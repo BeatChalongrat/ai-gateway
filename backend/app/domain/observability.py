@@ -1,0 +1,225 @@
+"""Observability domain contracts.
+
+These types define the internal representation of request lifecycle events,
+provider calls, usage tracking, and audit records.
+
+Most fields are privacy-safe (counts, IDs, timing) but ``RequestRecord``
+also carries the four DLP trace snapshots — ``input_raw``, ``input_masked``,
+``output_raw``, ``output_final`` — which DO contain raw user content.
+These exist so the admin Request Detail view can show what was filtered;
+they are written only when the orchestrator captures them and read only
+through admin-authenticated endpoints.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
+
+
+class RequestStatus(str, Enum):
+    SUCCESS = "success"
+    BLOCKED = "blocked"
+    PROVIDER_ERROR = "provider_error"
+    VALIDATION_ERROR = "validation_error"
+    AUTH_ERROR = "auth_error"
+    INTERNAL_ERROR = "internal_error"
+
+
+@dataclass
+class RequestRecord:
+    """Complete record of a single request through the gateway.
+
+    Most fields are privacy-safe metadata. The DLP trace fields
+    (``input_raw``, ``input_masked``, ``output_raw``, ``output_final``,
+    ``dlp_findings_json``) DO contain raw user content and exist so the
+    admin Request Detail view can audit the DLP pipeline. They are
+    populated only by the orchestrator and exposed only via admin-
+    authenticated endpoints.
+    """
+
+    request_id: str
+    tenant_id: str
+    project_id: str
+    provider: str = ""
+    model: str = ""
+    status: RequestStatus = RequestStatus.SUCCESS
+    policy_action: str = "allow"
+
+    # Timing
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: datetime | None = None
+    latency_ms: int = 0
+
+    # Usage
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+    # Routing
+    route_provider: str = ""
+    route_model: str = ""
+    fallback_used: bool = False
+    constrained_by_policy: bool = False
+
+    # DLP
+    dlp_findings_count: int = 0
+    dlp_direction: str = ""
+    # Per-direction summary, persisted to request_logs by RequestLogService.
+    dlp_input_findings: int = 0
+    dlp_input_action: str | None = None
+    dlp_output_findings: int = 0
+    dlp_categories: list[str] = field(default_factory=list)
+    # Which router won: "semantic" / "keyword" / "service" / None.
+    router_used: str | None = None
+    # Effective policy profile applied — project default OR a
+    # per-request ``policy_profile_id`` override. Mirrors
+    # RequestLogORM.policy_profile_id (migration 020).
+    policy_profile_id: str | None = None
+
+    # Error
+    error_code: str | None = None
+    error_message: str | None = None
+
+    # DLP trace (migration 021). Raw user content — see class docstring.
+    # All five default to None so existing call sites continue to compile
+    # without touching them; the orchestrator fills them in at the build
+    # sites that have the necessary state in scope.
+    input_raw: str | None = None
+    input_masked: str | None = None
+    output_raw: str | None = None
+    output_final: str | None = None
+    dlp_findings_json: str | None = None
+
+    def complete(
+        self,
+        status: RequestStatus = RequestStatus.SUCCESS,
+        latency_ms: int = 0,
+    ) -> None:
+        self.status = status
+        self.completed_at = datetime.now(timezone.utc)
+        self.latency_ms = latency_ms
+
+    def to_dict(self) -> dict:
+        """Serialize for persistence or logging."""
+        return {
+            "request_id": self.request_id,
+            "tenant_id": self.tenant_id,
+            "project_id": self.project_id,
+            "provider": self.provider,
+            "model": self.model,
+            "status": self.status.value if isinstance(self.status, RequestStatus) else self.status,
+            "policy_action": self.policy_action,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "latency_ms": self.latency_ms,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "estimated_cost_usd": self.estimated_cost_usd,
+            "fallback_used": self.fallback_used,
+            "constrained_by_policy": self.constrained_by_policy,
+            "dlp_findings_count": self.dlp_findings_count,
+            "error_code": self.error_code,
+        }
+
+
+# ---------------------------------------------------------------------------
+# DLP trace helpers
+# ---------------------------------------------------------------------------
+
+
+def extract_messages_text(messages: list[Any]) -> str:
+    """Join all message content strings into one trace-friendly blob.
+
+    Accepts either dicts (``{"role": ..., "content": ...}``) or pydantic
+    Message instances. ``content`` may be a plain string or a list of
+    block dicts (OpenAI vision format) — only ``type == "text"`` blocks
+    contribute. Roles are joined with a ``\\n---\\n`` separator so the
+    rendered trace in the admin UI shows clear message boundaries.
+    """
+    parts: list[str] = []
+    for m in messages:
+        if hasattr(m, "model_dump"):
+            m = m.model_dump()
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content", "")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+    return "\n---\n".join(parts)
+
+
+def build_dlp_findings_json(
+    input_match_actions: list[Any],
+    output_match_actions: list[Any] | None = None,
+    span_map: dict[str, str] | None = None,
+) -> str | None:
+    """Serialize DLP match actions to a JSON list for the trace column.
+
+    Returns ``None`` when there are no findings to record (so we don't
+    write empty arrays into a column whose absence already means "no
+    findings"). Each entry is a flat dict — see the spec in
+    ``021_add_dlp_trace_to_request_logs.py`` for the shape.
+
+    The ``span_map`` carries the actual indexed tokens emitted by the
+    transformer (``{"[EMAIL_0]": "alice@example.com"}``); we reverse it
+    so each finding can record the exact token that replaced its raw
+    value. When a match isn't in the span_map (e.g. the action was
+    ALLOW or BLOCK, or the value duplicated and lost the lookup), we
+    fall back to ``None`` for ``mask_token`` rather than guess.
+    """
+    output_match_actions = output_match_actions or []
+    span_map = span_map or {}
+    # Reverse map: original value → indexed token. Multiple originals
+    # may collide on the same value; last writer wins, which is fine
+    # for trace purposes (operator can still see what was masked).
+    value_to_token: dict[str, str] = {v: k for k, v in span_map.items()}
+
+    findings: list[dict[str, Any]] = []
+    for direction, actions in (
+        ("input", input_match_actions),
+        ("output", output_match_actions),
+    ):
+        for ma in actions:
+            match = ma.match
+            findings.append({
+                "direction": direction,
+                "detector": match.detector_name,
+                "entity_type": match.entity_type,
+                "category": match.category,
+                "severity": match.severity.name if hasattr(match.severity, "name") else str(match.severity),
+                "start": match.start,
+                "end": match.end,
+                "matched_text": match.matched_text,
+                "action": ma.action.name.lower() if hasattr(ma.action, "name") else str(ma.action),
+                "mask_token": value_to_token.get(match.matched_text),
+            })
+
+    if not findings:
+        return None
+    return json.dumps(findings, ensure_ascii=False)
+
+
+@dataclass(frozen=True)
+class UsageRecord:
+    """Normalized token usage and cost for a single request."""
+
+    request_id: str
+    tenant_id: str
+    project_id: str
+    provider: str
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    is_estimate: bool = True  # True when based on heuristic, False when from provider

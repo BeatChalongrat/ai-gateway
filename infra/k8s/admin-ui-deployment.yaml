@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-ai-gateway-admin-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secure-ai-gateway-admin-ui
+  template:
+    metadata:
+      labels:
+        app: secure-ai-gateway-admin-ui
+    spec:
+      containers:
+        - name: admin-ui
+          image: secure-ai-gateway/admin-ui:latest
+          ports:
+            - containerPort: 3000

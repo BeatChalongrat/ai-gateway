@@ -1,0 +1,11 @@
+{
+  "profile_id": "strict",
+  "name": "Strict",
+  "category_actions": {
+    "pii": "MASK",
+    "secret": "BLOCK",
+    "financial": "BLOCK"
+  },
+  "severity_threshold_block": "CRITICAL",
+  "scan_responses": true
+}

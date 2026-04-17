@@ -1,0 +1,10 @@
+{
+  "profile_id": "default",
+  "name": "Default",
+  "category_actions": {
+    "pii": "MASK",
+    "secret": "BLOCK"
+  },
+  "severity_threshold_block": null,
+  "scan_responses": true
+}
