@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-ai-gateway-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secure-ai-gateway-backend
+  template:
+    metadata:
+      labels:
+        app: secure-ai-gateway-backend
+    spec:
+      containers:
+        - name: backend
+          image: secure-ai-gateway/backend:latest
+          ports:
+            - containerPort: 8080

@@ -1,0 +1,977 @@
+/* ═══════════════════════════════════════════════════════════════════
+   SRAN AI Gateway — Design System
+
+   Brand: Deep royal blue, premium, enterprise, secure, modern
+   Palette derived from SRAN brand identity
+   ═══════════════════════════════════════════════════════════════════ */
+
+@import "tailwindcss";
+
+/* ─── SRAN Theme Tokens ─────────────────────────────────────────── */
+
+@theme {
+  /* Primary: Deep Royal Blue */
+  --color-sran-50: #e8edf5;
+  --color-sran-100: #c5d0e6;
+  --color-sran-200: #9eb3d4;
+  --color-sran-300: #7796c2;
+  --color-sran-400: #5a81b5;
+  --color-sran-500: #3d6ca8;
+  --color-sran-600: #2d5a91;
+  --color-sran-700: #1e3a5f;
+  --color-sran-800: #162c49;
+  --color-sran-900: #0f1f38;
+  --color-sran-950: #091526;
+
+  /* Accent: Electric Blue */
+  --color-accent-400: #60a5fa;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+
+  /* Surface colors */
+  --color-surface-primary: #ffffff;
+  --color-surface-secondary: #f8f9fb;
+  --color-surface-tertiary: #f1f4f8;
+  --color-surface-dark: #0f1f38;
+  --color-surface-darker: #091526;
+
+  /* Text */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #7c8ca1;
+  --color-text-inverse: #f8fafc;
+  --color-text-accent: #2563eb;
+
+  /* Borders */
+  --color-border-default: #e5e9f0;
+  --color-border-strong: #c8d1de;
+  --color-border-accent: #3b82f6;
+
+  /* Status */
+  --color-status-success: #059669;
+  --color-status-success-bg: #ecfdf5;
+  --color-status-warning: #d97706;
+  --color-status-warning-bg: #fffbeb;
+  --color-status-error: #dc2626;
+  --color-status-error-bg: #fef2f2;
+  --color-status-info: #2563eb;
+  --color-status-info-bg: #eff6ff;
+
+  /* Shadows — slightly warmer, more grounded */
+  --shadow-sm: 0 1px 2px rgba(15, 31, 56, 0.04);
+  --shadow-md: 0 2px 8px -2px rgba(15, 31, 56, 0.08), 0 1px 2px rgba(15, 31, 56, 0.04);
+  --shadow-lg: 0 8px 24px -4px rgba(15, 31, 56, 0.10), 0 2px 6px -2px rgba(15, 31, 56, 0.06);
+  --shadow-card: 0 1px 3px rgba(15, 31, 56, 0.04), 0 0 0 1px rgba(15, 31, 56, 0.02);
+
+  /* Radius */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+
+  /* Typography scale — tighter, more intentional steps */
+  --font-size-xs: 0.6875rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-base: 0.875rem;
+  --font-size-lg: 1rem;
+  --font-size-xl: 1.125rem;
+  --font-size-2xl: 1.25rem;
+  --font-size-3xl: 1.625rem;
+  --font-size-4xl: 2rem;
+}
+
+/* ─── Base Styles ────────────────────────────────────────────────── */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+      Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-base);
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  code, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+}
+
+/* ─── Component Patterns ─────────────────────────────────────────── */
+
+@layer components {
+
+  /* Card — clean, restrained */
+  .sran-card {
+    background: var(--color-surface-primary);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 1.25rem 1.5rem;
+  }
+
+  /* Page header — stronger hierarchy */
+  .sran-page-header {
+    margin-bottom: 1.75rem;
+  }
+
+  .sran-page-title {
+    font-size: var(--font-size-3xl);
+    font-weight: 700;
+    color: var(--color-text-primary);
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  .sran-page-subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    margin: 0.375rem 0 0;
+    letter-spacing: 0.005em;
+  }
+
+  /* Section title — used within cards */
+  .sran-section-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 1rem;
+  }
+
+  /* ─── Buttons ─── */
+
+  .sran-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    padding: 0.4375rem 0.875rem;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 120ms ease;
+    line-height: 1.25rem;
+    white-space: nowrap;
+  }
+
+  .sran-btn:focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 1px;
+  }
+
+  .sran-btn-primary {
+    background: var(--color-sran-700);
+    color: white;
+    border-color: var(--color-sran-800);
+    box-shadow: 0 1px 2px rgba(15, 31, 56, 0.12);
+  }
+
+  .sran-btn-primary:hover {
+    background: var(--color-sran-600);
+    border-color: var(--color-sran-700);
+  }
+
+  .sran-btn-primary:active {
+    background: var(--color-sran-800);
+  }
+
+  .sran-btn-secondary {
+    background: white;
+    color: var(--color-text-primary);
+    border-color: var(--color-border-strong);
+    box-shadow: 0 1px 2px rgba(15, 31, 56, 0.04);
+  }
+
+  .sran-btn-secondary:hover {
+    background: var(--color-surface-tertiary);
+    border-color: var(--color-border-strong);
+  }
+
+  .sran-btn-secondary:active {
+    background: var(--color-surface-secondary);
+  }
+
+  .sran-btn-danger {
+    background: var(--color-status-error);
+    color: white;
+    border-color: #b91c1c;
+    box-shadow: 0 1px 2px rgba(220, 38, 38, 0.15);
+  }
+
+  .sran-btn-danger:hover {
+    background: #b91c1c;
+  }
+
+  .sran-btn-danger:active {
+    background: #991b1b;
+  }
+
+  .sran-btn-sm {
+    padding: 0.25rem 0.625rem;
+    font-size: var(--font-size-xs);
+  }
+
+  .sran-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  /* ─── Badges — with subtle border for definition ─── */
+
+  .sran-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.0625rem 0.5rem;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    border-radius: 9999px;
+    line-height: 1.375rem;
+    letter-spacing: 0.01em;
+    border: 1px solid transparent;
+  }
+
+  .sran-badge-success {
+    background: var(--color-status-success-bg);
+    color: var(--color-status-success);
+    border-color: rgba(5, 150, 105, 0.15);
+  }
+
+  .sran-badge-warning {
+    background: var(--color-status-warning-bg);
+    color: var(--color-status-warning);
+    border-color: rgba(217, 119, 6, 0.15);
+  }
+
+  .sran-badge-error {
+    background: var(--color-status-error-bg);
+    color: var(--color-status-error);
+    border-color: rgba(220, 38, 38, 0.15);
+  }
+
+  .sran-badge-info {
+    background: var(--color-status-info-bg);
+    color: var(--color-status-info);
+    border-color: rgba(37, 99, 235, 0.12);
+  }
+
+  .sran-badge-neutral {
+    background: var(--color-surface-tertiary);
+    color: var(--color-text-secondary);
+    border-color: var(--color-border-default);
+  }
+
+  /* ─── Tables — tighter, more professional ─── */
+
+  .sran-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+  }
+
+  .sran-table th {
+    text-align: left;
+    padding: 0.625rem 1rem;
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+    border-bottom: 1px solid var(--color-border-default);
+    background: var(--color-surface-secondary);
+    white-space: nowrap;
+  }
+
+  .sran-table td {
+    padding: 0.5625rem 1rem;
+    border-bottom: 1px solid var(--color-border-default);
+    color: var(--color-text-primary);
+    vertical-align: middle;
+  }
+
+  .sran-table tbody tr {
+    transition: background 80ms ease;
+  }
+
+  .sran-table tbody tr:hover {
+    background: rgba(241, 244, 248, 0.6);
+  }
+
+  .sran-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ─── Inputs ─── */
+
+  .sran-input {
+    width: 100%;
+    padding: 0.4375rem 0.75rem;
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: white;
+    color: var(--color-text-primary);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+    outline: none;
+    line-height: 1.4;
+  }
+
+  .sran-input:focus {
+    border-color: var(--color-accent-500);
+    box-shadow: 0 0 0 2.5px rgba(59, 130, 246, 0.1);
+  }
+
+  .sran-input::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  /* Label */
+  .sran-label {
+    display: block;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 0.3125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Empty state */
+  .sran-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+  }
+
+  /* ─── Stat card ─── */
+
+  .sran-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .sran-stat-label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+  }
+
+  .sran-stat-value {
+    font-size: var(--font-size-4xl);
+    font-weight: 700;
+    color: var(--color-text-primary);
+    letter-spacing: -0.035em;
+    line-height: 1.15;
+  }
+
+  /* ============================================
+     SRAN SIDEBAR — Cybersecurity Theme
+     ============================================ */
+
+  .sran-sidebar {
+    background: #0a1a38;
+    color: #e2e8f0;
+    width: 15.5rem;
+    flex-shrink: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid rgba(80, 130, 220, 0.12);
+    position: sticky;
+    top: 0;
+    overflow: hidden;
+    transition: width 0.2s ease;
+  }
+
+  .sran-sidebar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(80, 130, 255, 0.008) 2px,
+      rgba(80, 130, 255, 0.008) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .sran-sidebar > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .sran-sidebar-brand {
+    padding: 1rem 1.125rem;
+    border-bottom: 1px solid rgba(80, 130, 220, 0.10);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .sran-sidebar-brand-name {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: #ffffff;
+    text-transform: uppercase;
+    font-family: Inter, -apple-system, sans-serif;
+  }
+
+  .sran-sidebar-brand-sub {
+    font-size: 0.5625rem;
+    color: rgba(150, 178, 235, 0.5);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-family: Inter, -apple-system, sans-serif;
+    margin-top: 1px;
+  }
+
+  .sran-sidebar-nav {
+    padding: 0.5rem 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 140, 220, 0.2) transparent;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar-thumb {
+    background: rgba(100, 140, 220, 0.25);
+    border-radius: 2px;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 140, 220, 0.45);
+  }
+
+  .sran-sidebar-section {
+    padding: 0 0.5rem;
+    margin-bottom: 0.0625rem;
+  }
+
+  .sran-sidebar-section-title {
+    font-size: 0.5625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgba(130, 165, 225, 0.58);
+    padding: 0.875rem 0.625rem 0.25rem;
+    font-family: Inter, -apple-system, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .sran-sidebar-section-title::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 1px;
+    background: rgba(110, 150, 225, 0.3);
+    flex-shrink: 0;
+  }
+
+  .sran-sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5625rem;
+    padding: 0.4375rem 0.625rem;
+    border-radius: 5px;
+    color: rgba(190, 210, 240, 0.72);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    letter-spacing: 0.005em;
+    margin-bottom: 1px;
+    transition: all 0.1s ease;
+    border: 1px solid transparent;
+    position: relative;
+    font-family: Inter, -apple-system, sans-serif;
+  }
+
+  .sran-sidebar-link:hover {
+    color: rgba(230, 240, 255, 0.95);
+    background: rgba(90, 140, 240, 0.07);
+    border-color: rgba(90, 140, 240, 0.15);
+  }
+
+  .sran-sidebar-link-active {
+    color: #ffffff !important;
+    background: rgba(90, 140, 240, 0.12) !important;
+    border-color: rgba(90, 140, 240, 0.28) !important;
+    font-weight: 500;
+  }
+
+  .sran-sidebar-link-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 22%;
+    height: 56%;
+    width: 2px;
+    background: #6aa0ff;
+    border-radius: 0 2px 2px 0;
+    box-shadow: 0 0 6px rgba(100, 160, 255, 0.4);
+  }
+
+  /* ─── Search bar ─── */
+
+  .sran-search-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .sran-search-icon {
+    position: absolute;
+    left: 0.75rem;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    pointer-events: none;
+  }
+
+  .sran-search-input {
+    width: 100%;
+    padding: 0.4375rem 2rem 0.4375rem 2.125rem;
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-primary);
+    color: var(--color-text-primary);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+    outline: none;
+  }
+
+  .sran-search-input:focus {
+    border-color: var(--color-accent-500);
+    box-shadow: 0 0 0 2.5px rgba(59, 130, 246, 0.1);
+  }
+
+  .sran-search-input::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  .sran-search-clear {
+    position: absolute;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    padding: 0.25rem;
+    line-height: 1;
+  }
+
+  .sran-search-clear:hover {
+    color: var(--color-text-primary);
+  }
+
+  /* ─── Pagination ─── */
+
+  .sran-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid var(--color-border-default);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+  }
+
+  .sran-pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .sran-pagination-page {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    min-width: 2.5rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── Skeleton ─── */
+
+  .sran-skeleton {
+    height: 0.875rem;
+    background: linear-gradient(90deg, var(--color-surface-tertiary) 25%, #eef1f6 50%, var(--color-surface-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ─── Error state ─── */
+
+  .sran-error-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .sran-error-state-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    background: var(--color-status-error-bg);
+    color: var(--color-status-error);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: var(--font-size-lg);
+  }
+
+  .sran-error-state-message {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    margin: 0;
+  }
+
+  /* ─── Toast ─── */
+
+  .sran-toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
+  }
+
+  .sran-toast {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    pointer-events: auto;
+    animation: toast-in 250ms ease-out;
+    min-width: 14rem;
+    max-width: 22rem;
+  }
+
+  .sran-toast-success {
+    background: var(--color-status-success);
+    color: white;
+  }
+
+  .sran-toast-error {
+    background: var(--color-status-error);
+    color: white;
+  }
+
+  .sran-toast-info {
+    background: var(--color-status-info);
+    color: white;
+  }
+
+  .sran-toast-icon {
+    font-size: var(--font-size-base);
+    flex-shrink: 0;
+  }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(1rem); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ─── Empty state ─── */
+
+  .sran-empty-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    background: var(--color-surface-tertiary);
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.125rem;
+    margin: 0 auto 0.75rem;
+  }
+
+  /* ─── Detail drawer ─── */
+
+  .sran-detail-field {
+    margin-bottom: 0.75rem;
+  }
+
+  .sran-detail-label {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.125rem;
+    font-weight: 500;
+  }
+
+  .sran-detail-value {
+    font-weight: 500;
+    font-size: var(--font-size-sm);
+  }
+
+  /* ─── Collapsible JSON ─── */
+
+  .sran-collapsible-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    background: var(--color-surface-secondary);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--color-text-primary);
+    transition: background 120ms;
+  }
+
+  .sran-collapsible-toggle:hover {
+    background: var(--color-surface-tertiary);
+  }
+
+  .sran-code-block {
+    background: var(--color-surface-dark);
+    color: var(--color-text-inverse);
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: var(--font-size-xs);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 16rem;
+    overflow-y: auto;
+    margin-top: 0.5rem;
+  }
+
+  /* ─── Form validation ─── */
+
+  .sran-field-error {
+    font-size: var(--font-size-xs);
+    color: var(--color-status-error);
+    margin-top: 0.25rem;
+  }
+
+  .sran-input-error {
+    border-color: var(--color-status-error);
+  }
+
+  .sran-input-error:focus {
+    box-shadow: 0 0 0 2.5px rgba(220, 38, 38, 0.1);
+  }
+
+  .sran-char-count {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    text-align: right;
+    margin-top: 0.125rem;
+  }
+
+  /* ─── Responsive sidebar ─── */
+
+  @media (max-width: 1280px) {
+    .sran-sidebar {
+      width: 4rem;
+    }
+
+    .sran-sidebar-brand-name,
+    .sran-sidebar-brand-sub,
+    .sran-sidebar-section-title,
+    .sran-sidebar-link span:last-child,
+    .sran-sidebar-footer-text,
+    .sran-badge-role {
+      display: none;
+    }
+
+    .sran-sidebar-brand {
+      justify-content: center;
+      padding: 0.875rem 0.5rem;
+    }
+
+    .sran-sidebar-brand img {
+      width: 32px !important;
+      height: 32px !important;
+    }
+
+    .sran-sidebar-section {
+      padding: 0 0.375rem;
+    }
+
+    .sran-sidebar-link {
+      justify-content: center;
+      padding: 0.5rem;
+      border: none;
+    }
+
+    .sran-sidebar-icon {
+      width: auto;
+    }
+
+    .sran-sidebar-footer {
+      justify-content: center;
+      padding: 0.625rem 0.5rem;
+    }
+
+    .sran-sidebar-footer > div:first-child {
+      display: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .sran-sidebar {
+      width: 3.5rem;
+    }
+
+    .sran-sidebar-brand {
+      padding: 0.75rem 0.375rem;
+    }
+
+    .sran-sidebar-brand img {
+      width: 28px !important;
+      height: 28px !important;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .sran-table th,
+    .sran-table td {
+      padding: 0.5rem 0.625rem;
+      font-size: var(--font-size-xs);
+    }
+  }
+
+  /* ─── Copy button ─── */
+
+  .sran-copy-btn {
+    background: none;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    padding: 0.125rem 0.375rem;
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    color: var(--color-text-muted);
+    transition: all 120ms;
+  }
+
+  .sran-copy-btn:hover {
+    background: var(--color-surface-tertiary);
+    color: var(--color-text-primary);
+    border-color: var(--color-border-strong);
+  }
+
+  /* ─── Trend indicators ─── */
+
+  .sran-trend-up {
+    color: var(--color-status-success);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+  }
+
+  .sran-trend-neutral {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+  }
+
+  /* ─── Sidebar footer ─── */
+
+  .sran-sidebar-footer {
+    padding: 0.625rem 0.875rem;
+    border-top: 1px solid rgba(80, 130, 220, 0.10);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(0, 0, 0, 0.12);
+  }
+
+  .sran-sidebar-footer-text {
+    font-size: 0.625rem;
+    color: rgba(170, 198, 245, 0.7);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  .sran-badge-role {
+    font-size: 0.5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid rgba(100, 160, 255, 0.3);
+    color: #95b8e8;
+    background: rgba(100, 160, 255, 0.08);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    display: inline-block;
+  }
+
+  /* ─── Sidebar nav icon ─── */
+
+  .sran-sidebar-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    flex-shrink: 0;
+    opacity: 0.55;
+    transition: opacity 0.1s ease;
+  }
+
+  .sran-sidebar-link-active .sran-sidebar-icon,
+  .sran-sidebar-link:hover .sran-sidebar-icon {
+    opacity: 1;
+  }
+}
+
+/* ─── Google Fonts import ────────────────────────────────────────── */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
