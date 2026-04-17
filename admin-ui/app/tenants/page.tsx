@@ -1,0 +1,426 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import { Outfit } from "next/font/google";
+import Modal from "../../components/ui/Modal";
+import ConfirmModal from "../../components/ui/ConfirmModal";
+import ErrorState from "../../components/ui/ErrorState";
+import EmptyState from "../../components/ui/EmptyState";
+import { SkeletonTable } from "../../components/ui/Skeleton";
+import { useApi } from "../../lib/useApi";
+import { api } from "../../lib/api";
+import { useToast } from "../../components/ui/Toast";
+
+const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
+
+/* ── Tokens ───────────────────────────────────────────────────────── */
+
+const T = {
+  bg: "#f6f7f9", card: "#ffffff",
+  bl: "#e8eaef", bm: "#dcdfe6",
+  tp: "#111827", ts: "#4b5563", th: "#374151", tt: "#9ca3af",
+  accent: "#3b6cf6",
+  mono: "'JetBrains Mono','Fira Code',monospace",
+};
+
+const AVATAR_COLORS = ["#3b6cf6", "#8b5cf6", "#ef4444", "#10b981", "#f59e0b", "#6b7280", "#06b6d4", "#ec4899"];
+function avatarColor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+}
+
+/* ── Region pill colors ───────────────────────────────────────────── */
+
+function regionStyle(r: string): { color: string; bg: string } {
+  if (r === "global") return { color: "#3b6cf6", bg: "rgba(59,108,246,0.08)" };
+  if (r === "us") return { color: "#8b5cf6", bg: "rgba(139,92,246,0.08)" };
+  if (r.startsWith("ap")) return { color: "#06b6d4", bg: "rgba(6,182,212,0.08)" };
+  if (r.startsWith("eu")) return { color: "#059669", bg: "rgba(16,185,129,0.08)" };
+  return { color: T.ts, bg: "rgba(107,114,128,0.08)" };
+}
+
+/* ── Status config ────────────────────────────────────────────────── */
+
+const STATUS: Record<string, { color: string; bg: string; dot: string; glow: boolean }> = {
+  active:    { color: "#059669", bg: "rgba(16,185,129,0.08)", dot: "#10b981", glow: true },
+  deleted:   { color: "#dc2626", bg: "rgba(239,68,68,0.08)",  dot: "#ef4444", glow: false },
+  suspended: { color: "#d97706", bg: "rgba(245,158,11,0.08)", dot: "#f59e0b", glow: false },
+};
+
+/* ── CSS ──────────────────────────────────────────────────────────── */
+
+const CSS = `
+@keyframes tnFadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes tnPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+@keyframes tnSwing{0%,100%{transform:rotate(0)}25%{transform:rotate(6deg)}75%{transform:rotate(-6deg)}}
+@keyframes tnGlow{0%,100%{opacity:1}50%{opacity:0.6}}
+@keyframes dotGlow{0%,100%{opacity:1}50%{opacity:0.5}}
+.tn-stat{animation:tnFadeUp 0.4s ease-out both}
+.tn-row{animation:tnFadeUp 0.35s ease-out both}
+.tn-card{animation:tnFadeUp 0.4s ease-out both}
+.tn-icon-pulse svg{animation:tnPulse 2.5s ease-in-out infinite}
+.tn-icon-glow svg{animation:tnGlow 2s ease-in-out infinite}
+.tn-icon-swing svg{animation:tnSwing 3s ease-in-out infinite}
+.tn-table{width:100%;border-collapse:collapse}
+.tn-table th{text-align:left;padding:0 20px;height:40px;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:${T.th};border-bottom:1px solid ${T.bl};background:#f0f2f5;white-space:nowrap}
+.tn-table td{padding:16px 20px;border-bottom:1px solid ${T.bl};vertical-align:middle}
+.tn-table tbody tr{transition:background 100ms}
+.tn-table tbody tr:hover{background:rgba(59,108,246,0.04)}
+.tn-table tbody tr:last-child td{border-bottom:none}
+.tn-table tbody tr .tn-acts{opacity:0;transition:opacity 0.15s}
+.tn-table tbody tr:hover .tn-acts{opacity:1}
+`;
+
+/* ── Stat card ────────────────────────────────────────────────────── */
+
+function StatCard({ value, label, icon, accent, delay = 0, iconClass }: {
+  value: number; label: string; icon: React.ReactNode; accent: string; delay?: number; iconClass?: string;
+}) {
+  return (
+    <div className="tn-stat" style={{
+      animationDelay: `${delay}ms`,
+      background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`,
+      boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+      padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0,
+    }}>
+      <div className={iconClass} style={{
+        width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+        background: `${accent}14`, display: "flex", alignItems: "center", justifyContent: "center", color: accent,
+      }}>{icon}</div>
+      <div>
+        <div style={{ fontFamily: T.mono, fontSize: 24, fontWeight: 700, color: T.tp, lineHeight: 1, letterSpacing: "-0.02em" }}>{value}</div>
+        <div style={{ fontSize: "12.5px", fontWeight: 500, color: T.ts, marginTop: 3 }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Pill ──────────────────────────────────────────────────────────── */
+
+function Pill({ text, color, bg, size = "11px" }: { text: string; color: string; bg: string; size?: string }) {
+  return <span style={{ display: "inline-block", padding: "2px 10px", fontSize: size, fontWeight: 600, color, background: bg, borderRadius: 100, textTransform: "capitalize", lineHeight: 1.6 }}>{text}</span>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* PAGE                                                                */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+const iconHouse = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
+const iconCheck = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+const iconX = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>;
+const iconGlobe = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>;
+
+export default function TenantsPage() {
+  const { data, loading, error, refetch } = useApi<{ items: any[] }>("/admin/tenants");
+  const [showCreate, setShowCreate] = useState(false);
+  const [selected, setSelected] = useState<any | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<any | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [form, setForm] = useState({ name: "", slug: "", region: "global" });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const items = data?.items ?? [];
+
+  const stats = useMemo(() => {
+    const active = items.filter((t) => t.status === "active").length;
+    const deleted = items.filter((t) => t.status === "deleted").length;
+    const regions = new Set(items.map((t) => t.region)).size;
+    return { total: items.length, active, deleted, regions };
+  }, [items]);
+
+  const filtered = useMemo(() => {
+    let r = items;
+    if (statusFilter) r = r.filter((t) => t.status === statusFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      r = r.filter((t) => t.name?.toLowerCase().includes(q) || t.slug?.toLowerCase().includes(q) || t.region?.toLowerCase().includes(q));
+    }
+    return r;
+  }, [items, statusFilter, search]);
+
+  function validate() {
+    const e: Record<string, string> = {};
+    if (!form.name.trim()) e.name = "Name is required";
+    if (!form.slug.trim()) e.slug = "Slug is required";
+    else if (!/^[a-z0-9-]+$/.test(form.slug)) e.slug = "Only lowercase letters, numbers, and hyphens";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  async function handleCreate() {
+    if (!validate()) return;
+    setSaving(true);
+    try {
+      await api.post("/admin/tenants", form);
+      setShowCreate(false); setForm({ name: "", slug: "", region: "global" }); setErrors({});
+      toast("Tenant created successfully"); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || "Failed to create tenant", "error"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/admin/tenants/${deleteTarget.tenant_id}`);
+      toast(`Tenant "${deleteTarget.name}" deleted`); setDeleteTarget(null); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || "Failed to delete tenant", "error"); }
+    finally { setDeleting(false); }
+  }
+
+  async function handleRestore() {
+    if (!restoreTarget) return;
+    setRestoring(true);
+    try {
+      await api.put(`/admin/tenants/${restoreTarget.tenant_id}`, { status: "active" });
+      toast(`Tenant "${restoreTarget.name}" restored`); setRestoreTarget(null); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || "Failed to restore tenant", "error"); }
+    finally { setRestoring(false); }
+  }
+
+  const activeCount = stats.active;
+  const deletedCount = stats.deleted;
+
+  return (
+    <div className={outfit.className} style={{ background: T.bg, margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
+      <style>{CSS}</style>
+
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+        <div>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>Tenants</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>Organization-level tenant management</p>
+        </div>
+        <button onClick={() => setShowCreate(true)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Create Tenant
+        </button>
+      </div>
+
+      {/* Stats */}
+      {!loading && !error && items.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+          <StatCard value={stats.total} label="Total Tenants" icon={iconHouse} accent="#3b6cf6" delay={0} iconClass="tn-icon-pulse" />
+          <StatCard value={stats.active} label="Active" icon={iconCheck} accent="#10b981" delay={50} iconClass="tn-icon-glow" />
+          <StatCard value={stats.deleted} label="Deleted" icon={iconX} accent="#ef4444" delay={100} iconClass="tn-icon-swing" />
+          <StatCard value={stats.regions} label="Regions" icon={iconGlobe} accent="#8b5cf6" delay={150} iconClass="tn-icon-pulse" />
+        </div>
+      )}
+
+      {/* Main card */}
+      <div className="tn-card" style={{ animationDelay: "0.25s", background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", overflow: "hidden" }}>
+        {loading ? (
+          <SkeletonTable rows={6} cols={5} />
+        ) : error ? (
+          <div style={{ padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>
+        ) : items.length === 0 ? (
+          <div style={{ padding: 20 }}><EmptyState message="No tenants yet" icon="▣" action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>Create your first tenant</button>} /></div>
+        ) : (
+          <>
+            {/* Toolbar */}
+            <div style={{ padding: "10px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ position: "relative", flex: "0 1 280px", minWidth: 160 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tenants..."
+                  style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: "inherit", border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "#fafbfc", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,108,246,0.08)"; e.currentTarget.style.background = "white"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "#fafbfc"; }}
+                />
+                {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.tt, fontSize: 12, padding: 2 }}>✕</button>}
+              </div>
+
+              <span style={{ width: 1, height: 24, background: T.bl, flexShrink: 0 }} />
+
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                {[
+                  { key: null, label: "All", count: items.length, dot: null },
+                  { key: "active", label: "Active", count: activeCount, dot: "#10b981" },
+                  { key: "deleted", label: "Deleted", count: deletedCount, dot: "#ef4444" },
+                ].map((f) => {
+                  const active = statusFilter === f.key;
+                  return (
+                    <button key={f.label} onClick={() => setStatusFilter(f.key)} style={{
+                      display: "inline-flex", alignItems: "center", gap: 5,
+                      padding: "4px 10px", fontSize: 11, fontWeight: active ? 600 : 500,
+                      borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+                      border: active ? `1.5px solid ${T.accent}` : "1.5px solid transparent",
+                      background: active ? "rgba(59,108,246,0.06)" : "transparent",
+                      color: active ? T.accent : T.tt, transition: "all 120ms",
+                    }}>
+                      {f.dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: f.dot, opacity: active ? 1 : 0.5, flexShrink: 0 }} />}
+                      {f.label} <span style={{ fontWeight: 700, fontSize: 10 }}>{f.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>{filtered.length} tenant{filtered.length !== 1 ? "s" : ""}</span>
+            </div>
+
+            {/* Table */}
+            <div style={{ overflowX: "auto" }}>
+              <table className="tn-table" style={{ minWidth: 700 }}>
+                <thead><tr>
+                  <th style={{ paddingLeft: 20 }}>Tenant</th>
+                  <th>Region</th>
+                  <th style={{ textAlign: "center", width: 110 }}>Status</th>
+                  <th style={{ width: 120 }}>Created</th>
+                  <th style={{ width: 140 }}></th>
+                </tr></thead>
+                <tbody>
+                  {filtered.map((t, i) => {
+                    const ac = avatarColor(t.name || "");
+                    const st = STATUS[t.status] || STATUS.active;
+                    const rs = regionStyle(t.region || "global");
+                    const isDeleted = t.status === "deleted";
+                    return (
+                      <tr key={t.tenant_id} className="tn-row" style={{ animationDelay: `${0.3 + i * 0.03}s`, cursor: "pointer" }} onClick={() => setSelected(t)}>
+                        {/* Tenant: avatar + name + slug */}
+                        <td style={{ paddingLeft: 20 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ width: 34, height: 34, borderRadius: 6, background: ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "white", flexShrink: 0 }}>
+                              {(t.name || "?").charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: T.tp, lineHeight: 1.3 }}>{t.name}</div>
+                              <div style={{ fontFamily: T.mono, fontSize: "11.5px", color: T.tt, lineHeight: 1.2, marginTop: 1 }}>{t.slug}</div>
+                            </div>
+                          </div>
+                        </td>
+                        {/* Region */}
+                        <td><Pill text={t.region || "global"} color={rs.color} bg={rs.bg} /></td>
+                        {/* Status */}
+                        <td style={{ textAlign: "center" }}>
+                          <span style={{
+                            display: "inline-flex", alignItems: "center", gap: 6,
+                            padding: "3px 10px", borderRadius: 100,
+                            fontSize: "11.5px", fontWeight: 600,
+                            color: st.color, background: st.bg,
+                          }}>
+                            <span style={{
+                              width: 6, height: 6, borderRadius: "50%", background: st.dot, flexShrink: 0,
+                              animation: st.glow ? "dotGlow 2s ease-in-out infinite" : "none",
+                            }} />
+                            {t.status}
+                          </span>
+                        </td>
+                        {/* Created */}
+                        <td>
+                          <span style={{ fontFamily: T.mono, fontSize: "12.5px", color: T.ts }}>
+                            {t.created_at ? new Date(t.created_at).toLocaleDateString() : "—"}
+                          </span>
+                        </td>
+                        {/* Actions */}
+                        <td>
+                          <div className="tn-acts" style={{ display: "flex", gap: 6, justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
+                            {isDeleted ? (
+                              <button onClick={() => setRestoreTarget(t)} style={{
+                                display: "inline-flex", alignItems: "center", gap: 4,
+                                padding: "6px 12px", fontSize: 12, fontWeight: 500, fontFamily: "inherit",
+                                borderRadius: 6, border: "1px solid rgba(16,185,129,0.3)", background: "transparent",
+                                color: "#059669", cursor: "pointer", transition: "background 100ms",
+                              }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(16,185,129,0.06)"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                              >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                                Restore
+                              </button>
+                            ) : t.slug !== "demo" ? (
+                              <>
+                                <button style={{
+                                  display: "inline-flex", alignItems: "center", gap: 4,
+                                  padding: "6px 12px", fontSize: 12, fontWeight: 500, fontFamily: "inherit",
+                                  borderRadius: 6, border: `1px solid ${T.bl}`, background: "transparent",
+                                  color: T.ts, cursor: "pointer", transition: "all 100ms",
+                                }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(59,108,246,0.06)"; e.currentTarget.style.color = T.accent; e.currentTarget.style.borderColor = "rgba(59,108,246,0.3)"; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.ts; e.currentTarget.style.borderColor = T.bl; }}
+                                  onClick={() => setSelected(t)}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                  Edit
+                                </button>
+                                <button style={{
+                                  display: "inline-flex", alignItems: "center", gap: 4,
+                                  padding: "6px 12px", fontSize: 12, fontWeight: 500, fontFamily: "inherit",
+                                  borderRadius: 6, border: "1px solid rgba(239,68,68,0.3)", background: "transparent",
+                                  color: "#dc2626", cursor: "pointer", transition: "background 100ms",
+                                }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.06)"; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                                  onClick={() => setDeleteTarget(t)}
+                                >Delete</button>
+                              </>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Delete confirm */}
+      <ConfirmModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title="Delete Tenant" message={`Delete tenant "${deleteTarget?.name}"? This will deactivate all associated projects and API keys.`} confirmLabel="Delete Tenant" loading={deleting} />
+
+      {/* Restore confirm */}
+      <ConfirmModal open={!!restoreTarget} onClose={() => setRestoreTarget(null)} onConfirm={handleRestore} title="Restore Tenant" message={`Restore tenant "${restoreTarget?.name}"? This will reactivate the tenant and its resources.`} confirmLabel="Restore" loading={restoring} />
+
+      {/* Detail drawer */}
+      <Modal open={!!selected && !deleteTarget} onClose={() => setSelected(null)} title="Tenant Detail" footer={<button className="sran-btn sran-btn-secondary" onClick={() => setSelected(null)}>Close</button>}>
+        {selected && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+            <div className="sran-detail-field"><div className="sran-detail-label">Name</div><div className="sran-detail-value">{selected.name}</div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">Slug</div><div className="sran-detail-value"><code>{selected.slug}</code></div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">Region</div><div className="sran-detail-value">{selected.region}</div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">Status</div><div className="sran-detail-value">{selected.status}</div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">Tenant ID</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{selected.tenant_id}</code></div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">Created</div><div className="sran-detail-value">{selected.created_at ? new Date(selected.created_at).toLocaleString() : "—"}</div></div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Create modal */}
+      <Modal open={showCreate} onClose={() => { setShowCreate(false); setErrors({}); }} title="Create Tenant" footer={
+        <>
+          <button className="sran-btn sran-btn-secondary" onClick={() => { setShowCreate(false); setErrors({}); }}>Cancel</button>
+          <button className="sran-btn sran-btn-primary" onClick={handleCreate} disabled={saving}>{saving ? "Creating..." : "Create"}</button>
+        </>
+      }>
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+          <div>
+            <label className="sran-label">Name *</label>
+            <input className={`sran-input ${errors.name ? "sran-input-error" : ""}`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Acme Corp" maxLength={64} />
+            {errors.name && <div className="sran-field-error">{errors.name}</div>}
+            <div className="sran-char-count">{form.name.length}/64</div>
+          </div>
+          <div>
+            <label className="sran-label">Slug *</label>
+            <input className={`sran-input ${errors.slug ? "sran-input-error" : ""}`} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="acme-corp" maxLength={64} />
+            {errors.slug && <div className="sran-field-error">{errors.slug}</div>}
+            <div className="sran-char-count">{form.slug.length}/64</div>
+          </div>
+          <div>
+            <label className="sran-label">Region</label>
+            <select className="sran-input" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })}>
+              <option value="global">Global</option><option value="us">US</option><option value="eu">EU</option>
+            </select>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}

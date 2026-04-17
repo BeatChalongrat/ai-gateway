@@ -1,0 +1,9 @@
+# Optional dependencies for the semantic router.
+#
+# The gateway runs fine without these — SemanticRouter is only loaded
+# when SEMANTIC_ROUTER_ENABLED=true in settings. Install with:
+#
+#     pip install -r requirements-semantic.txt
+#
+# These pull in torch (~750 MB on CUDA-enabled wheels, ~200 MB on CPU).
+sentence-transformers>=2.2.0,<4.0.0
