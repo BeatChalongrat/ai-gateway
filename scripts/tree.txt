@@ -1,0 +1,7 @@
+project/
+  backend/
+  admin-ui/
+  docs/
+  examples/
+  infra/
+  scripts/
