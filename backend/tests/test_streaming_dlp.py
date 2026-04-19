@@ -170,8 +170,15 @@ class TestStreamingBlockReturns403:
         assert captured["called"] is False
 
 
-class TestStreamingProviderPiiMaskedInResponse:
-    def test_streaming_provider_pii_masked_in_response(self, monkeypatch):
+class TestStreamingProviderPiiPassesThroughUnderDefault:
+    def test_streaming_provider_pii_is_allowed_by_default(self, monkeypatch):
+        """Streaming counterpart of the non-streaming Fix-3 test.
+
+        Outbound PII under DEFAULT_PROFILE is ALLOW (Fix 3). The
+        streaming path uses the same direction-aware evaluator as the
+        non-streaming path — provider-introduced PII reaches the user
+        through the SSE buffer untouched.
+        """
         captured = _install_stream_spy(
             monkeypatch,
             chunks=["contact jane@example.com for help"],
@@ -186,10 +193,9 @@ class TestStreamingProviderPiiMaskedInResponse:
 
         events = _parse_sse(resp.content)
         full = _full_content(events)
-        # Provider-introduced PII is masked with an indexed token and is
-        # NOT restored (it was never in span_map).
-        assert "jane@example.com" not in full
-        assert "[EMAIL_0]" in full
+        # Provider-introduced PII reaches the user — outbound PII is ALLOW.
+        assert "jane@example.com" in full
+        assert "[EMAIL_" not in full
 
 
 class TestStreamingCleanMessagePassesThrough:
