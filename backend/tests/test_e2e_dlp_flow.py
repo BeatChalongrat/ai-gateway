@@ -176,10 +176,18 @@ class TestBlockStopsRequest:
         assert captured["called"] is False
 
 
-class TestProviderIntroducedPiiMaskedInResponse:
-    def test_provider_introduced_pii_masked_in_response(self, monkeypatch):
-        # Mock the provider to introduce a fresh email that the user did
-        # not include in their request.
+class TestProviderIntroducedPiiPassesThroughUnderDefault:
+    def test_provider_introduced_pii_is_allowed_by_default(self, monkeypatch):
+        """Fix 3: outbound PII (email) under DEFAULT_PROFILE is ALLOW.
+
+        Pre-Fix-3 the gateway masked AI-generated emails to ``[EMAIL_0]``
+        even when the user explicitly asked for an example. The new
+        ``category_actions_output`` on DEFAULT_PROFILE narrows outbound
+        masking to credentials/secrets only — PII / financial / network /
+        identity flow through to the user untouched. The companion
+        unit suite (test_dlp_per_direction_policy.py) covers the
+        credential-still-masks path.
+        """
         _install_capture(
             monkeypatch,
             response_text="A common example is john@example.com",
@@ -191,15 +199,17 @@ class TestProviderIntroducedPiiMaskedInResponse:
         body = resp.json()
         content = body["choices"][0]["message"]["content"]
 
-        # The new email is masked (it's a leak, not an echo) and does NOT
-        # get restored because it was never in span_map.
-        assert "john@example.com" not in content
-        assert "[EMAIL_0]" in content
+        # The AI's example email reaches the user — outbound PII is ALLOW.
+        assert "john@example.com" in content
+        assert "[EMAIL_" not in content
 
-        # The overall policy action reflects the output-side masking.
-        assert body["policy_action"] == "mask"
+        # No transformation happened on either direction (input had no
+        # PII; outbound PII is ALLOW under default).
+        assert body["policy_action"] == "allow"
 
         log = _log_for(body["id"])
         assert log is not None
         assert log.dlp_input_findings == 0
+        # Output detector still fires for trace/audit; the policy decision
+        # is what changes — action="allow" rather than "mask".
         assert log.dlp_output_findings >= 1

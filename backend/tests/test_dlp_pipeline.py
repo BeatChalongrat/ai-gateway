@@ -185,8 +185,18 @@ class TestResponseSideScanning:
         result = orch._scan_text_as_result("nothing sensitive here")
         assert result.has_sensitive_content is False
 
-    def test_response_with_email_gets_masked(self):
-        """Direct test: scan_and_evaluate + transform on response content."""
+    def test_response_with_email_is_allowed_under_default(self):
+        """Outbound PII is ALLOW under the default profile (Fix 3).
+
+        Before Fix 3, every category in ``category_actions`` applied
+        identically to input and output, so an AI-generated email in
+        the response was masked. The new ``category_actions_output``
+        on DEFAULT_PROFILE narrows outbound masking to credentials and
+        secrets only — letting the AI's answers about emails / cards /
+        IPs flow through to the user untouched. This test pins that
+        contract; the SECRET-category companion test below confirms
+        the masking-still-applies path.
+        """
         from app.services.orchestrator import GatewayOrchestrator
         from app.services.policy.profiles import DEFAULT_PROFILE
 
@@ -196,12 +206,13 @@ class TestResponseSideScanning:
         detection = orch._scan_text_as_result(response_text)
         enforcement = orch._scan_and_evaluate(detection, DEFAULT_PROFILE)
 
-        assert enforcement.requires_transformation
-        result = orch.transformer.transform_text(
-            response_text, enforcement.match_actions
+        # PII outbound under default is ALLOW — no transformation needed.
+        assert enforcement.requires_transformation is False
+        # The match was still recorded for trace/audit purposes.
+        assert any(
+            ma.match.detector_name == "email"
+            for ma in enforcement.match_actions
         )
-        assert "user@example.com" not in result.transformed_text
-        assert result.transformations_applied == 1
 
     def test_response_with_secret_is_masked_in_default(self):
         """Default profile now masks (not blocks) the legacy secret category."""
