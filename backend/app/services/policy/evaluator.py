@@ -38,7 +38,21 @@ class PolicyEvaluator:
         detection_result: DetectionResult,
         profile: PolicyProfile,
     ) -> EnforcementDecision:
-        """Produce an EnforcementDecision for the given findings and profile."""
+        """Produce an EnforcementDecision for the given findings and profile.
+
+        The evaluator picks the right category-action map based on
+        ``detection_result.scanned_direction``:
+
+        - ``"input"`` (or anything other than "output") → uses
+          ``profile.category_actions``.
+        - ``"output"`` → uses ``profile.category_actions_output`` if the
+          profile has set it, otherwise falls back to
+          ``profile.category_actions`` (preserves pre-Fix-3 behavior
+          for profiles that don't define a separate outbound dict).
+
+        ``severity_threshold_block`` and the ALLOW fallback are
+        unchanged — they apply identically to both directions.
+        """
         if not detection_result.has_sensitive_content:
             return EnforcementDecision(
                 match_actions=[],
@@ -46,11 +60,23 @@ class PolicyEvaluator:
                 reasons=["No sensitive content detected."],
             )
 
+        # Resolve the active category-action map for this scan's direction
+        # ONCE, then pass it to _decide for every match — keeps the
+        # decision logic stateless and avoids re-checking direction in
+        # every loop iteration.
+        is_output = detection_result.scanned_direction == "output"
+        if is_output and profile.category_actions_output is not None:
+            category_actions = profile.category_actions_output
+        else:
+            category_actions = profile.category_actions
+
         match_actions: list[MatchAction] = []
         reasons: list[str] = []
 
         for match in detection_result.matches:
-            action, reason_code, reason_message = self._decide(match, profile)
+            action, reason_code, reason_message = self._decide(
+                match, profile, category_actions
+            )
             match_actions.append(
                 MatchAction(
                     match=match,
@@ -77,10 +103,14 @@ class PolicyEvaluator:
     def _decide(
         match: DetectionMatch,
         profile: PolicyProfile,
+        category_actions: dict[str, EnforcementAction],
     ) -> tuple[EnforcementAction, str, str]:
         """Decide the action for a single match.
 
-        Returns (action, reason_code, reason_message).
+        Returns (action, reason_code, reason_message). ``category_actions``
+        is the direction-resolved map chosen by ``evaluate`` — pass
+        ``profile.category_actions`` for input scans or
+        ``profile.category_actions_output`` (when set) for output scans.
         """
         # Check 1: severity threshold block
         if (
@@ -94,8 +124,8 @@ class PolicyEvaluator:
                 f"block threshold {profile.severity_threshold_block.name}.",
             )
 
-        # Check 2: category action from profile
-        category_action = profile.category_actions.get(match.category)
+        # Check 2: category action from profile (direction-resolved)
+        category_action = category_actions.get(match.category)
         if category_action is not None:
             action_name = category_action.name.lower()
             return (
