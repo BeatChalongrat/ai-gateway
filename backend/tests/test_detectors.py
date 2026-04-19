@@ -101,7 +101,9 @@ class TestPhoneDetector:
         assert len(matches) == 1
 
     def test_bare_10_digits(self):
-        text = "number is 5551234567 ok"
+        # Bare digit runs now require a phone-context keyword in a ±25 char
+        # window (tightened to eliminate epoch / order-ID false positives).
+        text = "phone number is 5551234567 ok"
         matches = self.det.detect(text)
         assert len(matches) == 1
         assert matches[0].matched_text == "5551234567"

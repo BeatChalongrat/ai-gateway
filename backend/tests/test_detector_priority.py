@@ -187,23 +187,31 @@ class TestDetectorClassPriorities:
 
 class TestThaiIdBeatsPhoneEndToEnd:
     def test_thai_id_mask_token_wins_over_phone_on_13_digit_span(self):
-        """The exact regression ``test_masks_thai_id`` originally tripped on.
+        """The 13-digit Thai ID must be masked as [THAI_ID_0], never as phone.
 
-        Pre-fix: phone.py matched the 13-digit span, _resolve_overlaps
-        picked phone because of sort order, masked_text showed
-        [PHONE_NUMBER_0]. Post-fix: thai_national_id declares
-        priority=10 and wins the tiebreak, masked_text shows [THAI_ID_0].
+        History: pre-priority-fix, phone.py's bare ``\\b\\d{10,15}\\b``
+        branch matched the 13-digit span and the overlap resolver picked
+        phone. The priority system was added so ``thai_national_id``
+        (priority=10) beats phone on shared spans.
+
+        Post Fix 2 (context-gated bare digits), phone no longer fires on
+        this input at all — there is no phone-context keyword near the
+        digits — so the overlap doesn't even arise. The test still
+        asserts the user-visible guarantee: the ID is masked with the
+        Thai-ID token, not a phone token.
         """
         text = f"citizen id {VALID_THAI_ID}"
         registry = get_default_registry(disabled_detectors=[])
         matches = registry.scan_text(text)
 
-        # Both detectors should fire on the same span.
         names = {m.detector_name for m in matches}
         assert "thai_national_id" in names
-        assert "phone" in names  # still matches — we didn't remove it
+        # "phone" no longer matches bare 13-digit runs without phone
+        # context (Fix 2). The priority system still protects the
+        # user-visible invariant below even if phone ever re-matches
+        # later — the transformer would still pick [THAI_ID_0].
+        assert "phone" not in names
 
-        # Transformer collapses the overlap using priority.
         from app.domain.dlp import EnforcementAction, MatchAction
         actions = [
             MatchAction(
@@ -214,7 +222,7 @@ class TestThaiIdBeatsPhoneEndToEnd:
             )
             for m in matches
         ]
-        masked_text, _ = DLPTransformer().mask_text(text, actions)
+        masked_text, _, _ = DLPTransformer().mask_text(text, actions)
 
         assert VALID_THAI_ID not in masked_text
         assert "[THAI_ID_0]" in masked_text
