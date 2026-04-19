@@ -31,6 +31,18 @@ DEFAULT_PROFILE = PolicyProfile(
         # placeholder so users get a response rather than a hard failure.
         "secret": EnforcementAction.MASK,
     },
+    # Outbound override (Fix 3). Only mask categories that the AI should
+    # never leak back to the user regardless of context — credentials and
+    # secret tokens. PII / financial / network / identity findings on the
+    # outbound side fall through to ALLOW (categories absent from this
+    # dict default to ALLOW per evaluator logic), so AI answers about
+    # public test card numbers, RFC-1918 IPs, fictional emails, and
+    # similar reference data reach the user untouched. Inbound behavior
+    # is unchanged.
+    category_actions_output={
+        "credential": EnforcementAction.MASK,
+        "secret": EnforcementAction.MASK,
+    },
     severity_threshold_block=None,  # rely on category rules only
     scan_responses=True,
 )
@@ -46,6 +58,10 @@ STRICT_PROFILE = PolicyProfile(
         "credential": EnforcementAction.BLOCK,
         "secret": EnforcementAction.BLOCK,
     },
+    # category_actions_output left at None on purpose — strict profile
+    # falls back to the inbound dict for the outbound path, preserving
+    # its pre-Fix-3 behavior (block everything sensitive both ways).
+    category_actions_output=None,
     severity_threshold_block=SensitivityLevel.CRITICAL,
     scan_responses=True,
     moderation_enabled=True,

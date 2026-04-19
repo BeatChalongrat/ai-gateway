@@ -42,12 +42,31 @@ async def lifespan(app: FastAPI):
     # Seed admin user (runs blocking bcrypt in thread)
     await asyncio.to_thread(_seed_admin_user)
 
+    # Per-worker NER pre-load. ``ner_status`` module-level state is
+    # process-local — a ``PATCH /admin/settings`` call routes to one
+    # gunicorn worker, which loads the analyzer in *its* process only,
+    # leaving the other workers at ``not_loaded``. Subsequent chat
+    # requests can then land on a worker that has no analyzer and
+    # ``PresidioDetector`` silently no-ops for them. We fix that here:
+    # each worker checks ``org_settings.ner_enabled`` on boot and loads
+    # its own analyzer when the DB flag is on.
+    await asyncio.to_thread(_maybe_preload_ner)
+
     # Start event loop lag monitor — logs when loop is blocked > 100ms
     monitor_task = asyncio.create_task(_loop_monitor())
+
+    # Daily DLP retention — NULL-ifies raw PII columns on request_logs
+    # rows older than ``settings.dlp_raw_retention_days``. Only one
+    # gunicorn worker needs to run this, but every worker scheduling
+    # it is acceptable: the DB update is idempotent (already-NULL rows
+    # are a no-op) and the cost is one SQL UPDATE per day per worker.
+    # If that becomes a concern, promote to a distributed lock.
+    retention_task = asyncio.create_task(_daily_dlp_retention())
 
     yield
 
     monitor_task.cancel()
+    retention_task.cancel()
     executor.shutdown(wait=False)
 
 
@@ -86,6 +105,36 @@ def _seed_admin_user() -> None:
         session.close()
 
 
+def _maybe_preload_ner() -> None:
+    """If ``org_settings.ner_enabled`` is True, load the Presidio
+    analyzer into *this* worker's process. No-op otherwise.
+
+    Logs outcome to stdout so operators see the boot-time state in
+    container logs without having to hit the admin API from each
+    worker.
+    """
+    from app.core.db import SessionLocal
+    from app.services.dlp import ner_status
+    from app.models.org_settings import OrgSettingsORM
+
+    session = SessionLocal()
+    try:
+        row = session.get(OrgSettingsORM, 1)
+        if row is None or not getattr(row, "ner_enabled", False):
+            return
+        ner_status.begin_load()
+        ner_status.load_analyzer_sync()
+        status = ner_status.get_status()
+        print(
+            f"[startup] NER pre-load: status={status.status} "
+            f"message={status.message or ''}"
+        )
+    except Exception as exc:
+        print(f"[startup] NER pre-load skipped: {exc}")
+    finally:
+        session.close()
+
+
 async def _loop_monitor() -> None:
     """Background task that detects event loop blocking.
 
@@ -100,6 +149,49 @@ async def _loop_monitor() -> None:
         lag = time.monotonic() - t - 1.0
         if lag > 0.1:
             print(f"[loop-monitor] Event loop blocked for {lag:.3f}s")
+
+
+async def _daily_dlp_retention() -> None:
+    """Run ``run_dlp_retention_cleanup`` once every 24 hours.
+
+    First pass runs after a 60s warm-up so boot-time traffic doesn't
+    compete with an UPDATE over the whole table. All DB work is pushed
+    to a thread so the event loop stays responsive even on a cold index
+    scan; the retention job itself is a plain blocking function.
+    """
+    import asyncio
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await asyncio.to_thread(_run_dlp_retention_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[dlp-retention] run failed: {exc}")
+        await asyncio.sleep(24 * 60 * 60)
+
+
+def _run_dlp_retention_once() -> None:
+    """Open a session, run the cleanup, close the session."""
+    import structlog
+
+    from app.core.db import SessionLocal
+    from app.jobs.dlp_retention import run_dlp_retention_cleanup
+
+    logger = structlog.get_logger("dlp.retention")
+
+    session = SessionLocal()
+    try:
+        stats = run_dlp_retention_cleanup(session)
+        logger.info(
+            "dlp_retention_job_ran",
+            rows_cleaned=stats.rows_with_raw_text_cleared,
+            findings_stripped=stats.rows_with_findings_stripped,
+            retention_days=stats.retention_days,
+        )
+    finally:
+        session.close()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)

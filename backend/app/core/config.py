@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     dlp_default_profile: str = "default"
     dlp_disabled_detectors: str = ""
     dlp_scan_responses: bool = True
+    # Days to retain raw PII content (input_raw / output_raw / matched_text
+    # in dlp_findings_json) on request_logs rows. After this window,
+    # scripts/dlp_retention_cleanup.py NULL-ifies the raw columns and
+    # strips matched_text from each finding — leaving the masked
+    # snapshots, summary counts, and per-finding metadata intact for
+    # analytics and post-hoc audits.
+    dlp_raw_retention_days: int = 90
 
     # Semantic router (intent classification via sentence-transformers).
     # Off by default — flipping this to true requires the optional

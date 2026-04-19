@@ -191,6 +191,7 @@ def build_dlp_findings_json(
     ):
         for ma in actions:
             match = ma.match
+            raw_text = match.matched_text or ""
             findings.append({
                 "direction": direction,
                 "detector": match.detector_name,
@@ -199,7 +200,14 @@ def build_dlp_findings_json(
                 "severity": match.severity.name if hasattr(match.severity, "name") else str(match.severity),
                 "start": match.start,
                 "end": match.end,
-                "matched_text": match.matched_text,
+                # ``matched_text`` is the raw PII value — gated to ADMIN-tier
+                # callers at the API layer. ``matched_text_len`` is always
+                # safe to expose: it preserves enough context for debugging
+                # ("a 17-char value was masked here") without leaking the
+                # value itself, so non-admin trace views and post-retention
+                # rows can still surface useful per-finding info.
+                "matched_text": raw_text,
+                "matched_text_len": len(raw_text),
                 "action": ma.action.name.lower() if hasattr(ma.action, "name") else str(ma.action),
                 "mask_token": value_to_token.get(match.matched_text),
             })

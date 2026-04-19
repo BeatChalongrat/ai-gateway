@@ -34,8 +34,10 @@ class RequestLogORM(Base):
     )
 
     # DLP findings summary (populated by the orchestrator after a round-trip).
-    # Raw matched values are never stored here — only counts, the worst action,
-    # and the set of categories found.
+    # Counts, worst action, and category set only — these summary columns
+    # never contain raw PII and are safe to retain indefinitely. The raw
+    # content lives in the trace columns further down (input_raw / output_raw
+    # / dlp_findings_json), each of which has its own privacy gate.
     dlp_input_findings: Mapped[int] = mapped_column(
         Integer, server_default=sa.text("0")
     )
@@ -57,10 +59,26 @@ class RequestLogORM(Base):
         String(100), nullable=True
     )
 
-    # DLP trace (migration 021). Four message snapshots bounding the
-    # pipeline plus a JSON-encoded list of finding objects. Unlike the
-    # summary columns above, these hold raw content — admin endpoint
-    # auth is the only access control.
+    # DLP trace columns (migration 021). Four message snapshots bounding
+    # the pipeline plus a JSON-encoded list of per-finding objects.
+    #
+    # Privacy posture (Fix 4):
+    # - ``input_raw`` and ``output_raw`` hold verbatim message content —
+    #   the user's actual passport / card / email and the provider's
+    #   response before mask-token restore. The /admin/requests/{id}
+    #   endpoint gates these two columns behind ``Role.ADMIN`` (see
+    #   admin.py::get_request); lower admin tiers receive ``None`` for
+    #   them while still seeing the masked snapshots and per-finding
+    #   metadata.
+    # - ``dlp_findings_json`` includes ``matched_text`` (raw values).
+    #   The same admin endpoint strips ``matched_text`` for non-ADMIN
+    #   callers via ``_strip_raw_from_findings``, leaving
+    #   ``matched_text_len`` as a privacy-safe replacement.
+    # - Both ``input_raw`` / ``output_raw`` and the ``matched_text``
+    #   keys inside ``dlp_findings_json`` are NULL-ified by the
+    #   ``app.jobs.dlp_retention.run_dlp_retention_cleanup`` job after
+    #   ``settings.dlp_raw_retention_days`` (default 90). Masked
+    #   snapshots, summary counts, and per-finding metadata survive.
     input_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_masked: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
