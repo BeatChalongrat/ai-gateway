@@ -17,7 +17,15 @@ const CATEGORIES: string[] = ["network", "identity", "financial", "pii", "creden
 const ACTIONS: Action[] = ["allow", "mask", "block"];
 
 interface Detector { name: string; category: string; severity: string; enabled: boolean; is_ner: boolean; }
-interface Profile { id: string; profile_id: string; name: string; category_actions: Record<string, Action>; }
+interface Profile {
+  id: string;
+  profile_id: string;
+  name: string;
+  category_actions: Record<string, Action>;
+  // Null on profiles that inherit inbound for outbound (e.g. STRICT).
+  // Missing categories inside the dict also inherit, rendered as "(inherited)".
+  category_actions_output: Record<string, Action> | null;
+}
 interface NerStatus { status: "not_loaded" | "loading" | "ready" | "error"; message?: string; ner_enabled: boolean; }
 type Tab = "profiles" | "detectors" | "ner";
 
@@ -81,43 +89,6 @@ const PROF: Record<string, { color: string; bg: string; border: string }> = {
   strict:  { color: "#f59e0b", bg: "rgba(245,158,11,0.07)", border: "#f59e0b" },
 };
 function profAccent(id: string) { return PROF[id] || PROF.default; }
-
-/* ── Scoped CSS ───────────────────────────────────────────────────── */
-
-const STYLES = `
-@keyframes dlpFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-@keyframes dlpTabIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-@keyframes dlpPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
-@keyframes dlpSwing { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(8deg)} 75%{transform:rotate(-8deg)} }
-@keyframes dlpGlow { 0%,100%{opacity:1} 50%{opacity:0.55} }
-@keyframes dotGlow { 0%,100%{box-shadow:0 0 4px rgba(16,185,129,0.3)} 50%{box-shadow:0 0 10px rgba(16,185,129,0.6)} }
-.dlp-stat { animation: dlpFadeUp 0.4s ease-out both; }
-.dlp-row { animation: dlpFadeUp 0.35s ease-out both; }
-.dlp-card-anim { animation: dlpFadeUp 0.4s ease-out both; }
-.dlp-tab-content { animation: dlpTabIn 0.25s ease-out both; }
-.dlp-icon-pulse svg { animation: dlpPulse 2.5s ease-in-out infinite; }
-.dlp-icon-swing svg { animation: dlpSwing 3s ease-in-out infinite; }
-.dlp-icon-glow svg { animation: dlpGlow 2s ease-in-out infinite; }
-.dlp-table { width:100%; border-collapse:collapse; }
-.dlp-table th {
-  text-align:left; padding:0 0.875rem; height:36px; font-weight:600; font-size:10.5px;
-  text-transform:uppercase; letter-spacing:1.2px; color:${C.textHeader};
-  border-bottom:1px solid ${C.borderLight}; background:#fafbfc; white-space:nowrap;
-}
-.dlp-table td { padding:14px 0.875rem; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
-.dlp-table tbody tr { transition: background 100ms ease; }
-.dlp-table tbody tr:hover { background: rgba(59,108,246,0.04); }
-.dlp-table tbody tr:last-child td { border-bottom:none; }
-.dlp-select {
-  appearance:none; -webkit-appearance:none;
-  background:white url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center;
-  color:${C.textPrimary}; border:1.5px solid ${C.borderLight}; border-radius:6px;
-  padding:5px 26px 5px 10px; font-size:13px; font-weight:500; cursor:pointer;
-  outline:none; transition:border-color 120ms, box-shadow 120ms; font-family:inherit;
-}
-.dlp-select:focus { border-color:${C.accent}; box-shadow:0 0 0 3px rgba(59,108,246,0.08); }
-.dlp-select:disabled { background:#f9fafb; color:#9ca3af; cursor:not-allowed; }
-`;
 
 /* ── Stat card ────────────────────────────────────────────────────── */
 
@@ -231,8 +202,6 @@ export default function PoliciesPage() {
 
   return (
     <div className={outfit.className} style={{ background: C.bg, margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
-      <style>{STYLES}</style>
-
       {/* Header */}
       <div style={{ marginBottom: "20px" }}>
         <h1 style={{ fontSize: "30px", fontWeight: 800, color: C.textPrimary, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>
@@ -321,6 +290,26 @@ function ProfCard({ profile, idx }: { profile: Profile; idx: number }) {
     }
   }, [profile.profile_id, profile.category_actions]);
 
+  // Outbound column is read-only for now — no PATCH endpoint exists for
+  // category_actions_output. The evaluator's contract (see
+  // services/policy/evaluator.py _decide) is:
+  //   - category_actions_output === null → outbound truly inherits the
+  //     inbound action for every category.
+  //   - category_actions_output === {...} and cat ∈ dict → explicit value.
+  //   - category_actions_output === {...} and cat ∉ dict → falls through
+  //     to ALLOW (the _decide "no_matching_rule" branch).
+  // Only the first case renders "(inherited)".
+  const outboundOverrides = profile.category_actions_output;
+  const outboundFor = (cat: string): { value: Action; inherited: boolean } => {
+    if (outboundOverrides && cat in outboundOverrides) {
+      return { value: outboundOverrides[cat], inherited: false };
+    }
+    if (!outboundOverrides) {
+      return { value: (actions[cat] ?? "allow") as Action, inherited: true };
+    }
+    return { value: "allow", inherited: false };
+  };
+
   return (
     <div className="dlp-card-anim" style={{
       animationDelay: `${0.1 + idx * 0.08}s`,
@@ -342,18 +331,56 @@ function ProfCard({ profile, idx }: { profile: Profile; idx: number }) {
         }}>{profile.profile_id}</span>
       </div>
       <table className="dlp-table">
-        <thead><tr><th>Category</th><th style={{ width: 130 }}>Action</th><th style={{ width: 80, textAlign: "center" }}>Status</th></tr></thead>
+        <thead><tr>
+          <th>Category</th>
+          <th style={{ width: 130 }}>Inbound</th>
+          <th style={{ width: 150 }}>Outbound</th>
+          <th style={{ width: 80, textAlign: "center" }}>Status</th>
+        </tr></thead>
         <tbody>
-          {CATEGORIES.map((cat, i) => (
-            <tr key={cat} className="dlp-row" style={{ animationDelay: `${0.25 + i * 0.03}s` }}>
-              <td><CatPill category={cat} /></td>
-              <td><ActionSel value={actions[cat] ?? "allow"} onChange={(act) => onChange(cat, act)} /></td>
-              <td style={{ textAlign: "center" }}><SaveDot state={saveState[cat] ?? "idle"} /></td>
-            </tr>
-          ))}
+          {CATEGORIES.map((cat, i) => {
+            const ob = outboundFor(cat);
+            return (
+              <tr key={cat} className="dlp-row" style={{ animationDelay: `${0.25 + i * 0.03}s` }}>
+                <td><CatPill category={cat} /></td>
+                <td><ActionSel value={actions[cat] ?? "allow"} onChange={(act) => onChange(cat, act)} /></td>
+                <td>
+                  <OutboundCell value={ob.value} inherited={ob.inherited} />
+                </td>
+                <td style={{ textAlign: "center" }}><SaveDot state={saveState[cat] ?? "idle"} /></td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function OutboundCell({ value, inherited }: { value: Action; inherited: boolean }) {
+  const pillBg =
+    value === "block" ? "rgba(220,38,38,0.08)"
+    : value === "mask" ? "rgba(59,108,246,0.08)"
+    : "rgba(16,185,129,0.08)";
+  const pillColor =
+    value === "block" ? "#dc2626"
+    : value === "mask" ? "#3b6cf6"
+    : "#059669";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span style={{
+        display: "inline-block", padding: "3px 10px",
+        fontSize: 12, fontWeight: 600, color: pillColor, background: pillBg,
+        borderRadius: 6, textTransform: "lowercase", letterSpacing: "0.02em",
+        fontFamily: C.mono,
+      }}>{value}</span>
+      {inherited && (
+        <span
+          title="Outbound inherits the inbound action for this category"
+          style={{ fontSize: 11, fontWeight: 500, color: C.textTertiary }}
+        >(inherited)</span>
+      )}
+    </span>
   );
 }
 
