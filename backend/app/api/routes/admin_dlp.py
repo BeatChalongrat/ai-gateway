@@ -90,6 +90,7 @@ def list_policy_profiles(
                 "profile_id": v.profile_id,
                 "name": v.name,
                 "category_actions": v.category_actions,
+                "category_actions_output": v.category_actions_output,
             }
             for v in views
         ]
@@ -457,7 +458,7 @@ def test_dlp(body: DlpTestRequest) -> dict[str, Any]:
         )
         for m in matches
     ]
-    masked_text, _span_map = DLPTransformer().mask_text(body.text, actions)
+    masked_text, _span_map, _counters = DLPTransformer().mask_text(body.text, actions)
 
     findings = [
         {

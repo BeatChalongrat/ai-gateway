@@ -18,7 +18,10 @@ Design constraints:
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
+
+import structlog
 
 from app.domain.dlp import (
     EnforcementAction,
@@ -29,6 +32,13 @@ from app.domain.dlp import (
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
+
+logger = structlog.get_logger(__name__)
+
+# Any bracketed ALL-CAPS token with a trailing index — same shape produced
+# by ``_indexed_token``. Used by ``restore`` to detect tokens that survive
+# restore because they are not in the span_map (orphans).
+_MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_\d+\]")
 
 
 # Descriptive placeholder tokens. Keyed on DetectionMatch.detector_name so
@@ -71,14 +81,76 @@ def mask_token_for(detector_name: str) -> str:
     return MASK_TOKENS.get(detector_name, DEFAULT_MASK_TOKEN)
 
 
+def _mask_base_name(detector_name: str) -> str:
+    """Return the bracket-free base name for a detector's mask token.
+
+    Multiple detectors can map to the same base (e.g. ``api_key_secret``
+    and ``db_connection_string`` both use ``[CREDENTIAL]``). Callers that
+    allocate indexed tokens MUST key their counters on this base name
+    rather than on ``detector_name`` — otherwise two detectors that
+    share a base will both emit ``[CREDENTIAL_0]`` and clobber each
+    other in ``span_map``.
+    """
+    base = MASK_TOKENS.get(detector_name, DEFAULT_MASK_TOKEN)
+    return base.strip("[]")
+
+
 def _indexed_token(detector_name: str, index: int) -> str:
     """Return an indexed mask token like '[EMAIL_0]' so multiple
     occurrences of the same detector stay distinguishable for restore.
     """
-    base = MASK_TOKENS.get(detector_name, DEFAULT_MASK_TOKEN)
-    # Strip surrounding brackets, append index, re-bracket.
-    inner = base.strip("[]")
-    return f"[{inner}_{index}]"
+    return f"[{_mask_base_name(detector_name)}_{index}]"
+
+
+def _allocate_token(
+    detector_name: str,
+    counters: dict[str, int],
+    span_map: dict[str, str],
+    original: str,
+) -> str:
+    """Pick the next ``[BASE_N]`` token for this detector and bind it.
+
+    Counter keying: by *base* name. This is the fix for the collision
+    bug where two detectors sharing a base (``api_key_secret`` and
+    ``db_connection_string`` → both ``[CREDENTIAL]``) each reset their
+    own index to 0 and produced the same ``[CREDENTIAL_0]`` token,
+    losing one value on ``span_map`` dict write.
+
+    Defensive guard: if the token somehow still collides with an
+    existing span_map entry whose original is *different*, log a clear
+    error and allocate a fresh-offset token so both values survive.
+    After the base-keyed counter fix this branch should never fire in
+    practice — keeping it means a future MASK_TOKENS edit that
+    introduces a new collision pattern fails loud instead of
+    corrupting data silently.
+    """
+    base = _mask_base_name(detector_name)
+    idx = counters.get(base, 0)
+    token = f"[{base}_{idx}]"
+    counters[base] = idx + 1
+
+    existing = span_map.get(token)
+    if existing is not None and existing != original:
+        # Base-keyed counter failed to avoid collision — bail to a
+        # high-offset slot rather than overwrite the existing binding.
+        logger.error(
+            "dlp_span_map_collision",
+            token=token,
+            existing_value_prefix=existing[:20],
+            new_value_prefix=original[:20],
+            detector=detector_name,
+        )
+        fallback = idx
+        while True:
+            fallback += 1
+            alt = f"[{base}_{fallback}]"
+            if alt not in span_map:
+                token = alt
+                counters[base] = fallback + 1
+                break
+
+    span_map[token] = original
+    return token
 
 
 class DLPTransformer:
@@ -195,7 +267,7 @@ class DLPTransformer:
         self,
         messages: list[Message],
         match_actions: list[MatchAction],
-    ) -> tuple[list[Message], dict[str, str]]:
+    ) -> tuple[list[Message], dict[str, str], dict[str, int]]:
         """Mask messages using indexed tokens and return a span_map.
 
         Unlike ``transform_messages``, each MASK replacement uses a
@@ -204,6 +276,22 @@ class DLPTransformer:
         ``span_map`` maps each indexed token back to its original value
         and is used by ``restore()`` to reverse the masking on the
         provider's response.
+
+        The final element of the tuple is the per-**base-token** index
+        ``counters`` as they stand after this call. Counters are keyed
+        on the stripped mask token name (e.g. ``"CREDENTIAL"``), not
+        the detector name, so multiple detectors that share a base
+        (``api_key_secret`` + ``db_connection_string`` both map to
+        ``[CREDENTIAL]``) get distinct indices and do not collide in
+        ``span_map``.
+
+        Callers that also mask content in the *output* direction
+        (provider response) within the same request must thread these
+        counters into ``mask_text(..., start_counters=...)`` — otherwise
+        the outbound pass starts its own counter at 0 and can collide
+        with inbound tokens, which would make ``restore()`` splice the
+        user's own input PII into positions where the provider wrote
+        something different.
 
         REDACT actions keep the static ``[REDACTED]`` replacement and
         are intentionally NOT added to the span_map — redaction is
@@ -215,7 +303,12 @@ class DLPTransformer:
 
         new_messages: list[MessageModel] = []
         span_map: dict[str, str] = {}
-        # Per-detector global counters so tokens are unique across all messages.
+        # Counters are keyed on the *base* mask token name (see
+        # ``_mask_base_name``) so detectors that share a base — e.g.
+        # api_key_secret and db_connection_string both emit
+        # ``[CREDENTIAL]`` — still allocate disjoint indices within a
+        # single request. Per-message keying would let the base counter
+        # reset between messages and reintroduce the collision.
         counters: dict[str, int] = {}
 
         for msg in messages:
@@ -249,12 +342,10 @@ class DLPTransformer:
             # (start, end, replacement, original)
             for ma in resolved:
                 if ma.action == EnforcementAction.MASK:
-                    det = ma.match.detector_name
-                    idx = counters.get(det, 0)
-                    counters[det] = idx + 1
-                    token = _indexed_token(det, idx)
                     original = msg.content[ma.match.start:ma.match.end]
-                    span_map[token] = original
+                    token = _allocate_token(
+                        ma.match.detector_name, counters, span_map, original
+                    )
                     replacements.append(
                         (ma.match.start, ma.match.end, token, original)
                     )
@@ -274,40 +365,51 @@ class DLPTransformer:
                 MessageModel(role=msg.role, content=result_text)
             )
 
-        return new_messages, span_map
+        return new_messages, span_map, counters
 
     def mask_text(
         self,
         text: str,
         match_actions: list[MatchAction],
-    ) -> tuple[str, dict[str, str]]:
+        *,
+        start_counters: dict[str, int] | None = None,
+    ) -> tuple[str, dict[str, str], dict[str, int]]:
         """Mask a single text string using indexed tokens + span_map.
 
         Shares the same indexing scheme as ``mask_messages`` but operates
         on a raw string (used for the provider response path where there
         is no Message envelope).
+
+        Pass ``start_counters`` to continue the indexing sequence from a
+        prior ``mask_messages`` call within the same request. Without
+        this, an outbound pass would start at index 0 and collide with
+        inbound tokens already in the caller's span_map — ``restore``
+        would then replace the AI's newly-invented value with the
+        user's original PII. See ``mask_messages`` docstring for the
+        rationale.
         """
         actionable = [
             ma for ma in match_actions
             if ma.action in (EnforcementAction.MASK, EnforcementAction.REDACT)
         ]
+        counters: dict[str, int] = (
+            dict(start_counters) if start_counters else {}
+        )
         if not actionable:
-            return text, {}
+            return text, {}, counters
 
         resolved = _resolve_overlaps(actionable)
         resolved.sort(key=lambda ma: ma.match.start)
 
-        counters: dict[str, int] = {}
         replacements: list[tuple[int, int, str]] = []
         span_map: dict[str, str] = {}
 
         for ma in resolved:
             if ma.action == EnforcementAction.MASK:
-                det = ma.match.detector_name
-                idx = counters.get(det, 0)
-                counters[det] = idx + 1
-                token = _indexed_token(det, idx)
-                span_map[token] = text[ma.match.start:ma.match.end]
+                original = text[ma.match.start:ma.match.end]
+                token = _allocate_token(
+                    ma.match.detector_name, counters, span_map, original
+                )
                 replacements.append((ma.match.start, ma.match.end, token))
             else:  # REDACT
                 replacements.append((ma.match.start, ma.match.end, "[REDACTED]"))
@@ -318,7 +420,7 @@ class DLPTransformer:
         ):
             result_text = result_text[:start] + replacement + result_text[end:]
 
-        return result_text, span_map
+        return result_text, span_map, counters
 
     def restore(self, text: str, span_map: dict[str, str]) -> str:
         """Reverse indexed masking by replacing each token with its original.
@@ -326,12 +428,32 @@ class DLPTransformer:
         Processes longer tokens first so that ``[EMAIL_10]`` is replaced
         before ``[EMAIL_1]`` — otherwise the shorter token would match
         the prefix of the longer one and corrupt the output.
+
+        If the text still contains indexed mask tokens *after* restore
+        (so: tokens the caller never registered in ``span_map``), emit
+        an ``dlp_orphan_mask_tokens`` warning. Behavior is intentionally
+        unchanged — the literal token passes through to the user — but
+        operators get visibility on the orphan so they can diagnose
+        stale history replays, split-vault bugs, or provider echoes
+        of tokens the gateway never issued.
         """
-        if not span_map or not text:
+        if not text:
             return text
         result = text
-        for token in sorted(span_map, key=len, reverse=True):
-            result = result.replace(token, span_map[token])
+        if span_map:
+            for token in sorted(span_map, key=len, reverse=True):
+                result = result.replace(token, span_map[token])
+        # Orphan detection runs whether or not span_map was empty: a
+        # bracketed [DETECTOR_N] surviving to this point is suspicious
+        # either way.
+        orphans = set(_MASK_TOKEN_RE.findall(result))
+        if orphans:
+            logger.warning(
+                "dlp_orphan_mask_tokens",
+                orphan_tokens=sorted(orphans),
+                span_map_size=len(span_map),
+                text_snippet=result[:120],
+            )
         return result
 
 

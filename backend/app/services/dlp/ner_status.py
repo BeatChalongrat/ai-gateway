@@ -92,32 +92,57 @@ def load_analyzer_sync() -> None:
         from presidio_analyzer import AnalyzerEngine
         from presidio_analyzer.nlp_engine import NlpEngineProvider
 
-        # Two-language config — en + th. th_core_news_lg may fall back
-        # to th_core_news_sm or fail to load entirely; the Dockerfile
-        # wraps the Thai download in `|| true` so absence is expected.
-        # AnalyzerEngine still starts with only en in that case.
+        # Pick the best English spaCy model that's actually installed.
+        # The Dockerfile best-effort installs ``en_core_web_lg``
+        # (preferred; ~580 MB; high accuracy) and ``en_core_web_sm``
+        # (~12 MB; reliable fallback) — spaCy 3.7.4 has a stale-catalog
+        # bug that makes _lg fail to download intermittently, so we
+        # cannot assume it's present. ``en_core_web_sm`` is the
+        # always-available fallback.
+        import spacy
+
+        def _first_installed(candidates: tuple[str, ...]) -> str | None:
+            for name in candidates:
+                try:
+                    spacy.util.get_package_path(name)
+                    return name
+                except Exception:
+                    continue
+            return None
+
+        en_model = _first_installed(("en_core_web_lg", "en_core_web_sm"))
+        th_model = _first_installed(("th_core_news_lg", "th_core_news_sm"))
+
+        if en_model is None:
+            raise RuntimeError(
+                "No English spaCy model available. Install one with "
+                "`python -m spacy download en_core_web_sm`."
+            )
+
+        # Two-language config when a Thai model is available, otherwise
+        # English-only. AnalyzerEngine still handles mixed-language
+        # text under English-only mode via the underlying spaCy model.
         try:
+            models_cfg = [{"lang_code": "en", "model_name": en_model}]
+            if th_model is not None:
+                models_cfg.append({"lang_code": "th", "model_name": th_model})
             provider = NlpEngineProvider(
                 nlp_configuration={
                     "nlp_engine_name": "spacy",
-                    "models": [
-                        {"lang_code": "en", "model_name": "en_core_web_lg"},
-                        {"lang_code": "th", "model_name": "th_core_news_lg"},
-                    ],
+                    "models": models_cfg,
                 }
             )
             engine = AnalyzerEngine(
                 nlp_engine=provider.create_engine(),
-                supported_languages=["en", "th"],
+                supported_languages=(["en", "th"] if th_model else ["en"]),
             )
         except Exception:
-            # Thai model unavailable — fall back to English-only.
+            # Second attempt: English-only, in case the two-language
+            # config was rejected by NlpEngineProvider for any reason.
             provider = NlpEngineProvider(
                 nlp_configuration={
                     "nlp_engine_name": "spacy",
-                    "models": [
-                        {"lang_code": "en", "model_name": "en_core_web_lg"},
-                    ],
+                    "models": [{"lang_code": "en", "model_name": en_model}],
                 }
             )
             engine = AnalyzerEngine(
@@ -127,7 +152,7 @@ def load_analyzer_sync() -> None:
 
         with _analyzer_lock:
             _analyzer = engine
-        set_status("ready", None)
+        set_status("ready", f"loaded model(s): en={en_model}" + (f", th={th_model}" if th_model else ""))
     except Exception as exc:  # pragma: no cover - exercised only with presidio
         with _analyzer_lock:
             _analyzer = None
