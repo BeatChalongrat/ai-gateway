@@ -51,19 +51,48 @@ class ProfileView:
 
     profile_id: str
     name: str
-    category_actions: dict[str, str]  # category → "allow"|"mask"|"block"
+    category_actions: dict[str, str]  # inbound: category → "allow"|"mask"|"block"
+    # Outbound overrides. ``None`` means the profile inherits the inbound
+    # actions for responses (Fix 3 contract — evaluator falls back to
+    # ``category_actions`` when ``category_actions_output`` is None). The
+    # admin UI renders this as "(inherited)" next to the outbound cell.
+    category_actions_output: dict[str, str] | None = None
 
 
-def _builtin_map() -> dict[str, tuple[str, dict[str, EnforcementAction]]]:
-    """Snapshot of built-in profiles keyed by profile_id."""
+def _actions_to_str(
+    actions: dict[str, EnforcementAction] | None,
+) -> dict[str, str] | None:
+    if actions is None:
+        return None
+    return {cat: _ACTION_ENUM_TO_STR.get(act, "allow") for cat, act in actions.items()}
+
+
+def _builtin_map() -> dict[
+    str,
+    tuple[
+        str,
+        dict[str, EnforcementAction],
+        dict[str, EnforcementAction] | None,
+    ],
+]:
+    """Snapshot of built-in profiles keyed by profile_id.
+
+    Tuple shape: (name, inbound_actions, outbound_actions_or_None).
+    """
     return {
         DEFAULT_PROFILE.profile_id: (
             DEFAULT_PROFILE.name,
             dict(DEFAULT_PROFILE.category_actions),
+            dict(DEFAULT_PROFILE.category_actions_output)
+            if DEFAULT_PROFILE.category_actions_output is not None
+            else None,
         ),
         STRICT_PROFILE.profile_id: (
             STRICT_PROFILE.name,
             dict(STRICT_PROFILE.category_actions),
+            dict(STRICT_PROFILE.category_actions_output)
+            if STRICT_PROFILE.category_actions_output is not None
+            else None,
         ),
     }
 
@@ -118,18 +147,20 @@ def list_profiles(session: Session) -> list[ProfileView]:
 
     views: list[ProfileView] = []
     seen: set[str] = set()
-    for profile_id, (name, actions) in builtins.items():
+    for profile_id, (name, actions, outbound_actions) in builtins.items():
         merged = _merge(actions, db_overrides.get(profile_id, {}))
         views.append(
             ProfileView(
                 profile_id=profile_id,
                 name=db_names.get(profile_id, name),
                 category_actions=merged,
+                category_actions_output=_actions_to_str(outbound_actions),
             )
         )
         seen.add(profile_id)
 
-    # Custom DB-only profiles (not shipped with the app)
+    # Custom DB-only profiles (not shipped with the app). They have no
+    # outbound override channel yet, so outbound inherits inbound (None).
     for profile_id, overrides in db_overrides.items():
         if profile_id in seen:
             continue
@@ -138,6 +169,7 @@ def list_profiles(session: Session) -> list[ProfileView]:
                 profile_id=profile_id,
                 name=db_names.get(profile_id, profile_id),
                 category_actions=_merge({}, overrides),
+                category_actions_output=None,
             )
         )
     return views

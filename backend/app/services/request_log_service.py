@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain.observability import RequestRecord
@@ -62,6 +62,31 @@ class RequestLogService:
             .limit(limit)
         )
         return list(session.execute(stmt).scalars().all())
+
+    def list_paginated(
+        self,
+        session: Session,
+        *,
+        limit: int,
+        offset: int,
+        project_id: str | None = None,
+    ) -> tuple[list[RequestLogORM], int]:
+        """Return (rows, total) for audit listings. ``total`` counts the
+        filtered set ignoring pagination so the UI can render accurate
+        pager controls even when only a page worth of rows is fetched."""
+        base = select(RequestLogORM)
+        count_base = select(func.count()).select_from(RequestLogORM)
+        if project_id is not None:
+            base = base.where(RequestLogORM.project_id == project_id)
+            count_base = count_base.where(RequestLogORM.project_id == project_id)
+        total = int(session.execute(count_base).scalar() or 0)
+        stmt = (
+            base.order_by(RequestLogORM.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = list(session.execute(stmt).scalars().all())
+        return rows, total
 
     def get_by_id(
         self, session: Session, request_id: str
