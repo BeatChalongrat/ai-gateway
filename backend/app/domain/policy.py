@@ -27,9 +27,20 @@ class PolicyProfile:
     name : str
         Human-readable display name.
     category_actions : dict[str, EnforcementAction]
-        Maps finding category → action.
+        Maps finding category → action for INBOUND scans (request
+        messages headed to the provider).
         e.g. {"pii": MASK, "secret": BLOCK, "financial": BLOCK}
         Findings whose category is absent default to ALLOW.
+    category_actions_output : dict[str, EnforcementAction] | None
+        Optional override for OUTBOUND scans (provider response
+        headed back to the user). When ``None`` (the default), the
+        evaluator falls back to ``category_actions`` so existing
+        profiles keep their pre-Fix-3 behavior. When set, this dict
+        replaces ``category_actions`` for output-direction findings —
+        typical use is to mask only credentials/secrets the AI
+        shouldn't leak while letting the AI's answers about other
+        sensitive-looking data (test cards, example IPs, fictional
+        emails) flow through to the user untouched.
     severity_threshold_block : SensitivityLevel | None
         Any finding at or above this severity is BLOCKED regardless
         of its category action.  None disables this check.
@@ -40,6 +51,7 @@ class PolicyProfile:
     profile_id: str
     name: str
     category_actions: dict[str, EnforcementAction] = field(default_factory=dict)
+    category_actions_output: dict[str, EnforcementAction] | None = None
     severity_threshold_block: SensitivityLevel | None = None
     scan_responses: bool = True
     moderation_enabled: bool = False
