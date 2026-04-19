@@ -3,13 +3,14 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import ResolvedApiKey, check_tenant_access, get_db_session, require_admin
 from app.core.exceptions import NotFoundError
+from app.domain.rbac import Role, has_role_level
 from app.models.alert_rule import AlertEventORM, AlertRuleORM
 from app.models.api_key import ApiKeyORM
 from app.models.keyword_rule import KeywordRuleORM
@@ -439,6 +440,28 @@ def delete_policy(
     session.flush()
 
 
+def _strip_raw_from_findings(findings: list[dict]) -> list[dict]:
+    """Drop ``matched_text`` from every finding entry.
+
+    ``matched_text_len`` is preserved (and synthesized from any surviving
+    ``matched_text`` if missing on legacy rows) so non-admin viewers can
+    still see *that* a value was masked and roughly how long it was —
+    just not the value itself.
+    """
+    cleaned: list[dict] = []
+    for entry in findings:
+        if not isinstance(entry, dict):
+            continue
+        copy = dict(entry)
+        # Backfill matched_text_len for rows written before Fix 4c so the
+        # field stays useful on historical data.
+        if "matched_text_len" not in copy and isinstance(copy.get("matched_text"), str):
+            copy["matched_text_len"] = len(copy["matched_text"])
+        copy.pop("matched_text", None)
+        cleaned.append(copy)
+    return cleaned
+
+
 @router.get("/requests/{request_id}", response_model=RequestLogDetail)
 def get_request(
     request_id: str,
@@ -455,6 +478,20 @@ def get_request(
         raise NotFoundError(f"Request '{request_id}' not found.")
     check_tenant_access(auth, r.tenant_id)
 
+    # Privacy gate (Fix 4a): only ADMIN-tier callers see the raw-content
+    # columns and the raw ``matched_text`` inside dlp_findings. Lower
+    # admin tiers (TENANT_ADMIN, PROJECT_ADMIN) still get the full
+    # masked snapshots + the per-finding metadata, just without the
+    # actual sensitive values. ``Role.ADMIN`` is the highest tier in
+    # the current RBAC enum (see backend/app/domain/rbac.py); when a
+    # SUPER_ADMIN or COMPLIANCE_ADMIN role is added later, this is the
+    # one place to widen.
+    try:
+        caller_role = Role[auth.role.upper()]
+    except (KeyError, AttributeError):
+        caller_role = Role.USER
+    include_raw = has_role_level(caller_role, Role.ADMIN)
+
     # Parse DLP findings JSON for the trace tab. Treat anything that
     # doesn't decode to a list as None — operators see the raw text
     # snapshots either way, and a corrupt findings blob shouldn't
@@ -467,6 +504,9 @@ def get_request(
                 dlp_findings = parsed
         except Exception:
             dlp_findings = None
+
+    if dlp_findings is not None and not include_raw:
+        dlp_findings = _strip_raw_from_findings(dlp_findings)
 
     return RequestLogDetail(
         request_id=r.request_id,
@@ -484,9 +524,12 @@ def get_request(
         estimated_cost_usd=r.estimated_cost_usd,
         error_code=r.error_code,
         created_at=r.created_at,
-        input_raw=r.input_raw,
+        # Fix 4a: raw snapshots gated behind ADMIN role. The masked /
+        # final snapshots are always returned — they contain only mask
+        # tokens and post-restore values that the user already saw.
+        input_raw=r.input_raw if include_raw else None,
         input_masked=r.input_masked,
-        output_raw=r.output_raw,
+        output_raw=r.output_raw if include_raw else None,
         output_final=r.output_final,
         dlp_findings=dlp_findings,
     )
@@ -495,16 +538,27 @@ def get_request(
 @router.get("/requests")
 def requests(
     project_id: str | None = None,
+    limit: int = Query(default=100, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db_session),
 ):
+    """Paginated request log listing.
+
+    ``limit`` is capped at 5000 — the audit UI's CSV export bumps it to
+    1000, and holding the line below 5000 keeps a single response under
+    a few megabytes and under the gunicorn timeout even on cold caches.
+    ``total`` reflects the filtered set regardless of pagination.
+    """
     from app.services.request_log_service import RequestLogService
 
     try:
         svc = RequestLogService()
-        if project_id:
-            rows = svc.list_by_project(session, project_id, limit=100)
-        else:
-            rows = svc.list_recent(session, limit=100)
+        rows, total = svc.list_paginated(
+            session,
+            limit=limit,
+            offset=offset,
+            project_id=project_id,
+        )
         return {
             "items": [
                 {
@@ -523,11 +577,19 @@ def requests(
                 }
                 for r in rows
             ],
-            "total": len(rows),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
         }
     except Exception as e:
         print(f"[requests] ERROR: {e}")
-        return {"items": [], "total": 0, "error": "query_failed"}
+        return {
+            "items": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "error": "query_failed",
+        }
 
 
 # ---------------------------------------------------------------------------

@@ -111,6 +111,10 @@ async def chat_completions(
 
     messages_to_send = list(payload.messages)
     span_map: dict[str, str] = {}
+    # Per-detector mask index counters carried from inbound to outbound so
+    # that a new PII finding in the provider response doesn't re-use an
+    # index already bound to an inbound original. See transformer docstring.
+    inbound_counters: dict[str, int] = {}
     input_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
 
     if settings.dlp_enabled:
@@ -143,7 +147,7 @@ async def chat_completions(
             )
 
         if input_enforcement.requires_transformation:
-            messages_to_send, span_map = orchestrator.transformer.mask_messages(
+            messages_to_send, span_map, inbound_counters = orchestrator.transformer.mask_messages(
                 payload.messages, input_enforcement.match_actions
             )
 
@@ -311,8 +315,13 @@ async def chat_completions(
                 response_detection, profile
             )
             if response_enforcement.requires_transformation:
-                full_text, _ = orchestrator.transformer.mask_text(
-                    full_text, response_enforcement.match_actions
+                # start_counters=inbound_counters keeps outbound indices
+                # disjoint from inbound — see orchestrator.handle_chat_completion
+                # step 8 for the rationale.
+                full_text, _, _ = orchestrator.transformer.mask_text(
+                    full_text,
+                    response_enforcement.match_actions,
+                    start_counters=inbound_counters,
                 )
 
         if span_map:

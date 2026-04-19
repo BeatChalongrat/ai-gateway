@@ -210,12 +210,18 @@ class GatewayOrchestrator:
             )
 
         # 4. Transform messages if needed (mask/redact)
-        # mask_messages returns indexed tokens ([EMAIL_0], [EMAIL_1], …) and
-        # a span_map so we can restore them in the provider's response.
+        # mask_messages returns indexed tokens ([EMAIL_0], [EMAIL_1], …), a
+        # span_map so we can restore them in the provider's response, and the
+        # per-detector counters as they stand after this call. The counters
+        # are threaded into any subsequent mask_text() so outbound indices
+        # continue where inbound left off — preventing an outbound [EMAIL_0]
+        # from clashing with an inbound [EMAIL_0] (which would make restore
+        # splice the user's own PII over the AI-generated value).
         messages_to_send = list(payload.messages)
         span_map: dict[str, str] = {}
+        inbound_counters: dict[str, int] = {}
         if input_enforcement.requires_transformation:
-            messages_to_send, span_map = self.transformer.mask_messages(
+            messages_to_send, span_map, inbound_counters = self.transformer.mask_messages(
                 payload.messages, input_enforcement.match_actions
             )
 
@@ -516,12 +522,21 @@ class GatewayOrchestrator:
 
             if response_enforcement.requires_transformation:
                 # Use mask_text (indexed tokens) so new PII introduced by
-                # the provider is masked with [EMAIL_0], [CREDENTIAL_0], …
+                # the provider is masked with [EMAIL_N], [CREDENTIAL_N], …
                 # — consistent with the inbound masking scheme. These new
                 # tokens are NOT added to span_map (they have no original
                 # to restore to), so they survive the restore step below.
-                response_content, _ = self.transformer.mask_text(
-                    response_content, response_enforcement.match_actions
+                #
+                # start_counters=inbound_counters is load-bearing: without
+                # it, outbound would restart the index at 0 and re-emit
+                # [EMAIL_0] that collides with an inbound [EMAIL_0] in
+                # span_map. The subsequent restore() would then overwrite
+                # the AI's newly-generated value with the user's original
+                # PII. See transformer.mask_text docstring.
+                response_content, _, _ = self.transformer.mask_text(
+                    response_content,
+                    response_enforcement.match_actions,
+                    start_counters=inbound_counters,
                 )
 
         # 8b. Restore indexed input tokens AFTER output scan+mask.

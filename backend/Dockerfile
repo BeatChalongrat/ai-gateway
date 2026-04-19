@@ -10,17 +10,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-# spaCy models for Presidio NER. en_core_web_lg covers English PERSON /
-# LOCATION / ORG / GPE; th_core_news_lg adds Thai PER / LOC / ORG. Both
-# downloads are best-effort — spaCy 3.7.4's ``spacy download`` command
-# has a known stale-catalog bug that intermittently generates 404 URLs
-# like ``.../-en_core_web_lg/-en_core_web_lg.tar.gz`` (note the leading
-# dash). A failed download puts ``ner_status.load_analyzer_sync()``
-# into an ``error`` state at runtime — the NER toggle surfaces the
-# error in the admin UI and PresidioDetector no-ops. The gateway's
-# regex DLP detectors are unaffected either way.
-RUN python -m spacy download en_core_web_lg || true
-RUN python -m spacy download th_core_news_lg || true
+# spaCy models for Presidio NER.
+#
+# ``spacy download`` is broken on spaCy 3.7.4 for our image — its
+# catalog lookup constructs a URL like
+# ``/releases/download/-en_core_web_sm/-en_core_web_sm.tar.gz`` (note
+# the leading dashes) that 404s. We pin direct wheel URLs from the
+# spacy-models GitHub releases instead. The URLs are stable once a
+# release tag is cut, so this avoids the download-time catalog lookup
+# entirely.
+#
+# ``en_core_web_sm`` (~12 MB) is the minimum viable English model for
+# Presidio PERSON/LOCATION/ORG detection. The large variant
+# (``en_core_web_lg``, ~580 MB) gives better accuracy but bloats the
+# image — intentionally left optional. ``th_core_news_lg`` is similarly
+# optional; ``load_analyzer_sync`` falls back to English-only when Thai
+# is absent. Installation is best-effort (|| true) so the gateway still
+# boots even on a blocked network; the startup check in
+# ``presidio_ner.py`` logs a clear WARNING when no model is present.
+RUN pip install --no-cache-dir \
+    "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl" \
+    || true
 
 COPY . .
 
