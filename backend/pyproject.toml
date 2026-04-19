@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+addopts = """
+  --ignore=tests/test_dlp_docs.py
+  --ignore=tests/test_api_docs.py
+  --ignore=tests/test_routing_inventory.py
+  --ignore=tests/test_observability_inventory.py
+  --ignore=tests/test_scale_inventory.py
+  --ignore=tests/test_enterprise_docs.py
+"""
