@@ -33,8 +33,9 @@ export default function Modal({ open, onClose, title, children, footer }: Props)
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "white", borderRadius: "var(--radius-xl)",
-          boxShadow: "0 16px 48px -8px rgba(15, 31, 56, 0.18), 0 4px 12px rgba(15, 31, 56, 0.08)",
+          background: "var(--bg-surface)", color: "var(--text-primary)",
+          borderRadius: "var(--radius-xl)",
+          boxShadow: "0 16px 48px -8px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25)",
           border: "1px solid var(--color-border-default)",
           width: "100%", maxWidth: "28rem",
           maxHeight: "85vh", overflow: "auto",
