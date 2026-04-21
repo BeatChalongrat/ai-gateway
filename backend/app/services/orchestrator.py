@@ -163,6 +163,16 @@ class GatewayOrchestrator:
             self.quota_service.check_request_quota(session, ctx.project_id)
             self.budget_service.check_budget(session, ctx.project_id)
 
+        # 1d. Portal credit check — no-op for admin/tenant keys.
+        # Runs BEFORE DLP so a suspended/zero-balance portal user doesn't
+        # waste CPU on entity detection + provider calls. See
+        # app.services.gateway.portal_credit_check for the policy.
+        if session is not None:
+            from app.services.gateway.portal_credit_check import (
+                check_portal_credit,
+            )
+            check_portal_credit(session, str(auth.key_id))
+
         # Resolve policy profile: project-level → settings default → "default"
         profile_id = ctx.policy_profile_id or settings.dlp_default_profile
         profile = get_profile(profile_id)
@@ -583,6 +593,20 @@ class GatewayOrchestrator:
             input_enforcement=input_enforcement,
             output_enforcement=response_enforcement,
         )
+
+        # 10b. Portal credit deduction — no-op for admin/tenant keys.
+        # Writes a ``credit_transactions`` row (type=usage) and clamps
+        # the balance at 0.
+        if session is not None and usage is not None:
+            from app.services.gateway.portal_credit_check import (
+                deduct_portal_credit,
+            )
+            deduct_portal_credit(
+                session,
+                str(auth.key_id),
+                int(getattr(usage, "total_tokens", 0) or 0),
+                request_id,
+            )
 
         # Persist to request_logs table for /admin/requests
         if session is not None:
