@@ -1,0 +1,112 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { MouseEvent, useEffect, useState } from "react";
+
+import LogoTile from "@/app/_shared/LogoTile";
+
+const NAV_OFFSET = 80; // matches scroll-padding-top in globals.css
+const SCROLL_DURATION = 600; // ms
+
+// Manual rAF scroll with ease-in-out cubic. We avoid both
+// scrollIntoView({ behavior: "smooth" }) and CSS scroll-behavior:
+// smooth — Chrome cancels them mid-animation when other scroll work
+// is happening (IntersectionObserver reveals on the landing page).
+// Instant window.scrollTo is reliable, so we drive the easing in JS.
+function smoothScrollTo(targetY: number, duration = SCROLL_DURATION) {
+  const startY = window.scrollY;
+  const distance = targetY - startY;
+  if (Math.abs(distance) < 2) return;
+
+  const startTime = performance.now();
+  const easeInOutCubic = (t: number) =>
+    t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+  const step = (now: number) => {
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    window.scrollTo(0, startY + distance * easeInOutCubic(progress));
+    if (progress < 1) requestAnimationFrame(step);
+  };
+
+  requestAnimationFrame(step);
+}
+
+export function MarketingNav() {
+  const [scrolled, setScrolled] = useState(false);
+  const pathname = usePathname();
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 20);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // On landing: animate scroll to #features manually so re-clicks fire
+  // and don't get cancelled. On other pages: let the default <a>
+  // navigation to /#features happen and the browser will jump to the
+  // anchor on landing page load.
+  function handleProductClick(e: MouseEvent<HTMLAnchorElement>) {
+    if (pathname !== "/") return;
+    e.preventDefault();
+    const el = document.getElementById("features");
+    if (!el) return;
+    const targetY = el.getBoundingClientRect().top + window.scrollY - NAV_OFFSET;
+    smoothScrollTo(targetY);
+  }
+
+  return (
+    <nav className={`marketing-nav${scrolled ? " scrolled" : ""}`} aria-label="Primary">
+      <div className="container nav-inner">
+        <Link href="/" className="brand" aria-label="SRAN — AI Gateway home">
+          <LogoTile size={36} radius={8} />
+          <span className="brand-text">
+            <span className="brand-name">SRAN</span>
+            <span className="brand-tag">AI GATEWAY</span>
+          </span>
+        </Link>
+        <div className="nav-links">
+          <a
+            href="/#features"
+            onClick={handleProductClick}
+            className={pathname === "/" ? "is-active" : undefined}
+          >
+            Product
+          </a>
+          <a
+            href="/security"
+            className={pathname.startsWith("/security") ? "is-active" : undefined}
+          >
+            Security
+          </a>
+          <a
+            href="/pricing"
+            className={pathname.startsWith("/pricing") ? "is-active" : undefined}
+          >
+            Pricing
+          </a>
+          <a
+            href="/docs"
+            className={pathname.startsWith("/docs") ? "is-active" : undefined}
+          >
+            Docs
+          </a>
+        </div>
+        <div className="nav-cta">
+          <Link href="/login" className="btn btn-ghost">
+            Sign in
+          </Link>
+          <Link
+            href="/signup"
+            className="btn brand-cta"
+            style={{ fontWeight: 500, color: "#ffffff" }}
+          >
+            Get started <span className="arrow" aria-hidden="true">→</span>
+          </Link>
+        </div>
+      </div>
+    </nav>
+  );
+}
