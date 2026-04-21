@@ -35,6 +35,45 @@ _CANDIDATES: list[ModelCandidate] = [
     # Z.AI / 01.AI Yi (OpenAI-compatible)
     ModelCandidate(provider="zai", model="yi-large", cost_tier="premium", latency_tier="standard", supports_streaming=True),
     ModelCandidate(provider="zai", model="yi-medium", cost_tier="standard", latency_tier="fast", supports_streaming=True),
+    # OpenRouter aggregator — popular meta-models passed through as-is.
+    ModelCandidate(provider="openrouter", model="openrouter/auto", cost_tier="standard", latency_tier="standard", supports_streaming=True),
+    ModelCandidate(provider="openrouter", model="anthropic/claude-3.5-sonnet", cost_tier="standard", latency_tier="standard", supports_streaming=True),
+    ModelCandidate(provider="openrouter", model="openai/gpt-4o", cost_tier="standard", latency_tier="standard", supports_streaming=True),
+    ModelCandidate(provider="openrouter", model="meta-llama/llama-3.1-405b", cost_tier="premium", latency_tier="slow", supports_streaming=True),
+    ModelCandidate(provider="openrouter", model="google/gemini-pro-1.5", cost_tier="standard", latency_tier="standard", supports_streaming=True),
+    # Google AI (Gemini) — native adapter
+    ModelCandidate(provider="google", model="gemini-2.0-flash-exp", cost_tier="budget", latency_tier="fast", supports_streaming=True),
+    ModelCandidate(provider="google", model="gemini-1.5-pro", cost_tier="premium", latency_tier="standard", supports_streaming=True),
+    ModelCandidate(provider="google", model="gemini-1.5-flash", cost_tier="budget", latency_tier="fast", supports_streaming=True),
+    ModelCandidate(provider="google", model="gemini-1.5-flash-8b", cost_tier="budget", latency_tier="fast", supports_streaming=True),
+    # Groq (OpenAI-compatible; all on LPUs — latency tier "fast")
+    ModelCandidate(provider="groq", model="llama-3.3-70b-versatile", cost_tier="standard", latency_tier="fast", supports_streaming=True),
+    ModelCandidate(provider="groq", model="llama-3.1-8b-instant", cost_tier="budget", latency_tier="fast", supports_streaming=True),
+    ModelCandidate(provider="groq", model="mixtral-8x7b-32768", cost_tier="standard", latency_tier="fast", supports_streaming=True),
+    ModelCandidate(provider="groq", model="gemma2-9b-it", cost_tier="budget", latency_tier="fast", supports_streaming=True),
+    ModelCandidate(provider="groq", model="deepseek-r1-distill-llama-70b", cost_tier="standard", latency_tier="fast", supports_streaming=True),
+    ModelCandidate(provider="groq", model="qwen-2.5-32b", cost_tier="standard", latency_tier="fast", supports_streaming=True),
+    # DeepSeek (OpenAI-compatible)
+    ModelCandidate(provider="deepseek", model="deepseek-chat", cost_tier="budget", latency_tier="standard", supports_streaming=True),
+    ModelCandidate(provider="deepseek", model="deepseek-coder", cost_tier="budget", latency_tier="standard", supports_streaming=True),
+    ModelCandidate(provider="deepseek", model="deepseek-reasoner", cost_tier="standard", latency_tier="slow", supports_streaming=True),
+    # xAI / Grok (OpenAI-compatible)
+    ModelCandidate(provider="xai", model="grok-2-latest", cost_tier="standard", latency_tier="standard", supports_streaming=True),
+    ModelCandidate(provider="xai", model="grok-2-mini", cost_tier="budget", latency_tier="fast", supports_streaming=True),
+    # Mistral (pending — registered so UI exposes key slot; chat() raises 501)
+    ModelCandidate(provider="mistral", model="mistral-large-latest", cost_tier="premium", latency_tier="standard", supports_streaming=False),
+    ModelCandidate(provider="mistral", model="mistral-small-latest", cost_tier="budget", latency_tier="fast", supports_streaming=False),
+    ModelCandidate(provider="mistral", model="codestral-latest", cost_tier="standard", latency_tier="standard", supports_streaming=False),
+    ModelCandidate(provider="mistral", model="mistral-embed", cost_tier="budget", latency_tier="fast", supports_streaming=False),
+    # Cohere (pending)
+    ModelCandidate(provider="cohere", model="command-r-plus-08-2024", cost_tier="premium", latency_tier="standard", supports_streaming=False),
+    ModelCandidate(provider="cohere", model="command-r-08-2024", cost_tier="standard", latency_tier="standard", supports_streaming=False),
+    ModelCandidate(provider="cohere", model="command", cost_tier="standard", latency_tier="standard", supports_streaming=False),
+    ModelCandidate(provider="cohere", model="command-light", cost_tier="budget", latency_tier="fast", supports_streaming=False),
+    # Perplexity (pending)
+    ModelCandidate(provider="perplexity", model="llama-3.1-sonar-large-128k-online", cost_tier="premium", latency_tier="standard", supports_streaming=False),
+    ModelCandidate(provider="perplexity", model="llama-3.1-sonar-small-128k-online", cost_tier="standard", latency_tier="fast", supports_streaming=False),
+    ModelCandidate(provider="perplexity", model="llama-3.1-sonar-huge-128k-online", cost_tier="premium", latency_tier="slow", supports_streaming=False),
 ]
 
 _MODEL_MAP: dict[str, ModelCandidate] = {c.model: c for c in _CANDIDATES}
@@ -54,6 +93,11 @@ _PREFIX_MAP: list[tuple[str, str]] = [
     ("qwen-", "qwen"),
     ("moonshot-", "kimi"),
     ("yi-", "zai"),
+    ("gemini-", "google"),
+    ("grok-", "xai"),
+    ("deepseek-", "deepseek"),
+    ("codestral-", "mistral"),
+    ("mistral-", "mistral"),
 ]
 
 
