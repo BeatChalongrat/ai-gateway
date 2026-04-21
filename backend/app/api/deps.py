@@ -164,3 +164,45 @@ def check_tenant_access(auth: ResolvedApiKey, target_tenant_id: str) -> None:
             "Access denied: resource belongs to a different tenant.",
             details={"caller_tenant": auth.tenant_id, "target_tenant": target_tenant_id},
         )
+
+
+def get_portal_user(
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_db_session),
+):
+    """Resolve the caller to a PortalUserORM from a Bearer portal JWT.
+
+    Only accepts tokens minted by ``auth_service.create_portal_token``
+    (signed with ``portal_jwt_secret`` and carrying ``type="portal"``).
+    Admin JWTs are signed with a different secret and will fail here.
+
+    Raises:
+        AuthenticationError (401): missing/invalid/expired token, or
+            the token's subject user no longer exists.
+        AuthorizationError (403): user exists but is suspended/deleted.
+    """
+    from app.models.portal_user import PortalUserORM
+    from app.services.portal.auth_service import verify_portal_token
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise AuthenticationError("Missing or invalid authorization header")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise AuthenticationError("Missing or invalid authorization header")
+
+    payload = verify_portal_token(token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise AuthenticationError("Invalid token payload")
+
+    user = session.get(PortalUserORM, user_id)
+    if user is None:
+        raise AuthenticationError("User not found")
+    if user.status != "active":
+        raise AuthorizationError(
+            "Account is not active.",
+            code="account_suspended",
+            details={"status": user.status},
+        )
+    return user
