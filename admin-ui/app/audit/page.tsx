@@ -8,20 +8,26 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
+import { ThemeToggle } from "../../components/ThemeToggle";
 
 const gFont = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 
 /* ── GCP Tokens ───────────────────────────────────────────────────── */
 
+// Theme-reactive tokens. Values resolve from CSS vars on <html data-theme>.
+// Accent colors (blue/green/orange/red) stay hardcoded because they're used
+// with matching low-opacity background tints further down (blueBg, etc.) —
+// swapping only the foreground would desync the pair.
 const G = {
-  bg: "#f8f9fa", card: "#ffffff", surfaceBg: "#f1f3f4",
-  border: "#dadce0", borderLight: "#e8eaed",
-  tp: "#202124", ts: "#5f6368", tt: "#80868b",
-  blue: "#1a73e8", blueHover: "#1967d2", blueBg: "#e8f0fe",
-  green: "#1e8e3e", greenBg: "#e6f4ea",
-  orange: "#e37400", orangeBg: "#fef7e0",
-  red: "#d93025", redBg: "#fce8e6",
+  bg: "var(--bg-base)", card: "var(--bg-surface)", surfaceBg: "var(--bg-elevated)",
+  border: "var(--border-default)", borderLight: "var(--border-subtle)",
+  tp: "var(--text-primary)", ts: "var(--text-secondary)", tt: "var(--text-muted)",
+  blue: "#1a73e8", blueHover: "#1967d2", blueBg: "rgba(26,115,232,0.10)",
+  green: "#1e8e3e", greenBg: "rgba(30,142,62,0.10)",
+  orange: "#e37400", orangeBg: "rgba(227,116,0,0.10)",
+  red: "#d93025", redBg: "rgba(217,48,37,0.10)",
   mono: "'JetBrains Mono','Google Sans Mono','Fira Code',monospace",
+  // Dark code block background stays dark in both themes.
   dark: "#1e1e2e",
 };
 
@@ -229,6 +235,7 @@ export default function AuditPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             {downloading ? "Preparing..." : "Download"}
           </button>
+          <ThemeToggle />
         </div>
       </div>
 

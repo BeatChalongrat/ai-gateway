@@ -7,6 +7,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonCards, SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api, ApiError } from "../../lib/api";
+import { ThemeToggle } from "../../components/ThemeToggle";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -32,10 +33,11 @@ type Tab = "profiles" | "detectors" | "ner";
 /* ── Design tokens ────────────────────────────────────────────────── */
 
 const C = {
-  bg: "#f6f7f9", card: "#ffffff",
-  borderLight: "#e8eaef", borderMed: "#dcdfe6",
-  textPrimary: "#111827", textSecondary: "#4b5563", textHeader: "#374151", textTertiary: "#9ca3af",
-  accent: "#3b6cf6",
+  bg: "var(--bg-base)", card: "var(--bg-surface)",
+  borderLight: "var(--border-default)", borderMed: "var(--border-default)",
+  textPrimary: "var(--text-primary)", textSecondary: "var(--text-secondary)",
+  textHeader: "var(--text-secondary)", textTertiary: "var(--text-muted)",
+  accent: "var(--accent-primary)",
   mono: "'JetBrains Mono', 'Fira Code', monospace",
 };
 
@@ -203,13 +205,16 @@ export default function PoliciesPage() {
   return (
     <div className={outfit.className} style={{ background: C.bg, margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
       {/* Header */}
-      <div style={{ marginBottom: "20px" }}>
-        <h1 style={{ fontSize: "30px", fontWeight: 800, color: C.textPrimary, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>
-          DLP Policies
-        </h1>
-        <p style={{ fontSize: "15px", fontWeight: 500, color: C.textSecondary, margin: "4px 0 0", lineHeight: 1.4 }}>
-          Detector categories, policy profiles, and NER settings
-        </p>
+      <div style={{ marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <h1 style={{ fontSize: "30px", fontWeight: 800, color: C.textPrimary, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>
+            DLP Policies
+          </h1>
+          <p style={{ fontSize: "15px", fontWeight: 500, color: C.textSecondary, margin: "4px 0 0", lineHeight: 1.4 }}>
+            Detector categories, policy profiles, and NER settings
+          </p>
+        </div>
+        <ThemeToggle />
       </div>
 
       {/* Stats */}
@@ -229,7 +234,7 @@ export default function PoliciesPage() {
         overflow: "hidden",
       }}>
         {/* Tabs */}
-        <div style={{ display: "flex", borderBottom: `1px solid ${C.borderLight}`, background: "#fafbfc" }}>
+        <div style={{ display: "flex", borderBottom: `1px solid ${C.borderLight}`, background: "var(--bg-surface-2)" }}>
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)} style={{
               background: "none", border: "none", cursor: "pointer",
@@ -435,11 +440,11 @@ function DetectorsTab() {
             style={{
               width: "100%", padding: "5px 24px 5px 28px", fontSize: "13px", fontFamily: "inherit",
               border: `1.5px solid ${C.borderLight}`, borderRadius: 6,
-              background: "#fafbfc", color: C.textPrimary, outline: "none",
+              background: "var(--bg-base)", color: C.textPrimary, outline: "none",
               transition: "border-color 120ms, box-shadow 120ms, background 120ms",
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(59,108,246,0.08)`; e.currentTarget.style.background = "white"; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = C.borderLight; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "#fafbfc"; }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(99,102,241,0.18)`; e.currentTarget.style.background = "var(--bg-surface)"; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = C.borderLight; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
           />
           {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.textTertiary, fontSize: 12, padding: 2 }}>✕</button>}
         </div>
