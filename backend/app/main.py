@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes.auth import router as auth_router
@@ -9,6 +11,13 @@ from app.api.routes.health import router as health_router
 from app.api.routes.public_chat import router as public_chat_router
 from app.api.routes.public_models import router as public_models_router
 from app.api.routes.admin import router as admin_router
+from app.api.routes.portal_auth import router as portal_auth_router
+from app.api.routes.portal_me import router as portal_me_router
+from app.api.routes.portal_projects import router as portal_projects_router
+from app.api.routes.portal_billing import router as portal_billing_router
+from app.api.routes.admin_portal_users import router as admin_portal_users_router
+from app.api.routes.admin_system_settings import router as admin_system_settings_router
+from app.api.routes.admin_token_packs import router as admin_token_packs_router
 from app.core.config import settings
 from app.core.exceptions import GatewayError
 from app.core.logging import configure_logging
@@ -214,7 +223,19 @@ app.add_middleware(MetricsMiddleware)
 app.add_middleware(TimeoutMiddleware, timeout_seconds=20.0)
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(RequestContextMiddleware)
-app.add_middleware(BodySizeLimitMiddleware, max_bytes=1 * 1024 * 1024)
+app.add_middleware(
+    BodySizeLimitMiddleware,
+    max_bytes=1 * 1024 * 1024,
+    path_overrides={"/portal/me/avatar": 5 * 1024 * 1024},
+)
+
+# --- Static files (user-uploaded avatars etc.) ---
+# Served at ``/static/*``. Underlying directory lives at
+# ``backend/uploads/`` and is filesystem-scoped to this deployment.
+UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+(UPLOAD_DIR / "avatars").mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(UPLOAD_DIR)), name="static")
 
 # --- Exception handlers (order: most specific -> least specific) ---
 app.add_exception_handler(GatewayError, handle_gateway_error)
@@ -228,6 +249,17 @@ app.include_router(auth_router)  # /auth/login, /auth/refresh, /auth/me
 app.include_router(public_chat_router, prefix="/v1")
 app.include_router(public_models_router, prefix="/v1")
 app.include_router(admin_router, prefix="/admin")
+
+# Portal (self-service) — separate JWT secret; see portal_auth.py
+app.include_router(portal_auth_router, prefix="/portal/auth", tags=["portal-auth"])
+app.include_router(portal_me_router, prefix="/portal/me", tags=["portal-me"])
+app.include_router(portal_projects_router, prefix="/portal/projects", tags=["portal-projects"])
+app.include_router(portal_billing_router, prefix="/portal/billing", tags=["portal-billing"])
+
+# Admin views over portal data
+app.include_router(admin_portal_users_router, prefix="/admin/portal-users", tags=["admin-portal"])
+app.include_router(admin_system_settings_router, prefix="/admin/system-settings", tags=["admin-settings"])
+app.include_router(admin_token_packs_router, prefix="/admin/token-packs", tags=["admin-packs"])
 
 
 @app.get("/metrics")

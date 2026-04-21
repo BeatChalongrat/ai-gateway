@@ -362,6 +362,29 @@ def dashboard_recent_requests(
         .limit(limit)
     ).all()
 
+    # DERIVED HTTP status code map. The request_logs table stores an
+    # internal status label (e.g. "success", "blocked", "timeout") — it does
+    # NOT persist the actual HTTP response code the client received. This
+    # dict maps each label to a plausible HTTP code so the dashboard can
+    # show a numeric status pill (200 / 403 / 502 / 504) instead of a fuzzy
+    # bucket ("2XX" / "4XX" / "5XX").
+    #
+    # NOTE: these are DERIVED, not authoritative. A future iteration should
+    # add a real ``http_status INTEGER`` column to request_logs and capture
+    # the actual ``response.status_code`` from the gateway middleware. Until
+    # then, any discrepancy between a request's real response code and the
+    # value shown here is expected — consumers of /admin/dashboard must
+    # treat ``http_status`` as best-effort.
+    HTTP_STATUS_MAP = {
+        "success": 200,
+        "blocked": 403,
+        "dlp_blocked": 403,
+        "policy_blocked": 403,
+        "error": 502,
+        "provider_error": 502,
+        "timeout": 504,
+    }
+
     items = []
     for r in rows:
         # Map the internal status string to a rough HTTP class so the UI
@@ -381,6 +404,7 @@ def dashboard_recent_requests(
                 "request_id": r.request_id,
                 "status": status,
                 "http_class": http_class,
+                "http_status": HTTP_STATUS_MAP.get(status),
                 "provider": r.provider,
                 "model": r.model,
                 "latency_ms": int(r.latency_ms or 0),
