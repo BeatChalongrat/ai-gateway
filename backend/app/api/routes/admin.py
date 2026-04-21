@@ -66,6 +66,13 @@ router.include_router(_admin_dlp_router)
 from app.api.routes.admin_ai_review import router as _admin_ai_review_router  # noqa: E402
 router.include_router(_admin_ai_review_router)
 
+# Operational dashboard aggregations (/admin/dashboard/{overview,volume,
+# top-models,recent-requests}). Mounted here so it inherits require_admin
+# and the /admin prefix. The legacy /admin/dashboard endpoint below stays
+# for the existing minimal layout.
+from app.api.routes.admin_dashboard import router as _admin_dashboard_router  # noqa: E402
+router.include_router(_admin_dashboard_router)
+
 
 # ---------------------------------------------------------------------------
 # Existing hardcoded endpoints (providers, policies, requests)
