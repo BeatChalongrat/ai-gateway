@@ -10,16 +10,18 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
+import { ThemeToggle } from "../../components/ThemeToggle";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
 /* ── Tokens ───────────────────────────────────────────────────────── */
 
 const T = {
-  bg: "#f6f7f9", card: "#ffffff",
-  bl: "#e8eaef", bm: "#dcdfe6",
-  tp: "#111827", ts: "#4b5563", th: "#374151", tt: "#9ca3af",
-  accent: "#3b6cf6",
+  bg: "var(--bg-base)", card: "var(--bg-surface)",
+  bl: "var(--border-default)", bm: "var(--border-default)",
+  tp: "var(--text-primary)", ts: "var(--text-secondary)",
+  th: "var(--text-secondary)", tt: "var(--text-muted)",
+  accent: "var(--accent-primary)",
   mono: "'JetBrains Mono','Fira Code',monospace",
 };
 
@@ -198,10 +200,13 @@ export default function TenantsPage() {
           <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>Tenants</h1>
           <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>Organization-level tenant management</p>
         </div>
-        <button className="sran-btn sran-btn-primary" onClick={() => setShowCreate(true)}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Create Tenant
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button className="sran-btn sran-btn-primary" onClick={() => setShowCreate(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Create Tenant
+          </button>
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* Stats */}
@@ -229,9 +234,9 @@ export default function TenantsPage() {
               <div style={{ position: "relative", flex: "0 1 280px", minWidth: 160 }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tenants..."
-                  style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: "inherit", border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "#fafbfc", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,108,246,0.08)"; e.currentTarget.style.background = "white"; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "#fafbfc"; }}
+                  style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: "inherit", border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
                 />
                 {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.tt, fontSize: 12, padding: 2 }}>✕</button>}
               </div>
