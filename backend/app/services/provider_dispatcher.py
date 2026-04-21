@@ -19,6 +19,13 @@ from app.services.providers.minimax_adapter import MinimaxAdapter
 from app.services.providers.qwen_adapter import QwenAdapter
 from app.services.providers.kimi_adapter import KIMIAdapter
 from app.services.providers.zai_adapter import ZAIAdapter
+from app.services.providers.google_adapter import GoogleAIAdapter
+from app.services.providers.groq_adapter import GroqAdapter
+from app.services.providers.deepseek_adapter import DeepSeekAdapter
+from app.services.providers.xai_adapter import XAIAdapter
+from app.services.providers._pending.mistral_adapter import MistralAdapter
+from app.services.providers._pending.cohere_adapter import CohereAdapter
+from app.services.providers._pending.perplexity_adapter import PerplexityAdapter
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -39,6 +46,13 @@ class ProviderDispatcher:
             "qwen": QwenAdapter(),
             "kimi": KIMIAdapter(),
             "zai": ZAIAdapter(),
+            "google": GoogleAIAdapter(),
+            "groq": GroqAdapter(),
+            "deepseek": DeepSeekAdapter(),
+            "xai": XAIAdapter(),
+            "mistral": MistralAdapter(),
+            "cohere": CohereAdapter(),
+            "perplexity": PerplexityAdapter(),
         }
 
     async def dispatch(self, route, payload, messages: list[Message], *, api_key: str | None = None) -> ProviderResponse:
