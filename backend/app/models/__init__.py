@@ -9,21 +9,26 @@ from app.models.ai_review import (
 )
 from app.models.alert_rule import AlertEventORM, AlertRuleORM
 from app.models.api_key import ApiKeyORM
+from app.models.credit_transaction import CreditTransactionORM
 from app.models.keyword_rule import KeywordRuleORM
 from app.models.org_settings import OrgSettingsORM
 from app.models.policy import PolicyORM
 from app.models.policy_profile import PolicyProfileORM
+from app.models.portal_user import PortalUserORM
 from app.models.project import ProjectORM
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
 from app.models.request_log import RequestLogORM
+from app.models.system_setting import SystemSettingORM
 from app.models.tenant import TenantORM
+from app.models.token_pack import TokenPackORM
 
 __all__ = [
     "AdminAuditLogORM", "AdminUserORM", "AiReviewFindingORM",
     "AiReviewScanRunORM", "AiReviewSettingsORM",
     "AlertEventORM", "AlertRuleORM",
-    "ApiKeyORM", "KeywordRuleORM", "OrgSettingsORM", "PolicyORM",
-    "PolicyProfileORM", "ProjectORM", "ProviderORM", "ProviderKeyORM",
-    "RequestLogORM", "TenantORM",
+    "ApiKeyORM", "CreditTransactionORM", "KeywordRuleORM",
+    "OrgSettingsORM", "PolicyORM", "PolicyProfileORM",
+    "PortalUserORM", "ProjectORM", "ProviderORM", "ProviderKeyORM",
+    "RequestLogORM", "SystemSettingORM", "TenantORM", "TokenPackORM",
 ]
