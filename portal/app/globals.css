@@ -1,0 +1,192 @@
+/* Outfit is the heading font for the authenticated app shell. Inter +
+   Geist Mono come in via next/font/google in app/layout.tsx (so they
+   self-host and ship with size-adjust). */
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* App shell palette — used by the dashboard, projects, billing, etc. */
+  --brand-dark: #0a1a38;
+  --brand-navy: #1e3a5f;
+  --brand-blue: #3b6cf6;
+  --brand-green: #10b981;
+  --brand-orange: #f59e0b;
+  --brand-red: #ef4444;
+  --bg-page: #f8f9fb;
+  --bg-card: #ffffff;
+  --text-primary: #111827;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+
+  /* Marketing surface — landing page tokens. Kept in :root (not scoped
+     to .marketing) so the values are inspectable from anywhere and
+     stay consistent if other public pages reuse them later. */
+  --bg: #F7F8FC;
+  --bg-2: #FFFFFF;
+  --bg-soft: #F0F2F8;
+
+  --line: #E6E8F0;
+  --line-2: #D4D7E3;
+  --line-soft: #EEF0F7;
+
+  --text: #1A1F36;
+  --text-2: #525F7F;
+  --text-3: #8792A8;
+
+  --violet: #6E5EF6;
+  --violet-soft: #EEECFF;
+  --cyan: #3DB5C7;
+  --cyan-soft: #E4F5F8;
+  --green: #10B981;
+  --green-soft: #DCFCE7;
+  --amber: #F59E0B;
+  --rose: #F43F5E;
+
+  /* Login visual-panel navy. Used for the deep gradient backdrop on
+     the auth split layout — sits visually between the brand-dark of
+     the app shell and pure black. */
+  --navy-1: #0B1E4A;
+  --navy-2: #1A2E5E;
+  --navy-3: #243975;
+
+  --accent-grad: linear-gradient(135deg, #6E5EF6 0%, #3DB5C7 100%);
+  --accent-grad-anim: linear-gradient(
+    135deg,
+    #6E5EF6 0%,
+    #8B7FFF 25%,
+    #3DB5C7 50%,
+    #8B7FFF 75%,
+    #6E5EF6 100%
+  );
+
+  --shadow-sm: 0 1px 2px rgba(26, 31, 54, 0.04), 0 1px 1px rgba(26, 31, 54, 0.02);
+  --shadow-md: 0 4px 12px rgba(26, 31, 54, 0.06), 0 1px 3px rgba(26, 31, 54, 0.04);
+  --shadow-lg: 0 20px 48px rgba(26, 31, 54, 0.08), 0 8px 16px rgba(26, 31, 54, 0.04);
+  --shadow-xl: 0 30px 72px rgba(26, 31, 54, 0.12), 0 12px 24px rgba(26, 31, 54, 0.06);
+  --shadow-glow: 0 20px 60px -20px rgba(110, 94, 246, 0.35);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Font-family handles bound to the next/font CSS variables exposed
+     by app/layout.tsx. The ui-sans-serif / ui-monospace fallbacks
+     keep the page legible if next/font ever fails to load. */
+  --ff: var(--font-inter, "Inter"), ui-sans-serif, system-ui, sans-serif;
+  --ff-mono: var(--font-geist-mono, "Geist Mono"), ui-monospace, SFMono-Regular,
+    Menlo, monospace;
+}
+
+html {
+  /* Space for the fixed marketing nav so in-page targets (e.g.
+     #features) don't land hidden under the sticky nav. We do NOT set
+     scroll-behavior: smooth here — JS-driven anchor scrolls in
+     MarketingNav animate the scroll manually, and the two mechanisms
+     race each other and cancel mid-animation in Chrome. */
+  scroll-padding-top: 80px;
+}
+
+html,
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "Outfit", sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* Small but important: smooth color transitions everywhere — kept fast
+   (150ms) so nothing feels laggy, scoped to color/border to avoid
+   animating layout. */
+* {
+  transition: background-color 150ms, border-color 150ms, color 150ms;
+}
+
+/* Buttons compress slightly on press — tactile feedback for clicks. */
+button {
+  transition: all 100ms;
+}
+button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+/* Card lift on hover for cards that opt in via class="card-hover". */
+.card-hover {
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(15, 31, 56, 0.08);
+}
+
+/* Glow ring around the credit bar in the navy card. */
+.glow-bar {
+  box-shadow: 0 0 18px rgba(59, 108, 246, 0.35);
+}
+
+/* Page enter animation — each direct child of <main> fades up.
+   Scoped to the authenticated app shell only (.app-main) so the
+   marketing landing page's own staggered .anim / .reveal animations
+   aren't doubled up by a global fade. */
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.app-main > * {
+  animation: pageIn 200ms ease-out both;
+}
+
+/* Modal enter — scale + fade for emphasis. */
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.modal-in {
+  animation: modalIn 180ms ease-out both;
+}
+
+/* Focus ring — applies everywhere we don't override it. */
+input:focus,
+button:focus-visible,
+a:focus-visible,
+[role="switch"]:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+/* Quiet scrollbar. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e0;
+}

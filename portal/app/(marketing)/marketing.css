@@ -1,0 +1,1624 @@
+/* All marketing-only styles. Imported once by app/(marketing)/layout.tsx
+   so nothing here leaks into the authenticated app shell. Class names
+   are deliberately ungated (no .marketing prefix) — they only ever
+   render under this layout, and matching the reference HTML 1:1 makes
+   diffing against the mockup straightforward.
+
+   Tokens (var(--violet) etc.) are declared in app/globals.css :root.
+*/
+
+.marketing-root {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ff);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11";
+  overflow-x: hidden;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.marketing-root main {
+  flex: 1;
+}
+
+.container {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 28px;
+  position: relative;
+}
+
+/* ========== NAV ========== */
+.marketing-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  background: rgba(247, 248, 252, 0.85);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.3s ease, background 0.3s ease;
+}
+.marketing-nav.scrolled {
+  border-bottom-color: var(--line);
+  background: rgba(247, 248, 252, 0.95);
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Vertical only — leave horizontal to .container so the nav lines
+     up with hero/features/footer at every viewport size. */
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text);
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.brand-name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.brand-tag {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-grad-anim);
+  background-size: 200% 200%;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 8px rgba(110, 94, 246, 0.25);
+  animation: gradientShift 6s ease infinite, markBreathe 3s ease-in-out infinite;
+  position: relative;
+}
+.brand-mark::after {
+  content: "S";
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+@keyframes markBreathe {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(110, 94, 246, 0.25),
+      0 0 0 0 rgba(110, 94, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 2px 12px rgba(110, 94, 246, 0.35),
+      0 0 0 6px rgba(110, 94, 246, 0);
+  }
+}
+
+.nav-links {
+  display: flex;
+  gap: 28px;
+}
+.nav-links a {
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  position: relative;
+  padding: 4px 0;
+  transition: color 0.2s ease;
+}
+.nav-links a::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nav-links a:hover { color: var(--text); }
+.nav-links a:hover::after { transform: scaleX(1); }
+/* Active route keeps the underline drawn in the brand indigo. */
+.nav-links a.is-active {
+  color: var(--text);
+}
+.nav-links a.is-active::after {
+  transform: scaleX(1);
+  background: #6366f1;
+}
+
+.nav-cta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ========== BUTTONS ========== */
+.btn {
+  font-family: var(--ff);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+}
+.btn-ghost { color: var(--text-2); background: transparent; }
+.btn-ghost:hover { color: var(--text); background: var(--bg-soft); }
+.btn-primary {
+  color: #fff;
+  background: var(--text);
+  font-weight: 500;
+}
+.btn-primary::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.15),
+    transparent
+  );
+  transition: left 0.6s ease;
+}
+.btn-primary:hover {
+  background: #000;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.btn-primary:hover::before { left: 100%; }
+.btn-primary:active { transform: translateY(0); }
+.btn-secondary {
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--line-2);
+}
+.btn-secondary:hover {
+  border-color: var(--text-3);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+}
+.btn-lg { padding: 12px 22px; font-size: 15px; }
+.brand-cta {
+  background: #1a1f36;
+  color: #ffffff;
+  transition: background-color 0.2s var(--ease-out),
+              transform 180ms var(--ease-out),
+              box-shadow 180ms var(--ease-out);
+}
+.brand-cta:hover {
+  background: #252b4a;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px -8px rgba(26, 31, 54, 0.4);
+}
+.brand-cta:active { transform: translateY(0); }
+.btn .arrow {
+  transition: transform 0.25s var(--ease-out);
+  display: inline-block;
+}
+.btn:hover .arrow { transform: translateX(4px); }
+.btn:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}
+
+/* ========== HERO ========== */
+.hero {
+  padding: 80px 0 100px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1200px;
+  height: 600px;
+  background: radial-gradient(circle at 30% 50%, rgba(110, 94, 246, 0.14), transparent 50%),
+    radial-gradient(circle at 70% 40%, rgba(61, 181, 199, 0.12), transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+  animation: heroGlow 12s ease-in-out infinite;
+}
+@keyframes heroGlow {
+  0%, 100% { transform: translateX(-50%) scale(1); opacity: 1; }
+  50% { transform: translateX(-50%) scale(1.05); opacity: 0.85; }
+}
+.hero-inner {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  max-width: 780px;
+  margin: 0 auto;
+}
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 28px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s var(--ease-out);
+  cursor: default;
+}
+.hero-badge:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+  border-color: var(--violet-soft);
+}
+.hero-badge .dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+.hero-badge .dot::before,
+.hero-badge .dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--green);
+  animation: ring 2.5s ease-out infinite;
+}
+.hero-badge .dot::after { animation-delay: 1.25s; }
+@keyframes ring {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(3.5); opacity: 0; }
+}
+.hero-badge strong { color: var(--text); font-weight: 600; }
+
+.hero h1 {
+  font-size: clamp(40px, 6vw, 64px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+  margin-bottom: 20px;
+  color: var(--text);
+  font-family: var(--ff);
+}
+.hero h1 .grad {
+  background: var(--accent-grad-anim);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  display: inline-block;
+  animation: gradientShift 5s ease infinite;
+}
+.hero-sub {
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--text-2);
+  max-width: 620px;
+  margin: 0 auto 36px;
+  font-weight: 400;
+}
+.hero-ctas {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+.hero-trust {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.hero-trust span::before {
+  content: "✓";
+  color: var(--green);
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+/* ========== FLOW DIAGRAM ========== */
+.hero-flow {
+  margin-top: 80px;
+  position: relative;
+  z-index: 1;
+}
+.flow-wrap {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 40px 32px;
+  box-shadow: var(--shadow-lg);
+  max-width: 960px;
+  margin: 0 auto;
+  position: relative;
+  transition: box-shadow 0.4s var(--ease-out);
+}
+.flow-wrap:hover { box-shadow: var(--shadow-xl); }
+.flow-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 20px;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgba(110, 94, 246, 0.4),
+    rgba(61, 181, 199, 0.2),
+    transparent
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+.flow-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1.3fr auto 1fr;
+  gap: 20px;
+  align-items: center;
+}
+.flow-node {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px 18px;
+  text-align: center;
+  transition: all 0.35s var(--ease-out);
+  position: relative;
+}
+.flow-node:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--line-2);
+}
+.flow-node.center {
+  background: var(--accent-grad-anim);
+  background-size: 200% 200%;
+  border: none;
+  color: #fff;
+  box-shadow: var(--shadow-glow);
+  animation: gradientShift 8s ease infinite;
+}
+.flow-node.center:hover {
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 30px 70px -20px rgba(110, 94, 246, 0.5);
+}
+.flow-node .node-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  margin-bottom: 10px;
+}
+.flow-node.center .node-label { color: rgba(255, 255, 255, 0.8); }
+.flow-node .node-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #fff;
+  margin: 0 auto 10px;
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.3s var(--ease-out);
+}
+.flow-node:hover .node-icon { transform: scale(1.1) rotate(-3deg); }
+.flow-node.center .node-icon {
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.flow-node.center:hover .node-icon { transform: scale(1.1) rotate(3deg); }
+.flow-node .node-icon svg { width: 22px; height: 22px; }
+.flow-node.left .node-icon svg { color: var(--text-2); }
+.flow-node.center .node-icon svg { color: #fff; }
+.flow-node.right .node-icon svg { color: var(--violet); }
+.flow-node .node-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.flow-node.center .node-title { color: #fff; font-size: 16px; }
+.flow-node .node-desc {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+.flow-node.center .node-desc { color: rgba(255, 255, 255, 0.85); }
+.flow-node.center .node-features {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.flow-node.center .node-features span {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-weight: 500;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.25s ease;
+}
+.flow-node.center .node-features span:hover { background: rgba(255, 255, 255, 0.32); }
+
+/* Animated arrow with moving dot */
+.flow-arrow {
+  position: relative;
+  width: 48px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--line-2), var(--violet), var(--cyan), var(--line-2));
+  background-size: 200% 100%;
+  border-radius: 2px;
+  animation: lineFlow 3s linear infinite;
+  overflow: visible;
+}
+.flow-arrow::after {
+  content: "";
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid var(--cyan);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+.flow-arrow .pulse-dot {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--violet);
+  box-shadow: 0 0 12px var(--violet);
+  animation: dotMove 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+/* Second arrow (delayed). React renders these as siblings in the row,
+   so the 4th child of flow-row is the second flow-arrow. */
+.flow-row > .flow-arrow:nth-of-type(2) .pulse-dot,
+.flow-row > .flow-arrow + .flow-node + .flow-arrow .pulse-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 12px var(--cyan);
+  animation-delay: 1.25s;
+}
+@keyframes dotMove {
+  0% { left: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+@keyframes lineFlow {
+  0% { background-position: 200% 0; }
+  100% { background-position: 0% 0; }
+}
+
+.flow-stats {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line-soft);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.flow-stat { text-align: center; position: relative; }
+.flow-stat:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 10%;
+  bottom: 10%;
+  width: 1px;
+  background: var(--line-soft);
+}
+.flow-stat-val {
+  font-family: var(--ff-mono);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.flow-stat-val .u { color: var(--green); font-size: 14px; margin-left: 2px; }
+.flow-stat-lbl {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* ========== FEATURES ========== */
+section.features { padding: 100px 0; }
+.section-head {
+  text-align: center;
+  max-width: 640px;
+  margin: 0 auto 56px;
+}
+/* Features-specific scope: match the tighter heading→content gap used in
+   the How-It-Works section below so both landing sections read
+   consistently. Kept separate from the global .section-head rule
+   because /docs, /pricing, /security etc. still depend on the 56px. */
+section.features .section-head {
+  margin: 0 auto 48px;
+}
+.eyebrow {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--violet);
+  margin-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+.section-title {
+  font-size: clamp(32px, 4.5vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  margin-bottom: 14px;
+  font-family: var(--ff);
+  color: var(--text);
+}
+.section-sub {
+  font-size: 17px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.feat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.feat {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 32px 28px;
+  transition: all 0.35s var(--ease-out);
+  position: relative;
+  overflow: hidden;
+}
+.feat::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--violet), var(--cyan));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.35s var(--ease-out);
+  pointer-events: none;
+}
+.feat:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: transparent;
+}
+.feat:hover::before { opacity: 1; }
+.feat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 20px;
+  transition: transform 0.4s var(--ease-out);
+}
+.feat:hover .feat-icon { transform: scale(1.08) rotate(-4deg); }
+.feat-icon svg {
+  width: 24px;
+  height: 24px;
+  transition: transform 0.4s var(--ease-out);
+}
+.feat:hover .feat-icon svg { transform: rotate(4deg); }
+.feat.safety .feat-icon { background: var(--violet-soft); }
+.feat.safety .feat-icon svg { color: var(--violet); }
+.feat.cost .feat-icon { background: var(--green-soft); }
+.feat.cost .feat-icon svg { color: var(--green); }
+.feat.insight .feat-icon { background: var(--cyan-soft); }
+.feat.insight .feat-icon svg { color: var(--cyan); }
+
+.feat h3 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-bottom: 10px;
+  font-family: var(--ff);
+  color: var(--text);
+}
+.feat p {
+  font-size: 16px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+.feat-highlight {
+  padding: 14px 16px;
+  background: var(--bg-soft);
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  transition: background 0.3s ease;
+}
+.feat:hover .feat-highlight {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.feat-highlight-label { color: var(--text-3); }
+.feat-highlight-val {
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+.feat-highlight-val.green { color: var(--green); }
+.feat-highlight-val.violet { color: var(--violet); }
+.feat-highlight-val::after {
+  content: "";
+  position: absolute;
+  inset: -6px -10px;
+  border-radius: 8px;
+  background: currentColor;
+  opacity: 0;
+  animation: valPulse 3s ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+  z-index: -1;
+}
+.feat.safety .feat-highlight-val { --delay: 0s; }
+.feat.cost .feat-highlight-val { --delay: 1s; }
+.feat.insight .feat-highlight-val { --delay: 2s; }
+@keyframes valPulse {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: 0.08; transform: scale(1.05); }
+}
+
+/* ========== HOW IT WORKS ========== */
+section.how {
+  padding: 72px 0;
+  background: #fff;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+/* Collapse the section-head bottom margin inside .how — the gap between
+   heading and steps is owned by .steps's padding-top below, so the total
+   comes out to exactly 48px and the section fits one desktop fold. */
+section.how .section-head {
+  margin: 0 auto;
+}
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  position: relative;
+  padding-top: 3rem; /* 48px — the only gap between heading and steps */
+}
+/* Connector line tracks step-num centers (28px below step top edge),
+   so the absolute offset has to include .steps's own padding-top. */
+.steps::before {
+  content: "";
+  position: absolute;
+  top: calc(3rem + 28px);
+  left: 16.67%;
+  right: 16.67%;
+  height: 1px;
+  background: var(--line-2);
+  z-index: 0;
+}
+.steps::after {
+  content: "";
+  position: absolute;
+  top: calc(3rem + 28px);
+  left: 16.67%;
+  width: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--violet), var(--cyan));
+  z-index: 1;
+  transition: width 1.4s var(--ease-out);
+}
+.steps.revealed::after { width: 66.66%; }
+.step {
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+.step-num {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  margin: 0 auto 20px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.4s var(--ease-out);
+  position: relative;
+  font-family: var(--ff-mono);
+}
+.step:nth-child(2) .step-num {
+  border-color: var(--violet);
+  color: var(--violet);
+  box-shadow: 0 0 0 4px var(--violet-soft);
+}
+.step:hover .step-num {
+  transform: translateY(-4px) scale(1.05);
+  box-shadow: 0 10px 24px rgba(110, 94, 246, 0.25);
+  border-color: var(--violet);
+  color: var(--violet);
+}
+.step h4 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  transition: color 0.25s ease;
+  color: var(--text);
+}
+.step:hover h4 { color: var(--violet); }
+.step p {
+  font-size: 14px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+/* ========== SOCIAL PROOF ========== */
+section.social { padding: 80px 0; }
+.social-label {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-3);
+  margin-bottom: 32px;
+  font-weight: 500;
+}
+/* 3D stage: a 720×320 perspective box containing a single "plane" that
+   carries all 14 spheres. Mouse-move handler in SocialProof.tsx writes
+   rotateX/rotateY onto the plane; the 220ms transition keeps motion
+   smooth but responsive. The plane and every sphere-wrap share
+   preserve-3d so per-sphere translateZ stacks correctly under tilt.
+   Desktop-only — mobile falls back to the static .logos grid below. */
+.social-3d {
+  position: relative;
+  width: 720px;
+  height: 320px;
+  max-width: 100%;
+  margin: 0 auto;
+  perspective: 1200px;
+  perspective-origin: 50% 45%;
+  display: none;
+}
+@media (min-width: 768px) {
+  .social-3d { display: block; }
+}
+.social-3d-plane {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(0deg) rotateY(0deg);
+  transition: transform 220ms ease-out;
+}
+.social-3d-plane.is-hovered { will-change: transform; }
+
+/* Tile wrapper owns the absolute position on the plane and the depth
+   variables. It is a 3D stacking context (preserve-3d) so its children
+   can carry their own translateZ — the tile lifts on hover while the
+   ground shadow stays planted on the plane's z=0 floor. */
+.tile-wrap {
+  position: absolute;
+  transform-style: preserve-3d;
+}
+/* Lift wrapper carries the tile's base translateZ plus hover deltas.
+   Splitting lift (this element) from drift (.tile below) means hover
+   transforms don't collide with the running idle-float animation. */
+.tile-lift {
+  position: absolute;
+  inset: 0;
+  transform: translateZ(var(--tz, 0px));
+  transform-style: preserve-3d;
+  transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.tile-wrap:hover .tile-lift {
+  transform: translateZ(calc(var(--tz, 0px) + 40px)) scale(1.12);
+  z-index: 5;
+}
+/* The tile itself: white rounded rectangle with a hairline border, inset
+   highlight, and two stacked drop shadows. Shadow radii scale with --s
+   so the same ratios hold across tier sizes. */
+.tile {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border-radius: calc(var(--s) * 0.22);
+  box-shadow:
+    0 calc(var(--s) * 0.35) calc(var(--s) * 0.5) calc(var(--s) * -0.1) rgba(15, 23, 42, 0.22),
+    0 calc(var(--s) * 0.12) calc(var(--s) * 0.18) calc(var(--s) * -0.05) rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+  animation: tileFloat 4.5s ease-in-out infinite alternate;
+  transition: box-shadow 260ms ease-out;
+}
+.tile-wrap:hover .tile {
+  animation-play-state: paused;
+  box-shadow:
+    0 calc(var(--s) * 0.5) calc(var(--s) * 0.75) calc(var(--s) * -0.1) rgba(15, 23, 42, 0.28),
+    0 calc(var(--s) * 0.18) calc(var(--s) * 0.26) calc(var(--s) * -0.05) rgba(15, 23, 42, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+.tile-logo {
+  display: block;
+  max-width: 55%;
+  max-height: 55%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Ground shadow: a soft blurred ellipse sitting on the plane's z=0
+   floor. It lives outside .tile-lift so the tile can rise on hover
+   while the shadow stays planted; the scale-on-hover cue then reads
+   as "the tile has lifted further off the floor". */
+.tile-shadow {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 14px);
+  width: calc(var(--s) * 0.9);
+  height: calc(var(--s) * 0.22);
+  transform: translateX(-50%) scale(var(--shadow-scale, 1));
+  background: radial-gradient(
+    ellipse at center,
+    rgba(15, 23, 42, var(--shadow-alpha, 0.22)) 0%,
+    rgba(15, 23, 42, 0) 70%
+  );
+  filter: blur(3px);
+  pointer-events: none;
+  transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              filter 260ms ease-out;
+}
+.tile-wrap:hover .tile-shadow {
+  transform: translateX(-50%) scale(calc(var(--shadow-scale, 1) * 1.28));
+  filter: blur(6px) brightness(0.75);
+}
+
+.tile-tooltip {
+  position: absolute;
+  top: calc(100% + 28px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: #fff;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  box-shadow: 0 4px 14px -4px rgba(15, 23, 42, 0.18);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease-out;
+  z-index: 6;
+}
+.tile-wrap:hover .tile-tooltip { opacity: 1; }
+
+@keyframes tileFloat {
+  from { transform: translateY(-3px); }
+  to   { transform: translateY(6px); }
+}
+
+/* Mobile fallback: balanced 7×2 grid shown only below 768px. */
+.logos {
+  display: none;
+  grid-template-columns: repeat(7, 1fr);
+  align-items: center;
+  justify-items: center;
+  row-gap: 28px;
+  column-gap: 32px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.logo-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  filter: grayscale(1);
+  transition: opacity 0.2s var(--ease-out), filter 0.2s var(--ease-out),
+              transform 0.2s var(--ease-out);
+  cursor: default;
+}
+.logo-item img {
+  display: block;
+  height: 32px;
+  width: auto;
+  object-fit: contain;
+}
+.logo-item:hover {
+  opacity: 1;
+  filter: grayscale(0);
+  transform: scale(1.1);
+}
+@media (max-width: 767px) {
+  .logos {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    row-gap: 22px;
+    column-gap: 24px;
+    max-width: 320px;
+  }
+  .logo-item img { height: 28px; }
+}
+
+/* ========== CTA ========== */
+section.cta-section { padding: 120px 0; }
+.cta-box {
+  background: linear-gradient(135deg, #1a1f36 0%, #2d2f5f 100%);
+  border-radius: 24px;
+  padding: 72px 48px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.cta-box::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -20%;
+  width: 140%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(110, 94, 246, 0.4), transparent 50%);
+  pointer-events: none;
+  animation: ctaGlow 8s ease-in-out infinite;
+}
+@keyframes ctaGlow {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(3%, -2%) scale(1.05); }
+  66% { transform: translate(-2%, 3%) scale(0.98); }
+}
+.cta-box::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.5),
+    transparent
+  );
+  animation: shimmer 3s linear infinite;
+}
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.cta-box > * { position: relative; z-index: 1; }
+.cta-box h2 {
+  font-size: clamp(32px, 4vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #fff;
+  margin-bottom: 14px;
+  line-height: 1.15;
+  font-family: var(--ff);
+}
+.cta-box p {
+  font-size: 17px;
+  color: rgba(255, 255, 255, 0.75);
+  margin-bottom: 32px;
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.cta-box .btn-primary { background: #fff; color: var(--text); }
+.cta-box .btn-primary:hover {
+  background: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* ========== FOOTER ========== */
+.marketing-footer {
+  border-top: 1px solid var(--line);
+  padding: 40px 0 32px;
+  background: #fff;
+}
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  /* No padding override — inherits padding: 0 28px from .container so
+     the first link aligns with the nav brand at every viewport. */
+}
+.footer-links {
+  display: flex;
+  gap: 28px;
+}
+.footer-links a {
+  color: var(--text-3);
+  text-decoration: none;
+  font-size: 13px;
+  position: relative;
+  padding: 2px 0;
+  transition: color 0.2s ease;
+}
+.footer-links a::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.footer-links a:hover { color: var(--text); }
+.footer-links a:hover::after { transform: scaleX(1); }
+.footer-copy {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ========== SCROLL REVEAL ========== */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s var(--ease-out), transform 0.7s var(--ease-out);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-delay-1 { transition-delay: 0.08s; }
+.reveal-delay-2 { transition-delay: 0.16s; }
+.reveal-delay-3 { transition-delay: 0.24s; }
+
+/* ========== ENTRANCE ANIMATIONS ========== */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.anim { animation: fadeUp 0.7s var(--ease-out) both; }
+.d1 { animation-delay: 0.05s; }
+.d2 { animation-delay: 0.15s; }
+.d3 { animation-delay: 0.25s; }
+.d4 { animation-delay: 0.35s; }
+.d5 { animation-delay: 0.45s; }
+.d6 { animation-delay: 0.6s; }
+
+/* ========== RESPONSIVE ========== */
+@media (max-width: 900px) {
+  .feat-grid,
+  .steps { grid-template-columns: 1fr; }
+  /* On mobile steps stack vertically with a smaller heading→first-step
+     gap; the horizontal connector line is removed. */
+  .steps { padding-top: 2rem; }
+  .steps::before,
+  .steps::after { display: none; }
+  .flow-row { grid-template-columns: 1fr; }
+  .flow-arrow {
+    width: 2px;
+    height: 32px;
+    background: linear-gradient(180deg, var(--line-2), var(--violet), var(--cyan), var(--line-2));
+    margin: 0 auto;
+  }
+  .flow-arrow::after {
+    right: 50%;
+    top: auto;
+    bottom: -4px;
+    transform: translateX(50%);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid var(--cyan);
+    border-bottom: none;
+  }
+  .flow-arrow .pulse-dot {
+    left: 50%;
+    top: 0;
+    animation: dotMoveVert 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+  @keyframes dotMoveVert {
+    0% { top: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+  }
+  .nav-links { display: none; }
+  .flow-stat:not(:last-child)::after { display: none; }
+}
+
+/* Base state for the flip faces (mobile-first). Mobile has no flip —
+   the back face is DOM-present (for screen readers) but visually
+   hidden; the front face is just a transparent wrapper letting content
+   flow inside .feat's original padding + background. */
+.feat-face--back { display: none; }
+
+/* ========== FEATURES: SLIDE-UP DETAIL PANEL (desktop only) ==========
+   Card stays facing forward. On hover (or keyboard focus-within) the
+   front content fades to 0.3 opacity and shifts up 20px, while the
+   back face — a light-theme detail panel with the card's accent
+   colour — slides up from below the card's bottom edge. The back's
+   top uses a soft white-to-opaque gradient so the front's ghost
+   remains faintly visible through the first ~30% of the panel.
+
+   `.feat` keeps its original white bg, border, padding, and radius;
+   we just turn on `overflow: hidden` (so the panel can start below
+   the card and be clipped) and retarget its hover transform to none
+   (cancelling the pre-existing translateY(-4px) lift). */
+@media (min-width: 768px) {
+  .feat-card {
+    position: relative;
+    overflow: hidden;
+    transition: border-color 240ms var(--ease-out),
+                box-shadow 240ms var(--ease-out),
+                transform 240ms var(--ease-out);
+  }
+  /* Kill the pre-existing gradient-border ::before on flip cards — the
+     new hover treatment is a border-colour shift + drop shadow, so the
+     violet→cyan outline would fight it. */
+  .feat-card::before { display: none; }
+  /* Front face is a transparent flow wrapper; it inherits .feat's
+     existing padding + background. Transition drives the fade/shift. */
+  .feat-face--front {
+    transition: transform 320ms ease-out, opacity 320ms ease-out;
+  }
+  /* Back panel: absolute inset:0 so it fills the card's interior when
+     slid in, but starts at translateY(100%) (below the card) + opacity
+     0. Soft accent-tinted gradient at the top fades to pure white by
+     70%, subtly echoing each card's front icon colour. */
+  .feat-face--back {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    position: absolute;
+    inset: 0;
+    padding: 24px 18px;
+    background: linear-gradient(180deg, var(--accent-soft, #eef2ff) 0%, #fff 70%);
+    color: #334155;
+    transform: translateY(100%);
+    opacity: 0;
+    transition: transform 380ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 280ms ease-out;
+  }
+  .feat-card:hover .feat-face--front,
+  .feat-card:focus-within .feat-face--front {
+    transform: translateY(-20px);
+    opacity: 0.3;
+  }
+  .feat-card:hover .feat-face--back,
+  .feat-card:focus-within .feat-face--back {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  /* Hover treatment on the card itself: darker border + soft shadow.
+     `transform: none` cancels the pre-existing `.feat:hover` lift so
+     the card stays put while the panel slides inside it. */
+  .feat-card:hover,
+  .feat-card:focus-within {
+    transform: none;
+    border-color: #cbd5e1;
+    box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.15);
+  }
+  /* Per-card accent pair: --accent drives the number + label highlight,
+     --accent-soft is the top-of-panel wash. Indigo / emerald / sky
+     match each front icon's colour. */
+  .feat.safety  { --accent: #6366f1; --accent-soft: #eef2ff; }
+  .feat.cost    { --accent: #10b981; --accent-soft: #dcfce7; }
+  .feat.insight { --accent: #0284c7; --accent-soft: #dbeafe; }
+  .feat-stat-num {
+    font-size: 60px;
+    font-weight: 600;
+    letter-spacing: -2px;
+    line-height: 1;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Small trailing unit inside the number ("%", "d") — same colour as
+     the number but visually lighter so it doesn't compete. */
+  .feat-stat-num .unit { font-size: 36px; }
+  .feat-stat-label {
+    font-size: 16px;
+    font-weight: 500;
+    color: #334155;
+    margin-top: 10px;
+  }
+  .feat-stat-caption {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #64748b;
+    margin-top: 12px;
+    max-width: 260px;
+  }
+  /* Card is the focusable target (no link inside any more) — give
+     keyboard users a clear ring that matches the card's accent. */
+  .feat-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* ========== STEPS: FOCUS ACTIVE, BLUR NEIGHBOURS (desktop only) ==========
+   When any step inside .steps is hovered OR a keyboard focus lands in
+   it, the :has() selector dims + blurs the whole row, and the single
+   matching :hover/:focus-within step scales up and snaps back to
+   full clarity. The step's number dot switches to solid indigo with
+   a glow. `:has()` handles the "mouse left the row" reset — when no
+   child matches :hover/:focus-within, the base rules apply again. */
+@media (min-width: 768px) {
+  .steps .step {
+    transition: transform 360ms cubic-bezier(0.4, 0, 0.2, 1),
+                filter 360ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 360ms cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+  }
+  .steps:has(.step:hover) .step,
+  .steps:has(.step:focus-within) .step {
+    transform: scale(0.94);
+    filter: blur(3px);
+    opacity: 0.25;
+  }
+  .steps:has(.step:hover) .step:hover,
+  .steps:has(.step:focus-within) .step:focus-within {
+    transform: scale(1.1) translateY(-4px);
+    filter: none;
+    opacity: 1;
+  }
+  /* Active step's number dot: solid indigo with a drop-shadow glow.
+     Wins over the existing `.step:hover .step-num` via higher specificity. */
+  .steps:has(.step:hover) .step:hover .step-num,
+  .steps:has(.step:focus-within) .step:focus-within .step-num {
+    border-color: #6366f1;
+    background: #6366f1;
+    color: #fff;
+    box-shadow: 0 10px 24px -8px rgba(99, 102, 241, 0.5);
+  }
+}
+
+/* Honor reduced-motion preference for the marketing page. The token
+   covers app-shell animations elsewhere in globals.css too, but the
+   landing page is the most animation-heavy surface so we restate it
+   here for clarity. */
+@media (prefers-reduced-motion: reduce) {
+  .marketing-root *,
+  .marketing-root *::before,
+  .marketing-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  /* Suppress the slide entirely — back panel stays off-screen, front
+     content stays static at opacity 1 with no shift. Reduced-motion
+     users keep the original static card rendering. */
+  .feat-card:hover .feat-face--back,
+  .feat-card:focus-within .feat-face--back {
+    transform: translateY(100%) !important;
+    opacity: 0 !important;
+  }
+  .feat-card:hover .feat-face--front,
+  .feat-card:focus-within .feat-face--front {
+    transform: none !important;
+    opacity: 1 !important;
+  }
+  /* Suppress the focus-blur — siblings stay clear, no scale up. */
+  .steps:has(.step:hover) .step,
+  .steps:has(.step:focus-within) .step,
+  .steps:has(.step:hover) .step:hover,
+  .steps:has(.step:focus-within) .step:focus-within {
+    transform: none !important;
+    filter: none !important;
+    opacity: 1 !important;
+  }
+}
+
+/* ========== PAGE SHELL (docs / pricing / security / privacy / terms) ========== */
+.page-hero {
+  padding: 80px 0 48px;
+  background: linear-gradient(180deg, var(--bg-soft) 0%, transparent 100%);
+  border-bottom: 1px solid var(--line);
+}
+.page-hero-inner { max-width: 720px; margin: 0 auto; }
+.page-eyebrow {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--violet);
+  margin-bottom: 16px;
+}
+.page-title {
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+.page-subtitle {
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--text-2);
+  max-width: 620px;
+}
+.page-body {
+  padding: 56px 0 96px;
+}
+.page-content {
+  max-width: 760px;
+  margin: 0 auto;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--text);
+}
+.page-content h2 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 48px 0 16px;
+  line-height: 1.2;
+}
+.page-content h2:first-child { margin-top: 0; }
+.page-content h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 32px 0 12px;
+}
+.page-content p { margin-bottom: 16px; color: var(--text-2); }
+.page-content ul,
+.page-content ol {
+  margin: 0 0 20px 24px;
+  color: var(--text-2);
+}
+.page-content li { margin-bottom: 8px; line-height: 1.6; }
+.page-content code {
+  font-family: var(--ff-mono);
+  font-size: 13px;
+  background: var(--bg-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text);
+}
+.page-content pre {
+  background: var(--navy-deep, #0F1424);
+  color: #E8E9F3;
+  padding: 20px 24px;
+  border-radius: 10px;
+  overflow-x: auto;
+  margin: 24px 0;
+}
+.page-content pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.page-content a {
+  color: var(--violet);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(110, 94, 246, 0.3);
+}
+.page-content a:hover { text-decoration-color: var(--violet); }
+
+/* Pricing section — breaks out of .page-content's 760px to use the
+   full 1160px container width so 3 cards have room to breathe. */
+.pricing-section {
+  padding: 40px 0 24px;
+}
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  max-width: 1160px;
+  margin: 0 auto;
+}
+@media (max-width: 900px) {
+  .pricing-grid { grid-template-columns: 1fr; }
+}
+
+/* Card layout mirrors the /billing dashboard so users see the same
+   pricing cards before and after signing in. */
+.pricing-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 32px 28px;
+  position: relative;
+  text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+.pricing-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 40px rgba(26, 31, 54, 0.10);
+}
+.pricing-card.featured {
+  border: 2px solid var(--violet);
+  background: #fff;
+}
+.pricing-card.featured::before {
+  content: "★ MOST POPULAR";
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, var(--violet), #8B7FFF);
+  color: #fff;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 6px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(110, 94, 246, 0.3);
+}
+.pricing-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 20px;
+}
+.pricing-tokens {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.pricing-tokens-num {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+.pricing-tokens-unit {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.pricing-tokens-label {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--text-3);
+  margin-bottom: 20px;
+}
+.pricing-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1;
+  margin-bottom: 28px;
+}
+.pricing-price-currency {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pricing-price-num {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.pricing-features {
+  list-style: none;
+  margin: 0 0 24px 0;
+  padding: 0;
+  font-size: 14px;
+  color: var(--text-2);
+  text-align: center;
+}
+.pricing-features li {
+  padding: 8px 0;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.pricing-features li::before {
+  content: "✓";
+  color: var(--green, #10B981);
+  font-weight: 700;
+}
+.pricing-cta {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.15s;
+  margin-top: auto;
+}
+.pricing-cta.primary {
+  background: var(--navy-1, #1A1F36);
+  color: #fff;
+}
+.pricing-cta.primary:hover { background: #000; }
+.pricing-cta.secondary {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--line-2);
+}
+.pricing-cta.secondary:hover {
+  background: var(--bg-soft);
+  border-color: var(--text-3);
+}
