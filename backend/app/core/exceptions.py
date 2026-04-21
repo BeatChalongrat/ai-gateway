@@ -139,6 +139,11 @@ class ProviderUnavailableError(ProviderError):
     message = "The upstream provider is currently unavailable."
 
 
+class ProviderNotImplementedError(ProviderError):
+    code = "provider_not_implemented"
+    message = "Adapter implementation pending."
+
+
 class UpstreamBadResponseError(GatewayError):
     code = "upstream_bad_response"
     message = "The upstream provider returned an unparseable response."

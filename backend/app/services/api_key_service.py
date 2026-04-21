@@ -25,11 +25,14 @@ class ApiKeyService:
         project_id: str,
         name: str,
         expires_at: datetime | None = None,
+        portal_user_id: str | None = None,
     ) -> tuple[str, ApiKeyORM]:
         """Create a new API key.
 
         Returns (raw_key, api_key_orm). The raw_key is shown to the caller
-        exactly once — only the hash is persisted.
+        exactly once — only the hash is persisted. ``portal_user_id`` is
+        set when the key is created via the self-service portal, so the
+        gateway's credit-check path can find the owning portal user.
         """
         raw_key, key_prefix, key_hash = generate_api_key()
 
@@ -41,6 +44,7 @@ class ApiKeyService:
             project_id=project_id,
             name=name,
             expires_at=expires_at,
+            portal_user_id=portal_user_id,
         )
         session.add(api_key)
         session.flush()

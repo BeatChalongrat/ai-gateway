@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     master_encryption_key: str = "change-me"
     access_token_expire_minutes: int = 1440  # 24 hours
 
+    # Portal JWT — separate secret so leaking the admin secret does not
+    # forge portal tokens (and vice versa). Payload carries type="portal".
+    portal_jwt_secret: str = "change-me-portal-secret"
+    portal_access_token_expire_minutes: int = 60
+    portal_refresh_token_expire_days: int = 7
+
     # Provider API keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""
@@ -41,6 +47,13 @@ class Settings(BaseSettings):
     qwen_api_key: str = ""
     kimi_api_key: str = ""
     zai_api_key: str = ""
+    google_api_key: str = ""
+    groq_api_key: str = ""
+    deepseek_api_key: str = ""
+    xai_api_key: str = ""
+    mistral_api_key: str = ""
+    cohere_api_key: str = ""
+    perplexity_api_key: str = ""
 
     # Provider timeouts and retry
     provider_timeout_connect: float = 5.0
