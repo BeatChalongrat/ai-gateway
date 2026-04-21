@@ -10,6 +10,27 @@
 /* ─── SRAN Theme Tokens ─────────────────────────────────────────── */
 
 @theme {
+  /* Dual-theme semantic tokens (v4 auto-generates bg-bg-base, text-text-primary, etc.).
+     Values are wired to underlying --bg-*, --text-* vars defined in the :root /
+     [data-theme="dark"] blocks below so they swap with data-theme. */
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-surface-2: var(--bg-surface-2);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-border-default: var(--border-default);
+  --color-border-subtle: var(--border-subtle);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-muted: var(--text-muted);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-success: var(--accent-success);
+  --color-accent-warning: var(--accent-warning);
+  --color-accent-danger: var(--accent-danger);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-cyan: var(--accent-cyan);
+
   /* Primary: Deep Royal Blue */
   --color-sran-50: #e8edf5;
   --color-sran-100: #c5d0e6;
@@ -80,6 +101,88 @@
   --font-size-4xl: 2rem;
 }
 
+/* ─── Theme-reactive tokens (data-theme="light" | "dark") ─────────
+   All semantic colors live here so they swap with <html data-theme>.
+   Legacy --color-surface-* / --color-text-* / --color-border-* are re-
+   declared below as aliases pointing to the new tokens so existing
+   .sran-* class references continue to work in both themes (B2 strategy). */
+
+:root,
+[data-theme="light"] {
+  /* Canvas */
+  --bg-base: #F7F8FC;
+  --bg-surface: #FFFFFF;
+  --bg-surface-2: #FAFAFA;
+  --bg-sidebar: #0A1230;   /* navy both themes, brand identity */
+  --bg-elevated: #F0F1F4;
+
+  /* Borders */
+  --border-default: #E8E9ED;
+  --border-subtle: #F2F3F5;
+
+  /* Text */
+  --text-primary: #1A1C23;
+  --text-secondary: #4B5673;
+  --text-tertiary: #6B6F7E;
+  --text-muted: #8B92A5;
+
+  /* Accents */
+  --accent-primary: #6366F1;
+  --accent-success: #059669;
+  --accent-warning: #D97706;
+  --accent-danger: #DC2626;
+  --accent-violet: #7C3AED;
+  --accent-cyan: #0891B2;
+
+  /* B2 compat: re-point legacy names to new tokens so .sran-* classes
+     that reference --color-surface-primary, --color-text-primary, etc.
+     remain theme-aware in both modes. */
+  --color-surface-primary: var(--bg-surface);
+  --color-surface-secondary: var(--bg-base);
+  --color-surface-tertiary: var(--bg-elevated);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-inverse: #F8FAFC;
+  --color-border-default: var(--border-default);
+  --color-border-strong: #C8D1DE;
+}
+
+[data-theme="dark"] {
+  --bg-base: #0A1230;
+  --bg-surface: #0F1835;
+  --bg-surface-2: #0C1530;
+  --bg-sidebar: #060A1D;
+  --bg-elevated: #1A2450;
+
+  --border-default: #1F2A55;
+  --border-subtle: #141D3F;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #8B96BA;
+  --text-tertiary: #6B7699;
+  --text-muted: #4B5885;
+
+  --accent-primary: #6366F1;
+  --accent-success: #10B981;
+  --accent-warning: #F59E0B;
+  --accent-danger: #F87171;
+  --accent-violet: #8B5CF6;
+  --accent-cyan: #06B6D4;
+
+  /* B2 compat — legacy aliases (inverse stays light so code blocks on
+     dark backgrounds still read correctly). */
+  --color-surface-primary: var(--bg-surface);
+  --color-surface-secondary: var(--bg-base);
+  --color-surface-tertiary: var(--bg-elevated);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-inverse: #F8FAFC;
+  --color-border-default: var(--border-default);
+  --color-border-strong: #3B4670;
+}
+
 /* ─── Base Styles ────────────────────────────────────────────────── */
 
 @layer base {
@@ -95,11 +198,12 @@
   body {
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
       Roboto, "Helvetica Neue", Arial, sans-serif;
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text-primary);
+    background-color: var(--bg-base);
+    color: var(--text-primary);
     font-size: var(--font-size-base);
     line-height: 1.55;
     margin: 0;
+    transition: background-color 150ms ease, color 150ms ease;
   }
 
   code, pre {
@@ -194,14 +298,14 @@
   }
 
   .sran-btn-secondary {
-    background: white;
+    background: var(--bg-surface);
     color: var(--color-text-primary);
     border-color: var(--color-border-strong);
     box-shadow: 0 1px 2px rgba(15, 31, 56, 0.04);
   }
 
   .sran-btn-secondary:hover {
-    background: var(--color-surface-tertiary);
+    background: var(--bg-elevated);
     border-color: var(--color-border-strong);
   }
 
@@ -327,7 +431,7 @@
     font-size: var(--font-size-sm);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
-    background: white;
+    background: var(--bg-surface);
     color: var(--color-text-primary);
     transition: border-color 120ms ease, box-shadow 120ms ease;
     outline: none;
@@ -391,7 +495,7 @@
      ============================================ */
 
   .sran-sidebar {
-    background: #0a1a38;
+    background: var(--bg-sidebar);
     color: #e2e8f0;
     width: 15.5rem;
     flex-shrink: 0;
@@ -1007,22 +1111,22 @@
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 1.2px;
-  color: #374151;
-  border-bottom: 1px solid #e8eaef;
-  background: #fafbfc;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-surface-2);
   white-space: nowrap;
 }
-.dlp-table td { padding: 14px 0.875rem; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+.dlp-table td { padding: 14px 0.875rem; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; color: var(--text-primary); }
 .dlp-table tbody tr { transition: background 100ms ease; }
-.dlp-table tbody tr:hover { background: rgba(59, 108, 246, 0.04); }
+.dlp-table tbody tr:hover { background: rgba(99, 102, 241, 0.05); }
 .dlp-table tbody tr:last-child td { border-bottom: none; }
 
 .dlp-select {
   appearance: none;
   -webkit-appearance: none;
-  background: white url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center;
-  color: #111827;
-  border: 1.5px solid #e8eaef;
+  background: var(--bg-surface) url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-default);
   border-radius: 6px;
   padding: 5px 26px 5px 10px;
   font-size: 13px;
@@ -1032,8 +1136,8 @@
   transition: border-color 120ms, box-shadow 120ms;
   font-family: inherit;
 }
-.dlp-select:focus { border-color: #3b6cf6; box-shadow: 0 0 0 3px rgba(59, 108, 246, 0.08); }
-.dlp-select:disabled { background: #f9fafb; color: #9ca3af; cursor: not-allowed; }
+.dlp-select:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+.dlp-select:disabled { background: var(--bg-elevated); color: var(--text-muted); cursor: not-allowed; }
 
 /* ─── Google Fonts import ────────────────────────────────────────── */
 
