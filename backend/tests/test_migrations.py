@@ -48,6 +48,9 @@ class TestSchemaFromORM:
             "max_requests_per_day",
             "created_at",
             "updated_at",
+            # Added by migration 025 (portal users): link a project to
+            # its owning portal user when it was created via /portal.
+            "portal_user_id",
         }
         assert expected == cols
 
@@ -277,6 +280,9 @@ class TestMigration001:
                 _load_migration("021_add_dlp_trace_to_request_logs.py").upgrade()
                 _load_migration("022_add_ai_review.py").upgrade()
                 _load_migration("023_ai_review_provider_config.py").upgrade()
+                _load_migration("024_system_settings.py").upgrade()
+                _load_migration("025_portal_users.py").upgrade()
+                _load_migration("026_portal_users_oauth.py").upgrade()
 
             inspector = inspect(conn)
 

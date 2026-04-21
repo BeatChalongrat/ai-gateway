@@ -34,3 +34,9 @@ class ApiKeyORM(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    portal_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("portal_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )

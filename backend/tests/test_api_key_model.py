@@ -110,6 +110,10 @@ class TestApiKeySchema:
             "expires_at",
             "created_at",
             "last_used_at",
+            # Added by migration 025 (portal users): link a key to its
+            # owning portal user so the gateway credit-check path can
+            # find the user for suspension / deduction checks.
+            "portal_user_id",
         }
         assert expected == cols
 
@@ -292,6 +296,11 @@ class TestMigration003:
             _load_migration("003_add_api_keys.py").upgrade()
             _load_migration("004_add_usage_columns.py").upgrade()
             _load_migration("005_add_role_to_api_keys.py").upgrade()
+            # Migration 025 adds portal_user_id to api_keys — to keep
+            # test_migration_columns_match_orm honest the runner must
+            # reach at least that revision. 024 is a prereq.
+            _load_migration("024_system_settings.py").upgrade()
+            _load_migration("025_portal_users.py").upgrade()
 
     def test_upgrade_creates_api_keys_table(self):
         engine = create_engine("sqlite:///:memory:")
@@ -319,6 +328,7 @@ class TestMigration003:
                 "expires_at",
                 "created_at",
                 "last_used_at",
+                "portal_user_id",  # migration 025
             }
             assert expected == cols
         engine.dispose()
