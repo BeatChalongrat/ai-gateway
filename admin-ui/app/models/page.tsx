@@ -6,6 +6,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import Pagination from "../../components/ui/Pagination";
 import { useApi } from "../../lib/useApi";
+import { ThemeToggle } from "../../components/ThemeToggle";
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -58,7 +59,7 @@ function getMeta(m: string) {
 function ProviderLogo({ provider, size = 36 }: { provider: string; size?: number }) {
   const [failed, setFailed] = useState(false);
   const c = brand(provider);
-  const src = `/images/providers/${provider.toLowerCase()}.png`;
+  const src = `/providers/${provider.toLowerCase()}.png`;
   const initials = provider.slice(0, 2).toUpperCase();
 
   return (
@@ -114,13 +115,13 @@ const STYLES = `
 .mr-table { width:100%; border-collapse:collapse; }
 .mr-table th {
   text-align:left; padding:0.5rem 0.875rem; font-weight:500; font-size:0.6875rem;
-  text-transform:uppercase; letter-spacing:0.06em; color:#374151; font-weight:600;
-  border-bottom:1px solid #e5e7eb; background:#fafbfc; white-space:nowrap;
+  text-transform:uppercase; letter-spacing:0.06em; color:var(--text-secondary); font-weight:600;
+  border-bottom:1px solid var(--border-default); background:var(--bg-surface-2); white-space:nowrap;
   position:sticky; top:0; z-index:1;
 }
-.mr-table td { padding:1.25rem 0.875rem; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.mr-table td { padding:1.25rem 0.875rem; border-bottom:1px solid var(--border-subtle); vertical-align:middle; color:var(--text-primary); }
 .mr-table tbody tr { transition: background 100ms ease; }
-.mr-table tbody tr:hover { background: #f8fafc; }
+.mr-table tbody tr:hover { background: rgba(99,102,241,0.05); }
 .mr-table tbody tr:last-child td { border-bottom:none; }
 @keyframes mrFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
 @keyframes mrFadeIn { from{opacity:0} to{opacity:1} }
@@ -141,14 +142,14 @@ function ContextBar({ ctx, ctxK }: { ctx: string; ctxK: number }) {
   const pct = Math.min(100, (ctxK / 256) * 100);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 100 }}>
-      <div style={{ flex: 1, height: 3, borderRadius: 2, background: "#e2e8f0", overflow: "hidden" }}>
+      <div style={{ flex: 1, height: 3, borderRadius: 2, background: "var(--bg-elevated)", overflow: "hidden" }}>
         <div style={{
           width: `${pct}%`, height: "100%", borderRadius: 2,
           background: `linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%)`,
         }} />
       </div>
       <span style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-        fontSize: "0.625rem", fontWeight: 600, color: "#64748b", whiteSpace: "nowrap",
+        fontSize: "0.625rem", fontWeight: 600, color: "var(--text-tertiary)", whiteSpace: "nowrap",
       }}>{ctx}</span>
     </div>
   );
@@ -187,10 +188,11 @@ function ProviderChip({ name, active, count, onClick }: {
       fontSize: "0.6875rem", fontWeight: active ? 600 : 500,
       borderRadius: 6,
       border: active ? `1.5px solid ${c}` : "1.5px solid transparent",
-      background: active ? `${c}0D` : "transparent",
-      color: active ? c : "#64748b",
+      background: active ? `${c}22` : "transparent",
+      color: active ? c : "var(--text-tertiary)",
       cursor: "pointer", transition: "all 120ms",
       textTransform: "capitalize", whiteSpace: "nowrap",
+      fontFamily: "inherit",
     }}>
       <span style={{
         width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
@@ -198,7 +200,7 @@ function ProviderChip({ name, active, count, onClick }: {
       }} />
       {name}
       <span style={{
-        fontSize: "0.5625rem", fontWeight: 700, color: active ? c : "#6b7280",
+        fontSize: "0.5625rem", fontWeight: 700, color: active ? c : "var(--text-muted)",
         marginLeft: "0.0625rem",
       }}>{count}</span>
     </button>
@@ -211,8 +213,8 @@ function StatCard({ value, label, icon, accent, delay = 0, iconClass }: {
   return (
     <div className="mr-stat" style={{
       animationDelay: `${delay}ms`,
-      background: "white", borderRadius: 10,
-      border: "1px solid #e5e7eb",
+      background: "var(--bg-surface)", borderRadius: 10,
+      border: "1px solid var(--border-default)",
       padding: "0.875rem 1rem",
       display: "flex", alignItems: "center", gap: "0.75rem",
       flex: 1, minWidth: 0,
@@ -225,12 +227,12 @@ function StatCard({ value, label, icon, accent, delay = 0, iconClass }: {
       }}>{icon}</div>
       <div>
         <div style={{
-          fontSize: "1.25rem", fontWeight: 700, color: "#0f172a",
+          fontSize: "1.25rem", fontWeight: 700, color: "var(--text-primary)",
           lineHeight: 1, letterSpacing: "-0.03em",
           fontVariantNumeric: "tabular-nums",
         }}>{value}</div>
         <div style={{
-          fontSize: "0.6875rem", fontWeight: 500, color: "#6b7280",
+          fontSize: "0.6875rem", fontWeight: 500, color: "var(--text-tertiary)",
           marginTop: "0.125rem", lineHeight: 1,
         }}>{label}</div>
       </div>
@@ -293,15 +295,16 @@ export default function ModelsPage() {
   const iconStream = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>;
 
   return (
-    <div style={{ background: "#f6f7f9", margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
+    <div style={{ background: "var(--bg-base)", margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
       <style>{STYLES}</style>
 
       {/* ── Header ── */}
-      <div className="sran-page-header" style={{ marginBottom: "1.25rem" }}>
+      <div className="sran-page-header" style={{ marginBottom: "1.25rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <h1 className="sran-page-title">Model Registry</h1>
           <p className="sran-page-subtitle">Capabilities, cost tiers, and latency metadata for all registered models</p>
         </div>
+        <ThemeToggle />
       </div>
 
       {/* ── Stats row ── */}
@@ -315,8 +318,8 @@ export default function ModelsPage() {
 
       {/* ── Main registry surface ── */}
       <div style={{
-        background: "white", borderRadius: 12,
-        border: "1px solid #e5e7eb",
+        background: "var(--bg-surface)", borderRadius: 12,
+        border: "1px solid var(--border-default)",
         boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)",
         overflow: "hidden",
       }}>
@@ -349,32 +352,32 @@ export default function ModelsPage() {
                     width: "100%",
                     padding: "0.3125rem 1.5rem 0.3125rem 1.75rem",
                     fontSize: "0.8125rem", fontFamily: "inherit",
-                    border: "1.5px solid #e5e7eb", borderRadius: 6,
-                    background: "#fafbfc", color: "#0f172a", outline: "none",
+                    border: "1.5px solid var(--border-default)", borderRadius: 6,
+                    background: "var(--bg-base)", color: "var(--text-primary)", outline: "none",
                     transition: "border-color 120ms, box-shadow 120ms, background 120ms",
                   }}
                   onFocus={(e) => {
-                    e.currentTarget.style.borderColor = "#3b82f6";
-                    e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.08)";
-                    e.currentTarget.style.background = "white";
+                    e.currentTarget.style.borderColor = "var(--accent-primary)";
+                    e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.15)";
+                    e.currentTarget.style.background = "var(--bg-surface)";
                   }}
                   onBlur={(e) => {
-                    e.currentTarget.style.borderColor = "#e5e7eb";
+                    e.currentTarget.style.borderColor = "var(--border-default)";
                     e.currentTarget.style.boxShadow = "none";
-                    e.currentTarget.style.background = "#fafbfc";
+                    e.currentTarget.style.background = "var(--bg-base)";
                   }}
                 />
                 {search && (
                   <button onClick={() => handleSearch("")} style={{
                     position: "absolute", right: "0.375rem", top: "50%", transform: "translateY(-50%)",
                     background: "none", border: "none", cursor: "pointer",
-                    color: "#94a3b8", fontSize: "0.75rem", padding: 2,
+                    color: "var(--text-muted)", fontSize: "0.75rem", padding: 2,
                   }}>✕</button>
                 )}
               </div>
 
               {/* Divider */}
-              <span style={{ width: 1, height: 20, background: "#e5e7eb", flexShrink: 0 }} />
+              <span style={{ width: 1, height: 20, background: "var(--border-default)", flexShrink: 0 }} />
 
               {/* Provider chips */}
               <div style={{ display: "flex", gap: "0.1875rem", flexWrap: "wrap", alignItems: "center" }}>
@@ -382,11 +385,11 @@ export default function ModelsPage() {
                   display: "inline-flex", alignItems: "center", padding: "0.25rem 0.5rem",
                   fontSize: "0.6875rem", fontWeight: providerFilter === null ? 600 : 500,
                   borderRadius: 6, cursor: "pointer", transition: "all 120ms",
-                  border: providerFilter === null ? "1.5px solid #3b82f6" : "1.5px solid transparent",
-                  background: providerFilter === null ? "rgba(59,130,246,0.06)" : "transparent",
-                  color: providerFilter === null ? "#3b82f6" : "#64748b",
+                  border: providerFilter === null ? "1.5px solid var(--accent-primary)" : "1.5px solid transparent",
+                  background: providerFilter === null ? "rgba(99,102,241,0.12)" : "transparent",
+                  color: providerFilter === null ? "var(--accent-primary)" : "var(--text-tertiary)",
                   fontFamily: "inherit",
-                }}>All <span style={{ fontSize: "0.5625rem", fontWeight: 700, marginLeft: 3, color: providerFilter === null ? "#3b82f6" : "#6b7280" }}>{items.length}</span></button>
+                }}>All <span style={{ fontSize: "0.5625rem", fontWeight: 700, marginLeft: 3, color: providerFilter === null ? "var(--accent-primary)" : "var(--text-muted)" }}>{items.length}</span></button>
                 {providers.map(([name, count]) => (
                   <ProviderChip
                     key={name} name={name} count={count}
@@ -397,7 +400,7 @@ export default function ModelsPage() {
               </div>
 
               {/* Divider */}
-              <span style={{ width: 1, height: 20, background: "#e5e7eb", flexShrink: 0 }} />
+              <span style={{ width: 1, height: 20, background: "var(--border-default)", flexShrink: 0 }} />
 
               {/* Streaming toggle */}
               <button onClick={toggleStream} style={{
@@ -416,14 +419,14 @@ export default function ModelsPage() {
               {/* Spacer + view toggle + count */}
               <span style={{ flex: 1 }} />
 
-              <div style={{ display: "flex", gap: "0.125rem", background: "#f1f5f9", borderRadius: 6, padding: 2 }}>
+              <div style={{ display: "flex", gap: "0.125rem", background: "var(--bg-elevated)", borderRadius: 6, padding: 2 }}>
                 {(["list", "grid"] as const).map((v) => (
                   <button key={v} onClick={() => setView(v)} style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     width: 28, height: 24, borderRadius: 4, border: "none", cursor: "pointer",
-                    background: view === v ? "white" : "transparent",
-                    boxShadow: view === v ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
-                    color: view === v ? "#0f172a" : "#94a3b8",
+                    background: view === v ? "var(--bg-surface)" : "transparent",
+                    boxShadow: view === v ? "0 1px 2px rgba(0,0,0,0.18)" : "none",
+                    color: view === v ? "var(--text-primary)" : "var(--text-muted)",
                     transition: "all 100ms",
                   }}>
                     {v === "list" ? (
@@ -436,7 +439,7 @@ export default function ModelsPage() {
               </div>
 
               <span style={{
-                fontSize: "0.6875rem", fontWeight: 500, color: "#6b7280",
+                fontSize: "0.6875rem", fontWeight: 500, color: "var(--text-tertiary)",
                 whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
               }}>
                 {isFiltered ? `${filtered.length} of ${items.length}` : `${items.length} models`}
@@ -446,14 +449,14 @@ export default function ModelsPage() {
             {/* ── Content ── */}
             {filtered.length === 0 ? (
               <div style={{ padding: "3rem 1rem", textAlign: "center" }}>
-                <p style={{ fontSize: "0.8125rem", color: "#6b7280", margin: "0 0 0.75rem" }}>
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-tertiary)", margin: "0 0 0.75rem" }}>
                   No models match the current filters
                 </p>
                 <button onClick={() => { setSearch(""); setProviderFilter(null); setStreamingOnly(false); setPage(1); }}
                   style={{
                     padding: "0.375rem 0.875rem", fontSize: "0.8125rem", fontWeight: 500,
-                    borderRadius: 6, border: "1.5px solid #e5e7eb", background: "white",
-                    color: "#0f172a", cursor: "pointer", fontFamily: "inherit",
+                    borderRadius: 6, border: "1.5px solid var(--border-default)", background: "var(--bg-surface)",
+                    color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit",
                   }}>Clear filters</button>
               </div>
             ) : view === "list" ? (
@@ -481,7 +484,7 @@ export default function ModelsPage() {
                                 <ProviderLogo provider={m.provider} size={36} />
                                 <div>
                                   <code style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                                    fontSize: "0.8125rem", fontWeight: 600, color: "#0f172a",
+                                    fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-primary)",
                                     letterSpacing: "-0.01em", lineHeight: 1.3,
                                   }}>{m.model}</code>
                                   <div style={{ display: "flex", alignItems: "center", gap: "0.3125rem", marginTop: "0.1rem" }}>
@@ -490,7 +493,7 @@ export default function ModelsPage() {
                                       background: brand(m.provider),
                                     }} />
                                     <span style={{
-                                      fontSize: "0.6875rem", fontWeight: 500, color: "#6b7280",
+                                      fontSize: "0.6875rem", fontWeight: 500, color: "var(--text-tertiary)",
                                       textTransform: "capitalize", lineHeight: 1,
                                     }}>{m.provider}</span>
                                   </div>
@@ -502,7 +505,7 @@ export default function ModelsPage() {
                               {meta?.ctx ? (
                                 <ContextBar ctx={meta.ctx} ctxK={meta.ctxK} />
                               ) : (
-                                <span style={{ color: "#cbd5e1", fontSize: "0.75rem" }}>—</span>
+                                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
                               )}
                             </td>
                             {/* Capabilities */}
@@ -512,7 +515,7 @@ export default function ModelsPage() {
                                   {meta.caps.map((c) => <CapTag key={c} cap={c} />)}
                                 </div>
                               ) : (
-                                <span style={{ color: "#cbd5e1", fontSize: "0.75rem" }}>—</span>
+                                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
                               )}
                             </td>
                             {/* Stream */}
@@ -528,7 +531,7 @@ export default function ModelsPage() {
                                   </svg>
                                 </span>
                               ) : (
-                                <span style={{ color: "#cbd5e1", fontSize: "0.75rem" }}>—</span>
+                                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
                               )}
                             </td>
                             {/* Cost */}
@@ -558,26 +561,26 @@ export default function ModelsPage() {
                     return (
                       <div key={m.model} className="mr-row" style={{
                         animationDelay: `${0.3 + i * 0.03}s`,
-                        background: "#fafbfc", borderRadius: 10,
-                        border: "1px solid #f1f5f9",
+                        background: "var(--bg-surface-2)", borderRadius: 10,
+                        border: "1px solid var(--border-subtle)",
                         padding: "0.875rem 1rem",
                         display: "flex", flexDirection: "column", gap: "0.5rem",
                         transition: "border-color 150ms, box-shadow 150ms",
                       }}
-                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#f1f5f9"; e.currentTarget.style.boxShadow = "none"; }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.boxShadow = "none"; }}
                       >
                         {/* Header */}
                         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                           <ProviderLogo provider={m.provider} size={32} />
                           <div>
                             <code style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                              fontSize: "0.8125rem", fontWeight: 600, color: "#0f172a",
+                              fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-primary)",
                               letterSpacing: "-0.01em",
                             }}>{m.model}</code>
                             <div style={{ display: "flex", alignItems: "center", gap: "0.3125rem", marginTop: "0.125rem" }}>
                               <span style={{ width: 7, height: 7, borderRadius: "50%", background: brand(m.provider) }} />
-                              <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#6b7280", textTransform: "capitalize" }}>{m.provider}</span>
+                              <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "var(--text-tertiary)", textTransform: "capitalize" }}>{m.provider}</span>
                             </div>
                           </div>
                         </div>
