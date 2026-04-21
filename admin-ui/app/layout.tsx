@@ -2,6 +2,7 @@ import "./globals.css";
 import { Outfit } from "next/font/google";
 import { ToastProvider } from "../components/ui/Toast";
 import ShellWrapper from "../components/ShellWrapper";
+import { ThemeProvider } from "../components/ThemeProvider";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -18,13 +19,22 @@ export const metadata = {
   },
 };
 
+// Runs synchronously before React hydrates so data-theme is set before
+// first paint. Prevents a flash of wrong-theme on initial load.
+const THEME_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem("sran-theme")||"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={outfit.variable}>
+    <html lang="en" className={outfit.variable} data-theme="dark" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body>
-        <ToastProvider>
-          <ShellWrapper>{children}</ShellWrapper>
-        </ToastProvider>
+        <ThemeProvider>
+          <ToastProvider>
+            <ShellWrapper>{children}</ShellWrapper>
+          </ToastProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
