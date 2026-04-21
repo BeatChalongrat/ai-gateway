@@ -7,15 +7,22 @@ import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
+import { ThemeToggle } from "../../components/ThemeToggle";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
+// Theme-reactive tokens. Values resolve from CSS vars set on <html data-theme>
+// so the whole page re-tints on theme toggle without re-rendering.
 const T = {
-  bg: "#f6f7f9", card: "#ffffff",
-  bl: "#e8eaef", bm: "#dcdfe6",
-  tp: "#111827", ts: "#4b5563", th: "#374151", tt: "#9ca3af",
-  accent: "#3b6cf6", green: "#10b981", red: "#ef4444",
+  bg: "var(--bg-base)", card: "var(--bg-surface)",
+  bl: "var(--border-default)", bm: "var(--border-default)",
+  tp: "var(--text-primary)", ts: "var(--text-secondary)",
+  th: "var(--text-secondary)", tt: "var(--text-muted)",
+  accent: "var(--accent-primary)",
+  green: "var(--accent-success)", red: "var(--accent-danger)",
   mono: "'JetBrains Mono','Fira Code',monospace",
+  // Code-block background stays dark in both themes (syntax-highlighted output
+  // reads poorly on a light card background).
   dark: "#1a1d27",
 };
 
@@ -176,6 +183,7 @@ export default function RequestsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
             Refresh
           </button>
+          <ThemeToggle />
         </div>
       </div>
 
@@ -188,9 +196,9 @@ export default function RequestsPage() {
           <div style={{ position: "relative", flex: "0 1 320px", minWidth: 160 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Filter requests..."
-              style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: T.mono, border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "#fafbfc", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,108,246,0.08)"; e.currentTarget.style.background = "white"; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "#fafbfc"; }}
+              style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: T.mono, border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
             />
             {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.tt, fontSize: 12, padding: 2 }}>✕</button>}
           </div>
