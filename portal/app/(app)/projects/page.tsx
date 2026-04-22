@@ -145,7 +145,16 @@ export default function ProjectsPage() {
       />
 
       {error ? (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+        <div
+          style={{
+            background: "rgba(220, 38, 38, 0.08)",
+            border: "1px solid rgba(220, 38, 38, 0.25)",
+            color: "var(--accent-danger)",
+            fontSize: 13,
+            padding: "8px 12px",
+            borderRadius: 8,
+          }}
+        >
           {error}
         </div>
       ) : null}
@@ -206,7 +215,16 @@ export default function ProjectsPage() {
       >
         <form onSubmit={handleCreate} className="space-y-4">
           {submitError ? (
-            <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+            <div
+              style={{
+                background: "rgba(220, 38, 38, 0.08)",
+                border: "1px solid rgba(220, 38, 38, 0.25)",
+                color: "var(--accent-danger)",
+                fontSize: 13,
+                padding: "8px 12px",
+                borderRadius: 8,
+              }}
+            >
               {submitError}
             </div>
           ) : null}
@@ -272,9 +290,13 @@ export default function ProjectsPage() {
           </>
         }
       >
-        <p className="text-sm text-gray-700">
-          Delete <span className="font-semibold">{deleteTarget?.name}</span>? All API keys in this
-          project will be revoked immediately. This cannot be undone.
+        <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+          Delete{" "}
+          <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+            {deleteTarget?.name}
+          </span>
+          ? All API keys in this project will be revoked immediately. This cannot
+          be undone.
         </p>
       </Modal>
     </div>

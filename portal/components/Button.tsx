@@ -12,15 +12,31 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   fullWidth?: boolean;
 }
 
-const VARIANT: Record<Variant, string> = {
-  primary:
-    "bg-brand-navy text-white hover:bg-brand-dark disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed",
-  secondary:
-    "bg-white text-brand-navy border border-gray-300 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed",
-  ghost:
-    "bg-transparent text-brand-navy hover:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed",
-  danger:
-    "bg-brand-red text-white hover:brightness-95 disabled:bg-gray-300 disabled:cursor-not-allowed",
+// Variant styles use CSS vars so they swap with the active theme.
+// We attach inline style + a className for sizing/layout. Disabled
+// state still uses Tailwind utilities (gray-300 etc.) intentionally —
+// disabled buttons read OK against both light and dark surfaces.
+const VARIANT_STYLE: Record<Variant, React.CSSProperties> = {
+  primary: {
+    background: "var(--accent-primary)",
+    color: "#FFFFFF",
+    border: "1px solid var(--accent-primary)",
+  },
+  secondary: {
+    background: "var(--bg-surface)",
+    color: "var(--text-primary)",
+    border: "1px solid var(--border-default)",
+  },
+  ghost: {
+    background: "transparent",
+    color: "var(--text-primary)",
+    border: "1px solid transparent",
+  },
+  danger: {
+    background: "var(--accent-danger)",
+    color: "#FFFFFF",
+    border: "1px solid var(--accent-danger)",
+  },
 };
 
 const SIZE: Record<Size, string> = {
@@ -30,21 +46,38 @@ const SIZE: Record<Size, string> = {
 };
 
 export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
-  { variant = "primary", size = "md", loading, fullWidth, className = "", disabled, children, ...rest },
+  {
+    variant = "primary",
+    size = "md",
+    loading,
+    fullWidth,
+    className = "",
+    style,
+    disabled,
+    children,
+    ...rest
+  },
   ref
 ) {
+  const isDisabled = disabled || loading;
+  // Primary + danger get the premium press feedback (indigo glow +
+  // lift + settle). Secondary/ghost stay quiet — they're usually
+  // Cancel-type actions that shouldn't be the louder affordance.
+  const wantsPremium = variant === "primary" || variant === "danger";
   return (
     <button
       ref={ref}
-      disabled={disabled || loading}
+      disabled={isDisabled}
       className={[
-        "inline-flex items-center justify-center rounded-lg font-medium transition",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2",
-        VARIANT[variant],
+        "inline-flex items-center justify-center rounded-lg font-medium",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
         SIZE[size],
         fullWidth ? "w-full" : "",
+        isDisabled ? "opacity-60 cursor-not-allowed" : "",
+        wantsPremium && !isDisabled ? "btn-premium" : "",
         className,
       ].join(" ")}
+      style={{ ...VARIANT_STYLE[variant], ...style }}
       {...rest}
     >
       {loading ? (

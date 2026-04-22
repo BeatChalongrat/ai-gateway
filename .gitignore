@@ -16,3 +16,4 @@ coverage/
 logs/
 *.sqlite3
 admin-ui/tsconfig.tsbuildinfo
+backend/uploads/

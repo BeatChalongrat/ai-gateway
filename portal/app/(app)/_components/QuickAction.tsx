@@ -12,19 +12,49 @@ export default function QuickAction({ icon, title, description, href }: Props) {
   return (
     <Link
       href={href}
-      className="group flex items-start gap-4 p-5 rounded-xl border border-gray-200 bg-white hover:border-violet-400 hover:shadow-md hover:-translate-y-0.5 transition-all h-full"
+      className="group flex items-start gap-4 p-5 rounded-xl h-full transition-all"
+      style={{
+        background:
+          "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+        border: "1px solid var(--border-default)",
+        textDecoration: "none",
+      }}
     >
-      <div className="w-10 h-10 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center flex-shrink-0 group-hover:bg-violet-100 transition-colors">
+      <div
+        className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{
+          background: "rgba(99, 102, 241, 0.12)",
+          color: "var(--accent-primary)",
+        }}
+      >
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="font-heading font-semibold text-gray-900 mb-0.5 flex items-center gap-1.5">
+        <div
+          className="font-heading mb-0.5 flex items-center gap-1.5"
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+          }}
+        >
           {title}
-          <span className="text-gray-300 group-hover:text-violet-500 group-hover:translate-x-0.5 transition-all">
+          <span
+            className="transition-transform group-hover:translate-x-0.5"
+            style={{ color: "var(--accent-primary)" }}
+          >
             →
           </span>
         </div>
-        <div className="text-sm text-gray-500 leading-relaxed">{description}</div>
+        <div
+          style={{
+            fontSize: 12.5,
+            color: "var(--text-secondary)",
+            lineHeight: 1.5,
+          }}
+        >
+          {description}
+        </div>
       </div>
     </Link>
   );
