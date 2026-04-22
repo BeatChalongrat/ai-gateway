@@ -6,24 +6,21 @@ import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowRight,
+  ArrowUpRight,
   BookOpen,
   FolderOpen,
   FolderPlus,
   Key,
   ScrollText,
+  Sparkles,
   Zap,
 } from "lucide-react";
 
-import { Card } from "@/components/Card";
-import { CreditBar } from "@/components/CreditBar";
 import { PageSpinner } from "@/components/Spinner";
 import { api, PortalApiError } from "@/lib/api";
 import { formatTokens, relativeTime } from "@/lib/format";
+import { useCountUp } from "@/lib/hooks/useCountUp";
 import type { PortalUser, Project, UsageRequest } from "@/lib/types";
-import EmptyState from "../_components/EmptyState";
-import PageHeader from "../_components/PageHeader";
-import QuickAction from "../_components/QuickAction";
-import StatCard from "../_components/StatCard";
 
 interface ProjectsResp {
   projects: Project[];
@@ -81,165 +78,865 @@ export default function DashboardPage() {
 
   if (loading) return <PageSpinner />;
 
+  const balance = user?.credit_balance ?? 0;
+  const used = user?.credit_used ?? 0;
+  const total = balance + used;
+  const percent = total > 0 ? Math.round((balance / total) * 100) : 100;
+  const planLabel = user?.plan
+    ? user.plan.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    : "Free Trial";
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Dashboard"
-        subtitle={`Welcome back, ${user?.display_name || user?.email || "there"}`}
-      />
+    <div className="space-y-5">
+      {/* Header */}
+      <div>
+        <h1
+          className="font-heading"
+          style={{
+            fontSize: 24,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
+            margin: "0 0 4px",
+            color: "var(--text-primary)",
+          }}
+        >
+          Dashboard
+        </h1>
+        <p style={{ fontSize: 13, color: "var(--text-tertiary)", margin: 0 }}>
+          Welcome back, {user?.display_name || user?.email || "there"}
+        </p>
+      </div>
 
       {error ? (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+        <div
+          style={{
+            background: "rgba(220, 38, 38, 0.08)",
+            border: "1px solid rgba(220, 38, 38, 0.25)",
+            color: "var(--accent-danger)",
+            fontSize: 13,
+            padding: "8px 12px",
+            borderRadius: 8,
+          }}
+        >
           {error}
         </div>
       ) : null}
 
       {user?.is_low_credit ? (
-        <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 flex items-center justify-between">
-          <span className="inline-flex items-center gap-2">
-            <AlertCircle size={16} className="text-amber-600" />
+        <div
+          style={{
+            background: "rgba(217, 119, 6, 0.08)",
+            border: "1px solid rgba(217, 119, 6, 0.25)",
+            padding: "12px 16px",
+            borderRadius: 10,
+            fontSize: 13,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            color: "var(--accent-warning)",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <AlertCircle size={16} />
             Your credit balance is running low. Top up to keep using the gateway.
           </span>
           <button
             onClick={() => router.push("/billing")}
-            className="font-semibold text-amber-900 hover:underline"
+            style={{
+              fontWeight: 600,
+              background: "none",
+              border: "none",
+              color: "inherit",
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+            type="button"
           >
             View plans →
           </button>
         </div>
       ) : null}
 
-      {user ? (
-        <CreditBar
-          balance={user.credit_balance}
-          used={user.credit_used}
-          plan={user.plan}
-          onUpgrade={() => router.push("/billing")}
-          viewTransactionsHref="/billing"
-        />
-      ) : null}
+      <CreditHero
+        balance={balance}
+        used={used}
+        total={total}
+        percent={percent}
+        planLabel={planLabel}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <QuickAction
-          icon={<FolderPlus className="w-5 h-5" strokeWidth={1.75} />}
-          title="Create a project"
-          description="Group API keys by app or environment"
-          href="/projects"
-        />
-        <QuickAction
-          icon={<Key className="w-5 h-5" strokeWidth={1.75} />}
-          title="Get your first API key"
-          description="Start sending requests in under a minute"
-          href="/projects"
-        />
-        <QuickAction
-          icon={<BookOpen className="w-5 h-5" strokeWidth={1.75} />}
-          title="Read the quickstart"
-          description="OpenAI-compatible — swap one line"
-          href="/docs"
-        />
-      </div>
+      <QuickstartGrid />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          tone="violet"
-          icon={<Zap className="w-5 h-5" strokeWidth={1.75} />}
-          label="Tokens Used"
-          value={formatTokens(user?.credit_used ?? 0)}
-          caption="All time"
-        />
-        <StatCard
-          tone="cyan"
-          icon={<FolderOpen className="w-5 h-5" strokeWidth={1.75} />}
-          label="Projects"
-          value={projectCount.toString()}
-          caption={`${projectCount} project${projectCount === 1 ? "" : "s"}`}
-          href="/projects"
-        />
-        <StatCard
-          tone="amber"
-          icon={<Key className="w-5 h-5" strokeWidth={1.75} />}
-          label="API Keys"
-          value={keyCount.toString()}
-          caption="Across all projects"
-          href="/projects"
-        />
-      </div>
+      <StatsGrid
+        used={used}
+        projectCount={projectCount}
+        keyCount={keyCount}
+      />
 
-      <Card padding="md">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-heading font-semibold">Recent Activity</h2>
-          <Link
-            href="/usage"
-            className="text-sm text-brand-navy hover:underline inline-flex items-center gap-1"
+      <RecentActivitySection recent={recent} totalRequests={totalRequests} />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* Credit Hero                                                           */
+/* -------------------------------------------------------------------- */
+
+function CreditHero({
+  balance,
+  used,
+  total,
+  percent,
+  planLabel,
+}: {
+  balance: number;
+  used: number;
+  total: number;
+  percent: number;
+  planLabel: string;
+}) {
+  const r = 42;
+  const circumference = 2 * Math.PI * r;
+  const dashOffset = circumference * (1 - percent / 100);
+  const displayBalance = useCountUp(balance, 1000);
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        background: "var(--hero-gradient)",
+        border: "1px solid var(--border-default)",
+        borderRadius: 16,
+        padding: "28px 32px",
+        boxShadow: "0 20px 40px -20px var(--hero-glow)",
+        color: "#FFFFFF",
+      }}
+    >
+      {/* Grid pattern overlay — slow drift, imperceptible "alive" feel */}
+      <div
+        aria-hidden
+        className="hero-grid"
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage:
+            "linear-gradient(rgba(99,102,241,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.05) 1px, transparent 1px)",
+          backgroundSize: "40px 40px",
+          pointerEvents: "none",
+        }}
+      />
+      {/* Radial glow — breathes on 6s loop */}
+      <div
+        aria-hidden
+        className="hero-glow"
+        style={{
+          position: "absolute",
+          top: -80,
+          right: -80,
+          width: 280,
+          height: 280,
+          background:
+            "radial-gradient(circle, rgba(99,102,241,0.25) 0%, transparent 70%)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <div
+        style={{
+          position: "relative",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 24,
+          flexWrap: "wrap",
+        }}
+      >
+        {/* Left side */}
+        <div style={{ minWidth: 0, flex: "1 1 320px" }}>
+          <div
+            style={{
+              fontSize: 10.5,
+              fontWeight: 700,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: "rgba(255,255,255,0.7)",
+              marginBottom: 8,
+            }}
           >
-            View all <ArrowRight size={14} />
-          </Link>
+            Available Credits
+          </div>
+          <div
+            className="font-heading"
+            style={{
+              fontSize: 48,
+              fontWeight: 700,
+              letterSpacing: "-0.02em",
+              lineHeight: 1,
+              color: "#FFFFFF",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {displayBalance.toLocaleString()}
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.55)",
+              marginTop: 6,
+            }}
+          >
+            of {total.toLocaleString()} total · Last 7 days
+          </div>
+
+          {/* Stats row */}
+          <div
+            style={{
+              display: "flex",
+              gap: 32,
+              marginTop: 20,
+              flexWrap: "wrap",
+            }}
+          >
+            <HeroStat label="Used" value={used.toLocaleString()} />
+            <HeroStat label="Remaining" value={balance.toLocaleString()} />
+            <HeroStat label="Next Reset" value="—" />
+          </div>
         </div>
-        {recent.length === 0 ? (
-          <EmptyState
-            icon={<ScrollText className="w-7 h-7" strokeWidth={1.5} />}
-            title="No requests yet"
-            description="Create an API key and send your first request to see it appear here."
-            action={{ label: "Go to Projects →", href: "/projects" }}
-            secondaryAction={{ label: "View docs", href: "/docs" }}
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+
+        {/* Right side */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 16,
+            flexShrink: 0,
+          }}
+        >
+          {/* Plan pill */}
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 10px",
+              borderRadius: 999,
+              background: "rgba(99,102,241,0.15)",
+              color: "#A5B4FC",
+              border: "1px solid rgba(99,102,241,0.3)",
+              fontSize: 11,
+              fontWeight: 500,
+            }}
+          >
+            <Sparkles size={11} />
+            {planLabel}
+          </span>
+
+          {/* Donut */}
+          <div style={{ position: "relative", width: 110, height: 110 }}>
+            <svg
+              viewBox="0 0 100 100"
+              width="110"
+              height="110"
+              style={{ transform: "rotate(-90deg)" }}
+              aria-hidden
+            >
+              <circle
+                cx="50"
+                cy="50"
+                r={r}
+                fill="none"
+                stroke="rgba(255,255,255,0.1)"
+                strokeWidth="6"
+              />
+              <circle
+                className="hero-circle"
+                cx="50"
+                cy="50"
+                r={r}
+                fill="none"
+                stroke="url(#heroDonutGrad)"
+                strokeWidth="6"
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                style={
+                  {
+                    ["--circle-circumference" as string]: String(circumference),
+                    ["--circle-target-offset" as string]: String(dashOffset),
+                  } as React.CSSProperties
+                }
+              />
+              <defs>
+                <linearGradient id="heroDonutGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#6366F1" />
+                  <stop offset="100%" stopColor="#06B6D4" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <div
+                className="font-heading"
+                style={{ fontSize: 20, fontWeight: 700, color: "#FFFFFF", lineHeight: 1 }}
+              >
+                {percent}%
+              </div>
+              <div
+                style={{
+                  fontSize: 9,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.55)",
+                  marginTop: 4,
+                }}
+              >
+                Available
+              </div>
+            </div>
+          </div>
+
+          {/* Actions row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Link
+              href="/billing"
+              style={{
+                fontSize: 12,
+                color: "rgba(255,255,255,0.7)",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              View transactions →
+            </Link>
+            <Link
+              href="/billing"
+              className="btn-premium"
+              style={{
+                background: "#FFFFFF",
+                color: "#0A1230",
+                borderRadius: 8,
+                padding: "6px 14px",
+                fontSize: 12,
+                fontWeight: 600,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              Upgrade
+              <ArrowUpRight size={13} />
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeroStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
+          color: "rgba(255,255,255,0.5)",
+          marginBottom: 4,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 600, color: "#FFFFFF" }}>{value}</div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* Quickstart cards                                                      */
+/* -------------------------------------------------------------------- */
+
+function QuickstartGrid() {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+        gap: 12,
+      }}
+    >
+      <QuickstartCard
+        rgb="99,102,241"
+        icon={<FolderPlus size={16} strokeWidth={1.75} />}
+        title="Create a project"
+        description="Group API keys by app or environment"
+        href="/projects"
+      />
+      <QuickstartCard
+        rgb="139,92,246"
+        icon={<Key size={16} strokeWidth={1.75} />}
+        title="Get your first API key"
+        description="Start sending requests in under a minute"
+        href="/projects"
+      />
+      {/* TODO: point to /docs when docs page is built */}
+      <QuickstartCard
+        rgb="245,158,11"
+        icon={<BookOpen size={16} strokeWidth={1.75} />}
+        title="Read the quickstart"
+        description="OpenAI-compatible — swap one line"
+        href="/projects"
+      />
+    </div>
+  );
+}
+
+function QuickstartCard({
+  rgb,
+  icon,
+  title,
+  description,
+  href,
+}: {
+  rgb: string;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="card-hover"
+      style={{
+        display: "block",
+        background: "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+        border: "1px solid var(--border-default)",
+        borderRadius: 10,
+        padding: 16,
+        textDecoration: "none",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            background: `rgba(${rgb}, 0.12)`,
+            border: `1px solid rgba(${rgb}, 0.2)`,
+            borderRadius: 9,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: `rgb(${rgb})`,
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </div>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+          }}
+        >
+          {title}
+          <ArrowRight size={12} style={{ color: `rgb(${rgb})` }} />
+        </div>
+      </div>
+      <div
+        style={{
+          paddingLeft: 48,
+          marginTop: 6,
+          fontSize: 11.5,
+          color: "var(--text-secondary)",
+        }}
+      >
+        {description}
+      </div>
+    </Link>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* Stats cards                                                           */
+/* -------------------------------------------------------------------- */
+
+function StatsGrid({
+  used,
+  projectCount,
+  keyCount,
+}: {
+  used: number;
+  projectCount: number;
+  keyCount: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+        gap: 12,
+      }}
+    >
+      <StatPanel
+        rgb="99,102,241"
+        label="Tokens Used"
+        value={formatTokens(used)}
+        caption="All time"
+        icon={<Zap size={12} strokeWidth={2} />}
+      />
+      <StatPanel
+        rgb="6,182,212"
+        label="Projects"
+        value={projectCount.toString()}
+        caption={`${projectCount} project${projectCount === 1 ? "" : "s"}`}
+        icon={<FolderOpen size={12} strokeWidth={2} />}
+        href="/projects"
+      />
+      <StatPanel
+        rgb="245,158,11"
+        label="API Keys"
+        value={keyCount.toString()}
+        caption="Across all projects"
+        icon={<Key size={12} strokeWidth={2} />}
+        href="/projects"
+      />
+    </div>
+  );
+}
+
+function StatPanel({
+  rgb,
+  label,
+  value,
+  caption,
+  icon,
+  href,
+}: {
+  rgb: string;
+  label: string;
+  value: string;
+  caption: string;
+  icon: React.ReactNode;
+  href?: string;
+}) {
+  const body = (
+    <div
+      className="card-hover"
+      style={{
+        position: "relative",
+        background: "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+        border: "1px solid var(--border-default)",
+        borderRadius: 10,
+        padding: 16,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 1.5,
+          background: `linear-gradient(90deg, transparent, rgba(${rgb}, 0.65), transparent)`,
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 10,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 10.5,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "var(--text-tertiary)",
+            fontWeight: 600,
+          }}
+        >
+          {label}
+        </span>
+        <div
+          style={{
+            width: 22,
+            height: 22,
+            background: `rgba(${rgb}, 0.14)`,
+            borderRadius: 6,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: `rgb(${rgb})`,
+          }}
+        >
+          {icon}
+        </div>
+      </div>
+      <div
+        className="font-heading"
+        style={{
+          fontSize: 28,
+          fontWeight: 700,
+          letterSpacing: "-0.02em",
+          color: "var(--text-primary)",
+          lineHeight: 1.05,
+        }}
+      >
+        {value}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>
+        {caption}
+      </div>
+    </div>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} style={{ display: "block", textDecoration: "none" }}>
+        {body}
+      </Link>
+    );
+  }
+  return body;
+}
+
+/* -------------------------------------------------------------------- */
+/* Recent activity                                                       */
+/* -------------------------------------------------------------------- */
+
+function RecentActivitySection({
+  recent,
+  totalRequests,
+}: {
+  recent: UsageRequest[];
+  totalRequests: number;
+}) {
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+        border: "1px solid var(--border-default)",
+        borderRadius: 10,
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 16,
+        }}
+      >
+        <h2
+          className="font-heading"
+          style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}
+        >
+          Recent Activity
+        </h2>
+        <Link
+          href="/usage"
+          style={{
+            fontSize: 12,
+            color: "var(--accent-primary)",
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          View all <ArrowRight size={12} />
+        </Link>
+      </div>
+
+      {recent.length === 0 ? (
+        <div
+          style={{
+            padding: "32px 0",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              background: "rgba(99,102,241,0.08)",
+              border: "1px solid rgba(99,102,241,0.2)",
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--accent-primary)",
+            }}
+          >
+            <ScrollText size={18} strokeWidth={1.5} />
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+            Send your first request to see activity here.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-gray-200">
-                  <th className="py-2 pr-4 font-medium">When</th>
-                  <th className="py-2 pr-4 font-medium">Model</th>
-                  <th className="py-2 pr-4 font-medium">Tokens</th>
-                  <th className="py-2 pr-4 font-medium">Status</th>
+                <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                  <Th>When</Th>
+                  <Th>Model</Th>
+                  <Th>Tokens</Th>
+                  <Th>Status</Th>
                 </tr>
               </thead>
               <tbody>
                 {recent.map((r, i) => (
-                  <tr key={r.id ?? i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                    <td className="py-2 pr-4 text-gray-600">{relativeTime(r.created_at)}</td>
-                    <td className="py-2 pr-4 text-gray-900 font-mono text-xs">{r.model ?? "—"}</td>
-                    <td className="py-2 pr-4 text-gray-900">
+                  <tr
+                    key={r.id ?? i}
+                    style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                  >
+                    <Td color="var(--text-secondary)">{relativeTime(r.created_at)}</Td>
+                    <Td color="var(--text-primary)" mono>
+                      {r.model ?? "—"}
+                    </Td>
+                    <Td color="var(--text-primary)">
                       {r.total_tokens != null ? formatTokens(r.total_tokens) : "—"}
-                    </td>
-                    <td className="py-2 pr-4">
+                    </Td>
+                    <Td>
                       <StatusChip status={r.status} />
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-        {recent.length > 0 ? (
-          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+          <div
+            style={{
+              marginTop: 14,
+              paddingTop: 12,
+              borderTop: "1px solid var(--border-subtle)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+            }}
+          >
             <span>
               Showing {recent.length} of {totalRequests.toLocaleString()}
             </span>
             <Link
               href="/usage"
-              className="inline-flex items-center gap-1 text-violet-600 font-medium hover:underline"
+              style={{
+                color: "var(--accent-primary)",
+                textDecoration: "none",
+                fontWeight: 500,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
             >
               View all in Usage <ArrowRight size={12} />
             </Link>
           </div>
-        ) : null}
-      </Card>
+        </>
+      )}
     </div>
+  );
+}
+
+function Th({ children }: { children: React.ReactNode }) {
+  return (
+    <th
+      style={{
+        padding: "8px 16px 8px 0",
+        textAlign: "left",
+        fontSize: 10.5,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        color: "var(--text-muted)",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  color = "var(--text-primary)",
+  mono = false,
+}: {
+  children: React.ReactNode;
+  color?: string;
+  mono?: boolean;
+}) {
+  return (
+    <td
+      style={{
+        padding: "10px 16px 10px 0",
+        color,
+        fontFamily: mono ? "var(--ff-mono)" : "inherit",
+        fontSize: mono ? 12 : 13,
+      }}
+    >
+      {children}
+    </td>
   );
 }
 
 function StatusChip({ status }: { status: string | null }) {
   const s = (status || "").toLowerCase();
-  const color =
-    s === "success"
-      ? "bg-green-100 text-green-800"
-      : s === "error" || s === "failed" || s.startsWith("http_5")
-      ? "bg-red-100 text-red-800"
-      : "bg-gray-100 text-gray-700";
+  const isError = s === "error" || s === "failed" || s.startsWith("http_5");
+  const isSuccess = s === "success";
+  const bg = isSuccess
+    ? "rgba(16,185,129,0.12)"
+    : isError
+    ? "rgba(248,113,113,0.12)"
+    : "var(--bg-elevated)";
+  const color = isSuccess
+    ? "var(--accent-success)"
+    : isError
+    ? "var(--accent-danger)"
+    : "var(--text-secondary)";
   return (
-    <span className={["inline-block px-2 py-0.5 rounded-full text-xs font-medium", color].join(" ")}>
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 500,
+        background: bg,
+        color,
+      }}
+    >
       {status || "—"}
     </span>
   );

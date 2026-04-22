@@ -8,16 +8,17 @@ import {
   Receipt,
   ShoppingBag,
   Sliders,
+  Sparkles,
   Star,
   Zap,
 } from "lucide-react";
 
 import { Button } from "@/components/Button";
-import { Card } from "@/components/Card";
 import { Modal } from "@/components/Modal";
 import { PageSpinner } from "@/components/Spinner";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate, formatTokens, formatUsd } from "@/lib/format";
+import { useCountUp } from "@/lib/hooks/useCountUp";
 import type { CreditTransaction, PortalUser, TokenPack } from "@/lib/types";
 import EmptyState from "../_components/EmptyState";
 import PageHeader from "../_components/PageHeader";
@@ -102,6 +103,11 @@ export default function BillingPage() {
     }
   }
 
+  // Hooks must run on every render — evaluate the count-up before the
+  // early return for the loading state. When `user` isn't loaded yet,
+  // target is 0 and the hook is a no-op.
+  const displayBalance = useCountUp(user?.credit_balance ?? 0, 1000);
+
   if (loading) return <PageSpinner />;
 
   const planLabel =
@@ -115,59 +121,151 @@ export default function BillingPage() {
       />
 
       {error ? (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+        <div
+          style={{
+            background: "rgba(220,38,38,0.08)",
+            border: "1px solid rgba(220,38,38,0.25)",
+            color: "var(--accent-danger)",
+            fontSize: 13,
+            padding: "8px 12px",
+            borderRadius: 8,
+          }}
+        >
           {error}
         </div>
       ) : null}
 
       {purchaseMsg ? (
-        <div className="rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm px-3 py-2 flex items-start justify-between gap-3">
+        <div
+          className="flex items-start justify-between gap-3"
+          style={{
+            background: "rgba(99,102,241,0.08)",
+            border: "1px solid rgba(99,102,241,0.25)",
+            color: "var(--accent-primary)",
+            fontSize: 13,
+            padding: "8px 12px",
+            borderRadius: 8,
+          }}
+        >
           <span>{purchaseMsg}</span>
           <button
             onClick={() => setPurchaseMsg(null)}
-            className="text-blue-900 text-lg leading-none"
             aria-label="Dismiss"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "inherit",
+              fontSize: 18,
+              lineHeight: 1,
+              cursor: "pointer",
+            }}
           >
             ×
           </button>
         </div>
       ) : null}
 
-      {/* Balance — gradient card matching /dashboard CreditBar */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-dark via-brand-navy to-brand-dark p-7 text-white shadow-lg">
+      {/* Balance hero — same gradient + grid + glow as dashboard */}
+      <div
+        style={{
+          position: "relative",
+          overflow: "hidden",
+          background: "var(--hero-gradient)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 16,
+          padding: "28px 32px",
+          boxShadow: "0 20px 40px -20px var(--hero-glow)",
+          color: "#FFFFFF",
+        }}
+      >
         <div
           aria-hidden
-          className="pointer-events-none absolute -top-20 -right-20 h-56 w-56 rounded-full opacity-30"
+          className="hero-grid"
           style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage:
+              "linear-gradient(rgba(99,102,241,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.05) 1px, transparent 1px)",
+            backgroundSize: "40px 40px",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          aria-hidden
+          className="hero-glow"
+          style={{
+            position: "absolute",
+            top: -80,
+            right: -80,
+            width: 280,
+            height: 280,
             background:
-              "radial-gradient(circle, rgba(59,108,246,0.5), transparent 70%)",
+              "radial-gradient(circle, rgba(99,102,241,0.25) 0%, transparent 70%)",
+            pointerEvents: "none",
           }}
         />
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.2em] text-white/60">
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.7)",
+              }}
+            >
               Current Balance
             </div>
             <p className="mt-3 flex items-baseline gap-2">
-              <span className="font-heading font-extrabold leading-none tracking-tight text-[42px]">
-                {formatTokens(user?.credit_balance ?? 0)}
+              <span
+                className="font-heading"
+                style={{
+                  fontSize: 42,
+                  fontWeight: 700,
+                  letterSpacing: "-0.02em",
+                  lineHeight: 1,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {formatTokens(displayBalance)}
               </span>
-              <span className="text-sm text-white/60">tokens</span>
+              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>tokens</span>
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
-            <span className="inline-flex items-center rounded-full bg-brand-blue/20 border border-brand-blue/40 px-2.5 py-0.5 text-[11px] font-medium text-white">
+            <span
+              className="inline-flex items-center rounded-full"
+              style={{
+                background: "rgba(99,102,241,0.15)",
+                border: "1px solid rgba(99,102,241,0.3)",
+                color: "#A5B4FC",
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 500,
+                gap: 6,
+              }}
+            >
+              <Sparkles size={11} />
               {planLabel}
             </span>
-            <div className="text-right text-xs text-white/60">
-              Used: <span className="text-white/90 font-medium">{formatTokens(user?.credit_used ?? 0)}</span>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>
+              Used:{" "}
+              <span style={{ color: "rgba(255,255,255,0.9)", fontWeight: 500 }}>
+                {formatTokens(user?.credit_used ?? 0)}
+              </span>
             </div>
           </div>
         </div>
       </div>
 
       <div>
-        <h2 className="text-lg font-heading font-semibold mb-4">Token Packs</h2>
+        <h2
+          className="font-heading mb-4"
+          style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+        >
+          Token Packs
+        </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {sorted.map((p) => {
             const popular = p.id === popularId;
@@ -176,44 +274,116 @@ export default function BillingPage() {
               <div
                 key={p.id}
                 className={[
-                  "relative rounded-2xl bg-white border shadow-sm p-6 flex flex-col card-hover",
-                  popular
-                    ? "border-2 border-brand-blue shadow-md sm:scale-[1.02]"
-                    : "border-gray-200",
+                  "card-hover relative p-6 flex flex-col",
+                  popular ? "sm:scale-[1.02]" : "",
                 ].join(" ")}
+                style={{
+                  background: popular
+                    ? "linear-gradient(180deg, rgba(99,102,241,0.06), var(--bg-surface-2))"
+                    : "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+                  border: popular
+                    ? "2px solid var(--accent-primary)"
+                    : "1px solid var(--border-default)",
+                  borderRadius: 16,
+                  boxShadow: popular
+                    ? "0 8px 24px -8px rgba(99,102,241,0.25)"
+                    : "0 1px 2px rgba(0,0,0,0.03)",
+                }}
               >
                 {popular ? (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-navy to-brand-blue px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-white shadow">
-                    <Star size={11} strokeWidth={2.5} className="fill-white" />
+                  <span
+                    className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-full"
+                    style={{
+                      background:
+                        "linear-gradient(90deg, var(--accent-primary), var(--accent-violet))",
+                      padding: "4px 12px",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                      color: "#FFFFFF",
+                      boxShadow: "0 4px 12px rgba(99,102,241,0.3)",
+                    }}
+                  >
+                    <Star size={11} strokeWidth={2.5} style={{ fill: "#FFFFFF" }} />
                     Most Popular
                   </span>
                 ) : null}
 
-                <h3 className="mt-1 text-center text-xl font-heading font-bold text-brand-navy">
+                <h3
+                  className="mt-1 text-center font-heading"
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 700,
+                    color: "var(--text-primary)",
+                  }}
+                >
                   {p.name}
                 </h3>
 
                 <div className="mt-4 text-center">
-                  <div className="font-heading font-extrabold text-4xl text-gray-900 leading-none">
+                  <div
+                    className="font-heading leading-none"
+                    style={{
+                      fontSize: 36,
+                      fontWeight: 800,
+                      color: "var(--text-primary)",
+                    }}
+                  >
                     {formatTokens(p.tokens / 1_000_000)}
-                    <span className="text-base font-normal text-gray-500">M</span>
+                    <span
+                      style={{
+                        fontSize: 16,
+                        fontWeight: 400,
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
+                      M
+                    </span>
                   </div>
-                  <div className="mt-1 text-xs uppercase tracking-widest text-gray-500">
+                  <div
+                    className="mt-1"
+                    style={{
+                      fontSize: 11,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.14em",
+                      color: "var(--text-tertiary)",
+                    }}
+                  >
                     tokens
                   </div>
                 </div>
 
                 <div className="mt-5 text-center">
-                  <span className="text-sm text-gray-500 mr-0.5">$</span>
-                  <span className="font-heading font-bold text-3xl text-gray-900">
+                  <span
+                    style={{ fontSize: 13, color: "var(--text-tertiary)", marginRight: 2 }}
+                  >
+                    $
+                  </span>
+                  <span
+                    className="font-heading"
+                    style={{
+                      fontSize: 30,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                    }}
+                  >
                     {Math.round(p.price_usd)}
                   </span>
                 </div>
 
                 <ul className="mt-5 space-y-2">
                   {features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-gray-700">
-                      <Check size={14} strokeWidth={2.25} className="text-brand-green shrink-0" />
+                    <li
+                      key={f}
+                      className="flex items-center gap-2"
+                      style={{ fontSize: 13, color: "var(--text-secondary)" }}
+                    >
+                      <Check
+                        size={14}
+                        strokeWidth={2.25}
+                        style={{ color: "var(--accent-success)", flexShrink: 0 }}
+                      />
                       {f}
                     </li>
                   ))}
@@ -222,8 +392,13 @@ export default function BillingPage() {
                 <div className="mt-6">
                   <Button
                     fullWidth
-                    variant={popular ? "primary" : "secondary"}
+                    className="btn-premium"
                     onClick={() => setConfirmPack(p)}
+                    style={{
+                      background: "var(--bg-sidebar)",
+                      border: "1px solid var(--bg-sidebar)",
+                      color: "#FFFFFF",
+                    }}
                   >
                     Purchase
                   </Button>
@@ -234,12 +409,26 @@ export default function BillingPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h3 className="font-heading font-semibold text-gray-900">
+      <div
+        className="overflow-hidden"
+        style={{
+          background:
+            "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+          border: "1px solid var(--border-default)",
+          borderRadius: 12,
+        }}
+      >
+        <div
+          className="px-6 py-4"
+          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <h3
+            className="font-heading"
+            style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}
+          >
             Transaction History
           </h3>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2 }}>
             Purchases, bonuses, and usage charges
           </p>
         </div>
@@ -251,40 +440,52 @@ export default function BillingPage() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
-                  <th className="px-6 py-3 font-medium">Date</th>
-                  <th className="px-6 py-3 font-medium">Type</th>
-                  <th className="px-6 py-3 font-medium">Description</th>
-                  <th className="px-6 py-3 font-medium text-right">Amount</th>
-                  <th className="px-6 py-3 font-medium text-right">Balance</th>
+            <table className="w-full" style={{ fontSize: 13, borderCollapse: "collapse" }}>
+              <thead>
+                <tr
+                  style={{
+                    borderBottom: "1px solid var(--border-subtle)",
+                    background: "var(--bg-surface-2)",
+                  }}
+                >
+                  <Th>Date</Th>
+                  <Th>Type</Th>
+                  <Th>Description</Th>
+                  <Th align="right">Amount</Th>
+                  <Th align="right">Balance</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {txs.map((t) => (
-                  <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-3 text-gray-600 whitespace-nowrap">
+                  <tr
+                    key={t.id}
+                    className="row-hover"
+                    style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                  >
+                    <Td color="var(--text-secondary)" nowrap>
                       {formatDate(t.created_at)}
-                    </td>
-                    <td className="px-6 py-3">
+                    </Td>
+                    <Td>
                       <TxTypeChip type={t.type} />
-                    </td>
-                    <td className="px-6 py-3 text-gray-700">
+                    </Td>
+                    <Td color="var(--text-secondary)">
                       {t.description ?? t.request_id ?? "—"}
-                    </td>
-                    <td
-                      className={[
-                        "px-6 py-3 text-right font-medium",
-                        t.amount >= 0 ? "text-green-700" : "text-rose-700",
-                      ].join(" ")}
+                    </Td>
+                    <Td
+                      align="right"
+                      color={
+                        t.amount >= 0
+                          ? "var(--accent-success)"
+                          : "var(--accent-danger)"
+                      }
+                      weight={500}
                     >
                       {t.amount >= 0 ? "+" : ""}
                       {formatTokens(t.amount)}
-                    </td>
-                    <td className="px-6 py-3 text-right text-gray-900">
+                    </Td>
+                    <Td align="right" color="var(--text-primary)">
                       {formatTokens(t.balance_after)}
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -313,14 +514,19 @@ export default function BillingPage() {
         }
       >
         {confirmPack ? (
-          <div className="text-sm text-gray-700 space-y-2">
-            <p>
+          <div className="space-y-2">
+            <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
               You are purchasing{" "}
-              <span className="font-semibold">{confirmPack.name}</span> —{" "}
-              {formatTokens(confirmPack.tokens)} tokens for{" "}
-              <span className="font-semibold">{formatUsd(confirmPack.price_usd)}</span>.
+              <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                {confirmPack.name}
+              </span>{" "}
+              — {formatTokens(confirmPack.tokens)} tokens for{" "}
+              <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                {formatUsd(confirmPack.price_usd)}
+              </span>
+              .
             </p>
-            <p className="text-xs text-gray-500">
+            <p style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
               Payment processing is coming soon. Purchasing now will not charge you.
             </p>
           </div>
@@ -330,31 +536,119 @@ export default function BillingPage() {
   );
 }
 
+function Th({
+  children,
+  align = "left",
+}: {
+  children: React.ReactNode;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      style={{
+        padding: "12px 24px",
+        textAlign: align,
+        fontSize: 11,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        color: "var(--text-muted)",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  color = "var(--text-primary)",
+  align = "left",
+  nowrap = false,
+  weight,
+}: {
+  children: React.ReactNode;
+  color?: string;
+  align?: "left" | "right";
+  nowrap?: boolean;
+  weight?: number;
+}) {
+  return (
+    <td
+      style={{
+        padding: "12px 24px",
+        color,
+        textAlign: align,
+        fontSize: 13,
+        whiteSpace: nowrap ? "nowrap" : "normal",
+        fontWeight: weight,
+      }}
+    >
+      {children}
+    </td>
+  );
+}
+
 type TxType = "signup_bonus" | "usage" | "manual_topup" | "purchase" | "adjustment";
 
 function TxTypeChip({ type }: { type: string }) {
-  // Icon + color per transaction type. Anything unknown falls back to a
-  // neutral pill with the raw type string so new backend types still
-  // render sensibly.
-  const map: Record<TxType, { label: string; Icon: typeof Zap; bg: string; text: string }> = {
-    signup_bonus: { label: "Signup bonus", Icon: Gift, bg: "bg-green-50", text: "text-green-700" },
-    usage: { label: "Usage", Icon: Zap, bg: "bg-blue-50", text: "text-blue-700" },
-    manual_topup: { label: "Top-up", Icon: PlusCircle, bg: "bg-green-50", text: "text-green-700" },
-    purchase: { label: "Purchase", Icon: ShoppingBag, bg: "bg-purple-50", text: "text-purple-700" },
-    adjustment: { label: "Adjustment", Icon: Sliders, bg: "bg-amber-50", text: "text-amber-700" },
+  // Icon + token-mapped color per transaction type. Anything unknown
+  // falls back to a neutral pill so new backend types still render.
+  const map: Record<
+    TxType,
+    { label: string; Icon: typeof Zap; bg: string; color: string }
+  > = {
+    signup_bonus: {
+      label: "Signup bonus",
+      Icon: Gift,
+      bg: "rgba(16,185,129,0.12)",
+      color: "var(--accent-success)",
+    },
+    usage: {
+      label: "Usage",
+      Icon: Zap,
+      bg: "rgba(99,102,241,0.12)",
+      color: "var(--accent-primary)",
+    },
+    manual_topup: {
+      label: "Top-up",
+      Icon: PlusCircle,
+      bg: "rgba(16,185,129,0.12)",
+      color: "var(--accent-success)",
+    },
+    purchase: {
+      label: "Purchase",
+      Icon: ShoppingBag,
+      bg: "rgba(139,92,246,0.14)",
+      color: "var(--accent-violet)",
+    },
+    adjustment: {
+      label: "Adjustment",
+      Icon: Sliders,
+      bg: "rgba(245,158,11,0.14)",
+      color: "var(--accent-warning)",
+    },
   };
   const m = map[type as TxType];
   if (!m) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs bg-gray-100 text-gray-700">
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5"
+        style={{
+          fontSize: 11,
+          background: "var(--bg-elevated)",
+          color: "var(--text-secondary)",
+        }}
+      >
         {type}
       </span>
     );
   }
-  const { Icon, label, bg, text } = m;
+  const { Icon, label, bg, color } = m;
   return (
     <span
-      className={["inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium", bg, text].join(" ")}
+      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5"
+      style={{ fontSize: 11, fontWeight: 500, background: bg, color }}
     >
       <Icon size={12} strokeWidth={2} />
       {label}

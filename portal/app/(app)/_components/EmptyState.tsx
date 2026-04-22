@@ -18,23 +18,42 @@ type Props = {
   secondaryAction?: { label: string; href: string };
 };
 
-function classes(variant: Variant = "primary") {
-  return variant === "secondary"
-    ? "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-    : "bg-gray-900 text-white hover:bg-black";
+function buttonStyle(variant: Variant = "primary"): React.CSSProperties {
+  if (variant === "secondary") {
+    return {
+      background: "var(--bg-surface)",
+      border: "1px solid var(--border-default)",
+      color: "var(--text-primary)",
+    };
+  }
+  return {
+    background: "var(--accent-primary)",
+    color: "#FFFFFF",
+    border: "1px solid var(--accent-primary)",
+  };
 }
 
 function ActionButton({ action }: { action: ActionProp }) {
-  const cls = `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${classes(action.variant)}`;
+  const style: React.CSSProperties = {
+    ...buttonStyle(action.variant),
+    padding: "8px 16px",
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 500,
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    cursor: "pointer",
+  };
   if (action.href) {
     return (
-      <Link href={action.href} className={cls}>
+      <Link href={action.href} style={style}>
         {action.label}
       </Link>
     );
   }
   return (
-    <button type="button" onClick={action.onClick} className={cls}>
+    <button type="button" onClick={action.onClick} style={style}>
       {action.label}
     </button>
   );
@@ -49,13 +68,36 @@ export default function EmptyState({
 }: Props) {
   return (
     <div className="flex flex-col items-center justify-center text-center px-6 py-16">
-      <div className="w-16 h-16 rounded-2xl bg-violet-50 text-violet-500 flex items-center justify-center mb-5">
+      <div
+        className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
+        style={{
+          background: "rgba(99,102,241,0.10)",
+          border: "1px solid rgba(99,102,241,0.20)",
+          color: "var(--accent-primary)",
+        }}
+      >
         {icon}
       </div>
-      <h3 className="text-lg font-heading font-semibold text-gray-900 mb-2">
+      <h3
+        className="font-heading"
+        style={{
+          fontSize: 17,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          marginBottom: 8,
+        }}
+      >
         {title}
       </h3>
-      <p className="text-sm text-gray-500 max-w-md mb-6 leading-relaxed">
+      <p
+        style={{
+          fontSize: 13,
+          color: "var(--text-secondary)",
+          maxWidth: 420,
+          marginBottom: 24,
+          lineHeight: 1.55,
+        }}
+      >
         {description}
       </p>
       {action ? (
@@ -64,7 +106,14 @@ export default function EmptyState({
           {secondaryAction ? (
             <Link
               href={secondaryAction.href}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-900"
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "var(--text-secondary)",
+                textDecoration: "none",
+              }}
             >
               {secondaryAction.label}
             </Link>
