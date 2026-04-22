@@ -151,24 +151,51 @@ export default function SettingsPage() {
       />
 
       {error ? (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+        <div
+          style={{
+            background: "rgba(220,38,38,0.08)",
+            border: "1px solid rgba(220,38,38,0.25)",
+            color: "var(--accent-danger)",
+            fontSize: 13,
+            padding: "8px 12px",
+            borderRadius: 8,
+          }}
+        >
           {error}
         </div>
       ) : null}
 
-      {/* Account — live data, not a stub */}
+      {/* Account */}
       <Card padding="md">
-        <h2 className="text-lg font-heading font-semibold mb-4">Account</h2>
-        <dl className="divide-y divide-gray-100">
+        <h2
+          className="font-heading mb-4"
+          style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+        >
+          Account
+        </h2>
+        <dl>
           <Row label="Member since" value={formatDate(user?.created_at)} />
           <Row
             label="User ID"
             value={
-              <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="text-gray-700">{user?.id.slice(0, 8)}…</span>
+              <div
+                className="flex items-center gap-2"
+                style={{ fontFamily: "var(--ff-mono)", fontSize: 12 }}
+              >
+                <span style={{ color: "var(--text-secondary)" }}>
+                  {user?.id.slice(0, 8)}…
+                </span>
                 <button
                   onClick={copyUserId}
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-brand-navy hover:bg-gray-100"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "var(--accent-primary)",
+                    background: "transparent",
+                    border: "1px solid var(--border-default)",
+                    cursor: "pointer",
+                  }}
                 >
                   {idCopied ? (
                     <>
@@ -186,22 +213,53 @@ export default function SettingsPage() {
           <Row
             label="Plan"
             value={
-              <span className="inline-flex items-center rounded-full bg-brand-blue/10 border border-brand-blue/30 px-2.5 py-0.5 text-xs font-medium text-brand-navy">
+              <span
+                className="inline-flex items-center rounded-full px-2.5 py-0.5"
+                style={{
+                  background: "rgba(99,102,241,0.12)",
+                  border: "1px solid rgba(99,102,241,0.3)",
+                  color: "var(--accent-primary)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
                 {planLabel}
               </span>
             }
           />
-          <Row label="Email" value={<span className="text-gray-900">{user?.email}</span>} />
+          <Row
+            label="Email"
+            value={<span style={{ color: "var(--text-primary)" }}>{user?.email}</span>}
+          />
         </dl>
       </Card>
 
       {/* Profile */}
       <Card padding="md">
-        <h2 className="text-lg font-heading font-semibold mb-5">Profile</h2>
+        <h2
+          className="font-heading mb-5"
+          style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+        >
+          Profile
+        </h2>
 
-        {/* Avatar block */}
-        <div className="flex items-start gap-5 pb-5 mb-5 border-b border-gray-100">
-          <div className="relative w-24 h-24 rounded-full overflow-hidden bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-3xl font-semibold flex-shrink-0">
+        <div
+          className="flex items-start gap-5 pb-5 mb-5"
+          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <div
+            className="relative flex items-center justify-center flex-shrink-0"
+            style={{
+              width: 70,
+              height: 70,
+              borderRadius: "50%",
+              overflow: "hidden",
+              background: "linear-gradient(135deg, #6366F1, #06B6D4)",
+              color: "#FFFFFF",
+              fontSize: 24,
+              fontWeight: 600,
+            }}
+          >
             {user?.avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -215,17 +273,34 @@ export default function SettingsPage() {
               </span>
             )}
             {uploadingAvatar ? (
-              <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+              <div
+                className="absolute inset-0 flex items-center justify-center"
+                style={{ background: "rgba(0,0,0,0.5)" }}
+              >
                 <div className="w-6 h-6 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               </div>
             ) : null}
           </div>
 
           <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold text-gray-900 mb-1">
+            <h3
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                marginBottom: 4,
+              }}
+            >
               Profile picture
             </h3>
-            <p className="text-sm text-gray-500 mb-3 leading-relaxed">
+            <p
+              style={{
+                fontSize: 12.5,
+                color: "var(--text-secondary)",
+                marginBottom: 12,
+                lineHeight: 1.5,
+              }}
+            >
               JPEG, PNG, or WebP. Max 5 MB. We&apos;ll crop it to a 256×256 square.
             </p>
 
@@ -241,7 +316,16 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadingAvatar}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg"
+                style={{
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: uploadingAvatar ? "not-allowed" : "pointer",
+                  opacity: uploadingAvatar ? 0.6 : 1,
+                }}
               >
                 <Upload className="w-4 h-4" />
                 {user?.avatar_url ? "Replace" : "Upload"}
@@ -251,7 +335,16 @@ export default function SettingsPage() {
                   type="button"
                   onClick={handleAvatarRemove}
                   disabled={uploadingAvatar}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-rose-200 bg-white text-sm font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg"
+                  style={{
+                    background: "var(--bg-surface)",
+                    border: "1px solid rgba(248,113,113,0.3)",
+                    color: "var(--accent-danger)",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: uploadingAvatar ? "not-allowed" : "pointer",
+                    opacity: uploadingAvatar ? 0.6 : 1,
+                  }}
                 >
                   <Trash2 className="w-4 h-4" />
                   Remove
@@ -261,9 +354,14 @@ export default function SettingsPage() {
 
             {avatarMsg ? (
               <div
-                className={`mt-3 text-sm ${
-                  avatarMsg.type === "success" ? "text-green-600" : "text-rose-600"
-                }`}
+                className="mt-3"
+                style={{
+                  fontSize: 12.5,
+                  color:
+                    avatarMsg.type === "success"
+                      ? "var(--accent-success)"
+                      : "var(--accent-danger)",
+                }}
               >
                 {avatarMsg.text}
               </div>
@@ -282,16 +380,32 @@ export default function SettingsPage() {
             label="Email"
             value={user?.email ?? ""}
             readOnly
-            className="bg-gray-50 text-gray-500 cursor-not-allowed"
+            style={{
+              background: "var(--bg-surface-2)",
+              color: "var(--text-tertiary)",
+              cursor: "not-allowed",
+            }}
           />
 
           {profileMsg ? (
             <div
-              className={`rounded-lg border px-3 py-2 text-sm ${
-                profileMsg.type === "success"
-                  ? "bg-green-50 border-green-200 text-green-700"
-                  : "bg-rose-50 border-rose-200 text-rose-700"
-              }`}
+              className="rounded-lg px-3 py-2"
+              style={{
+                fontSize: 13,
+                background:
+                  profileMsg.type === "success"
+                    ? "rgba(16,185,129,0.1)"
+                    : "rgba(248,113,113,0.1)",
+                border: `1px solid ${
+                  profileMsg.type === "success"
+                    ? "rgba(16,185,129,0.25)"
+                    : "rgba(248,113,113,0.25)"
+                }`,
+                color:
+                  profileMsg.type === "success"
+                    ? "var(--accent-success)"
+                    : "var(--accent-danger)",
+              }}
             >
               {profileMsg.text}
             </div>
@@ -312,7 +426,12 @@ export default function SettingsPage() {
       {/* Security — coming soon */}
       <Card padding="md">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-heading font-semibold">Security</h2>
+          <h2
+            className="font-heading"
+            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+          >
+            Security
+          </h2>
           <ComingSoonPill />
         </div>
         <div className="opacity-60 pointer-events-none">
@@ -324,7 +443,11 @@ export default function SettingsPage() {
               value={currentPw}
               onChange={(e) => setCurrentPw(e.target.value)}
               disabled
-              className="bg-gray-50 text-gray-500 cursor-not-allowed"
+              style={{
+                background: "var(--bg-surface-2)",
+                color: "var(--text-tertiary)",
+                cursor: "not-allowed",
+              }}
             />
             <Input
               label="New password"
@@ -333,7 +456,11 @@ export default function SettingsPage() {
               value={newPw}
               onChange={(e) => setNewPw(e.target.value)}
               disabled
-              className="bg-gray-50 text-gray-500 cursor-not-allowed"
+              style={{
+                background: "var(--bg-surface-2)",
+                color: "var(--text-tertiary)",
+                cursor: "not-allowed",
+              }}
             />
             <Input
               label="Confirm new password"
@@ -342,7 +469,11 @@ export default function SettingsPage() {
               value={confirmPw}
               onChange={(e) => setConfirmPw(e.target.value)}
               disabled
-              className="bg-gray-50 text-gray-500 cursor-not-allowed"
+              style={{
+                background: "var(--bg-surface-2)",
+                color: "var(--text-tertiary)",
+                cursor: "not-allowed",
+              }}
             />
             <Button type="submit" disabled className="opacity-50">
               Update Password
@@ -354,7 +485,12 @@ export default function SettingsPage() {
       {/* Preferences — coming soon */}
       <Card padding="md">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-heading font-semibold">Preferences</h2>
+          <h2
+            className="font-heading"
+            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+          >
+            Preferences
+          </h2>
           <ComingSoonPill />
         </div>
         <div className="opacity-60 pointer-events-none">
@@ -376,21 +512,61 @@ export default function SettingsPage() {
       </Card>
 
       {/* Danger zone */}
-      <section className="bg-white rounded-xl border border-rose-200 shadow-sm p-6">
+      <section
+        className="p-6"
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid rgba(248,113,113,0.3)",
+          borderRadius: 12,
+        }}
+      >
         <div className="flex items-center gap-2 mb-2">
-          <AlertTriangle className="w-5 h-5 text-rose-600" />
-          <h2 className="text-lg font-heading font-semibold text-gray-900">
+          <AlertTriangle
+            className="w-5 h-5"
+            style={{ color: "var(--accent-danger)" }}
+          />
+          <h2
+            className="font-heading"
+            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+          >
             Danger Zone
           </h2>
         </div>
-        <p className="text-sm text-gray-500 mb-5">
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--text-secondary)",
+            marginBottom: 20,
+          }}
+        >
           These actions cannot be undone. Proceed carefully.
         </p>
 
-        <div className="flex items-start justify-between gap-4 p-4 rounded-lg border border-rose-100 bg-rose-50/40">
+        <div
+          className="flex items-start justify-between gap-4 p-4 rounded-lg"
+          style={{
+            border: "1px solid rgba(248,113,113,0.2)",
+            background: "rgba(248,113,113,0.04)",
+          }}
+        >
           <div className="min-w-0">
-            <div className="font-medium text-gray-900 mb-1">Delete account</div>
-            <div className="text-sm text-gray-600 leading-relaxed">
+            <div
+              style={{
+                fontWeight: 500,
+                color: "var(--text-primary)",
+                marginBottom: 4,
+                fontSize: 13.5,
+              }}
+            >
+              Delete account
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                color: "var(--text-secondary)",
+                lineHeight: 1.5,
+              }}
+            >
               Permanently delete your SRAN account, all projects, API keys, and
               usage history. Unused token balance will be forfeited.
             </div>
@@ -398,7 +574,16 @@ export default function SettingsPage() {
           <button
             type="button"
             disabled
-            className="flex-shrink-0 px-4 py-2 rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex-shrink-0 px-4 py-2 rounded-lg"
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid rgba(248,113,113,0.3)",
+              color: "var(--accent-danger)",
+              fontSize: 13,
+              fontWeight: 500,
+              opacity: 0.5,
+              cursor: "not-allowed",
+            }}
             title="Coming soon"
           >
             Delete account
@@ -411,18 +596,38 @@ export default function SettingsPage() {
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="py-3 flex items-center justify-between gap-4">
-      <dt className="text-xs uppercase tracking-widest text-gray-500 font-medium">
+    <div
+      className="py-3 flex items-center justify-between gap-4"
+      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+    >
+      <dt
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: "0.12em",
+          color: "var(--text-tertiary)",
+          fontWeight: 600,
+        }}
+      >
         {label}
       </dt>
-      <dd className="text-sm">{value}</dd>
+      <dd style={{ fontSize: 13, color: "var(--text-primary)" }}>{value}</dd>
     </div>
   );
 }
 
 function ComingSoonPill() {
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-100">
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+      style={{
+        fontSize: 11,
+        fontWeight: 500,
+        background: "rgba(245,158,11,0.12)",
+        color: "var(--accent-warning)",
+        border: "1px solid rgba(245,158,11,0.25)",
+      }}
+    >
       <Clock className="w-3 h-3" />
       Coming soon
     </span>
@@ -439,21 +644,43 @@ function PreferenceRow({
   defaultOn?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3 border-b border-gray-100 last:border-b-0">
+    <div
+      className="flex items-start justify-between gap-4 py-3"
+      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+    >
       <div className="min-w-0">
-        <div className="font-medium text-gray-900">{title}</div>
-        <div className="text-sm text-gray-500 mt-0.5">{description}</div>
+        <div
+          style={{ fontWeight: 500, color: "var(--text-primary)", fontSize: 13.5 }}
+        >
+          {title}
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2 }}>
+          {description}
+        </div>
       </div>
       <div
-        className={`flex-shrink-0 w-10 h-6 rounded-full relative transition-colors ${
-          defaultOn ? "bg-violet-500" : "bg-gray-300"
-        }`}
+        className="flex-shrink-0 relative"
+        style={{
+          width: 40,
+          height: 24,
+          borderRadius: 999,
+          background: defaultOn ? "var(--accent-primary)" : "var(--bg-elevated)",
+          transition: "background 150ms",
+        }}
         aria-hidden="true"
       >
         <span
-          className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${
-            defaultOn ? "left-[calc(100%-22px)]" : "left-0.5"
-          }`}
+          className="absolute"
+          style={{
+            top: 2,
+            width: 20,
+            height: 20,
+            background: "#FFFFFF",
+            borderRadius: "50%",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+            left: defaultOn ? "calc(100% - 22px)" : 2,
+            transition: "left 150ms",
+          }}
         />
       </div>
     </div>

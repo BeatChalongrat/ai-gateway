@@ -19,6 +19,33 @@ const config: Config = {
         bg: {
           page: "#F8F9FB",
           card: "#FFFFFF",
+          // Theme-token-aware aliases. These resolve at runtime via
+          // CSS vars defined in globals.css and swap based on
+          // data-theme on <html>. Use these in (app)/* — leave the
+          // raw page/card values for marketing/auth surfaces.
+          base: "var(--bg-base)",
+          surface: "var(--bg-surface)",
+          "surface-2": "var(--bg-surface-2)",
+          sidebar: "var(--bg-sidebar)",
+          elevated: "var(--bg-elevated)",
+        },
+        border: {
+          DEFAULT: "var(--border-default)",
+          subtle: "var(--border-subtle)",
+        },
+        text: {
+          primary: "var(--text-primary)",
+          secondary: "var(--text-secondary)",
+          tertiary: "var(--text-tertiary)",
+          muted: "var(--text-muted)",
+        },
+        accent: {
+          primary: "var(--accent-primary)",
+          success: "var(--accent-success)",
+          warning: "var(--accent-warning)",
+          danger: "var(--accent-danger)",
+          violet: "var(--accent-violet)",
+          cyan: "var(--accent-cyan)",
         },
       },
       fontFamily: {
