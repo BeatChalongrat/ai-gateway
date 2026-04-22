@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  Activity,
   ArrowUpRight,
   CreditCard,
   FolderOpen,
@@ -21,6 +20,7 @@ import { resolveAvatarUrl } from "@/lib/avatar";
 import { formatTokens } from "@/lib/format";
 import type { PortalUser } from "@/lib/types";
 import { Logo } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface NavItem {
   label: string;
@@ -41,8 +41,6 @@ export function Sidebar() {
   const router = useRouter();
   const [user, setUser] = useState<PortalUser | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -60,17 +58,6 @@ export function Sidebar() {
       alive = false;
     };
   }, [pathname]); // refresh on route change so post-topup reflects in sidebar
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (!menuOpen) return;
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, [menuOpen]);
 
   function handleLogout() {
     api.post("/portal/auth/logout").catch(() => {});
@@ -105,9 +92,9 @@ export function Sidebar() {
                   href={item.href}
                   onClick={() => setMobileOpen(false)}
                   className={[
-                    "flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                    "nav-item flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-lg text-sm font-medium",
                     active
-                      ? "bg-violet-500/10 text-white"
+                      ? "is-active bg-violet-500/10 text-white"
                       : "text-white/80 hover:bg-white/5 hover:text-white",
                   ].join(" ")}
                 >
@@ -124,95 +111,170 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {/* Mini credit indicator — only for portal users, not visible when
-          the /me call hasn't landed yet. */}
-      {user ? (
-        <div className="px-4 pb-3">
-          <div className="rounded-lg bg-white/5 border border-white/10 px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-white/90">
-                <Gem size={14} strokeWidth={1.75} className="text-brand-blue" />
-                <span className="text-sm font-medium">
-                  {formatTokens(user.credit_balance)}
-                </span>
-                <span className="text-xs text-white/50">credits</span>
-              </div>
+      {/* Footer: credits / theme toggle / user card with logout icon.
+          Each block stands alone — no dropdown. The logout icon
+          replaces the old click-the-avatar-to-open-menu interaction;
+          name + avatar are now non-interactive. */}
+      <footer
+        className="mt-auto px-3 pb-4 pt-3 flex flex-col gap-2.5 border-t border-white/10"
+      >
+        {/* Credits card — sidebar-scoped (translucent on navy, both themes) */}
+        {user ? (
+          <div
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.04))",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 10,
+              padding: "10px 12px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <Gem size={13} strokeWidth={1.75} style={{ color: "#6366F1" }} />
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#FFFFFF",
+                }}
+              >
+                {formatTokens(user.credit_balance)}
+              </span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>credits</span>
             </div>
             <Link
               href="/billing"
               onClick={() => setMobileOpen(false)}
-              className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-blue hover:underline"
+              style={{
+                fontSize: 11,
+                color: "#6366F1",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                fontWeight: 500,
+              }}
             >
               Upgrade
-              <ArrowUpRight size={12} />
+              <ArrowUpRight size={11} />
             </Link>
-          </div>
-        </div>
-      ) : null}
-
-      {/* User block + dropdown */}
-      <div
-        ref={menuRef}
-        className="px-3 pb-4 pt-2 border-t border-white/10 relative"
-      >
-        {menuOpen ? (
-          <div className="absolute bottom-full left-3 right-3 mb-1 rounded-lg bg-brand-dark border border-white/10 shadow-xl overflow-hidden">
-            <Link
-              href="/settings"
-              onClick={() => {
-                setMenuOpen(false);
-                setMobileOpen(false);
-              }}
-              className="flex items-center gap-2 px-3 py-2.5 text-sm text-white/80 hover:bg-white/5"
-            >
-              <Settings size={14} />
-              Settings
-            </Link>
-            <button
-              onClick={() => {
-                setMenuOpen(false);
-                handleLogout();
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-white/80 hover:bg-white/5 border-t border-white/10"
-            >
-              <LogOut size={14} />
-              Sign out
-            </button>
           </div>
         ) : null}
 
-        <button
-          onClick={() => setMenuOpen((v) => !v)}
-          className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 text-left"
-        >
-          <div className="w-9 h-9 rounded-full overflow-hidden bg-brand-blue/80 text-white flex items-center justify-center text-sm font-semibold shrink-0">
-            {user?.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={resolveAvatarUrl(user.avatar_url) ?? ""}
-                alt="Profile"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span>{(user?.display_name || user?.email || "?").slice(0, 1).toUpperCase()}</span>
-            )}
+        {/* Theme toggle */}
+        <ThemeToggle />
+
+        {/* User card with standalone logout icon — sidebar-scoped */}
+        {user ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 10px",
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.04))",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 10,
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                background: "linear-gradient(135deg, #6366F1, #8B5CF6)",
+                borderRadius: 7,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#FFFFFF",
+                flexShrink: 0,
+                overflow: "hidden",
+              }}
+            >
+              {user.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={resolveAvatarUrl(user.avatar_url) ?? ""}
+                  alt="Profile"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              ) : (
+                <span>
+                  {(user.display_name || user.email || "?").slice(0, 1).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "#FFFFFF",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {user.display_name || "—"}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "rgba(255,255,255,0.6)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {user.email || ""}
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              aria-label="Sign out"
+              title="Sign out"
+              type="button"
+              style={{
+                width: 28,
+                height: 28,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "transparent",
+                border: "none",
+                borderRadius: 6,
+                color: "rgba(255,255,255,0.55)",
+                cursor: "pointer",
+                flexShrink: 0,
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(248,113,113,0.15)";
+                e.currentTarget.style.color = "#F87171";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = "rgba(255,255,255,0.55)";
+              }}
+            >
+              <LogOut size={14} strokeWidth={1.75} />
+            </button>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-white font-medium truncate">
-              {user?.display_name || "—"}
-            </p>
-            <p className="text-xs text-white/50 truncate">{user?.email || ""}</p>
-          </div>
-          <Activity size={14} className="text-white/40 shrink-0" strokeWidth={2} />
-        </button>
-      </div>
+        ) : null}
+      </footer>
     </>
   );
 
   return (
     <>
       {/* Mobile top bar */}
-      <div className="md:hidden h-14 flex items-center justify-between px-4 bg-brand-dark text-white">
+      <div
+        className="md:hidden h-14 flex items-center justify-between px-4 text-white"
+        style={{ backgroundColor: "var(--bg-sidebar)" }}
+      >
         <Logo variant="light" size="sm" />
         <button
           aria-label="Open menu"
@@ -223,10 +285,10 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar — navy in BOTH themes (brand signature). */}
       <aside
         className="hidden md:flex md:flex-col md:fixed md:inset-y-0 md:left-0 md:w-60 text-white"
-        style={{ backgroundColor: "var(--brand-dark)" }}
+        style={{ backgroundColor: "var(--bg-sidebar)" }}
       >
         {sidebarBody}
       </aside>
@@ -240,7 +302,7 @@ export function Sidebar() {
           />
           <div
             className="w-64 flex flex-col text-white"
-            style={{ backgroundColor: "var(--brand-dark)" }}
+            style={{ backgroundColor: "var(--bg-sidebar)" }}
           >
             <div className="flex justify-end p-3">
               <button
