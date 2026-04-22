@@ -25,25 +25,48 @@ export function Modal({ open, onClose, title, children, footer, widthClass = "ma
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.5)" }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className={[
-          "w-full bg-white rounded-xl shadow-2xl border border-gray-200",
-          widthClass,
-        ].join(" ")}
+        className={["w-full rounded-xl shadow-2xl", widthClass].join(" ")}
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-default)",
+        }}
       >
         {title ? (
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold font-heading text-gray-900">{title}</h2>
+          <div
+            className="px-6 py-4"
+            style={{ borderBottom: "1px solid var(--border-subtle)" }}
+          >
+            <h2
+              className="font-heading"
+              style={{
+                fontSize: 17,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                margin: 0,
+              }}
+            >
+              {title}
+            </h2>
           </div>
         ) : null}
-        <div className="px-6 py-5">{children}</div>
+        <div className="px-6 py-5" style={{ color: "var(--text-primary)" }}>
+          {children}
+        </div>
         {footer ? (
-          <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl flex justify-end gap-2">
+          <div
+            className="px-6 py-4 rounded-b-xl flex justify-end gap-2"
+            style={{
+              borderTop: "1px solid var(--border-subtle)",
+              background: "var(--bg-surface-2)",
+            }}
+          >
             {footer}
           </div>
         ) : null}

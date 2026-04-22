@@ -18,13 +18,15 @@ type Props = {
   href?: string;
 };
 
-const TONES: Record<Tone, { bg: string; text: string }> = {
-  violet: { bg: "bg-violet-50", text: "text-violet-600" },
-  cyan: { bg: "bg-cyan-50", text: "text-cyan-600" },
-  green: { bg: "bg-green-50", text: "text-green-600" },
-  amber: { bg: "bg-amber-50", text: "text-amber-600" },
-  rose: { bg: "bg-rose-50", text: "text-rose-600" },
-  neutral: { bg: "bg-gray-100", text: "text-gray-600" },
+// rgb triplets matching the new accent palette so we can build
+// rgba() backgrounds and gradient accent lines without parsing hex.
+const TONE_RGB: Record<Tone, string> = {
+  violet: "99,102,241",
+  cyan: "6,182,212",
+  green: "16,185,129",
+  amber: "245,158,11",
+  rose: "248,113,113",
+  neutral: "139,146,165",
 };
 
 export default function StatCard({
@@ -36,49 +38,105 @@ export default function StatCard({
   trend,
   href,
 }: Props) {
-  const t = TONES[tone];
+  const rgb = TONE_RGB[tone];
+
   const body = (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 transition-all hover:shadow-md hover:-translate-y-0.5 h-full">
+    <div
+      className="h-full"
+      style={{
+        position: "relative",
+        background:
+          "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+        border: "1px solid var(--border-default)",
+        borderRadius: 12,
+        padding: 20,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 1.5,
+          background: `linear-gradient(90deg, transparent, rgba(${rgb}, 0.65), transparent)`,
+        }}
+      />
+
       <div className="flex items-start justify-between mb-4">
         <div
-          className={`${t.bg} ${t.text} w-10 h-10 rounded-lg flex items-center justify-center`}
+          className="w-9 h-9 rounded-lg flex items-center justify-center"
+          style={{
+            background: `rgba(${rgb}, 0.14)`,
+            color: `rgb(${rgb})`,
+          }}
         >
           {icon}
         </div>
         {trend ? (
           <span
-            className={`text-xs font-medium px-2 py-1 rounded-md ${
-              trend.direction === "up"
-                ? "bg-green-50 text-green-700"
-                : trend.direction === "down"
-                  ? "bg-rose-50 text-rose-700"
-                  : "bg-gray-100 text-gray-600"
-            }`}
+            className="text-xs font-medium px-2 py-1 rounded-md"
+            style={{
+              background:
+                trend.direction === "up"
+                  ? "rgba(16,185,129,0.12)"
+                  : trend.direction === "down"
+                  ? "rgba(248,113,113,0.12)"
+                  : "var(--bg-elevated)",
+              color:
+                trend.direction === "up"
+                  ? "var(--accent-success)"
+                  : trend.direction === "down"
+                  ? "var(--accent-danger)"
+                  : "var(--text-secondary)",
+            }}
           >
             {trend.direction === "up"
               ? "↑"
               : trend.direction === "down"
-                ? "↓"
-                : "—"}{" "}
+              ? "↓"
+              : "—"}{" "}
             {trend.label}
           </span>
         ) : null}
       </div>
-      <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">
+      <div
+        style={{
+          fontSize: 10.5,
+          textTransform: "uppercase",
+          letterSpacing: "0.14em",
+          color: "var(--text-tertiary)",
+          fontWeight: 600,
+          marginBottom: 6,
+        }}
+      >
         {label}
       </div>
-      <div className="text-3xl font-heading font-bold text-gray-900 leading-tight">
+      <div
+        className="font-heading"
+        style={{
+          fontSize: 28,
+          fontWeight: 700,
+          letterSpacing: "-0.02em",
+          color: "var(--text-primary)",
+          lineHeight: 1.1,
+        }}
+      >
         {value}
       </div>
       {caption ? (
-        <div className="text-sm text-gray-500 mt-1">{caption}</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 6 }}>
+          {caption}
+        </div>
       ) : null}
     </div>
   );
 
   if (href) {
     return (
-      <Link href={href} className="block h-full">
+      <Link href={href} className="block h-full" style={{ textDecoration: "none" }}>
         {body}
       </Link>
     );
