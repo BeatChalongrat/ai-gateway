@@ -1,7 +1,21 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 
+import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
+
+// Inline before-hydration script: read sran-portal-theme from
+// localStorage and stamp data-theme on <html> *before* React renders,
+// so the first paint already matches the user's saved theme. Without
+// this the page flashes light → dark on every refresh in dark mode.
+const themeBootScript = `
+  (function () {
+    try {
+      var t = localStorage.getItem("sran-portal-theme") || "light";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+`;
 
 // Self-hosted via next/font so the marketing page can use Inter for
 // body and a tabular monospace for .flow-stat-val without adding
@@ -37,8 +51,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
-      <body>{children}</body>
+    <html
+      lang="en"
+      data-theme="light"
+      suppressHydrationWarning
+      className={`${inter.variable} ${mono.variable}`}
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }

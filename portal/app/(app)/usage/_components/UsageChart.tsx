@@ -24,19 +24,35 @@ export default function UsageChart({ totalRequests, range }: Props) {
   const hasData = totalRequests > 0;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+    <div
+      className="p-6"
+      style={{
+        background:
+          "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+        border: "1px solid var(--border-default)",
+        borderRadius: 12,
+      }}
+    >
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h3 className="font-heading font-semibold text-gray-900">
+          <h3
+            className="font-heading"
+            style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}
+          >
             Requests over time
           </h3>
-          <p className="text-sm text-gray-500 mt-0.5">{RANGE_LABEL[range]}</p>
+          <p style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2 }}>
+            {RANGE_LABEL[range]}
+          </p>
         </div>
         {hasData ? (
-          <div className="flex items-center gap-4 text-xs">
+          <div className="flex items-center gap-4" style={{ fontSize: 11 }}>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-sm bg-violet-500" />
-              <span className="text-gray-600">Requests</span>
+              <span
+                className="w-2 h-2 rounded-sm"
+                style={{ background: "var(--accent-primary)" }}
+              />
+              <span style={{ color: "var(--text-secondary)" }}>Requests</span>
             </div>
           </div>
         ) : null}
@@ -49,17 +65,32 @@ export default function UsageChart({ totalRequests, range }: Props) {
               {PLACEHOLDER_HEIGHTS.map((h, i) => (
                 <div
                   key={i}
-                  className="flex-1 bg-gray-100 rounded-t"
-                  style={{ height: `${h}%` }}
+                  className="flex-1 rounded-t"
+                  style={{ height: `${h}%`, background: "var(--bg-elevated)" }}
                 />
               ))}
             </div>
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="bg-white/90 backdrop-blur-sm px-5 py-3 rounded-lg border border-gray-200 shadow-sm text-center">
-                <div className="text-sm font-medium text-gray-900">
+              <div
+                className="px-5 py-3 rounded-lg text-center"
+                style={{
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-default)",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "var(--text-primary)",
+                  }}
+                >
                   Awaiting data
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">
+                <div
+                  style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 2 }}
+                >
                   Send your first request to see it here
                 </div>
               </div>
@@ -71,15 +102,32 @@ export default function UsageChart({ totalRequests, range }: Props) {
             {PLACEHOLDER_HEIGHTS.map((h, i) => (
               <div
                 key={i}
-                className="flex-1 bg-violet-500 rounded-t opacity-80 hover:opacity-100 transition-opacity"
-                style={{ height: `${h}%` }}
+                className="flex-1 rounded-t transition-opacity"
+                style={{
+                  height: `${h}%`,
+                  background: "var(--accent-primary)",
+                  opacity: 0.6,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = "1";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = "0.6";
+                }}
               />
             ))}
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between mt-4 text-xs text-gray-400 border-t border-gray-100 pt-3">
+      <div
+        className="flex items-center justify-between mt-4 pt-3"
+        style={{
+          fontSize: 11,
+          color: "var(--text-tertiary)",
+          borderTop: "1px solid var(--border-subtle)",
+        }}
+      >
         <span>Earliest</span>
         <span>Now</span>
       </div>

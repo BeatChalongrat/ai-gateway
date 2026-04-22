@@ -115,27 +115,55 @@ export default function UsagePage() {
         title="Usage"
         subtitle="Recent gateway requests from your API keys."
         actions={
-          <div className="inline-flex rounded-lg bg-white border border-gray-200 p-0.5">
-            {(["today", "7d", "30d", "all"] as Range[]).map((r) => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={[
-                  "px-3 py-1.5 text-sm font-medium rounded-md",
-                  range === r
-                    ? "bg-brand-navy text-white shadow-sm"
-                    : "text-gray-600 hover:bg-gray-100",
-                ].join(" ")}
-              >
-                {r === "today" ? "Today" : r === "all" ? "All" : r === "7d" ? "7 days" : "30 days"}
-              </button>
-            ))}
+          <div
+            className="inline-flex p-0.5"
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 8,
+            }}
+          >
+            {(["today", "7d", "30d", "all"] as Range[]).map((r) => {
+              const active = range === r;
+              return (
+                <button
+                  key={r}
+                  onClick={() => setRange(r)}
+                  type="button"
+                  className="px-3 py-1.5 text-sm font-medium rounded-md"
+                  style={{
+                    background: active ? "var(--bg-elevated)" : "transparent",
+                    color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {r === "today"
+                    ? "Today"
+                    : r === "all"
+                    ? "All"
+                    : r === "7d"
+                    ? "7 days"
+                    : "30 days"}
+                </button>
+              );
+            })}
           </div>
         }
       />
 
       {error ? (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+        <div
+          style={{
+            background: "rgba(220, 38, 38, 0.08)",
+            border: "1px solid rgba(220, 38, 38, 0.25)",
+            color: "var(--accent-danger)",
+            fontSize: 13,
+            padding: "8px 12px",
+            borderRadius: 8,
+          }}
+        >
           {error}
         </div>
       ) : null}
@@ -169,7 +197,10 @@ export default function UsagePage() {
       <RequestLogTable rows={logRows} />
 
       {filtered.length > 0 ? (
-        <p className="text-xs text-gray-400 text-right">
+        <p
+          className="text-right"
+          style={{ fontSize: 11, color: "var(--text-tertiary)" }}
+        >
           Showing {filtered.length} of {total} request
           {total === 1 ? "" : "s"}
         </p>

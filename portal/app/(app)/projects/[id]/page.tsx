@@ -146,7 +146,16 @@ export default function ProjectDetailPage() {
     return (
       <div className="space-y-4">
         <BackLink />
-        <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+        <div
+          style={{
+            background: "rgba(220,38,38,0.08)",
+            border: "1px solid rgba(220,38,38,0.25)",
+            color: "var(--accent-danger)",
+            fontSize: 13,
+            padding: "8px 12px",
+            borderRadius: 8,
+          }}
+        >
           {error}
         </div>
       </div>
@@ -158,14 +167,31 @@ export default function ProjectDetailPage() {
       <BackLink />
 
       <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-xl bg-brand-navy/10 text-brand-navy flex items-center justify-center shrink-0">
+        <div
+          className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+          style={{
+            background: "rgba(99,102,241,0.12)",
+            color: "var(--accent-primary)",
+          }}
+        >
           <FolderOpen size={24} strokeWidth={1.75} />
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-heading font-bold truncate">
+          <h1
+            className="font-heading truncate"
+            style={{
+              fontSize: 24,
+              fontWeight: 600,
+              letterSpacing: "-0.02em",
+              color: "var(--text-primary)",
+              margin: 0,
+            }}
+          >
             {project?.name}
           </h1>
-          <p className="text-xs text-gray-500 mt-1">
+          <p
+            style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 4 }}
+          >
             Created {formatDate(project?.created_at)}
           </p>
         </div>
@@ -181,7 +207,12 @@ export default function ProjectDetailPage() {
       {/* API Keys */}
       <Card padding="md">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-heading font-semibold">API Keys</h2>
+          <h2
+            className="font-heading"
+            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}
+          >
+            API Keys
+          </h2>
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus size={14} className="mr-1" strokeWidth={2} />
             Create Key
@@ -190,13 +221,26 @@ export default function ProjectDetailPage() {
 
         {keys.length === 0 ? (
           <div className="py-10 text-center">
-            <div className="mx-auto w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-300">
+            <div
+              className="mx-auto w-12 h-12 rounded-full flex items-center justify-center"
+              style={{
+                background: "rgba(99,102,241,0.08)",
+                border: "1px solid rgba(99,102,241,0.2)",
+                color: "var(--accent-primary)",
+              }}
+            >
               <Key size={26} strokeWidth={1.5} />
             </div>
-            <h3 className="mt-3 text-base font-heading font-semibold text-gray-900">
+            <h3
+              className="mt-3 font-heading"
+              style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}
+            >
               No API keys yet
             </h3>
-            <p className="mt-1 text-sm text-gray-500 max-w-sm mx-auto">
+            <p
+              className="mt-1 max-w-sm mx-auto"
+              style={{ fontSize: 13, color: "var(--text-secondary)" }}
+            >
               Create a key to start sending requests through the gateway.
             </p>
             <div className="mt-4">
@@ -207,43 +251,53 @@ export default function ProjectDetailPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full" style={{ fontSize: 13, borderCollapse: "collapse" }}>
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-gray-200">
-                  <th className="py-2 pr-4 font-medium">Name</th>
-                  <th className="py-2 pr-4 font-medium">Key</th>
-                  <th className="py-2 pr-4 font-medium">Status</th>
-                  <th className="py-2 pr-4 font-medium">Created</th>
-                  <th className="py-2 pr-4 font-medium">Last used</th>
-                  <th className="py-2 pr-4 font-medium text-right"></th>
+                <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                  <KeyTh>Name</KeyTh>
+                  <KeyTh>Key</KeyTh>
+                  <KeyTh>Status</KeyTh>
+                  <KeyTh>Created</KeyTh>
+                  <KeyTh>Last used</KeyTh>
+                  <KeyTh align="right">{""}</KeyTh>
                 </tr>
               </thead>
               <tbody>
                 {keys.map((k) => (
-                  <tr key={k.key_id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                    <td className="py-2 pr-4 text-gray-900">{k.name}</td>
-                    <td className="py-2 pr-4 font-mono text-xs text-gray-700">
+                  <tr
+                    key={k.key_id}
+                    style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                  >
+                    <KeyTd color="var(--text-primary)">{k.name}</KeyTd>
+                    <KeyTd color="var(--text-secondary)" mono>
                       {k.key_prefix}…
-                    </td>
-                    <td className="py-2 pr-4">
+                    </KeyTd>
+                    <KeyTd>
                       <KeyStatus status={k.status} />
-                    </td>
-                    <td className="py-2 pr-4 text-gray-600">
+                    </KeyTd>
+                    <KeyTd color="var(--text-secondary)">
                       {relativeTime(k.created_at)}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-600">
+                    </KeyTd>
+                    <KeyTd color="var(--text-secondary)">
                       {k.last_used_at ? relativeTime(k.last_used_at) : "Never"}
-                    </td>
-                    <td className="py-2 pr-4 text-right">
+                    </KeyTd>
+                    <KeyTd align="right">
                       {k.status === "active" ? (
                         <button
                           onClick={() => setDeleteTarget(k)}
-                          className="text-xs font-medium text-brand-red hover:underline"
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 500,
+                            color: "var(--accent-danger)",
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                          }}
                         >
                           Revoke
                         </button>
                       ) : null}
-                    </td>
+                    </KeyTd>
                   </tr>
                 ))}
               </tbody>
@@ -274,7 +328,16 @@ export default function ProjectDetailPage() {
       >
         <form onSubmit={handleCreate} className="space-y-4">
           {createError ? (
-            <div className="rounded-lg bg-red-50 border border-red-200 text-brand-red text-sm px-3 py-2">
+            <div
+              style={{
+                background: "rgba(220,38,38,0.08)",
+                border: "1px solid rgba(220,38,38,0.25)",
+                color: "var(--accent-danger)",
+                fontSize: 13,
+                padding: "8px 12px",
+                borderRadius: 8,
+              }}
+            >
               {createError}
             </div>
           ) : null}
@@ -300,20 +363,49 @@ export default function ProjectDetailPage() {
         }
       >
         <div className="space-y-4">
-          <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2.5 text-sm flex gap-2">
-            <AlertTriangle size={18} className="shrink-0 mt-0.5 text-amber-600" />
+          <div
+            className="rounded-lg px-3 py-2.5 flex gap-2"
+            style={{
+              background: "rgba(245,158,11,0.1)",
+              border: "1px solid rgba(245,158,11,0.3)",
+              color: "var(--accent-warning)",
+              fontSize: 13,
+            }}
+          >
+            <AlertTriangle
+              size={18}
+              className="shrink-0 mt-0.5"
+              style={{ color: "var(--accent-warning)" }}
+            />
             <span>
               <strong>Save this key now.</strong> For security reasons it will{" "}
               <strong>not</strong> be shown again.
             </span>
           </div>
           <div className="flex gap-2">
-            <code className="flex-1 font-mono text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 break-all">
+            <code
+              className="flex-1 rounded-lg px-3 py-2.5 break-all"
+              style={{
+                fontFamily: "var(--ff-mono)",
+                fontSize: 12,
+                background: "var(--bg-surface-2)",
+                border: "1px solid var(--border-default)",
+                color: "var(--text-primary)",
+              }}
+            >
               {createdKey?.api_key}
             </code>
             <button
               onClick={copyKey}
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-brand-navy text-white px-3 text-sm font-medium hover:bg-brand-dark"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3"
+              style={{
+                background: "var(--accent-primary)",
+                color: "#FFFFFF",
+                fontSize: 13,
+                fontWeight: 500,
+                border: "1px solid var(--accent-primary)",
+                cursor: "pointer",
+              }}
             >
               {copied ? (
                 <>
@@ -349,9 +441,12 @@ export default function ProjectDetailPage() {
           </>
         }
       >
-        <p className="text-sm text-gray-700">
-          Revoke <span className="font-semibold">{deleteTarget?.name}</span>? Any request using
-          this key will immediately fail authentication.
+        <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+          Revoke{" "}
+          <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+            {deleteTarget?.name}
+          </span>
+          ? Any request using this key will immediately fail authentication.
         </p>
       </Modal>
     </div>
@@ -363,7 +458,15 @@ function BackLink() {
   return (
     <button
       onClick={() => router.push("/projects")}
-      className="inline-flex items-center gap-1 text-sm font-medium text-brand-navy hover:text-brand-blue"
+      className="inline-flex items-center gap-1"
+      style={{
+        fontSize: 13,
+        fontWeight: 500,
+        color: "var(--accent-primary)",
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+      }}
     >
       <ChevronLeft size={16} />
       Back to projects
@@ -381,27 +484,112 @@ function StatTile({
   value: string;
 }) {
   return (
-    <Card padding="md" className="card-hover">
-      <div className="w-9 h-9 rounded-lg bg-brand-blue/10 text-brand-blue flex items-center justify-center">
+    <Card padding="md">
+      <div
+        className="w-9 h-9 rounded-lg flex items-center justify-center"
+        style={{
+          background: "rgba(99,102,241,0.14)",
+          color: "var(--accent-primary)",
+        }}
+      >
         <Icon size={18} strokeWidth={1.75} />
       </div>
-      <p className="mt-3 text-xs uppercase tracking-widest text-gray-500">{label}</p>
-      <p className="mt-1 text-2xl font-heading font-bold text-gray-900">{value}</p>
+      <p
+        className="mt-3"
+        style={{
+          fontSize: 10.5,
+          textTransform: "uppercase",
+          letterSpacing: "0.14em",
+          color: "var(--text-tertiary)",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </p>
+      <p
+        className="mt-1 font-heading"
+        style={{
+          fontSize: 24,
+          fontWeight: 700,
+          letterSpacing: "-0.02em",
+          color: "var(--text-primary)",
+        }}
+      >
+        {value}
+      </p>
     </Card>
   );
 }
 
 function KeyStatus({ status }: { status: string }) {
   const s = (status || "").toLowerCase();
-  const color =
+  const palette =
     s === "active"
-      ? "bg-green-100 text-green-800"
+      ? { bg: "rgba(16,185,129,0.12)", color: "var(--accent-success)" }
       : s === "revoked"
-      ? "bg-red-100 text-red-800"
-      : "bg-gray-100 text-gray-700";
+      ? { bg: "rgba(248,113,113,0.12)", color: "var(--accent-danger)" }
+      : { bg: "var(--bg-elevated)", color: "var(--text-secondary)" };
   return (
-    <span className={["inline-block px-2 py-0.5 rounded-full text-xs font-medium", color].join(" ")}>
+    <span
+      className="inline-block px-2 py-0.5 rounded-full"
+      style={{
+        fontSize: 11,
+        fontWeight: 500,
+        background: palette.bg,
+        color: palette.color,
+      }}
+    >
       {status}
     </span>
+  );
+}
+
+function KeyTh({
+  children,
+  align = "left",
+}: {
+  children: React.ReactNode;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      style={{
+        padding: "8px 16px 8px 0",
+        textAlign: align,
+        fontSize: 11,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        color: "var(--text-muted)",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function KeyTd({
+  children,
+  color = "var(--text-primary)",
+  align = "left",
+  mono = false,
+}: {
+  children: React.ReactNode;
+  color?: string;
+  align?: "left" | "right";
+  mono?: boolean;
+}) {
+  return (
+    <td
+      style={{
+        padding: "10px 16px 10px 0",
+        color,
+        textAlign: align,
+        fontFamily: mono ? "var(--ff-mono)" : "inherit",
+        fontSize: mono ? 12 : 13,
+      }}
+    >
+      {children}
+    </td>
   );
 }

@@ -11,14 +11,16 @@ const PADDING = {
   lg: "p-8",
 };
 
-export function Card({ padding = "md", className = "", children, ...rest }: Props) {
+export function Card({ padding = "md", className = "", style, children, ...rest }: Props) {
   return (
     <div
-      className={[
-        "bg-bg-card rounded-xl border border-gray-200 shadow-sm",
-        PADDING[padding],
-        className,
-      ].join(" ")}
+      className={["rounded-xl", PADDING[padding], className].join(" ")}
+      style={{
+        background:
+          "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+        border: "1px solid var(--border-default)",
+        ...style,
+      }}
       {...rest}
     >
       {children}

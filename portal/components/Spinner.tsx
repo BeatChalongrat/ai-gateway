@@ -6,8 +6,13 @@ interface Props {
 export function Spinner({ size = 20, className = "" }: Props) {
   return (
     <span
-      style={{ width: size, height: size }}
-      className={["inline-block border-2 border-gray-300 border-t-brand-navy rounded-full animate-spin", className].join(" ")}
+      style={{
+        width: size,
+        height: size,
+        borderColor: "var(--border-default)",
+        borderTopColor: "var(--accent-primary)",
+      }}
+      className={["inline-block border-2 rounded-full animate-spin", className].join(" ")}
       role="status"
       aria-label="loading"
     />
