@@ -16,10 +16,22 @@ type Props = {
   rows: LogRow[];
 };
 
-const STATUS_STYLE: Record<LogRow["status"], string> = {
-  success: "bg-green-50 text-green-700",
-  error: "bg-rose-50 text-rose-700",
-  rate_limited: "bg-amber-50 text-amber-700",
+const STATUS_PALETTE: Record<
+  LogRow["status"],
+  { bg: string; color: string }
+> = {
+  success: {
+    bg: "rgba(16,185,129,0.12)",
+    color: "var(--accent-success)",
+  },
+  error: {
+    bg: "rgba(248,113,113,0.12)",
+    color: "var(--accent-danger)",
+  },
+  rate_limited: {
+    bg: "rgba(245,158,11,0.14)",
+    color: "var(--accent-warning)",
+  },
 };
 
 const STATUS_LABEL: Record<LogRow["status"], string> = {
@@ -28,18 +40,40 @@ const STATUS_LABEL: Record<LogRow["status"], string> = {
   rate_limited: "429",
 };
 
+function shellStyle(): React.CSSProperties {
+  return {
+    background:
+      "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+    border: "1px solid var(--border-default)",
+    borderRadius: 12,
+    overflow: "hidden",
+  };
+}
+
+function Header() {
+  return (
+    <div
+      className="px-6 py-4"
+      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+    >
+      <h3
+        className="font-heading"
+        style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}
+      >
+        Recent requests
+      </h3>
+      <p style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2 }}>
+        The last 100 requests from your API keys
+      </p>
+    </div>
+  );
+}
+
 export default function RequestLogTable({ rows }: Props) {
   if (rows.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h3 className="font-heading font-semibold text-gray-900">
-            Recent requests
-          </h3>
-          <p className="text-sm text-gray-500 mt-0.5">
-            The last 100 requests from your API keys
-          </p>
-        </div>
+      <div style={shellStyle()}>
+        <Header />
         <EmptyState
           icon={<Activity className="w-7 h-7" strokeWidth={1.5} />}
           title="No requests in this period"
@@ -51,55 +85,122 @@ export default function RequestLogTable({ rows }: Props) {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-100">
-        <h3 className="font-heading font-semibold text-gray-900">
-          Recent requests
-        </h3>
-        <p className="text-sm text-gray-500 mt-0.5">
-          The last 100 requests from your API keys
-        </p>
-      </div>
+    <div style={shellStyle()}>
+      <Header />
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-100">
-            <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
-              <th className="px-6 py-3 font-medium">Time</th>
-              <th className="px-6 py-3 font-medium">Model</th>
-              <th className="px-6 py-3 font-medium">Project</th>
-              <th className="px-6 py-3 font-medium text-right">Tokens</th>
-              <th className="px-6 py-3 font-medium text-right">Latency</th>
-              <th className="px-6 py-3 font-medium">Status</th>
+        <table className="w-full" style={{ fontSize: 13, borderCollapse: "collapse" }}>
+          <thead>
+            <tr
+              style={{
+                borderBottom: "1px solid var(--border-subtle)",
+                background: "var(--bg-surface-2)",
+              }}
+            >
+              <Th>Time</Th>
+              <Th>Model</Th>
+              <Th>Project</Th>
+              <Th align="right">Tokens</Th>
+              <Th align="right">Latency</Th>
+              <Th>Status</Th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {rows.map((row) => (
-              <tr key={row.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-3 text-gray-600 whitespace-nowrap">
-                  {row.timestamp}
-                </td>
-                <td className="px-6 py-3 font-mono text-xs text-gray-900">
-                  {row.model}
-                </td>
-                <td className="px-6 py-3 text-gray-900">{row.project}</td>
-                <td className="px-6 py-3 text-right font-medium text-gray-900">
-                  {row.tokens.toLocaleString()}
-                </td>
-                <td className="px-6 py-3 text-right text-gray-600">
-                  {row.latencyMs}ms
-                </td>
-                <td className="px-6 py-3">
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_STYLE[row.status]}`}
-                  >
-                    {STATUS_LABEL[row.status]}
-                  </span>
-                </td>
-              </tr>
-            ))}
+          <tbody>
+            {rows.map((row) => {
+              const palette = STATUS_PALETTE[row.status];
+              return (
+                <tr
+                  key={row.id}
+                  className="row-hover"
+                  style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                >
+                  <Td color="var(--text-secondary)" nowrap>
+                    {row.timestamp}
+                  </Td>
+                  <Td color="var(--text-primary)" mono>
+                    {row.model}
+                  </Td>
+                  <Td color="var(--text-primary)">{row.project}</Td>
+                  <Td color="var(--text-primary)" align="right" weight={500}>
+                    {row.tokens.toLocaleString()}
+                  </Td>
+                  <Td color="var(--text-secondary)" align="right">
+                    {row.latencyMs}ms
+                  </Td>
+                  <Td>
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 500,
+                        background: palette.bg,
+                        color: palette.color,
+                      }}
+                    >
+                      {STATUS_LABEL[row.status]}
+                    </span>
+                  </Td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function Th({
+  children,
+  align = "left",
+}: {
+  children: React.ReactNode;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      style={{
+        padding: "12px 24px",
+        textAlign: align,
+        fontSize: 11,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        color: "var(--text-muted)",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  color = "var(--text-primary)",
+  align = "left",
+  mono = false,
+  nowrap = false,
+  weight,
+}: {
+  children: React.ReactNode;
+  color?: string;
+  align?: "left" | "right";
+  mono?: boolean;
+  nowrap?: boolean;
+  weight?: number;
+}) {
+  return (
+    <td
+      style={{
+        padding: "12px 24px",
+        color,
+        textAlign: align,
+        fontFamily: mono ? "var(--ff-mono)" : "inherit",
+        fontSize: mono ? 12 : 13,
+        whiteSpace: nowrap ? "nowrap" : "normal",
+        fontWeight: weight,
+      }}
+    >
+      {children}
+    </td>
   );
 }
