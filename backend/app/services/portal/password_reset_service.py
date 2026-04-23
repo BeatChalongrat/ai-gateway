@@ -37,7 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import ValidationError
+from app.core.exceptions import RateLimitExceededError, ValidationError
 from app.models.portal_user import PortalUserORM
 
 
@@ -48,8 +48,45 @@ _log = logging.getLogger("password_reset")
 # free to compute.
 _TOKEN_BYTES = 48
 _REDIS_PREFIX = "password_reset:"
+_RATE_LIMIT_PREFIX = "password_reset_rl:"
 _TOKEN_TTL_SECONDS = 60 * 60  # 1 hour per spec
 _BCRYPT_COST = 12  # Match auth_service._hash_password.
+
+# Rate limit: 3 requests per email per hour. Blocks the mail-spam
+# abuse vector where someone types a victim's email repeatedly on
+# the forgot-password page. 4th request returns 429 before the
+# sender is called.
+_RATE_LIMIT_MAX = 3
+_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
+
+
+def _rate_limit_check_and_bump(redis_client, *, email_norm: str) -> None:
+    """Increment the per-email reset-request counter. 4th hit → 429.
+
+    Runs BEFORE we decide whether the email matches a real user so
+    the 429 shape is identical regardless of existence — same no-
+    oracle guarantee as the request endpoint itself.
+
+    Redis outage → allow (same fail-open policy as LoginRateLimiter).
+    """
+    key = f"{_RATE_LIMIT_PREFIX}{email_norm}"
+    try:
+        count = redis_client.incr(key)
+        if count == 1:
+            # First hit in this window — set TTL.
+            redis_client.expire(key, _RATE_LIMIT_WINDOW_SECONDS)
+    except Exception:
+        return  # fail-open
+    if count > _RATE_LIMIT_MAX:
+        try:
+            ttl = int(redis_client.ttl(key) or 0)
+        except Exception:
+            ttl = _RATE_LIMIT_WINDOW_SECONDS
+        raise RateLimitExceededError(
+            "Too many password reset requests for this email. "
+            "Try again later.",
+            details={"retry_after_seconds": max(ttl, 1)},
+        )
 
 
 @dataclass
@@ -108,6 +145,11 @@ def request_reset(
         # Same shape so the caller can't probe by sending garbage
         # emails and watching for a different response.
         return result
+
+    # Rate limit BEFORE resolving the user so the 429 covers both
+    # registered and unregistered emails equally — preserves the
+    # no-user-existence-oracle contract.
+    _rate_limit_check_and_bump(redis_client, email_norm=email_norm)
 
     user = db.execute(
         select(PortalUserORM).where(PortalUserORM.email == email_norm)

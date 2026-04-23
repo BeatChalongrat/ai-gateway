@@ -365,3 +365,153 @@ class TestEndpointRoundtrip:
         body = r.json()
         # No token exposed for unknown emails even in dev mode.
         assert body == {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting — Commit 34
+# ---------------------------------------------------------------------------
+
+
+class TestRequestRateLimit:
+    @pytest.fixture()
+    def client(self, redis_client, monkeypatch):
+        from app.api.routes import portal_auth
+
+        def _fake_redis_dep():
+            return redis_client
+
+        app.dependency_overrides[portal_auth._portal_redis_client] = _fake_redis_dep
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.pop(
+                portal_auth._portal_redis_client, None
+            )
+
+    def test_fourth_request_in_window_is_rate_limited(
+        self, client, redis_client
+    ):
+        """3 requests within an hour for the same email → all 200.
+        4th → 429 with retry_after_seconds hint."""
+        _seed_user(email="rl@example.com")
+        for _ in range(3):
+            r = client.post(
+                "/portal/auth/password-reset/request",
+                json={"email": "rl@example.com"},
+            )
+            assert r.status_code == 200
+        r4 = client.post(
+            "/portal/auth/password-reset/request",
+            json={"email": "rl@example.com"},
+        )
+        assert r4.status_code == 429
+        body = r4.json()
+        assert body["error"]["code"] == "rate_limit_exceeded"
+
+    def test_rate_limit_applies_to_unknown_emails_too(
+        self, client, redis_client
+    ):
+        """A probe attack with a non-existent email must also trip
+        the limiter so the attacker can't burn free requests hunting
+        for which emails exist."""
+        for _ in range(3):
+            r = client.post(
+                "/portal/auth/password-reset/request",
+                json={"email": "unknown-probe@example.com"},
+            )
+            assert r.status_code == 200
+        r4 = client.post(
+            "/portal/auth/password-reset/request",
+            json={"email": "unknown-probe@example.com"},
+        )
+        assert r4.status_code == 429
+
+    def test_rate_limit_scoped_per_email(self, client, redis_client):
+        """Different emails use separate counters."""
+        for _ in range(3):
+            client.post(
+                "/portal/auth/password-reset/request",
+                json={"email": "a-separate@example.com"},
+            )
+        # Exhausted for a-separate@; b-separate@ should still get 200.
+        r = client.post(
+            "/portal/auth/password-reset/request",
+            json={"email": "b-separate@example.com"},
+        )
+        assert r.status_code == 200
+
+    def test_rate_limit_redis_outage_fails_open(self, monkeypatch):
+        """When Redis raises, the limiter must not block requests —
+        the password check is the backstop and we don't want Redis
+        blips to create a self-inflicted DoS."""
+        from app.services.portal import password_reset_service
+
+        class BoomRedis:
+            def incr(self, _key):
+                raise RuntimeError("redis down")
+
+            def expire(self, _key, _ttl):
+                return None
+
+            def ttl(self, _key):
+                return 0
+
+        # Should not raise.
+        password_reset_service._rate_limit_check_and_bump(
+            BoomRedis(), email_norm="fail-open@example.com"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Full integration — request → email sent → confirm → login with new pwd
+# ---------------------------------------------------------------------------
+
+
+class TestFullFlowIntegration:
+    @pytest.fixture()
+    def client(self, redis_client, monkeypatch):
+        from app.api.routes import portal_auth
+
+        def _fake_redis_dep():
+            return redis_client
+
+        app.dependency_overrides[portal_auth._portal_redis_client] = _fake_redis_dep
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.pop(
+                portal_auth._portal_redis_client, None
+            )
+
+    def test_end_to_end_user_can_log_in_with_new_password(self, client):
+        _seed_user(email="e2e@example.com", password="OldPass1234")
+
+        # 1. Request reset
+        issued = client.post(
+            "/portal/auth/password-reset/request",
+            json={"email": "e2e@example.com"},
+        ).json()
+        token = issued["token"]
+
+        # 2. Confirm
+        r = client.post(
+            "/portal/auth/password-reset/confirm",
+            json={"token": token, "new_password": "ShinyNew1234"},
+        )
+        assert r.status_code == 200
+
+        # 3. Old password fails
+        r_old = client.post(
+            "/portal/auth/login",
+            json={"email": "e2e@example.com", "password": "OldPass1234"},
+        )
+        assert r_old.status_code == 401
+
+        # 4. New password works
+        r_new = client.post(
+            "/portal/auth/login",
+            json={"email": "e2e@example.com", "password": "ShinyNew1234"},
+        )
+        assert r_new.status_code == 200
+        tokens = r_new.json()
+        assert "access_token" in tokens
