@@ -17,6 +17,7 @@ export interface PortalUser {
   // Phase 3 tenancy. tenant_id may be null for orphaned users
   // between tenant-removal and re-invite redemption.
   tenant_id?: string | null;
+  tenant_name?: string | null;
   tenant_role?: "owner" | "member";
   // Short locale tag (en/th today). Used by transactional-email
   // rendering on the backend and by the Preferences toggle in the
@@ -39,11 +40,20 @@ export interface TenantInvite {
   id: string;
   tenant_id: string;
   code: string;
+  // Post-2026-04-24 redesign fields. Older callers hit the plural
+  // /portal/team/invites endpoints which still ship rows without
+  // these set — treat them as optional at the edge, always-present
+  // on anything coming from the new /portal/team/invite endpoint.
+  role?: "owner" | "member";
   email_hint: string | null;
   created_at: string;
   expires_at: string;
   used_at: string | null;
   used_by: string | null;
+  revoked_at?: string | null;
+  // Full shareable URL composed server-side so the frontend has one
+  // source of truth for the link shape.
+  invite_url?: string;
 }
 
 export interface AuthResponse {
