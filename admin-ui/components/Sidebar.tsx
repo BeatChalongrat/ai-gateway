@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { getSession, clearSession, ROLE_NAV, type DemoSession } from "../lib/auth";
+import { getSession, refreshSession, clearSession, ROLE_NAV, type AdminSession } from "../lib/auth";
 
 const S = { w: 15, h: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
@@ -57,16 +57,20 @@ const Divider = () => <div style={{ height: "1px", background: "rgba(80,130,220,
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [session, setSessionState] = useState<DemoSession | null>(null);
+  const [session, setSessionState] = useState<AdminSession | null>(null);
 
   useEffect(() => {
+    // First paint: render from the cached role so the UI doesn't flash.
     setSessionState(getSession());
+    // Then revalidate against the backend; this also catches session
+    // expiry while the tab is open.
+    refreshSession().then((s) => setSessionState(s));
   }, []);
 
   const allowedPaths = session ? ROLE_NAV[session.role] : [];
 
-  function handleLogout() {
-    clearSession();
+  async function handleLogout() {
+    await clearSession();
     router.push("/login");
   }
 

@@ -2,17 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { type DemoRole } from "../../lib/auth";
 
-const DEMO_USERS: Record<string, { password: string; role: DemoRole; name: string }> = {
-  admin: { password: "admin1234", role: "admin", name: "Super Admin" },
-  manager: { password: "manager1234", role: "project_admin", name: "Project Admin" },
-  viewer: { password: "viewer1234", role: "viewer", name: "Demo Viewer" },
-};
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  // Phase 2A Commit 6: the "username" field is now email — the backend
+  // session login endpoint authenticates against AdminUserORM.email.
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22,19 +19,25 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    await new Promise((r) => setTimeout(r, 400));
-
-    const user = DEMO_USERS[username.toLowerCase()];
-    if (!user || user.password !== password) {
-      setError("Invalid username or password");
+    try {
+      const res = await fetch(`${API_BASE}/auth/session/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) {
+        if (res.status === 429) setError("Too many attempts. Try again later.");
+        else setError("Invalid email or password");
+        setLoading(false);
+        return;
+      }
+      // Backend set admin_session + csrf_token cookies. Navigate home.
+      router.push("/");
+    } catch {
+      setError("Unable to reach the backend. Try again.");
       setLoading(false);
-      return;
     }
-
-    const session = { role: user.role, name: user.name, loggedInAt: Date.now() };
-    localStorage.setItem("sran_demo_session", JSON.stringify(session));
-    document.cookie = `sran_demo_role=${user.role}; path=/; max-age=86400`;
-    router.push("/");
   }
 
   const inputStyle: React.CSSProperties = {
@@ -120,13 +123,13 @@ export default function LoginPage() {
         }}>
           <form onSubmit={handleSubmit} style={{ width: "100%" }}>
             <div style={{ marginBottom: "1.25rem" }}>
-              <label style={labelStyle}>Username</label>
+              <label style={labelStyle}>Email</label>
               <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
-                autoComplete="username"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
                 style={inputStyle}
                 onFocus={(e) => { e.target.style.borderColor = "rgba(100,160,255,0.5)"; }}
                 onBlur={(e) => { e.target.style.borderColor = "rgba(100,140,220,0.2)"; }}
