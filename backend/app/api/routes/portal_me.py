@@ -39,6 +39,10 @@ OUTPUT_EXT = "webp"
 
 class UpdateProfileRequest(BaseModel):
     display_name: str | None = Field(None, max_length=100)
+    # Two-letter locale or similar short tag (we only ship 'en' and 'th'
+    # today). Longer values are rejected rather than silently truncated
+    # so a bad client never quietly overwrites the stored preference.
+    preferred_language: str | None = Field(None, max_length=8)
 
 
 def _low_credit_threshold(db: Session) -> int:
@@ -72,10 +76,15 @@ def get_me(
         "credit_used": used,
         "credit_percent_used": round(percent_used, 2),
         "is_low_credit": threshold > 0 and balance < threshold,
+        "email_verified": bool(user.email_verified),
         # Phase 3 tenancy fields. The UI gates the "Team" menu and
         # owner-only actions on tenant_role.
         "tenant_id": user.tenant_id,
         "tenant_role": user.tenant_role or "member",
+        # Transactional-email language + future UI locale. Exposing it
+        # on /me lets the Settings page preselect the correct radio
+        # without a separate round-trip.
+        "preferred_language": user.preferred_language or "en",
         "created_at": user.created_at,
     }
 
@@ -91,6 +100,14 @@ def update_me(
         cleaned = payload.display_name.strip()
         user.display_name = cleaned if cleaned else None
 
+    if payload.preferred_language is not None:
+        lang = payload.preferred_language.strip().lower()
+        # Allow any short locale tag; transactional-email renderer
+        # falls back to 'en' for unknown ones so a future "add ja"
+        # needs zero backend change.
+        if lang and len(lang) <= 8:
+            user.preferred_language = lang
+
     session.commit()
     session.refresh(user)
 
@@ -103,6 +120,9 @@ def update_me(
         "status": user.status,
         "credit_balance": int(user.credit_balance),
         "credit_used": int(user.credit_used),
+        "preferred_language": user.preferred_language or "en",
+        "tenant_id": user.tenant_id,
+        "tenant_role": user.tenant_role or "member",
         "created_at": user.created_at,
     }
 
