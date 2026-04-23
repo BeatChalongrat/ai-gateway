@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -60,6 +60,50 @@ from app.services.api_key_service import ApiKeyService
 
 router = APIRouter(dependencies=[Depends(require_admin_session)])
 _api_key_service = ApiKeyService()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2B Commit 11 — P0-9 / P0-10: reject client-supplied IDs
+# ---------------------------------------------------------------------------
+
+
+async def _reject_client_supplied_field(request: Request, field: str) -> None:
+    """Raise 400 if the request JSON body carries ``field``.
+
+    FastAPI caches ``await request.body()``, so reading it here is safe
+    even though the same body is parsed again by the Pydantic body
+    argument on the endpoint itself.
+    """
+    raw = await request.body()
+    if not raw:
+        return
+    import json
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return  # Pydantic will surface the JSON error
+    if isinstance(data, dict) and field in data:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "client_supplied_id_forbidden",
+                    "message": (
+                        f"client-supplied {field} is not permitted; "
+                        "server generates identifiers"
+                    ),
+                    "field": field,
+                }
+            },
+        )
+
+
+async def _reject_tenant_id_on_body(request: Request) -> None:
+    await _reject_client_supplied_field(request, "tenant_id")
+
+
+async def _reject_project_id_on_body(request: Request) -> None:
+    await _reject_client_supplied_field(request, "project_id")
 
 # Stage 7: DLP admin routes (detectors / policy profiles / NER settings).
 # Mounted on the same router so they inherit require_admin.
@@ -681,6 +725,7 @@ def list_tenants(
     "/tenants",
     response_model=TenantResponse,
     status_code=201,
+    dependencies=[Depends(_reject_tenant_id_on_body)],
 )
 def create_tenant(
     body: TenantCreate,
@@ -801,6 +846,7 @@ def list_projects(
     "/projects",
     response_model=ProjectResponse,
     status_code=201,
+    dependencies=[Depends(_reject_project_id_on_body)],
 )
 def create_project(
     body: ProjectCreate,
