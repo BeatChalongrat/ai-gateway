@@ -1,4 +1,4 @@
-.PHONY: up down logs seed clean test shell-backend shell-admin shell-portal build rebuild ps help
+.PHONY: up down logs seed clean clean-portal-users test shell-backend shell-admin shell-portal build rebuild ps help
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -30,6 +30,9 @@ seed: ## Seed tenants + projects + API keys + admin user + portal users
 
 clean: ## Stop the stack AND remove volumes (wipes DB + redis data)
 	docker compose down -v
+
+clean-portal-users: ## Delete portal users that aren't part of the seed set (keeps DB)
+	docker compose exec backend python -m scripts.clean_portal_residue
 
 test: ## Run the backend test suite inside the backend container
 	# Config / dlp tests assert pydantic Settings defaults. The compose
