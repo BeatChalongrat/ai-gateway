@@ -16,6 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { Avatar } from "@/components/Avatar";
 import { PageSpinner } from "@/components/Spinner";
 import { api, PortalApiError } from "@/lib/api";
 import { formatTokens, relativeTime } from "@/lib/format";
@@ -89,22 +90,32 @@ export default function DashboardPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div>
-        <h1
-          className="font-heading"
-          style={{
-            fontSize: 24,
-            fontWeight: 600,
-            letterSpacing: "-0.02em",
-            margin: "0 0 4px",
-            color: "var(--text-primary)",
-          }}
-        >
-          Dashboard
-        </h1>
-        <p style={{ fontSize: 13, color: "var(--text-tertiary)", margin: 0 }}>
-          Welcome back, {user?.display_name || user?.email || "there"}
-        </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <Avatar
+          url={user?.avatar_url}
+          name={user?.display_name}
+          email={user?.email}
+          id={user?.id}
+          size={44}
+          radius={12}
+        />
+        <div>
+          <h1
+            className="font-heading"
+            style={{
+              fontSize: 24,
+              fontWeight: 600,
+              letterSpacing: "-0.02em",
+              margin: "0 0 4px",
+              color: "var(--text-primary)",
+            }}
+          >
+            Dashboard
+          </h1>
+          <p style={{ fontSize: 13, color: "var(--text-tertiary)", margin: 0 }}>
+            Welcome back, {user?.display_name || user?.email || "there"}
+          </p>
+        </div>
       </div>
 
       {error ? (

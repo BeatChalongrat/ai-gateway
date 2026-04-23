@@ -149,6 +149,90 @@ def test_wrong_password_returns_generic_error(_seeded_portal_users, client):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# tenant_role assignment — regression for the "portal-UX" overhaul.
+# Prior to that change the seed left every user at the ORM default
+# ``member`` role, which meant the Team page had no Owner — every
+# tenant loaded into the portal with the Invite button hidden.
+# ---------------------------------------------------------------------------
+
+
+def test_seed_assigns_owners_per_tenant(_seeded_portal_users):
+    """Alice owns Acme, Bob owns Globex; everyone else stays member.
+
+    Keeps the Team page demo honest: the "crown + Owner" badge the UI
+    renders is data-driven, so the seed has to keep at least one owner
+    per tenant.
+    """
+    db = _Session()
+    try:
+        owners_by_email = {
+            row.email: row.tenant_role
+            for row in db.query(PortalUserORM).all()
+        }
+        assert owners_by_email["alice@acme.test"] == "owner"
+        assert owners_by_email["bob@globex.test"] == "owner"
+        assert owners_by_email["charlie@acme.test"] == "member"
+        assert owners_by_email["dave@acme.test"] == "member"
+        assert owners_by_email["eve@globex.test"] == "member"
+    finally:
+        db.close()
+
+
+def test_reseed_restores_owner_role_after_drift():
+    """Regression: re-seed must restore tenant_role, not just passwords.
+
+    If an operator demotes Alice to member manually (e.g. testing an
+    RBAC flow), re-running `make seed` must put her back as owner —
+    otherwise the post-seed DB has no owner for Acme and every Acme
+    user's Team page is stuck without invite capability.
+    """
+    db = _Session()
+    try:
+        db.query(PortalUserORM).delete()
+        db.commit()
+
+        seed_portal_users(db)
+        db.commit()
+
+        alice = db.query(PortalUserORM).filter_by(email="alice@acme.test").one()
+        alice.tenant_role = "member"
+        db.commit()
+
+        seed_portal_users(db)
+        db.commit()
+        db.refresh(alice)
+
+        assert alice.tenant_role == "owner"
+    finally:
+        db.query(PortalUserORM).delete()
+        db.commit()
+        db.close()
+
+
+def test_seeded_display_names_are_production_safe(_seeded_portal_users):
+    """No decorative emoji / Thai test strings in the shipped seed.
+
+    The audit seed used to carry "Charlie Chen 🐉 ทดสอบ" so we could
+    smoke-test Unicode rendering; that leaked into PR screenshots of
+    the Team page and made the portal look unfinished. Unicode support
+    is covered separately in ``test_portal_auth`` — the shipped seed
+    must read as realistic production data.
+    """
+    db = _Session()
+    try:
+        for row in db.query(PortalUserORM).all():
+            name = row.display_name or ""
+            # No emoji in the Basic Multilingual Plane overflow range.
+            assert all(ord(c) < 0x1F000 for c in name), f"emoji in {name}"
+            # No Thai-script markers.
+            assert all(not (0x0E00 <= ord(c) <= 0x0E7F) for c in name), (
+                f"Thai script in {name}"
+            )
+    finally:
+        db.close()
+
+
 def test_reseeding_overwrites_drifted_password_hash():
     """Regression for the create-only seed bug.
 
