@@ -22,7 +22,27 @@ import { Modal } from "@/components/Modal";
 import { PageSpinner } from "@/components/Spinner";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate, formatTokens, relativeTime } from "@/lib/format";
-import type { ApiKey, ApiKeyCreated, Project, UsageRequest } from "@/lib/types";
+import type {
+  ApiKey,
+  ApiKeyCreated,
+  PortalUser,
+  Project,
+  TenantMember,
+  UsageRequest,
+} from "@/lib/types";
+
+import { ProjectMembersSection } from "../_components/ProjectMembersSection";
+
+interface ProjectMemberLite {
+  user_id: string;
+  role: "admin" | "member" | "viewer";
+}
+interface MembersResp {
+  members: ProjectMemberLite[];
+}
+interface TenantMembersResp {
+  members: TenantMember[];
+}
 
 interface KeysResp {
   keys: ApiKey[];
@@ -41,6 +61,14 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [usage, setUsage] = useState<UsageRequest[]>([]);
+  const [me, setMe] = useState<PortalUser | null>(null);
+  // selfProjectRole is the caller's role on *this* project, derived
+  // from the project_members fetch. Tenant Owner passes through as
+  // "admin" via the canManage short-circuit below.
+  const [selfProjectRole, setSelfProjectRole] = useState<
+    "admin" | "member" | "viewer" | null
+  >(null);
+  const [tenantMembers, setTenantMembers] = useState<TenantMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,10 +91,17 @@ export default function ProjectDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [p, k, u] = await Promise.all([
+      const [p, k, u, meResp, pm, tm] = await Promise.all([
         api.get<Project>(`/portal/projects/${projectId}`),
         api.get<KeysResp>(`/portal/projects/${projectId}/keys`),
         api.get<UsageResp>(`/portal/me/usage?limit=200`),
+        api.get<PortalUser>("/portal/me"),
+        api.get<MembersResp>(
+          `/portal/projects/${projectId}/members`
+        ),
+        api
+          .get<TenantMembersResp>("/portal/team/members")
+          .catch(() => ({ members: [] }) as TenantMembersResp),
       ]);
       setProject(p);
       setKeys(k.keys);
@@ -75,6 +110,10 @@ export default function ProjectDetailPage() {
       // adds a project filter we'll narrow this. Flagged inline so it
       // isn't silently wrong in a later refactor.
       setUsage(u.requests);
+      setMe(meResp);
+      const selfRow = pm.members.find((m) => m.user_id === meResp.id);
+      setSelfProjectRole(selfRow?.role ?? null);
+      setTenantMembers(tm.members);
     } catch (err) {
       if (err instanceof PortalApiError) setError(err.message);
       else setError("Failed to load project.");
@@ -353,6 +392,22 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </Card>
+
+      {/* Members section — 2026-04-24 portal-project-members task.
+          canManage is derived from (tenant_role === 'owner') OR
+          (caller's project role === 'admin'). The backend short-
+          circuits the tenant-owner path to project-admin on every
+          mutation, so client-side gating is purely for affordance. */}
+      {me && project ? (
+        <ProjectMembersSection
+          projectId={projectId}
+          currentUserId={me.id}
+          canManage={
+            me.tenant_role === "owner" || selfProjectRole === "admin"
+          }
+          tenantMembers={tenantMembers}
+        />
+      ) : null}
 
       {/* Create key modal */}
       <Modal
