@@ -8,7 +8,12 @@ import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import ResolvedApiKey, check_tenant_access, get_db_session, require_admin
+from app.api.deps import (
+    ResolvedApiKey,
+    check_tenant_access,
+    get_db_session,
+    require_admin_session,
+)
 from app.core.exceptions import NotFoundError
 from app.domain.rbac import Role, has_role_level
 from app.models.alert_rule import AlertEventORM, AlertRuleORM
@@ -53,7 +58,7 @@ from app.schemas.admin import (
 from app.schemas.common import ErrorResponse
 from app.services.api_key_service import ApiKeyService
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+router = APIRouter(dependencies=[Depends(require_admin_session)])
 _api_key_service = ApiKeyService()
 
 # Stage 7: DLP admin routes (detectors / policy profiles / NER settings).
@@ -473,7 +478,7 @@ def _strip_raw_from_findings(findings: list[dict]) -> list[dict]:
 def get_request(
     request_id: str,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> RequestLogDetail:
     import json as _json
 
@@ -647,7 +652,7 @@ def _tenant_to_response(tenant: TenantORM) -> TenantResponse:
 def get_tenant(
     tenant_id: str,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> TenantResponse:
     check_tenant_access(auth, tenant_id)
     tenant = session.get(TenantORM, tenant_id)
@@ -698,7 +703,7 @@ def update_tenant(
     tenant_id: str,
     body: TenantUpdate,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> TenantResponse:
     check_tenant_access(auth, tenant_id)
     tenant = session.get(TenantORM, tenant_id)
@@ -720,7 +725,7 @@ def update_tenant(
 def delete_tenant(
     tenant_id: str,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> None:
     check_tenant_access(auth, tenant_id)
     tenant = session.get(TenantORM, tenant_id)
@@ -739,7 +744,7 @@ def delete_tenant(
 def get_project(
     project_id: str,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> ProjectResponse:
     project = session.get(ProjectORM, project_id)
     if project is None:
@@ -758,7 +763,7 @@ def get_project(
 def list_projects(
     tenant_id: str | None = None,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> AdminListResponse[ProjectResponse]:
     # P0-5 fix: tenant-scoped callers only see their own tenant's
     # projects. Global ADMIN honours the query param (or, if omitted,
@@ -831,7 +836,7 @@ def update_project(
     project_id: str,
     body: ProjectUpdate,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> ProjectResponse:
     project = session.get(ProjectORM, project_id)
     if project is None:
@@ -855,7 +860,7 @@ def update_project(
 def delete_project(
     project_id: str,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> None:
     project = session.get(ProjectORM, project_id)
     if project is None:
@@ -874,7 +879,7 @@ def delete_project(
 def get_api_key(
     key_id: str,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> ApiKeyResponse:
     api_key = session.get(ApiKeyORM, key_id)
     if api_key is None:
@@ -895,7 +900,7 @@ def get_api_key(
 def list_api_keys(
     project_id: str | None = None,
     session: Session = Depends(get_db_session),
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> AdminListResponse[ApiKeyResponse]:
     # P0-6 fix: tenant-scoped callers only see their own tenant's keys.
     # If a project_id is supplied, we additionally verify that project
@@ -938,7 +943,7 @@ def list_api_keys(
 def create_api_key(
     body: ApiKeyCreate,
     session: Session = Depends(get_db_session),
-    auth: object = Depends(require_admin),
+    auth: object = Depends(require_admin_session),
 ) -> ApiKeyCreateResponse:
     raw_key, api_key = _api_key_service.create_key(
         session,
@@ -972,7 +977,7 @@ def create_api_key(
 def revoke_api_key(
     key_id: str,
     session: Session = Depends(get_db_session),
-    auth: object = Depends(require_admin),
+    auth: object = Depends(require_admin_session),
 ) -> None:
     # Look up key before revoke for audit context
     api_key = session.get(ApiKeyORM, key_id)

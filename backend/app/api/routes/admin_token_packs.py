@@ -15,12 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session, require_admin
+from app.api.deps import get_db_session, require_admin_session
 from app.core.exceptions import NotFoundError
 from app.models.token_pack import TokenPackORM
 
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+router = APIRouter(dependencies=[Depends(require_admin_session)])
 
 
 class PackCreate(BaseModel):

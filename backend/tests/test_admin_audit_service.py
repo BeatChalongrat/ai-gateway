@@ -70,6 +70,10 @@ class TestAdminAuditLogSchema:
 
     def test_columns(self, db_inspector):
         cols = {c["name"] for c in db_inspector.get_columns("admin_audit_log")}
+        # Phase 2A Commit 7 / migration 028 added outcome, ip_address,
+        # user_agent, session_id_prefix. See test_admin_audit_extensions
+        # for the full round-trip coverage of those.
         expected = {"id", "timestamp", "actor_key_id", "tenant_id", "action",
-                    "resource_type", "resource_id", "details"}
+                    "resource_type", "resource_id", "details",
+                    "outcome", "ip_address", "user_agent", "session_id_prefix"}
         assert expected == cols

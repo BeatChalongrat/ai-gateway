@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Generator
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
@@ -125,6 +125,12 @@ def require_admin(
     """Require admin or tenant_admin role for admin endpoints.
 
     Raises AuthorizationError (403) if role is insufficient.
+
+    NOTE (Phase 2B Commit 9): this function still accepts API-key +
+    Bearer-JWT auth via ``get_resolved_api_key``. Admin routers now
+    use ``require_admin_session`` instead, which closes the Bearer
+    path. ``require_admin`` is preserved for callers that are NOT
+    on the admin router surface.
     """
     from app.domain.rbac import Role, has_role_level
 
@@ -139,6 +145,103 @@ def require_admin(
             details={"role": auth.role, "required": "project_admin"},
         )
     return auth
+
+
+def require_admin_session(
+    request: Request,
+    session_manager=Depends(lambda: None),
+) -> ResolvedApiKey:
+    """Session-cookie-only admin auth (Phase 2B Commit 9).
+
+    Closes the remaining hole from P0-1: the router-level
+    ``Depends(require_admin)`` on admin endpoints used to accept any of
+    (a) gw_xxx API keys, (b) admin JWT bearer tokens. The cookie-
+    session flow is now the only way to reach the admin surface.
+
+    Behaviour:
+      * If an ``Authorization: Bearer`` header is present → 401.
+        We block Bearer explicitly so misconfigured clients see a
+        clear error rather than silently falling through.
+      * Reads the ``admin_session`` cookie via ``get_admin_session``
+        (HMAC-verified + Redis-backed + TTL-checked).
+      * Enforces caller role >= PROJECT_ADMIN (matches the old
+        ``require_admin`` contract).
+      * Returns a ``ResolvedApiKey`` shaped object so existing admin
+        route bodies that take ``auth: ResolvedApiKey`` keep
+        working without a per-route rewrite.
+    """
+    from app.domain.rbac import Role, has_role_level
+
+    auth_hdr = (request.headers.get("authorization") or "").strip()
+    if auth_hdr.lower().startswith("bearer "):
+        raise AuthenticationError(
+            "Bearer tokens are not accepted on admin endpoints. "
+            "Log in via POST /auth/session/login and resend with the "
+            "session cookie."
+        )
+
+    # Manually resolve the session — we can't Depends(get_admin_session)
+    # cleanly from a function that FastAPI itself treats as a dep target,
+    # so we call the underlying manager directly. Mirrors the logic in
+    # get_admin_session but without the Depends-injected manager kwarg.
+    from app.core.config import settings
+    from app.services.admin.session_manager import (
+        SessionExpired,
+        SessionInvalid,
+        SessionRevoked,
+    )
+
+    cookie = request.cookies.get(settings.session_cookie_name)
+    if not cookie:
+        raise AuthenticationError("No admin session cookie")
+    try:
+        session = session_manager.verify_cookie(cookie)
+    except (SessionInvalid, SessionExpired, SessionRevoked) as exc:
+        raise AuthenticationError(str(exc)) from exc
+
+    role_str = (session.get("role") or "user").upper()
+    try:
+        role = Role[role_str]
+    except KeyError:
+        role = Role.USER
+    if not has_role_level(role, Role.PROJECT_ADMIN):
+        raise AuthorizationError(
+            "Insufficient permissions for admin operations.",
+            details={"role": role_str.lower(), "required": "project_admin"},
+        )
+
+    return ResolvedApiKey(
+        key_id=f"session:{session.get('user_id', '?')}",
+        tenant_id=session.get("tenant_id") or "__global__",
+        project_id="__admin__",
+        key_prefix=f"sess:{(session.get('session_id') or '')[:8]}",
+        role=role_str.lower(),
+    )
+
+
+def _install_admin_session_manager_dep() -> None:
+    """Late-binding — rewrite the ``session_manager`` default on
+    ``require_admin_session`` to ``Depends(get_session_manager)``.
+
+    Done post-definition to avoid a circular import
+    (deps → session_service → session_manager → settings). Tests override
+    ``get_session_manager`` via ``app.dependency_overrides`` and the
+    new default picks that up.
+    """
+    import inspect as _inspect
+
+    from app.services.admin.session_service import get_session_manager
+
+    sig = _inspect.signature(require_admin_session)
+    params = []
+    for name, p in sig.parameters.items():
+        if name == "session_manager":
+            p = p.replace(default=Depends(get_session_manager))
+        params.append(p)
+    require_admin_session.__signature__ = sig.replace(parameters=params)  # type: ignore[attr-defined]
+
+
+_install_admin_session_manager_dep()
 
 
 def check_tenant_access(auth: ResolvedApiKey, target_tenant_id: str) -> None:
