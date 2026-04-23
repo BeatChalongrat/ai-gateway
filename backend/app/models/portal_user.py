@@ -13,6 +13,16 @@ class PortalUserORM(Base):
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Terminology (portal-wide convention):
+    #   credits = prepaid balance (the thing the user buys / holds)
+    #            — shown as "Available Credits", sidebar "N credits",
+    #              Billing "Current Balance".
+    #   tokens  = LLM metering unit (the thing consumed per request)
+    #            — shown as "Tokens Used", Usage page totals.
+    # One credit debits one token. credit_used is the lifetime sum of
+    # debits and must stay in lockstep with SUM(request_logs.total_tokens)
+    # for the same user; credit_service.debit() writes both in one
+    # transaction to preserve that invariant.
     credit_balance: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default="0"
     )

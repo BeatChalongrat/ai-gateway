@@ -230,7 +230,7 @@ export default function BillingPage() {
               >
                 {formatTokens(displayBalance)}
               </span>
-              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>tokens</span>
+              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>credits</span>
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
@@ -250,7 +250,7 @@ export default function BillingPage() {
               {planLabel}
             </span>
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>
-              Used:{" "}
+              Used (lifetime):{" "}
               <span style={{ color: "rgba(255,255,255,0.9)", fontWeight: 500 }}>
                 {formatTokens(user?.credit_used ?? 0)}
               </span>
