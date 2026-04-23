@@ -83,10 +83,10 @@ const CSS = `
 .dc-pop{animation:dcPop 0.35s ease-out both}
 .dc-row{animation:dcFadeUp 0.35s ease-out both}
 .dc-table{width:100%;border-collapse:collapse}
-.dc-table th{text-align:left;padding:0 14px;height:36px;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:${T.th};border-bottom:1px solid ${T.bl};background:#f0f2f5;white-space:nowrap}
-.dc-table td{padding:12px 14px;border-bottom:1px solid #f3f4f6;vertical-align:middle}
+.dc-table th{text-align:left;padding:0 14px;height:36px;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:${T.th};border-bottom:1px solid ${T.bl};background:var(--bg-elevated);white-space:nowrap}
+.dc-table td{padding:12px 14px;border-bottom:1px solid ${T.bl};vertical-align:middle;color:${T.tp}}
 .dc-table tbody tr{transition:background 100ms}
-.dc-table tbody tr:hover{background:rgba(59,108,246,0.04)}
+.dc-table tbody tr:hover{background:color-mix(in srgb, var(--bg-elevated) 60%, transparent)}
 .dc-table tbody tr:last-child td{border-bottom:none}
 `;
 
@@ -393,12 +393,12 @@ export default function DlpCoveragePage() {
           rows={5}
           style={{
             width: "100%", fontFamily: T.mono, fontSize: 13, padding: "14px 16px",
-            borderRadius: 10, border: `1.5px solid ${T.bl}`, background: "#f4f5f7",
+            borderRadius: 10, border: `1.5px solid ${T.bl}`, background: "var(--bg-elevated)",
             color: T.tp, outline: "none", resize: "vertical", lineHeight: 1.6,
             transition: "border-color 120ms, box-shadow 120ms, background 120ms",
           }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,108,246,0.08)"; e.currentTarget.style.background = "white"; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "#f4f5f7"; }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,108,246,0.08)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-elevated)"; }}
         />
 
         <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
@@ -441,7 +441,7 @@ export default function DlpCoveragePage() {
                     <div key={i} className="dc-row" style={{
                       animationDelay: `${i * 0.04}s`,
                       display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
-                      padding: "10px 14px", borderRadius: 8, background: "#f0f2f5",
+                      padding: "10px 14px", borderRadius: 8, background: "var(--bg-elevated)",
                     }}>
                       <Pill text={f.category} color={cs.color} bg={cs.bg} />
                       <code style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 4, background: "rgba(239,68,68,0.08)", color: "#dc2626" }}>
@@ -460,7 +460,7 @@ export default function DlpCoveragePage() {
             {testResult.masked_text && (
               <div style={{ marginTop: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: T.th, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Masked Output</div>
-                <div style={{ fontFamily: T.mono, fontSize: 13, padding: "14px 16px", borderRadius: 10, background: "#f4f5f7", border: `1px solid ${T.bl}`, whiteSpace: "pre-wrap", lineHeight: 1.6, color: T.tp }}>
+                <div style={{ fontFamily: T.mono, fontSize: 13, padding: "14px 16px", borderRadius: 10, background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, whiteSpace: "pre-wrap", lineHeight: 1.6, color: T.tp }}>
                   {testResult.masked_text}
                 </div>
               </div>
