@@ -270,10 +270,19 @@ async def chat_completions(
         )
 
     async def event_generator():
-        # v1: buffer the full streamed body so we can scan + restore in one
-        # pass. Emitting restored content chunk-by-chunk would require
-        # span-boundary-safe splitting — a future optimisation.
-        # Future: chunked restore requires span-boundary-safe splitting.
+        # Phase 2C Commit 13 — P0-7 fix. Previously the generator
+        # yielded raw provider deltas as they arrived, then ran outbound
+        # DLP on the full buffer AFTER the stream closed. Fresh PII the
+        # model produced mid-stream (email, phone, SSN) was emitted to
+        # the client before any redaction happened.
+        #
+        # The fix: accumulate every provider chunk server-side, run DLP
+        # on the full buffered body, and emit the MASKED text as a
+        # single content delta followed by finish + usage. This gives
+        # up token-level streaming granularity but closes the PII-leak
+        # window the auditor flagged under P0-7. Streaming perf work
+        # can re-introduce incremental masking later with a rolling-
+        # buffer scanner (see AUTH_REDESIGN_DESIGN §11 followup).
         buffered_parts: list[str] = []
         final_finish_reason: str | None = None
         final_model: str = route.model_name
@@ -286,6 +295,10 @@ async def chat_completions(
         ):
             if chunk.delta:
                 buffered_parts.append(chunk.delta)
+                # Intentionally no yield here — raw provider text must
+                # not reach the client until outbound DLP has scrubbed
+                # it. The aggregate emit below replaces the per-chunk
+                # emission that used to live at this point.
             if chunk.model:
                 final_model = chunk.model
             if chunk.finish_reason is not None:
@@ -299,11 +312,9 @@ async def chat_completions(
         # rewrite below doesn't clobber it.
         output_raw = full_text
 
-        # 3. Outbound DLP: scan the masked buffered body for NEW PII, mask
-        # it with indexed tokens, THEN restore the input span_map. Order
-        # matches GatewayOrchestrator step 8 — scan first so indexed input
-        # tokens don't trip the regex detectors, and so new findings
-        # survive the restore step.
+        # Outbound DLP on the full buffered body. Runs BEFORE anything
+        # leaves the server (Phase 2C Commit 13 — P0-7). The masked
+        # text is later emitted as the single content delta at step 5.
         response_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
         if settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses:
             response_detection = orchestrator._scan_text_as_result(
@@ -423,7 +434,23 @@ async def chat_completions(
             api_key_id=str(auth.key_id) if auth else None,
         )
 
-        # 5. Emit the restored body as a single SSE chunk, then [DONE].
+        # 5. Emit the DLP-scrubbed body as a single content delta,
+        # followed by the finish-reason chunk, followed by [DONE].
+        # Per Phase 2C Commit 13 — P0-7 — raw provider text is never
+        # emitted; the full_text here has already been run through
+        # outbound DLP + span_map restore.
+        if full_text:
+            yield "data: {}\n\n".format(json.dumps({
+                "id": ctx.request_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": final_model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": full_text},
+                    "finish_reason": None,
+                }],
+            }))
         yield "data: {}\n\n".format(json.dumps({
             "id": ctx.request_id,
             "object": "chat.completion.chunk",
@@ -431,7 +458,7 @@ async def chat_completions(
             "model": final_model,
             "choices": [{
                 "index": 0,
-                "delta": {"content": full_text} if full_text else {},
+                "delta": {},
                 "finish_reason": final_finish_reason,
             }],
         }))
