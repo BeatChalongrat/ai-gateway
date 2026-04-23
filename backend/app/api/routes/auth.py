@@ -106,39 +106,26 @@ def decode_jwt(token: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/login", response_model=LoginResponse)
-def login(
-    body: LoginRequest,
-    session: Session = Depends(get_db_session),
-):
-    """Authenticate with username/email + password, return JWT tokens."""
-    user = session.execute(
-        select(AdminUserORM).where(
-            (AdminUserORM.username == body.username)
-            | (AdminUserORM.email == body.username)
-        )
-    ).scalar_one_or_none()
+@router.post("/login", status_code=410)
+def login_gone(body: LoginRequest):
+    """LEGACY: returns 410 Gone. Clients must use /auth/session/login.
 
-    if user is None:
-        raise AuthenticationError("Invalid credentials")
+    Removing the endpoint outright would 404 — a client would assume
+    a routing or deploy issue and retry. 410 is explicit: the
+    resource is intentionally gone, do not retry, here's where to go.
+    """
+    from fastapi.responses import JSONResponse
 
-    password_valid = bcrypt.checkpw(
-        body.password.encode("utf-8"),
-        user.hashed_password.encode("utf-8"),
-    )
-    if not password_valid:
-        raise AuthenticationError("Invalid credentials")
-
-    if not user.is_active:
-        raise AuthenticationError("Account is disabled")
-
-    access_token, expires_in = _create_access_token(user)
-    refresh_token = _create_refresh_token(user)
-
-    return LoginResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=expires_in,
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error_code": "endpoint_removed",
+            "error_message": (
+                "POST /auth/login has been removed. "
+                "Use POST /auth/session/login (cookie-based session) instead."
+            ),
+            "replacement": "/auth/session/login",
+        },
     )
 
 
