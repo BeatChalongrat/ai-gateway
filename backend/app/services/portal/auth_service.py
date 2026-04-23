@@ -176,19 +176,31 @@ def signup(
     email: str,
     password: str,
     display_name: str | None = None,
+    *,
+    invite_code: str | None = None,
+    tenant_name: str | None = None,
 ) -> dict:
-    """Register a new portal user.
+    """Register a new portal user + attach to a tenant atomically.
 
-    Flow:
-    1. Check the ``portal_signup_enabled`` system setting — reject with
-       ``ValidationError(code=signup_disabled)`` if disabled.
-    2. Reject duplicate emails (case-insensitive) with ``ConflictError``.
-    3. Hash the password with bcrypt (cost 12).
-    4. Read ``free_trial_tokens`` from system settings and open the
-       user's balance at that value via ``credit_service.topup_credits``
-       (``type=signup_bonus``) — this single source of truth is what the
-       "changing the setting affects NEW users only" test relies on.
-    5. Return access + refresh tokens along with the user dict.
+    Phase 3 — P0-4. The signup flow now produces three artefacts
+    instead of one:
+
+    1. The portal_user row (as before).
+    2. Credit-ledger rows for the free-trial bonus (as before).
+    3. Tenant membership. Two paths:
+       - ``invite_code`` present → redeem it, join that tenant as
+         ``'member'``. ``tenant_name`` is rejected in this branch.
+       - ``invite_code`` absent → create a brand-new tenant with the
+         user as ``'owner'``. If ``tenant_name`` is not supplied we
+         fall back to a default derived from the user's email ("X's
+         Team") so the portal UI can skip the name field for the
+         simple case.
+
+    Everything happens under a single db flush; the caller's
+    transaction wraps this call (same pattern as pre-Phase-3).
+
+    Pre-Phase-3 disabled-signup and duplicate-email gates are
+    unchanged.
     """
     email_norm = (email or "").strip().lower()
     if not email_norm or "@" not in email_norm:
@@ -197,6 +209,14 @@ def signup(
         raise ValidationError(
             "Password must be at least 8 characters.",
             code="weak_password",
+        )
+    if invite_code and tenant_name:
+        # One path or the other — never both at once. Stops silent
+        # surprises where the user types a tenant name AND pastes a
+        # code and we pick one arbitrarily.
+        raise ValidationError(
+            "Provide an invite code OR a tenant name, not both.",
+            code="invite_and_tenant_name_conflict",
         )
 
     signup_enabled = (
@@ -232,9 +252,29 @@ def signup(
         credit_used=0,
         plan="free_trial",
         status="active",
+        # Initial token_version so a freshly-minted JWT matches the DB.
+        token_version=1,
     )
     db.add(user)
     db.flush()
+
+    # Tenant assignment — happens inside the same transaction. If this
+    # raises, the user row is rolled back too.
+    from app.services.portal import tenant_service
+
+    if invite_code:
+        tenant_service.redeem_invite(
+            db, code=invite_code, redeeming_user_id=user.id
+        )
+    else:
+        effective_name = (
+            (tenant_name or "").strip()
+            or _default_tenant_name_for_email(email_norm)
+        )
+        tenant_service.create_tenant_with_owner(
+            db, tenant_name=effective_name, owner_user_id=user.id
+        )
+    db.refresh(user)
 
     if free_trial > 0:
         credit_service.topup_credits(
@@ -248,6 +288,17 @@ def signup(
         db.refresh(user)
 
     return _issue_tokens(user)
+
+
+def _default_tenant_name_for_email(email: str) -> str:
+    """Derive a human-ish tenant name when the user doesn't supply one.
+
+    Local-part of the email, first letter capitalised, with "'s Team"
+    appended — matches the portal UI's "Welcome, X" nicety without
+    forcing users to pick a name upfront.
+    """
+    local = email.split("@", 1)[0] or "My"
+    return f"{local.capitalize()}'s Team"
 
 
 def login(db: Session, email: str, password: str) -> dict:
