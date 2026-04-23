@@ -37,6 +37,12 @@ class SignupRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=320)
     password: str = Field(..., min_length=8, max_length=200)
     display_name: str | None = Field(default=None, max_length=200)
+    # Phase 3 — optional tenancy inputs. Either provide an invite
+    # code (join an existing tenant as member) or a tenant name
+    # (create a new tenant as owner). Omit both and a default tenant
+    # name is derived from the email.
+    invite_code: str | None = Field(default=None, max_length=128)
+    tenant_name: str | None = Field(default=None, max_length=255)
 
 
 class LoginRequest(BaseModel):
@@ -58,6 +64,8 @@ def signup(
         email=body.email,
         password=body.password,
         display_name=body.display_name,
+        invite_code=body.invite_code,
+        tenant_name=body.tenant_name,
     )
 
 
