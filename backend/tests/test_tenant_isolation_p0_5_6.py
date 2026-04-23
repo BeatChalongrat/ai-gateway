@@ -116,7 +116,12 @@ def seeded(engine):
 def client(engine, seeded):
     from fastapi import FastAPI
 
-    from app.api.deps import ResolvedApiKey, get_db_session, require_admin
+    from app.api.deps import (
+        ResolvedApiKey,
+        get_db_session,
+        require_admin,
+        require_admin_session,
+    )
     from app.api.routes.admin import router as admin_router
     from app.core.exceptions import GatewayError
     from app.middleware.error_handler import (
@@ -153,8 +158,10 @@ def client(engine, seeded):
                 key_prefix="test_",
                 role=user["role"],
             )
-        # Override require_admin for this client.
+        # Override BOTH legacy require_admin AND the new cookie-only
+        # require_admin_session dep: admin routers swapped in Commit 9.
         app.dependency_overrides[require_admin] = _auth_dep
+        app.dependency_overrides[require_admin_session] = _auth_dep
         return TestClient(app)
 
     return _make_tc

@@ -14,12 +14,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session, require_admin
+from app.api.deps import get_db_session, require_admin_session
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.system_setting import SystemSettingORM
 
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+router = APIRouter(dependencies=[Depends(require_admin_session)])
 
 
 class SettingUpdate(BaseModel):
