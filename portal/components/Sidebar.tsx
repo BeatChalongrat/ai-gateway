@@ -12,6 +12,7 @@ import {
   LogOut,
   Settings,
   TrendingUp,
+  Users,
 } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
@@ -32,6 +33,7 @@ const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
   { label: "Projects", href: "/projects", Icon: FolderOpen },
   { label: "Usage", href: "/usage", Icon: TrendingUp },
+  { label: "Team", href: "/team", Icon: Users },
   { label: "Billing", href: "/billing", Icon: CreditCard },
   { label: "Settings", href: "/settings", Icon: Settings },
 ];
