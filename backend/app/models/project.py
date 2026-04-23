@@ -25,3 +25,12 @@ class ProjectORM(Base):
     portal_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("portal_users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Soft-delete for the admin "Archive project" flow. Non-null means
+    # archived — the admin UI hides these by default but surfaces them
+    # under a "Show archived" toggle. 30-day window documented in the
+    # admin UI; actual retention is enforced by a manual purge script,
+    # not a cron (nothing about archive is security-critical so we
+    # don't need an auto-hard-delete yet).
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
