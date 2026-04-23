@@ -9,12 +9,22 @@ response is constant.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session
-from app.services.portal import auth_service, oauth_service
+from app.core.exceptions import ValidationError
+from app.services.portal import auth_service, oauth_flow_service, oauth_service
+from app.services.portal.oauth_flow_service import (
+    IdTokenVerificationFailed,
+    InvalidReturnUrl,
+    OAuthStateStore,
+    generate_pkce,
+    get_oauth_state_store,
+    validate_return_to,
+)
 
 
 router = APIRouter()
@@ -74,36 +84,130 @@ def logout():
     return {"message": "ok"}
 
 
-class OAuthCallbackRequest(BaseModel):
-    provider: str = Field(..., pattern="^(google|github)$")
-    oauth_id: str = Field(..., min_length=1, max_length=200)
-    email: str = Field(..., min_length=3, max_length=320)
-    display_name: str | None = Field(default=None, max_length=200)
-    avatar_url: str | None = Field(default=None, max_length=1000)
+@router.post("/oauth/callback", status_code=410)
+def oauth_callback_legacy():
+    """LEGACY (P0-8): closed. Clients must use the server-side flow.
 
-
-@router.post("/oauth/callback")
-def oauth_callback(
-    body: OAuthCallbackRequest,
-    session: Session = Depends(get_db_session),
-):
-    """Exchange a verified OAuth identity for portal tokens.
-
-    Intended to be called by NextAuth's ``signIn`` callback AFTER it has
-    verified the provider's ID token / access token. The backend trusts
-    the caller — it doesn't re-verify the OAuth assertion — so this
-    endpoint should only be reachable from the portal itself, never
-    directly by browsers. The portal's NextAuth setup lives on the same
-    origin/host.
+    The previous POST endpoint accepted ``{provider, oauth_id, email,
+    display_name}`` from the caller and trusted those fields. Anyone
+    could forge an identity by POSTing arbitrary values. Replaced by
+    the GET /oauth/start → /oauth/callback flow which holds the
+    client secret on the backend and verifies the provider's
+    id_token via JWKS before minting portal tokens.
     """
-    return oauth_service.login_or_create(
-        session,
-        provider=body.provider,
-        oauth_id=body.oauth_id,
-        email=body.email,
-        display_name=body.display_name,
-        avatar_url=body.avatar_url,
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error_code": "endpoint_removed",
+            "error_message": (
+                "POST /portal/auth/oauth/callback has been removed. "
+                "Use GET /portal/auth/oauth/start?provider=... to begin "
+                "the server-driven OAuth flow instead."
+            ),
+            "replacement": "/portal/auth/oauth/start",
+        },
     )
+
+
+@router.get("/oauth/start")
+def oauth_start(
+    request: Request,
+    provider: str = Query(..., pattern="^(google|github)$"),
+    return_to: str = Query(default="/"),
+    state_store: OAuthStateStore = Depends(get_oauth_state_store),
+):
+    """Begin the server-driven OAuth flow.
+
+    Generates state + PKCE, stashes them in Redis under a 5-minute
+    one-shot key, and 302s to the provider's authorize URL. The
+    browser never sees our client secret; the provider never sees
+    an unsafelisted return URL because we validate it here.
+    """
+    from app.core.config import settings
+    from app.services.portal.oauth_flow_service import _provider_config
+
+    # Whitelist the portal's own origin; extend via config later.
+    allowed = [
+        getattr(settings, "portal_origin", "") or "",
+        getattr(settings, "admin_ui_origin", "") or "",
+    ]
+    allowed = [o for o in allowed if o]
+    try:
+        return_to = validate_return_to(return_to, allowed_origins=allowed)
+    except InvalidReturnUrl as exc:
+        raise ValidationError(
+            f"invalid return_to: {exc}",
+            code="invalid_return_to",
+        )
+
+    verifier, challenge = generate_pkce()
+    state = state_store.put(
+        provider=provider,
+        code_verifier=verifier,
+        return_to=return_to,
+    )
+
+    cfg = _provider_config(provider)
+    callback_url = str(request.url_for("portal_oauth_callback"))
+    from urllib.parse import urlencode
+    authorize_url = (
+        f"{cfg['authorize_url']}?"
+        + urlencode(
+            {
+                "client_id": cfg["client_id"],
+                "redirect_uri": callback_url,
+                "response_type": "code",
+                "scope": cfg["scope"],
+                "state": state,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+            }
+        )
+    )
+    return RedirectResponse(url=authorize_url, status_code=302)
+
+
+@router.get("/oauth/callback", name="portal_oauth_callback")
+def oauth_callback(
+    request: Request,
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+    session: Session = Depends(get_db_session),
+    state_store: OAuthStateStore = Depends(get_oauth_state_store),
+):
+    """Finish the server-driven flow: validate state, exchange, verify, mint."""
+    row = state_store.pop(state)
+    if row is None:
+        raise ValidationError(
+            "OAuth state is missing, expired, or already used.",
+            code="invalid_state",
+        )
+    if not code:
+        raise ValidationError("Missing auth code.", code="missing_code")
+
+    callback_url = str(request.url_for("portal_oauth_callback"))
+    try:
+        claims = oauth_flow_service.exchange_code_for_verified_userinfo(
+            provider=row["provider"],
+            code=code,
+            code_verifier=row["code_verifier"],
+            redirect_uri=callback_url,
+        )
+    except IdTokenVerificationFailed as exc:
+        raise ValidationError(
+            f"OAuth verification failed: {exc}",
+            code="oauth_verification_failed",
+        )
+
+    result = oauth_service.login_or_create(
+        session,
+        provider=row["provider"],
+        oauth_id=claims["sub"],
+        email=claims.get("email") or "",
+        display_name=claims.get("name"),
+        avatar_url=claims.get("picture"),
+    )
+    return result
 
 
 @router.get("/public-settings")

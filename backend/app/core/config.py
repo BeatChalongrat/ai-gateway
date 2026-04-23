@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     session_idle_ttl_seconds: int = 86400  # 24h sliding
     session_absolute_ttl_seconds: int = 604800  # 7d hard cap
     admin_ui_origin: str = "http://localhost:3001"
+    portal_origin: str = "http://localhost:3010"
+
+    # Server-side OAuth (Phase 2A Commit 4, P0-8 fix). Client secrets
+    # stay on the backend; the portal never touches them. Empty values
+    # mean the matching provider's /oauth/start endpoint will fail the
+    # fetch_token call — that's the correct behaviour on a dev box that
+    # hasn't set up OAuth yet.
+    oauth_google_client_id: str = ""
+    oauth_google_client_secret: str = ""
+    oauth_github_client_id: str = ""
+    oauth_github_client_secret: str = ""
 
     # Provider API keys
     openai_api_key: str = ""
