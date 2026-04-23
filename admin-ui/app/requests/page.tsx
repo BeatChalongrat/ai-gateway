@@ -7,6 +7,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
+import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
@@ -123,6 +124,23 @@ function JsonBlock({ data }: { data: any }) {
   );
 }
 
+// Small header strip for the JSON panel in the detail pane — label
+// on the left, "Copy JSON" action on the right. Hoisted so the page
+// body doesn't repeat the layout markup.
+function JsonPanelHeader({ label, onCopy }: { label: string; onCopy: () => void }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{label}</span>
+      <button
+        onClick={(e) => { e.stopPropagation(); onCopy(); }}
+        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: T.accent, padding: 0, fontFamily: "inherit" }}
+      >
+        Copy JSON
+      </button>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════ */
 /* PAGE                                                                */
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -135,6 +153,8 @@ export default function RequestsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [downloading, setDownloading] = useState(false);
+  const { toast } = useToast();
 
   const items = data?.items ?? [];
 
@@ -165,7 +185,70 @@ export default function RequestsPage() {
 
   const okCount = items.filter((x) => x.status === "success").length;
   const errCount = items.filter((x) => x.status !== "success").length;
+  const allowedCount = items.filter((x) => x.policy_action === "allow").length;
   const maskedCount = items.filter((x) => x.policy_action === "mask").length;
+  const blockedCount = items.filter((x) => x.policy_action === "block" || x.status === "blocked").length;
+
+  // Client-side CSV export. The list endpoint doesn't carry detail
+  // fields (input_masked, dlp_findings, etc.), so the export sticks
+  // to what every row reliably has — consistent with what the old
+  // /audit page exported before it was folded into this page.
+  async function handleDownload() {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = (await api.get("/admin/requests?limit=1000")) as { items?: any[] };
+      let rows = res?.items ?? [];
+      if (statusFilter === "ok") rows = rows.filter((x) => x.status === "success");
+      else if (statusFilter === "error") rows = rows.filter((x) => x.status !== "success");
+      else if (statusFilter === "masked") rows = rows.filter((x) => x.policy_action === "mask");
+      if (search) {
+        const q = search.toLowerCase();
+        rows = rows.filter((x) =>
+          x.request_id?.toLowerCase().includes(q) ||
+          x.model?.toLowerCase().includes(q) ||
+          x.provider?.toLowerCase().includes(q) ||
+          x.status?.toLowerCase().includes(q),
+        );
+      }
+
+      const header = ["request_id", "timestamp", "provider", "model", "policy", "latency_ms", "status"];
+      const esc = (v: any) => {
+        const s = v == null ? "" : String(v);
+        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const lines = [header.join(",")];
+      for (const r of rows) {
+        lines.push([
+          r.request_id ?? "",
+          r.created_at ?? "",
+          r.provider ?? "",
+          r.model ?? "",
+          r.policy_action ?? "",
+          r.latency_ms ?? "",
+          r.status ?? "",
+        ].map(esc).join(","));
+      }
+      const csv = lines.join("\n");
+
+      const today = new Date().toISOString().slice(0, 10);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `requests-${today}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast(`Downloaded ${rows.length} record${rows.length === 1 ? "" : "s"}`);
+    } catch (e: any) {
+      toast(e?.body?.error?.message || "Download failed", "error");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <div className={outfit.className} style={{ background: T.bg, margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
@@ -183,9 +266,47 @@ export default function RequestsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
             Refresh
           </button>
+          <button
+            onClick={handleDownload}
+            disabled={downloading || items.length === 0}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px",
+              fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 8,
+              border: `1px solid ${T.bl}`, background: T.card, color: T.ts,
+              cursor: downloading ? "wait" : items.length === 0 ? "not-allowed" : "pointer",
+              opacity: downloading || items.length === 0 ? 0.65 : 1,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            {downloading ? "Preparing…" : "Download"}
+          </button>
           <ThemeToggle />
         </div>
       </div>
+
+      {/* Stats chips — total / allowed / masked / blocked.
+          Matches the summary row the old /audit page had before the
+          two pages were folded together. */}
+      {!loading && !error && items.length > 0 && (
+        <div className="rq-anim" style={{ animationDelay: "0.02s", display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          {[
+            { label: "total records", count: items.length, dot: null },
+            { label: "allowed", count: allowedCount, dot: T.green },
+            { label: "masked", count: maskedCount, dot: "#f59e0b" },
+            { label: "blocked", count: blockedCount, dot: T.red },
+          ].map((c) => (
+            <span key={c.label} style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "6px 14px", borderRadius: 16,
+              background: T.card, border: `1px solid ${T.bl}`, fontSize: 13,
+            }}>
+              {c.dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.dot }} />}
+              <span style={{ fontFamily: T.mono, fontWeight: 600, color: T.tp }}>{c.count}</span>
+              <span style={{ color: T.ts }}>{c.label}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Sparkline */}
       {!loading && !error && items.length > 0 && <Sparkline items={items} />}
@@ -354,17 +475,31 @@ export default function RequestsPage() {
                 )}
 
                 {/* JSON */}
-                <JsonBlock data={{
-                  request_id: detail.request_id,
-                  provider: detail.provider,
-                  model: detail.model,
-                  status: detail.status,
-                  code: detail.error_code || null,
-                  dlp: detail.policy_action,
-                  latency_ms: detail.latency_ms,
-                  tokens: { in: detail.prompt_tokens ?? 0, out: detail.completion_tokens ?? 0 },
-                  time: detail.created_at,
-                }} />
+                {(() => {
+                  const payload = {
+                    request_id: detail.request_id,
+                    provider: detail.provider,
+                    model: detail.model,
+                    status: detail.status,
+                    code: detail.error_code || null,
+                    dlp: detail.policy_action,
+                    latency_ms: detail.latency_ms,
+                    tokens: { in: detail.prompt_tokens ?? 0, out: detail.completion_tokens ?? 0 },
+                    time: detail.created_at,
+                  };
+                  return (
+                    <>
+                      <JsonPanelHeader
+                        label="Raw Payload"
+                        onCopy={() => {
+                          navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+                          toast("JSON copied to clipboard");
+                        }}
+                      />
+                      <JsonBlock data={payload} />
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>Failed to load details</div>
