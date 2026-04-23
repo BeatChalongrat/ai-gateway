@@ -343,6 +343,7 @@ def public_settings(session: Session = Depends(get_db_session)):
     Intentionally scoped — never expose the full ``system_settings``
     table here.
     """
+    from app.core.config import settings
     from app.services.portal import credit_service
 
     free_trial_raw = credit_service.get_setting(
@@ -361,4 +362,48 @@ def public_settings(session: Session = Depends(get_db_session)):
     return {
         "free_trial_tokens": free_trial,
         "portal_signup_enabled": signup_enabled,
+        "resend_configured": bool((settings.resend_api_key or "").strip()),
+    }
+
+
+@router.get("/invite/{code}")
+@public_portal_route
+def preview_invite(code: str, session: Session = Depends(get_db_session)):
+    """Pre-signup peek at an invite code — public, read-only.
+
+    The invite landing page (portal ``/invite/:code``) renders a
+    context banner ("You're joining Acme Corp as Member") before the
+    user signs up, so the CTA is less scary than a bare signup form.
+    We return a small subset of the invite row — tenant name, role,
+    inviter display name, expiry — or ``{ valid: false }`` for
+    missing/revoked/expired codes. The opaque false is deliberate:
+    we do not want to enumerate live codes.
+    """
+    from app.models.tenant import TenantORM
+    from app.services.portal import tenant_service
+
+    invite = tenant_service.preview_invite(session, code=code)
+    if invite is None:
+        return {"valid": False}
+
+    tenant = session.get(TenantORM, invite.tenant_id)
+    tenant_name = tenant.name if tenant is not None else "a team"
+    # Inviter display name lookup is a bonus — if the row was hard-
+    # deleted for some reason we still want the landing page to work.
+    inviter = None
+    if invite.created_by:
+        from app.models.portal_user import PortalUserORM
+
+        row = session.get(PortalUserORM, invite.created_by)
+        if row is not None:
+            inviter = row.display_name or row.email
+    return {
+        "valid": True,
+        "tenant_name": tenant_name,
+        "tenant_id": invite.tenant_id,
+        "role": invite.role or "member",
+        "inviter_name": inviter,
+        "expires_at": invite.expires_at.isoformat()
+        if invite.expires_at
+        else None,
     }
