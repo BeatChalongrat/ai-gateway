@@ -9,7 +9,7 @@ import { Input } from "@/components/Input";
 import { Modal } from "@/components/Modal";
 import { PageSpinner } from "@/components/Spinner";
 import { api, PortalApiError } from "@/lib/api";
-import type { Project } from "@/lib/types";
+import type { PortalUser, Project } from "@/lib/types";
 import EmptyState from "../_components/EmptyState";
 import PageHeader from "../_components/PageHeader";
 import ProjectCard from "./_components/ProjectCard";
@@ -33,6 +33,7 @@ export default function ProjectsPage() {
   const [statsMap, setStatsMap] = useState<Record<string, ProjectStats>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [me, setMe] = useState<PortalUser | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -49,8 +50,12 @@ export default function ProjectsPage() {
   async function load() {
     setLoading(true);
     try {
-      const r = await api.get<ProjectsResp>("/portal/projects");
+      const [r, meResp] = await Promise.all([
+        api.get<ProjectsResp>("/portal/projects"),
+        api.get<PortalUser>("/portal/me"),
+      ]);
       setProjects(r.projects);
+      setMe(meResp);
 
       // Fetch key counts per project in parallel. Requests counts are
       // not yet per-project on the backend; leave at 0 for now.
@@ -162,13 +167,26 @@ export default function ProjectsPage() {
       {loading ? (
         <PageSpinner />
       ) : projects.length === 0 ? (
-        <EmptyState
-          icon={<FolderPlus className="w-7 h-7" strokeWidth={1.5} />}
-          title="No projects yet"
-          description="Create your first project to organize API keys by application or environment."
-          action={{ label: "Create project", onClick: () => setCreateOpen(true) }}
-          secondaryAction={{ label: "View docs", href: "/docs" }}
-        />
+        // Empty-state copy branches on tenant role. A tenant-owner with
+        // no projects is a fresh tenant; a plain member with no
+        // projects is a user whose team hasn't granted access yet —
+        // different framing nudges the right next action.
+        me?.tenant_role === "member" ? (
+          <EmptyState
+            icon={<FolderPlus className="w-7 h-7" strokeWidth={1.5} />}
+            title="No projects yet"
+            description="Ask your team admin to grant access, or create one of your own."
+            action={{ label: "Create project", onClick: () => setCreateOpen(true) }}
+          />
+        ) : (
+          <EmptyState
+            icon={<FolderPlus className="w-7 h-7" strokeWidth={1.5} />}
+            title="No projects yet"
+            description="Create your first project to organize API keys by application or environment."
+            action={{ label: "Create project", onClick: () => setCreateOpen(true) }}
+            secondaryAction={{ label: "View docs", href: "/docs" }}
+          />
+        )
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((p) => (
