@@ -21,6 +21,7 @@ from app.domain.providers import (
     ProviderUsage,
 )
 from app.services.providers.base import BaseProviderAdapter
+from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.http_client import create_provider_client
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.parsers import parse_anthropic_response
@@ -93,7 +94,7 @@ class AnthropicAdapter(BaseProviderAdapter):
         body = self._build_body(payload, messages, resolved_model=resolved_model)
 
         client = create_provider_client(
-            base_url=ANTHROPIC_BASE_URL,
+            base_url=resolve_base_url(self.provider_name, ANTHROPIC_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             headers={
@@ -134,7 +135,7 @@ class AnthropicAdapter(BaseProviderAdapter):
         initial_model = resolved_model or payload.model
 
         client = create_provider_client(
-            base_url=ANTHROPIC_BASE_URL,
+            base_url=resolve_base_url(self.provider_name, ANTHROPIC_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             headers={

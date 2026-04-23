@@ -11,6 +11,7 @@ blocked. Rate limiting is a safety net, not an auth gate.
 
 from __future__ import annotations
 
+import os
 import time
 
 import redis as redis_lib
@@ -22,6 +23,40 @@ DEFAULT_KEY_LIMIT = 60
 DEFAULT_PROJECT_LIMIT = 300
 DEFAULT_TENANT_LIMIT = 1000
 DEFAULT_WINDOW_SECONDS = 60
+
+# Perf-test-only override knobs. Setting
+# ``PERF_TEST_PROJECT_LIMIT=120000`` in the environment raises the
+# per-project ceiling for the project identified by
+# ``PERF_TEST_PROJECT_ID`` (default ``perf-test-project``);
+# ``PERF_TEST_TENANT_LIMIT=200000`` does the same for the owning
+# tenant (default ``perf-test-tenant``). Without the tenant override
+# the 1 000/min default tenant cap would still cascade at
+# 25+ RPS — we saw this during Phase-2 sanity checks. Intentionally
+# off by default and never read in production environments — the
+# shipping rate-limit posture is the DEFAULT_* constants above. See
+# FINDING_429_LATENCY_ANOMALY.md for why per-tenant-also-needed.
+_PERF_PROJECT_ID = os.environ.get("PERF_TEST_PROJECT_ID", "perf-test-project")
+_PERF_TENANT_ID = os.environ.get("PERF_TEST_TENANT_ID", "perf-test-tenant")
+
+
+def _env_int(key: str) -> int | None:
+    """Parse a positive int from the environment; None on absent/invalid."""
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def _perf_project_limit_override() -> int | None:
+    return _env_int("PERF_TEST_PROJECT_LIMIT")
+
+
+def _perf_tenant_limit_override() -> int | None:
+    return _env_int("PERF_TEST_TENANT_LIMIT")
 
 
 class RateLimitService:
@@ -79,10 +114,24 @@ class RateLimitService:
         return self._sliding_window(f"rl:key:{key_id}", limit)
 
     def check_project(self, project_id: str, limit: int = DEFAULT_PROJECT_LIMIT) -> dict:
-        return self._sliding_window(f"rl:proj:{project_id}", limit)
+        # Perf-test-only ceiling override. Any call for the perf
+        # project id picks up the env-var limit when set; everything
+        # else is unchanged. Production must never set this env var.
+        effective = limit
+        if project_id == _PERF_PROJECT_ID:
+            override = _perf_project_limit_override()
+            if override is not None:
+                effective = override
+        return self._sliding_window(f"rl:proj:{project_id}", effective)
 
     def check_tenant(self, tenant_id: str, limit: int = DEFAULT_TENANT_LIMIT) -> dict:
-        return self._sliding_window(f"rl:tenant:{tenant_id}", limit)
+        # Perf-test-only ceiling override, mirroring the project override.
+        effective = limit
+        if tenant_id == _PERF_TENANT_ID:
+            override = _perf_tenant_limit_override()
+            if override is not None:
+                effective = override
+        return self._sliding_window(f"rl:tenant:{tenant_id}", effective)
 
     def check_all(
         self,
