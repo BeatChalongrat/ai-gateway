@@ -415,8 +415,12 @@
     transition: background 80ms ease;
   }
 
+  /* Row hover — theme-aware. The old value (rgba(241,244,248,0.6))
+     was a near-white tint that lit up wrong on dark mode. Use the
+     elevated-surface token for both themes; the small alpha keeps
+     the effect subtle so single-row focus still reads. */
   .sran-table tbody tr:hover {
-    background: rgba(241, 244, 248, 0.6);
+    background: color-mix(in srgb, var(--bg-elevated) 65%, transparent);
   }
 
   .sran-table tbody tr:last-child td {

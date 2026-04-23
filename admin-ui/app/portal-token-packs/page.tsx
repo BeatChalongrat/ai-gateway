@@ -298,7 +298,7 @@ export default function TokenPacksPage() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
           {formErr ? (
-            <div style={{ fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", padding: "6px 10px", borderRadius: 6 }}>
+            <div style={{ fontSize: 12, color: "var(--accent-danger)", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", padding: "6px 10px", borderRadius: 6 }}>
               {formErr}
             </div>
           ) : null}
