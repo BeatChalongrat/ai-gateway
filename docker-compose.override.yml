@@ -1,0 +1,57 @@
+# Dev-mode overrides. Compose auto-merges this on top of
+# docker-compose.yml, so `docker compose up -d` in development gives
+# you: hot-reload backend (uvicorn --reload), hot-reload admin-ui
+# (next dev), hot-reload portal (next dev). In CI / prod, invoke
+# compose with -f docker-compose.yml alone to skip this overlay.
+services:
+  backend:
+    # Override the image CMD so uvicorn runs with --reload against the
+    # mounted source tree. Migrations still run once on container start.
+    command: >-
+      sh -c "python -m alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8080
+             --reload --reload-dir /app/app"
+    volumes:
+      - ./backend:/app
+    environment:
+      # watchfiles polls on the Windows-to-container bridge — docker
+      # inotify events don't always propagate through the Hyper-V layer.
+      WATCHFILES_FORCE_POLLING: "true"
+      LOG_LEVEL: DEBUG
+
+  admin-ui:
+    # Run next dev out of a plain node image against the bind-mounted
+    # source tree. The Dockerfile's prod multi-stage build is bypassed
+    # for dev so edits on the host reload inside the container.
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "if [ ! -d node_modules ] || [ ! -f node_modules/.install-stamp ]; then npm ci && touch node_modules/.install-stamp; fi && npx next dev -H 0.0.0.0 -p 3000"
+    volumes:
+      - ./admin-ui:/app
+      - admin_ui_node_modules:/app/node_modules
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_ADMIN_API_KEY: ${NEXT_PUBLIC_ADMIN_API_KEY:-}
+      WATCHPACK_POLLING: "true"
+    # No build block in dev: we only use the node:20-alpine base.
+    build: !reset null
+
+  portal:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "if [ ! -d node_modules ] || [ ! -f node_modules/.install-stamp ]; then npm ci && touch node_modules/.install-stamp; fi && npx next dev -H 0.0.0.0 -p 3001"
+    volumes:
+      - ./portal:/app
+      - portal_node_modules:/app/node_modules
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}
+      BACKEND_URL: http://backend:8080
+      WATCHPACK_POLLING: "true"
+    build: !reset null
+
+volumes:
+  admin_ui_node_modules:
+  portal_node_modules:
