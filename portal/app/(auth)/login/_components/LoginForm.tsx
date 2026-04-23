@@ -78,17 +78,9 @@ export default function LoginForm() {
               <label className="af-label" htmlFor="login-password">
                 Password
               </label>
-              <button
-                type="button"
-                className="af-link"
-                onClick={() =>
-                  alert(
-                    "Password reset is coming soon. Contact support@sran.ai for help."
-                  )
-                }
-              >
+              <Link href="/forgot-password" className="af-link">
                 Forgot password?
-              </button>
+              </Link>
             </div>
             <div className="af-input-wrap">
               <input
