@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_portal_user
+from app.api.portal_scope import explicit_cross_portal_tenant
 from app.core.exceptions import NotFoundError
 from app.models.portal_user import PortalUserORM
 from app.models.token_pack import TokenPackORM
@@ -27,6 +28,13 @@ class PurchaseRequest(BaseModel):
 
 
 @router.get("/packs")
+@explicit_cross_portal_tenant(
+    reason=(
+        "Token pack SKUs are global during Phase 3 pre-C25. "
+        "Q1 answer ('tenant-scoped packs') lands in C25 which "
+        "replaces this marker with @scope_to_portal_tenant."
+    )
+)
 def list_packs(session: Session = Depends(get_db_session)):
     rows = (
         session.execute(
@@ -51,6 +59,12 @@ def list_packs(session: Session = Depends(get_db_session)):
 
 
 @router.post("/purchase")
+@explicit_cross_portal_tenant(
+    reason=(
+        "Purchase endpoint looks up a global pack SKU. "
+        "Becomes @scope_to_portal_tenant in C25."
+    )
+)
 def purchase(
     body: PurchaseRequest,
     user: PortalUserORM = Depends(get_portal_user),
