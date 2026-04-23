@@ -47,6 +47,20 @@ TENANTS = [
 
 PROJECTS_PER_TENANT = ["web-app", "mobile-app", "batch-jobs"]
 
+# credit_used is deliberately 0 for every seed user so it reconciles
+# with the (empty) request_logs / credit_transactions ledger for a
+# freshly-seeded DB. Previously Bob/Charlie/Dave carried positive
+# credit_used values that had no corresponding gateway activity,
+# which made the Dashboard and Billing surfaces show consumption
+# that the Usage page (derived from request_logs) couldn't find —
+# the "15,000 ghost" reconciliation bug Beat flagged. Keep credits
+# used at 0 here; real consumption lands via credit_service.debit()
+# as requests flow, which writes both to portal_users.credit_used
+# AND to credit_transactions, keeping every surface honest.
+#
+# For the "low-credit" case Charlie used to cover, that's now
+# represented purely via credit_balance (5,000 — small enough to
+# trigger credit-warning UI without faking a ledger).
 PORTAL_USERS = [
     {"email": "alice@acme.test", "password": "Alice!2345", "display_name": "Alice Anderson",
      "tenant_id": "acme-001",
@@ -55,16 +69,16 @@ PORTAL_USERS = [
     {"email": "bob@globex.test", "password": "Bob!2345", "display_name": "Bob Beaumont",
      "tenant_id": "globex-001",
      "plan": "pro", "status": "active", "email_verified": True,
-     "credit_balance": 200000, "credit_used": 15000},
+     "credit_balance": 200000, "credit_used": 0},
     {"email": "charlie@acme.test", "password": "Charlie!2345",
      "display_name": "Charlie Chen 🐉 ทดสอบ",  # emoji + Thai in display_name
      "tenant_id": "acme-001",
      "plan": "free_trial", "status": "active", "email_verified": True,
-     "credit_balance": 5000, "credit_used": 4900},  # low credit case
+     "credit_balance": 5000, "credit_used": 0},  # low-credit warning case
     {"email": "dave@acme.test", "password": "Dave!2345", "display_name": "Dave Davies",
      "tenant_id": "acme-001",
      "plan": "starter", "status": "suspended", "email_verified": True,
-     "credit_balance": 10000, "credit_used": 2000},
+     "credit_balance": 10000, "credit_used": 0},
     {"email": "eve@globex.test", "password": "Eve!2345", "display_name": "Eve Evans",
      "tenant_id": "globex-001",
      "plan": "free_trial", "status": "active", "email_verified": False,  # unverified
