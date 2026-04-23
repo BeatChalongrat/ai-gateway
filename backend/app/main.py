@@ -250,7 +250,9 @@ app.add_exception_handler(Exception, handle_unhandled_exception)
 
 # --- Routers ---
 app.include_router(health_router)
-app.include_router(auth_router)  # /auth/login, /auth/refresh, /auth/me
+app.include_router(auth_router)  # /auth/login → 410, /auth/refresh, /auth/me
+from app.api.routes.admin_session import router as admin_session_router
+app.include_router(admin_session_router)  # /auth/session/{login,logout,me}
 app.include_router(public_chat_router, prefix="/v1")
 app.include_router(public_models_router, prefix="/v1")
 app.include_router(admin_router, prefix="/admin")
