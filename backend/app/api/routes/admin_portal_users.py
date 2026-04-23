@@ -49,6 +49,7 @@ def list_users(
     offset: int = Query(0, ge=0),
     search: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    tenant_id: str | None = Query(default=None),
     session: Session = Depends(get_db_session),
 ):
     filters = []
@@ -62,6 +63,11 @@ def list_users(
         )
     if status:
         filters.append(PortalUserORM.status == status)
+    # tenant_id scope — used by the admin Add-Member dialog to limit
+    # the search to the project's tenant. No cross-tenant membership,
+    # so the picker shouldn't even offer users from other tenants.
+    if tenant_id:
+        filters.append(PortalUserORM.tenant_id == tenant_id)
 
     where = and_(*filters) if filters else None
 
