@@ -48,6 +48,13 @@ class PortalUserORM(Base):
     token_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="1"
     )
+    # Phase 3.5 — transactional email language preference. 'en' |
+    # 'th' today, string (not enum) so adding more locales post-
+    # launch needs zero DDL. Unknown values fall back to English at
+    # render time.
+    preferred_language: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="en"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
