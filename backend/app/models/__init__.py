@@ -21,6 +21,7 @@ from app.models.provider_key import ProviderKeyORM
 from app.models.request_log import RequestLogORM
 from app.models.system_setting import SystemSettingORM
 from app.models.tenant import TenantORM
+from app.models.tenant_invite import TenantInviteORM
 from app.models.token_pack import TokenPackORM
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "ApiKeyORM", "CreditTransactionORM", "KeywordRuleORM",
     "OrgSettingsORM", "PolicyORM", "PolicyProfileORM",
     "PortalUserORM", "ProjectORM", "ProviderORM", "ProviderKeyORM",
-    "RequestLogORM", "SystemSettingORM", "TenantORM", "TokenPackORM",
+    "RequestLogORM", "SystemSettingORM", "TenantORM",
+    "TenantInviteORM", "TokenPackORM",
 ]
