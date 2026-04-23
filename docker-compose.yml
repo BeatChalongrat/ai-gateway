@@ -61,10 +61,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001
-      # Point the three main provider SDKs at the in-cluster mock by
-      # default. Remove/override in .env for live-provider testing.
-      PROVIDER_BASE_URL_OVERRIDES: >-
-        {"openai":"http://mock-provider:9090/v1","anthropic":"http://mock-provider:9090","openrouter":"http://mock-provider:9090/v1"}
+      # Empty by default → adapters hit real provider URLs. Uncomment
+      # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
+      # anthropic/openrouter at the in-cluster mock-provider service.
+      PROVIDER_BASE_URL_OVERRIDES: ${PROVIDER_BASE_URL_OVERRIDES:-}
     ports:
       - "8080:8080"
     depends_on:

@@ -32,7 +32,16 @@ clean: ## Stop the stack AND remove volumes (wipes DB + redis data)
 	docker compose down -v
 
 test: ## Run the backend test suite inside the backend container
-	docker compose exec backend pytest
+	# Config / dlp tests assert pydantic Settings defaults. The compose
+	# runtime sets POSTGRES_HOST=postgres etc.; `env -u` unsets those
+	# so the defaults come from the Settings class, not the container env.
+	docker compose exec backend env \
+	  -u POSTGRES_HOST -u POSTGRES_PORT -u POSTGRES_DB \
+	  -u POSTGRES_USER -u POSTGRES_PASSWORD \
+	  -u REDIS_HOST -u REDIS_PORT \
+	  -u CORS_ORIGINS -u LOG_LEVEL \
+	  -u PROVIDER_BASE_URL_OVERRIDES -u DLP_DISABLED_DETECTORS \
+	  pytest
 
 build: ## Build all images without starting
 	docker compose build
