@@ -5,6 +5,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_DEFAULTS = {"change-me", "changeme", "secret", "password", "", "dev-stable-key-change-in-prod"}
 _DEV_ENVS = {"development", "test", "testing"}
+# Minimum byte length for security-critical secrets. 32 bytes = 256 bits,
+# the safe floor for HMAC-SHA256 / AES-256. Shorter values pass a
+# string-match against _INSECURE_DEFAULTS but still offer weak entropy,
+# so we reject them explicitly in production.
+_MIN_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -122,25 +127,37 @@ class Settings(BaseSettings):
         return [d.strip() for d in self.dlp_disabled_detectors.split(",") if d.strip()]
 
     def validate_secrets(self) -> None:
-        """Reject insecure default secrets outside dev/test environments.
+        """Reject insecure default / too-short secrets outside dev/test.
 
-        Raises RuntimeError if critical secrets are left at placeholder values.
+        Raises RuntimeError if critical secrets are left at placeholder
+        values or fall below ``_MIN_SECRET_LENGTH``. This MUST be called
+        at process startup (``app.main`` does so at import time) so a
+        misconfigured production deploy never accepts a single request.
         """
         if self.app_env.lower() in _DEV_ENVS:
             return  # Allow insecure defaults in dev/test
 
         issues: list[str] = []
-        if self.jwt_secret.lower() in _INSECURE_DEFAULTS:
-            issues.append("JWT_SECRET is set to an insecure default")
-        if self.master_encryption_key.lower() in _INSECURE_DEFAULTS:
-            issues.append("MASTER_ENCRYPTION_KEY is set to an insecure default")
+
+        def _check(name: str, value: str) -> None:
+            if value.lower() in _INSECURE_DEFAULTS:
+                issues.append(f"{name} is set to an insecure default")
+            elif len(value.encode("utf-8")) < _MIN_SECRET_LENGTH:
+                issues.append(
+                    f"{name} is too short "
+                    f"(need ≥{_MIN_SECRET_LENGTH} bytes, got {len(value.encode('utf-8'))})"
+                )
+
+        _check("JWT_SECRET", self.jwt_secret)
+        _check("MASTER_ENCRYPTION_KEY", self.master_encryption_key)
+        _check("PORTAL_JWT_SECRET", self.portal_jwt_secret)
+
         signing = self.session_signing_secrets_list
         if not signing:
             issues.append("SESSION_SIGNING_SECRETS is empty")
-        elif any(s.lower() in _INSECURE_DEFAULTS for s in signing):
-            issues.append(
-                "SESSION_SIGNING_SECRETS contains an insecure default value"
-            )
+        else:
+            for idx, s in enumerate(signing):
+                _check(f"SESSION_SIGNING_SECRETS[{idx}]", s)
 
         if issues:
             raise RuntimeError(
