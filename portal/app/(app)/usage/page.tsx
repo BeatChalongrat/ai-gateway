@@ -151,7 +151,7 @@ export default function UsagePage() {
                   key={r}
                   onClick={() => setRange(r)}
                   type="button"
-                  className="px-3 py-1.5 text-sm font-medium rounded-md"
+                  className="chip-bounce px-3 py-1.5 text-sm font-medium rounded-md"
                   style={{
                     background: active ? "var(--bg-elevated)" : "transparent",
                     color: active ? "var(--text-primary)" : "var(--text-secondary)",
@@ -195,6 +195,7 @@ export default function UsagePage() {
           icon={<Hash className="w-5 h-5" strokeWidth={1.75} />}
           label="Total Requests"
           value={totals.requests.toLocaleString()}
+          numericValue={totals.requests}
           caption="Selected period"
         />
         <StatCard
@@ -202,6 +203,8 @@ export default function UsagePage() {
           icon={<Zap className="w-5 h-5" strokeWidth={1.75} />}
           label="Total Tokens"
           value={formatTokens(totals.tokens)}
+          numericValue={totals.tokens}
+          format={formatTokens}
           caption="Selected period"
         />
         <StatCard
@@ -209,6 +212,8 @@ export default function UsagePage() {
           icon={<TrendingUp className="w-5 h-5" strokeWidth={1.75} />}
           label="Avg / Request"
           value={formatTokens(totals.avg)}
+          numericValue={totals.avg}
+          format={formatTokens}
           caption="Tokens per request"
         />
       </div>

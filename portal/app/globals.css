@@ -362,6 +362,191 @@ button:not(:disabled):active {
 }
 
 /* -------------------------------------------------------------------
+   PATTERN 8 — Stagger fade-up for list rows
+   -------------------------------------------------------------------
+   Applied to <tr class="row-stagger" style={animationDelay: `${i * 50}ms`}>
+   on the Team page so members fade in one after another on load. 250ms
+   fade + 8px→0 translate feels "list materialising" without being slow.
+*/
+@keyframes rowStagger {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.row-stagger {
+  animation: rowStagger 250ms var(--ease-out-expo) both;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 9 — Avatar hover lift
+   -------------------------------------------------------------------
+   A subtle scale + soft shadow on hover. Kept quiet (105%, not 110%)
+   so it reads as "this is interactive" without disturbing rows.
+*/
+.avatar-hover {
+  transition:
+    transform var(--motion-base) var(--ease-out-expo),
+    box-shadow var(--motion-base) var(--ease-out-expo);
+}
+.avatar-hover:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.25);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 10 — Filter chip bounce on click
+   -------------------------------------------------------------------
+   Active-state confirmation: a quick 97%→100% pulse so the user sees
+   the chip "acknowledge" the click even before the data updates.
+*/
+@keyframes chipBounce {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+.chip-bounce:active {
+  animation: chipBounce 200ms var(--ease-out-quad);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 11 — Chart bar grow-in
+   -------------------------------------------------------------------
+   Usage page: bars render at transform-origin bottom and animate
+   scaleY 0→1 over 400ms with a per-bar stagger supplied inline.
+*/
+@keyframes barGrow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.bar-grow {
+  transform-origin: bottom;
+  animation: barGrow 400ms var(--ease-out-expo) both;
+}
+.bar-grow:hover {
+  transform: scaleY(1.05);
+  transition: transform 100ms ease-out;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 12 — Toast slide-in from top-right (spring-ish)
+   -------------------------------------------------------------------
+   Approximates Framer's stiffness-300/damping-30 spring with a cubic
+   Bezier that overshoots ~3% then settles. Keeps the toast feeling
+   "arrive" rather than "appear."
+*/
+@keyframes toastIn {
+  0%   { opacity: 0; transform: translateX(100%) translateY(-4px); }
+  70%  { opacity: 1; transform: translateX(-4px) translateY(0); }
+  100% { opacity: 1; transform: translateX(0) translateY(0); }
+}
+.toast-in {
+  animation: toastIn 320ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 13 — Empty-state float
+   -------------------------------------------------------------------
+   Gentle up/down loop on illustrations so blank pages feel alive.
+   3s cycle, 4px range — well below anything that would bother a
+   vestibular-sensitive user (and the reduced-motion block below
+   kills it outright).
+*/
+@keyframes emptyFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+.empty-float {
+  animation: emptyFloat 3s ease-in-out infinite;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 13b — Dropdown menu slide + fade
+   -------------------------------------------------------------------
+   Two variants for the row-kebab menu: one that opens downward (the
+   common case) and one that flips to open upward when the trigger
+   is close to the viewport bottom. Both 150ms ease-out cubic. The
+   close state reverses the transform so the menu "retracts" into
+   the trigger rather than popping out.
+*/
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes menuInUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes menuOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+}
+@keyframes menuOutUp {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+}
+.menu-anim-in-down { animation: menuIn 150ms cubic-bezier(0.16, 1, 0.3, 1) both; transform-origin: top right; }
+.menu-anim-in-up   { animation: menuInUp 150ms cubic-bezier(0.16, 1, 0.3, 1) both; transform-origin: bottom right; }
+.menu-anim-out-down { animation: menuOut 150ms cubic-bezier(0.4, 0, 1, 1) both; transform-origin: top right; }
+.menu-anim-out-up   { animation: menuOutUp 150ms cubic-bezier(0.4, 0, 1, 1) both; transform-origin: bottom right; }
+
+/* -------------------------------------------------------------------
+   PATTERN 14 — Skeleton shimmer
+   -------------------------------------------------------------------
+   Background-position animation across a slanted gradient — reads as
+   "loading" without rotating anything (so it's safe under reduced-
+   motion too; we disable it anyway). 1.5s loop.
+*/
+@keyframes skelShimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 0%,
+    color-mix(in srgb, var(--bg-elevated) 60%, var(--bg-surface)) 40%,
+    var(--bg-elevated) 80%
+  );
+  background-size: 200px 100%;
+  background-repeat: no-repeat;
+  animation: skelShimmer 1.5s infinite linear;
+  border-radius: 6px;
+}
+
+/* -------------------------------------------------------------------
    Reduced-motion override — honors OS-level accessibility preference
    (macOS: System Settings → Accessibility → Display → Reduce motion).
    Kills keyframe animations and transitions near-instantly across the
