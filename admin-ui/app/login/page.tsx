@@ -7,8 +7,9 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080"
 
 export default function LoginPage() {
   const router = useRouter();
-  // Phase 2A Commit 6: the "username" field is now email — the backend
-  // session login endpoint authenticates against AdminUserORM.email.
+  // The backend session login accepts either a username (e.g. "admin")
+  // or an email address. The JSON field name stays `email` for wire-
+  // compat; the label/input type below reflect the real accepted shape.
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -28,7 +29,7 @@ export default function LoginPage() {
       });
       if (!res.ok) {
         if (res.status === 429) setError("Too many attempts. Try again later.");
-        else setError("Invalid email or password");
+        else setError("Invalid credentials");
         setLoading(false);
         return;
       }
@@ -123,13 +124,13 @@ export default function LoginPage() {
         }}>
           <form onSubmit={handleSubmit} style={{ width: "100%" }}>
             <div style={{ marginBottom: "1.25rem" }}>
-              <label style={labelStyle}>Email</label>
+              <label style={labelStyle}>Username or email</label>
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
+                placeholder="admin or you@example.com"
+                autoComplete="username"
                 style={inputStyle}
                 onFocus={(e) => { e.target.style.borderColor = "rgba(100,160,255,0.5)"; }}
                 onBlur={(e) => { e.target.style.borderColor = "rgba(100,140,220,0.2)"; }}
