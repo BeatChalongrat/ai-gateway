@@ -268,6 +268,18 @@ app.include_router(admin_portal_users_router, prefix="/admin/portal-users", tags
 app.include_router(admin_system_settings_router, prefix="/admin/system-settings", tags=["admin-settings"])
 app.include_router(admin_token_packs_router, prefix="/admin/token-packs", tags=["admin-packs"])
 
+# --- Admin auth gate (Phase 2A Commit 5) ---
+# Backfill a default @require_role(PROJECT_ADMIN) marker onto every
+# /admin/* route that doesn't already carry one (endpoints decorated
+# explicitly during Commits 2-4 keep their markers). Then run the
+# boot-check — crashes the worker if anything slipped through.
+from app.api.admin_auth import (
+    tag_untagged_admin_routes,
+    check_admin_routes_decorated,
+)
+tag_untagged_admin_routes(app)
+check_admin_routes_decorated(app)
+
 
 @app.get("/metrics")
 async def metrics():
