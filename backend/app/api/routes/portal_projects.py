@@ -16,6 +16,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_portal_user
+from app.api.portal_scope import scope_to_portal_tenant
 from app.core.exceptions import (
     AuthorizationError,
     NotFoundError,
@@ -90,6 +91,7 @@ def _own_project(
 
 
 @router.get("")
+@scope_to_portal_tenant
 def list_projects(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
@@ -107,6 +109,7 @@ def list_projects(
 
 
 @router.post("")
+@scope_to_portal_tenant
 def create_project(
     body: ProjectCreate,
     user: PortalUserORM = Depends(get_portal_user),
@@ -125,6 +128,7 @@ def create_project(
 
 
 @router.get("/{project_id}")
+@scope_to_portal_tenant
 def get_project(
     project_id: str,
     user: PortalUserORM = Depends(get_portal_user),
@@ -134,6 +138,7 @@ def get_project(
 
 
 @router.patch("/{project_id}")
+@scope_to_portal_tenant
 def update_project(
     project_id: str,
     body: ProjectUpdate,
@@ -150,6 +155,7 @@ def update_project(
 
 
 @router.delete("/{project_id}")
+@scope_to_portal_tenant
 def delete_project(
     project_id: str,
     user: PortalUserORM = Depends(get_portal_user),
@@ -173,6 +179,7 @@ def delete_project(
 
 
 @router.get("/{project_id}/keys")
+@scope_to_portal_tenant
 def list_keys(
     project_id: str,
     user: PortalUserORM = Depends(get_portal_user),
@@ -206,6 +213,7 @@ def list_keys(
 
 
 @router.post("/{project_id}/keys")
+@scope_to_portal_tenant
 def create_key(
     project_id: str,
     body: ApiKeyCreate,
@@ -230,6 +238,7 @@ def create_key(
 
 
 @router.delete("/{project_id}/keys/{key_id}")
+@scope_to_portal_tenant
 def delete_key(
     project_id: str,
     key_id: str,

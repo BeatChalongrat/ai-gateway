@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_portal_user
+from app.api.portal_scope import scope_to_portal_tenant
 from app.core.exceptions import AuthorizationError, NotFoundError
 from app.models.portal_user import PortalUserORM
 from app.models.tenant_invite import TenantInviteORM
@@ -94,6 +95,7 @@ def _invite_to_dict(inv: TenantInviteORM, *, include_code: bool = False) -> dict
 
 
 @router.get("/members")
+@scope_to_portal_tenant
 def list_members(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
@@ -109,6 +111,7 @@ def list_members(
 
 
 @router.delete("/members/{target_user_id}")
+@scope_to_portal_tenant
 def remove_member(
     target_user_id: str,
     user: PortalUserORM = Depends(get_portal_user),
@@ -139,6 +142,7 @@ class InviteCreate(BaseModel):
 
 
 @router.get("/invites")
+@scope_to_portal_tenant
 def list_invites(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
@@ -171,6 +175,7 @@ def list_invites(
 
 
 @router.post("/invites")
+@scope_to_portal_tenant
 def create_invite(
     body: InviteCreate,
     user: PortalUserORM = Depends(get_portal_user),
@@ -193,6 +198,7 @@ def create_invite(
 
 
 @router.delete("/invites/{invite_id}")
+@scope_to_portal_tenant
 def revoke_invite(
     invite_id: str,
     user: PortalUserORM = Depends(get_portal_user),
@@ -229,6 +235,7 @@ class RedeemRequest(BaseModel):
 
 
 @router.post("/redeem")
+@scope_to_portal_tenant
 def redeem_invite(
     body: RedeemRequest,
     user: PortalUserORM = Depends(get_portal_user),

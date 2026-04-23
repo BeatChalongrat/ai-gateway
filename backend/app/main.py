@@ -328,6 +328,14 @@ from app.api.admin_auth import (
 tag_untagged_admin_routes(app)
 check_admin_routes_decorated(app)
 
+# --- Portal scope gate (Phase 3 Commit 23) ---
+# Mirrors the admin boot-check: every /portal/* route must declare
+# @scope_to_portal_tenant, @explicit_cross_portal_tenant(reason=...),
+# or @public_portal_route. Boot crashes on an undeclared route.
+from app.api.portal_scope import check_portal_routes_decorated
+
+check_portal_routes_decorated(app)
+
 
 @app.get("/metrics")
 async def metrics() -> Response:
