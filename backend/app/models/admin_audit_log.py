@@ -22,3 +22,11 @@ class AdminAuditLogORM(Base):
     resource_type: Mapped[str] = mapped_column(String(50), nullable=False)
     resource_id: Mapped[str] = mapped_column(String(36), nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Phase 2A Commit 7 — extended context. See migration 028.
+    outcome: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    session_id_prefix: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, index=True
+    )
