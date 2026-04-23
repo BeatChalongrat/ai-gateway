@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, AsyncIterator
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk
 from app.services.providers.base import BaseProviderAdapter
+from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.http_client import create_provider_client
 from app.services.providers.openai_adapter import _parse_sse_line
@@ -82,8 +83,12 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
     def _build_client(self, api_key: str | None):
         headers = {"Authorization": f"Bearer {api_key or ''}"}
         headers.update(self._extra_headers())
+        # Resolve at call time so PROVIDER_BASE_URL_OVERRIDES can steer
+        # traffic to the perf mock without a code change. Falls through
+        # to the subclass's hardcoded ``base_url`` when no override set.
+        effective_base_url = resolve_base_url(self.provider_name, self.base_url)
         return create_provider_client(
-            base_url=self.base_url,
+            base_url=effective_base_url,
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             headers=headers,
