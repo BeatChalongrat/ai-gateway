@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 T = TypeVar("T")
 
@@ -87,10 +87,19 @@ class UsageSummary(BaseModel):
 
 
 class TenantCreate(BaseModel):
-    name: str
-    slug: str
+    # Phase 2C Commit 15 — name/slug constrained.
+    name: str = Field(..., min_length=1, max_length=255)
+    slug: str = Field(..., min_length=1, max_length=255)
     region: str = "global"
     ner_enabled: bool = False
+
+    @field_validator("name", "slug")
+    @classmethod
+    def _strip_and_require_non_empty(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("must not be empty after trimming")
+        return v
 
 
 class TenantResponse(BaseModel):
@@ -104,10 +113,24 @@ class TenantResponse(BaseModel):
 
 
 class TenantUpdate(BaseModel):
-    name: Optional[str] = None
+    # Phase 2C Commit 15: extra fields rejected via the route-level
+    # _reject_unknown_update_fields helper (returns 400 with the
+    # specific field names). The schema itself stays forgiving so
+    # Pydantic doesn't also 422 on the same input.
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
     region: Optional[str] = None
     status: Optional[str] = None  # 'active' | 'inactive'
     ner_enabled: Optional[bool] = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty after trimming")
+        return v
 
 
 # --- Project CRUD ---
@@ -115,14 +138,33 @@ class TenantUpdate(BaseModel):
 
 class ProjectCreate(BaseModel):
     tenant_id: str
-    name: str
+    name: str = Field(..., min_length=1, max_length=255)
     policy_profile_id: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("must not be empty after trimming")
+        return v
 
 
 class ProjectUpdate(BaseModel):
-    name: Optional[str] = None
+    # See TenantUpdate note on extra="forbid" handling.
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
     policy_profile_id: Optional[str] = None
     status: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty after trimming")
+        return v
 
 
 class ProjectResponse(BaseModel):
