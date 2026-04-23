@@ -270,23 +270,97 @@ async def chat_completions(
         )
 
     async def event_generator():
-        # Phase 2C Commit 13 — P0-7 fix. Previously the generator
-        # yielded raw provider deltas as they arrived, then ran outbound
-        # DLP on the full buffer AFTER the stream closed. Fresh PII the
-        # model produced mid-stream (email, phone, SSN) was emitted to
-        # the client before any redaction happened.
+        # Phase 3.5 Commits 30-31 — incremental DLP streaming.
+        # Phase 2C (C13) closed P0-7 by buffering the whole response,
+        # running DLP on the full body, then emitting as a single
+        # content delta. That kept the wire safe but killed real-time
+        # UX. This generator restores incremental emission while
+        # keeping the wire safe via a rolling ~50-char tail:
         #
-        # The fix: accumulate every provider chunk server-side, run DLP
-        # on the full buffered body, and emit the MASKED text as a
-        # single content delta followed by finish + usage. This gives
-        # up token-level streaming granularity but closes the PII-leak
-        # window the auditor flagged under P0-7. Streaming perf work
-        # can re-introduce incremental masking later with a rolling-
-        # buffer scanner (see AUTH_REDESIGN_DESIGN §11 followup).
-        buffered_parts: list[str] = []
+        #   window = tail_masked + new raw chunk text
+        #   DLP scan on the full window catches PII spanning a chunk
+        #   boundary (tail carries enough context).
+        #   emit everything EXCEPT the last MIN_TAIL_CHARS chars of
+        #   the masked window; keep the last MIN_TAIL_CHARS as tail.
+        #
+        # Trade-off: patterns longer than MIN_TAIL_CHARS spanning chunk
+        # boundaries in a way that their leading fragment individually
+        # is NOT a match could leak. In practice, DLP detectors don't
+        # match partial patterns (an email regex needs the full `@...`),
+        # so emails/phones/SSNs/credit-cards are safe at N=50.
+        # Documented as a known limitation.
+        MIN_TAIL_CHARS = 50
+
+        tail_masked = ""
+        cumulative_raw = ""
+        emitted_parts: list[str] = []
+        accumulated_outbound_actions = []
+        counters_mut = dict(inbound_counters)
         final_finish_reason: str | None = None
         final_model: str = route.model_name
         provider_usage = None
+
+        def _dlp_scan_and_mask(
+            text: str,
+        ) -> tuple[str, list]:
+            """Scan ``text`` outbound + mask in-place.
+
+            Returns (masked_text, match_actions). On any exception the
+            chunk is DROPPED and a warning logged — we fail closed
+            rather than emit raw text past a broken DLP.
+            """
+            if not text:
+                return "", []
+            if not (
+                settings.dlp_enabled
+                and settings.dlp_scan_responses
+                and profile.scan_responses
+            ):
+                return text, []
+            try:
+                detection = orchestrator._scan_text_as_result(
+                    text, direction="output", ner_enabled=ctx.ner_enabled,
+                )
+                enforcement = orchestrator._scan_and_evaluate(detection, profile)
+                if not enforcement.requires_transformation:
+                    return text, enforcement.match_actions
+                masked, _, new_counters = orchestrator.transformer.mask_text(
+                    text,
+                    enforcement.match_actions,
+                    start_counters=counters_mut,
+                )
+                # Mutate via the enclosing variable binding.
+                counters_mut.clear()
+                counters_mut.update(new_counters)
+                return masked, list(enforcement.match_actions)
+            except Exception as exc:
+                log.warning(
+                    "sse_dlp_chunk_failed",
+                    error=str(exc)[:200],
+                    dropped_chars=len(text),
+                )
+                # Fail-closed: drop the chunk rather than emit raw.
+                return "", []
+
+        def _emit_chunk(body_text: str) -> str:
+            """Serialise a content-delta SSE frame."""
+            return "data: {}\n\n".format(
+                json.dumps(
+                    {
+                        "id": ctx.request_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": final_model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": body_text},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                )
+            )
 
         async for chunk in adapter.stream_chat(
             payload, messages_to_send,
@@ -294,11 +368,30 @@ async def chat_completions(
             api_key=provider_api_key,
         ):
             if chunk.delta:
-                buffered_parts.append(chunk.delta)
-                # Intentionally no yield here — raw provider text must
-                # not reach the client until outbound DLP has scrubbed
-                # it. The aggregate emit below replaces the per-chunk
-                # emission that used to live at this point.
+                cumulative_raw += chunk.delta
+                # Combine retained masked tail + new raw chunk text.
+                # The scanner won't re-match already-masked placeholders
+                # (`<EMAIL_1>` is not a valid email), so keeping masked
+                # text in the tail is safe and deduplication-friendly.
+                window = tail_masked + chunk.delta
+                masked_window, actions = _dlp_scan_and_mask(window)
+                if actions:
+                    accumulated_outbound_actions.extend(actions)
+
+                if len(masked_window) > MIN_TAIL_CHARS:
+                    safe = masked_window[:-MIN_TAIL_CHARS]
+                    tail_masked = masked_window[-MIN_TAIL_CHARS:]
+                    emit_text = (
+                        orchestrator.transformer.restore(safe, span_map)
+                        if span_map
+                        else safe
+                    )
+                    if emit_text:
+                        emitted_parts.append(emit_text)
+                        yield _emit_chunk(emit_text)
+                else:
+                    tail_masked = masked_window
+
             if chunk.model:
                 final_model = chunk.model
             if chunk.finish_reason is not None:
@@ -306,37 +399,27 @@ async def chat_completions(
             if chunk.usage is not None:
                 provider_usage = chunk.usage
 
-        full_text = "".join(buffered_parts)
-        # DLP trace snapshot 3/4: buffered provider text BEFORE any
-        # output DLP work or restore — captured here so the post-restore
-        # rewrite below doesn't clobber it.
-        output_raw = full_text
-
-        # Outbound DLP on the full buffered body. Runs BEFORE anything
-        # leaves the server (Phase 2C Commit 13 — P0-7). The masked
-        # text is later emitted as the single content delta at step 5.
-        response_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
-        if settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses:
-            response_detection = orchestrator._scan_text_as_result(
-                full_text,
-                direction="output",
-                ner_enabled=ctx.ner_enabled,
+        # Flush the remaining tail. The tail already went through a
+        # DLP scan in its most recent iteration; no need to re-mask.
+        if tail_masked:
+            final_emit = (
+                orchestrator.transformer.restore(tail_masked, span_map)
+                if span_map
+                else tail_masked
             )
-            response_enforcement = orchestrator._scan_and_evaluate(
-                response_detection, profile
-            )
-            if response_enforcement.requires_transformation:
-                # start_counters=inbound_counters keeps outbound indices
-                # disjoint from inbound — see orchestrator.handle_chat_completion
-                # step 8 for the rationale.
-                full_text, _, _ = orchestrator.transformer.mask_text(
-                    full_text,
-                    response_enforcement.match_actions,
-                    start_counters=inbound_counters,
-                )
+            if final_emit:
+                emitted_parts.append(final_emit)
+                yield _emit_chunk(final_emit)
 
-        if span_map:
-            full_text = orchestrator.transformer.restore(full_text, span_map)
+        # Capture DLP trace + build the response-enforcement summary
+        # from the per-chunk match actions we accumulated. overall_action
+        # is computed from match_actions automatically.
+        output_raw = cumulative_raw
+        full_text = "".join(emitted_parts)
+        response_enforcement = EnforcementDecision(
+            match_actions=accumulated_outbound_actions,
+            policy_profile_id=profile.profile_id,
+        )
 
         # 4. Persist DLP summary + basic request metrics. Mirrors the
         # fields populated by GatewayOrchestrator.handle_chat_completion.
@@ -434,23 +517,9 @@ async def chat_completions(
             api_key_id=str(auth.key_id) if auth else None,
         )
 
-        # 5. Emit the DLP-scrubbed body as a single content delta,
-        # followed by the finish-reason chunk, followed by [DONE].
-        # Per Phase 2C Commit 13 — P0-7 — raw provider text is never
-        # emitted; the full_text here has already been run through
-        # outbound DLP + span_map restore.
-        if full_text:
-            yield "data: {}\n\n".format(json.dumps({
-                "id": ctx.request_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": final_model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": full_text},
-                    "finish_reason": None,
-                }],
-            }))
+        # 5. Finish-reason frame + [DONE]. Content deltas were already
+        # emitted incrementally above (one per chunk whose masked
+        # window grew past MIN_TAIL_CHARS, plus one tail flush).
         yield "data: {}\n\n".format(json.dumps({
             "id": ctx.request_id,
             "object": "chat.completion.chunk",
