@@ -17,9 +17,9 @@ import {
 
 import { api, PortalApiError } from "@/lib/api";
 import { clearTokens } from "@/lib/auth";
-import { resolveAvatarUrl } from "@/lib/avatar";
 import { formatTokens } from "@/lib/format";
 import type { PortalUser } from "@/lib/types";
+import { Avatar } from "./Avatar";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -180,35 +180,14 @@ export function Sidebar() {
               borderRadius: 10,
             }}
           >
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                background: "linear-gradient(135deg, #6366F1, #8B5CF6)",
-                borderRadius: 7,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#FFFFFF",
-                flexShrink: 0,
-                overflow: "hidden",
-              }}
-            >
-              {user.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={resolveAvatarUrl(user.avatar_url) ?? ""}
-                  alt="Profile"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                <span>
-                  {(user.display_name || user.email || "?").slice(0, 1).toUpperCase()}
-                </span>
-              )}
-            </div>
+            <Avatar
+              url={user.avatar_url}
+              name={user.display_name}
+              email={user.email}
+              id={user.id}
+              size={28}
+              radius={7}
+            />
             <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
               <div
                 style={{

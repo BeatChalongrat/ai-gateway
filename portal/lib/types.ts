@@ -18,6 +18,10 @@ export interface PortalUser {
   // between tenant-removal and re-invite redemption.
   tenant_id?: string | null;
   tenant_role?: "owner" | "member";
+  // Short locale tag (en/th today). Used by transactional-email
+  // rendering on the backend and by the Preferences toggle in the
+  // portal Settings page. Unknown values fall back to 'en' at render.
+  preferred_language?: string;
   created_at: string;
 }
 
@@ -25,6 +29,7 @@ export interface TenantMember {
   id: string;
   email: string;
   display_name: string | null;
+  avatar_url?: string | null;
   tenant_role: "owner" | "member";
   status: string;
   created_at: string;

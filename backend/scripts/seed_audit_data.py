@@ -61,26 +61,36 @@ PROJECTS_PER_TENANT = ["web-app", "mobile-app", "batch-jobs"]
 # For the "low-credit" case Charlie used to cover, that's now
 # represented purely via credit_balance (5,000 — small enough to
 # trigger credit-warning UI without faking a ledger).
+# Seed names are deliberately boring / production-safe. Earlier audit
+# seeds carried emoji + Thai test-strings in display_name (e.g.
+# "Charlie Chen 🐉 ทดสอบ") which leaked into screenshots meant to
+# demo the portal UI. Unicode rendering is still covered by
+# tests/test_portal_auth.py::test_display_name_unicode — we don't need
+# decorative glyphs in the shipped seed to prove that works.
+#
+# tenant_role: the first user seeded per tenant gets "owner". Alice
+# owns Acme; Bob owns Globex. Everyone else is a plain member so the
+# Team page has a realistic owner/member mix for screenshots.
 PORTAL_USERS = [
     {"email": "alice@acme.test", "password": "Alice!2345", "display_name": "Alice Anderson",
-     "tenant_id": "acme-001",
+     "tenant_id": "acme-001", "tenant_role": "owner",
      "plan": "starter", "status": "active", "email_verified": True,
      "credit_balance": 50000, "credit_used": 0},
     {"email": "bob@globex.test", "password": "Bob!2345", "display_name": "Bob Beaumont",
-     "tenant_id": "globex-001",
+     "tenant_id": "globex-001", "tenant_role": "owner",
      "plan": "pro", "status": "active", "email_verified": True,
      "credit_balance": 200000, "credit_used": 0},
     {"email": "charlie@acme.test", "password": "Charlie!2345",
-     "display_name": "Charlie Chen 🐉 ทดสอบ",  # emoji + Thai in display_name
-     "tenant_id": "acme-001",
+     "display_name": "Charlie Chen",
+     "tenant_id": "acme-001", "tenant_role": "member",
      "plan": "free_trial", "status": "active", "email_verified": True,
      "credit_balance": 5000, "credit_used": 0},  # low-credit warning case
     {"email": "dave@acme.test", "password": "Dave!2345", "display_name": "Dave Davies",
-     "tenant_id": "acme-001",
+     "tenant_id": "acme-001", "tenant_role": "member",
      "plan": "starter", "status": "suspended", "email_verified": True,
      "credit_balance": 10000, "credit_used": 0},
     {"email": "eve@globex.test", "password": "Eve!2345", "display_name": "Eve Evans",
-     "tenant_id": "globex-001",
+     "tenant_id": "globex-001", "tenant_role": "member",
      "plan": "free_trial", "status": "active", "email_verified": False,  # unverified
      "credit_balance": 5000, "credit_used": 0},
 ]
@@ -180,6 +190,7 @@ def seed_portal_users(session):
         existing = session.execute(
             select(PortalUserORM).where(PortalUserORM.email == u["email"])
         ).scalar_one_or_none()
+        role = u.get("tenant_role", "member")
         if existing is None:
             user = PortalUserORM(
                 id=str(uuid.uuid4()),
@@ -187,6 +198,7 @@ def seed_portal_users(session):
                 password_hash=_hash(u["password"]),
                 display_name=u["display_name"],
                 tenant_id=u["tenant_id"],
+                tenant_role=role,
                 plan=u["plan"],
                 status=u["status"],
                 email_verified=u["email_verified"],
@@ -200,10 +212,15 @@ def seed_portal_users(session):
             # Bring the row back to the documented spec. Re-hashes
             # the password (cheap — 5 users, bcrypt rounds=10) so
             # changing PORTAL_USERS' password actually takes effect
-            # on the next seed run.
+            # on the next seed run. tenant_role is part of the spec
+            # now (Phase portal-UX): without this line, re-seeding an
+            # existing DB leaves Alice/Bob as plain members and the
+            # owner-gated UI (Invite button, invites list) stays
+            # hidden.
             existing.password_hash = _hash(u["password"])
             existing.display_name = u["display_name"]
             existing.tenant_id = u["tenant_id"]
+            existing.tenant_role = role
             existing.plan = u["plan"]
             existing.status = u["status"]
             existing.email_verified = u["email_verified"]
