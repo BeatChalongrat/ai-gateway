@@ -18,6 +18,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_portal_user
+from app.api.portal_scope import scope_to_portal_tenant
 from app.models.api_key import ApiKeyORM
 from app.models.credit_transaction import CreditTransactionORM
 from app.models.portal_user import PortalUserORM
@@ -49,6 +50,7 @@ def _low_credit_threshold(db: Session) -> int:
 
 
 @router.get("")
+@scope_to_portal_tenant
 def get_me(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
@@ -75,6 +77,7 @@ def get_me(
 
 
 @router.patch("")
+@scope_to_portal_tenant
 def update_me(
     payload: UpdateProfileRequest,
     user: PortalUserORM = Depends(get_portal_user),
@@ -101,6 +104,7 @@ def update_me(
 
 
 @router.post("/avatar")
+@scope_to_portal_tenant
 async def upload_avatar(
     file: UploadFile = File(...),
     user: PortalUserORM = Depends(get_portal_user),
@@ -153,6 +157,7 @@ async def upload_avatar(
 
 
 @router.delete("/avatar")
+@scope_to_portal_tenant
 def delete_avatar(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
@@ -170,6 +175,7 @@ def delete_avatar(
 
 
 @router.get("/usage")
+@scope_to_portal_tenant
 def get_usage(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -230,6 +236,7 @@ def get_usage(
 
 
 @router.get("/transactions")
+@scope_to_portal_tenant
 def get_transactions(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
