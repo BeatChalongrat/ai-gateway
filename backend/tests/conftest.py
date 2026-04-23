@@ -110,6 +110,19 @@ main_app.dependency_overrides[get_db_session] = _integration_db_session
 
 
 # ---------------------------------------------------------------------------
+# Phase 2B Commit 10 — CSRF middleware is enforced by default but
+# existing tests drive admin routes via MOCK_AUTH without CSRF
+# cookies. Flip the process-wide bypass flag so the main-app TestClient
+# works. Dedicated CSRF tests in ``test_csrf_middleware.py`` build
+# their own FastAPI app and don't rely on this flag — the middleware
+# they add is enforced normally.
+# ---------------------------------------------------------------------------
+
+from app.middleware import csrf as _csrf_mod
+_csrf_mod._BYPASS_FOR_TESTING = True
+
+
+# ---------------------------------------------------------------------------
 # Global provider stub for integration tests.
 # Monkeypatches ProviderDispatcher.dispatch so tests never hit real APIs.
 # Adapter-level tests use their own @respx.mock for HTTP-level mocking.
