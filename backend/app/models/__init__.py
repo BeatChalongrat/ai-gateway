@@ -16,6 +16,7 @@ from app.models.policy import PolicyORM
 from app.models.policy_profile import PolicyProfileORM
 from app.models.portal_user import PortalUserORM
 from app.models.project import ProjectORM
+from app.models.project_member import ProjectMemberORM
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
 from app.models.request_log import RequestLogORM
@@ -30,7 +31,7 @@ __all__ = [
     "AlertEventORM", "AlertRuleORM",
     "ApiKeyORM", "CreditTransactionORM", "KeywordRuleORM",
     "OrgSettingsORM", "PolicyORM", "PolicyProfileORM",
-    "PortalUserORM", "ProjectORM", "ProviderORM", "ProviderKeyORM",
+    "PortalUserORM", "ProjectORM", "ProjectMemberORM", "ProviderORM", "ProviderKeyORM",
     "RequestLogORM", "SystemSettingORM", "TenantORM",
     "TenantInviteORM", "TokenPackORM",
 ]
