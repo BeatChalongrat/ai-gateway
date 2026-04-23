@@ -7,8 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+COPY requirements.txt requirements-dev.txt ./
+# Install base + dev deps (respx, etc). Test deps are tiny and having
+# them in the image lets `make test` work against the running
+# container without a separate install step.
+RUN pip install --no-cache-dir -r requirements-dev.txt gunicorn
 
 # spaCy models for Presidio NER.
 #
