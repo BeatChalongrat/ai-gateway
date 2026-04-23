@@ -26,19 +26,36 @@ const STRENGTH_LABEL: Record<Strength, { text: string; cls: string }> = {
   3: { text: "Strong", cls: "s3" },
 };
 
-export default function SignupForm() {
+interface SignupFormProps {
+  // When the user arrived via /invite/{code}, the landing page passes
+  // the code down so the form pre-fills it + hides the "Have an invite
+  // code?" toggle. Optional — unpressed signup still works.
+  presetInviteCode?: string;
+  inviteContext?: {
+    tenantName: string;
+    role: string;
+    inviterName: string | null;
+  } | null;
+}
+
+export default function SignupForm({
+  presetInviteCode,
+  inviteContext,
+}: SignupFormProps = {}) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
+  const [inviteCode, setInviteCode] = useState(presetInviteCode ?? "");
   const [tos, setTos] = useState(true);
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const locked = Boolean(presetInviteCode);
 
   const strength = useMemo(() => computeStrength(password), [password]);
   const meta = STRENGTH_LABEL[strength];
@@ -89,9 +106,29 @@ export default function SignupForm() {
           <span aria-hidden="true">←</span> Back to home
         </Link>
         <div className="sv-form-header anim d1">
-          <div className="sv-form-eyebrow">Free forever tier</div>
-          <h1>Create your account</h1>
-          <p>No credit card. 5 minutes to first API call.</p>
+          {inviteContext ? (
+            <>
+              <div
+                className="sv-form-eyebrow"
+                style={{ color: "#A5B4FC" }}
+              >
+                Team invite
+              </div>
+              <h1>Join {inviteContext.tenantName}</h1>
+              <p>
+                {inviteContext.inviterName
+                  ? `${inviteContext.inviterName} invited you to join as a ${inviteContext.role}.`
+                  : `You were invited to join as a ${inviteContext.role}.`}{" "}
+                Create your account below.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="sv-form-eyebrow">Free forever tier</div>
+              <h1>Create your account</h1>
+              <p>No credit card. 5 minutes to first API call.</p>
+            </>
+          )}
         </div>
 
         <form className="sv-form anim d2" onSubmit={handleSubmit} noValidate>
@@ -178,36 +215,38 @@ export default function SignupForm() {
             </div>
           </div>
 
-          <div className="sv-field">
-            {!showInvite ? (
-              <button
-                type="button"
-                className="sv-invite-toggle"
-                onClick={() => setShowInvite(true)}
-              >
-                Have an invite code? Click to enter it.
-              </button>
-            ) : (
-              <>
-                <label className="sv-label" htmlFor="su-invite">
-                  Invite code (optional)
-                </label>
-                <input
-                  id="su-invite"
-                  type="text"
-                  className="sv-input"
-                  autoComplete="off"
-                  placeholder="Paste the code your team owner shared"
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                />
-                <p className="sv-invite-hint">
-                  Joining an existing team with this code. Leave empty
-                  to create your own team.
-                </p>
-              </>
-            )}
-          </div>
+          {locked ? null : (
+            <div className="sv-field">
+              {!showInvite ? (
+                <button
+                  type="button"
+                  className="sv-invite-toggle"
+                  onClick={() => setShowInvite(true)}
+                >
+                  Have an invite code? Click to enter it.
+                </button>
+              ) : (
+                <>
+                  <label className="sv-label" htmlFor="su-invite">
+                    Invite code (optional)
+                  </label>
+                  <input
+                    id="su-invite"
+                    type="text"
+                    className="sv-input"
+                    autoComplete="off"
+                    placeholder="Paste the code your team owner shared"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                  />
+                  <p className="sv-invite-hint">
+                    Joining an existing team with this code. Leave empty
+                    to create your own team.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
 
           <label className="sv-tos">
             <input

@@ -11,7 +11,11 @@ const PUBLIC_PATHS = ["/", "/docs", "/pricing", "/security", "/privacy", "/terms
 
 // Routes that should *redirect away* if the user is already logged in
 // (so signed-in users don't land back on /login or /signup).
-const AUTH_PATHS = ["/login", "/signup"];
+// /invite/:code is an auth path — the page resolves the code server-
+// side and shows a pre-filled signup. Already-logged-in users bounce
+// to the dashboard because the backend refuses to let a tenanted
+// user redeem into another tenant anyway.
+const AUTH_PATHS = ["/login", "/signup", "/invite"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
