@@ -29,9 +29,12 @@ class PortalUserORM(Base):
     oauth_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     oauth_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Phase 3 — portal tenancy (migration 029). Starts nullable; flipped
-    # to NOT NULL by migration 030 once the backfill has populated every
-    # row. Application code treats tenant_id as mandatory from day one.
+    # Phase 3 — portal tenancy. Every portal user belongs to exactly
+    # one tenant in production; migration 030 enforces this via a DB
+    # NOT NULL constraint. The ORM leaves it nullable so pre-Phase-3
+    # test fixtures (which bypass migrations via metadata.create_all)
+    # can still seed users — application code in auth_service.signup
+    # is the gatekeeper that guarantees tenant assignment in practice.
     tenant_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("tenants.tenant_id", name="fk_portal_users_tenant_id"),
