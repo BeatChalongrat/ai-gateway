@@ -912,6 +912,24 @@ def delete_project(
     if project is None:
         raise NotFoundError(f"Project '{project_id}' not found.")
     check_tenant_access(auth, project.tenant_id)
+
+    # P0-11 (Phase 2B Commit 12): refuse to delete a project that
+    # still has API keys pointing at it. A cascade would risk
+    # accidental data loss; a 500 (prior FK-violation behaviour)
+    # isn't actionable. Return 409 with the dependent key ids so
+    # the operator knows exactly what to clean up.
+    from app.core.exceptions import ConflictError
+
+    dependent_keys = session.execute(
+        select(ApiKeyORM.key_id).where(ApiKeyORM.project_id == project_id)
+    ).scalars().all()
+    if dependent_keys:
+        raise ConflictError(
+            f"project has {len(dependent_keys)} API keys; delete them first",
+            code="project_has_dependent_keys",
+            details={"dependent_keys": list(dependent_keys)},
+        )
+
     session.delete(project)
     session.flush()
 
