@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     portal_access_token_expire_minutes: int = 60
     portal_refresh_token_expire_days: int = 7
 
+    # Admin session (Phase 2A): Redis-backed sessions keyed by signed
+    # HttpOnly cookie. SESSION_SIGNING_SECRETS is a comma-separated list;
+    # the first entry is used to sign new cookies, later entries remain
+    # valid for verification (zero-downtime key rotation). Any entry in
+    # _INSECURE_DEFAULTS is rejected outside dev by validate_secrets().
+    session_signing_secrets: str = "change-me-session-signing"
+    session_cookie_name: str = "admin_session"
+    session_idle_ttl_seconds: int = 86400  # 24h sliding
+    session_absolute_ttl_seconds: int = 604800  # 7d hard cap
+    admin_ui_origin: str = "http://localhost:3001"
+
     # Provider API keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""
@@ -89,6 +100,11 @@ class Settings(BaseSettings):
         return f"redis://{self.redis_host}:{self.redis_port}/0"
 
     @property
+    def session_signing_secrets_list(self) -> list[str]:
+        """Parsed rotation list. First entry signs, all entries verify."""
+        return [s.strip() for s in self.session_signing_secrets.split(",") if s.strip()]
+
+    @property
     def database_url(self) -> str:
         if self.database_url_override:
             return self.database_url_override
@@ -118,6 +134,13 @@ class Settings(BaseSettings):
             issues.append("JWT_SECRET is set to an insecure default")
         if self.master_encryption_key.lower() in _INSECURE_DEFAULTS:
             issues.append("MASTER_ENCRYPTION_KEY is set to an insecure default")
+        signing = self.session_signing_secrets_list
+        if not signing:
+            issues.append("SESSION_SIGNING_SECRETS is empty")
+        elif any(s.lower() in _INSECURE_DEFAULTS for s in signing):
+            issues.append(
+                "SESSION_SIGNING_SECRETS contains an insecure default value"
+            )
 
         if issues:
             raise RuntimeError(

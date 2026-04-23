@@ -12,10 +12,12 @@ structlog==24.4.0
 orjson==3.10.7
 PyJWT==2.9.0
 bcrypt==4.2.0
+itsdangerous==2.2.0
 Pillow>=10.2.0
 python-multipart>=0.0.9
 pytest==8.3.3
 pytest-asyncio==0.24.0
+fakeredis==2.26.1
 black==24.8.0
 ruff==0.6.4
 
