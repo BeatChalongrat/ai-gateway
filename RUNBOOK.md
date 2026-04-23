@@ -187,6 +187,62 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8080` | Backend API URL |
 | `NEXT_PUBLIC_ADMIN_API_KEY` | | Admin API key for console auth |
 
+## Session signing key rotation
+
+The admin session layer (Phase 2A) signs session-id cookies with
+`itsdangerous` using one or more secrets in `SESSION_SIGNING_SECRETS`
+(comma-separated). The **first** entry signs every new cookie; **all**
+entries are accepted for verification. That list is the rotation
+primitive — you never need a migration or forced logout to swap keys.
+
+### Routine rotation (no known compromise)
+
+Recommended cadence: **quarterly** for SOC2 hygiene. Do not rotate on
+every deploy — that churns user sessions for no security gain.
+
+```bash
+# 1. Generate a strong new secret (32+ bytes, from a CSPRNG).
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+#   eg:  ksp9-Av7r2...T8uQ
+
+# 2. Prepend to SESSION_SIGNING_SECRETS in your env / secret manager.
+#    Old secret stays on the list so in-flight sessions keep verifying.
+SESSION_SIGNING_SECRETS="ksp9-Av7r2...T8uQ,<previous secret>"
+
+# 3. Deploy. New cookies are now signed with the new key;
+#    old cookies still verify against the old key.
+
+# 4. Wait the full SESSION_ABSOLUTE_TTL_SECONDS window (default 7 days).
+#    By now every live cookie has been re-signed under the new key.
+
+# 5. Remove the old secret from the list. Deploy again.
+SESSION_SIGNING_SECRETS="ksp9-Av7r2...T8uQ"
+```
+
+### Emergency rotation (suspected compromise)
+
+Skip the 7-day wait. After step 3, forcibly evict every live session
+so attackers holding leaked cookies are kicked out immediately:
+
+```bash
+# Revoke every live admin session by emptying the session keyspace.
+# Users will be forced to log in again; any attacker with a stolen
+# cookie loses access in the same breath.
+docker exec -i audit-redis redis-cli --scan --pattern 'session:*' \
+  | xargs -r docker exec -i audit-redis redis-cli del
+```
+
+Then remove the old secret and redeploy. Announce re-auth to users.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `SESSION_SIGNING_SECRETS is empty` at startup | Env var unset | Set to at least one strong secret |
+| `SESSION_SIGNING_SECRETS contains an insecure default value` | Placeholder like `change-me` | Replace with CSPRNG-generated 32+ byte value |
+| Users report being logged out after deploy | Old secret dropped before absolute TTL window elapsed | Re-add old secret to list, wait full window, then remove |
+| `SessionInvalid` on all requests after key change | New secret was not prepended (just replaced) | Put the previous secret back as 2nd entry until old sessions expire |
+
 ## Troubleshooting
 
 | Problem | Fix |
