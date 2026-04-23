@@ -28,6 +28,7 @@ from app.middleware.error_handler import (
     handle_validation_error,
 )
 from app.middleware.body_limit import BodySizeLimitMiddleware
+from app.middleware.csrf import CsrfMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.request_timing import RequestTimingMiddleware
 from app.middleware.timeout import TimeoutMiddleware
@@ -228,6 +229,10 @@ app.add_middleware(MetricsMiddleware)
 app.add_middleware(TimeoutMiddleware, timeout_seconds=20.0)
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(RequestContextMiddleware)
+# CSRF check for /admin/* mutations — runs after routing is
+# established so the path is available to the middleware. See
+# app/middleware/csrf.py for the scope rules.
+app.add_middleware(CsrfMiddleware)
 app.add_middleware(
     BodySizeLimitMiddleware,
     max_bytes=1 * 1024 * 1024,
