@@ -237,6 +237,53 @@ def create_key(
     }
 
 
+@router.post("/{project_id}/keys/{key_id}/rotate")
+@scope_to_portal_tenant
+def rotate_key(
+    project_id: str,
+    key_id: str,
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Rotate an API key without deleting it.
+
+    Mints a new key value (returned once), keeps the same tenant /
+    project / name / owner, and grace-expires the old key in 1 hour
+    so callers have a window to roll their deployments. Ownership is
+    verified via ``_own_project`` + a scoped match on
+    ``api_keys.portal_user_id`` — cross-tenant rotation is
+    structurally impossible.
+    """
+    _own_project(session, user, project_id)
+    old = session.execute(
+        select(ApiKeyORM).where(
+            and_(
+                ApiKeyORM.key_id == key_id,
+                ApiKeyORM.project_id == project_id,
+                ApiKeyORM.portal_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if old is None:
+        raise NotFoundError("API key not found.", code="key_not_found")
+
+    rotated = _api_key_service.rotate_key(session, old.key_id)
+    if rotated is None:
+        # Key was revoked between the ownership check and the rotate
+        # call — surface as not-found to match the 404 used elsewhere.
+        raise NotFoundError("API key not found.", code="key_not_found")
+    raw_new_key, new_orm = rotated
+    return {
+        "old_key_id": old.key_id,
+        "old_key_expires_at": old.expires_at,
+        "key_id": new_orm.key_id,
+        "key_prefix": new_orm.key_prefix,
+        "name": new_orm.name,
+        "api_key": raw_new_key,  # shown exactly once
+        "created_at": new_orm.created_at,
+    }
+
+
 @router.delete("/{project_id}/keys/{key_id}")
 @scope_to_portal_tenant
 def delete_key(

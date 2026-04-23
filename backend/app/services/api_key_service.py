@@ -6,13 +6,18 @@ Pure service logic — takes a SQLAlchemy session, no HTTP/FastAPI concerns.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import generate_api_key, hash_api_key
 from app.models.api_key import ApiKeyORM
+
+
+# 1-hour grace period between rotation and the old key hard-expiring.
+# Matches Beat's Phase 4 F2 spec: "Sets old key to expire in 1 hour".
+_ROTATION_GRACE_PERIOD = timedelta(hours=1)
 
 
 class ApiKeyService:
@@ -88,3 +93,58 @@ class ApiKeyService:
         api_key.status = "revoked"
         session.flush()
         return True
+
+    def rotate_key(
+        self,
+        session: Session,
+        key_id: str,
+    ) -> tuple[str, ApiKeyORM] | None:
+        """Rotate an API key: mint a fresh value, grace-expire the old.
+
+        Phase 4 Feature 2. The old row is kept so deployments that
+        haven't swapped the key yet keep working for a 1-hour grace
+        period; ``verify_key`` already honours ``expires_at``. A brand-
+        new row is inserted with the same tenant / project / name /
+        owner and a new ``key_id`` + hash — callers update their
+        deployment with the returned raw key value (shown exactly once,
+        matching ``create_key`` semantics).
+
+        Returns ``None`` when the target key doesn't exist or is
+        already revoked — rotating a revoked key would resurrect it
+        under a new id, which is not what we want.
+        """
+        old = session.get(ApiKeyORM, key_id)
+        if old is None or old.status != "active":
+            return None
+
+        now = datetime.now(timezone.utc)
+
+        # Stamp the grace expiry on the old row. If a shorter expiry
+        # was already set manually, don't extend it — keep the earlier
+        # one so deliberate short-TTL keys aren't accidentally
+        # promoted.
+        grace = now + _ROTATION_GRACE_PERIOD
+        existing_exp = old.expires_at
+        if existing_exp is not None and existing_exp.tzinfo is None:
+            existing_exp = existing_exp.replace(tzinfo=timezone.utc)
+        if existing_exp is None or grace < existing_exp:
+            old.expires_at = grace
+
+        # New row inherits every caller-facing attribute except the
+        # secret material. The portal_user_id link is preserved so
+        # credit-check + ownership queries still resolve.
+        raw_key, key_prefix, key_hash = generate_api_key()
+        new = ApiKeyORM(
+            key_id=str(uuid.uuid4()),
+            key_prefix=key_prefix,
+            key_hash=key_hash,
+            tenant_id=old.tenant_id,
+            project_id=old.project_id,
+            name=old.name,
+            # Fresh created_at so the audit trail distinguishes the
+            # rotated key from the original.
+            portal_user_id=old.portal_user_id,
+        )
+        session.add(new)
+        session.flush()
+        return raw_key, new
