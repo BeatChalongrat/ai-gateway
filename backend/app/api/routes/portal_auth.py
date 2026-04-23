@@ -77,6 +77,43 @@ def refresh(
     return auth_service.refresh(session, refresh_token=body.refresh_token)
 
 
+# ---------------------------------------------------------------------------
+# Phase 2C Commit 14 — email verification flow
+# ---------------------------------------------------------------------------
+
+
+class VerificationRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=10, max_length=4096)
+
+
+@router.post("/request-verification-email")
+def request_verification_email(
+    body: VerificationRequest,
+    session: Session = Depends(get_db_session),
+):
+    """Start (or restart) the email-verification flow for an address.
+
+    Returns 200 + ``{"ok": True}`` regardless of whether the email is
+    registered or already verified — prevents user-existence
+    probing. In dev/test the response also contains the minted token
+    so integration tests can drive the flow without a mail server.
+    """
+    return auth_service.request_verification_email(session, email=body.email)
+
+
+@router.post("/verify-email")
+def verify_email(
+    body: VerifyEmailRequest,
+    session: Session = Depends(get_db_session),
+):
+    """Consume a verification token and flip the ``email_verified`` flag."""
+    return auth_service.verify_email(session, token=body.token)
+
+
 @router.post("/logout")
 def logout():
     # Portal tokens are stateless JWTs — server-side revocation is not
