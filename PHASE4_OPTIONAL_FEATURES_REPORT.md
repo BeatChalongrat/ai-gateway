@@ -150,7 +150,7 @@ Backend service existed but read endpoint + UI were net-new.
 - 10 tests: empty DB, ordering, each filter, q substring match, pagination disjoint pages, CSV download headers, CSV respects filters.
 
 **UI** (`f5943a8`):
-- New `/audit-log` page in the admin-UI — "Admin Actions" in sidebar (next to the now-renamed "Request Audit"). The admin-UI is already the `/admin` console, so routes do not duplicate that prefix; the backend endpoint remains `/admin/audit-log`.
+- New `/audit-log` page in the admin-UI — "Admin Actions" in sidebar. The admin-UI is already the `/admin` console, so routes do not duplicate that prefix; the backend endpoint remains `/admin/audit-log`. (The separate "Request Audit" entry that pointed to `/audit` was removed in the 2026-04-23 UX-cleanup pass — `/audit` duplicated `/requests` and is now a redirect.)
 - Filter bar with 7 inputs: search, action, tenant, actor, outcome select, date from/to (datetime-local). Apply + Clear + Export CSV buttons.
 - Table columns: timestamp, actor, tenant, action, resource (type/id), outcome pill (green success, red denied/error), IP address.
 - Pagination 50/page. Loading / error / empty states via existing `SkeletonTable` / `ErrorState` / `EmptyState` primitives.
