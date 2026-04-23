@@ -17,7 +17,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db_session
 from app.api.portal_scope import public_portal_route
 from app.core.exceptions import ValidationError
-from app.services.portal import auth_service, oauth_flow_service, oauth_service
+from app.services.admin.session_service import _build_redis_client
+from app.services.portal import (
+    auth_service,
+    oauth_flow_service,
+    oauth_service,
+    password_reset_service,
+)
 from app.services.portal.oauth_flow_service import (
     IdTokenVerificationFailed,
     InvalidReturnUrl,
@@ -126,6 +132,68 @@ def verify_email(
 ):
     """Consume a verification token and flip the ``email_verified`` flag."""
     return auth_service.verify_email(session, token=body.token)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.5 Commit 32 — password reset flow
+# ---------------------------------------------------------------------------
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(..., min_length=10, max_length=200)
+    new_password: str = Field(..., min_length=8, max_length=200)
+
+
+def _portal_redis_client():
+    """FastAPI dep: reuse the admin session module's Redis factory.
+
+    Passwordless-reset tokens share no state with admin sessions —
+    they just live in the same Redis instance under a different key
+    prefix — so the factory is fine.
+    """
+    return _build_redis_client()
+
+
+@router.post("/password-reset/request")
+@public_portal_route
+def password_reset_request(
+    body: PasswordResetRequest,
+    session: Session = Depends(get_db_session),
+    redis_client=Depends(_portal_redis_client),
+):
+    """Start a reset: generate a token + email the link.
+
+    Always returns ``{"ok": True}`` even if the email is unknown —
+    no user-existence oracle. Dev/test mode echoes the token so
+    integration tests don't need a mail server.
+    """
+    return password_reset_service.request_reset(
+        session, redis_client, email=body.email
+    )
+
+
+@router.post("/password-reset/confirm")
+@public_portal_route
+def password_reset_confirm(
+    body: PasswordResetConfirmRequest,
+    session: Session = Depends(get_db_session),
+    redis_client=Depends(_portal_redis_client),
+):
+    """Consume a reset token + set a new password.
+
+    On success, every live portal JWT for the user is invalidated
+    via the token_version bump (Phase 3 Concern 1).
+    """
+    return password_reset_service.confirm_reset(
+        session,
+        redis_client,
+        token=body.token,
+        new_password=body.new_password,
+    )
 
 
 @router.post("/logout")
