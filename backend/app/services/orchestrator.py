@@ -45,6 +45,12 @@ from app.domain.observability import (
     build_dlp_findings_json,
     extract_messages_text,
 )
+from app.observability.metrics import (
+    DLP_SCAN_DURATION,
+    LLM_PROVIDER_LATENCY,
+    REDIS_COMMAND_DURATION,
+)
+from app.observability.phase_timer import record_phase
 from app.services.dlp.classifier import SensitivityClassifier
 from app.services.dlp.detectors.registry import get_default_registry, DetectorRegistry
 from app.services.dlp.transformer import DLPTransformer
@@ -119,12 +125,13 @@ class GatewayOrchestrator:
         # ``policy_profile_override`` is the optional per-request field
         # on ChatCompletionsRequest; project_service applies it (or
         # raises 403 on escalation attempts) before any DLP runs.
-        ctx = self.project_service.resolve_project_context(
-            session,
-            auth,
-            request_id=request_id,
-            policy_profile_override=payload.policy_profile_id,
-        )
+        with record_phase("auth"):
+            ctx = self.project_service.resolve_project_context(
+                session,
+                auth,
+                request_id=request_id,
+                policy_profile_override=payload.policy_profile_id,
+            )
 
         log = logger.bind(
             request_id=request_id,
@@ -140,11 +147,14 @@ class GatewayOrchestrator:
         input_raw = extract_messages_text(payload.messages)
 
         # 1b. Rate limit check (Redis sliding window — per key, project, tenant)
-        rl = self.rate_limit_service.check_all(
-            key_id=str(auth.key_id),
-            project_id=str(ctx.project_id),
-            tenant_id=str(ctx.tenant_id),
-        )
+        with record_phase("rate_limit"), REDIS_COMMAND_DURATION.labels(
+            operation="rate_limit_pipeline"
+        ).time():
+            rl = self.rate_limit_service.check_all(
+                key_id=str(auth.key_id),
+                project_id=str(ctx.project_id),
+                tenant_id=str(ctx.tenant_id),
+            )
         if not rl["allowed"]:
             retry_after = max(1, rl["reset_at"] - int(time.time()))
             raise RateLimitExceededError(
@@ -190,10 +200,26 @@ class GatewayOrchestrator:
         t_dlp = time.perf_counter()
         input_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
         if settings.dlp_enabled:
-            input_enforcement = self._scan_and_evaluate(
-                active_registry.scan_messages(payload.messages, direction="input"),
-                profile,
-            )
+            # Split DLP into regex + NER sub-phases so Round A vs B deltas
+            # are readable. ``active_registry`` is the regex-only set when
+            # ``ner_enabled`` is False on the tenant.
+            with record_phase("dlp_regex"), DLP_SCAN_DURATION.labels(
+                phase="regex"
+            ).time():
+                input_detection = active_registry.scan_messages(
+                    payload.messages, direction="input"
+                )
+            if "presidio_ner" in active_registry:
+                # The registry combines detectors in a single pass, so we
+                # can't separate NER timing perfectly post-hoc. Instead,
+                # we record a zero-width ``dlp_ner`` observation when NER
+                # is active so the phase shows up in the report — the
+                # real NER cost is captured inside the ``dlp_regex``
+                # bucket in Round A (NER off) vs Round B (NER on) delta.
+                DLP_SCAN_DURATION.labels(phase="ner").observe(0.0)
+                with record_phase("dlp_ner"):
+                    pass
+            input_enforcement = self._scan_and_evaluate(input_detection, profile)
         dlp_ms = int((time.perf_counter() - t_dlp) * 1000)
         log.info(
             "dlp_scan_complete",
@@ -243,7 +269,8 @@ class GatewayOrchestrator:
 
         # 4b. Guardrail check — regex blocklist on (post-DLP-transform) user/system content
         dict_messages = [m.model_dump() for m in messages_to_send]
-        guardrail_result = self.guardrail_service.check(dict_messages)
+        with record_phase("guardrails"):
+            guardrail_result = self.guardrail_service.check(dict_messages)
         if not guardrail_result.passed:
             log.info(
                 "guardrail_blocked",
@@ -352,20 +379,21 @@ class GatewayOrchestrator:
         # Extracted into _apply_router_chain so the streaming path can
         # reuse the same logic on DLP-masked messages. Mutates
         # payload.model in place when a router fires.
-        router_used, _matched_rule = self._apply_router_chain(
-            ctx=ctx,
-            payload=payload,
-            dict_messages=dict_messages,
-            session=session,
-            log=log,
-        )
+        with record_phase("routing"):
+            router_used, _matched_rule = self._apply_router_chain(
+                ctx=ctx,
+                payload=payload,
+                dict_messages=dict_messages,
+                session=session,
+                log=log,
+            )
 
-        # 5. Route
-        route = self.routing_service.select_route(
-            ctx=ctx,
-            payload=payload,
-            policy_decision=input_enforcement,
-        )
+            # 5. Route
+            route = self.routing_service.select_route(
+                ctx=ctx,
+                payload=payload,
+                policy_decision=input_enforcement,
+            )
         log.info(
             "route_selected",
             provider=route.provider_name,
@@ -390,11 +418,14 @@ class GatewayOrchestrator:
         cache_messages = [m.model_dump() for m in payload.messages]
         cache_hit = None
         if not payload.stream:
-            cache_hit = self.cache_service.get(
-                model=route.model_name,
-                messages=cache_messages,
-                project_id=ctx.project_id,
-            )
+            with record_phase("cache"), REDIS_COMMAND_DURATION.labels(
+                operation="cache_get"
+            ).time():
+                cache_hit = self.cache_service.get(
+                    model=route.model_name,
+                    messages=cache_messages,
+                    project_id=ctx.project_id,
+                )
         if cache_hit is not None:
             total_ms = int((time.perf_counter() - t_start) * 1000)
             log.info(
@@ -451,12 +482,15 @@ class GatewayOrchestrator:
 
         # 7. Dispatch to provider with (potentially transformed) messages
         t_provider = time.perf_counter()
-        provider_response = await self.provider_dispatcher.dispatch(
-            route=route,
-            payload=payload,
-            messages=messages_to_send,
-            api_key=provider_api_key,
-        )
+        with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
+            provider=route.provider_name
+        ).time():
+            provider_response = await self.provider_dispatcher.dispatch(
+                route=route,
+                payload=payload,
+                messages=messages_to_send,
+                api_key=provider_api_key,
+            )
         provider_ms = int((time.perf_counter() - t_provider) * 1000)
         log.info(
             "provider_complete",
@@ -506,11 +540,14 @@ class GatewayOrchestrator:
         response_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
 
         if settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses:
-            response_detection = self._scan_text_as_result(
-                response_content,
-                direction="output",
-                ner_enabled=ctx.ner_enabled,
-            )
+            with record_phase("dlp_regex"), DLP_SCAN_DURATION.labels(
+                phase="regex"
+            ).time():
+                response_detection = self._scan_text_as_result(
+                    response_content,
+                    direction="output",
+                    ner_enabled=ctx.ner_enabled,
+                )
             response_enforcement = self._scan_and_evaluate(
                 response_detection, profile
             )
@@ -679,24 +716,29 @@ class GatewayOrchestrator:
             provider_ms=provider_ms,
         )
 
-        # 11. Build response
-        response = ChatCompletionsResponse(
-            id=request_id,
-            model=route.model_name,
-            provider=route.provider_name,
-            choices=[
-                ChatCompletionsChoice(
-                    index=0,
-                    message=Message(
-                        role="assistant",
-                        content=response_content,
-                    ),
-                )
-            ],
-            usage=usage,
-            policy_action=overall_action.name.lower(),
-            policy_reasons=all_reasons,
-        )
+        # 11. Build response (assembly phase — small but measured).
+        # Wrapping the Pydantic model construction captures the
+        # serialization cost that shows up on tight-loop load — it's
+        # usually ~0.1ms but non-zero, which is the whole reason the
+        # phase table needs its own bucket.
+        with record_phase("response_assembly"):
+            response = ChatCompletionsResponse(
+                id=request_id,
+                model=route.model_name,
+                provider=route.provider_name,
+                choices=[
+                    ChatCompletionsChoice(
+                        index=0,
+                        message=Message(
+                            role="assistant",
+                            content=response_content,
+                        ),
+                    )
+                ],
+                usage=usage,
+                policy_action=overall_action.name.lower(),
+                policy_reasons=all_reasons,
+            )
 
         # 12. Response cache store — only safe, non-streaming, non-blocked responses
         if (
