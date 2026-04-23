@@ -207,7 +207,11 @@ class TestRevokeInvite:
             },
         )
         assert signup_attempt.status_code == 409
-        assert signup_attempt.json()["error"]["code"] == "invite_already_used"
+        # Post-invite-redesign (2026-04-24): revoked codes fail with
+        # ``invite_revoked``. Pre-redesign the code was
+        # ``invite_already_used`` because revoke and redeem both wrote
+        # to ``used_at``. Splitting the columns split the error codes.
+        assert signup_attempt.json()["error"]["code"] == "invite_revoked"
 
     def test_cross_tenant_revoke_returns_404(self, client):
         owner_a = _signup(client, "a@t.com")

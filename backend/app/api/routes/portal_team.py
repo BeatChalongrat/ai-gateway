@@ -82,14 +82,26 @@ def _invite_to_dict(inv: TenantInviteORM, *, include_code: bool = False) -> dict
     body = {
         "id": inv.id,
         "tenant_id": inv.tenant_id,
+        "role": inv.role,
         "email_hint": inv.email_hint,
         "created_at": inv.created_at,
         "expires_at": inv.expires_at,
         "used_at": inv.used_at,
         "used_by": inv.used_by,
+        "revoked_at": inv.revoked_at,
     }
     if include_code:
         body["code"] = inv.code
+        # Frontend composes and displays this, but including it in the
+        # response means the "Copy link" button has a single source of
+        # truth for the URL shape — otherwise a host-config mismatch
+        # between frontend and backend produces confusing "404 on
+        # valid code" reports.
+        from app.core.config import settings
+
+        body["invite_url"] = (
+            f"{settings.portal_public_url.rstrip('/')}/invite/{inv.code}"
+        )
     return body
 
 
@@ -208,11 +220,16 @@ def revoke_invite(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
 ):
-    """Revoke a pending invite by marking it used.
+    """Revoke a pending invite by marking it revoked.
 
     Owner-only. Revoked invites are still in the DB (audit trail)
     but cannot be redeemed. We do not delete the row so an operator
     can reconstruct who revoked what and when.
+
+    Post-redesign (2026-04-24): sets ``revoked_at`` instead of the
+    old ``used_at``-sentinel overload. Redemption checks both fields;
+    the column split lets "2 people used this link, nobody revoked
+    it" stay distinct from "1 owner killed the link."
     """
     tenant_id = _require_owner(user)
     invite = session.get(TenantInviteORM, invite_id)
@@ -220,11 +237,10 @@ def revoke_invite(
         raise NotFoundError(
             "Invite not found.", code="invite_not_found"
         )
-    if invite.used_at is not None:
-        # Already redeemed or already revoked — idempotent ok.
+    if invite.revoked_at is not None:
+        # Already revoked — idempotent ok.
         return {"message": "ok"}
-    invite.used_at = datetime.now(timezone.utc)
-    invite.used_by = None  # None indicates revocation, not redemption.
+    invite.revoked_at = datetime.now(timezone.utc)
     session.flush()
     return {"message": "ok"}
 
@@ -256,5 +272,198 @@ def redeem_invite(
     )
     return {
         "tenant_id": invite.tenant_id,
-        "tenant_role": "member",
+        "tenant_role": invite.role or "member",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Invite-flow redesign (2026-04-24) — singular /invite endpoints.
+#
+# The plural /invites endpoints above stay for backward compatibility
+# (they served the pre-redesign "copy the code" UI). The new UI talks
+# to the singular routes which enforce "one live invite per tenant"
+# at the handler level. Both sets share the same tenant_service
+# primitives, so there's no risk of them drifting.
+# ---------------------------------------------------------------------------
+
+
+class CreateInviteLinkRequest(BaseModel):
+    role: str = Field(default="member", max_length=16)
+    force: bool = Field(default=False)
+
+
+@router.get("/invite")
+@scope_to_portal_tenant
+def get_active_invite(
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Return the currently-live invite for the caller's tenant.
+
+    Returns 200 with a null body when no live invite exists, rather
+    than 404. The UI decides between "Create invite link" (null) and
+    the live-link card (non-null) and a 200+null lets it skip the
+    error-handling code path entirely. Owner-only.
+    """
+    tenant_id = _require_owner(user)
+    invite = tenant_service.get_live_invite(session, tenant_id=tenant_id)
+    if invite is None:
+        return {"invite": None}
+    return {"invite": _invite_to_dict(invite, include_code=True)}
+
+
+@router.post("/invite")
+@scope_to_portal_tenant
+def create_or_regenerate_invite(
+    body: CreateInviteLinkRequest,
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Create a shareable invite link.
+
+    Two modes:
+      * ``force=false`` (default): if a live invite already exists,
+        return it idempotently. First call on a fresh tenant creates
+        a new one.
+      * ``force=true``: revoke the existing live invite (if any) and
+        create a new one. This is how the "Regenerate link" button
+        works — the old URL stops working immediately so a leaked
+        link can be killed in one click.
+    """
+    tenant_id = _require_owner(user)
+    existing = tenant_service.get_live_invite(session, tenant_id=tenant_id)
+    if existing is not None and not body.force:
+        return {"invite": _invite_to_dict(existing, include_code=True)}
+
+    if existing is not None:
+        existing.revoked_at = datetime.now(timezone.utc)
+        session.flush()
+
+    invite = tenant_service.generate_invite(
+        session,
+        tenant_id=tenant_id,
+        creator_user_id=user.id,
+        role=body.role or "member",
+    )
+    return {"invite": _invite_to_dict(invite, include_code=True)}
+
+
+@router.delete("/invite")
+@scope_to_portal_tenant
+def revoke_active_invite(
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Revoke the tenant's currently-live invite (if any).
+
+    Idempotent: if nothing is live, returns ok. Owner-only.
+    """
+    tenant_id = _require_owner(user)
+    invite = tenant_service.get_live_invite(session, tenant_id=tenant_id)
+    if invite is None:
+        return {"message": "ok"}
+    invite.revoked_at = datetime.now(timezone.utc)
+    session.flush()
+    return {"message": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Email-sender — Pattern-2 Block 2.
+# ---------------------------------------------------------------------------
+
+
+class SendInviteEmailRequest(BaseModel):
+    recipients: list[str] = Field(default_factory=list, max_length=25)
+
+
+class PublicInvitePreviewResponse(BaseModel):
+    valid: bool
+    tenant_name: str | None = None
+    tenant_id: str | None = None
+    role: str | None = None
+    inviter_name: str | None = None
+    expires_at: str | None = None
+
+
+@router.post("/invite/send-email")
+@scope_to_portal_tenant
+def send_invite_emails(
+    body: SendInviteEmailRequest,
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Fan-out the live invite link to a list of recipients via Resend.
+
+    Does NOT mint per-recipient codes — every email gets the single
+    tenant link, matching the "shareable link" model. If there's no
+    live link, the call refuses (the UI also disables the button in
+    that state, this is defence in depth).
+
+    Returns per-recipient success/failure so the UI can show
+    "2 of 3 sent" and keep the failed chip red.
+    """
+    from app.core.config import settings
+    from app.models.tenant import TenantORM
+    from app.services.email import send_invite_email
+
+    tenant_id = _require_owner(user)
+    invite = tenant_service.get_live_invite(session, tenant_id=tenant_id)
+    if invite is None:
+        raise NotFoundError(
+            "No active invite link. Create one before sending emails.",
+            code="no_active_invite",
+        )
+
+    tenant = session.get(TenantORM, tenant_id)
+    tenant_name = tenant.name if tenant is not None else "your team"
+    invite_url = (
+        f"{settings.portal_public_url.rstrip('/')}/invite/{invite.code}"
+    )
+
+    # Basic input hygiene — dedupe (case-insensitive) and strip. The
+    # per-recipient email validator lives in the schema for format
+    # checks, but chip-style UIs sometimes submit rough strings, so
+    # we normalise defensively before hitting the sender.
+    seen: set[str] = set()
+    clean: list[str] = []
+    for r in body.recipients:
+        addr = (r or "").strip().lower()
+        if not addr or "@" not in addr:
+            clean.append("")  # placeholder for index alignment
+            continue
+        if addr in seen:
+            clean.append("")
+            continue
+        seen.add(addr)
+        clean.append(addr)
+
+    results: list[dict] = []
+    for i, addr in enumerate(clean):
+        original = body.recipients[i]
+        if not addr:
+            results.append({
+                "email": original,
+                "delivered": False,
+                "reason": "invalid_or_duplicate",
+            })
+            continue
+        r = send_invite_email(
+            to=addr,
+            inviter_name=user.display_name or user.email,
+            tenant_name=tenant_name,
+            invite_link=invite_url,
+            invite_code=invite.code,
+            language=user.preferred_language or "en",
+        )
+        results.append({
+            "email": addr,
+            "delivered": bool(r.delivered),
+            "reason": r.reason,
+        })
+
+    sent = sum(1 for r in results if r["delivered"])
+    return {
+        "sent": sent,
+        "total": len(results),
+        "results": results,
     }

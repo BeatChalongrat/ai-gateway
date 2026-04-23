@@ -61,6 +61,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+      # The portal origin the user browses to. Verification links,
+      # password-reset links, and invite-link emails are stamped with
+      # this host — mismatched value = dead links in email.
+      PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-http://localhost:3001}
       # Empty by default → adapters hit real provider URLs. Uncomment
       # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
       # anthropic/openrouter at the in-cluster mock-provider service.
