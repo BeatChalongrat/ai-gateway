@@ -1,14 +1,16 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, Clock, Copy, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Check, Clock, Copy, Globe, Trash2, Upload } from "lucide-react";
 
+import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Input } from "@/components/Input";
 import { PageSpinner } from "@/components/Spinner";
+import { useToast } from "@/components/Toast";
+import { AvatarCropModal } from "./_crop/AvatarCropModal";
 import { api, PortalApiError } from "@/lib/api";
-import { resolveAvatarUrl } from "@/lib/avatar";
 import { formatDate } from "@/lib/format";
 import type { PortalUser } from "@/lib/types";
 import PageHeader from "../_components/PageHeader";
@@ -16,18 +18,21 @@ import PageHeader from "../_components/PageHeader";
 type InlineMsg = { type: "success" | "error"; text: string } | null;
 
 export default function SettingsPage() {
+  const { toast } = useToast();
   const [user, setUser] = useState<PortalUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [idCopied, setIdCopied] = useState(false);
 
   const [displayName, setDisplayName] = useState("");
+  const [language, setLanguage] = useState<string>("en");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState<InlineMsg>(null);
 
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarMsg, setAvatarMsg] = useState<InlineMsg>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cropSource, setCropSource] = useState<string | null>(null);
 
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -39,6 +44,7 @@ export default function SettingsPage() {
         const me = await api.get<PortalUser>("/portal/me");
         setUser(me);
         setDisplayName(me.display_name ?? "");
+        setLanguage(me.preferred_language ?? "en");
       } catch (err) {
         if (err instanceof PortalApiError) setError(err.message);
         else setError("Failed to load settings.");
@@ -60,53 +66,78 @@ export default function SettingsPage() {
     try {
       const updated = await api.patch<PortalUser>("/portal/me", {
         display_name: displayName,
+        preferred_language: language,
       });
       setUser((prev) => (prev ? { ...prev, ...updated } : updated));
       setDisplayName(updated.display_name ?? "");
+      setLanguage(updated.preferred_language ?? "en");
       setProfileMsg({ type: "success", text: "Profile updated." });
+      toast("Profile updated", "success");
       setTimeout(() => setProfileMsg(null), 3000);
     } catch (err) {
       const msg =
         err instanceof PortalApiError ? err.message : "Failed to update profile.";
       setProfileMsg({ type: "error", text: msg });
+      toast(msg, "error");
     } finally {
       setSavingProfile(false);
     }
   }
 
-  async function handleAvatarUpload(e: ChangeEvent<HTMLInputElement>) {
+  function handleAvatarPick(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       setAvatarMsg({ type: "error", text: "Use JPEG, PNG, or WebP." });
+      toast("Use JPEG, PNG, or WebP.", "error");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
       setAvatarMsg({ type: "error", text: "Image must be under 5 MB." });
+      toast("Image must be under 5 MB.", "error");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
+    // Read as data URL so the crop modal can work in-memory. The
+    // backend still does the authoritative 256x256 crop + format
+    // conversion; this lets the user pick the square they actually
+    // want rather than always getting a center crop.
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = typeof reader.result === "string" ? reader.result : null;
+      if (src) setCropSource(src);
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleCropConfirm(blob: Blob) {
     setUploadingAvatar(true);
     setAvatarMsg(null);
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      // Backend expects a content-type we accept; WEBP is our target
+      // format anyway, so encoding the cropped canvas as webp keeps
+      // the bytes small. PNG fallback is handled by the browser.
+      formData.append("file", blob, "avatar.webp");
       const res = await api.upload<{ avatar_url: string }>(
         "/portal/me/avatar",
         formData
       );
       setUser((prev) => (prev ? { ...prev, avatar_url: res.avatar_url } : prev));
       setAvatarMsg({ type: "success", text: "Avatar updated." });
+      toast("Avatar updated", "success");
       setTimeout(() => setAvatarMsg(null), 3000);
+      setCropSource(null);
     } catch (err) {
       const msg = err instanceof PortalApiError ? err.message : "Upload failed.";
       setAvatarMsg({ type: "error", text: msg });
+      toast(msg, "error");
     } finally {
       setUploadingAvatar(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -119,11 +150,13 @@ export default function SettingsPage() {
       await api.delete<{ avatar_url: null }>("/portal/me/avatar");
       setUser((prev) => (prev ? { ...prev, avatar_url: null } : prev));
       setAvatarMsg({ type: "success", text: "Avatar removed." });
+      toast("Avatar removed", "success");
       setTimeout(() => setAvatarMsg(null), 3000);
     } catch (err) {
       const msg =
         err instanceof PortalApiError ? err.message : "Could not remove avatar.";
       setAvatarMsg({ type: "error", text: msg });
+      toast(msg, "error");
     } finally {
       setUploadingAvatar(false);
     }
@@ -133,6 +166,7 @@ export default function SettingsPage() {
     if (!user) return;
     navigator.clipboard.writeText(user.id).then(() => {
       setIdCopied(true);
+      toast("User ID copied", "success");
       setTimeout(() => setIdCopied(false), 1500);
     });
   }
@@ -142,6 +176,10 @@ export default function SettingsPage() {
   const planLabel = user?.plan
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const dirty =
+    displayName.trim() !== (user?.display_name ?? "") ||
+    language !== (user?.preferred_language ?? "en");
 
   return (
     <div className="space-y-6">
@@ -182,7 +220,10 @@ export default function SettingsPage() {
                 className="flex items-center gap-2"
                 style={{ fontFamily: "var(--ff-mono)", fontSize: 12 }}
               >
-                <span style={{ color: "var(--text-secondary)" }}>
+                <span
+                  title={user?.id}
+                  style={{ color: "var(--text-secondary)", cursor: "help" }}
+                >
                   {user?.id.slice(0, 8)}…
                 </span>
                 <button
@@ -247,35 +288,18 @@ export default function SettingsPage() {
           className="flex items-start gap-5 pb-5 mb-5"
           style={{ borderBottom: "1px solid var(--border-subtle)" }}
         >
-          <div
-            className="relative flex items-center justify-center flex-shrink-0"
-            style={{
-              width: 70,
-              height: 70,
-              borderRadius: "50%",
-              overflow: "hidden",
-              background: "linear-gradient(135deg, #6366F1, #06B6D4)",
-              color: "#FFFFFF",
-              fontSize: 24,
-              fontWeight: 600,
-            }}
-          >
-            {user?.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={resolveAvatarUrl(user.avatar_url) ?? ""}
-                alt="Profile"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span>
-                {(user?.display_name || user?.email || "?").slice(0, 1).toUpperCase()}
-              </span>
-            )}
+          <div className="relative">
+            <Avatar
+              url={user?.avatar_url}
+              name={user?.display_name}
+              email={user?.email}
+              id={user?.id}
+              size={70}
+            />
             {uploadingAvatar ? (
               <div
                 className="absolute inset-0 flex items-center justify-center"
-                style={{ background: "rgba(0,0,0,0.5)" }}
+                style={{ background: "rgba(0,0,0,0.5)", borderRadius: "50%" }}
               >
                 <div className="w-6 h-6 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               </div>
@@ -301,7 +325,7 @@ export default function SettingsPage() {
                 lineHeight: 1.5,
               }}
             >
-              JPEG, PNG, or WebP. Max 5 MB. We&apos;ll crop it to a 256×256 square.
+              JPEG, PNG, or WebP. Max 5 MB. You&apos;ll crop it to a 256×256 square after picking.
             </p>
 
             <div className="flex items-center gap-2">
@@ -310,7 +334,7 @@ export default function SettingsPage() {
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 className="hidden"
-                onChange={handleAvatarUpload}
+                onChange={handleAvatarPick}
               />
               <button
                 type="button"
@@ -376,16 +400,6 @@ export default function SettingsPage() {
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="How your name appears in the portal"
           />
-          <Input
-            label="Email"
-            value={user?.email ?? ""}
-            readOnly
-            style={{
-              background: "var(--bg-surface-2)",
-              color: "var(--text-tertiary)",
-              cursor: "not-allowed",
-            }}
-          />
 
           {profileMsg ? (
             <div
@@ -414,16 +428,115 @@ export default function SettingsPage() {
           <Button
             type="submit"
             loading={savingProfile}
-            disabled={
-              savingProfile || displayName.trim() === (user?.display_name ?? "")
-            }
+            disabled={savingProfile || !dirty}
           >
             Save changes
           </Button>
         </form>
       </Card>
 
-      {/* Security — coming soon */}
+      {/* Preferences — Feature 5: language toggle is live; other rows
+          remain "coming soon" until email wiring lands. */}
+      <Card padding="md">
+        <div className="flex items-center justify-between mb-5">
+          <h2
+            className="font-heading"
+            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+          >
+            Preferences
+          </h2>
+        </div>
+
+        <div
+          className="flex items-start justify-between gap-4 py-3"
+          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <div className="min-w-0 flex-1">
+            <div
+              style={{
+                fontWeight: 500,
+                color: "var(--text-primary)",
+                fontSize: 13.5,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Globe size={14} style={{ color: "var(--accent-primary)" }} />
+              Language
+            </div>
+            <div
+              style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2 }}
+            >
+              Transactional emails and (soon) the portal interface will use this
+              language.
+            </div>
+          </div>
+          <div
+            role="radiogroup"
+            aria-label="Language"
+            style={{
+              display: "inline-flex",
+              background: "var(--bg-elevated)",
+              borderRadius: 8,
+              padding: 3,
+              border: "1px solid var(--border-default)",
+              flexShrink: 0,
+            }}
+          >
+            {[
+              { code: "en", label: "English" },
+              { code: "th", label: "ไทย" },
+            ].map((opt) => {
+              const active = language === opt.code;
+              return (
+                <button
+                  key={opt.code}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setLanguage(opt.code)}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                    borderRadius: 6,
+                    background: active ? "var(--accent-primary)" : "transparent",
+                    color: active ? "#FFFFFF" : "var(--text-secondary)",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="opacity-60 pointer-events-none">
+          <PreferenceRow
+            title="Email notifications"
+            description="Get alerted when usage approaches your balance threshold"
+            defaultOn
+            pill={<ComingSoonPill />}
+          />
+          <PreferenceRow
+            title="Weekly usage summary"
+            description="Receive a weekly email with request counts and costs"
+            defaultOn
+            pill={<ComingSoonPill />}
+          />
+          <PreferenceRow
+            title="Product updates"
+            description="New features, model availability, and platform changes"
+            pill={<ComingSoonPill />}
+          />
+        </div>
+      </Card>
+
+      {/* Security — coming soon. Fields stay shown (disabled) so the
+          roadmap is visible, but they read as non-interactive. */}
       <Card padding="md">
         <div className="flex items-center justify-between mb-5">
           <h2
@@ -479,35 +592,6 @@ export default function SettingsPage() {
               Update Password
             </Button>
           </form>
-        </div>
-      </Card>
-
-      {/* Preferences — coming soon */}
-      <Card padding="md">
-        <div className="flex items-center justify-between mb-5">
-          <h2
-            className="font-heading"
-            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
-          >
-            Preferences
-          </h2>
-          <ComingSoonPill />
-        </div>
-        <div className="opacity-60 pointer-events-none">
-          <PreferenceRow
-            title="Email notifications"
-            description="Get alerted when usage approaches your balance threshold"
-            defaultOn
-          />
-          <PreferenceRow
-            title="Weekly usage summary"
-            description="Receive a weekly email with request counts and costs"
-            defaultOn
-          />
-          <PreferenceRow
-            title="Product updates"
-            description="New features, model availability, and platform changes"
-          />
         </div>
       </Card>
 
@@ -590,6 +674,13 @@ export default function SettingsPage() {
           </button>
         </div>
       </section>
+
+      <AvatarCropModal
+        open={cropSource !== null}
+        imageSrc={cropSource}
+        onCancel={() => setCropSource(null)}
+        onConfirm={handleCropConfirm}
+      />
     </div>
   );
 }
@@ -638,10 +729,12 @@ function PreferenceRow({
   title,
   description,
   defaultOn,
+  pill,
 }: {
   title: string;
   description: string;
   defaultOn?: boolean;
+  pill?: React.ReactNode;
 }) {
   return (
     <div
@@ -650,9 +743,17 @@ function PreferenceRow({
     >
       <div className="min-w-0">
         <div
-          style={{ fontWeight: 500, color: "var(--text-primary)", fontSize: 13.5 }}
+          style={{
+            fontWeight: 500,
+            color: "var(--text-primary)",
+            fontSize: 13.5,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+          }}
         >
           {title}
+          {pill}
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2 }}>
           {description}

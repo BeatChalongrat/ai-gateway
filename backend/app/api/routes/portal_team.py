@@ -64,10 +64,14 @@ def _require_owner(user: PortalUserORM) -> str:
 
 
 def _member_to_dict(u: PortalUserORM) -> dict:
+    # avatar_url is included so the Team page can render the same
+    # circle the user sees in the sidebar. Nullable — falls back to the
+    # deterministic initial+colour in the Avatar component.
     return {
         "id": u.id,
         "email": u.email,
         "display_name": u.display_name,
+        "avatar_url": u.avatar_url,
         "tenant_role": u.tenant_role,
         "status": u.status,
         "created_at": u.created_at,
