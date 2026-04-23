@@ -130,12 +130,44 @@ def _record_cross_tenant_access(
     reason: str,
     method: str,
     path: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    session_id_prefix: str | None = None,
 ) -> None:
-    """Stub audit entry. Commit 7 replaces with admin_audit_log insert."""
+    """Write an admin_audit_log row for every cross_tenant invocation.
+
+    Best-effort: a failure here (DB offline, constraint violation)
+    must not block the admin action itself. We still emit a structlog
+    entry on failure so the audit gap is visible.
+    """
     _log.info(
         "cross_tenant_access user=%s reason=%r method=%s path=%s",
         user_id, reason, method, path,
     )
+    try:
+        from app.core.db import SessionLocal
+        from app.models.admin_audit_log import AdminAuditLogORM
+
+        session = SessionLocal()
+        try:
+            row = AdminAuditLogORM(
+                actor_key_id=f"session:{user_id}",
+                tenant_id=session_tenant_id or "__global__",
+                action="cross_tenant_access",
+                resource_type="endpoint",
+                resource_id=path,
+                details=f"{method} {path} — reason: {reason}",
+                outcome="success",
+                ip_address=ip_address,
+                user_agent=(user_agent or "")[:500] or None,
+                session_id_prefix=session_id_prefix,
+            )
+            session.add(row)
+            session.commit()
+        finally:
+            session.close()
+    except Exception as exc:
+        _log.warning("cross_tenant_audit_write_failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -278,12 +310,16 @@ def cross_tenant(*, reason: str) -> Callable:
                 "Cross-tenant access is restricted to global ADMIN role.",
                 details={"required": "ADMIN", "actual": actual.name},
             )
+        sid = session.get("session_id") or ""
         _record_cross_tenant_access(
             user_id=session.get("user_id", "?"),
             session_tenant_id=session.get("tenant_id"),
             reason=mark.reason or "",
             method=request.method,
             path=request.url.path,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            session_id_prefix=sid[:8] if sid else None,
         )
         return session
 
