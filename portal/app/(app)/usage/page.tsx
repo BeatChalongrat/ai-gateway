@@ -19,6 +19,18 @@ interface UsageResp {
   total: number;
 }
 
+interface UsageSummaryResp {
+  totals: { requests: number; tokens: number; estimated_cost_usd: number };
+  windows: { today: number; last_7d: number; last_30d: number };
+  top_models: { model: string; requests: number; tokens: number }[];
+  by_project: {
+    project_id: string;
+    project_name: string;
+    requests: number;
+    tokens: number;
+  }[];
+}
+
 type Range = "today" | "7d" | "30d" | "all";
 
 const RANGE_MS: Record<Exclude<Range, "all">, number> = {
@@ -30,6 +42,7 @@ const RANGE_MS: Record<Exclude<Range, "all">, number> = {
 export default function UsagePage() {
   const [rows, setRows] = useState<UsageRequest[]>([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<UsageSummaryResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<Range>("7d");
@@ -39,10 +52,18 @@ export default function UsagePage() {
     (async () => {
       setLoading(true);
       try {
-        const r = await api.get<UsageResp>("/portal/me/usage?limit=200");
+        // Pull the recent request list (for the table) AND the
+        // aggregated tenant summary (for the new top-models + per-
+        // project panels) in parallel. Either endpoint failing still
+        // surfaces one error message — we don't try to partial-render.
+        const [list, summ] = await Promise.all([
+          api.get<UsageResp>("/portal/me/usage?limit=200"),
+          api.get<UsageSummaryResp>("/portal/me/usage/summary"),
+        ]);
         if (!alive) return;
-        setRows(r.requests);
-        setTotal(r.total);
+        setRows(list.requests);
+        setTotal(list.total);
+        setSummary(summ);
       } catch (err) {
         if (err instanceof PortalApiError) setError(err.message);
         else setError("Failed to load usage.");
@@ -193,6 +214,107 @@ export default function UsagePage() {
       </div>
 
       <UsageChart totalRequests={totals.requests} range={range} />
+
+      {summary ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 12,
+              padding: 20,
+            }}
+          >
+            <h3
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                marginBottom: 12,
+                color: "var(--text-primary)",
+              }}
+            >
+              Top models
+            </h3>
+            {summary.top_models.length === 0 ? (
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-tertiary)",
+                }}
+              >
+                No requests yet — run your first call to populate this.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {summary.top_models.map((m) => (
+                  <li
+                    key={m.model}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <span
+                      className="font-mono"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      {m.model}
+                    </span>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      {m.requests.toLocaleString()} req ·{" "}
+                      {formatTokens(m.tokens)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 12,
+              padding: 20,
+            }}
+          >
+            <h3
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                marginBottom: 12,
+                color: "var(--text-primary)",
+              }}
+            >
+              Per-project
+            </h3>
+            {summary.by_project.length === 0 ? (
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-tertiary)",
+                }}
+              >
+                Usage will appear here once a project has requests.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {summary.by_project.map((p) => (
+                  <li
+                    key={p.project_id}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <span style={{ color: "var(--text-primary)" }}>
+                      {p.project_name}
+                    </span>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      {p.requests.toLocaleString()} req ·{" "}
+                      {formatTokens(p.tokens)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       <RequestLogTable rows={logRows} />
 

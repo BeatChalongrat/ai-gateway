@@ -178,6 +178,129 @@ def delete_avatar(
     return {"avatar_url": None}
 
 
+@router.get("/usage/summary")
+@scope_to_portal_tenant
+def get_usage_summary(
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Aggregated usage for the caller's tenant.
+
+    Phase 4 Feature 1 — dashboard-friendly roll-up of request_logs.
+    Includes:
+
+    * ``totals``: lifetime requests, token count, estimated cost.
+    * ``windows``: counts for today, last 7d, last 30d.
+    * ``top_models``: top 5 by request count.
+    * ``by_project``: per-project request + token totals (joined
+      against projects so we can surface a friendly name).
+
+    Tenant-scoped via ``user.tenant_id`` — the @scope_to_portal_tenant
+    decorator documents the contract and the boot-check enforces it.
+    Orphaned portal users (tenant_id=None, transient state during
+    removal/re-invite) get an empty summary.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.project import ProjectORM
+
+    tenant_id = user.tenant_id
+    empty: dict = {
+        "totals": {"requests": 0, "tokens": 0, "estimated_cost_usd": 0.0},
+        "windows": {"today": 0, "last_7d": 0, "last_30d": 0},
+        "top_models": [],
+        "by_project": [],
+    }
+    if not tenant_id:
+        return empty
+
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=7)
+    month_start = now - timedelta(days=30)
+
+    scope = RequestLogORM.tenant_id == tenant_id
+
+    # Lifetime totals
+    totals_row = session.execute(
+        select(
+            func.count(RequestLogORM.request_id),
+            func.coalesce(func.sum(RequestLogORM.total_tokens), 0),
+            func.coalesce(func.sum(RequestLogORM.estimated_cost_usd), 0.0),
+        ).where(scope)
+    ).one()
+
+    # Time-window request counts
+    def _count_since(since_dt) -> int:
+        return int(
+            session.execute(
+                select(func.count(RequestLogORM.request_id)).where(
+                    scope, RequestLogORM.created_at >= since_dt
+                )
+            ).scalar()
+            or 0
+        )
+
+    # Top 5 models by request count (descending)
+    top_models_rows = session.execute(
+        select(
+            RequestLogORM.model,
+            func.count(RequestLogORM.request_id).label("requests"),
+            func.coalesce(func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+        )
+        .where(scope)
+        .group_by(RequestLogORM.model)
+        .order_by(func.count(RequestLogORM.request_id).desc())
+        .limit(5)
+    ).all()
+
+    # Per-project breakdown with friendly names
+    by_project_rows = session.execute(
+        select(
+            RequestLogORM.project_id,
+            func.coalesce(ProjectORM.name, RequestLogORM.project_id).label(
+                "project_name"
+            ),
+            func.count(RequestLogORM.request_id).label("requests"),
+            func.coalesce(func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+        )
+        .outerjoin(ProjectORM, ProjectORM.project_id == RequestLogORM.project_id)
+        .where(scope)
+        .group_by(RequestLogORM.project_id, ProjectORM.name)
+        .order_by(func.count(RequestLogORM.request_id).desc())
+    ).all()
+
+    return {
+        "totals": {
+            "requests": int(totals_row[0] or 0),
+            "tokens": int(totals_row[1] or 0),
+            "estimated_cost_usd": float(totals_row[2] or 0.0),
+        },
+        "windows": {
+            "today": _count_since(today_start),
+            "last_7d": _count_since(week_start),
+            "last_30d": _count_since(month_start),
+        },
+        "top_models": [
+            {
+                "model": row[0],
+                "requests": int(row[1]),
+                "tokens": int(row[2]),
+            }
+            for row in top_models_rows
+        ],
+        "by_project": [
+            {
+                "project_id": row[0],
+                "project_name": row[1],
+                "requests": int(row[2]),
+                "tokens": int(row[3]),
+            }
+            for row in by_project_rows
+        ],
+    }
+
+
 @router.get("/usage")
 @scope_to_portal_tenant
 def get_usage(
