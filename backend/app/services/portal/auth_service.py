@@ -159,6 +159,11 @@ def _user_to_dict(user: PortalUserORM) -> dict:
         "credit_balance": int(user.credit_balance),
         "credit_used": int(user.credit_used),
         "email_verified": bool(user.email_verified),
+        # Phase 3 tenancy. tenant_id may be None transiently for
+        # removed members between tenant-drop and re-invite; the UI
+        # uses tenant_role to gate owner-only actions.
+        "tenant_id": user.tenant_id,
+        "tenant_role": user.tenant_role or "member",
         "created_at": user.created_at,
     }
 

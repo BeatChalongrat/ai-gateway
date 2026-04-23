@@ -72,6 +72,10 @@ def get_me(
         "credit_used": used,
         "credit_percent_used": round(percent_used, 2),
         "is_low_credit": threshold > 0 and balance < threshold,
+        # Phase 3 tenancy fields. The UI gates the "Team" menu and
+        # owner-only actions on tenant_role.
+        "tenant_id": user.tenant_id,
+        "tenant_role": user.tenant_role or "member",
         "created_at": user.created_at,
     }
 
