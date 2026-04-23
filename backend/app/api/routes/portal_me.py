@@ -59,11 +59,22 @@ def get_me(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
 ):
+    from app.models.tenant import TenantORM
+
     balance = int(user.credit_balance)
     used = int(user.credit_used)
     lifetime = balance + used
     percent_used = (used / lifetime * 100.0) if lifetime > 0 else 0.0
     threshold = _low_credit_threshold(session)
+
+    # tenant_name lookup — the Team page header ("Invite teammates to
+    # Globex Inc") and the Settings account block both want the
+    # display name. A single cheap join here beats an extra GET.
+    tenant_name: str | None = None
+    if user.tenant_id:
+        tenant = session.get(TenantORM, user.tenant_id)
+        if tenant is not None:
+            tenant_name = tenant.name
 
     return {
         "id": user.id,
@@ -80,6 +91,7 @@ def get_me(
         # Phase 3 tenancy fields. The UI gates the "Team" menu and
         # owner-only actions on tenant_role.
         "tenant_id": user.tenant_id,
+        "tenant_name": tenant_name,
         "tenant_role": user.tenant_role or "member",
         # Transactional-email language + future UI locale. Exposing it
         # on /me lets the Settings page preselect the correct radio
