@@ -17,3 +17,9 @@ logs/
 *.sqlite3
 admin-ui/tsconfig.tsbuildinfo
 backend/uploads/
+
+# Perf-baseline track (deferred) — source lives on branch
+# archive/uncommitted-20260423 in perf/. Generated results and scratch
+# directories are never tracked on main.
+perf/
+perf_audit_tmp/
