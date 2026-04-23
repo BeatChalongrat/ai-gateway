@@ -71,6 +71,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             <div
               key={t.id}
               role="status"
+              className="toast-in"
               style={{
                 pointerEvents: "auto",
                 display: "flex",
@@ -86,7 +87,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 fontSize: 13,
                 fontWeight: 500,
                 minWidth: 240,
-                animation: "modalIn 180ms ease-out both",
               }}
             >
               <span

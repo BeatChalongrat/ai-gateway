@@ -275,12 +275,13 @@ export default function TeamPage() {
                   </td>
                 </tr>
               ) : (
-                filteredMembers.map((m) => (
+                filteredMembers.map((m, i) => (
                   <MemberRow
                     key={m.id}
                     member={m}
                     currentUserId={me.id}
                     isOwner={isOwner}
+                    staggerIndex={i}
                     onLeave={() => setLeaveOpen(true)}
                     onRemove={() => setRemoveTarget(m)}
                   />
@@ -348,12 +349,14 @@ function MemberRow({
   member,
   currentUserId,
   isOwner,
+  staggerIndex = 0,
   onLeave,
   onRemove,
 }: {
   member: TenantMember;
   currentUserId: string;
   isOwner: boolean;
+  staggerIndex?: number;
   onLeave: () => void;
   onRemove: () => void;
 }) {
@@ -363,10 +366,11 @@ function MemberRow({
 
   return (
     <tr
-      className="row-hover"
+      className="row-hover row-stagger"
       style={{
         borderBottom: "1px solid var(--border-subtle)",
         opacity: suspended ? 0.72 : 1,
+        animationDelay: `${staggerIndex * 50}ms`,
       }}
     >
       <td style={{ padding: "10px 16px 10px 0" }}>
@@ -597,6 +601,7 @@ function FilterChips({
           <button
             key={c.key}
             type="button"
+            className="chip-bounce"
             onClick={() => onChange(c.key)}
             style={{
               padding: "5px 10px",
@@ -629,36 +634,126 @@ function FilterChips({
 }
 
 function RowMenu({ onRemove }: { onRemove: () => void }) {
+  // "open" drives visibility; "closing" drives the exit-animation
+  // frame. When the user clicks away / hits Escape, we flip to
+  // closing, wait 150ms for the CSS animation to finish, then
+  // unmount. React doesn't render exit animations otherwise.
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [direction, setDirection] = useState<"down" | "up">("down");
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Smart flip: if opening the menu downward would spill past the
+  // viewport, open upward instead. Measured once at toggle time —
+  // we don't re-flip mid-animation.
+  function toggle() {
+    if (open) {
+      beginClose();
+      return;
+    }
+    const btn = triggerRef.current;
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      // Estimate menu height at ~100px (two items + separator). If
+      // there's less room below than needed, flip. Small margin so
+      // it doesn't hug the viewport edge.
+      setDirection(spaceBelow < 140 ? "up" : "down");
+    }
+    setClosing(false);
+    setOpen(true);
+  }
+
+  function beginClose() {
+    if (!open || closing) return;
+    setClosing(true);
+    window.setTimeout(() => {
+      setOpen(false);
+      setClosing(false);
+      // Focus return: put keyboard focus back on the trigger after
+      // the menu unmounts, matching native <select> / WAI-ARIA
+      // dialog conventions.
+      triggerRef.current?.focus();
+    }, 150);
+  }
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) beginClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        beginClose();
+      }
+      // Basic focus trap — Tab / Shift+Tab cycle within the menu.
+      if (e.key === "Tab" && menuRef.current) {
+        const items = menuRef.current.querySelectorAll<HTMLElement>(
+          "[role='menuitem']:not([disabled])"
+        );
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    // On open, focus the first menu item so keyboard users land
+    // inside the menu immediately.
+    window.setTimeout(() => {
+      menuRef.current
+        ?.querySelector<HTMLElement>("[role='menuitem']:not([disabled])")
+        ?.focus();
+    }, 0);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const animClass = closing
+    ? direction === "up"
+      ? "menu-anim-out-up"
+      : "menu-anim-out-down"
+    : direction === "up"
+    ? "menu-anim-in-up"
+    : "menu-anim-in-down";
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
+        ref={triggerRef}
         type="button"
         aria-label="Row actions"
+        aria-expanded={open}
+        aria-haspopup="menu"
         title="Actions"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         style={iconBtnStyle("ghost")}
       >
         <MoreVertical size={15} />
       </button>
       {open ? (
         <div
+          ref={menuRef}
           role="menu"
+          className={animClass}
           style={{
             position: "absolute",
             right: 0,
-            top: "calc(100% + 4px)",
+            top: direction === "down" ? "calc(100% + 4px)" : "auto",
+            bottom: direction === "up" ? "calc(100% + 4px)" : "auto",
             zIndex: 20,
             background: "var(--bg-surface)",
             border: "1px solid var(--border-default)",
@@ -690,7 +785,7 @@ function RowMenu({ onRemove }: { onRemove: () => void }) {
             label="Remove from team"
             tone="danger"
             onClick={() => {
-              setOpen(false);
+              beginClose();
               onRemove();
             }}
           />

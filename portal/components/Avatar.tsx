@@ -59,7 +59,7 @@ export function Avatar({
 
   return (
     <div
-      className={className}
+      className={[className, "avatar-hover"].filter(Boolean).join(" ")}
       style={{
         width: size,
         height: size,
