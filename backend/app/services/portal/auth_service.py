@@ -392,10 +392,20 @@ def request_verification_email(db: Session, email: str) -> dict:
         return result  # already verified — nothing to do
 
     token = mint_email_verification_token(user.id, user.email)
-    # TODO: enqueue email-send in production. For now, log.
-    import logging
-    logging.getLogger("portal.auth").info(
-        "email_verification_token_minted user=%s", user.id
+    # Phase 3.5 — real email via Resend (dev-mode → console log).
+    # Dispatch is fire-and-forget: a Resend outage logs a warning
+    # and does NOT block the user's response. Tests still read the
+    # token from the return value in dev/test mode.
+    from app.services.email import send_verification_email
+
+    verification_link = (
+        f"{settings.portal_public_url.rstrip('/')}/verify-email?token={token}"
+    )
+    send_verification_email(
+        to=user.email,
+        display_name=user.display_name,
+        verification_link=verification_link,
+        language=user.preferred_language or "en",
     )
     if settings.app_env.lower() in ("development", "test", "testing"):
         result["token"] = token
