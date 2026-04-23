@@ -289,10 +289,7 @@ export default function ApiKeysPage() {
                                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(245,158,11,0.06)"; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                               >Revoke</button>
-                            ) : (
-                              // TODO: Add regenerate button when backend endpoint is implemented
-                              null
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       );
