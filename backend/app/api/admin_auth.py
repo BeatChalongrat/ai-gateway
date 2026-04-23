@@ -66,17 +66,56 @@ class AuthMark:
 # ---------------------------------------------------------------------------
 
 
-def get_admin_session(request: Request) -> dict:
+def get_admin_session(request: Request, manager=Depends(lambda: None)) -> dict:
     """Dependency: return the validated admin session payload.
 
-    Commit 2 installs this as the stable injection point. Commit 3
-    wires it to ``SessionManager.verify_cookie`` + CSRF checks. For
-    now, any request that reaches here without a dependency override
-    is unauthenticated, so raise.
+    Reads the signed ``admin_session`` cookie, verifies the HMAC and
+    the Redis row, enforces idle + absolute TTL, and returns the
+    payload (session_id, user_id, tenant_id, role, created_at, etc.).
+
+    The ``manager`` kwarg is resolved via a FastAPI Depends on
+    ``get_session_manager`` — wired at module import below. Using
+    Depends (vs a direct import-call) lets tests swap the manager
+    through ``app.dependency_overrides``.
+
+    Raises AuthenticationError (401) on any failure. The four failure
+    modes — SessionInvalid / SessionExpired / SessionRevoked / missing
+    — collapse to 401 here; the route layer does not need to
+    distinguish because the client response is the same: clear the
+    cookie and re-auth.
     """
-    raise AuthenticationError(
-        "admin session not available — session middleware not installed"
+    from app.core.config import settings
+    from app.services.admin.session_manager import (
+        SessionExpired,
+        SessionInvalid,
+        SessionRevoked,
     )
+
+    cookie = request.cookies.get(settings.session_cookie_name)
+    if not cookie:
+        raise AuthenticationError("No admin session cookie")
+    try:
+        return manager.verify_cookie(cookie)
+    except (SessionInvalid, SessionExpired, SessionRevoked) as exc:
+        raise AuthenticationError(str(exc)) from exc
+
+
+def _install_session_manager_dep() -> None:
+    """Late-binding trick: rewrite get_admin_session's ``manager`` default
+    to Depends(get_session_manager) without creating an import cycle.
+    """
+    from app.services.admin.session_service import get_session_manager
+
+    sig = inspect.signature(get_admin_session)
+    params = []
+    for name, p in sig.parameters.items():
+        if name == "manager":
+            p = p.replace(default=Depends(get_session_manager))
+        params.append(p)
+    get_admin_session.__signature__ = sig.replace(parameters=params)  # type: ignore[attr-defined]
+
+
+_install_session_manager_dep()
 
 
 # ---------------------------------------------------------------------------
