@@ -15,6 +15,7 @@ from app.api.routes.portal_auth import router as portal_auth_router
 from app.api.routes.portal_me import router as portal_me_router
 from app.api.routes.portal_projects import router as portal_projects_router
 from app.api.routes.portal_billing import router as portal_billing_router
+from app.api.routes.portal_team import router as portal_team_router
 from app.api.routes.admin_portal_users import router as admin_portal_users_router
 from app.api.routes.admin_system_settings import router as admin_system_settings_router
 from app.api.routes.admin_token_packs import router as admin_token_packs_router
@@ -33,7 +34,12 @@ from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.request_timing import RequestTimingMiddleware
 from app.middleware.timeout import TimeoutMiddleware
 from app.middleware.metrics import MetricsMiddleware, get_metrics
+from app.observability.metrics import (
+    DB_POOL_ACTIVE,
+    render_prometheus_exposition,
+)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 configure_logging()
 
@@ -78,10 +84,16 @@ async def lifespan(app: FastAPI):
     # If that becomes a concern, promote to a distributed lock.
     retention_task = asyncio.create_task(_daily_dlp_retention())
 
+    # DB pool sampler — every 5s reads SQLAlchemy pool stats and
+    # pushes them to the Prometheus gauge. Load tests consume this
+    # via /metrics to correlate saturation with pool contention.
+    pool_task = asyncio.create_task(_db_pool_sampler())
+
     yield
 
     monitor_task.cancel()
     retention_task.cancel()
+    pool_task.cancel()
     executor.shutdown(wait=False)
 
 
@@ -164,6 +176,36 @@ async def _loop_monitor() -> None:
         lag = time.monotonic() - t - 1.0
         if lag > 0.1:
             print(f"[loop-monitor] Event loop blocked for {lag:.3f}s")
+
+
+async def _db_pool_sampler() -> None:
+    """Sample SQLAlchemy engine pool stats every 5s into DB_POOL_ACTIVE.
+
+    ``pool.checkedout()`` is the count of connections currently held
+    outside the pool (i.e. actively used by an in-flight request). The
+    gauge is read by Prometheus; the value also turns up in the
+    ``/health`` endpoint but only on demand.
+    """
+    import asyncio
+
+    from app.core.db import engine
+
+    while True:
+        try:
+            pool = engine.pool
+            active = 0
+            if hasattr(pool, "checkedout"):
+                try:
+                    active = pool.checkedout()
+                except Exception:
+                    active = 0
+            DB_POOL_ACTIVE.set(active)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Never let telemetry break the app.
+            pass
+        await asyncio.sleep(5)
 
 
 async def _daily_dlp_retention() -> None:
@@ -267,6 +309,7 @@ app.include_router(portal_auth_router, prefix="/portal/auth", tags=["portal-auth
 app.include_router(portal_me_router, prefix="/portal/me", tags=["portal-me"])
 app.include_router(portal_projects_router, prefix="/portal/projects", tags=["portal-projects"])
 app.include_router(portal_billing_router, prefix="/portal/billing", tags=["portal-billing"])
+app.include_router(portal_team_router, prefix="/portal/team", tags=["portal-team"])
 
 # Admin views over portal data
 app.include_router(admin_portal_users_router, prefix="/admin/portal-users", tags=["admin-portal"])
@@ -287,7 +330,22 @@ check_admin_routes_decorated(app)
 
 
 @app.get("/metrics")
-async def metrics():
+async def metrics() -> Response:
+    """Prometheus text exposition endpoint.
+
+    Content-Type is ``text/plain; version=0.0.4; charset=utf-8`` per
+    the Prometheus exposition format. The legacy in-memory counters
+    (``uptime_seconds``, ``requests_by_route``, …) are available at
+    ``GET /metrics.json`` for the admin UI; the Prometheus scrape
+    target is this path.
+    """
+    body, content_type = render_prometheus_exposition()
+    return Response(content=body, media_type=content_type)
+
+
+@app.get("/metrics.json")
+async def metrics_json() -> dict:
+    """Legacy JSON metrics view — kept for admin UI + smoke tests."""
     return get_metrics()
 
 
