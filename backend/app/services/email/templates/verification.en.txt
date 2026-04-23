@@ -1,0 +1,13 @@
+Verify your SRAN AI Gateway account
+
+Hi {{display_name}},
+
+Welcome to SRAN AI Gateway. Click the link below to verify your
+email address and finish setting up your account:
+
+{{verification_link}}
+
+This link expires in 24 hours. If you didn't create an account,
+you can safely ignore this email.
+
+— The SRAN team

@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     provider_timeout_read: float = 30.0
     provider_max_retries: int = 2
 
+    # Provider base-URL overrides (used by perf-baseline to re-target all
+    # outbound calls at the local mock_provider). JSON dict keyed by
+    # provider_name; unset keys fall through to each adapter's hardcoded
+    # default. Empty string disables the feature. Example:
+    #   PROVIDER_BASE_URL_OVERRIDES='{"openai":"http://localhost:9090",
+    #                                  "anthropic":"http://localhost:9090"}'
+    provider_base_url_overrides: str = ""
+
     # DLP
     dlp_enabled: bool = True
     dlp_default_profile: str = "default"
@@ -106,10 +114,27 @@ class Settings(BaseSettings):
     semantic_router_enabled: bool = False
     semantic_router_model: str = "all-MiniLM-L6-v2"
     semantic_router_threshold: float = 0.65
+    # Perf-baseline only: when ``SEMANTIC_ROUTER_MOCK=1`` the encoder is
+    # replaced by a deterministic hash-seeded 384-dim vector + calibrated
+    # lognormal sleep (p50=200ms, p95=600ms, p99=1500ms). Avoids torch /
+    # sentence-transformers install on the runner. See
+    # PERF_BASELINE_PLAN.md §5.7 (Variant C) for rationale.
+    semantic_router_mock: bool = False
 
     # Optional full DATABASE_URL override (used in Docker / production).
     # When set, takes precedence over individual postgres_* fields.
     database_url_override: str = ""
+
+    # Email (Phase 3.5 — Resend transactional provider)
+    # ``RESEND_API_KEY`` is mandatory in production; validate_secrets
+    # refuses to boot without it. Dev/test leaves the sender in
+    # "log-to-console" mode and never calls the real API.
+    resend_api_key: str = ""
+    email_from_address: str = "no-reply@sran.ai"
+    email_from_name: str = "SRAN AI Gateway"
+    # Absolute URL to prefix verification / password-reset links with.
+    # Must match the portal origin the user browses from.
+    portal_public_url: str = "http://localhost:3010"
 
     @property
     def redis_url(self) -> str:
@@ -132,6 +157,37 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def provider_base_url_overrides_map(self) -> dict[str, str]:
+        """Decode ``PROVIDER_BASE_URL_OVERRIDES`` JSON into a mapping.
+
+        Parse failures are silently treated as "no override" so a typo in
+        the env var cannot knock production off the real upstream. We
+        emit a one-time warning on malformed input via ``warnings.warn``
+        to make the misconfiguration discoverable in logs.
+        """
+        raw = (self.provider_base_url_overrides or "").strip()
+        if not raw:
+            return {}
+        try:
+            import json as _json
+
+            data = _json.loads(raw)
+        except Exception:
+            warnings.warn(
+                "PROVIDER_BASE_URL_OVERRIDES is not valid JSON — ignoring.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(k): str(v).rstrip("/")
+            for k, v in data.items()
+            if isinstance(v, (str,)) and v
+        }
 
     @property
     def dlp_disabled_detectors_list(self) -> list[str]:
@@ -169,6 +225,17 @@ class Settings(BaseSettings):
         else:
             for idx, s in enumerate(signing):
                 _check(f"SESSION_SIGNING_SECRETS[{idx}]", s)
+
+        # Phase 3.5 — Resend is mandatory in production so the
+        # verification + password-reset flows aren't silently dropped.
+        # Dev/test runs with the console-log sender and doesn't need
+        # a real key.
+        if not (self.resend_api_key or "").strip():
+            issues.append(
+                "RESEND_API_KEY is empty "
+                "(required in production — set a Resend API key or "
+                "switch APP_ENV=development to use the console sender)"
+            )
 
         if issues:
             raise RuntimeError(
