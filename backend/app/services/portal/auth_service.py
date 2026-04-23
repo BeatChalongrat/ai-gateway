@@ -49,6 +49,9 @@ def _mint_token(
     *,
     sub: str,
     email: str,
+    tenant_id: str | None,
+    tenant_role: str,
+    token_version: int,
     token_type: Literal["access", "refresh"],
 ) -> str:
     now = datetime.now(timezone.utc)
@@ -68,6 +71,16 @@ def _mint_token(
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
         "jti": str(uuid.uuid4()),
+        # Phase 3 tenancy claims. tenant_id may be None for test
+        # fixtures that predate Phase 3; production signup always sets
+        # it. tenant_role defaults to 'member' — only owners see
+        # elevated portal UI.
+        "tenant_id": tenant_id,
+        "tenant_role": tenant_role,
+        # Rotated by the DB on credential-reset / tenant-change events.
+        # The verify path in deps.get_portal_user requires this claim
+        # to match the current user row, so stale tokens fail closed.
+        "token_version": token_version,
     }
     return jwt.encode(payload, settings.portal_jwt_secret, algorithm=_ALGORITHM)
 
@@ -76,9 +89,40 @@ def create_portal_token(
     user_id: str,
     email: str,
     token_type: Literal["access", "refresh"] = "access",
+    *,
+    tenant_id: str | None = None,
+    tenant_role: str = "member",
+    token_version: int = 1,
 ) -> str:
-    """Mint a portal JWT. See module docstring for payload shape."""
-    return _mint_token(sub=user_id, email=email, token_type=token_type)
+    """Mint a portal JWT. See module docstring for payload shape.
+
+    Phase 3: pass the caller's tenant_id / tenant_role / token_version
+    so the JWT carries enough context to scope every portal request.
+    Defaults preserve the pre-Phase-3 behaviour for tests that haven't
+    been updated yet (no tenant, 'member' role, version 1).
+    """
+    return _mint_token(
+        sub=user_id,
+        email=email,
+        tenant_id=tenant_id,
+        tenant_role=tenant_role,
+        token_version=token_version,
+        token_type=token_type,
+    )
+
+
+def _mint_for_user(
+    user: PortalUserORM, token_type: Literal["access", "refresh"]
+) -> str:
+    """Convenience wrapper that pulls every claim from the user row."""
+    return create_portal_token(
+        user.id,
+        user.email,
+        token_type,
+        tenant_id=user.tenant_id,
+        tenant_role=user.tenant_role or "member",
+        token_version=user.token_version or 1,
+    )
 
 
 def verify_portal_token(token: str) -> dict:
@@ -121,8 +165,8 @@ def _user_to_dict(user: PortalUserORM) -> dict:
 
 def _issue_tokens(user: PortalUserORM) -> dict:
     return {
-        "access_token": create_portal_token(user.id, user.email, "access"),
-        "refresh_token": create_portal_token(user.id, user.email, "refresh"),
+        "access_token": _mint_for_user(user, "access"),
+        "refresh_token": _mint_for_user(user, "refresh"),
         "user": _user_to_dict(user),
     }
 
@@ -335,5 +379,5 @@ def refresh(db: Session, refresh_token: str) -> dict:
     if user is None or user.status != "active":
         raise AuthenticationError("User not found or disabled.")
     return {
-        "access_token": create_portal_token(user.id, user.email, "access"),
+        "access_token": _mint_for_user(user, "access"),
     }
