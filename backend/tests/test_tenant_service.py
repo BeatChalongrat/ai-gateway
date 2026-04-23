@@ -237,13 +237,21 @@ class TestRedeemInvite:
         # Token version bumped so any in-flight session invalidates.
         assert newcomer.token_version == 2
 
-    def test_already_used_invite_rejected(self, db):
+    def test_revoked_invite_rejected(self, db):
+        """Post-invite-redesign (2026-04-24): codes are multi-use until
+        revoked or expired. The pre-redesign variant of this test
+        asserted that a second redemption failed as ``already_used``;
+        the current model only kills a code via explicit revocation."""
         _, _, invite, newcomer = self._setup(db)
         tenant_service.redeem_invite(
             db, code=invite.code, redeeming_user_id=newcomer.id
         )
+        # Mark the invite revoked by the owner; a second redemption
+        # must now fail with ``invite_revoked``.
+        invite.revoked_at = datetime.now(timezone.utc)
+        db.flush()
         stranger = _make_user(db, email="str@example.com")
-        with pytest.raises(ConflictError, match="already been used"):
+        with pytest.raises(ConflictError, match="revoked"):
             tenant_service.redeem_invite(
                 db, code=invite.code, redeeming_user_id=stranger.id
             )
