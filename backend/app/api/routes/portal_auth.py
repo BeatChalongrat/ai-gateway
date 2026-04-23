@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session
+from app.api.portal_scope import public_portal_route
 from app.core.exceptions import ValidationError
 from app.services.portal import auth_service, oauth_flow_service, oauth_service
 from app.services.portal.oauth_flow_service import (
@@ -55,6 +56,7 @@ class RefreshRequest(BaseModel):
 
 
 @router.post("/signup")
+@public_portal_route
 def signup(
     body: SignupRequest,
     session: Session = Depends(get_db_session),
@@ -70,6 +72,7 @@ def signup(
 
 
 @router.post("/login")
+@public_portal_route
 def login(
     body: LoginRequest,
     session: Session = Depends(get_db_session),
@@ -78,6 +81,7 @@ def login(
 
 
 @router.post("/refresh")
+@public_portal_route
 def refresh(
     body: RefreshRequest,
     session: Session = Depends(get_db_session),
@@ -99,6 +103,7 @@ class VerifyEmailRequest(BaseModel):
 
 
 @router.post("/request-verification-email")
+@public_portal_route
 def request_verification_email(
     body: VerificationRequest,
     session: Session = Depends(get_db_session),
@@ -114,6 +119,7 @@ def request_verification_email(
 
 
 @router.post("/verify-email")
+@public_portal_route
 def verify_email(
     body: VerifyEmailRequest,
     session: Session = Depends(get_db_session),
@@ -123,6 +129,7 @@ def verify_email(
 
 
 @router.post("/logout")
+@public_portal_route
 def logout():
     # Portal tokens are stateless JWTs — server-side revocation is not
     # implemented in the MVP. Clients must drop the token on their end.
@@ -130,6 +137,7 @@ def logout():
 
 
 @router.post("/oauth/callback", status_code=410)
+@public_portal_route
 def oauth_callback_legacy():
     """LEGACY (P0-8): closed. Clients must use the server-side flow.
 
@@ -155,6 +163,7 @@ def oauth_callback_legacy():
 
 
 @router.get("/oauth/start")
+@public_portal_route
 def oauth_start(
     request: Request,
     provider: str = Query(..., pattern="^(google|github)$"),
@@ -213,6 +222,7 @@ def oauth_start(
 
 
 @router.get("/oauth/callback", name="portal_oauth_callback")
+@public_portal_route
 def oauth_callback(
     request: Request,
     code: str = Query(default=""),
@@ -256,6 +266,7 @@ def oauth_callback(
 
 
 @router.get("/public-settings")
+@public_portal_route
 def public_settings(session: Session = Depends(get_db_session)):
     """Public values safe to read unauthenticated.
 
