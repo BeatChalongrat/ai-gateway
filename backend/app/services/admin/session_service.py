@@ -41,14 +41,21 @@ def get_session_manager() -> SessionManager:
 
 
 def get_login_rate_limiter() -> LoginRateLimiter:
-    """FastAPI dep: lazy singleton LoginRateLimiter wired to Redis."""
+    """FastAPI dep: lazy singleton LoginRateLimiter wired to Redis.
+
+    Phase 2C Commit 16: per-IP limit tightened from 20/1min to 5/15min
+    per Beat's P1 spec. A single IP can no longer rotate through 20
+    emails in a minute — it gets 5 attempts per 15 minutes, same
+    window as the per-email cap. Legitimate users rarely fail login
+    5 times in 15 minutes; attackers brute-forcing across emails do.
+    """
     global _rate_limiter
     if _rate_limiter is None:
         _rate_limiter = LoginRateLimiter(
             redis_client=_build_redis_client(),
             per_email_limit=5,
             per_email_window_seconds=15 * 60,
-            per_ip_limit=20,
-            per_ip_window_seconds=60,
+            per_ip_limit=5,
+            per_ip_window_seconds=15 * 60,
         )
     return _rate_limiter
