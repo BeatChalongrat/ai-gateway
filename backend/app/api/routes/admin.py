@@ -758,7 +758,22 @@ def get_project(
 def list_projects(
     tenant_id: str | None = None,
     session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin),
 ) -> AdminListResponse[ProjectResponse]:
+    # P0-5 fix: tenant-scoped callers only see their own tenant's
+    # projects. Global ADMIN honours the query param (or, if omitted,
+    # returns every project).
+    from app.domain.rbac import Role
+    try:
+        caller_role = Role[auth.role.upper()]
+    except KeyError:
+        caller_role = Role.USER
+    if caller_role < Role.ADMIN:
+        # Force-override any caller-supplied tenant_id. A tenant-scoped
+        # admin cannot peek into another tenant's data regardless of the
+        # query parameter.
+        tenant_id = auth.tenant_id
+
     stmt = select(ProjectORM)
     if tenant_id:
         stmt = stmt.where(ProjectORM.tenant_id == tenant_id)
@@ -880,8 +895,22 @@ def get_api_key(
 def list_api_keys(
     project_id: str | None = None,
     session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin),
 ) -> AdminListResponse[ApiKeyResponse]:
+    # P0-6 fix: tenant-scoped callers only see their own tenant's keys.
+    # If a project_id is supplied, we additionally verify that project
+    # belongs to the caller's tenant before returning its keys.
+    from app.domain.rbac import Role
+    try:
+        caller_role = Role[auth.role.upper()]
+    except KeyError:
+        caller_role = Role.USER
+
     stmt = select(ApiKeyORM)
+    if caller_role < Role.ADMIN:
+        # Force-scope to caller's tenant. A forged project_id that
+        # belongs to another tenant will drop to zero rows below.
+        stmt = stmt.where(ApiKeyORM.tenant_id == auth.tenant_id)
     if project_id:
         stmt = stmt.where(ApiKeyORM.project_id == project_id)
     rows = session.execute(stmt).scalars().all()

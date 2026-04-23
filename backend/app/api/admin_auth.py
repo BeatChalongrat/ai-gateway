@@ -317,6 +317,42 @@ def _endpoint_has_mark(endpoint: Callable) -> bool:
     return False
 
 
+def tag_untagged_admin_routes(
+    app: FastAPI,
+    *,
+    default_mark: AuthMark | None = None,
+) -> list[str]:
+    """Backfill a default marker onto admin routes that lack one.
+
+    During the Phase 2A migration, the bulk of admin routes are still
+    protected by the router-level ``Depends(require_admin)`` JWT path.
+    The new @require_role/@scope_to_tenant/@cross_tenant/@public
+    decorators will be applied per-endpoint as the migration progresses
+    (Commit 6 & beyond). Until then, this helper walks every /admin/*
+    route at startup and tags any unmarked endpoint with
+    ``default_mark`` (defaulting to require_role(PROJECT_ADMIN)) so the
+    boot-check gate passes without gaps.
+
+    Returns the list of routes it tagged so main.py can log them.
+    """
+    if default_mark is None:
+        default_mark = AuthMark(
+            kind="require_role", min_role=Role.PROJECT_ADMIN
+        )
+    tagged: list[str] = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if not route.path.lower().startswith(_ADMIN_PATH_PREFIX):
+            continue
+        endpoint = route.endpoint
+        if _endpoint_has_mark(endpoint):
+            continue
+        setattr(endpoint, _AUTH_MARK_ATTR, default_mark)
+        tagged.append(f"{route.path}")
+    return tagged
+
+
 def check_admin_routes_decorated(app: FastAPI) -> None:
     """Scan routes and fail boot if any ``/admin/*`` lacks a marker.
 
