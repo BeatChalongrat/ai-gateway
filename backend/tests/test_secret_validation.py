@@ -22,6 +22,11 @@ def _prod_settings(**overrides):
         master_encryption_key=_STRONG_ENC,
         portal_jwt_secret=_STRONG_PORTAL,
         session_signing_secrets=_STRONG_SESSION,
+        # Phase 3.5 C27 — validate_secrets now also checks
+        # RESEND_API_KEY in production. Provide a non-empty value so
+        # every pre-existing "happy path" test keeps passing; tests
+        # that specifically target the Resend gate override this.
+        resend_api_key="re_strong_test_key",
     )
     defaults.update(overrides)
     return Settings(**defaults)
