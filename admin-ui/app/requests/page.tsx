@@ -239,6 +239,11 @@ export default function RequestsPage() {
           {/* Left: list */}
           <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <div style={{ flex: 1, overflowY: "auto" }}>
+              {filtered.length === 0 ? (
+                <div style={{ padding: "40px 20px", textAlign: "center", color: T.tt, fontSize: 13 }}>
+                  No results match the current filter.
+                </div>
+              ) : null}
               {paged.map((r) => {
                 const isOk = r.status === "success";
                 const isSel = selected?.request_id === r.request_id;
