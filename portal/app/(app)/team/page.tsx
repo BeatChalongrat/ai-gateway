@@ -17,41 +17,31 @@
  *     role changes; remove is live)
  */
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
-  Copy,
   Crown,
   DoorOpen,
-  Mail,
   MoreVertical,
   Search,
   Shield,
-  Trash2,
   UserCheck,
   UserMinus,
-  UserPlus,
 } from "lucide-react";
 
 import { Avatar } from "@/components/Avatar";
-import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Input } from "@/components/Input";
 import { PageSpinner } from "@/components/Spinner";
 import { useToast } from "@/components/Toast";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate, relativeTime } from "@/lib/format";
-import type { PortalUser, TenantInvite, TenantMember } from "@/lib/types";
+import type { PortalUser, TenantMember } from "@/lib/types";
 
 import PageHeader from "../_components/PageHeader";
+import { InviteSection, MemberOnlyInviteCard } from "./_components/InviteSection";
 
 interface MembersResponse {
   members: TenantMember[];
-}
-
-interface InvitesResponse {
-  invites: TenantInvite[];
 }
 
 type StatusFilter = "all" | "active" | "suspended" | "pending";
@@ -60,14 +50,8 @@ export default function TeamPage() {
   const { toast } = useToast();
   const [me, setMe] = useState<PortalUser | null>(null);
   const [members, setMembers] = useState<TenantMember[] | null>(null);
-  const [invites, setInvites] = useState<TenantInvite[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [inviteEmailHint, setInviteEmailHint] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [lastGenerated, setLastGenerated] = useState<TenantInvite | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -75,7 +59,6 @@ export default function TeamPage() {
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<TenantMember | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
-  const [revokeTarget, setRevokeTarget] = useState<TenantInvite | null>(null);
 
   async function refresh() {
     setError(null);
@@ -84,12 +67,6 @@ export default function TeamPage() {
       setMe(user);
       const m = await api.get<MembersResponse>("/portal/team/members");
       setMembers(m.members);
-      if (user.tenant_role === "owner") {
-        const inv = await api.get<InvitesResponse>("/portal/team/invites");
-        setInvites(inv.invites);
-      } else {
-        setInvites(null);
-      }
     } catch (err) {
       setError(
         err instanceof PortalApiError
@@ -105,45 +82,6 @@ export default function TeamPage() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  async function handleGenerateInvite(e: FormEvent) {
-    e.preventDefault();
-    setCreating(true);
-    try {
-      const invite = await api.post<TenantInvite>(
-        "/portal/team/invites",
-        { email_hint: inviteEmailHint.trim() || undefined }
-      );
-      setLastGenerated(invite);
-      setInviteEmailHint("");
-      toast("Invite code generated", "success");
-      await refresh();
-    } catch (err) {
-      const msg =
-        err instanceof PortalApiError ? err.message : "Failed to create invite.";
-      setError(msg);
-      toast(msg, "error");
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  async function confirmRevoke() {
-    if (!revokeTarget) return;
-    setPendingAction(true);
-    try {
-      await api.delete(`/portal/team/invites/${revokeTarget.id}`);
-      toast("Invite revoked", "success");
-      setRevokeTarget(null);
-      await refresh();
-    } catch (err) {
-      const msg =
-        err instanceof PortalApiError ? err.message : "Failed to revoke invite.";
-      toast(msg, "error");
-    } finally {
-      setPendingAction(false);
-    }
-  }
 
   async function confirmLeave() {
     if (!me) return;
@@ -179,13 +117,6 @@ export default function TeamPage() {
     } finally {
       setPendingAction(false);
     }
-  }
-
-  function copyToClipboard(value: string, key: string, label: string) {
-    navigator.clipboard.writeText(value);
-    setCopied(key);
-    toast(`${label} copied`, "success");
-    setTimeout(() => setCopied(null), 2000);
   }
 
   const filteredMembers = useMemo(() => {
@@ -245,168 +176,24 @@ export default function TeamPage() {
         }
       />
 
-      {isOwner && (
-        <Card padding="md">
-          <div className="flex items-center gap-2 mb-4">
-            <UserPlus size={16} style={{ color: "var(--accent-primary)" }} />
-            <h2
-              className="font-heading"
-              style={{
-                fontSize: 15,
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                margin: 0,
-              }}
-            >
-              Invite a teammate
-            </h2>
-          </div>
-          <form
-            onSubmit={handleGenerateInvite}
-            className="flex flex-col gap-3 md:flex-row md:items-end"
-          >
-            <div className="flex-1 min-w-0">
-              <Input
-                label="Email hint (optional)"
-                type="email"
-                placeholder="bob@teammate.com"
-                value={inviteEmailHint}
-                onChange={(e) => setInviteEmailHint(e.target.value)}
-              />
-              <p
-                style={{
-                  marginTop: 6,
-                  fontSize: 12,
-                  color: "var(--text-tertiary)",
-                }}
-              >
-                Display-only — the invite code is usable by anyone who has it.
-              </p>
-            </div>
-            <Button type="submit" loading={creating}>
-              Generate code
-            </Button>
-          </form>
-
-          {lastGenerated && (
-            <div
-              className="mt-4 p-3"
-              style={{
-                borderRadius: 10,
-                background: "rgba(16,185,129,0.08)",
-                border: "1px solid rgba(16,185,129,0.25)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: "var(--accent-success)",
-                  marginBottom: 4,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <Check size={12} /> Invite created
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  marginBottom: 10,
-                }}
-              >
-                Send this code to your teammate via Slack, email, or any other
-                channel. Expires {formatDate(lastGenerated.expires_at)}.
-              </div>
-              <div
-                className="flex gap-2 items-center"
-                style={{
-                  padding: "6px 10px",
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 8,
-                }}
-              >
-                <code
-                  style={{
-                    flex: 1,
-                    fontSize: 12,
-                    fontFamily: "var(--ff-mono)",
-                    color: "var(--text-primary)",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  {lastGenerated.code}
-                </code>
-                <button
-                  type="button"
-                  onClick={() =>
-                    copyToClipboard(lastGenerated.code, lastGenerated.code, "Invite code")
-                  }
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 500,
-                    color: "var(--accent-primary)",
-                    background: "transparent",
-                    border: "1px solid var(--border-default)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {copied === lastGenerated.code ? (
-                    <>
-                      <Check size={11} /> Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={11} /> Copy
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {isOwner && invites && invites.length > 0 && (
-        <Card padding="md">
-          <div className="flex items-center justify-between mb-3">
-            <h2
-              className="font-heading"
-              style={{
-                fontSize: 15,
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                margin: 0,
-              }}
-            >
-              Pending invites
-            </h2>
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--text-tertiary)",
-                fontWeight: 500,
-              }}
-            >
-              {invites.length} waiting
-            </span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {invites.map((inv) => (
-              <PendingInviteRow
-                key={inv.id}
-                invite={inv}
-                onCopy={(code) => copyToClipboard(code, inv.id, "Invite code")}
-                copiedKey={copied}
-                onRevoke={() => setRevokeTarget(inv)}
-              />
-            ))}
-          </div>
-        </Card>
+      {isOwner ? (
+        <InviteSection
+          tenantName={me.tenant_name || "your team"}
+          onInviteChanged={refresh}
+        />
+      ) : (
+        (() => {
+          const owner = (members ?? []).find((m) => m.tenant_role === "owner");
+          if (!owner) return null;
+          return (
+            <MemberOnlyInviteCard
+              ownerName={owner.display_name}
+              ownerEmail={owner.email}
+              ownerAvatarUrl={owner.avatar_url}
+              ownerId={owner.id}
+            />
+          );
+        })()
       )}
 
       <Card padding="md">
@@ -535,21 +322,6 @@ export default function TeamPage() {
         }
       />
 
-      <ConfirmDialog
-        open={revokeTarget !== null}
-        onClose={() => setRevokeTarget(null)}
-        onConfirm={confirmRevoke}
-        title="Revoke this invite?"
-        confirmLabel="Revoke invite"
-        loading={pendingAction}
-        message={
-          <>
-            The code will stop working immediately. You can always generate a
-            fresh one if you still want to invite
-            {revokeTarget?.email_hint ? ` ${revokeTarget.email_hint}` : " this person"}.
-          </>
-        }
-      />
     </div>
   );
 }
@@ -994,110 +766,6 @@ function MenuItem({
         </span>
       ) : null}
     </button>
-  );
-}
-
-function PendingInviteRow({
-  invite,
-  onCopy,
-  onRevoke,
-  copiedKey,
-}: {
-  invite: TenantInvite;
-  onCopy: (code: string) => void;
-  onRevoke: () => void;
-  copiedKey: string | null;
-}) {
-  const expiresAt = new Date(invite.expires_at);
-  const daysLeft = Math.max(
-    0,
-    Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-  );
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "10px 12px",
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 10,
-      }}
-    >
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          background: "rgba(245,158,11,0.12)",
-          color: "var(--accent-warning)",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        <Mail size={14} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            color: "var(--text-primary)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {invite.email_hint || (
-            <em style={{ color: "var(--text-tertiary)" }}>
-              unspecified recipient
-            </em>
-          )}
-        </div>
-        <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 1 }}>
-          Expires in {daysLeft} day{daysLeft === 1 ? "" : "s"} ·{" "}
-          {formatDate(invite.expires_at)}
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={() => onCopy(invite.code)}
-        title={invite.code}
-        className="inline-flex items-center gap-1 rounded-md px-2 py-1"
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          color: "var(--accent-primary)",
-          background: "transparent",
-          border: "1px solid var(--border-default)",
-          cursor: "pointer",
-          fontFamily: "var(--ff-mono)",
-        }}
-      >
-        {copiedKey === invite.id ? (
-          <>
-            <Check size={11} /> Copied
-          </>
-        ) : (
-          <>
-            <Copy size={11} /> {invite.code.slice(0, 8)}…
-          </>
-        )}
-      </button>
-      <button
-        type="button"
-        aria-label="Revoke invite"
-        title="Revoke invite"
-        onClick={onRevoke}
-        style={iconBtnStyle("danger")}
-      >
-        <Trash2 size={15} />
-      </button>
-    </div>
   );
 }
 
