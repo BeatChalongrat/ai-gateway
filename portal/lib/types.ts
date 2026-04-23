@@ -14,7 +14,31 @@ export interface PortalUser {
   credit_percent_used: number;
   is_low_credit: boolean;
   email_verified?: boolean;
+  // Phase 3 tenancy. tenant_id may be null for orphaned users
+  // between tenant-removal and re-invite redemption.
+  tenant_id?: string | null;
+  tenant_role?: "owner" | "member";
   created_at: string;
+}
+
+export interface TenantMember {
+  id: string;
+  email: string;
+  display_name: string | null;
+  tenant_role: "owner" | "member";
+  status: string;
+  created_at: string;
+}
+
+export interface TenantInvite {
+  id: string;
+  tenant_id: string;
+  code: string;
+  email_hint: string | null;
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
+  used_by: string | null;
 }
 
 export interface AuthResponse {

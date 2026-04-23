@@ -32,9 +32,11 @@ export default function SignupForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [tos, setTos] = useState(true);
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -64,6 +66,7 @@ export default function SignupForm() {
           email,
           password,
           display_name: name.trim() || undefined,
+          invite_code: inviteCode.trim() || undefined,
         },
         { auth: false }
       );
@@ -173,6 +176,37 @@ export default function SignupForm() {
                 {showConfirm ? "Hide" : "Show"}
               </button>
             </div>
+          </div>
+
+          <div className="sv-field">
+            {!showInvite ? (
+              <button
+                type="button"
+                className="sv-invite-toggle"
+                onClick={() => setShowInvite(true)}
+              >
+                Have an invite code? Click to enter it.
+              </button>
+            ) : (
+              <>
+                <label className="sv-label" htmlFor="su-invite">
+                  Invite code (optional)
+                </label>
+                <input
+                  id="su-invite"
+                  type="text"
+                  className="sv-input"
+                  autoComplete="off"
+                  placeholder="Paste the code your team owner shared"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                />
+                <p className="sv-invite-hint">
+                  Joining an existing team with this code. Leave empty
+                  to create your own team.
+                </p>
+              </>
+            )}
           </div>
 
           <label className="sv-tos">
