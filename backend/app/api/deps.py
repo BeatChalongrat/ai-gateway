@@ -308,4 +308,22 @@ def get_portal_user(
             code="account_suspended",
             details={"status": user.status},
         )
+
+    # Phase 3 Concern 1: reject stale JWTs whose token_version no
+    # longer matches the user row. The DB value gets bumped on
+    # migration 029, credential reset, and any explicit session
+    # revocation event. Tokens minted before any such bump become
+    # invalid on the next request.
+    token_version = payload.get("token_version")
+    expected_version = user.token_version or 1
+    # Tokens minted before Phase 3 have no claim at all; treat absent
+    # as version 0 so the compare always fails after the migration
+    # bumped every user to 2 — that's the one-time re-login event.
+    observed_version = token_version if token_version is not None else 0
+    if observed_version != expected_version:
+        raise AuthenticationError(
+            "Session is no longer valid. Please log in again.",
+            code="token_version_stale",
+        )
+
     return user

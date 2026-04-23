@@ -132,8 +132,22 @@ def login_or_create(
                 db.refresh(user)
 
     return {
-        "access_token": auth_service.create_portal_token(user.id, user.email, "access"),
-        "refresh_token": auth_service.create_portal_token(user.id, user.email, "refresh"),
+        "access_token": auth_service.create_portal_token(
+            user.id,
+            user.email,
+            "access",
+            tenant_id=user.tenant_id,
+            tenant_role=user.tenant_role or "member",
+            token_version=user.token_version or 1,
+        ),
+        "refresh_token": auth_service.create_portal_token(
+            user.id,
+            user.email,
+            "refresh",
+            tenant_id=user.tenant_id,
+            tenant_role=user.tenant_role or "member",
+            token_version=user.token_version or 1,
+        ),
         "user": {
             "id": user.id,
             "email": user.email,
