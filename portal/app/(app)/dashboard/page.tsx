@@ -287,7 +287,7 @@ function CreditHero({
               marginTop: 6,
             }}
           >
-            of {total.toLocaleString()} total · Last 7 days
+            of {total.toLocaleString()} lifetime allotment
           </div>
 
           {/* Stats row */}
@@ -601,7 +601,7 @@ function StatsGrid({
         rgb="99,102,241"
         label="Tokens Used"
         value={formatTokens(used)}
-        caption="All time"
+        caption="Lifetime"
         icon={<Zap size={12} strokeWidth={2} />}
       />
       <StatPanel
