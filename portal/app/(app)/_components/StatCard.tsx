@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
+
+import { useCountUp } from "@/lib/hooks/useCountUp";
 
 type Tone = "violet" | "cyan" | "green" | "amber" | "rose" | "neutral";
 
@@ -10,7 +14,13 @@ type Trend = {
 
 type Props = {
   label: string;
+  // Two shapes: pre-formatted ReactNode (backwards-compat) or a
+  // numeric target + formatter. The numeric path gets a count-up
+  // animation on first mount via useCountUp (respects prefers-
+  // reduced-motion and snaps to target for motion-sensitive users).
   value: ReactNode;
+  numericValue?: number;
+  format?: (n: number) => string;
   caption?: string;
   icon: ReactNode;
   tone?: Tone;
@@ -32,6 +42,8 @@ const TONE_RGB: Record<Tone, string> = {
 export default function StatCard({
   label,
   value,
+  numericValue,
+  format,
   caption,
   icon,
   tone = "violet",
@@ -39,6 +51,16 @@ export default function StatCard({
   href,
 }: Props) {
   const rgb = TONE_RGB[tone];
+  // Count-up only when the caller asked for it via numericValue. When
+  // they pre-formatted `value`, we render as-is to avoid double-
+  // animating something the caller already handled.
+  const counted = useCountUp(numericValue ?? 0, 600);
+  const displayedValue: ReactNode =
+    numericValue !== undefined
+      ? format
+        ? format(counted)
+        : counted.toLocaleString()
+      : value;
 
   const body = (
     <div
@@ -122,9 +144,10 @@ export default function StatCard({
           letterSpacing: "-0.02em",
           color: "var(--text-primary)",
           lineHeight: 1.1,
+          fontVariantNumeric: "tabular-nums",
         }}
       >
-        {value}
+        {displayedValue}
       </div>
       {caption ? (
         <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 6 }}>
