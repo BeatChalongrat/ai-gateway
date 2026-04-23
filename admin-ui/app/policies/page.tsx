@@ -136,7 +136,7 @@ function Toggle({ checked, disabled, onChange }: {
       disabled={disabled}
       style={{
         width: 40, height: 22, borderRadius: 11, padding: 2,
-        background: checked ? C.accent : "#d1d5db",
+        background: checked ? C.accent : "var(--bg-elevated)",
         border: "none", cursor: disabled ? "not-allowed" : "pointer",
         display: "flex", alignItems: "center",
         transition: "background 0.25s ease",
@@ -472,7 +472,7 @@ function DetectorsTab() {
                 <tr key={det.name} className="dlp-row" style={{ animationDelay: `${0.05 + i * 0.03}s` }}>
                   <td style={{ paddingLeft: 18 }}>
                     <span style={{ fontFamily: C.mono, fontSize: "13px", fontWeight: 600, color: C.textPrimary, letterSpacing: "-0.01em" }}>{det.name}</span>
-                    {isNer && <span style={{ marginLeft: 6, fontSize: "9px", fontWeight: 700, color: C.textTertiary, background: "#f3f4f6", padding: "1px 5px", borderRadius: 3, textTransform: "uppercase", letterSpacing: "0.03em" }}>NER</span>}
+                    {isNer && <span style={{ marginLeft: 6, fontSize: "9px", fontWeight: 700, color: C.textTertiary, background: "var(--bg-elevated)", padding: "1px 5px", borderRadius: 3, textTransform: "uppercase", letterSpacing: "0.03em" }}>NER</span>}
                   </td>
                   <td><CatPill category={det.category} /></td>
                   <td><SevBadge severity={det.severity} /></td>

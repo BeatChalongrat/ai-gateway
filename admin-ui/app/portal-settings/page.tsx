@@ -24,10 +24,14 @@ interface Setting {
   updated_at: string;
 }
 
+// Theme-aware tokens. These used to be hardcoded lights
+// (e8eaef / 6b7280) which read wrong on dark mode. Mapping to the
+// shared --border-default / --text-tertiary / --accent-primary vars
+// keeps both themes coherent with the rest of admin-ui.
 const C = {
-  accent: "#3b6cf6",
-  borderLight: "#e8eaef",
-  textTertiary: "#6b7280",
+  accent: "var(--accent-primary)",
+  borderLight: "var(--border-default)",
+  textTertiary: "var(--text-tertiary)",
 };
 
 export default function PortalSettingsPage() {
@@ -224,7 +228,7 @@ function Toggle({
         height: 24,
         borderRadius: 12,
         border: "none",
-        background: checked ? "#10b981" : "#cbd5e1",
+        background: checked ? "var(--accent-success)" : "var(--bg-elevated)",
         position: "relative",
         cursor: disabled ? "wait" : "pointer",
         transition: "background 150ms",
@@ -347,9 +351,9 @@ function TrialTab({
                 style={{
                   padding: "6px 14px",
                   borderRadius: 20,
-                  border: sel ? "1px solid #1e3a5f" : `1px solid ${C.borderLight}`,
-                  background: sel ? "#1e3a5f" : "white",
-                  color: sel ? "white" : "#374151",
+                  border: sel ? `1px solid ${C.accent}` : `1px solid ${C.borderLight}`,
+                  background: sel ? C.accent : "var(--bg-surface)",
+                  color: sel ? "#FFFFFF" : "var(--text-primary)",
                   fontSize: 12,
                   fontWeight: 500,
                   cursor: "pointer",

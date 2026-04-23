@@ -217,7 +217,7 @@ export default function ApiKeysPage() {
                   }}>{pName.charAt(0).toUpperCase()}</div>
                   <span style={{ fontSize: 15, fontWeight: 700, color: T.tp }}>{pName}</span>
                   <span style={{
-                    fontFamily: T.mono, fontSize: 12, color: T.tt, background: "#f0f2f5",
+                    fontFamily: T.mono, fontSize: 12, color: T.tt, background: "var(--bg-elevated)",
                     padding: "2px 8px", borderRadius: 100,
                   }}>{keys.length}</span>
                   <span style={{ flex: 1 }} />
@@ -354,7 +354,7 @@ export default function ApiKeysPage() {
           Save this key now. It will not be shown again.
         </div>
         <div style={{ position: "relative" }}>
-          <div style={{ fontFamily: T.mono, fontSize: 13, padding: "14px 16px", borderRadius: 10, background: "#f4f5f7", border: `1px solid ${T.bl}`, userSelect: "all", wordBreak: "break-all", lineHeight: 1.6, color: T.tp }}>
+          <div style={{ fontFamily: T.mono, fontSize: 13, padding: "14px 16px", borderRadius: 10, background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, userSelect: "all", wordBreak: "break-all", lineHeight: 1.6, color: T.tp }}>
             {rawKey}
           </div>
           <button onClick={() => { navigator.clipboard.writeText(rawKey || ""); toast("Key copied to clipboard"); }}

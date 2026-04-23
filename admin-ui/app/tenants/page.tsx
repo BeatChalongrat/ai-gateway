@@ -65,10 +65,10 @@ const CSS = `
 .tn-icon-glow svg{animation:tnGlow 2s ease-in-out infinite}
 .tn-icon-swing svg{animation:tnSwing 3s ease-in-out infinite}
 .tn-table{width:100%;border-collapse:collapse}
-.tn-table th{text-align:left;padding:0 20px;height:40px;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:${T.th};border-bottom:1px solid ${T.bl};background:#f0f2f5;white-space:nowrap}
-.tn-table td{padding:16px 20px;border-bottom:1px solid ${T.bl};vertical-align:middle}
+.tn-table th{text-align:left;padding:0 20px;height:40px;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:${T.th};border-bottom:1px solid ${T.bl};background:var(--bg-elevated);white-space:nowrap}
+.tn-table td{padding:16px 20px;border-bottom:1px solid ${T.bl};vertical-align:middle;color:${T.tp}}
 .tn-table tbody tr{transition:background 100ms}
-.tn-table tbody tr:hover{background:rgba(59,108,246,0.04)}
+.tn-table tbody tr:hover{background:color-mix(in srgb, var(--bg-elevated) 60%, transparent)}
 .tn-table tbody tr:last-child td{border-bottom:none}
 .tn-table tbody tr .tn-acts{opacity:0;transition:opacity 0.15s}
 .tn-table tbody tr:hover .tn-acts{opacity:1}

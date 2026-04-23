@@ -49,10 +49,10 @@ const CSS = `
 .pj-card .pj-card-acts{opacity:0;transform:translateY(4px);transition:opacity 0.2s ease,transform 0.2s ease}
 .pj-card:hover .pj-card-acts{opacity:1;transform:translateY(0)}
 .pj-table{width:100%;border-collapse:collapse}
-.pj-table th{text-align:left;padding:0 20px;height:40px;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:${T.th};border-bottom:1px solid ${T.bl};background:#f0f2f5;white-space:nowrap}
-.pj-table td{padding:15px 20px;border-bottom:1px solid ${T.bl};vertical-align:middle}
+.pj-table th{text-align:left;padding:0 20px;height:40px;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:${T.th};border-bottom:1px solid ${T.bl};background:var(--bg-elevated);white-space:nowrap}
+.pj-table td{padding:15px 20px;border-bottom:1px solid ${T.bl};vertical-align:middle;color:${T.tp}}
 .pj-table tbody tr{transition:background 100ms}
-.pj-table tbody tr:hover{background:rgba(59,108,246,0.04)}
+.pj-table tbody tr:hover{background:color-mix(in srgb, var(--bg-elevated) 60%, transparent)}
 .pj-table tbody tr:last-child td{border-bottom:none}
 `;
 

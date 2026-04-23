@@ -77,7 +77,7 @@ function Sparkline({ items }: { items: any[] }) {
           const total = b.ok + b.err;
           const h = total > 0 ? Math.max(3, Math.round((total / maxH) * 28)) : 2;
           const hasErr = b.err > 0;
-          return <div key={i} style={{ flex: 1, minWidth: 2, height: h, borderRadius: "2px 2px 0 0", background: hasErr ? T.red : total > 0 ? T.green : "#e5e7eb", opacity: 0.85, transition: "opacity 100ms" }}
+          return <div key={i} style={{ flex: 1, minWidth: 2, height: h, borderRadius: "2px 2px 0 0", background: hasErr ? T.red : total > 0 ? T.green : "var(--border-default)", opacity: 0.85, transition: "opacity 100ms" }}
             onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
             onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.85"; }}
           />;
@@ -458,7 +458,7 @@ export default function RequestsPage() {
                           <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
                         </div>
                         <pre style={{
-                          background: "#fafbfc", border: `1px solid ${T.bl}`, borderRadius: 6,
+                          background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, borderRadius: 6,
                           padding: "8px 10px", margin: 0, fontFamily: T.mono, fontSize: "11px",
                           lineHeight: 1.5, color: T.tp, whiteSpace: "pre-wrap", wordBreak: "break-word",
                           maxHeight: 140, overflowY: "auto",

@@ -262,7 +262,7 @@ export default function PortalUsersPage() {
             </svg>
           </div>
 
-          <span style={{ width: 1, height: 24, background: "#e8eaef", flexShrink: 0 }} />
+          <span style={{ width: 1, height: 24, background: "var(--border-default)", flexShrink: 0 }} />
 
           <div style={{ display: "flex", gap: 4 }}>
             {([
@@ -363,7 +363,7 @@ export default function PortalUsersPage() {
                         <span className="sran-badge sran-badge-error">No credits</span>
                       ) : (
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{ width: 60, height: 6, borderRadius: 3, background: "#eef0f4", overflow: "hidden", flexShrink: 0 }}>
+                          <div style={{ width: 60, height: 6, borderRadius: 3, background: "var(--bg-elevated)", overflow: "hidden", flexShrink: 0 }}>
                             <div style={{ width: `${pct}%`, height: "100%", background: color, transition: "width 250ms" }} />
                           </div>
                           <span style={{ fontSize: 12, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
@@ -431,7 +431,7 @@ export default function PortalUsersPage() {
                 <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Balance</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_balance)}</div></div>
                 <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Used</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_used)}</div></div>
               </div>
-              <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: "#eef0f4", overflow: "hidden" }}>
+              <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: "var(--bg-elevated)", overflow: "hidden" }}>
                 <div style={{
                   width: `${creditPercent(detailUser.credit_balance, detailUser.credit_used)}%`,
                   height: "100%",
