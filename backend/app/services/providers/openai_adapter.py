@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, AsyncIterator
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk, ProviderUsage
 from app.services.providers.base import BaseProviderAdapter
+from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.http_client import create_provider_client
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.parsers import parse_openai_response
@@ -54,7 +55,7 @@ class OpenAIAdapter(BaseProviderAdapter):
         key = api_key or settings.openai_api_key
 
         client = create_provider_client(
-            base_url=OPENAI_BASE_URL,
+            base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             headers={"Authorization": f"Bearer {key}"},
@@ -77,7 +78,7 @@ class OpenAIAdapter(BaseProviderAdapter):
         key = api_key or settings.openai_api_key
 
         client = create_provider_client(
-            base_url=OPENAI_BASE_URL,
+            base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             headers={"Authorization": f"Bearer {key}"},

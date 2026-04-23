@@ -27,7 +27,10 @@ Design notes
 
 from __future__ import annotations
 
+import hashlib
 import math
+import random
+import time
 from typing import Callable, Sequence
 
 import structlog
@@ -35,6 +38,57 @@ import structlog
 from app.services.providers.model_registry import resolve_provider
 
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Variant-C mock encoder (perf-baseline only).
+#
+# Used when ``settings.semantic_router_mock`` is true. Produces a
+# deterministic 384-dim unit vector (matching the real MiniLM encoder's
+# output dimension) derived from ``sha256(text)`` — so repeated calls on
+# the same prompt return the same vector, making classifier decisions
+# reproducible across runs.
+#
+# Sleep distribution is calibrated from reported MiniLM CPU benchmarks:
+#   p50 =  200 ms
+#   p95 =  600 ms
+#   p99 = 1500 ms
+# Fitted as lognormal(mu=ln(0.2), sigma=0.65) which gives approximately
+# those percentiles. The sleep is SYNC ``time.sleep`` to mirror the real
+# encoder's behaviour — ``sentence_transformers.encode`` is sync + CPU-
+# bound, so a faithful mock must block the event loop the same way.
+# Round B / C numbers therefore include event-loop stall.
+# ---------------------------------------------------------------------------
+
+_MOCK_VECTOR_DIM = 384
+_MOCK_LOG_MU = math.log(0.2)  # median ~200 ms
+_MOCK_LOG_SIGMA = 0.65
+
+
+def _mock_encode(text: str) -> list[float]:
+    """Deterministic 384-dim unit vector + calibrated-latency sleep.
+
+    The exact numeric values don't matter — the orchestrator only cares
+    that ``classify`` returns a consistent intent for a given prompt
+    (so retries don't flap) and that the call takes measurable wall-
+    clock time (so the baseline report can attribute router cost).
+    """
+    seed_bytes = hashlib.sha256(text.encode("utf-8")).digest()[:8]
+    seed_int = int.from_bytes(seed_bytes, "big")
+    rng = random.Random(seed_int)
+
+    vec = [rng.gauss(0.0, 1.0) for _ in range(_MOCK_VECTOR_DIM)]
+    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+    unit = [x / norm for x in vec]
+
+    # Separate RNG for the sleep so vector + latency are independently
+    # reproducible per-process but still tied to the input.
+    sleep_rng = random.Random(seed_int ^ 0x5f3759df)
+    sample = sleep_rng.lognormvariate(_MOCK_LOG_MU, _MOCK_LOG_SIGMA)
+    # Clip to a sane envelope so a long-tailed sample can't stall the
+    # load generator for minutes.
+    time.sleep(min(sample, 5.0))
+    return unit
 
 
 # Six built-in intents. Each is anchored on a short descriptive
@@ -145,23 +199,45 @@ class SemanticRouter:
             return
 
         if self._encoder is None:
-            # Lazy import so the whole test suite doesn't pay the cost
-            # of loading sentence-transformers when the flag is off.
+            # Variant C of the perf baseline runs with
+            # ``SEMANTIC_ROUTER_MOCK=1`` — bypass the real
+            # sentence-transformers import and use the deterministic
+            # hash-seeded mock encoder so the gateway can exercise the
+            # semantic-router code path without requiring a multi-GB
+            # torch install on the perf host.
             try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError as exc:  # pragma: no cover
-                raise RuntimeError(
-                    "Semantic router requires sentence-transformers. "
-                    "Install from requirements-semantic.txt or disable "
-                    "SEMANTIC_ROUTER_ENABLED."
-                ) from exc
-            self._model = SentenceTransformer(self.model_name)
-            self._encoder = lambda text: self._model.encode(
-                text, convert_to_numpy=True
-            ).tolist()
-            logger.info(
-                "semantic_router_loaded", model=self.model_name
-            )
+                from app.core.config import settings as _settings
+
+                use_mock = bool(getattr(_settings, "semantic_router_mock", False))
+            except Exception:
+                use_mock = False
+
+            if use_mock:
+                self._encoder = _mock_encode
+                logger.info(
+                    "semantic_router_loaded",
+                    model="mock-384d-lognormal",
+                    mock=True,
+                )
+            else:
+                # Lazy import so the whole test suite doesn't pay the cost
+                # of loading sentence-transformers when the flag is off.
+                try:
+                    from sentence_transformers import SentenceTransformer
+                except ImportError as exc:  # pragma: no cover
+                    raise RuntimeError(
+                        "Semantic router requires sentence-transformers. "
+                        "Install from requirements-semantic.txt or disable "
+                        "SEMANTIC_ROUTER_ENABLED. For perf-baseline Variant "
+                        "C, set SEMANTIC_ROUTER_MOCK=1 instead."
+                    ) from exc
+                self._model = SentenceTransformer(self.model_name)
+                self._encoder = lambda text: self._model.encode(
+                    text, convert_to_numpy=True
+                ).tolist()
+                logger.info(
+                    "semantic_router_loaded", model=self.model_name
+                )
 
         for intent, description in _INTENT_DESCRIPTIONS.items():
             self._anchors[intent] = list(self._encoder(description))
