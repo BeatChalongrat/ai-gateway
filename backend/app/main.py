@@ -36,6 +36,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 configure_logging()
 
+# Fail loud + early if any security-critical secret is a known-insecure
+# default or below the minimum byte length. In dev/test this is a no-op;
+# in production it crashes the worker before a single request is served.
+settings.validate_secrets()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
