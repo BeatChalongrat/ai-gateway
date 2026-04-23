@@ -152,28 +152,50 @@ def seed_portal_users(session):
     def _hash(pw: str) -> str:
         return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
 
+    # Re-applies the full PORTAL_USERS spec on every run. Previously
+    # this was create-only (skip if exists), which meant any drift in
+    # an existing row — a stale password hash, toggled email_verified,
+    # changed status — survived `make seed`. In practice that
+    # produced "Invalid email or password" for a seed user whose hash
+    # was from an earlier seed definition, with no clean way to reset
+    # short of a full volume wipe. Updating in-place keeps `make seed`
+    # a reliable "bring users back to the documented spec" operation
+    # without needing `make fresh`.
     created = []
     for u in PORTAL_USERS:
         existing = session.execute(
             select(PortalUserORM).where(PortalUserORM.email == u["email"])
         ).scalar_one_or_none()
-        if existing is not None:
-            continue
-        user = PortalUserORM(
-            id=str(uuid.uuid4()),
-            email=u["email"],
-            password_hash=_hash(u["password"]),
-            display_name=u["display_name"],
-            tenant_id=u["tenant_id"],
-            plan=u["plan"],
-            status=u["status"],
-            email_verified=u["email_verified"],
-            credit_balance=u["credit_balance"],
-            credit_used=u["credit_used"],
-        )
-        session.add(user)
-        session.flush()
-        created.append(u["email"])
+        if existing is None:
+            user = PortalUserORM(
+                id=str(uuid.uuid4()),
+                email=u["email"],
+                password_hash=_hash(u["password"]),
+                display_name=u["display_name"],
+                tenant_id=u["tenant_id"],
+                plan=u["plan"],
+                status=u["status"],
+                email_verified=u["email_verified"],
+                credit_balance=u["credit_balance"],
+                credit_used=u["credit_used"],
+            )
+            session.add(user)
+            session.flush()
+            created.append(u["email"])
+        else:
+            # Bring the row back to the documented spec. Re-hashes
+            # the password (cheap — 5 users, bcrypt rounds=10) so
+            # changing PORTAL_USERS' password actually takes effect
+            # on the next seed run.
+            existing.password_hash = _hash(u["password"])
+            existing.display_name = u["display_name"]
+            existing.tenant_id = u["tenant_id"]
+            existing.plan = u["plan"]
+            existing.status = u["status"]
+            existing.email_verified = u["email_verified"]
+            existing.credit_balance = u["credit_balance"]
+            existing.credit_used = u["credit_used"]
+            session.flush()
     return created
 
 
