@@ -207,7 +207,14 @@ def signup(
 
 
 def login(db: Session, email: str, password: str) -> dict:
-    """Verify credentials and issue portal tokens."""
+    """Verify credentials and issue portal tokens.
+
+    Phase 2C Commit 14: rejects users whose email is not verified.
+    The check runs AFTER the password verify so attackers can't use
+    the different response code as a user-existence oracle.
+    """
+    from app.core.exceptions import AuthorizationError
+
     email_norm = (email or "").strip().lower()
     if not email_norm:
         raise AuthenticationError("Invalid email or password.")
@@ -222,7 +229,101 @@ def login(db: Session, email: str, password: str) -> dict:
     if user.status != "active":
         raise AuthenticationError("Account is not active. Contact support.")
 
+    # Verified-email gate — only enforced for password accounts. OAuth
+    # accounts are auto-verified at signup (the provider already did it).
+    if not bool(user.email_verified):
+        raise AuthorizationError(
+            "Please verify your email address before logging in.",
+            code="email_not_verified",
+            details={"email": user.email},
+        )
+
     return _issue_tokens(user)
+
+
+# ---------------------------------------------------------------------------
+# Email verification (Phase 2C Commit 14)
+# ---------------------------------------------------------------------------
+
+_EMAIL_VERIFY_EXPIRY_HOURS = 24
+
+
+def mint_email_verification_token(user_id: str, email: str) -> str:
+    """Create a JWT tagged with ``purpose=email_verify``.
+
+    Short TTL (24h). Signed with the same portal JWT secret so
+    rotating that secret automatically invalidates every outstanding
+    verification link.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "type": "portal",
+        "purpose": "email_verify",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=_EMAIL_VERIFY_EXPIRY_HOURS)).timestamp()),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, settings.portal_jwt_secret, algorithm=_ALGORITHM)
+
+
+def request_verification_email(db: Session, email: str) -> dict:
+    """Generate a verification token for the given email.
+
+    Returns a constant 200-shape regardless of whether the email is
+    registered — don't leak user existence. In dev/test the token is
+    included in the response so callers can proceed without a live
+    mailer; in production ``app_env != 'development'`` hides it and
+    the token goes out via the email service (stubbed here).
+    """
+    email_norm = (email or "").strip().lower()
+    result: dict = {"ok": True}
+    if not email_norm or "@" not in email_norm:
+        return result
+
+    user = db.execute(
+        select(PortalUserORM).where(PortalUserORM.email == email_norm)
+    ).scalar_one_or_none()
+    if user is None:
+        return result  # silently succeed
+
+    if bool(user.email_verified):
+        return result  # already verified — nothing to do
+
+    token = mint_email_verification_token(user.id, user.email)
+    # TODO: enqueue email-send in production. For now, log.
+    import logging
+    logging.getLogger("portal.auth").info(
+        "email_verification_token_minted user=%s", user.id
+    )
+    if settings.app_env.lower() in ("development", "test", "testing"):
+        result["token"] = token
+    return result
+
+
+def verify_email(db: Session, token: str) -> dict:
+    """Decode the token, assert purpose, flip ``email_verified``."""
+    try:
+        payload = jwt.decode(
+            token, settings.portal_jwt_secret, algorithms=[_ALGORITHM]
+        )
+    except jwt.ExpiredSignatureError:
+        raise AuthenticationError("Verification link has expired.")
+    except jwt.InvalidTokenError:
+        raise AuthenticationError("Invalid verification token.")
+    if payload.get("purpose") != "email_verify":
+        raise AuthenticationError("Token is not a verification token.")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise AuthenticationError("Invalid verification token.")
+    user = db.get(PortalUserORM, user_id)
+    if user is None:
+        raise AuthenticationError("Account not found.")
+    user.email_verified = True
+    db.flush()
+    return {"ok": True, "email": user.email}
 
 
 def refresh(db: Session, refresh_token: str) -> dict:
