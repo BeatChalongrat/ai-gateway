@@ -33,8 +33,12 @@ interface ProjectMemberRow {
 interface Creator {
   user_id: string;
   display_name: string | null;
-  email: string;
+  email: string | null;
   avatar_url: string | null;
+  // True when the backend couldn't resolve a real portal_user row
+  // (pre-034 admin-created / seed projects). The UI renders these
+  // with a monospace "System" label instead of an email.
+  system?: boolean;
 }
 
 export interface ProjectDetail {
@@ -274,6 +278,7 @@ export default function ProjectDetailModal({
         open={open}
         onClose={onClose}
         title={detail?.name || "Project"}
+        maxWidth="640px"
         footer={
           <button className="sran-btn sran-btn-secondary" onClick={onClose}>
             Close
@@ -367,22 +372,43 @@ export default function ProjectDetailModal({
                       <Avatar
                         id={detail.created_by.user_id}
                         name={detail.created_by.display_name}
-                        email={detail.created_by.email}
+                        email={detail.created_by.email || undefined}
                         url={detail.created_by.avatar_url}
                         size={28}
                       />
                       <div style={{ fontSize: 13 }}>
-                        <div style={{ fontWeight: 500 }}>
-                          {detail.created_by.display_name || detail.created_by.email}
-                        </div>
                         <div
                           style={{
-                            fontSize: 11,
-                            color: "var(--color-text-muted)",
+                            fontWeight: 500,
+                            fontFamily: detail.created_by.system
+                              ? "var(--ff-mono, 'JetBrains Mono', monospace)"
+                              : undefined,
+                            color: detail.created_by.system
+                              ? "var(--color-text-muted)"
+                              : "var(--color-text-primary)",
                           }}
                         >
-                          {detail.created_by.email}
+                          {detail.created_by.display_name || detail.created_by.email || "—"}
                         </div>
+                        {detail.created_by.email ? (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "var(--color-text-muted)",
+                            }}
+                          >
+                            {detail.created_by.email}
+                          </div>
+                        ) : detail.created_by.system ? (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "var(--color-text-muted)",
+                            }}
+                          >
+                            Pre-034 project with no recorded creator
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   ) : (
@@ -559,9 +585,13 @@ function Section({
 }) {
   return (
     <div
-      className="sran-card"
+      // Drop the .sran-card class — it carries a light-theme default
+      // padding + shadow that clashed with the dark modal body. We
+      // reset padding+background inline so both themes resolve via
+      // the theme tokens, matching /requests and /audit-log.
       style={{
         padding: 16,
+        borderRadius: "var(--radius-lg)",
         background: "var(--bg-elevated)",
         border: danger
           ? "1px solid rgba(239,68,68,0.25)"
