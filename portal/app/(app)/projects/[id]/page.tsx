@@ -11,6 +11,7 @@ import {
   Hash,
   Key,
   Plus,
+  RotateCw,
   Zap,
 } from "lucide-react";
 
@@ -53,6 +54,10 @@ export default function ProjectDetailPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [rotateTarget, setRotateTarget] = useState<ApiKey | null>(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -129,6 +134,28 @@ export default function ProjectDetailPage() {
       alert(err instanceof PortalApiError ? err.message : "Failed to revoke key.");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function confirmRotate() {
+    if (!rotateTarget) return;
+    setRotating(true);
+    setRotateError(null);
+    try {
+      const rotated = await api.post<ApiKeyCreated>(
+        `/portal/projects/${projectId}/keys/${rotateTarget.key_id}/rotate`
+      );
+      setRotateTarget(null);
+      // Reuse the one-time key reveal modal — the response shape is
+      // deliberately identical so the same UI works for create + rotate.
+      setCreatedKey(rotated);
+      load();
+    } catch (err) {
+      setRotateError(
+        err instanceof PortalApiError ? err.message : "Failed to rotate key."
+      );
+    } finally {
+      setRotating(false);
     }
   }
 
@@ -283,19 +310,40 @@ export default function ProjectDetailPage() {
                     </KeyTd>
                     <KeyTd align="right">
                       {k.status === "active" ? (
-                        <button
-                          onClick={() => setDeleteTarget(k)}
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 500,
-                            color: "var(--accent-danger)",
-                            background: "transparent",
-                            border: "none",
-                            cursor: "pointer",
-                          }}
+                        <span
+                          className="inline-flex items-center gap-3"
+                          style={{ justifyContent: "flex-end" }}
                         >
-                          Revoke
-                        </button>
+                          <button
+                            onClick={() => setRotateTarget(k)}
+                            title="Rotate — mint a new key, keep old active 1h"
+                            className="inline-flex items-center gap-1"
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 500,
+                              color: "var(--accent-primary)",
+                              background: "transparent",
+                              border: "none",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <RotateCw size={12} />
+                            Rotate
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(k)}
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 500,
+                              color: "var(--accent-danger)",
+                              background: "transparent",
+                              border: "none",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Revoke
+                          </button>
+                        </span>
                       ) : null}
                     </KeyTd>
                   </tr>
@@ -448,6 +496,53 @@ export default function ProjectDetailPage() {
           </span>
           ? Any request using this key will immediately fail authentication.
         </p>
+      </Modal>
+
+      {/* Rotate confirmation */}
+      <Modal
+        open={!!rotateTarget}
+        onClose={() => !rotating && setRotateTarget(null)}
+        title="Rotate this key?"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setRotateTarget(null)}
+              disabled={rotating}
+            >
+              Cancel
+            </Button>
+            <Button onClick={confirmRotate} loading={rotating}>
+              Rotate key
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {rotateError ? (
+            <div
+              style={{
+                background: "rgba(220,38,38,0.08)",
+                border: "1px solid rgba(220,38,38,0.25)",
+                color: "var(--accent-danger)",
+                fontSize: 13,
+                padding: "8px 12px",
+                borderRadius: 8,
+              }}
+            >
+              {rotateError}
+            </div>
+          ) : null}
+          <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+            Rotate{" "}
+            <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+              {rotateTarget?.name}
+            </span>
+            ? You'll get a new key value. The old key will keep working
+            for <strong>1 hour</strong> so you have time to roll
+            deployments, then hard-expire.
+          </p>
+        </div>
       </Modal>
     </div>
   );
