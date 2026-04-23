@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import ResolvedApiKey, get_db_session, require_admin
+from app.api.deps import ResolvedApiKey, get_db_session, require_admin_session
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.api_key import ApiKeyORM
 from app.models.credit_transaction import CreditTransactionORM
@@ -16,7 +16,7 @@ from app.models.project import ProjectORM
 from app.services.portal import credit_service
 
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+router = APIRouter(dependencies=[Depends(require_admin_session)])
 
 
 class TopupRequest(BaseModel):
@@ -155,7 +155,7 @@ def get_user(
 def topup(
     user_id: str,
     body: TopupRequest,
-    auth: ResolvedApiKey = Depends(require_admin),
+    auth: ResolvedApiKey = Depends(require_admin_session),
     session: Session = Depends(get_db_session),
 ):
     user = session.get(PortalUserORM, user_id)

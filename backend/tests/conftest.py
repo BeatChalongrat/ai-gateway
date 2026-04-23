@@ -21,7 +21,13 @@ def pytest_configure(config):
 
 from fastapi import Header
 
-from app.api.deps import ResolvedApiKey, get_db_session, get_resolved_api_key, require_admin
+from app.api.deps import (
+    ResolvedApiKey,
+    get_db_session,
+    get_resolved_api_key,
+    require_admin,
+    require_admin_session,
+)
 from app.core.db import Base
 from app.main import app as main_app
 from app.models.project import ProjectORM
@@ -96,6 +102,10 @@ def _integration_db_session():
 
 main_app.dependency_overrides[get_resolved_api_key] = mock_resolved_api_key
 main_app.dependency_overrides[require_admin] = lambda: MOCK_AUTH
+# Phase 2B Commit 9: admin routers now use require_admin_session
+# (cookie-only, Bearer-rejecting). Tests that drive the admin router
+# via MOCK_AUTH go through this override instead.
+main_app.dependency_overrides[require_admin_session] = lambda: MOCK_AUTH
 main_app.dependency_overrides[get_db_session] = _integration_db_session
 
 
