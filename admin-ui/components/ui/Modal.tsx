@@ -8,9 +8,20 @@ interface Props {
   title: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  // Larger modals (like project-detail) need more horizontal room —
+  // the default 28rem is too cramped for multi-section layouts.
+  // Pass a CSS width value ("42rem", "720px"...) to override.
+  maxWidth?: string;
 }
 
-export default function Modal({ open, onClose, title, children, footer }: Props) {
+export default function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  maxWidth = "28rem",
+}: Props) {
   useEffect(() => {
     if (open) {
       document.body.style.overflow = "hidden";
@@ -33,11 +44,17 @@ export default function Modal({ open, onClose, title, children, footer }: Props)
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
+          // Dark-theme A2 fix (2026-04-24): the outer shell was
+          // already using var(--bg-surface) which resolves to
+          // #0F1835 in dark mode. Beat's "modal is white" report
+          // was partly the cramped 28rem width making the few
+          // themed pixels read wrong. We widen by default-prop and
+          // keep the tokens so both themes stay correct.
           background: "var(--bg-surface)", color: "var(--text-primary)",
           borderRadius: "var(--radius-xl)",
           boxShadow: "0 16px 48px -8px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25)",
           border: "1px solid var(--color-border-default)",
-          width: "100%", maxWidth: "28rem",
+          width: "100%", maxWidth,
           maxHeight: "85vh", overflow: "auto",
         }}
       >
