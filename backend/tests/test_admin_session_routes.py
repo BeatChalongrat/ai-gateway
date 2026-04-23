@@ -221,12 +221,37 @@ class TestSessionLogin:
         r = client.post("/auth/session/login", json={"email": "alice@example.com"})
         assert r.status_code == 422
 
-    def test_malformed_email_returns_422(self, client):
+    def test_malformed_identifier_returns_422(self, client):
+        # Space + punctuation — not a valid email, not a valid username.
         r = client.post(
             "/auth/session/login",
-            json={"email": "not-an-email", "password": "x"},
+            json={"email": "not an email!", "password": "x"},
         )
         assert r.status_code == 422
+
+    def test_login_with_username_works(self, client):
+        """Username alone (no @) resolves to the same admin_user."""
+        r = client.post(
+            "/auth/session/login",
+            json={"email": "alice", "password": "CorrectHorseBattery9!"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["user"]["username"] == "alice"
+        assert r.json()["user"]["email"] == "alice@example.com"
+
+    def test_login_username_wrong_password_returns_401(self, client):
+        r = client.post(
+            "/auth/session/login",
+            json={"email": "alice", "password": "wrong"},
+        )
+        assert r.status_code == 401
+
+    def test_login_unknown_username_returns_401(self, client):
+        r = client.post(
+            "/auth/session/login",
+            json={"email": "ghost", "password": "whatever"},
+        )
+        assert r.status_code == 401
 
 
 # ---------------------------------------------------------------------------

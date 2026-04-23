@@ -19,12 +19,13 @@ will be required on admin mutations by Commit 5.
 
 from __future__ import annotations
 
+import re
 import secrets
 
 import bcrypt
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.admin_auth import get_admin_session
@@ -48,18 +49,29 @@ router = APIRouter(prefix="/auth/session", tags=["admin-auth"])
 # ---------------------------------------------------------------------------
 
 
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
 class LoginRequest(BaseModel):
+    # Field is named ``email`` for backward compatibility with the admin-ui
+    # JSON contract, but accepts either an email address or a bare username
+    # (e.g. ``admin``). The handler resolves against AdminUserORM.email OR
+    # AdminUserORM.username.
     email: str
     password: str
 
     @field_validator("email")
     @classmethod
     def _shape_check(cls, v: str) -> str:
-        # Light-touch email shape check — enough to reject obvious typos
-        # without pulling in email-validator.
         v = (v or "").strip()
-        if "@" not in v or "." not in v.split("@")[-1]:
-            raise ValueError("invalid email")
+        if "@" in v:
+            # Email shape — light-touch check, avoids pulling email-validator.
+            if "." not in v.split("@")[-1]:
+                raise ValueError("invalid identifier")
+            return v
+        # Username shape — alphanumerics + . _ - only, 1–100 chars.
+        if not _USERNAME_RE.match(v):
+            raise ValueError("invalid identifier")
         return v
 
     @field_validator("password")
@@ -162,10 +174,15 @@ def login(
     session_manager: SessionManager = Depends(get_session_manager),
     rate_limiter: LoginRateLimiter = Depends(get_login_rate_limiter),
 ):
-    email = body.email.lower()
+    # ``identifier`` is either an email or a bare username. The rate-limiter
+    # keys on this string, so `admin` and `admin@audit.test` have separate
+    # counters — intentional: they're separate login attempts from the
+    # limiter's perspective and we don't want to leak which form maps to a
+    # real user.
+    identifier = body.email.lower()
     ip = _client_ip(request)
 
-    decision = rate_limiter.check(email=email, ip=ip)
+    decision = rate_limiter.check(email=identifier, ip=ip)
     if not decision.allowed:
         raise RateLimitExceededError(
             "Too many login attempts. Try again later.",
@@ -177,28 +194,33 @@ def login(
         )
 
     user = db.execute(
-        select(AdminUserORM).where(AdminUserORM.email == email)
+        select(AdminUserORM).where(
+            or_(
+                AdminUserORM.email == identifier,
+                AdminUserORM.username == identifier,
+            )
+        )
     ).scalar_one_or_none()
 
     # Always run bcrypt — either against the real hash or the sentinel.
     # This keeps the miss path ~as slow as the hit path.
     if user is None:
         bcrypt.checkpw(body.password.encode("utf-8"), _DUMMY_HASH.encode("utf-8"))
-        rate_limiter.record_failure(email=email, ip=ip)
+        rate_limiter.record_failure(email=identifier, ip=ip)
         raise AuthenticationError("Invalid credentials")
 
     password_ok = bcrypt.checkpw(
         body.password.encode("utf-8"), user.hashed_password.encode("utf-8")
     )
     if not password_ok:
-        rate_limiter.record_failure(email=email, ip=ip)
+        rate_limiter.record_failure(email=identifier, ip=ip)
         raise AuthenticationError("Invalid credentials")
 
     if not user.is_active:
-        rate_limiter.record_failure(email=email, ip=ip)
+        rate_limiter.record_failure(email=identifier, ip=ip)
         raise AuthenticationError("Invalid credentials")
 
-    rate_limiter.record_success(email=email, ip=ip)
+    rate_limiter.record_success(email=identifier, ip=ip)
 
     # Mint the session. CSRF token is stored in the session payload AND
     # set as a non-HttpOnly cookie — matching header will be enforced on
