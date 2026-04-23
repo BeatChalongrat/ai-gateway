@@ -693,6 +693,138 @@ def requests(
 
 
 # ---------------------------------------------------------------------------
+# Audit log (Phase 4 F4)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/audit-log")
+def audit_log(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    actor_key_id: str | None = None,
+    tenant_id: str | None = None,
+    action: str | None = None,
+    outcome: str | None = None,
+    q: str | None = None,
+    format: str = Query(default="json", pattern="^(json|csv)$"),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+):
+    """Filtered + paginated admin audit log listing.
+
+    Phase 4 F4 — separate from /admin/requests (request log, not
+    admin-action log). Query params map 1:1 to
+    ``AdminAuditService.list_with_filters`` so a single code path
+    serves JSON + CSV + future UIs.
+
+    CSV export respects every active filter; clients call with the
+    same params they use for the JSON response.
+    """
+    from datetime import datetime
+
+    from fastapi.responses import StreamingResponse
+
+    from app.services.admin_audit_service import AdminAuditService
+
+    def _parse_ts(raw: str | None):
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    svc = AdminAuditService()
+    # CSV path uses a higher limit so one page of the UI maps to a
+    # meaningful export; JSON path honours the pagination limit.
+    effective_limit = 1000 if format == "csv" else limit
+    effective_offset = 0 if format == "csv" else offset
+
+    rows, total = svc.list_with_filters(
+        session,
+        tenant_id=tenant_id,
+        actor_key_id=actor_key_id,
+        action=action,
+        outcome=outcome,
+        q=q,
+        date_from=_parse_ts(date_from),
+        date_to=_parse_ts(date_to),
+        limit=effective_limit,
+        offset=effective_offset,
+    )
+
+    if format == "csv":
+        import csv
+        import io
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(
+            [
+                "timestamp",
+                "actor_key_id",
+                "tenant_id",
+                "action",
+                "resource_type",
+                "resource_id",
+                "outcome",
+                "ip_address",
+                "user_agent",
+                "session_id_prefix",
+                "details",
+            ]
+        )
+        for r in rows:
+            writer.writerow(
+                [
+                    r.timestamp.isoformat() if r.timestamp else "",
+                    r.actor_key_id,
+                    r.tenant_id,
+                    r.action,
+                    r.resource_type,
+                    r.resource_id,
+                    r.outcome or "",
+                    r.ip_address or "",
+                    r.user_agent or "",
+                    r.session_id_prefix or "",
+                    r.details or "",
+                ]
+            )
+        buf.seek(0)
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="admin_audit_log.csv"',
+            },
+        )
+
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+                "actor_key_id": r.actor_key_id,
+                "tenant_id": r.tenant_id,
+                "action": r.action,
+                "resource_type": r.resource_type,
+                "resource_id": r.resource_id,
+                "outcome": r.outcome,
+                "ip_address": r.ip_address,
+                "user_agent": r.user_agent,
+                "session_id_prefix": r.session_id_prefix,
+                "details": r.details,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 
