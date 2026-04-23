@@ -49,19 +49,24 @@ PROJECTS_PER_TENANT = ["web-app", "mobile-app", "batch-jobs"]
 
 PORTAL_USERS = [
     {"email": "alice@acme.test", "password": "Alice!2345", "display_name": "Alice Anderson",
+     "tenant_id": "acme-001",
      "plan": "starter", "status": "active", "email_verified": True,
      "credit_balance": 50000, "credit_used": 0},
     {"email": "bob@globex.test", "password": "Bob!2345", "display_name": "Bob Beaumont",
+     "tenant_id": "globex-001",
      "plan": "pro", "status": "active", "email_verified": True,
      "credit_balance": 200000, "credit_used": 15000},
     {"email": "charlie@acme.test", "password": "Charlie!2345",
      "display_name": "Charlie Chen 🐉 ทดสอบ",  # emoji + Thai in display_name
+     "tenant_id": "acme-001",
      "plan": "free_trial", "status": "active", "email_verified": True,
      "credit_balance": 5000, "credit_used": 4900},  # low credit case
     {"email": "dave@acme.test", "password": "Dave!2345", "display_name": "Dave Davies",
+     "tenant_id": "acme-001",
      "plan": "starter", "status": "suspended", "email_verified": True,
      "credit_balance": 10000, "credit_used": 2000},
     {"email": "eve@globex.test", "password": "Eve!2345", "display_name": "Eve Evans",
+     "tenant_id": "globex-001",
      "plan": "free_trial", "status": "active", "email_verified": False,  # unverified
      "credit_balance": 5000, "credit_used": 0},
 ]
@@ -159,6 +164,7 @@ def seed_portal_users(session):
             email=u["email"],
             password_hash=_hash(u["password"]),
             display_name=u["display_name"],
+            tenant_id=u["tenant_id"],
             plan=u["plan"],
             status=u["status"],
             email_verified=u["email_verified"],
