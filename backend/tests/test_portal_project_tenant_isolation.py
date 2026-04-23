@@ -10,6 +10,15 @@ already in place. Phase 3 makes the stronger claim: even if a user
 could somehow reference a cross-tenant project_id by name, the
 isolation holds because writes derive tenant_id from the session,
 not the request body.
+
+Post-2026-04-24 (hybrid scope model): the pre-redesign error shape
+was 404 ``project_not_found`` (via the legacy ``_own_project``
+helper). The new ``_resolve_project`` helper surfaces the same
+cross-tenant probe as 403 ``project_access_denied`` — this is the
+contract the portal UI renders as "You don't have access to this
+project. Ask the project admin." These tests now assert the new
+shape; the underlying isolation guarantee is unchanged (still
+impossible for Tenant B to touch Tenant A's resource).
 """
 
 from __future__ import annotations
@@ -129,8 +138,8 @@ class TestCrossTenantProjectIsolation:
             f"/portal/projects/{a_proj_id}",
             headers=_auth(b["access_token"]),
         )
-        assert r.status_code == 404
-        assert r.json()["error"]["code"] == "project_not_found"
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "project_access_denied"
 
     def test_tenant_b_cannot_patch_tenant_a_project(self, client):
         a = _signup(client, "a@t.com")
@@ -146,7 +155,7 @@ class TestCrossTenantProjectIsolation:
             headers=_auth(b["access_token"]),
             json={"name": "hijacked"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 403
 
     def test_tenant_b_cannot_delete_tenant_a_project(self, client):
         a = _signup(client, "a@t.com")
@@ -161,7 +170,7 @@ class TestCrossTenantProjectIsolation:
             f"/portal/projects/{a_proj_id}",
             headers=_auth(b["access_token"]),
         )
-        assert r.status_code == 404
+        assert r.status_code == 403
 
     def test_tenant_b_cannot_list_keys_for_tenant_a_project(self, client):
         a = _signup(client, "a@t.com")
@@ -176,7 +185,7 @@ class TestCrossTenantProjectIsolation:
             f"/portal/projects/{a_proj_id}/keys",
             headers=_auth(b["access_token"]),
         )
-        assert r.status_code == 404
+        assert r.status_code == 403
 
     def test_tenant_b_cannot_create_key_in_tenant_a_project(self, client):
         a = _signup(client, "a@t.com")
@@ -192,7 +201,7 @@ class TestCrossTenantProjectIsolation:
             headers=_auth(b["access_token"]),
             json={"name": "hijack-key"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 403
 
     def test_new_project_lands_in_callers_own_tenant(self, client):
         a = _signup(client, "a@t.com")
