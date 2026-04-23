@@ -72,7 +72,7 @@ export default function UsageChart({ totalRequests, range }: Props) {
             </div>
             <div className="absolute inset-0 flex items-center justify-center">
               <div
-                className="px-5 py-3 rounded-lg text-center"
+                className="empty-float px-5 py-3 rounded-lg text-center"
                 style={{
                   background: "var(--bg-surface)",
                   border: "1px solid var(--border-default)",
@@ -102,11 +102,12 @@ export default function UsageChart({ totalRequests, range }: Props) {
             {PLACEHOLDER_HEIGHTS.map((h, i) => (
               <div
                 key={i}
-                className="flex-1 rounded-t transition-opacity"
+                className="flex-1 rounded-t transition-opacity bar-grow"
                 style={{
                   height: `${h}%`,
                   background: "var(--accent-primary)",
                   opacity: 0.6,
+                  animationDelay: `${i * 30}ms`,
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.opacity = "1";
