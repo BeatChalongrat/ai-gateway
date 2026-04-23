@@ -11,6 +11,7 @@ import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import ProjectDetailModal from "./_components/ProjectDetailModal";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -61,7 +62,10 @@ const CSS = `
 /* ═══════════════════════════════════════════════════════════════════ */
 
 export default function ProjectsPage() {
-  const { data, loading, error, refetch } = useApi<{ items: any[] }>("/admin/projects");
+  const [showArchived, setShowArchived] = useState(false);
+  const { data, loading, error, refetch } = useApi<{ items: any[] }>(
+    `/admin/projects${showArchived ? "?include_archived=true" : ""}`
+  );
   const tenants = useApi<{ items: any[] }>("/admin/tenants");
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<any | null>(null);
@@ -74,6 +78,16 @@ export default function ProjectsPage() {
   const [policyFilter, setPolicyFilter] = useState<string | null>(null);
   const [view, setView] = useState<"grid" | "list">("grid");
   const { toast } = useToast();
+
+  async function handleRestore(projectId: string) {
+    try {
+      await api.post(`/admin/projects/${projectId}/restore`, {});
+      toast("Project restored");
+      refetch();
+    } catch {
+      toast("Restore failed", "error");
+    }
+  }
 
   const items = data?.items ?? [];
   const tenantItems = tenants.data?.items ?? [];
@@ -250,6 +264,30 @@ export default function ProjectsPage() {
 
           <span style={{ flex: 1 }} />
 
+          {/* Show archived toggle — soft-deleted projects are hidden
+              by default; flipping this on requests include_archived=true
+              from the backend so the list shows every row. */}
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              color: T.tt,
+              cursor: "pointer",
+              userSelect: "none",
+              marginRight: 4,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              style={{ cursor: "pointer" }}
+            />
+            Show archived
+          </label>
+
           {/* View toggle */}
           <div style={{ display: "flex", gap: 2, background: "var(--bg-elevated)", borderRadius: 6, padding: 2 }}>
             {(["grid", "list"] as const).map((v) => (
@@ -295,6 +333,7 @@ export default function ProjectsPage() {
                 borderTop: `4px solid ${c}`,
                 boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
                 overflow: "hidden", position: "relative", cursor: "pointer",
+                opacity: p.archived_at ? 0.6 : 1,
               }} onClick={() => setSelected(p)}>
                 <div style={{ padding: "20px 22px 18px" }}>
                   {/* Top row */}
@@ -304,15 +343,26 @@ export default function ProjectsPage() {
                       display: "flex", alignItems: "center", justifyContent: "center",
                       fontSize: 16, fontWeight: 800, boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
                     }}>{(p.name || "?").charAt(0).toUpperCase()}</div>
-                    <span style={{
-                      display: "inline-flex", alignItems: "center", gap: 5,
-                      padding: "3px 10px", borderRadius: 100,
-                      fontSize: 11, fontWeight: 600, color: "#059669",
-                      background: "rgba(16,185,129,0.08)",
-                    }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", animation: "pjDotPulse 2s ease-in-out infinite" }} />
-                      active
-                    </span>
+                    {p.archived_at ? (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                        padding: "3px 10px", borderRadius: 100,
+                        fontSize: 11, fontWeight: 600, color: "var(--accent-warning)",
+                        background: "rgba(245,158,11,0.12)",
+                      }}>
+                        archived
+                      </span>
+                    ) : (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                        padding: "3px 10px", borderRadius: 100,
+                        fontSize: 11, fontWeight: 600, color: "#059669",
+                        background: "rgba(16,185,129,0.08)",
+                      }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", animation: "pjDotPulse 2s ease-in-out infinite" }} />
+                        active
+                      </span>
+                    )}
                   </div>
 
                   {/* Name + tenant */}
@@ -349,7 +399,16 @@ export default function ProjectsPage() {
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                     Open
                   </button>
-                  {!isProtected(p) && (
+                  {p.archived_at ? (
+                    <button onClick={() => handleRestore(p.project_id)} style={{
+                      display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 14px",
+                      fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6,
+                      border: "1px solid rgba(16,185,129,0.35)", background: "var(--bg-surface)", color: "var(--accent-success)", cursor: "pointer",
+                    }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1015.88-5.94L21 9"/><polyline points="21 3 21 9 15 9"/></svg>
+                      Restore
+                    </button>
+                  ) : !isProtected(p) && (
                     <button onClick={() => setDeleteTarget(p)} style={{
                       display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 14px",
                       fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6,
@@ -382,7 +441,7 @@ export default function ProjectsPage() {
                   const policy = p.policy_profile_id || "default";
                   const policyColor = policy === "strict" ? { color: "#d97706", bg: "rgba(245,158,11,0.08)" } : { color: T.accent, bg: "rgba(59,108,246,0.08)" };
                   return (
-                    <tr key={p.project_id} className="pj-row" style={{ animationDelay: `${0.2 + i * 0.03}s`, cursor: "pointer" }} onClick={() => setSelected(p)}>
+                    <tr key={p.project_id} className="pj-row" style={{ animationDelay: `${0.2 + i * 0.03}s`, cursor: "pointer", opacity: p.archived_at ? 0.6 : 1 }} onClick={() => setSelected(p)}>
                       <td style={{ paddingLeft: 20 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                           <div style={{ width: 34, height: 34, borderRadius: 6, background: c, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{(p.name || "?").charAt(0).toUpperCase()}</div>
@@ -394,10 +453,16 @@ export default function ProjectsPage() {
                       </td>
                       <td><span style={{ display: "inline-block", padding: "2px 10px", fontSize: 11, fontWeight: 600, color: policyColor.color, background: policyColor.bg, borderRadius: 100 }}>{policy}</span></td>
                       <td style={{ textAlign: "center" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: "11.5px", fontWeight: 600, color: "#059669", background: "rgba(16,185,129,0.08)" }}>
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", animation: "pjDotPulse 2s ease-in-out infinite" }} />
-                          active
-                        </span>
+                        {p.archived_at ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: "11.5px", fontWeight: 600, color: "var(--accent-warning)", background: "rgba(245,158,11,0.12)" }}>
+                            archived
+                          </span>
+                        ) : (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: "11.5px", fontWeight: 600, color: "#059669", background: "rgba(16,185,129,0.08)" }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", animation: "pjDotPulse 2s ease-in-out infinite" }} />
+                            active
+                          </span>
+                        )}
                       </td>
                       <td><span style={{ fontFamily: T.mono, fontSize: "12.5px", color: T.ts }}>{p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}</span></td>
                     </tr>
@@ -412,19 +477,15 @@ export default function ProjectsPage() {
       {/* Delete confirm */}
       <ConfirmModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title="Delete Project" message={`Delete project "${deleteTarget?.name}"? Associated API keys will be orphaned.`} confirmLabel="Delete Project" loading={deleting} />
 
-      {/* Detail modal */}
-      <Modal open={!!selected && !deleteTarget} onClose={() => setSelected(null)} title="Project Detail" footer={<button className="sran-btn sran-btn-secondary" onClick={() => setSelected(null)}>Close</button>}>
-        {selected && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-            <div className="sran-detail-field"><div className="sran-detail-label">Name</div><div className="sran-detail-value">{selected.name}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Tenant</div><div className="sran-detail-value">{tenantName(selected.tenant_id)}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Policy</div><div className="sran-detail-value">{selected.policy_profile_id || "default"}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Project ID</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{selected.project_id}</code></div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Tenant ID</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{selected.tenant_id}</code></div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Created</div><div className="sran-detail-value">{selected.created_at ? new Date(selected.created_at).toLocaleString() : "—"}</div></div>
-          </div>
-        )}
-      </Modal>
+      {/* Detail modal — new in 2026-04-24 redesign: sections for
+          Overview, Activity, Members, Danger zone. Backed by the
+          expanded GET /admin/projects/{id} endpoint. */}
+      <ProjectDetailModal
+        open={!!selected && !deleteTarget}
+        projectId={selected?.project_id ?? null}
+        onClose={() => setSelected(null)}
+        onMutated={refetch}
+      />
 
       {/* Create modal */}
       <Modal open={showCreate} onClose={() => { setShowCreate(false); setErrors({}); }} title="Create Project" footer={
