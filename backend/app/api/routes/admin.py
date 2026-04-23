@@ -4,8 +4,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 import sqlalchemy as sa
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -965,28 +966,122 @@ def delete_tenant(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/projects/{project_id}", response_model=ProjectResponse)
+@router.get("/projects/{project_id}")
 def get_project(
     project_id: str,
     session: Session = Depends(get_db_session),
     auth: ResolvedApiKey = Depends(require_admin_session),
-) -> ProjectResponse:
+):
+    """Full project detail for the admin UI.
+
+    The pre-polish shape was three fields (name / tenant / policy) and
+    drove the old read-only modal. The new modal surfaces creator,
+    members, counts, and recent activity, so this endpoint returns a
+    nested blob rather than the thin ProjectResponse — we skip the
+    Pydantic response_model to avoid declaring a dozen one-shot
+    schemas that'd be out of date the moment the UI changes.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.api_key import ApiKeyORM
+    from app.models.portal_user import PortalUserORM
+    from app.models.project_member import ProjectMemberORM
+    from app.models.request_log import RequestLogORM
+    from app.models.tenant import TenantORM
+
     project = session.get(ProjectORM, project_id)
     if project is None:
         raise NotFoundError(f"Project '{project_id}' not found.")
     check_tenant_access(auth, project.tenant_id)
-    return ProjectResponse(
-        project_id=project.project_id,
-        tenant_id=project.tenant_id,
-        name=project.name,
-        policy_profile_id=project.policy_profile_id,
-        created_at=project.created_at,
+
+    tenant = session.get(TenantORM, project.tenant_id)
+    creator: dict | None = None
+    if project.portal_user_id:
+        cu = session.get(PortalUserORM, project.portal_user_id)
+        if cu is not None:
+            creator = {
+                "user_id": cu.id,
+                "display_name": cu.display_name,
+                "email": cu.email,
+                "avatar_url": cu.avatar_url,
+            }
+
+    # Members — left-join portal_users so a stale FK (deleted user,
+    # CASCADE already removed the row) yields no ghost entries.
+    member_rows = session.execute(
+        select(ProjectMemberORM, PortalUserORM)
+        .join(PortalUserORM, ProjectMemberORM.user_id == PortalUserORM.id)
+        .where(ProjectMemberORM.project_id == project_id)
+        .order_by(ProjectMemberORM.added_at.asc())
+    ).all()
+    members = [
+        {
+            "user_id": pu.id,
+            "display_name": pu.display_name,
+            "email": pu.email,
+            "avatar_url": pu.avatar_url,
+            "role": pm.role,
+            "added_at": pm.added_at.isoformat() if pm.added_at else None,
+        }
+        for pm, pu in member_rows
+    ]
+
+    api_keys_count = (
+        session.execute(
+            select(func.count(ApiKeyORM.key_id)).where(
+                ApiKeyORM.project_id == project_id
+            )
+        ).scalar()
+        or 0
     )
+
+    # Last 7d request count + last-activity timestamp — both read from
+    # request_logs, so wrap the column access in getattr to tolerate
+    # the pre-Phase-2 ``key_id`` / ``api_key_id`` drift the other
+    # portal endpoints also hedge against.
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+    req_7d = (
+        session.execute(
+            select(func.count(RequestLogORM.request_id)).where(
+                RequestLogORM.project_id == project_id,
+                RequestLogORM.created_at >= week_ago,
+            )
+        ).scalar()
+        or 0
+    )
+    last_activity = session.execute(
+        select(func.max(RequestLogORM.created_at)).where(
+            RequestLogORM.project_id == project_id
+        )
+    ).scalar()
+
+    return {
+        "project_id": project.project_id,
+        "tenant_id": project.tenant_id,
+        "tenant_name": tenant.name if tenant is not None else None,
+        "name": project.name,
+        "policy_profile_id": project.policy_profile_id,
+        "created_at": project.created_at.isoformat()
+        if project.created_at
+        else None,
+        "archived_at": project.archived_at.isoformat()
+        if project.archived_at
+        else None,
+        "created_by": creator,
+        "members": members,
+        "api_keys_count": int(api_keys_count),
+        "request_count_last_7d": int(req_7d),
+        "last_activity_at": last_activity.isoformat()
+        if last_activity is not None
+        else None,
+    }
 
 
 @router.get("/projects", response_model=AdminListResponse[ProjectResponse])
 def list_projects(
     tenant_id: str | None = None,
+    include_archived: bool = False,
     session: Session = Depends(get_db_session),
     auth: ResolvedApiKey = Depends(require_admin_session),
 ) -> AdminListResponse[ProjectResponse]:
@@ -1007,6 +1102,11 @@ def list_projects(
     stmt = select(ProjectORM)
     if tenant_id:
         stmt = stmt.where(ProjectORM.tenant_id == tenant_id)
+    # archived_at IS NOT NULL is the soft-delete marker. Admin UI
+    # toggles this via the "Show archived" pill — default is hidden
+    # so the list keeps its normal density.
+    if not include_archived:
+        stmt = stmt.where(ProjectORM.archived_at.is_(None))
     rows = session.execute(stmt).scalars().all()
     return AdminListResponse(
         items=[
@@ -1115,6 +1215,201 @@ def delete_project(
         )
 
     session.delete(project)
+    session.flush()
+
+
+# ---------------------------------------------------------------------------
+# Project archive (soft-delete) + member management.
+# Added 2026-04-24 for the admin project-management UI. Hard-delete
+# above stays for ops scripts; day-to-day the admin UI calls archive.
+# ---------------------------------------------------------------------------
+
+
+class ProjectArchiveRequest(BaseModel):
+    archived: bool = True
+
+
+class ProjectMemberAddRequest(BaseModel):
+    user_id: str
+    role: str = "member"
+
+
+class ProjectMemberPatchRequest(BaseModel):
+    role: str
+
+
+_ALLOWED_MEMBER_ROLES = {"admin", "member", "viewer"}
+
+
+@router.post("/projects/{project_id}/archive")
+def archive_project(
+    project_id: str,
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+):
+    """Soft-delete: stamp archived_at. The list endpoint hides
+    archived rows by default; restore flips archived_at to NULL."""
+    from datetime import datetime, timezone
+
+    project = session.get(ProjectORM, project_id)
+    if project is None:
+        raise NotFoundError(f"Project '{project_id}' not found.")
+    check_tenant_access(auth, project.tenant_id)
+    if project.archived_at is not None:
+        return {"archived_at": project.archived_at.isoformat()}
+    project.archived_at = datetime.now(timezone.utc)
+    session.flush()
+    return {"archived_at": project.archived_at.isoformat()}
+
+
+@router.post("/projects/{project_id}/restore")
+def restore_project(
+    project_id: str,
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+):
+    """Undo an archive. Idempotent — a live project restore is ok."""
+    project = session.get(ProjectORM, project_id)
+    if project is None:
+        raise NotFoundError(f"Project '{project_id}' not found.")
+    check_tenant_access(auth, project.tenant_id)
+    project.archived_at = None
+    session.flush()
+    return {"archived_at": None}
+
+
+@router.post("/projects/{project_id}/members")
+def add_project_member(
+    project_id: str,
+    body: ProjectMemberAddRequest,
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+):
+    """Attach a portal user to a project.
+
+    User + project must live in the same tenant — cross-tenant
+    membership would break the tenant-isolation story even if the
+    admin had the authority to do it. Idempotent-ish: a duplicate
+    (project, user) add fails the primary-key constraint; we 409
+    rather than silently succeed so the UI can show "already a
+    member."
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.portal_user import PortalUserORM
+    from app.models.project_member import ProjectMemberORM
+
+    project = session.get(ProjectORM, project_id)
+    if project is None:
+        raise NotFoundError(f"Project '{project_id}' not found.")
+    check_tenant_access(auth, project.tenant_id)
+
+    if body.role not in _ALLOWED_MEMBER_ROLES:
+        from app.core.exceptions import ValidationError as _VE
+
+        raise _VE(
+            f"role must be one of {sorted(_ALLOWED_MEMBER_ROLES)}",
+            code="invalid_member_role",
+        )
+
+    user = session.get(PortalUserORM, body.user_id)
+    if user is None:
+        raise NotFoundError(f"User '{body.user_id}' not found.")
+    if user.tenant_id and user.tenant_id != project.tenant_id:
+        from app.core.exceptions import ConflictError as _CE
+
+        raise _CE(
+            "User belongs to a different tenant.",
+            code="cross_tenant_member_add",
+        )
+
+    row = ProjectMemberORM(
+        project_id=project_id,
+        user_id=body.user_id,
+        role=body.role,
+        added_by=None,
+    )
+    session.add(row)
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        from app.core.exceptions import ConflictError as _CE
+
+        raise _CE(
+            "User is already a member of this project.",
+            code="member_exists",
+        )
+
+    return {
+        "user_id": body.user_id,
+        "role": row.role,
+        "added_at": row.added_at.isoformat() if row.added_at else None,
+    }
+
+
+@router.patch("/projects/{project_id}/members/{user_id}")
+def update_project_member(
+    project_id: str,
+    user_id: str,
+    body: ProjectMemberPatchRequest,
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+):
+    """Change a member's role. Project-admin / member / viewer."""
+    from app.models.project_member import ProjectMemberORM
+
+    project = session.get(ProjectORM, project_id)
+    if project is None:
+        raise NotFoundError(f"Project '{project_id}' not found.")
+    check_tenant_access(auth, project.tenant_id)
+
+    if body.role not in _ALLOWED_MEMBER_ROLES:
+        from app.core.exceptions import ValidationError as _VE
+
+        raise _VE(
+            f"role must be one of {sorted(_ALLOWED_MEMBER_ROLES)}",
+            code="invalid_member_role",
+        )
+
+    row = session.execute(
+        select(ProjectMemberORM).where(
+            ProjectMemberORM.project_id == project_id,
+            ProjectMemberORM.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError("Member not found on this project.")
+    row.role = body.role
+    session.flush()
+    return {"user_id": user_id, "role": row.role}
+
+
+@router.delete("/projects/{project_id}/members/{user_id}", status_code=204)
+def remove_project_member(
+    project_id: str,
+    user_id: str,
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+):
+    """Detach a member. 404 when the row doesn't exist rather than
+    idempotent-ok — the admin UI treats the ⋯ menu action as
+    explicit, and a silent success on a stale row hides bugs."""
+    from app.models.project_member import ProjectMemberORM
+
+    project = session.get(ProjectORM, project_id)
+    if project is None:
+        raise NotFoundError(f"Project '{project_id}' not found.")
+    check_tenant_access(auth, project.tenant_id)
+    row = session.execute(
+        select(ProjectMemberORM).where(
+            ProjectMemberORM.project_id == project_id,
+            ProjectMemberORM.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError("Member not found on this project.")
+    session.delete(row)
     session.flush()
 
 
