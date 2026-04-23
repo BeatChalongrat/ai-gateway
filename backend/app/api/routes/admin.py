@@ -105,6 +105,50 @@ async def _reject_tenant_id_on_body(request: Request) -> None:
 async def _reject_project_id_on_body(request: Request) -> None:
     await _reject_client_supplied_field(request, "project_id")
 
+
+async def _reject_unknown_fields(request: Request, allowed: set[str]) -> None:
+    """Raise 400 if the request body contains keys outside ``allowed``.
+
+    Used on PATCH / PUT endpoints so a caller that mistypes (or tries
+    to inject) a field name gets a concrete error instead of a silent
+    drop. The response lists EVERY unknown key so one fix pass clears
+    the whole problem.
+    """
+    raw = await request.body()
+    if not raw:
+        return
+    import json
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return
+    if not isinstance(data, dict):
+        return
+    unknown = sorted(set(data.keys()) - allowed)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "unknown_fields",
+                    "message": f"Request body contains unknown fields: {unknown}",
+                    "unknown_fields": unknown,
+                }
+            },
+        )
+
+
+_TENANT_UPDATE_ALLOWED = {"name", "region", "status", "ner_enabled"}
+_PROJECT_UPDATE_ALLOWED = {"name", "policy_profile_id", "status"}
+
+
+async def _reject_unknown_tenant_update_fields(request: Request) -> None:
+    await _reject_unknown_fields(request, _TENANT_UPDATE_ALLOWED)
+
+
+async def _reject_unknown_project_update_fields(request: Request) -> None:
+    await _reject_unknown_fields(request, _PROJECT_UPDATE_ALLOWED)
+
 # Stage 7: DLP admin routes (detectors / policy profiles / NER settings).
 # Mounted on the same router so they inherit require_admin.
 from app.api.routes.admin_dlp import router as _admin_dlp_router  # noqa: E402
@@ -743,7 +787,11 @@ def create_tenant(
     return _tenant_to_response(tenant)
 
 
-@router.put("/tenants/{tenant_id}", response_model=TenantResponse)
+@router.put(
+    "/tenants/{tenant_id}",
+    response_model=TenantResponse,
+    dependencies=[Depends(_reject_unknown_tenant_update_fields)],
+)
 def update_tenant(
     tenant_id: str,
     body: TenantUpdate,
@@ -877,7 +925,11 @@ def create_project(
     )
 
 
-@router.put("/projects/{project_id}", response_model=ProjectResponse)
+@router.put(
+    "/projects/{project_id}",
+    response_model=ProjectResponse,
+    dependencies=[Depends(_reject_unknown_project_update_fields)],
+)
 def update_project(
     project_id: str,
     body: ProjectUpdate,
