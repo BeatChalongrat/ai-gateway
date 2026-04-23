@@ -16,7 +16,11 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_portal_user
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import (
+    AuthorizationError,
+    NotFoundError,
+    ValidationError,
+)
 from app.models.api_key import ApiKeyORM
 from app.models.portal_user import PortalUserORM
 from app.models.project import ProjectORM
@@ -27,11 +31,23 @@ router = APIRouter(dependencies=[Depends(get_portal_user)])
 _api_key_service = ApiKeyService()
 
 
-# Every portal user needs a tenant_id to satisfy the existing
-# (tenant_id, project_id) invariants on api_keys/projects. The seeded
-# demo tenant is the default; real deployments may want to create a
-# dedicated "portal" tenant or provision a tenant per user.
-_PORTAL_TENANT_ID = "demo-tenant-000"
+def _require_tenant_id(user: PortalUserORM) -> str:
+    """Read the tenant_id that every portal write has to land in.
+
+    Post-Phase-3 migration, the DB has NOT NULL on portal_users.tenant_id
+    (migration 030). This helper is the belt to go with those braces —
+    any code path that reaches here without a tenant indicates
+    something broke the Phase 3 contract (e.g. an admin-side script
+    that nulled it out) and we refuse the request rather than silently
+    landing a write in the wrong scope.
+    """
+    if not user.tenant_id:
+        raise AuthorizationError(
+            "Your account is not attached to a tenant. "
+            "Contact your administrator.",
+            code="user_without_tenant",
+        )
+    return user.tenant_id
 
 
 class ProjectCreate(BaseModel):
@@ -98,7 +114,7 @@ def create_project(
 ):
     project = ProjectORM(
         project_id=str(uuid.uuid4()),
-        tenant_id=_PORTAL_TENANT_ID,
+        tenant_id=_require_tenant_id(user),
         name=body.name,
         policy_profile_id="default",
         portal_user_id=user.id,
