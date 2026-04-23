@@ -1005,6 +1005,20 @@ def get_project(
                 "email": cu.email,
                 "avatar_url": cu.avatar_url,
             }
+    if creator is None:
+        # Bug A1 (2026-04-24): pre-034 admin-created / seed projects
+        # had no portal_user_id link. Migration 035 backfills the
+        # tenant owner where possible; tenants with no portal users
+        # (the demo seed) stay NULL. Render as "System" so the modal
+        # never shows a raw em-dash, and tag with a synthetic id so
+        # the Avatar component can hash it into a stable colour.
+        creator = {
+            "user_id": f"system:{project.tenant_id or 'unknown'}",
+            "display_name": "System",
+            "email": None,
+            "avatar_url": None,
+            "system": True,
+        }
 
     # Members — left-join portal_users so a stale FK (deleted user,
     # CASCADE already removed the row) yields no ghost entries.
