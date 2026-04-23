@@ -1,7 +1,11 @@
 "use client";
 
 /**
- * /admin/audit-log — Admin Actions audit viewer (Phase 4 F4).
+ * /audit-log — Admin Actions audit viewer (Phase 4 F4).
+ *
+ * Lives at /audit-log in the admin-UI (route is relative — the admin
+ * console already *is* the /admin area). Calls the backend's
+ * /admin/audit-log endpoint for data.
  *
  * Distinct from /audit (which shows request logs / the /v1 gateway
  * trace). This page surfaces ``admin_audit_log`` — who did what to
