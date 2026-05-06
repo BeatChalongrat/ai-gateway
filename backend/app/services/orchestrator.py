@@ -233,6 +233,41 @@ class GatewayOrchestrator:
 
         # 3. Block if input policy says so
         if input_enforcement.is_blocked:
+            # Persist BLOCKED row + commit BEFORE raising. The
+            # dep-injected session at api/deps.py:33-43 calls
+            # session.rollback() in its except branch when the
+            # violation propagates, which would otherwise discard
+            # the row. Mirrors the working pattern from
+            # public_chat.py (streaming moderation).
+            if session is not None:
+                from app.domain.observability import RequestRecord, RequestStatus
+                try:
+                    self.request_log_service.persist(
+                        session,
+                        RequestRecord(
+                            request_id=request_id,
+                            tenant_id=ctx.tenant_id,
+                            project_id=ctx.project_id,
+                            provider="",
+                            model=payload.model,
+                            status=RequestStatus.BLOCKED,
+                            policy_action="block",
+                            policy_profile_id=profile.profile_id,
+                            latency_ms=int((time.perf_counter() - t_start) * 1000),
+                            prompt_tokens=0,
+                            completion_tokens=0,
+                            total_tokens=0,
+                            estimated_cost_usd=0.0,
+                            error_code="dlp_violation",
+                            input_raw=input_raw,
+                            dlp_findings_json=build_dlp_findings_json(
+                                input_enforcement.match_actions,
+                            ),
+                        ),
+                    )
+                    session.commit()
+                except Exception as exc:
+                    log.warning("dlp_block_log_persist_failed", error=str(exc))
             self.audit_service.record_blocked_request(
                 ctx=ctx,
                 enforcement=input_enforcement,
@@ -555,6 +590,44 @@ class GatewayOrchestrator:
             )
 
             if response_enforcement.is_blocked:
+                # Persist BLOCKED row + commit BEFORE raising — see
+                # rationale in the inbound block path above. Outbound
+                # block has the full provider context so we capture
+                # input_raw/input_masked/output_raw and the usage
+                # counters that ran before the block fired.
+                if session is not None:
+                    from app.domain.observability import RequestRecord, RequestStatus
+                    try:
+                        self.request_log_service.persist(
+                            session,
+                            RequestRecord(
+                                request_id=request_id,
+                                tenant_id=ctx.tenant_id,
+                                project_id=ctx.project_id,
+                                provider=route.provider_name,
+                                model=route.model_name,
+                                status=RequestStatus.BLOCKED,
+                                policy_action="block",
+                                policy_profile_id=profile.profile_id,
+                                latency_ms=int((time.perf_counter() - t_start) * 1000),
+                                prompt_tokens=usage.prompt_tokens if usage else 0,
+                                completion_tokens=usage.completion_tokens if usage else 0,
+                                total_tokens=usage.total_tokens if usage else 0,
+                                estimated_cost_usd=usage.estimated_cost_usd if usage else 0.0,
+                                error_code="dlp_violation",
+                                input_raw=input_raw,
+                                input_masked=input_masked,
+                                output_raw=output_raw,
+                                dlp_findings_json=build_dlp_findings_json(
+                                    input_enforcement.match_actions,
+                                    response_enforcement.match_actions,
+                                    span_map=span_map,
+                                ),
+                            ),
+                        )
+                        session.commit()
+                    except Exception as exc:
+                        log.warning("dlp_block_log_persist_failed", error=str(exc))
                 self.audit_service.record_blocked_request(
                     ctx=ctx,
                     enforcement=response_enforcement,
