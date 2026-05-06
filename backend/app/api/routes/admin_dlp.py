@@ -275,7 +275,7 @@ _DETECTOR_META: dict[str, dict[str, Any]] = {
         "method": "checksum",
         "mask_token": "[THAI_ID]",
         "coverage_note": "Thai 13-digit national ID with mod-11 checksum",
-        "example_patterns": ["1-2345-67890-12-3"],
+        "example_patterns": ["1-1017-00230-70-8"],
     },
     "thai_tax_id": {
         "method": "checksum",
