@@ -19,6 +19,7 @@ from app.api.deps import ResolvedApiKey, check_tenant_access, get_db_session, ge
 from app.core.config import settings
 from app.core.exceptions import (
     DLPViolationError,
+    GuardrailViolationError,
     ModerationViolationError,
     NotFoundError,
     ProviderUnavailableError,
@@ -83,11 +84,12 @@ async def chat_completions(
     #   1. Resolve project context
     #   2. DLP mask input  (must run before router chain — semantic
     #      router embeddings must never see raw PII)
-    #   3. Moderation
-    #   4. Router chain on masked messages (may rewrite payload.model)
-    #   5. select_route (now respects the router's model choice)
-    #   6. supports_streaming check → fall back to non-stream if needed
-    #   7. Stream → buffer → DLP restore → log with router_used
+    #   3. Guardrail check (regex blocklist on post-DLP-mask messages)
+    #   4. Moderation
+    #   5. Router chain on masked messages (may rewrite payload.model)
+    #   6. select_route (now respects the router's model choice)
+    #   7. supports_streaming check → fall back to non-stream if needed
+    #   8. Stream → buffer → DLP restore → log with router_used
     ctx = orchestrator.resolve_streaming_context(
         auth=auth, payload=payload, session=session
     )
@@ -185,12 +187,78 @@ async def chat_completions(
                 payload.messages, input_enforcement.match_actions
             )
 
+    # Inject system prompt explaining DLP placeholders to the model.
+    from app.services.dlp_prompt import inject_dlp_system_prompt, has_mask_tokens
+    if has_mask_tokens(messages_to_send):
+        messages_to_send = inject_dlp_system_prompt(messages_to_send)
+        logger.info("dlp_system_prompt_injected", tokens_present=True)
+
     # DLP trace snapshot 2/4: messages as they will be streamed to the
     # provider — same semantics as the non-streaming path. Equal to
     # ``input_raw`` when no PII was masked.
     input_masked = extract_messages_text(messages_to_send)
 
-    # 1b. Moderation (OpenAI /v1/moderations) — opt-in per policy profile.
+    # 1b. Guardrail check — mirrors orchestrator.py:317-371. Runs on the
+    # post-DLP-mask messages so guardrail rules see the same content the
+    # provider would. Pre-stream so a block returns a clean 403 (the
+    # central error handler maps PolicyViolationError → 403 JSON before
+    # StreamingResponse is constructed; the client never sees a partial
+    # SSE body — same contract as the DLP and moderation pre-stream
+    # blocks above and below).
+    dict_messages_for_guard = [m.model_dump() for m in messages_to_send]
+    guardrail_result = orchestrator.guardrail_service.check(
+        dict_messages_for_guard
+    )
+    if not guardrail_result.passed:
+        log.info(
+            "guardrail_blocked",
+            rule=guardrail_result.rule_name,
+            reason=guardrail_result.reason,
+            streaming=True,
+        )
+        if session is not None:
+            try:
+                orchestrator.request_log_service.persist(
+                    session,
+                    RequestRecord(
+                        request_id=ctx.request_id or "",
+                        tenant_id=ctx.tenant_id,
+                        project_id=ctx.project_id,
+                        provider="",
+                        model=payload.model,
+                        status=RequestStatus.BLOCKED,
+                        # ``policy_action='block'`` aligns with the
+                        # dashboard / alert filters; the *kind* of
+                        # block is preserved on ``error_code``.
+                        policy_action="block",
+                        policy_profile_id=profile.profile_id,
+                        latency_ms=int((time.perf_counter() - t_start) * 1000),
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        total_tokens=0,
+                        estimated_cost_usd=0.0,
+                        error_code="guardrail_blocked",
+                        input_raw=input_raw,
+                        input_masked=input_masked,
+                        dlp_findings_json=build_dlp_findings_json(
+                            input_enforcement.match_actions,
+                            span_map=span_map,
+                        ),
+                    ),
+                )
+                # Commit BEFORE raise — the dep-injected session at
+                # api/deps.py:33-43 calls session.rollback() in its
+                # except branch when the violation propagates,
+                # which would otherwise discard the row.
+                session.commit()
+            except Exception as exc:
+                log.warning("guardrail_log_persist_failed", error=str(exc))
+        raise GuardrailViolationError(
+            guardrail_result.reason,
+            details={"rule": guardrail_result.rule_name},
+        )
+
+    # 1c. Moderation (OpenAI /v1/moderations) — opt-in per policy profile.
     # Mirrors GatewayOrchestrator step 4b2. Runs on the post-DLP-mask
     # messages so the moderation endpoint never sees raw PII. Fails open
     # on any error (timeout, bad key, parse error).
@@ -268,7 +336,7 @@ async def chat_completions(
                     },
                 )
 
-    # 1c. Router chain — semantic > keyword > service, on DLP-masked
+    # 1d. Router chain — semantic > keyword > service, on DLP-masked
     # messages. Mutates payload.model when a router fires. Any failure
     # falls back to plain "service" routing so the stream never breaks.
     dict_messages = [m.model_dump() for m in messages_to_send]
@@ -361,6 +429,8 @@ async def chat_completions(
                     text, direction="output", ner_enabled=ctx.ner_enabled,
                 )
                 enforcement = orchestrator._scan_and_evaluate(detection, profile)
+                if enforcement.is_blocked:
+                    return "", enforcement.match_actions
                 if not enforcement.requires_transformation:
                     return text, enforcement.match_actions
                 masked, _, new_counters = orchestrator.transformer.mask_text(
