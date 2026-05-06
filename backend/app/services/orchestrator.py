@@ -326,7 +326,13 @@ class GatewayOrchestrator:
                             provider="",
                             model=payload.model,
                             status=RequestStatus.BLOCKED,
-                            policy_action="guardrail",
+                            # ``policy_action='block'`` is the enum-aligned
+                            # value the dashboard (admin-ui/app/requests/
+                            # page.tsx:190) and the dlp_block_spike alert
+                            # rule (alert_evaluator.py:158) filter on. The
+                            # *kind* of block (guardrail vs DLP vs
+                            # moderation) is preserved in ``error_code``.
+                            policy_action="block",
                             policy_profile_id=profile.profile_id,
                             latency_ms=int((time.perf_counter() - t_start) * 1000),
                             prompt_tokens=0,
@@ -342,6 +348,11 @@ class GatewayOrchestrator:
                             ),
                         ),
                     )
+                    # Commit BEFORE raise — the dep-injected session at
+                    # api/deps.py:33-43 calls session.rollback() in its
+                    # except branch when the violation propagates,
+                    # which would otherwise discard the row.
+                    session.commit()
                 except Exception as exc:
                     log.warning("guardrail_log_persist_failed", error=str(exc))
             raise GuardrailViolationError(
@@ -386,7 +397,11 @@ class GatewayOrchestrator:
                                     provider="",
                                     model=payload.model,
                                     status=RequestStatus.BLOCKED,
-                                    policy_action="moderation",
+                                    # ``policy_action='block'`` aligns with
+                                    # the dashboard / alert filters; *kind*
+                                    # is in ``error_code``. See guardrail
+                                    # block above for the rationale.
+                                    policy_action="block",
                                     policy_profile_id=profile.profile_id,
                                     latency_ms=int((time.perf_counter() - t_start) * 1000),
                                     prompt_tokens=0,
@@ -402,6 +417,8 @@ class GatewayOrchestrator:
                                     ),
                                 ),
                             )
+                            # Commit BEFORE raise — see guardrail block.
+                            session.commit()
                         except Exception as exc:
                             log.warning("moderation_log_persist_failed", error=str(exc))
                     raise ModerationViolationError(

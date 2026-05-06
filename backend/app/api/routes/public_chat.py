@@ -230,7 +230,12 @@ async def chat_completions(
                                 provider="",
                                 model=payload.model,
                                 status=RequestStatus.BLOCKED,
-                                policy_action="moderation",
+                                # ``policy_action='block'`` aligns with
+                                # the dashboard / alert filters; *kind*
+                                # is in ``error_code``. See orchestrator
+                                # guardrail/moderation blocks for the
+                                # rationale.
+                                policy_action="block",
                                 policy_profile_id=profile.profile_id,
                                 prompt_tokens=0,
                                 completion_tokens=0,
