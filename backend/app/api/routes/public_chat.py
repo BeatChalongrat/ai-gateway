@@ -126,7 +126,9 @@ async def chat_completions(
         if not ctx.ner_enabled:
             input_registry = input_registry.without("presidio_ner")
         detection = input_registry.scan_messages(
-            payload.messages, direction="input"
+            payload.messages,
+            direction="input",
+            scan_system_messages=profile.scan_system_messages,
         )
         input_enforcement = orchestrator._scan_and_evaluate(detection, profile)
 

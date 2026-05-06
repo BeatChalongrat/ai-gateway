@@ -96,6 +96,7 @@ class DetectorRegistry:
         messages: list[Message],
         *,
         direction: str = "input",
+        scan_system_messages: bool = False,
     ) -> DetectionResult:
         """Scan all message contents and return an aggregated DetectionResult.
 
@@ -105,18 +106,36 @@ class DetectorRegistry:
             Chat messages to scan (only the ``content`` field is inspected).
         direction : str
             ``"input"`` for request messages, ``"output"`` for response content.
+        scan_system_messages : bool
+            When False (the default), system-role messages are excluded
+            from DLP scanning. Operator-authored system prompts ("Reply
+            in Thai.", "You are a banking assistant.") regularly contain
+            words that NER classifies as PERSON / NRP / ORGANIZATION,
+            which would otherwise pollute span_map with bindings the
+            user never authored — and the model can echo those tokens
+            back, causing restore() to splice the system-prompt fragment
+            into the user-facing reply. Tenants who legitimately place
+            PII in system prompts can opt back in via PolicyProfile.
         """
+        # Filter out system messages up-front when the profile says so.
+        # This is the single chokepoint for the system-message exclusion;
+        # ``scan_text`` (called per remaining message below) is unaware
+        # of role and therefore can't accidentally reintroduce them.
+        scanned_messages = [
+            m for m in messages
+            if scan_system_messages or getattr(m, "role", None) != "system"
+        ]
         # Detect language once across all message contents so every
         # PresidioDetector call uses the same spaCy model. Mixed-language
         # requests are rare enough that per-message detection isn't
         # worth the complexity.
         joined = " ".join(
-            m.content for m in messages
+            m.content for m in scanned_messages
             if isinstance(getattr(m, "content", None), str)
         )
         language = detect_language(joined)
         all_matches: list[DetectionMatch] = []
-        for msg in messages:
+        for msg in scanned_messages:
             all_matches.extend(
                 self.scan_text(msg.content, language=language)
             )

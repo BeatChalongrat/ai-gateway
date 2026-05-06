@@ -207,7 +207,9 @@ class GatewayOrchestrator:
                 phase="regex"
             ).time():
                 input_detection = active_registry.scan_messages(
-                    payload.messages, direction="input"
+                    payload.messages,
+                    direction="input",
+                    scan_system_messages=profile.scan_system_messages,
                 )
             if "presidio_ner" in active_registry:
                 # The registry combines detectors in a single pass, so we
