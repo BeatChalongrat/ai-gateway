@@ -78,6 +78,54 @@ The current container image only has `en_core_web_sm`. No Thai NER model is inst
 
 ---
 
+---
+
+## 5. Streaming endpoint bypasses regex guardrail
+
+**Severity:** HIGH (security — jailbreak / prompt-injection bypass)
+
+**Component:** `backend/app/api/routes/public_chat.py` (streaming entrypoint)
+
+The non-streaming orchestrator runs the regex guardrail check at
+`orchestrator.py:282-323` (`jailbreak_dan` / `prompt_injection` /
+`harmful_synthesis` rules from `guardrail_service.py`). The streaming
+entrypoint in `public_chat.py` does **not** run this check at all —
+the request flow goes:
+
+```
+auth → DLP scan → DLP block-or-mask → moderation → router → stream
+                                                 ^^^^
+                                       no guardrail step
+```
+
+**Impact:** clients setting `stream: true` can submit prompt-injection
+or jailbreak content that the non-streaming path would block with
+`GuardrailViolationError`. The streaming path returns whatever the
+provider responds.
+
+**Discovered:** during the May 2026 block-path persistence audit. While
+mapping all six 403-paths, the audit found only five — the streaming
+guardrail was simply absent (so its persistence question was moot).
+
+**Why not fixed in the persistence PR:** scope larger than persistence.
+Needs a design decision among:
+
+1. **Pre-stream gate** — run guardrail once before opening the SSE
+   response, fail fast with 403 (matches non-streaming semantics).
+   Simple but loses any chunk-level context.
+2. **Per-chunk on rolling-tail** — match the DLP pattern at
+   `public_chat.py:278-420` (rolling 50-char window). More complex
+   but symmetric with how DLP already works on streams.
+3. **Split rules by enforcement timing** — pre-stream rules
+   (`jailbreak_dan`, `prompt_injection`, …) gate before the stream
+   opens; per-chunk rules (TBD) run on the buffer.
+
+**Mitigation today:** none in code. Operational mitigation: tenants
+who require guardrail coverage on streaming should disable the
+streaming path at the API-key or project level until this is fixed.
+
+---
+
 ## How these were surfaced
 
 `sran-pii-test.sh` scenarios 2 and 5 produced `[ADDRESS_0]` and `[NAME_1]` orphan tokens in user-facing output. Diagnosis (`traces/diag-gateway-logs.txt`, May 2026) showed:
