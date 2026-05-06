@@ -46,6 +46,13 @@ class PolicyProfile:
         of its category action.  None disables this check.
     scan_responses : bool
         Whether provider responses should be scanned.
+    scan_system_messages : bool
+        Whether system-role messages should be included in DLP scanning.
+        Default False — operator-authored system prompts (e.g. "Reply
+        in Thai.") routinely contain words that NER classifies as
+        PERSON / NRP entities, polluting span_map with bindings the
+        user never authored. Tenants who put real PII in system
+        prompts can opt-in by setting this to True on their profile.
     """
 
     profile_id: str
@@ -55,3 +62,4 @@ class PolicyProfile:
     severity_threshold_block: SensitivityLevel | None = None
     scan_responses: bool = True
     moderation_enabled: bool = False
+    scan_system_messages: bool = False
