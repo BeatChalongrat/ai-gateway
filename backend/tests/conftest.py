@@ -210,6 +210,15 @@ def _isolate_session_local_to_integration_engine(monkeypatch):
     whole suite so future streaming tests don't have to remember it.
     Local monkeypatches in those tests still stack on top of this
     one — pytest's monkeypatch is LIFO per fixture.
+
+    Kept as defence-in-depth after known-issues #6 was resolved
+    (commit 216b54e).  The streaming path now captures the factory
+    at route entry (``chat_completions`` binds ``log_session_factory
+    = SessionLocal``) instead of importing it inside the generator,
+    but the patched attribute is still what the route handler reads
+    per request.  ``test_streaming_session_factory.py`` builds on
+    this fixture by overriding the patched attribute mid-test to
+    prove the per-request capture invariant.
     """
     integration_sessionmaker = sessionmaker(
         bind=_integration_engine, autoflush=False, autocommit=False
