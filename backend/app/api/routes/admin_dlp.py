@@ -281,7 +281,7 @@ _DETECTOR_META: dict[str, dict[str, Any]] = {
         "method": "checksum",
         "mask_token": "[TAX_ID]",
         "coverage_note": "Thai tax ID — same shape as national ID, keyword-gated",
-        "example_patterns": ["tax id: 1234567890123"],
+        "example_patterns": ["tax id: 5011000234569"],
     },
     "thai_bank_account": {
         "method": "regex",

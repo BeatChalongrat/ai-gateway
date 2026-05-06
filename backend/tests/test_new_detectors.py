@@ -200,6 +200,60 @@ class TestThaiTaxIdDetector:
         matches = self.det.detect(text)
         assert matches == []
 
+    # --- Heavy-scenario regression coverage -------------------------------
+    # Heavy multi-detector live test used "1234567890123" with
+    # "เลขผู้เสียภาษี" context. Regex matched, context fired, but the
+    # checksum correctly rejected (same invalid digit run as the
+    # thai_national_id case). Lock that contract.
+
+    HEAVY_SCENARIO_VALID_TAX_ID = "5011000234569"  # checksum-validated
+
+    def test_thai_short_keyword_form(self):
+        # "ผู้เสียภาษี" (the short keyword) plus a valid ID — heavy
+        # scenario uses this short form, not the longer
+        # "เลขประจำตัวผู้เสียภาษี".
+        text = f"เลขผู้เสียภาษี {self.HEAVY_SCENARIO_VALID_TAX_ID}"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].matched_text == self.HEAVY_SCENARIO_VALID_TAX_ID
+
+    def test_alternate_thai_keyword_lek_phasi(self):
+        # "เลขภาษี" is a separate keyword in the gate list — confirm
+        # it independently triggers detection.
+        text = f"เลขภาษี {self.HEAVY_SCENARIO_VALID_TAX_ID}"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+
+    def test_english_tin_keyword(self):
+        # "tin" is in the keyword list. Match must be case-insensitive.
+        text = f"TIN {self.HEAVY_SCENARIO_VALID_TAX_ID}"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+
+    def test_heavy_scenario_invalid_checksum_rejected(self):
+        # Exact heavy-scenario shape: short Thai keyword + 13-digit run
+        # with invalid checksum. Regex + context gate both fire; the
+        # checksum is the only thing keeping this out.
+        text = "เลขผู้เสียภาษี 1234567890123"
+        matches = self.det.detect(text)
+        assert matches == []
+
+    def test_heavy_scenario_hyphenated_invalid_rejected(self):
+        # Same digits, hyphenated form. Same outcome — checksum
+        # operates on the stripped digits.
+        text = "เลขผู้เสียภาษี 1-2345-67890-12-3"
+        matches = self.det.detect(text)
+        assert matches == []
+
+    def test_no_match_when_only_nid_keyword_present(self):
+        # If the surrounding context names the number as a national ID
+        # (no tax-related keyword in the window), the tax_id detector
+        # must NOT fire — that's the whole point of context gating
+        # versus thai_national_id.
+        text = f"เลขบัตรประชาชน {self.HEAVY_SCENARIO_VALID_TAX_ID}"
+        matches = self.det.detect(text)
+        assert matches == []
+
 
 # ---------------------------------------------------------------------------
 # Thai bank account detector
