@@ -93,6 +93,81 @@ class TestThaiNationalIdDetector:
         digits = "".join(ch for ch in matches[0].matched_text if ch.isdigit())
         assert digits == VALID_THAI_ID
 
+    # --- Format coverage --------------------------------------------------
+    # Heavy multi-detector scenario used "1-2345-67890-12-3" which the
+    # regex matched but the checksum correctly rejected (those digits
+    # don't validate). The next three tests lock the detector's contract
+    # for the three accepted separator shapes using a checksum-valid ID,
+    # so a future regex tweak can't silently lose any of them.
+
+    HEAVY_SCENARIO_VALID_ID = "1101700230708"  # checksum-validated
+
+    def test_format_no_separator(self):
+        text = f"national id {self.HEAVY_SCENARIO_VALID_ID}"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].matched_text == self.HEAVY_SCENARIO_VALID_ID
+
+    def test_format_hyphen_separated(self):
+        # The "1-XXXX-XXXXX-XX-X" form used in physical Thai NID cards
+        # and the heavy multi-detector live scenario.
+        formatted = "1-1017-00230-70-8"
+        text = f"เลขบัตรประชาชน {formatted}"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].matched_text == formatted
+
+    def test_format_space_separated(self):
+        # Less common but supported by `[-\s]?` in the regex.
+        formatted = "1 1017 00230 70 8"
+        text = f"national id {formatted}"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].matched_text == formatted
+
+    # --- Negative / false-positive prevention -----------------------------
+    # Adjacent shapes that must NOT match. A future regex change that
+    # widens the pattern (or weakens the checksum gate) would break one
+    # of these and surface immediately.
+
+    def test_phone_number_not_matched(self):
+        # 10-digit Thai mobile — wrong length for an NID.
+        matches = self.det.detect("call me at 0812345678 later")
+        assert matches == []
+
+    def test_credit_card_not_matched(self):
+        # 16-digit card with the same hyphen pattern — wrong length, and
+        # even after stripping hyphens the digit count is off.
+        matches = self.det.detect("card 4532-1234-5678-9010 expired")
+        assert matches == []
+
+    def test_too_short_run_not_matched(self):
+        # 12-digit run — one digit short of an NID.
+        matches = self.det.detect("order id 123456789012 was shipped")
+        assert matches == []
+
+    def test_too_long_run_not_matched(self):
+        # 14-digit run. The negative-lookahead `(?!\d)` guards against
+        # adjacent digits inflating the match.
+        matches = self.det.detect("ref 12345678901234 logged")
+        assert matches == []
+
+    def test_thirteen_digits_invalid_checksum_rejected(self):
+        # Heavy-scenario shape exactly: 13 digits in the canonical layout
+        # whose check digit doesn't validate. The regex matches but the
+        # checksum gate must reject. This is the bug-class that produced
+        # the false alarm in the heavy live test.
+        text = "เลขบัตรประชาชน 1234567890123"
+        matches = self.det.detect(text)
+        assert matches == []
+
+    def test_thirteen_digits_invalid_checksum_with_dashes_rejected(self):
+        # Same digits, hyphenated form. Identical outcome — checksum
+        # operates on stripped digits.
+        text = "เลขบัตรประชาชน 1-2345-67890-12-3"
+        matches = self.det.detect(text)
+        assert matches == []
+
 
 # ---------------------------------------------------------------------------
 # Thai tax ID detector
@@ -375,13 +450,8 @@ class TestCoverageEndpoint:
         resp = client.get("/admin/dlp/coverage", headers=_HEADERS)
         assert resp.status_code == 200
         body = resp.json()
-        # 21 base detectors (13 original + 8 expansion). The optional
-        # ``presidio_ner`` detector is registered only if the
-        # ``presidio_analyzer`` package is importable — it is not
-        # installed in the CI/dev test environment, so the count stays
-        # at 21. If presidio is ever added to the test requirements this
-        # assertion should be updated to 22.
-        assert body["summary"]["total"] == 21
+        # 27 = 21 original + 4 PDPA Section 26 + 1 thai_name + 1 presidio_ner
+        assert body["summary"]["total"] == 27
 
         names = {d["name"] for d in body["detectors"]}
         assert "thai_national_id" in names
