@@ -440,6 +440,18 @@ class DLPTransformer:
         if not text:
             return text
         result = text
+        # Diagnostic snapshot BEFORE restore — kept at debug level so
+        # operators can flip ``LOG_LEVEL=DEBUG`` to reproduce the
+        # span_map / orphan analysis used during the May 2026 audit
+        # without re-editing this file.
+        logger.debug(
+            "dlp_restore_debug_start",
+            span_map_size=len(span_map),
+            span_map_tokens=list(span_map.keys()),
+            span_map_values_preview={k: (v[:40] + "...") if len(v) > 40 else v for k, v in span_map.items()},
+            text_preview=text[:300],
+            tokens_in_text=sorted(set(_MASK_TOKEN_RE.findall(text))),
+        )
         if span_map:
             for token in sorted(span_map, key=len, reverse=True):
                 result = result.replace(token, span_map[token])
@@ -447,6 +459,15 @@ class DLPTransformer:
         # bracketed [DETECTOR_N] surviving to this point is suspicious
         # either way.
         orphans = set(_MASK_TOKEN_RE.findall(result))
+        # Diagnostic snapshot AFTER restore — same purpose as the
+        # _start event above.
+        logger.debug(
+            "dlp_restore_debug_end",
+            matched_tokens_in_input=[t for t in span_map if t in text],
+            unmatched_span_map_tokens=[t for t in span_map if t not in text],
+            orphans_in_output=sorted(orphans),
+            output_preview=result[:300],
+        )
         if orphans:
             logger.warning(
                 "dlp_orphan_mask_tokens",
