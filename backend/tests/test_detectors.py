@@ -615,7 +615,7 @@ class TestPasswordFieldDetector:
 class TestDefaultRegistry:
     def test_has_all_detectors(self):
         reg = get_default_registry()
-        assert len(reg) == 21
+        assert len(reg) == 28
         names = {d.name for d in reg.all()}
         assert names == {
             "email", "phone", "ssn", "credit_card", "iban",
@@ -624,8 +624,15 @@ class TestDefaultRegistry:
             "private_key", "password_field",
             # DLP coverage expansion.
             "thai_national_id", "thai_tax_id", "thai_bank_account",
-            "thai_promptpay", "thai_address", "db_connection_string",
+            "thai_promptpay", "thai_address", "thai_name",
+            "db_connection_string",
             "medical_record", "mac_address",
+            # PDPA Section 26 sensitive data.
+            "religion_belief", "health_condition", "criminal_record", "biometric_data",
+            # NER.
+            "presidio_ner",
+            # Thai-market contact identifier.
+            "line_id",
         }
 
     def test_categories(self):
@@ -633,7 +640,9 @@ class TestDefaultRegistry:
         pii = reg.by_category("pii")
         assert {d.name for d in pii} == {
             "email", "phone", "ssn", "date_of_birth",
-            "thai_address", "medical_record",
+            "thai_address", "thai_name", "medical_record",
+            "religion_belief", "health_condition", "criminal_record", "biometric_data",
+            "presidio_ner", "line_id",
         }
         financial = reg.by_category("financial")
         assert {d.name for d in financial} == {
