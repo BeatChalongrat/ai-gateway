@@ -560,8 +560,8 @@ class TestCoverageEndpoint:
         resp = client.get("/admin/dlp/coverage", headers=_HEADERS)
         assert resp.status_code == 200
         body = resp.json()
-        # 27 = 21 original + 4 PDPA Section 26 + 1 thai_name + 1 presidio_ner
-        assert body["summary"]["total"] == 27
+        # 28 = 21 original + 4 PDPA Section 26 + 1 thai_name + 1 presidio_ner + 1 line_id
+        assert body["summary"]["total"] == 28
 
         names = {d["name"] for d in body["detectors"]}
         assert "thai_national_id" in names

@@ -12,11 +12,17 @@ Usage::
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from app.domain.dlp import DetectionMatch, DetectionResult
 from app.services.dlp.detectors.base import BaseDetector
 from app.services.dlp.language import detect_language
+from app.services.dlp.preprocessor import (
+    NormalizedText,
+    map_offset_to_original,
+    normalize_for_scan,
+)
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -73,21 +79,63 @@ class DetectorRegistry:
 
     # -- Scanning -----------------------------------------------------------
 
+    def _run_detectors(
+        self, text: str, *, language: str = "en", from_decoded: bool = False
+    ) -> list[DetectionMatch]:
+        """Run all detectors over raw text (no preprocessing)."""
+        matches: list[DetectionMatch] = []
+        for detector in self._detectors:
+            kwargs: dict[str, object] = {}
+            if getattr(detector, "NEEDS_LANGUAGE", False):
+                kwargs["language"] = language
+            if from_decoded and getattr(detector, "ACCEPTS_DECODED", False):
+                kwargs["from_decoded"] = True
+            matches.extend(detector.detect(text, **kwargs))
+        return matches
+
     def scan_text(
         self, text: str, *, language: str = "en"
     ) -> list[DetectionMatch]:
-        """Run all detectors over *text*, return matches sorted by start offset.
+        """Run all detectors over *text* with preprocessing, return matches sorted by start offset.
 
-        Detectors whose class defines ``NEEDS_LANGUAGE = True`` receive
-        the ``language`` kwarg (currently only ``PresidioDetector``).
-        Regex detectors ignore it to keep their signatures unchanged.
+        Preprocessing applies encoding-bypass protections (NFKC normalization,
+        zero-width stripping, homoglyph mapping) before scanning. Base64
+        segments are decoded and scanned separately; findings are mapped
+        back to the original text positions.
         """
-        matches: list[DetectionMatch] = []
-        for detector in self._detectors:
-            if getattr(detector, "NEEDS_LANGUAGE", False):
-                matches.extend(detector.detect(text, language=language))
-            else:
-                matches.extend(detector.detect(text))
+        normalized = normalize_for_scan(text)
+
+        # Scan the normalized text
+        matches = self._run_detectors(normalized.normalized, language=language)
+
+        # Map offsets back to original text if zero-width chars were stripped
+        if normalized.offset_map is not None:
+            remapped: list[DetectionMatch] = []
+            for m in matches:
+                orig_start = map_offset_to_original(m.start, normalized.offset_map)
+                orig_end = map_offset_to_original(m.end, normalized.offset_map)
+                original_text = text[orig_start:orig_end]
+                remapped.append(replace(
+                    m,
+                    start=orig_start,
+                    end=orig_end,
+                    matched_text=original_text,
+                ))
+            matches = remapped
+
+        # Scan decoded base64 segments for additional findings
+        for segment in normalized.base64_segments:
+            segment_matches = self._run_detectors(segment.decoded_text, language=language, from_decoded=True)
+            for sm in segment_matches:
+                # Map findings back to the base64 span in original text
+                matches.append(replace(
+                    sm,
+                    start=segment.original_start,
+                    end=segment.original_end,
+                    matched_text=segment.encoded_text,
+                    metadata={"detected_via": "base64_decode", "decoded_match": sm.matched_text},
+                ))
+
         matches.sort(key=lambda m: (m.start, m.end))
         return matches
 
@@ -158,21 +206,27 @@ def get_default_registry(
     """
     from app.services.dlp.detectors.api_key_secret import APIKeySecretDetector
     from app.services.dlp.detectors.bearer_token import BearerTokenDetector
+    from app.services.dlp.detectors.biometric_data import BiometricDataDetector
     from app.services.dlp.detectors.credit_card import CreditCardDetector
+    from app.services.dlp.detectors.criminal_record import CriminalRecordDetector
     from app.services.dlp.detectors.date_of_birth import DateOfBirthDetector
     from app.services.dlp.detectors.db_connection_string import DbConnectionStringDetector
     from app.services.dlp.detectors.email import EmailDetector
+    from app.services.dlp.detectors.health_condition import HealthConditionDetector
     from app.services.dlp.detectors.iban import IBANDetector
     from app.services.dlp.detectors.ip_address import IPAddressDetector
+    from app.services.dlp.detectors.line_id import LineIdDetector
     from app.services.dlp.detectors.mac_address import MacAddressDetector
     from app.services.dlp.detectors.medical_record import MedicalRecordDetector
     from app.services.dlp.detectors.passport import PassportDetector
     from app.services.dlp.detectors.password_field import PasswordFieldDetector
     from app.services.dlp.detectors.phone import PhoneDetector
     from app.services.dlp.detectors.private_key import PrivateKeyDetector
+    from app.services.dlp.detectors.religion_belief import ReligionBeliefDetector
     from app.services.dlp.detectors.ssn import SSNDetector
     from app.services.dlp.detectors.thai_address import ThaiAddressDetector
     from app.services.dlp.detectors.thai_bank_account import ThaiBankAccountDetector
+    from app.services.dlp.detectors.thai_name import ThaiNameDetector
     from app.services.dlp.detectors.thai_national_id import ThaiNationalIdDetector
     from app.services.dlp.detectors.thai_promptpay import ThaiPromptPayDetector
     from app.services.dlp.detectors.thai_tax_id import ThaiTaxIdDetector
@@ -204,9 +258,17 @@ def get_default_registry(
         ThaiBankAccountDetector(),
         ThaiPromptPayDetector(),
         ThaiAddressDetector(),
+        ThaiNameDetector(),
         DbConnectionStringDetector(),
         MedicalRecordDetector(),
         MacAddressDetector(),
+        # PDPA Section 26 sensitive data detectors.
+        ReligionBeliefDetector(),
+        HealthConditionDetector(),
+        CriminalRecordDetector(),
+        BiometricDataDetector(),
+        # Thai-market contact identifier.
+        LineIdDetector(),
     ]
 
     # Presidio NER is optional at runtime. Gate registration on the

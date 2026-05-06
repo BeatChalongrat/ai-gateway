@@ -71,9 +71,16 @@ MASK_TOKENS: dict[str, str] = {
     "thai_bank_account": "[BANK_ACCOUNT]",
     "thai_promptpay": "[PROMPTPAY]",
     "thai_address": "[ADDRESS]",
+    "thai_name": "[THAI_NAME]",
     "db_connection_string": "[CREDENTIAL]",
     "medical_record": "[MEDICAL_RECORD]",
     "mac_address": "[MAC_ADDRESS]",
+    # PDPA Section 26 sensitive data detectors.
+    "religion_belief": "[RELIGION]",
+    "health_condition": "[HEALTH_CONDITION]",
+    "criminal_record": "[CRIMINAL_RECORD]",
+    "biometric_data": "[BIOMETRIC]",
+    "line_id": "[LINE_ID]",
 }
 
 

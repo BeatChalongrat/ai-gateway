@@ -68,10 +68,16 @@ _ALL_DETECTOR_NAMES = [
     "email", "phone", "ssn", "credit_card", "iban",
     "ip_address", "passport", "date_of_birth", "vehicle_plate",
     "bearer_token", "api_key_secret", "private_key", "password_field",
-    # DLP coverage expansion — 8 new detectors.
+    # DLP coverage expansion — 9 new detectors.
     "thai_national_id", "thai_tax_id", "thai_bank_account",
-    "thai_promptpay", "thai_address", "db_connection_string",
-    "medical_record", "mac_address",
+    "thai_promptpay", "thai_address", "thai_name",
+    "db_connection_string", "medical_record", "mac_address",
+    # PDPA Section 26 sensitive data detectors.
+    "religion_belief", "health_condition", "criminal_record", "biometric_data",
+    # NER detector.
+    "presidio_ner",
+    # Thai-market contact identifier.
+    "line_id",
 ]
 
 
@@ -112,9 +118,10 @@ class TestRegistryDisabledDetectors:
 
 
 class TestDLPEnabledToggle:
-    def test_dlp_enabled_masks_secret_in_default(self):
-        """Default profile now masks secrets (not blocks).
-        Strict profile still blocks them — see test_dlp_integration."""
+    def test_dlp_enabled_blocks_critical_secret_in_default(self):
+        """Default profile blocks CRITICAL-severity secrets inbound.
+        The severity_threshold_block=CRITICAL means credentials are
+        stopped before reaching the LLM — returns 403."""
         resp = client.post(
             "/v1/chat/completions",
             headers=_HEADERS,
@@ -124,8 +131,8 @@ class TestDLPEnabledToggle:
                 "metadata": {},
             },
         )
-        assert resp.status_code == 200
-        assert resp.json()["policy_action"] == "mask"
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "dlp_violation"
 
     @patch("app.services.orchestrator.settings")
     def test_dlp_disabled_allows_secret(self, mock_settings):

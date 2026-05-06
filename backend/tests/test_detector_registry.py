@@ -356,4 +356,4 @@ class TestDefaultRegistry:
     def test_has_built_in_detectors(self):
         """Default registry contains all built-in detectors."""
         reg = get_default_registry()
-        assert len(reg) == 21
+        assert len(reg) == 28
