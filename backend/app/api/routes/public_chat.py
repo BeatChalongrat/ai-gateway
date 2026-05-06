@@ -133,6 +133,38 @@ async def chat_completions(
         input_enforcement = orchestrator._scan_and_evaluate(detection, profile)
 
         if input_enforcement.is_blocked:
+            # Persist BLOCKED row + commit BEFORE raising — see
+            # rationale at orchestrator.py inbound DLP block. The
+            # streaming variant runs this check before mask, so
+            # input_masked is intentionally None here.
+            if session is not None:
+                try:
+                    orchestrator.request_log_service.persist(
+                        session,
+                        RequestRecord(
+                            request_id=ctx.request_id or "",
+                            tenant_id=ctx.tenant_id,
+                            project_id=ctx.project_id,
+                            provider="",
+                            model=payload.model,
+                            status=RequestStatus.BLOCKED,
+                            policy_action="block",
+                            policy_profile_id=profile.profile_id,
+                            latency_ms=int((time.perf_counter() - t_start) * 1000),
+                            prompt_tokens=0,
+                            completion_tokens=0,
+                            total_tokens=0,
+                            estimated_cost_usd=0.0,
+                            error_code="dlp_violation",
+                            input_raw=input_raw,
+                            dlp_findings_json=build_dlp_findings_json(
+                                input_enforcement.match_actions,
+                            ),
+                        ),
+                    )
+                    session.commit()
+                except Exception as exc:
+                    log.warning("dlp_block_log_persist_failed", error=str(exc))
             orchestrator.audit_service.record_blocked_request(
                 ctx=ctx, enforcement=input_enforcement, direction="input"
             )
