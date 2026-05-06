@@ -80,17 +80,26 @@ The current container image only has `en_core_web_sm`. No Thai NER model is inst
 
 ---
 
-## 5. Streaming endpoint bypasses regex guardrail
+## 5. Streaming endpoint bypasses regex guardrail — **Resolved (e5c1ee4)**
 
 **Severity:** HIGH (security — jailbreak / prompt-injection bypass)
 
 **Component:** `backend/app/api/routes/public_chat.py` (streaming entrypoint)
 
+**Status:** Resolved in commit `e5c1ee4` (May 2026). Option 1 (pre-stream
+gate) was selected — symmetric with the non-streaming path, matches the
+contract already established by the DLP and moderation pre-stream blocks
+in the same file. Per-chunk output guardrail is filed as a separate
+concern (the bug here was inbound prompt-injection bypass, not
+model-side jailbreak echo).
+
+**Diagnosis preserved below for context.**
+
 The non-streaming orchestrator runs the regex guardrail check at
-`orchestrator.py:282-323` (`jailbreak_dan` / `prompt_injection` /
+`orchestrator.py:317-371` (`jailbreak_dan` / `prompt_injection` /
 `harmful_synthesis` rules from `guardrail_service.py`). The streaming
-entrypoint in `public_chat.py` does **not** run this check at all —
-the request flow goes:
+entrypoint in `public_chat.py` did **not** run this check — the
+request flow went:
 
 ```
 auth → DLP scan → DLP block-or-mask → moderation → router → stream
@@ -98,31 +107,44 @@ auth → DLP scan → DLP block-or-mask → moderation → router → stream
                                        no guardrail step
 ```
 
-**Impact:** clients setting `stream: true` can submit prompt-injection
+**Impact:** clients setting `stream: true` could submit prompt-injection
 or jailbreak content that the non-streaming path would block with
-`GuardrailViolationError`. The streaming path returns whatever the
-provider responds.
+`GuardrailViolationError`. The streaming path returned whatever the
+provider responded.
 
 **Discovered:** during the May 2026 block-path persistence audit. While
 mapping all six 403-paths, the audit found only five — the streaming
 guardrail was simply absent (so its persistence question was moot).
 
-**Why not fixed in the persistence PR:** scope larger than persistence.
-Needs a design decision among:
+**Resolution shape:**
 
-1. **Pre-stream gate** — run guardrail once before opening the SSE
-   response, fail fast with 403 (matches non-streaming semantics).
-   Simple but loses any chunk-level context.
-2. **Per-chunk on rolling-tail** — match the DLP pattern at
-   `public_chat.py:278-420` (rolling 50-char window). More complex
-   but symmetric with how DLP already works on streams.
+- New step `1b` in `public_chat.py` between DLP-mask and moderation
+  (line ~201), reusing the orchestrator's `guardrail_service` instance.
+- On block: persists a `request_logs` row with `policy_action='block'`,
+  `error_code='guardrail_blocked'`, `session.commit()` before raising
+  (matches non-streaming pattern, ensures the row survives dep
+  cleanup's rollback branch).
+- Raises `GuardrailViolationError` before `StreamingResponse` is
+  constructed → central error handler emits a JSON 403. Client never
+  sees a partial SSE body.
+- 5 new tests in `backend/tests/test_streaming_guardrail.py` lock the
+  contract (block-shortcircuits-provider with dual spy, row-persisted,
+  clean-message-proceeds, JSON-403-shape, non-streaming-regression).
+- Verified live: same DAN-style payload that streamed through pre-fix
+  now returns 403 on `stream:true`, matching the 403 already returned
+  on `stream:false`. Two `guardrail_blocked` rows in `request_logs`
+  per back-to-back probe (one per path).
+
+**Discarded designs (preserved for future per-chunk work):**
+
+1. **Pre-stream gate** — *(selected)*. Simple, mirrors non-streaming.
+2. **Per-chunk on rolling-tail** — would match the DLP pattern at
+   `public_chat.py:317-446` (rolling 50-char window). More complex
+   but would catch model-side jailbreak echo. Out of scope here.
 3. **Split rules by enforcement timing** — pre-stream rules
    (`jailbreak_dan`, `prompt_injection`, …) gate before the stream
-   opens; per-chunk rules (TBD) run on the buffer.
-
-**Mitigation today:** none in code. Operational mitigation: tenants
-who require guardrail coverage on streaming should disable the
-streaming path at the API-key or project level until this is fixed.
+   opens; per-chunk rules (TBD) run on the buffer. Reconsider if a
+   per-chunk output rule is ever added.
 
 ---
 
