@@ -105,6 +105,34 @@ class TestRedactedRuleInPrompt:
         lower = DLP_PLACEHOLDER_PROMPT.lower()
         assert "do not invent" in lower or "do not echo" in lower
 
+    def test_no_concrete_token_examples(self):
+        # The prior version listed [NAME_0], [EMAIL_0], [DATE_OF_BIRTH_0],
+        # [SSN_0], [RELIGION_0], [HEALTH_CONDITION_0] as examples.
+        # The model picked those up as "valid token names" and invented
+        # them in replies even when the gateway never minted them
+        # (heavy multi-detector scenario). The example list must stay
+        # generic — concrete category names belong only in the user's
+        # actual masked message.
+        forbidden = [
+            "[NAME_0]",
+            "[EMAIL_0]",
+            "[DATE_OF_BIRTH_0]",
+            "[SSN_0]",
+            "[RELIGION_0]",
+            "[HEALTH_CONDITION_0]",
+            "[PHONE_NUMBER_0]",
+        ]
+        for ex in forbidden:
+            assert ex not in DLP_PLACEHOLDER_PROMPT, (
+                f"prompt must not seed concrete token names: found {ex}"
+            )
+
+    def test_generic_format_described(self):
+        # The prompt must still describe the token shape so the model
+        # knows what to look for. Use a generic placeholder name
+        # ([CATEGORY_NUMBER]) rather than a real category.
+        assert "[CATEGORY_NUMBER]" in DLP_PLACEHOLDER_PROMPT
+
 
 class TestOrphanTokenPassthrough:
     """Document current behavior: hallucinated tokens reach user as literal.
