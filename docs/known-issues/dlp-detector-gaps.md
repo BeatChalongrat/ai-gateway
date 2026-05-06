@@ -148,37 +148,54 @@ guardrail was simply absent (so its persistence question was moot).
 
 ---
 
-## 6. `public_chat.py:508` opens `SessionLocal()` directly — bypasses DI
+## 6. `public_chat.py` streaming `SessionLocal()` bypasses DI — **Resolved (216b54e)**
 
 **Severity:** MEDIUM (production-multitenancy concern + test-isolation footgun)
 
-**Component:** `backend/app/api/routes/public_chat.py:508` (streaming `event_generator`)
+**Component:** `backend/app/api/routes/public_chat.py` (streaming `event_generator`)
+
+**Status:** Resolved in commit `216b54e` (May 2026). Approach C
+(factory injection — closure capture from the route handler) was
+selected. The route handler now binds `log_session_factory` per
+request from `app.core.db.SessionLocal` and passes it via closure to
+`event_generator`. Today this resolves to the global default exactly
+as before; tomorrow a multi-tenant deployment can substitute
+`pick_factory(ctx.tenant_id)` at the same line without touching the
+generator.
+
+The `tests/conftest.py` autouse `SessionLocal` patch still works
+unchanged — the route handler does `from app.core.db import
+SessionLocal` per-request, so the fixture's setattr is honoured the
+same way the previous inline import honoured it.
+
+**Diagnosis preserved below for context.**
 
 The streaming endpoint runs the dep-injected session through the
 synchronous part of the request handler, but the SSE generator runs
 *after* FastAPI has unwound the dependency tree (the route function
 returns the `StreamingResponse` before the generator starts producing
 chunks). By the time `event_generator` needs to persist the request
-log, the dep session is closed — so the code opens a fresh
+log, the dep session is closed — so the code used to open a fresh
 `SessionLocal()` directly:
 
 ```python
+# pre-fix
 log_session = SessionLocal()
 try:
     orchestrator.request_log_service.persist(log_session, RequestRecord(...))
     log_session.commit()
 ```
 
-**Why this is a problem in production:**
+**Why this was a problem in production:**
 
 - Any future read-replica routing, sharded-DB setup, or per-tenant DB
   selection that's wired through `Depends(get_db_session)` would be
   silently bypassed by this code path.
 - `SessionLocal()` is a module-level singleton bound to the global
-  engine. The streaming persist always lands on the global DB
+  engine. The streaming persist always landed on the global DB
   regardless of any dep-time tenant routing.
 
-**Why this is a problem in tests:**
+**Why this was a problem in tests:**
 
 - The integration test conftest overrides `Depends(get_db_session)` to
   point at an in-memory SQLite engine. That override does NOT cover
@@ -188,28 +205,54 @@ try:
   in May 2026.
 - Mitigated for tests by an autouse fixture in `tests/conftest.py`
   that monkeypatches `app.core.db.SessionLocal` to the integration
-  engine. Production code path is unchanged.
+  engine. That fixture remains in place as defence-in-depth.
 
-**Why not fixed now:** the fix is non-trivial — needs a way to access
-a sessionmaker that respects whatever dep-time routing the caller
-intended. Options include:
+**Resolution shape:**
 
-1. Pass a sessionmaker through `event_generator` from the request
-   handler (closure capture) instead of importing the global one.
-2. Inject a `sessionmaker_factory` via a separate FastAPI dep that
-   returns a maker rather than a session, so streaming code can mint
-   sessions whenever it needs one.
-3. Refactor the streaming logger to write through a queue + background
-   worker that owns its own session.
+```python
+# in chat_completions, just before defining event_generator:
+from app.core.db import SessionLocal as _SessionLocal
+log_session_factory = _SessionLocal       # request-time capture
 
-All three require touching every direct `SessionLocal()` call in
-`public_chat.py` and `admin_ai_review.py`. Out of scope for the test
-isolation work that surfaced this.
+async def event_generator():
+    ...
+    log_session = log_session_factory()    # was: SessionLocal()
+```
 
-**Other direct `SessionLocal()` callers** (lower test-leak risk because
-they don't run inside a TestClient request, but same DI-bypass concern
-in production): `app/main.py:108,147,241` (startup hooks),
+- 2 new tests in `backend/tests/test_streaming_session_factory.py`
+  lock the contract (`factory-used` + `per-request capture
+  invariant`, the latter using distinct `FactoryA` / `FactoryB`
+  swapped between two POSTs to guard against module-level or
+  capture-at-import refactors).
+- The benign-stream-persists-log-row regression case is already
+  covered by `test_streaming_routing.py`'s four router tests, which
+  read `request_logs` through the integration engine — duplication
+  skipped intentionally.
+- Verified live: benign stream returns 200, row persists with
+  `status='success'`, `policy_action='allow'`, real token counts.
+
+**Discarded approaches (preserved for context):**
+
+1. **Manual context manager** — keep the dep session alive past the
+   route's return. Doesn't actually solve multi-tenant routing on its
+   own (`get_db_session` would still need to become tenant-aware) and
+   requires changing FastAPI's `yield`-based teardown contract.
+2. **`BackgroundTasks` for the persist** — fundamental timing
+   mismatch: persist data is generated DURING streaming, but
+   `BackgroundTasks` runs AFTER response completion. There is no
+   point in the request flow where we can both register the task and
+   hand it the data it needs. Don't revisit without that mismatch
+   being addressed at the FastAPI level.
+3. **Factory injection via closure** — *(selected)*. Smallest,
+   strictly-improvement change.
+
+**Other direct `SessionLocal()` callers** (out of scope for #6 per
+the original entry; lower test-leak risk because they don't run
+inside a TestClient request, but same DI-bypass concern in production):
+`app/main.py:108,147,241` (startup hooks),
 `app/api/admin_auth.py:151`, `app/api/routes/admin_ai_review.py:713,817,856`.
+Each would benefit from the same factory-capture pattern when the
+multi-tenant routing concern materialises for those code paths.
 
 ---
 
