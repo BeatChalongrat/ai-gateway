@@ -97,8 +97,8 @@ _DLP_HEAVY_RESPONSES = [
     "Here is the test account you requested — username test_user, "
     "password Hunter2! (please rotate after the first login), and API "
     "key sk-test-ABCDEFGH1234567890.",
-    "รายการเลขประจำตัวที่ต้องยืนยัน: 1-2345-67890-12-3 สำหรับเจ้าของบัญชี "
-    "และ 3-9876-54321-09-8 สำหรับผู้ติดต่อสำรอง.",
+    "รายการเลขประจำตัวที่ต้องยืนยัน: 1-1017-00230-70-8 สำหรับเจ้าของบัญชี "
+    "และ 3-9876-54321-09-7 สำหรับผู้ติดต่อสำรอง.",
     "Sample card: 4111 1111 1111 1111, expiry 12/27, CVV 123. Use it "
     "only in the sandbox environment — production gateway will reject "
     "test card numbers at the issuer tier.",
