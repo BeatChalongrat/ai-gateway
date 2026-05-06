@@ -188,6 +188,36 @@ def _mock_adapter_stream_chat(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_session_local_to_integration_engine(monkeypatch):
+    """Route every ``SessionLocal()`` call to the in-memory integration DB.
+
+    The FastAPI dep override at line 109 covers the main request path
+    (``Depends(get_db_session)``). It does NOT cover code that opens
+    its own session via ``from app.core.db import SessionLocal`` —
+    notably ``public_chat.py`` streaming ``event_generator()``, which
+    opens a fresh session AFTER the dep cleanup runs (the SSE handler
+    returns control to FastAPI as soon as it yields the
+    ``StreamingResponse``, and the dep cleanup closes the dep session
+    immediately — so any post-stream persist must use a fresh
+    ``SessionLocal()``). Without this fixture those persist calls
+    write to the live Postgres dev DB instead of the test DB,
+    producing rows like ``tenant_id='test-tenant'`` in the operator's
+    dashboard.
+
+    Three pre-existing tests (``test_dlp_trace.py``,
+    ``test_policy_override.py``, ``test_streaming_routing.py``) already
+    monkeypatch this locally; this fixture hoists the same fix to the
+    whole suite so future streaming tests don't have to remember it.
+    Local monkeypatches in those tests still stack on top of this
+    one — pytest's monkeypatch is LIFO per fixture.
+    """
+    integration_sessionmaker = sessionmaker(
+        bind=_integration_engine, autoflush=False, autocommit=False
+    )
+    monkeypatch.setattr("app.core.db.SessionLocal", integration_sessionmaker)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_stateful_redis_services(request, monkeypatch):
     """Neutralize Redis-backed gateway services for tests.
 
