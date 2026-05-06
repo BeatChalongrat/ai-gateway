@@ -232,6 +232,45 @@ obviously cheaper than catching the pollution after it lands.
 
 ---
 
+## 8. Tooling: heavy-scenario harness corrupts Thai input on Windows MSYS
+
+**Severity:** LOW (test tooling only; zero impact on production traffic, zero on unit tests)
+
+**Status:** Diagnosed May 2026 during the heavy multi-detector live test. Filed for separate fix; not blocking the detector-coverage campaign.
+
+**Symptom:** When the heavy scenario is sent via `bash` + `curl` on Windows MSYS, every Thai character in `input_raw` arrives at the backend as `0x3F` (`'?'`). The Portal's `/requests` page then renders `???` in the User → Service and Service → AI sections — the Portal is faithfully showing what's in the DB.
+
+**Evidence:** Row `req_8b3d0f17117b47d78d3e22b2de86df1f` from the heavy test:
+
+| Column         | char_len | byte_len | bytes/char | Verdict       |
+|----------------|---------:|---------:|-----------:|---------------|
+| `input_raw`    |      792 |      792 |       1.00 | All ASCII (`?`s) |
+| `output_final` |      628 |     1454 |       2.32 | Real Thai UTF-8  |
+
+Same row, same write path, two columns: input was already `?`s **before** insert; the AI's response came back as proper UTF-8 from OpenAI and was inserted with no loss. That isolates the corruption to ingress, not storage.
+
+Cross-check: rows from earlier the same day (`req_e834c0fe...`, `req_b67356e8...`, `req_39a9a04b...`) show `bytes/char` ratios of 1.82–2.50, confirming the backend write path stores Thai correctly when given UTF-8 bytes. The corruption is client-side and only on this dev workstation's shell pipeline.
+
+**Root cause:** On Windows MSYS, command substitution (`PAYLOAD=$(jq ...)`) buffers the child process's stdout through a code-page conversion (CP874/CP1252) before assigning to the shell variable. Non-ASCII bytes that don't map to the active code page collapse to `?`. By the time `curl` sends the body, the Thai bytes are already lost.
+
+**Workaround for Phase Final rerun:** avoid `$()` capture for any payload containing non-ASCII bytes. Two viable forms:
+
+1. Build the payload to a file with `jq`, then send with `--data-binary`:
+   ```bash
+   jq -n --rawfile usr "$INPUT_FILE" '...' > /tmp/payload.json
+   curl --data-binary @/tmp/payload.json ...
+   ```
+2. Send via Python (`httpx` / `requests`) — bypasses MSYS shell entirely.
+
+**Impact summary:**
+- Production traffic: zero (real clients send UTF-8 over HTTP and the backend stores it correctly).
+- Unit tests: zero (Python string literals don't transit the shell).
+- Bash-driven heavy-scenario reruns: blocked until the harness is updated.
+
+**Reconsider if:** the same `bytes/char = 1.00` pattern appears on rows that did NOT come from this MSYS shell pipeline. That would indicate a real backend bug rather than a tooling artifact.
+
+---
+
 ## How these were surfaced
 
 `sran-pii-test.sh` scenarios 2 and 5 produced `[ADDRESS_0]` and `[NAME_1]` orphan tokens in user-facing output. Diagnosis (`traces/diag-gateway-logs.txt`, May 2026) showed:
