@@ -236,7 +236,7 @@ obviously cheaper than catching the pollution after it lands.
 
 **Severity:** LOW (test tooling only; zero impact on production traffic, zero on unit tests)
 
-**Status:** Diagnosed May 2026 during the heavy multi-detector live test. Filed for separate fix; not blocking the detector-coverage campaign.
+**Status:** **Resolved** in the same commit that updates this entry. Both heavy-scenario harnesses (`real-loop-test.sh`, `sran-pii-test.sh`) were converted from `PAYLOAD=$(jq ...)` capture to file-based payloads (`jq ... > $tmpfile` + `curl --data-binary @$tmpfile`). The diagnosis below is preserved for context.
 
 **Symptom:** When the heavy scenario is sent via `bash` + `curl` on Windows MSYS, every Thai character in `input_raw` arrives at the backend as `0x3F` (`'?'`). The Portal's `/requests` page then renders `???` in the User → Service and Service → AI sections — the Portal is faithfully showing what's in the DB.
 
@@ -253,7 +253,18 @@ Cross-check: rows from earlier the same day (`req_e834c0fe...`, `req_b67356e8...
 
 **Root cause:** On Windows MSYS, command substitution (`PAYLOAD=$(jq ...)`) buffers the child process's stdout through a code-page conversion (CP874/CP1252) before assigning to the shell variable. Non-ASCII bytes that don't map to the active code page collapse to `?`. By the time `curl` sends the body, the Thai bytes are already lost.
 
-**Workaround for Phase Final rerun:** avoid `$()` capture for any payload containing non-ASCII bytes. Two viable forms:
+**Resolution:** the harnesses now use form (1) below. The shape adopted in `real-loop-test.sh` and `sran-pii-test.sh`:
+
+```bash
+PAYLOAD_FILE=$(mktemp --suffix=.json)
+trap 'rm -f "$PAYLOAD_FILE"' RETURN
+jq -n --arg usr "$INPUT" '{messages:[{role:"user",content:$usr}], ...}' > "$PAYLOAD_FILE"
+curl --data-binary @"$PAYLOAD_FILE" ...
+```
+
+Smoke-tested locally: a heavy Thai prose payload now writes 53 Thai-start bytes (`0xE0`) to the temp file with a `bytes/char` ratio ≈ 3 (was 1.00 / all `?`).
+
+**Original workaround analysis (preserved for context):** avoid `$()` capture for any payload containing non-ASCII bytes. Two viable forms:
 
 1. Build the payload to a file with `jq`, then send with `--data-binary`:
    ```bash
@@ -265,7 +276,7 @@ Cross-check: rows from earlier the same day (`req_e834c0fe...`, `req_b67356e8...
 **Impact summary:**
 - Production traffic: zero (real clients send UTF-8 over HTTP and the backend stores it correctly).
 - Unit tests: zero (Python string literals don't transit the shell).
-- Bash-driven heavy-scenario reruns: blocked until the harness is updated.
+- Bash-driven heavy-scenario reruns: ~~blocked until the harness is updated~~ unblocked — see Resolution above.
 
 **Reconsider if:** the same `bytes/char = 1.00` pattern appears on rows that did NOT come from this MSYS shell pipeline. That would indicate a real backend bug rather than a tooling artifact.
 
