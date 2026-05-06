@@ -376,6 +376,21 @@ async def chat_completions(
             details={"provider": route.provider_name},
         )
 
+    # Capture the per-request ``SessionLocal`` factory so
+    # ``event_generator`` can mint a fresh session at log-write time
+    # without reaching into the module-global ``app.core.db.SessionLocal``
+    # at generator-run time.  Per-request resolution:
+    #   (a) Preserves the ``app.core.db.SessionLocal`` autouse
+    #       monkeypatch in tests (the import below re-reads the
+    #       attribute every request, after the fixture's setattr).
+    #   (b) Is the future hook for tenant-aware engine selection.
+    #       Today: always the global default. Tomorrow: this is where
+    #       a multi-tenant deployment would call ``pick_factory(ctx)``
+    #       to pick a read replica, sharded engine, or async driver.
+    # Closes known-issues #6.
+    from app.core.db import SessionLocal as _SessionLocal
+    log_session_factory = _SessionLocal
+
     async def event_generator():
         # Phase 3.5 Commits 30-31 — incremental DLP streaming.
         # Phase 2C (C13) closed P0-7 by buffering the whole response,
@@ -534,8 +549,9 @@ async def chat_completions(
         # fields populated by GatewayOrchestrator.handle_chat_completion.
         # The dependency-injected `session` is closed by the time this
         # generator runs (route returned StreamingResponse → get_db_session
-        # already hit its finally block), so open a fresh session here.
-        from app.core.db import SessionLocal
+        # already hit its finally block), so we mint a fresh session via
+        # the per-request factory captured at route entry (see #6 note
+        # at chat_completions where ``log_session_factory`` is bound).
 
         overall_action = max(
             input_enforcement.overall_action,
@@ -567,7 +583,7 @@ async def chat_completions(
 
         latency_ms = int((time.perf_counter() - t_start) * 1000)
 
-        log_session = SessionLocal()
+        log_session = log_session_factory()
         try:
             orchestrator.request_log_service.persist(
                 log_session,
