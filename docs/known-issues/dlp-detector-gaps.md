@@ -126,6 +126,112 @@ streaming path at the API-key or project level until this is fixed.
 
 ---
 
+## 6. `public_chat.py:508` opens `SessionLocal()` directly — bypasses DI
+
+**Severity:** MEDIUM (production-multitenancy concern + test-isolation footgun)
+
+**Component:** `backend/app/api/routes/public_chat.py:508` (streaming `event_generator`)
+
+The streaming endpoint runs the dep-injected session through the
+synchronous part of the request handler, but the SSE generator runs
+*after* FastAPI has unwound the dependency tree (the route function
+returns the `StreamingResponse` before the generator starts producing
+chunks). By the time `event_generator` needs to persist the request
+log, the dep session is closed — so the code opens a fresh
+`SessionLocal()` directly:
+
+```python
+log_session = SessionLocal()
+try:
+    orchestrator.request_log_service.persist(log_session, RequestRecord(...))
+    log_session.commit()
+```
+
+**Why this is a problem in production:**
+
+- Any future read-replica routing, sharded-DB setup, or per-tenant DB
+  selection that's wired through `Depends(get_db_session)` would be
+  silently bypassed by this code path.
+- `SessionLocal()` is a module-level singleton bound to the global
+  engine. The streaming persist always lands on the global DB
+  regardless of any dep-time tenant routing.
+
+**Why this is a problem in tests:**
+
+- The integration test conftest overrides `Depends(get_db_session)` to
+  point at an in-memory SQLite engine. That override does NOT cover
+  direct `SessionLocal()` calls, so streaming tests' persist calls
+  used to write to the live Postgres dev DB. Surfaced by 314
+  `tenant_id='test-tenant'` rows polluting the operator's dashboard
+  in May 2026.
+- Mitigated for tests by an autouse fixture in `tests/conftest.py`
+  that monkeypatches `app.core.db.SessionLocal` to the integration
+  engine. Production code path is unchanged.
+
+**Why not fixed now:** the fix is non-trivial — needs a way to access
+a sessionmaker that respects whatever dep-time routing the caller
+intended. Options include:
+
+1. Pass a sessionmaker through `event_generator` from the request
+   handler (closure capture) instead of importing the global one.
+2. Inject a `sessionmaker_factory` via a separate FastAPI dep that
+   returns a maker rather than a session, so streaming code can mint
+   sessions whenever it needs one.
+3. Refactor the streaming logger to write through a queue + background
+   worker that owns its own session.
+
+All three require touching every direct `SessionLocal()` call in
+`public_chat.py` and `admin_ai_review.py`. Out of scope for the test
+isolation work that surfaced this.
+
+**Other direct `SessionLocal()` callers** (lower test-leak risk because
+they don't run inside a TestClient request, but same DI-bypass concern
+in production): `app/main.py:108,147,241` (startup hooks),
+`app/api/admin_auth.py:151`, `app/api/routes/admin_ai_review.py:713,817,856`.
+
+---
+
+## 7. Future-proof guard for new `SessionLocal()` callers
+
+**Severity:** LOW (process / safety net)
+
+**Status:** Considered but not adopted in May 2026.
+
+The autouse `SessionLocal` monkeypatch in `tests/conftest.py` only
+catches `SessionLocal()` callers that exist *today*. A future PR that
+introduces a new direct caller and forgets to use the dep override
+would silently regress: tests would keep passing while writing to the
+dev DB.
+
+**Considered fix (not adopted):** add a runtime guard inside
+`app/core/db.py`'s engine factory that errors if `PYTEST_CURRENT_TEST`
+is set and the engine URL doesn't include `test` or `:memory:`:
+
+```python
+def _make_engine() -> Engine:
+    url = settings.database_url
+    if "PYTEST_CURRENT_TEST" in os.environ and \
+       "test" not in url.lower() and ":memory:" not in url.lower():
+        raise RuntimeError(
+            f"Refusing to create DB engine to {url!r} during pytest. "
+            "Tests must override DATABASE_URL or use dependency_overrides."
+        )
+    return create_engine(url, ...)
+```
+
+**Why not adopted:** the rule "don't change production DB connection
+logic" took priority over the safety net. The autouse monkeypatch is
+sufficient as long as future contributors notice when their new
+streaming/background test starts polluting the dev DB.
+
+**Reconsider if:** a regression caused by a missed monkeypatch
+surfaces (i.e. someone adds a new `SessionLocal()` call site that the
+autouse fixture doesn't cover, or replaces `SessionLocal` import with
+a different binding). At that point the runtime guard becomes
+obviously cheaper than catching the pollution after it lands.
+
+---
+
 ## How these were surfaced
 
 `sran-pii-test.sh` scenarios 2 and 5 produced `[ADDRESS_0]` and `[NAME_1]` orphan tokens in user-facing output. Diagnosis (`traces/diag-gateway-logs.txt`, May 2026) showed:
