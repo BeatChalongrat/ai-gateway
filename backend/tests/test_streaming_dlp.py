@@ -161,13 +161,44 @@ class TestStreamingBlockReturns403:
         )
         captured = _install_stream_spy(monkeypatch, chunks=["should never run"])
 
+        # Unique marker — the integration DB is shared session-wide and
+        # other tests also produce ``dlp_violation`` rows; filtering by
+        # ``input_raw LIKE %marker%`` disambiguates our own row.
+        marker = "streaming-dlp-block-test-marker"
         key = "sk-ant-api03-" + ("a" * 40)
-        resp = _chat_stream(f"my key is {key}")
+        resp = _chat_stream(f"my key is {key} ({marker})")
 
         assert resp.status_code == 403
         body = resp.json()
         assert body["error"]["code"] == "dlp_violation"
         assert captured["called"] is False
+
+        # Streaming DLP block must persist a row — same compliance
+        # contract as the non-streaming path (test_e2e_dlp_flow.py).
+        # The streaming variant runs the block check BEFORE mask, so
+        # input_masked is intentionally None on this row (no masking
+        # happens on a blocked input).
+        from sqlalchemy.orm import sessionmaker
+        Session = sessionmaker(bind=_integration_engine)
+        s = Session()
+        try:
+            row = (
+                s.query(RequestLogORM)
+                .filter(RequestLogORM.error_code == "dlp_violation")
+                .filter(RequestLogORM.input_raw.like(f"%{marker}%"))
+                .order_by(RequestLogORM.created_at.desc())
+                .first()
+            )
+        finally:
+            s.close()
+        assert row is not None, "expected a BLOCKED row for the streaming DLP-blocked request"
+        assert row.status == "blocked"
+        assert row.policy_action == "block"
+        assert row.error_code == "dlp_violation"
+        assert row.input_masked is None, (
+            "streaming DLP block runs before the mask step; input_masked "
+            "must be None on this row"
+        )
 
 
 class TestStreamingProviderPiiPassesThroughUnderDefault:

@@ -144,12 +144,16 @@ class TestStreamingModerationBlocksFlaggedContent:
         # The request_log row is keyed on the X-Request-Id header —
         # but on a 403 the stream never runs, so we instead look up the
         # most recent blocked row for this test's predicate.
+        # ``policy_action='block'`` aligns with the dashboard
+        # (admin-ui/app/requests/page.tsx:190) and dlp_block_spike
+        # alert filters; the *kind* of block (moderation vs DLP vs
+        # guardrail) is preserved on ``error_code``.
         Session = sessionmaker(bind=_integration_engine)
         s = Session()
         try:
             row = (
                 s.query(RequestLogORM)
-                .filter(RequestLogORM.policy_action == "moderation")
+                .filter(RequestLogORM.error_code == "moderation_flagged")
                 .order_by(RequestLogORM.created_at.desc())
                 .first()
             )
@@ -157,6 +161,7 @@ class TestStreamingModerationBlocksFlaggedContent:
             s.close()
         assert row is not None
         assert row.status == "blocked"
+        assert row.policy_action == "block"
         assert row.error_code == "moderation_flagged"
 
 
