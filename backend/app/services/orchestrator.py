@@ -298,6 +298,16 @@ class GatewayOrchestrator:
                 payload.messages, input_enforcement.match_actions
             )
 
+        # 4a. Inject a system prompt explaining DLP placeholders so the
+        # model doesn't refuse masked messages.
+        from app.services.dlp_prompt import inject_dlp_system_prompt, has_mask_tokens
+        if has_mask_tokens(messages_to_send):
+            messages_to_send = inject_dlp_system_prompt(messages_to_send)
+            log.info(
+                "dlp_system_prompt_injected",
+                tokens_present=True,
+            )
+
         # DLP trace snapshot 2/4: messages as they will be sent to the
         # provider — already mask-substituted with indexed tokens. Equal
         # to ``input_raw`` when no PII was detected (the modal collapses
@@ -989,11 +999,27 @@ class GatewayOrchestrator:
         Pass ``ner_enabled=False`` to drop PresidioDetector from this
         scan — used by the outbound response scan when the request's
         tenant has NER off.
+
+        Outbound calls also drop findings whose ``matched_text`` is just
+        a mask-token literal (``[NAME_0]``, ``[DATE_OF_BIRTH_0]``, …).
+        Heavy-scenario testing showed presidio_ner classifying the
+        gateway's own placeholders as PII when scanning the model
+        response — a self-feedback loop where the DLP system flags
+        strings that the DLP system itself emitted upstream. The filter
+        is gated to ``direction == "output"`` so an inbound caller (none
+        today, but the signature allows it) is unaffected.
         """
+        from app.services.dlp_prompt import _MASK_TOKEN_RE
+
         registry = self.detector_registry
         if not ner_enabled:
             registry = registry.without("presidio_ner")
         matches = registry.scan_text(text)
+        if direction == "output":
+            matches = [
+                m for m in matches
+                if not _MASK_TOKEN_RE.fullmatch(m.matched_text.strip())
+            ]
         return DetectionResult(
             matches=matches,
             scanned_direction=direction,
