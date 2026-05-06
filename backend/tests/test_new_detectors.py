@@ -281,6 +281,62 @@ class TestThaiBankAccountDetector:
         matches = self.det.detect(text)
         assert matches == []
 
+    # --- Heavy-scenario regression coverage -------------------------------
+    # Heavy multi-detector live test had the form
+    #   "บัญชีธนาคารกสิกรสำหรับรับเงินคืน 123-4-56789-0"
+    # with 28 chars of prose between "บัญชี" and the digits. Layer-by-
+    # layer diagnosis (regex / digit-count / context-window) confirmed
+    # the detector handles this correctly. Lock that contract.
+
+    def test_heavy_scenario_prose_form(self):
+        # Full heavy line: keyword "บัญชี" + 28 chars of prose + digits.
+        # Both "บัญชี" and "ธนาคาร" hit the keyword list inside the
+        # 60-char window.
+        text = "- บัญชีธนาคารกสิกรสำหรับรับเงินคืน 123-4-56789-0"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].matched_text == "123-4-56789-0"
+
+    def test_alternate_keyword_lekbanchi(self):
+        # "เลขบัญชี" is a separate gate-list entry — confirm it
+        # independently triggers detection.
+        text = "เลขบัญชี 123-4-56789-0"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+
+    # --- Negative / false-positive prevention -----------------------------
+    # Cases where 'บัญชี' or 'ธนาคาร' appear but the surrounding text
+    # is NOT an account number — different word sense, marketing copy,
+    # cost figures, etc. The regex's 10-12 digit gate is what keeps
+    # these out today; tests lock that boundary in.
+
+    def test_banking_copy_no_account_number(self):
+        # Marketing line: keyword present, no account-shaped digit run.
+        # Only a single digit ("5") nearby.
+        text = "เปิดบัญชีธนาคาร 5 นาที"
+        matches = self.det.detect(text)
+        assert matches == []
+
+    def test_banchi_meaning_inventory_list(self):
+        # Different word sense for บัญชี ("list/inventory" not "account").
+        # Three-digit run, far below the 10-12 minimum.
+        text = "บัญชีรายชื่อ 3-1-2"
+        matches = self.det.detect(text)
+        assert matches == []
+
+    def test_banchi_meaning_fee_amount(self):
+        # Cost figure adjacent to keyword. Three-digit run, regex skips.
+        text = "ค่าธรรมเนียมบัญชี 200 บาท"
+        matches = self.det.detect(text)
+        assert matches == []
+
+    def test_keyword_beyond_window_rejected(self):
+        # Keyword exists but >60 chars before the digit run — context
+        # window must reject. Use 70 filler chars.
+        text = "บัญชี " + "x" * 70 + " 123-4-56789-0"
+        matches = self.det.detect(text)
+        assert matches == []
+
 
 # ---------------------------------------------------------------------------
 # Thai PromptPay detector
