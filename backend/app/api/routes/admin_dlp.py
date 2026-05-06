@@ -301,6 +301,12 @@ _DETECTOR_META: dict[str, dict[str, Any]] = {
         "coverage_note": "Thai postal addresses anchored on บ้านเลขที่ / ที่อยู่",
         "example_patterns": [],
     },
+    "thai_name": {
+        "method": "regex",
+        "mask_token": "[THAI_NAME]",
+        "coverage_note": "Thai personal names with title prefix (นาย/นาง/นางสาว/คุณ/ดร./etc.)",
+        "example_patterns": ["นายสมชาย ใจดี", "นางสาวพิมพ์ลดา จันทร์สว่าง"],
+    },
     "db_connection_string": {
         "method": "regex",
         "mask_token": "[CREDENTIAL]",
@@ -324,6 +330,13 @@ _DETECTOR_META: dict[str, dict[str, Any]] = {
         "mask_token": "[NAME]",
         "coverage_note": "Presidio NER — PERSON / LOCATION / ORG / GPE / NRP",
         "example_patterns": [],
+    },
+    "line_id": {
+        "method": "regex",
+        "mask_token": "[LINE_ID]",
+        "coverage_note": "LINE messaging-app handle, keyword-gated to avoid "
+                         "Twitter/Slack mention false positives",
+        "example_patterns": ["LINE: @somchai_dev"],
     },
 }
 
