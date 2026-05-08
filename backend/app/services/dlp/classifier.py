@@ -30,8 +30,10 @@ from app.domain.dlp import DetectionMatch, SensitivityLevel
 DEFAULT_SEVERITY_MAP: dict[str, SensitivityLevel] = {
     # PII detectors
     "email_address": SensitivityLevel.MEDIUM,
-    "phone_number": SensitivityLevel.MEDIUM,
+    "phone_number": SensitivityLevel.HIGH,
     "us_ssn": SensitivityLevel.HIGH,
+    "date_of_birth": SensitivityLevel.HIGH,
+    "vehicle_plate": SensitivityLevel.MEDIUM,
     # Secret detectors
     "bearer_token": SensitivityLevel.CRITICAL,
     "aws_access_key": SensitivityLevel.CRITICAL,
@@ -54,10 +56,15 @@ DEFAULT_SEVERITY_MAP: dict[str, SensitivityLevel] = {
     "thai_tax_id": SensitivityLevel.HIGH,
     "thai_bank_account": SensitivityLevel.HIGH,
     "thai_promptpay": SensitivityLevel.MEDIUM,
-    "thai_address": SensitivityLevel.LOW,
+    "thai_address": SensitivityLevel.MEDIUM,
     "db_connection_string": SensitivityLevel.CRITICAL,
     "medical_record": SensitivityLevel.HIGH,
     "mac_address": SensitivityLevel.LOW,
+    # PDPA Section 26 sensitive data.
+    "religion_belief": SensitivityLevel.HIGH,
+    "health_condition": SensitivityLevel.HIGH,
+    "criminal_record": SensitivityLevel.HIGH,
+    "biometric_data": SensitivityLevel.HIGH,
 }
 
 # Minimum escalation threshold — if triggered, everything below this

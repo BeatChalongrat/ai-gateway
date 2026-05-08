@@ -40,6 +40,13 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 # Generic `key=value` or `key: "value"` assignments for sensitive field names.
 # The value (not the key) is what gets captured and masked.
+_DECODED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "anthropic_api_key",
+        re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{8,}\b"),
+    ),
+]
+
 _ASSIGNMENT_RE = re.compile(
     r"""(?ix)                               # case-insensitive, verbose
     \b(?:
@@ -61,37 +68,40 @@ class APIKeySecretDetector(BaseDetector):
     name = "api_key_secret"
     category = "credential"
     default_sensitivity = SensitivityLevel.CRITICAL
+    ACCEPTS_DECODED = True
 
-    def detect(self, text: str) -> list[DetectionMatch]:
+    def detect(self, text: str, *, from_decoded: bool = False) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []
+        seen_spans: set[tuple[int, int]] = set()
+
+        def _emit(entity_type: str, start: int, end: int, matched_text: str) -> None:
+            if (start, end) in seen_spans:
+                return
+            seen_spans.add((start, end))
+            matches.append(
+                DetectionMatch(
+                    detector_name=self.name,
+                    entity_type=entity_type,
+                    category=self.category,
+                    start=start,
+                    end=end,
+                    matched_text=matched_text,
+                    severity=self.default_sensitivity,
+                )
+            )
 
         for entity_type, pattern in _PATTERNS:
             for m in pattern.finditer(text):
-                matches.append(
-                    DetectionMatch(
-                        detector_name=self.name,
-                        entity_type=entity_type,
-                        category=self.category,
-                        start=m.start(),
-                        end=m.end(),
-                        matched_text=m.group(),
-                        severity=self.default_sensitivity,
-                    )
-                )
+                _emit(entity_type, m.start(), m.end(), m.group())
+
+        if from_decoded:
+            for entity_type, pattern in _DECODED_PATTERNS:
+                for m in pattern.finditer(text):
+                    _emit(entity_type, m.start(), m.end(), m.group())
 
         for m in _ASSIGNMENT_RE.finditer(text):
             start = m.start("value")
             end = m.end("value")
-            matches.append(
-                DetectionMatch(
-                    detector_name=self.name,
-                    entity_type="credential_assignment",
-                    category=self.category,
-                    start=start,
-                    end=end,
-                    matched_text=m.group("value"),
-                    severity=self.default_sensitivity,
-                )
-            )
+            _emit("credential_assignment", start, end, m.group("value"))
 
         return matches

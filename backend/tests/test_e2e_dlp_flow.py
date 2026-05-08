@@ -117,7 +117,11 @@ class TestPiiMaskedBeforeProvider:
         body = resp.json()
 
         # Provider received masked text — NOT the raw email.
-        [sent] = captured["messages"]
+        # DLP system prompt injection may prepend a system message,
+        # so check the user message specifically.
+        user_msgs = [m for m in captured["messages"] if "john" in m or "[EMAIL_0]" in m]
+        assert len(user_msgs) >= 1
+        sent = user_msgs[0]
         assert "john@acme.com" not in sent
         assert "[EMAIL_0]" in sent
 
@@ -135,25 +139,44 @@ class TestPiiMaskedBeforeProvider:
         assert log.dlp_categories is not None and "pii" in log.dlp_categories
 
 
-class TestCredentialMaskedBeforeProvider:
-    def test_credential_masked_before_provider(self, monkeypatch):
-        captured = _install_capture(monkeypatch)  # echo masked input
+class TestCredentialBlockedBeforeProvider:
+    def test_credential_blocked_before_provider(self, monkeypatch):
+        captured = _install_capture(monkeypatch)
 
         # Anthropic key pattern: sk-ant-api03- followed by 32+ chars.
+        # Unique marker so this test's row is distinguishable from
+        # other ``dlp_violation`` rows produced in the shared
+        # integration DB.
+        marker = "credential-blocked-before-provider-marker"
         key = "sk-ant-api03-" + ("a" * 40)
-        resp = _chat(f"my api key is {key}, is it valid?")
+        resp = _chat(f"my api key is {key}, is it valid? ({marker})")
 
-        assert resp.status_code == 200
+        assert resp.status_code == 403
         body = resp.json()
+        assert body["error"]["code"] == "dlp_violation"
+        # Provider MUST NOT have been called (blocked before dispatch).
+        assert captured["called"] is False
 
-        [sent] = captured["messages"]
-        assert key not in sent
-        assert "[CREDENTIAL_0]" in sent
-
-        # Restored to the original on the user side.
-        content = body["choices"][0]["message"]["content"]
-        assert key in content
-        assert "[CREDENTIAL_0]" not in content
+        # Block path MUST persist a request_logs row — compliance and
+        # incident-response queries depend on every blocked request
+        # being visible.
+        Session = sessionmaker(bind=_integration_engine)
+        s = Session()
+        try:
+            row = (
+                s.query(RequestLogORM)
+                .filter(RequestLogORM.error_code == "dlp_violation")
+                .filter(RequestLogORM.input_raw.like(f"%{marker}%"))
+                .order_by(RequestLogORM.created_at.desc())
+                .first()
+            )
+        finally:
+            s.close()
+        assert row is not None, "expected a BLOCKED row for the DLP-blocked credential request"
+        assert row.status == "blocked"
+        assert row.policy_action == "block"
+        assert row.error_code == "dlp_violation"
+        assert row.dlp_findings_json is not None
 
 
 class TestBlockStopsRequest:

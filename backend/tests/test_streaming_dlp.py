@@ -128,7 +128,9 @@ class TestStreamingPiiMaskedToProvider:
         resp = _chat_stream("my email is john@acme.com, summarise this")
 
         assert resp.status_code == 200
-        [sent] = captured["messages"]
+        user_msgs = [m for m in captured["messages"] if "john" in m or "[EMAIL_0]" in m]
+        assert len(user_msgs) >= 1
+        sent = user_msgs[0]
         assert "john@acme.com" not in sent
         assert "[EMAIL_0]" in sent
 

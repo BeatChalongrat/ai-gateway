@@ -24,15 +24,129 @@ interface Setting {
   updated_at: string;
 }
 
-// Theme-aware tokens. These used to be hardcoded lights
-// (e8eaef / 6b7280) which read wrong on dark mode. Mapping to the
-// shared --border-default / --text-tertiary / --accent-primary vars
-// keeps both themes coherent with the rest of admin-ui.
-const C = {
-  accent: "var(--accent-primary)",
-  borderLight: "var(--border-default)",
-  textTertiary: "var(--text-tertiary)",
-};
+// ---------------------------------------------------------------------------
+// Lucide-style SVG icons
+// ---------------------------------------------------------------------------
+
+function IconCoins() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
+      <path d="M7 6h1v4" />
+      <path d="m16.71 13.88.7.71-2.82 2.82" />
+    </svg>
+  );
+}
+
+function IconLayers() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
+    </svg>
+  );
+}
+
+function IconAlertTriangle() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+function IconShield() {
+  return (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+function IconLoader() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "psPin 1s linear infinite" }}>
+      <line x1="12" y1="2" x2="12" y2="6" />
+      <line x1="12" y1="18" x2="12" y2="22" />
+      <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+      <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+      <line x1="2" y1="12" x2="6" y2="12" />
+      <line x1="18" y1="12" x2="22" y2="12" />
+      <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+      <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scoped styles
+// ---------------------------------------------------------------------------
+
+const STYLES = `
+@keyframes psFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+@keyframes psFadeIn { from{opacity:0} to{opacity:1} }
+@keyframes psPin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+.ps-stat { animation: psFadeUp 0.4s ease-out both; }
+.ps-tab-content { animation: psFadeIn 0.25s ease-out both; }
+.ps-metric-card {
+  transition: box-shadow 150ms ease, transform 150ms ease;
+}
+.ps-metric-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.ps-setting-card {
+  transition: box-shadow 150ms ease;
+}
+.ps-setting-card:hover {
+  box-shadow: var(--shadow-md);
+}
+`;
+
+// ---------------------------------------------------------------------------
+// Stat card (matches Models page pattern exactly)
+// ---------------------------------------------------------------------------
+
+function StatCard({ value, label, icon, accent, bg, delay = 0 }: {
+  value: string; label: string; icon: React.ReactNode; accent: string; bg: string; delay?: number;
+}) {
+  return (
+    <div className="ps-stat ps-metric-card" style={{
+      animationDelay: `${delay}ms`,
+      background: "var(--bg-surface)", borderRadius: 10,
+      border: "1px solid var(--border-default)",
+      padding: "1rem 1.125rem",
+      display: "flex", alignItems: "center", gap: "0.875rem",
+      flex: 1, minWidth: 0,
+    }}>
+      <div style={{
+        width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+        background: bg,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: accent,
+      }}>{icon}</div>
+      <div>
+        <div style={{
+          fontSize: "1.625rem", fontWeight: 700, color: "var(--text-primary)",
+          lineHeight: 1, letterSpacing: "-0.03em",
+          fontVariantNumeric: "tabular-nums",
+        }}>{value}</div>
+        <div style={{
+          fontSize: "0.6875rem", fontWeight: 500, color: "var(--text-tertiary)",
+          marginTop: "0.25rem", lineHeight: 1,
+        }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function PortalSettingsPage() {
   const [tab, setTab] = useState<Tab>("general");
@@ -47,8 +161,15 @@ export default function PortalSettingsPage() {
     return m;
   }, [settings]);
 
+  const freeTrialTokens = byKey.free_trial_tokens?.value ?? "150000";
+  const trialTier = byKey.trial_model_tier?.value ?? "budget";
+  const lowThreshold = byKey.credit_low_threshold?.value ?? "10000";
+
   return (
     <div style={{ padding: "2rem 2.5rem", maxWidth: 1000, margin: "0 auto" }}>
+      <style>{STYLES}</style>
+
+      {/* Page header */}
       <div className="sran-page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <h1 className="sran-page-title">Portal Settings</h1>
@@ -59,20 +180,47 @@ export default function PortalSettingsPage() {
         <ThemeToggle />
       </div>
 
+      {/* Metric cards */}
+      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1.25rem", flexWrap: "wrap" }}>
+        <StatCard
+          icon={<IconCoins />}
+          accent="#4f46e5"
+          bg="rgba(99,102,241,0.1)"
+          value={loading ? "—" : Number(freeTrialTokens).toLocaleString()}
+          label="tokens per signup"
+          delay={0}
+        />
+        <StatCard
+          icon={<IconLayers />}
+          accent="#059669"
+          bg="rgba(5,150,105,0.1)"
+          value={loading ? "—" : trialTier.charAt(0).toUpperCase() + trialTier.slice(1)}
+          label="maximum tier"
+          delay={80}
+        />
+        <StatCard
+          icon={<IconAlertTriangle />}
+          accent="#d97706"
+          bg="rgba(217,119,6,0.1)"
+          value={loading ? "—" : Number(lowThreshold).toLocaleString()}
+          label="warning threshold"
+          delay={160}
+        />
+      </div>
+
+      {/* Main card with tabs */}
       <div className="sran-card" style={{ padding: 0, overflow: "hidden" }}>
-        {/* Tabs */}
-        <div
-          style={{
-            display: "flex",
-            borderBottom: `1px solid ${C.borderLight}`,
-            background: "var(--bg-surface-2)",
-          }}
-        >
-          {[
+        {/* Tab bar */}
+        <div style={{
+          display: "flex",
+          borderBottom: "1px solid var(--border-default)",
+          background: "var(--bg-surface-2)",
+        }}>
+          {([
             { k: "general" as Tab, label: "General" },
             { k: "trial" as Tab, label: "Trial & Credits" },
             { k: "security" as Tab, label: "Security" },
-          ].map((t) => (
+          ]).map((t) => (
             <button
               key={t.k}
               onClick={() => setTab(t.k)}
@@ -81,12 +229,11 @@ export default function PortalSettingsPage() {
                 border: "none",
                 cursor: "pointer",
                 padding: "12px 20px",
-                fontSize: 13,
+                fontSize: "0.8125rem",
                 fontFamily: "inherit",
                 fontWeight: tab === t.k ? 600 : 500,
-                color: tab === t.k ? C.accent : C.textTertiary,
-                borderBottom:
-                  tab === t.k ? `2px solid ${C.accent}` : "2px solid transparent",
+                color: tab === t.k ? "var(--accent-primary)" : "var(--text-tertiary)",
+                borderBottom: tab === t.k ? "2px solid var(--accent-primary)" : "2px solid transparent",
                 marginBottom: "-1px",
                 transition: "color 120ms, border-color 120ms",
               }}
@@ -96,13 +243,14 @@ export default function PortalSettingsPage() {
           ))}
         </div>
 
-        <div style={{ padding: 24 }}>
+        {/* Tab content */}
+        <div style={{ padding: "1.5rem" }}>
           {loading ? (
             <SkeletonTable rows={3} />
           ) : error ? (
             <ErrorState message={error} onRetry={refetch} />
           ) : (
-            <>
+            <div key={tab} className="ps-tab-content">
               {tab === "general" && (
                 <GeneralTab
                   setting={byKey.portal_signup_enabled}
@@ -118,7 +266,7 @@ export default function PortalSettingsPage() {
                 />
               )}
               {tab === "security" && <SecurityTab />}
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -156,7 +304,6 @@ function GeneralTab({
   const [enabled, setEnabled] = useState(current);
   const [saving, setSaving] = useState(false);
 
-  // Keep in sync with refetched data.
   useEffect(() => {
     setEnabled(current);
   }, [current]);
@@ -179,29 +326,51 @@ function GeneralTab({
 
   return (
     <div style={{ maxWidth: 640 }}>
-      <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0, marginBottom: 14, fontFamily: "var(--font-outfit)" }}>
+      <h2 style={{ fontSize: "1.0625rem", fontWeight: 600, margin: "0 0 1rem", color: "var(--text-primary)" }}>
         Portal Registration
       </h2>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: "14px 16px",
-          border: `1px solid ${C.borderLight}`,
-          borderRadius: 10,
-          background: "var(--bg-surface)",
-        }}
-      >
+      <div className="ps-setting-card" style={{
+        display: "flex", alignItems: "center", gap: "1rem",
+        padding: "1rem 1.25rem",
+        border: "1px solid var(--border-default)",
+        borderRadius: 10, background: "var(--bg-surface)",
+      }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+          <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-primary)", marginBottom: 2 }}>
             Allow new user signups
           </div>
-          <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 2 }}>
-            When disabled, the signup page shows a "Registration is currently closed" message.
+          <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 8 }}>
+            When disabled, the signup page shows a &ldquo;Registration is currently closed&rdquo; message.
+          </div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: enabled ? "var(--accent-success)" : "var(--accent-danger)",
+            }} />
+            <span style={{
+              fontSize: "0.6875rem", fontWeight: 600,
+              color: enabled ? "var(--accent-success)" : "var(--accent-danger)",
+            }}>
+              {enabled ? "Active" : "Disabled"}
+            </span>
           </div>
         </div>
         <Toggle checked={enabled} disabled={saving} onChange={toggle} />
+      </div>
+
+      {/* Info card */}
+      <div style={{
+        marginTop: "1rem", padding: "0.875rem 1rem",
+        border: "1px solid var(--border-subtle)", borderRadius: 8,
+        background: "var(--bg-surface-2)",
+        fontSize: "0.75rem", color: "var(--text-tertiary)", lineHeight: 1.5,
+      }}>
+        <div style={{ fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+          About Portal Registration
+        </div>
+        Controls whether new users can create accounts through the self-service portal.
+        Existing users can still log in regardless of this setting. Disabling signup is
+        useful during maintenance or when onboarding is handled via admin invite only.
       </div>
     </div>
   );
@@ -288,8 +457,6 @@ function TrialTab({
 
   async function save() {
     setSaving(true);
-    // Patch each changed key in sequence so a single validation error
-    // doesn't clobber the other fields that were fine.
     let failed: string | null = null;
     try {
       if (tokens !== freeTrial?.value) {
@@ -314,33 +481,78 @@ function TrialTab({
   }
 
   return (
-    <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 20 }}>
-      <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0, fontFamily: "var(--font-outfit)" }}>
+    <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+      <h2 style={{ fontSize: "1.0625rem", fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
         Free Trial Configuration
       </h2>
 
-      <Field
-        label="Free trial tokens"
-        hint="Tokens granted to each new user on signup."
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="number"
-            min={1}
-            className="sran-input"
-            style={{ width: 220 }}
-            value={tokens}
-            onChange={(e) => setTokens(e.target.value)}
-          />
-          <span style={{ fontSize: 12, color: C.textTertiary }}>tokens</span>
+      {/* Free trial tokens */}
+      <div className="ps-setting-card" style={{
+        padding: "1rem 1.25rem",
+        border: "1px solid var(--border-default)",
+        borderRadius: 10, background: "var(--bg-surface)",
+      }}>
+        <label style={{
+          display: "block", fontSize: "0.8125rem", fontWeight: 600,
+          color: "var(--text-primary)", marginBottom: 4,
+        }}>
+          Free trial tokens
+        </label>
+        <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 10 }}>
+          Tokens granted to each new user on signup.
         </div>
-      </Field>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{
+            display: "flex", alignItems: "center",
+            border: "1px solid var(--border-default)", borderRadius: 8,
+            overflow: "hidden", background: "var(--bg-base)",
+            transition: "border-color 150ms",
+          }}>
+            <span style={{
+              padding: "0.5rem 0.625rem",
+              background: "var(--bg-surface-2)",
+              borderRight: "1px solid var(--border-default)",
+              color: "var(--text-tertiary)",
+              display: "flex", alignItems: "center",
+            }}>
+              <IconCoins />
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={tokens}
+              onChange={(e) => setTokens(e.target.value)}
+              style={{
+                border: "none", outline: "none", background: "transparent",
+                padding: "0.5rem 0.75rem", fontSize: "0.875rem", fontWeight: 500,
+                width: 160, color: "var(--text-primary)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            />
+            <span style={{
+              padding: "0.5rem 0.75rem", fontSize: "0.75rem",
+              color: "var(--text-tertiary)", fontWeight: 500,
+            }}>tokens</span>
+          </div>
+        </div>
+      </div>
 
-      <Field
-        label="Trial model tier"
-        hint="Maximum model tier available to trial users."
-      >
-        <div style={{ display: "flex", gap: 8 }}>
+      {/* Trial model tier */}
+      <div className="ps-setting-card" style={{
+        padding: "1rem 1.25rem",
+        border: "1px solid var(--border-default)",
+        borderRadius: 10, background: "var(--bg-surface)",
+      }}>
+        <label style={{
+          display: "block", fontSize: "0.8125rem", fontWeight: 600,
+          color: "var(--text-primary)", marginBottom: 4,
+        }}>
+          Trial model tier
+        </label>
+        <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 10 }}>
+          Maximum model tier available to trial users.
+        </div>
+        <div style={{ display: "inline-flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border-default)" }}>
           {(["budget", "standard", "premium"] as const).map((t) => {
             const sel = tierValue === t;
             return (
@@ -349,15 +561,17 @@ function TrialTab({
                 type="button"
                 onClick={() => setTierValue(t)}
                 style={{
-                  padding: "6px 14px",
-                  borderRadius: 20,
-                  border: sel ? `1px solid ${C.accent}` : `1px solid ${C.borderLight}`,
-                  background: sel ? C.accent : "var(--bg-surface)",
-                  color: sel ? "#FFFFFF" : "var(--text-primary)",
-                  fontSize: 12,
-                  fontWeight: 500,
+                  padding: "0.4375rem 1rem",
+                  border: "none",
+                  borderRight: t !== "premium" ? "1px solid var(--border-default)" : "none",
+                  background: sel ? "var(--bg-surface-dark, #0f172a)" : "var(--bg-surface)",
+                  color: sel ? "#ffffff" : "var(--text-secondary)",
+                  fontSize: "0.8125rem",
+                  fontWeight: sel ? 600 : 500,
                   cursor: "pointer",
                   textTransform: "capitalize",
+                  transition: "background 150ms, color 150ms",
+                  fontFamily: "inherit",
                 }}
               >
                 {t}
@@ -365,59 +579,88 @@ function TrialTab({
             );
           })}
         </div>
-      </Field>
+      </div>
 
-      <Field
-        label="Low credit warning threshold"
-        hint="Warn user in the portal when their balance drops below this value."
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="number"
-            min={1}
-            className="sran-input"
-            style={{ width: 220 }}
-            value={lowThreshold}
-            onChange={(e) => setLowThreshold(e.target.value)}
-          />
-          <span style={{ fontSize: 12, color: C.textTertiary }}>tokens</span>
+      {/* Low credit threshold */}
+      <div className="ps-setting-card" style={{
+        padding: "1rem 1.25rem",
+        border: "1px solid var(--border-default)",
+        borderRadius: 10, background: "var(--bg-surface)",
+      }}>
+        <label style={{
+          display: "block", fontSize: "0.8125rem", fontWeight: 600,
+          color: "var(--text-primary)", marginBottom: 4,
+        }}>
+          Low credit warning threshold
+        </label>
+        <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 10 }}>
+          Warn user in the portal when their balance drops below this value.
         </div>
-      </Field>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{
+            display: "flex", alignItems: "center",
+            border: "1px solid var(--border-default)", borderRadius: 8,
+            overflow: "hidden", background: "var(--bg-base)",
+            transition: "border-color 150ms",
+          }}>
+            <span style={{
+              padding: "0.5rem 0.625rem",
+              background: "var(--bg-surface-2)",
+              borderRight: "1px solid var(--border-default)",
+              color: "var(--text-tertiary)",
+              display: "flex", alignItems: "center",
+            }}>
+              <IconAlertTriangle />
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={lowThreshold}
+              onChange={(e) => setLowThreshold(e.target.value)}
+              style={{
+                border: "none", outline: "none", background: "transparent",
+                padding: "0.5rem 0.75rem", fontSize: "0.875rem", fontWeight: 500,
+                width: 160, color: "var(--text-primary)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            />
+            <span style={{
+              padding: "0.5rem 0.75rem", fontSize: "0.75rem",
+              color: "var(--text-tertiary)", fontWeight: 500,
+            }}>tokens</span>
+          </div>
+        </div>
+      </div>
 
-      <div>
+      {/* Save button area */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.875rem", marginTop: "0.25rem" }}>
         <button
-          className="sran-btn sran-btn-primary"
           onClick={save}
           disabled={!dirty || saving}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.5rem",
+            padding: "0.625rem 1.5rem",
+            fontSize: "0.8125rem", fontWeight: 600, fontFamily: "inherit",
+            borderRadius: 8, border: "none", cursor: dirty && !saving ? "pointer" : "not-allowed",
+            background: dirty ? "var(--bg-surface-dark, #0f172a)" : "var(--bg-elevated)",
+            color: dirty ? "#ffffff" : "var(--text-muted)",
+            transition: "background 150ms, opacity 150ms",
+            opacity: dirty ? 1 : 0.6,
+          }}
         >
+          {saving && <IconLoader />}
           {saving ? "Saving…" : "Save Changes"}
         </button>
+        {dirty && !saving && (
+          <span style={{
+            fontSize: "0.6875rem", fontWeight: 500, color: "var(--accent-warning)",
+            display: "inline-flex", alignItems: "center", gap: "0.25rem",
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent-warning)" }} />
+            Unsaved changes
+          </span>
+        )}
       </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label
-        className="sran-label"
-        style={{ display: "block", marginBottom: 4 }}
-      >
-        {label}
-      </label>
-      {hint ? (
-        <div style={{ fontSize: 12, color: C.textTertiary, marginBottom: 8 }}>{hint}</div>
-      ) : null}
-      {children}
     </div>
   );
 }
@@ -428,18 +671,22 @@ function Field({
 
 function SecurityTab() {
   return (
-    <div
-      style={{
-        padding: "40px 20px",
-        textAlign: "center",
-        color: C.textTertiary,
-      }}
-    >
-      <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      textAlign: "center", minHeight: 220, padding: "3rem 1.5rem",
+      border: "2px dashed var(--border-default)", borderRadius: 12,
+      background: "var(--bg-surface-2)",
+    }}>
+      <div style={{ color: "var(--text-muted)", marginBottom: "0.875rem", opacity: 0.45 }}>
+        <IconShield />
+      </div>
+      <div style={{
+        fontSize: "1.0625rem", fontWeight: 600, color: "var(--text-secondary)",
+        marginBottom: "0.375rem",
+      }}>
         Coming soon
       </div>
-      <div style={{ fontSize: 12 }}>
+      <div style={{ fontSize: "0.8125rem", color: "var(--text-tertiary)", maxWidth: 320 }}>
         Rate limits, IP allowlist, and session controls will live here.
       </div>
     </div>
