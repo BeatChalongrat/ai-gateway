@@ -10,6 +10,8 @@
 // grepping the built bundle (``admin-ui/.next/static``) for gw_ prefixes.
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
+const SESSION_CACHE_KEY = "admin_session_cache";
+let clearingSession: Promise<void> | null = null;
 
 export class ApiError extends Error {
   status: number;
@@ -29,6 +31,26 @@ function readCookie(name: string): string {
     if (c.startsWith(prefix)) return decodeURIComponent(c.slice(prefix.length));
   }
   return "";
+}
+
+async function clearInvalidSession() {
+  if (typeof window === "undefined") return;
+  if (!clearingSession) {
+    clearingSession = fetch(`${BASE_URL}/auth/session/logout`, {
+      method: "POST",
+      credentials: "include",
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        localStorage.removeItem(SESSION_CACHE_KEY);
+        document.cookie = "csrf_token=; Max-Age=0; path=/";
+        clearingSession = null;
+      });
+  }
+  await clearingSession;
+  if (window.location.pathname !== "/login") {
+    window.location.assign("/login");
+  }
 }
 
 // Dedup: if the same GET is already in-flight, reuse its promise
@@ -64,6 +86,9 @@ async function request(path: string, options: RequestInit = {}) {
     if (!res.ok) {
       let body;
       try { body = await res.json(); } catch { body = await res.text(); }
+      if (res.status === 401) {
+        void clearInvalidSession();
+      }
       throw new ApiError(res.status, body);
     }
     if (res.status === 204) return null;

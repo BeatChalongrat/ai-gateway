@@ -33,7 +33,13 @@ export async function refreshSession(): Promise<AdminSession | null> {
     const res = await fetch(`${API_BASE}/auth/session/me`, {
       credentials: "include",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status === 401 && typeof window !== "undefined") {
+        await clearSession();
+        window.location.assign("/login");
+      }
+      return null;
+    }
     const body = await res.json();
     const u = body.user;
     const session: AdminSession = {

@@ -56,7 +56,7 @@ _PLATE_PROVINCE_RE = re.compile(
 class VehiclePlateDetector(BaseDetector):
     name = "vehicle_plate"
     category = "identity"
-    default_sensitivity = SensitivityLevel.LOW
+    default_sensitivity = SensitivityLevel.MEDIUM
 
     def detect(self, text: str) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []

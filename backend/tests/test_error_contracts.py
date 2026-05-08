@@ -96,7 +96,7 @@ class TestValidationErrorContract:
 
 class TestDLPBlockErrorContract:
     def test_dlp_block_403(self):
-        """Sending an AWS key is masked (not blocked) under the default profile."""
+        """Sending an AWS key (CRITICAL) is blocked under the default profile."""
         resp = client.post(
             "/v1/chat/completions",
             headers=_HEADERS,
@@ -106,11 +106,9 @@ class TestDLPBlockErrorContract:
                 ]
             },
         )
-        # secret category masks (not blocks) in default profile since Stage 6
-        assert resp.status_code == 200
+        assert resp.status_code == 403
         body = resp.json()
-        # secret category masks (not blocks) in default profile since Stage 6
-        assert body["policy_action"] == "mask"
+        assert body["error"]["code"] == "dlp_violation"
 
 
 class TestNotFoundErrorContract:

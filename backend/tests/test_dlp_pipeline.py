@@ -105,30 +105,26 @@ class TestMaskScenario:
 # ---------------------------------------------------------------------------
 
 
-class TestSecretInMessageMasked:
-    def test_aws_key_returns_200_masked(self):
+class TestSecretInMessageBlocked:
+    def test_aws_key_returns_403_blocked(self):
         r = _chat("My key is AKIAIOSFODNN7EXAMPLE")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
-    def test_aws_key_restored_in_response(self):
-        """Input key is masked before the provider call, then restored in
-        the final response. The provider-side guarantee is tested in
-        test_e2e_dlp_flow.test_credential_masked_before_provider."""
+    def test_aws_key_not_in_error_response(self):
+        """Blocked response should not leak the original credential."""
         r = _chat("My key is AKIAIOSFODNN7EXAMPLE")
-        content = r["body"]["choices"][0]["message"]["content"]
-        assert "AKIAIOSFODNN7EXAMPLE" in content
+        assert "AKIAIOSFODNN7EXAMPLE" not in str(r["body"])
 
-    def test_private_key_returns_200_masked(self):
+    def test_private_key_returns_403_blocked(self):
         r = _chat("Here is my key: -----BEGIN PRIVATE KEY-----")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
-    def test_mask_has_reasons(self):
+    def test_block_has_details(self):
         r = _chat("My key is AKIAIOSFODNN7EXAMPLE")
-        reasons = r["body"].get("policy_reasons", [])
-        assert len(reasons) > 0
-        assert any("Input:" in r for r in reasons)
+        details = r["body"]["error"].get("details", {})
+        assert "reasons" in details
 
 
 # ---------------------------------------------------------------------------
@@ -214,8 +210,8 @@ class TestResponseSideScanning:
             for ma in enforcement.match_actions
         )
 
-    def test_response_with_secret_is_masked_in_default(self):
-        """Default profile now masks (not blocks) the legacy secret category."""
+    def test_response_with_secret_is_blocked_in_default(self):
+        """Default profile blocks CRITICAL-severity secrets (severity_threshold_block=CRITICAL)."""
         from app.services.orchestrator import GatewayOrchestrator
         from app.services.policy.profiles import DEFAULT_PROFILE
 
@@ -225,8 +221,7 @@ class TestResponseSideScanning:
         detection = orch._scan_text_as_result(response_text)
         enforcement = orch._scan_and_evaluate(detection, DEFAULT_PROFILE)
 
-        assert enforcement.is_blocked is False
-        assert enforcement.requires_transformation is True
+        assert enforcement.is_blocked is True
 
     def test_response_with_secret_is_blocked_in_strict(self):
         from app.services.orchestrator import GatewayOrchestrator
@@ -284,9 +279,9 @@ class TestResponseSideE2E:
         assert "user@example.com" in content
 
     def test_input_side_mask_reported_with_input_label(self):
-        """Default profile now masks (not blocks) secrets. The reason list
-        should carry an 'Input:' prefix identifying the direction."""
-        r = _chat("Key: AKIAIOSFODNN7EXAMPLE")
+        """Mask direction is reported in the reason list. Use email (non-CRITICAL)
+        so it's masked, not blocked."""
+        r = _chat("Email: user@example.com")
         assert r["status"] == 200
         reasons = r["body"].get("policy_reasons", [])
         assert any("Input:" in rr for rr in reasons)
