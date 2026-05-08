@@ -4,6 +4,7 @@ __pycache__/
 .env.*
 !.env.example
 .venv/
+venv/
 node_modules/
 .next/
 dist/
@@ -11,9 +12,14 @@ build/
 coverage/
 .pytest_cache/
 .claude/
+.vscode/
+.idea/
 .DS_Store
 *.log
 logs/
+tmp/
+storage/
+uploads/
 *.sqlite3
 admin-ui/tsconfig.tsbuildinfo
 backend/uploads/
@@ -23,3 +29,9 @@ backend/uploads/
 # directories are never tracked on main.
 perf/
 perf_audit_tmp/
+
+# Local dev artifacts (DOM measurements, hero-tuning screenshots,
+# debug request/response traces) — not project sources.
+measure.js
+hero-*.png
+traces/
