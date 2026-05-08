@@ -19,17 +19,17 @@ from app.services.dlp.detectors.base import BaseDetector
 
 
 _ADDRESS_RE = re.compile(
-    r"(บ้านเลขที่|เลขที่|ที่อยู่|อยู่ที่|ส่งที่)"
+    r"(อยู่บ้านเลขที่|บ้านเลขที่|เลขที่|ที่อยู่|อยู่ที่|ส่งที่)"
     r"[\s:：]*"
-    r"([^\n]{3,200}?)"
-    r"(?=\n|$|\s{3,})"
+    r"([^\n]{3,200}?\d{5}(?=[\s,]|$)"
+    r"|[^\n]{3,200}?(?=\n|$|\s{3,}))"
 )
 
 
 class ThaiAddressDetector(BaseDetector):
     name = "thai_address"
     category = "pii"
-    default_sensitivity = SensitivityLevel.LOW
+    default_sensitivity = SensitivityLevel.MEDIUM
 
     def detect(self, text: str) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []

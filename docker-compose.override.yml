@@ -9,8 +9,7 @@ services:
     # mounted source tree. Migrations still run once on container start.
     command: >-
       sh -c "python -m alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8080
-             --reload --reload-dir /app/app"
+             uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --reload-dir /app/app"
     volumes:
       - ./backend:/app
       # Read-only mount so test_*_docs.py tests that read ../docs/*.md
@@ -20,6 +19,7 @@ services:
       # watchfiles polls on the Windows-to-container bridge — docker
       # inotify events don't always propagate through the Hyper-V layer.
       WATCHFILES_FORCE_POLLING: "true"
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
 
   admin-ui:
     # Run next dev out of a plain node image against the bind-mounted
@@ -46,7 +46,7 @@ services:
       - ./portal:/app
       - portal_node_modules:/app/node_modules
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8080
       NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}

@@ -45,7 +45,7 @@ def _email() -> DetectionMatch:
 
 
 def _phone() -> DetectionMatch:
-    return _match("phone", "phone_number", "pii", SensitivityLevel.MEDIUM)
+    return _match("phone", "phone_number", "pii", SensitivityLevel.HIGH)
 
 
 def _ssn() -> DetectionMatch:
@@ -74,7 +74,7 @@ class TestDefaultSeverityMap:
         assert DEFAULT_SEVERITY_MAP["email_address"] == SensitivityLevel.MEDIUM
 
     def test_covers_phone(self):
-        assert DEFAULT_SEVERITY_MAP["phone_number"] == SensitivityLevel.MEDIUM
+        assert DEFAULT_SEVERITY_MAP["phone_number"] == SensitivityLevel.HIGH
 
     def test_covers_ssn(self):
         assert DEFAULT_SEVERITY_MAP["us_ssn"] == SensitivityLevel.HIGH
@@ -171,9 +171,13 @@ class TestClassifyNoEscalation:
         assert all(m.severity == SensitivityLevel.MEDIUM for m in result)
 
     def test_email_plus_phone_same_category(self):
-        """Email + phone = same category (pii), 2 entity types → no escalation (need 3)."""
+        """Email + phone = same category (pii), 2 entity types → no escalation (need 3).
+        Email stays MEDIUM, phone stays HIGH (its baseline)."""
         result = self.classifier.classify([_email(), _phone()])
-        assert all(m.severity == SensitivityLevel.MEDIUM for m in result)
+        email_match = [m for m in result if m.entity_type == "email_address"][0]
+        phone_match = [m for m in result if m.entity_type == "phone_number"][0]
+        assert email_match.severity == SensitivityLevel.MEDIUM
+        assert phone_match.severity == SensitivityLevel.HIGH
 
 
 # ---------------------------------------------------------------------------

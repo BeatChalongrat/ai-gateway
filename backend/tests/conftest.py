@@ -153,6 +153,16 @@ def _mock_provider_dispatch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _mock_provider_key_service(monkeypatch):
+    """Auto-stub ProviderKeyService.get_api_key so integration tests
+    never fail with 'No API key configured'."""
+    from app.services.provider_key_service import ProviderKeyService
+    monkeypatch.setattr(
+        ProviderKeyService, "get_api_key", lambda self, session, provider: "test-stub-key"
+    )
+
+
+@pytest.fixture(autouse=True)
 def _mock_adapter_stream_chat(monkeypatch):
     """Auto-stub ``adapter.stream_chat`` for OpenAI + Anthropic adapters.
 
