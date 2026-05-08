@@ -31,8 +31,8 @@ DEFAULT_PROFILE = PolicyProfile(
         # placeholder so users get a response rather than a hard failure.
         "secret": EnforcementAction.MASK,
     },
-    # Outbound override (Fix 3). Only mask categories that the AI should
-    # never leak back to the user regardless of context — credentials and
+    # Outbound override. Only mask categories that the AI should never
+    # leak back to the user regardless of context — credentials and
     # secret tokens. PII / financial / network / identity findings on the
     # outbound side fall through to ALLOW (categories absent from this
     # dict default to ALLOW per evaluator logic), so AI answers about
@@ -43,7 +43,11 @@ DEFAULT_PROFILE = PolicyProfile(
         "credential": EnforcementAction.MASK,
         "secret": EnforcementAction.MASK,
     },
-    severity_threshold_block=None,  # rely on category rules only
+    # BLOCK inbound CRITICAL severity items (api_key_secret, private_key,
+    # bearer_token, db_connection_string). These should never reach an LLM
+    # even in masked form — the presence and context of a credential in the
+    # prompt is itself a risk signal.
+    severity_threshold_block=SensitivityLevel.CRITICAL,
     scan_responses=True,
 )
 

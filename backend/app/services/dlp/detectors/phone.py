@@ -63,9 +63,10 @@ _CONTEXT_WINDOW = 25
 class PhoneDetector(BaseDetector):
     name = "phone"
     category = "pii"
-    default_sensitivity = SensitivityLevel.MEDIUM
+    default_sensitivity = SensitivityLevel.HIGH
+    ACCEPTS_DECODED = True
 
-    def detect(self, text: str) -> list[DetectionMatch]:
+    def detect(self, text: str, *, from_decoded: bool = False) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []
         seen_spans: set[tuple[int, int]] = set()
 
@@ -104,8 +105,13 @@ class PhoneDetector(BaseDetector):
         # the ±_CONTEXT_WINDOW chars window. Without this gate, Unix epoch
         # timestamps, order numbers, and other arbitrary digit runs
         # would trigger false-positive masking.
+        # When from_decoded=True (base64 decoded content), skip the context
+        # requirement since the decoded text is isolated.
         for m in _BARE_DIGITS_RE.finditer(text):
             start, end = m.start(), m.end()
+            if from_decoded:
+                _emit(start, end, m.group())
+                continue
             low = max(0, start - _CONTEXT_WINDOW)
             high = min(len(text), end + _CONTEXT_WINDOW)
             window = text[low:high]

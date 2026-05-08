@@ -114,21 +114,14 @@ class TestE2EDLPMasking:
 class TestE2EDLPBlock:
     def test_aws_key_blocked(self):
         resp = _chat("My AWS key: AKIAIOSFODNN7EXAMPLE")
-        # secret category masks (not blocks) in default profile since Stage 6
-        assert resp.status_code == 200
+        assert resp.status_code == 403
         body = resp.json()
-        # secret category masks (not blocks) in default profile since Stage 6
-        assert body["policy_action"] == "mask"
-        # Input value is restored in the final response (masked only on
-        # the provider side — see test_e2e_dlp_flow.py).
-        assert "AKIAIOSFODNN7EXAMPLE" in body["choices"][0]["message"]["content"]
+        assert body["error"]["code"] == "dlp_violation"
 
     def test_bearer_token_blocked(self):
         resp = _chat("Use Bearer sk-proj-12345678901234567890abcdefghijklm")
-        # secret category masks (not blocks) in default profile since Stage 6
-        assert resp.status_code == 200
-        # secret category masks (not blocks) in default profile since Stage 6
-        assert resp.json()["policy_action"] == "mask"
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "dlp_violation"
 
 
 # ---------------------------------------------------------------------------

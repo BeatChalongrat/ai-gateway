@@ -69,34 +69,34 @@ class TestEveryDetectorE2E:
         assert r["status"] == 200
         assert r["body"]["policy_action"] == "mask"
 
-    def test_bearer_token_masked(self):
-        """Bearer tokens (category=secret) are masked by default profile."""
+    def test_bearer_token_blocked(self):
+        """Bearer tokens (category=secret, CRITICAL severity) are blocked by default profile."""
         r = _chat("Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
-    def test_aws_key_masked(self):
+    def test_aws_key_blocked(self):
         r = _chat("Key: AKIAIOSFODNN7EXAMPLE")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
-    def test_openai_key_masked(self):
+    def test_openai_key_blocked(self):
         r = _chat("OPENAI_API_KEY=sk-abcdefghij1234567890abcd")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
-    def test_github_token_masked(self):
+    def test_github_token_blocked(self):
         r = _chat("token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
-    def test_private_key_masked(self):
+    def test_private_key_blocked(self):
         r = _chat("-----BEGIN RSA PRIVATE KEY-----")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
     def test_password_field_masked(self):
-        """password_field (category=secret) is masked by default profile."""
+        """password_in_config is HIGH severity — below CRITICAL threshold — so masked, not blocked."""
         r = _chat("DB_PASSWORD=supersecret123")
         assert r["status"] == 200
         assert r["body"]["policy_action"] == "mask"
@@ -258,16 +258,11 @@ class TestPipelineEdgeCases:
         assert "a@example.com" in content
         assert "b@example.com" in content
 
-    def test_pii_and_secret_in_same_message_masked(self):
-        """Email (pii→mask) + AWS key (secret→mask in default) → overall mask."""
+    def test_pii_and_secret_in_same_message_blocked(self):
+        """Email (pii→mask) + AWS key (secret, CRITICAL→block) → 403."""
         r = _chat("email user@example.com key AKIAIOSFODNN7EXAMPLE")
-        assert r["status"] == 200
-        assert r["body"]["policy_action"] == "mask"
-        # Input PII is restored in the final response (see class docstring
-        # of test_multiple_emails_all_masked above).
-        content = r["body"]["choices"][0]["message"]["content"]
-        assert "user@example.com" in content
-        assert "AKIAIOSFODNN7EXAMPLE" in content
+        assert r["status"] == 403
+        assert r["body"]["error"]["code"] == "dlp_violation"
 
     def test_valid_response_shape_after_mask(self):
         """Masked response still has full ChatCompletionsResponse shape."""
@@ -281,14 +276,13 @@ class TestPipelineEdgeCases:
         assert "policy_action" in body
         assert "policy_reasons" in body
 
-    def test_masked_response_shape(self):
-        """A masked (not blocked) response still has the full envelope."""
+    def test_blocked_response_shape(self):
+        """A blocked response (CRITICAL secret) returns 403 error envelope."""
         r = _chat("-----BEGIN PRIVATE KEY-----")
-        assert r["status"] == 200
+        assert r["status"] == 403
         body = r["body"]
-        assert body["policy_action"] == "mask"
-        assert "choices" in body
-        assert "policy_reasons" in body
+        assert body["error"]["code"] == "dlp_violation"
+        assert "details" in body["error"]
 
 
 # ---------------------------------------------------------------------------

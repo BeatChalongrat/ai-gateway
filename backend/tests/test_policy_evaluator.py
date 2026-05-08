@@ -100,8 +100,8 @@ class TestBuiltInProfiles:
         # so API-key-in-prompt mistakes don't hard-fail customer requests.
         assert DEFAULT_PROFILE.category_actions.get("secret") == EnforcementAction.MASK
 
-    def test_default_no_severity_threshold(self):
-        assert DEFAULT_PROFILE.severity_threshold_block is None
+    def test_default_blocks_critical_severity(self):
+        assert DEFAULT_PROFILE.severity_threshold_block == SensitivityLevel.CRITICAL
 
     def test_strict_blocks_financial(self):
         assert STRICT_PROFILE.category_actions.get("financial") == EnforcementAction.BLOCK
@@ -176,13 +176,13 @@ class TestEvaluatorCategoryMapping:
         assert len(decision.match_actions) == 1
         assert decision.match_actions[0].action == EnforcementAction.MASK
 
-    def test_secret_masked_by_default_profile(self):
+    def test_secret_blocked_by_default_profile(self):
         decision = self.evaluator.evaluate(
             _result(_match(category="secret", severity=SensitivityLevel.CRITICAL)),
             DEFAULT_PROFILE,
         )
-        assert decision.overall_action == EnforcementAction.MASK
-        assert decision.is_blocked is False
+        assert decision.overall_action == EnforcementAction.BLOCK
+        assert decision.is_blocked is True
 
     def test_secret_blocked_by_strict_profile(self):
         decision = self.evaluator.evaluate(
@@ -247,14 +247,13 @@ class TestEvaluatorSeverityThreshold:
         # Falls through to category rule: pii → MASK
         assert decision.overall_action == EnforcementAction.MASK
 
-    def test_no_threshold_means_no_severity_block(self):
-        """Default profile has no threshold → CRITICAL pii is masked, not blocked."""
+    def test_default_threshold_blocks_critical_pii(self):
+        """Default profile has severity_threshold_block=CRITICAL → CRITICAL pii is blocked."""
         decision = self.evaluator.evaluate(
             _result(_match(category="pii", severity=SensitivityLevel.CRITICAL)),
             DEFAULT_PROFILE,
         )
-        # Category rule: pii → MASK (threshold is None, so severity check skipped)
-        assert decision.overall_action == EnforcementAction.MASK
+        assert decision.overall_action == EnforcementAction.BLOCK
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +264,8 @@ class TestEvaluatorSeverityThreshold:
 class TestEvaluatorEscalation:
     evaluator = PolicyEvaluator()
 
-    def test_mixed_pii_and_secret_overall_masked_in_default(self):
-        """Email (pii→mask) + AWS key (secret→mask) → overall MASK."""
+    def test_mixed_pii_and_secret_overall_blocked_in_default(self):
+        """Email (pii→mask) + AWS key (secret, CRITICAL→block) → overall BLOCK."""
         decision = self.evaluator.evaluate(
             _result(
                 _match(category="pii"),
@@ -274,11 +273,8 @@ class TestEvaluatorEscalation:
             ),
             DEFAULT_PROFILE,
         )
-        assert decision.overall_action == EnforcementAction.MASK
-        assert decision.is_blocked is False
-        actions = {ma.match.category: ma.action for ma in decision.match_actions}
-        assert actions["pii"] == EnforcementAction.MASK
-        assert actions["secret"] == EnforcementAction.MASK
+        assert decision.overall_action == EnforcementAction.BLOCK
+        assert decision.is_blocked is True
 
     def test_mixed_pii_and_secret_overall_blocked_in_strict(self):
         """Strict still blocks on secret."""

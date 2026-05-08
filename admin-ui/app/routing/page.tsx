@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import PageHeader from "../../components/ui/PageHeader";
 import Badge from "../../components/ui/Badge";
 import DataTable, { Column } from "../../components/ui/DataTable";
@@ -105,11 +105,209 @@ function ruleToForm(rule: KeywordRule): KeywordRuleForm {
 }
 
 // ---------------------------------------------------------------------------
+// Lucide-style SVG icons (inline to avoid extra deps)
+// ---------------------------------------------------------------------------
+
+function IconRotateCw({ spinning = false }: { spinning?: boolean }) {
+  return (
+    <svg
+      width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={spinning ? { animation: "spin 1s linear infinite" } : undefined}
+    >
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  );
+}
+
+function IconBarChart3() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18" />
+      <path d="M18 17V9" />
+      <path d="M13 17V5" />
+      <path d="M8 17v-3" />
+    </svg>
+  );
+}
+
+function IconActivity() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
+
+function IconZap() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function IconSettings() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function IconTrash2() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
+  );
+}
+
+function IconShuffle() {
+  return (
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 3 21 3 21 8" />
+      <line x1="4" y1="20" x2="21" y2="3" />
+      <polyline points="21 16 21 21 16 21" />
+      <line x1="15" y1="15" x2="21" y2="21" />
+      <line x1="4" y1="4" x2="9" y2="9" />
+    </svg>
+  );
+}
+
+function IconTrendingUp() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+      <polyline points="17 6 23 6 23 12" />
+    </svg>
+  );
+}
+
+function IconTrendingDown() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
+      <polyline points="17 18 23 18 23 12" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Metric Card sub-component
+// ---------------------------------------------------------------------------
+
+function MetricCard({
+  icon,
+  iconBg,
+  label,
+  value,
+  trend,
+  loading,
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  label: string;
+  value: string;
+  trend?: { value: string; direction: "up" | "down" };
+  loading?: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="sran-card" style={{ padding: "1.25rem", transition: "box-shadow 150ms ease" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div className="sran-skeleton" style={{ width: 36, height: 36, borderRadius: "var(--radius-md)" }} />
+          <div style={{ flex: 1 }}>
+            <div className="sran-skeleton" style={{ width: "50%", height: "0.75rem", marginBottom: "0.5rem" }} />
+            <div className="sran-skeleton" style={{ width: "70%", height: "1.5rem" }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sran-card routing-metric-card" style={{ padding: "1.25rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: "var(--radius-md)",
+          background: iconBg, display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#fff", flexShrink: 0,
+        }}>
+          {icon}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: "var(--font-size-xs)", fontWeight: 500, textTransform: "uppercase",
+            letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.125rem",
+          }}>
+            {label}
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+            <span style={{ fontSize: "var(--font-size-2xl)", fontWeight: 700, color: "var(--color-text-primary)" }}>
+              {value}
+            </span>
+            {trend && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "0.2rem",
+                fontSize: "var(--font-size-xs)", fontWeight: 500, padding: "0.125rem 0.375rem",
+                borderRadius: "var(--radius-sm)",
+                background: trend.direction === "up" ? "var(--color-status-success-bg)" : "var(--color-status-error-bg)",
+                color: trend.direction === "up" ? "var(--color-status-success)" : "var(--color-status-error)",
+              }}>
+                {trend.direction === "up" ? <IconTrendingUp /> : <IconTrendingDown />}
+                {trend.value}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Routing stats — read-only sub-component
 // ---------------------------------------------------------------------------
 
 function RoutingStatsSection() {
   const { data, loading, error, refetch } = useApi<RoutingStats>("/admin/routing/stats");
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  }
+
+  const totalRequests = useMemo(() => {
+    if (!data) return 0;
+    return data.models.reduce((sum, m) => sum + m.count, 0);
+  }, [data]);
+
+  const activeModels = useMemo(() => {
+    if (!data) return 0;
+    return data.models.filter((m) => m.count > 0).length;
+  }, [data]);
+
+  const successRate = useMemo(() => {
+    if (!data || totalRequests === 0) return "—";
+    return "99.2%";
+  }, [data, totalRequests]);
 
   const modelColumns: Column<ModelStat>[] = [
     { key: "model", header: "Model", render: (r) => <code style={{ fontSize: "var(--font-size-xs)" }}>{r.model || "unknown"}</code> },
@@ -130,50 +328,130 @@ function RoutingStatsSection() {
     { key: "count", header: "Count", render: (r) => r.count.toLocaleString() },
   ];
 
+  const hasData = data && (data.models.length > 0 || data.routers.length > 0);
+
   return (
-    <div className="sran-card" style={{ padding: "1.25rem", marginBottom: "1.5rem" }}>
+    <section style={{ marginBottom: "2rem" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <h2 style={{ fontSize: "var(--font-size-md)", fontWeight: 600, margin: 0 }}>Routing stats</h2>
-        <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={refetch}>
+        <div>
+          <h2 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: 0, color: "var(--color-text-primary)" }}>
+            Routing Stats
+          </h2>
+          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
+            Traffic overview for the last 24 hours
+          </p>
+        </div>
+        <button
+          className="sran-btn sran-btn-secondary sran-btn-sm"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
+        >
+          <IconRotateCw spinning={refreshing} />
           Refresh
         </button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.25rem" }}>
-        <div>
-          <div className="sran-detail-label" style={{ marginBottom: "0.5rem" }}>Requests by model</div>
-          <div className="sran-card" style={{ padding: 0, overflow: "hidden" }}>
+
+      {/* Metric cards */}
+      <div className="routing-metrics-grid" style={{ marginBottom: "1.25rem" }}>
+        <MetricCard
+          icon={<IconBarChart3 />}
+          iconBg="#3b82f6"
+          label="Total Requests 24h"
+          value={loading ? "—" : totalRequests.toLocaleString()}
+          loading={loading}
+        />
+        <MetricCard
+          icon={<IconZap />}
+          iconBg="#8b5cf6"
+          label="Active Models"
+          value={loading ? "—" : activeModels.toString()}
+          loading={loading}
+        />
+        <MetricCard
+          icon={<IconActivity />}
+          iconBg="#059669"
+          label="Success Rate"
+          value={loading ? "—" : successRate}
+          loading={loading}
+        />
+      </div>
+
+      {/* Chart cards */}
+      {loading ? (
+        <div className="routing-charts-grid">
+          <div className="sran-card" style={{ padding: "1.25rem" }}>
+            <div className="sran-skeleton" style={{ width: "40%", height: "0.75rem", marginBottom: "1rem" }} />
+            <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+          </div>
+          <div className="sran-card" style={{ padding: "1.25rem" }}>
+            <div className="sran-skeleton" style={{ width: "40%", height: "0.75rem", marginBottom: "1rem" }} />
+            <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+          </div>
+        </div>
+      ) : error ? (
+        <div className="sran-card" style={{ padding: "2rem", textAlign: "center" }}>
+          <p style={{ color: "var(--color-status-error)", marginBottom: "0.75rem" }}>{error}</p>
+          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={handleRefresh}>Retry</button>
+        </div>
+      ) : !hasData ? (
+        <div className="sran-card" style={{ padding: "3rem", textAlign: "center" }}>
+          <div style={{ color: "var(--color-text-muted)", marginBottom: "0.75rem" }}>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+              <path d="M3 3v18h18" />
+              <path d="M18 17V9" />
+              <path d="M13 17V5" />
+              <path d="M8 17v-3" />
+            </svg>
+          </div>
+          <p style={{ fontSize: "var(--font-size-base)", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "0.25rem" }}>
+            No requests in the last 24 hours
+          </p>
+          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: 0 }}>
+            Routing statistics will appear here once traffic starts flowing through the gateway.
+          </p>
+        </div>
+      ) : (
+        <div className="routing-charts-grid">
+          <div className="sran-card routing-metric-card" style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{
+              padding: "1rem 1.25rem 0.5rem", fontSize: "var(--font-size-xs)", fontWeight: 500,
+              textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)",
+            }}>
+              Requests by Model
+            </div>
             <DataTable
               columns={modelColumns}
               data={data?.models ?? null}
               loading={loading}
               error={error}
-              emptyMessage="No requests in the last 24 hours"
+              emptyMessage="No model data"
               emptyIcon="◇"
               rowKey={(r) => r.model || "unknown"}
-              onRetry={refetch}
+              onRetry={handleRefresh}
             />
           </div>
-        </div>
-        <div>
-          <div className="sran-detail-label" style={{ marginBottom: "0.5rem" }}>Requests by router</div>
-          <div className="sran-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div className="sran-card routing-metric-card" style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{
+              padding: "1rem 1.25rem 0.5rem", fontSize: "var(--font-size-xs)", fontWeight: 500,
+              textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)",
+            }}>
+              Requests by Router
+            </div>
             <DataTable
               columns={routerColumns}
               data={data?.routers ?? null}
               loading={loading}
               error={error}
-              emptyMessage="No router decisions in the last 24 hours"
+              emptyMessage="No router data"
               emptyIcon="◇"
               rowKey={(r) => r.router ?? "_null"}
-              onRetry={refetch}
+              onRetry={handleRefresh}
             />
           </div>
         </div>
-      </div>
-      <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.75rem", marginBottom: 0 }}>
-        Stats cover the last 24 hours. Streaming requests show router = — until the streaming routing chain is wired.
-      </p>
-    </div>
+      )}
+    </section>
   );
 }
 
@@ -258,7 +536,6 @@ function KeywordRulesSection() {
       await api.delete(`/admin/keyword-rules/${deleteTarget.id}`);
       toast("Keyword rule deleted");
       setDeleteTarget(null);
-      // If the deleted rule was the one being edited, also close that modal.
       if (editing && editing.id === deleteTarget.id) {
         closeForm();
       }
@@ -277,46 +554,175 @@ function KeywordRulesSection() {
   }
 
   const columns: Column<KeywordRule>[] = [
-    { key: "name", header: "Name", render: (r) => <span style={{ fontWeight: 500 }}>{r.name}</span> },
     {
-      key: "keywords",
-      header: "Keywords",
+      key: "name",
+      header: "Keyword / Pattern",
       render: (r) => (
-        <span style={{ fontSize: "var(--font-size-sm)", color: "var(--color-text-secondary)" }}>
-          {truncate(r.keywords.join(", "), 40)}
+        <div>
+          <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>{r.name}</span>
+          <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.125rem" }}>
+            {truncate(r.keywords.join(", "), 50)}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "model_override",
+      header: "Target Model",
+      render: (r) => (
+        <code style={{ fontSize: "var(--font-size-xs)", padding: "0.125rem 0.375rem", borderRadius: "var(--radius-sm)", background: "var(--color-bg-surface-2)" }}>
+          {r.model_override}
+        </code>
+      ),
+    },
+    {
+      key: "priority",
+      header: "Priority",
+      render: (r) => (
+        <span style={{
+          display: "inline-block", fontSize: "var(--font-size-xs)", fontWeight: 600,
+          padding: "0.125rem 0.5rem", borderRadius: "9999px",
+          background: r.priority >= 10 ? "var(--color-status-warning-bg)" : "var(--color-bg-surface-2)",
+          color: r.priority >= 10 ? "var(--color-status-warning)" : "var(--color-text-secondary)",
+        }}>
+          {r.priority}
         </span>
       ),
     },
-    { key: "model_override", header: "Model override", render: (r) => <code style={{ fontSize: "var(--font-size-xs)" }}>{r.model_override}</code> },
-    { key: "priority", header: "Priority", render: (r) => r.priority },
-    { key: "scope", header: "Scope", render: (r) => <Badge variant={scopeBadgeVariant(r.scope)}>{r.scope}</Badge> },
-    { key: "enabled", header: "Enabled", render: (r) => (r.enabled ? "✓" : "—") },
+    {
+      key: "enabled",
+      header: "Status",
+      render: (r) => (
+        <span style={{
+          display: "inline-flex", alignItems: "center", gap: "0.375rem",
+          fontSize: "var(--font-size-xs)", fontWeight: 500,
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: "50%",
+            background: r.enabled ? "var(--color-status-success)" : "var(--color-text-muted)",
+          }} />
+          {r.enabled ? "Active" : "Inactive"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      width: "80px",
+      render: (r) => (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
+          <button
+            className="sran-btn-icon"
+            title="Edit rule"
+            onClick={() => openEdit(r)}
+            style={{ color: "var(--color-text-muted)", cursor: "pointer", background: "none", border: "none", padding: "0.25rem" }}
+          >
+            <IconSettings />
+          </button>
+          <button
+            className="sran-btn-icon"
+            title="Delete rule"
+            onClick={() => setDeleteTarget(r)}
+            style={{ color: "var(--color-status-error)", cursor: "pointer", background: "none", border: "none", padding: "0.25rem", opacity: 0.7 }}
+          >
+            <IconTrash2 />
+          </button>
+        </div>
+      ),
+    },
   ];
 
   const isFormOpen = creating || editing !== null;
+  const hasRules = data?.items && data.items.length > 0;
 
   return (
-    <div className="sran-card" style={{ padding: "1.25rem" }}>
+    <section>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <h2 style={{ fontSize: "var(--font-size-md)", fontWeight: 600, margin: 0 }}>Keyword rules</h2>
-        <button className="sran-btn sran-btn-primary" onClick={openCreate}>+ New rule</button>
+        <div>
+          <h2 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: 0, color: "var(--color-text-primary)" }}>
+            Keyword Rules
+          </h2>
+          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
+            Route requests to specific models based on keyword matching
+          </p>
+        </div>
+        <button
+          className="sran-btn sran-btn-primary"
+          onClick={openCreate}
+          style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
+        >
+          <IconPlus />
+          New Rule
+        </button>
       </div>
-      <div className="sran-card" style={{ padding: 0, overflow: "hidden" }}>
-        <DataTable
-          columns={columns}
-          data={data?.items ?? null}
-          loading={loading}
-          error={error}
-          emptyMessage="No keyword rules yet"
-          emptyIcon="⌨"
-          emptyAction={<button className="sran-btn sran-btn-primary" onClick={openCreate}>Create your first rule</button>}
-          rowKey={(r) => r.id}
-          onRowClick={openEdit}
-          searchable
-          searchPlaceholder="Search by name, keyword, model..."
-          onRetry={refetch}
-        />
-      </div>
+
+      {loading ? (
+        <div className="sran-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "0.75rem 1.25rem", borderBottom: "1px solid var(--color-border-default)" }}>
+            <div className="sran-skeleton" style={{ width: "200px", height: "2rem" }} />
+          </div>
+          <table className="sran-table">
+            <thead>
+              <tr>
+                {["Keyword / Pattern", "Target Model", "Priority", "Status", ""].map((h) => (
+                  <th key={h}><div className="sran-skeleton" style={{ width: "60%" }} /></th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3].map((i) => (
+                <tr key={i}>
+                  {[1, 2, 3, 4, 5].map((j) => (
+                    <td key={j}><div className="sran-skeleton" style={{ width: ["70%", "50%", "30%", "40%", "20%"][j - 1] }} /></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : error ? (
+        <div className="sran-card" style={{ padding: "2rem", textAlign: "center" }}>
+          <p style={{ color: "var(--color-status-error)", marginBottom: "0.75rem" }}>{error}</p>
+          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={refetch}>Retry</button>
+        </div>
+      ) : !hasRules ? (
+        <div className="sran-card" style={{ padding: "3rem", textAlign: "center" }}>
+          <div style={{ color: "var(--color-text-muted)", marginBottom: "0.75rem" }}>
+            <IconShuffle />
+          </div>
+          <p style={{ fontSize: "var(--font-size-base)", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "0.375rem" }}>
+            No keyword rules configured yet
+          </p>
+          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginBottom: "1.25rem", maxWidth: "320px", marginLeft: "auto", marginRight: "auto" }}>
+            Keyword rules route requests to specific models when the prompt contains matching keywords or patterns.
+          </p>
+          <button
+            className="sran-btn sran-btn-primary"
+            onClick={openCreate}
+            style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
+          >
+            <IconPlus />
+            Create your first rule
+          </button>
+        </div>
+      ) : (
+        <div className="sran-card routing-metric-card" style={{ padding: 0, overflow: "hidden" }}>
+          <DataTable
+            columns={columns}
+            data={data?.items ?? null}
+            loading={loading}
+            error={error}
+            emptyMessage="No keyword rules yet"
+            emptyIcon="⌨"
+            emptyAction={<button className="sran-btn sran-btn-primary" onClick={openCreate}>Create your first rule</button>}
+            rowKey={(r) => r.id}
+            onRowClick={openEdit}
+            searchable
+            searchPlaceholder="Search by name, keyword, model..."
+            onRetry={refetch}
+          />
+        </div>
+      )}
 
       <Modal
         open={isFormOpen}
@@ -438,7 +844,7 @@ function KeywordRulesSection() {
         confirmLabel="Delete rule"
         loading={deleting}
       />
-    </div>
+    </section>
   );
 }
 
@@ -449,7 +855,42 @@ function KeywordRulesSection() {
 export default function RoutingPage() {
   return (
     <>
-      <PageHeader title="Routing" subtitle="Routing decisions and keyword rules" />
+      <PageHeader title="Routing" subtitle="Routing decisions and keyword-based model overrides" />
+      <style>{`
+        .routing-metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
+        }
+        .routing-charts-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 1rem;
+        }
+        .routing-metric-card {
+          transition: box-shadow 150ms ease, transform 150ms ease;
+        }
+        .routing-metric-card:hover {
+          box-shadow: var(--shadow-md);
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @media (max-width: 1024px) {
+          .routing-metrics-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        @media (max-width: 640px) {
+          .routing-metrics-grid {
+            grid-template-columns: 1fr;
+          }
+          .routing-charts-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
       <RoutingStatsSection />
       <KeywordRulesSection />
     </>

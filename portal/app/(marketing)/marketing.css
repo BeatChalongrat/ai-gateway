@@ -543,6 +543,65 @@
   0% { background-position: 200% 0; }
   100% { background-position: 0% 0; }
 }
+@keyframes flow-right {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* ===== Cyber/hi-tech card effects ===== */
+@keyframes cyber-sweep {
+  0%   { transform: scaleX(0); transform-origin: left;  opacity: 0; }
+  50%  { transform: scaleX(1); opacity: 0.6; }
+  100% { transform: scaleX(0); transform-origin: right; opacity: 0; }
+}
+@keyframes scan-vertical {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+@keyframes glare-sweep {
+  0%   { transform: translateX(-100%) skewX(-20deg); opacity: 1; }
+  100% { transform: translateX(260%)  skewX(-20deg); opacity: 0; }
+}
+
+.cyber-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(139,92,246,0.4), transparent);
+  animation: cyber-sweep 4s linear infinite;
+  pointer-events: none;
+}
+.cyber-line-1 { top: 25%; animation-delay: 0s; }
+.cyber-line-2 { top: 50%; animation-delay: 1.3s; }
+.cyber-line-3 { top: 75%; animation-delay: 2.6s; }
+
+.scan-line-vertical {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent, rgba(139,92,246,0.08), transparent);
+  animation: scan-vertical 5s linear infinite;
+  pointer-events: none;
+}
+
+.card-glare-on-hover {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,255,255,0.4),
+    transparent
+  );
+  transform: translateX(-100%) skewX(-20deg);
+  opacity: 0;
+  pointer-events: none;
+}
+.group:hover .card-glare-on-hover {
+  animation: glare-sweep 0.8s ease-out forwards;
+}
 
 .flow-stats {
   margin-top: 24px;
