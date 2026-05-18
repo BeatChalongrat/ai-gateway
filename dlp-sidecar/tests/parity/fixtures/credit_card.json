@@ -1,0 +1,89 @@
+{
+  "detector": "credit_card",
+  "entity_type": "credit_card_number",
+  "category": "financial",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "visa_no_separators",
+      "input": "card 4111111111111111 expires",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "visa_dashed",
+      "input": "card 4111-1111-1111-1111 ok",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "mastercard_spaces",
+      "input": "card 5500 0055 5555 5559 ok",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "amex_15_digits",
+      "input": "card 378282246310005 charged",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "discover_test",
+      "input": "card 6011111111111117 saved",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "invalid_luhn",
+      "input": "the number 4111111111111112 wrong",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "too_short",
+      "input": "card 411111111111 only 12",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose",
+      "input": "no card here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

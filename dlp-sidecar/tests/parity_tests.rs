@@ -116,3 +116,11 @@ parity_test!(thai_national_id, "tests/parity/fixtures/thai_national_id.json");
 parity_test!(thai_tax_id, "tests/parity/fixtures/thai_tax_id.json");
 parity_test!(thai_bank_account, "tests/parity/fixtures/thai_bank_account.json");
 parity_test!(thai_promptpay, "tests/parity/fixtures/thai_promptpay.json");
+// Batch 4 — names / credit card / passport
+parity_test!(thai_name, "tests/parity/fixtures/thai_name.json");
+parity_test!(
+    thai_name_no_prefix,
+    "tests/parity/fixtures/thai_name_no_prefix.json"
+);
+parity_test!(credit_card, "tests/parity/fixtures/credit_card.json");
+parity_test!(passport, "tests/parity/fixtures/passport.json");

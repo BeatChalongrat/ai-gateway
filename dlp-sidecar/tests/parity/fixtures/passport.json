@@ -1,0 +1,70 @@
+{
+  "detector": "passport",
+  "entity_type": "passport_number",
+  "category": "identity",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "passport_no_letter_prefix",
+      "input": "passport AB1234567 issued",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "passport_number_colon",
+      "input": "passport number: A1234567 ok",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 17,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "thai_keyword",
+      "input": "หนังสือเดินทาง AA1234567 ของผม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 15,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "us_bare_9_digit",
+      "input": "passport 123456789 confirmed",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "no_keyword_no_match",
+      "input": "AB1234567 just sitting there",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose",
+      "input": "no travel info today",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "detector": "thai_name",
+  "entity_type": "thai_name",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "thai_prefix_full",
+      "input": "ลูกค้าชื่อ นาย สมชาย ใจดี",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "nang_sao",
+      "input": "ผู้รับ นางสาว สมหญิง สมบูรณ์",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "id": "doctor",
+      "input": "ดร. สมศักดิ์ มากมี เข้าร่วม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "english_dr_thai_name",
+      "input": "Dr. สมชาย ใจดี attended",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 14
+        }
+      ]
+    },
+    {
+      "id": "nayok_compound_no_match",
+      "input": "นายกรัฐมนตรี กล่าวต่อ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "nay_pol_compound_no_match",
+      "input": "นายพล ผู้บัญชาการ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose_no_match",
+      "input": "วันนี้ฝนตก",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}
