@@ -12,48 +12,41 @@ the regex to Thai labels.
 
 from __future__ import annotations
 
-from ._helpers import mask
+from ._helpers import has_match, mask
+
+
+_PASSWORDISH = ("password_field", "api_key_secret", "db_connection_string")
 
 
 class TestPasswordHappyPath:
     def test_label_preserved_en(self):
-        masked, span_map, _ = mask("Password: P@ssw0rd123!")
+        masked, _, matches = mask("Password: P@ssw0rd123!")
         assert masked.startswith("Password:")
         # Some pipelines pick credential_assignment (api_key_secret)
-        # instead of password_field on the same span — both produce
-        # tokens we accept.
-        assert any(
-            ("PASSWORD" in t or "CREDENTIAL" in t) for t in span_map
-        )
+        # instead of password_field on the same span — both are acceptable.
+        assert has_match(matches, *_PASSWORDISH)
 
     def test_case_insensitive_label(self):
-        masked, span_map, _ = mask("password: secret123")
-        # Either label-detector token is acceptable.
-        assert any(
-            ("PASSWORD" in t or "CREDENTIAL" in t) for t in span_map
-        )
+        _, _, matches = mask("password: secret123")
+        assert has_match(matches, *_PASSWORDISH)
 
 
 class TestPasswordBoundary:
     def test_passwd_label(self):
-        masked, span_map, _ = mask("passwd: abc123")
-        assert any(
-            ("PASSWORD" in t or "CREDENTIAL" in t) for t in span_map
-        )
+        _, _, matches = mask("passwd: abc123")
+        assert has_match(matches, *_PASSWORDISH)
 
     def test_pwd_label(self):
-        masked, span_map, _ = mask("pwd: mypassword")
-        assert any(
-            ("PASSWORD" in t or "CREDENTIAL" in t) for t in span_map
-        )
+        _, _, matches = mask("pwd: mypassword")
+        assert has_match(matches, *_PASSWORDISH)
 
 
 class TestPasswordNegative:
     def test_no_value_after_label(self):
         # "reset your password" — there is a label but no separator+value.
-        masked, span_map, _ = mask("Please reset your password")
-        assert not any("PASSWORD" in t for t in span_map)
+        _, _, matches = mask("Please reset your password")
+        assert not has_match(matches, "password_field")
 
     def test_thai_prompt_without_value(self):
-        masked, span_map, _ = mask("ลืมรหัสผ่าน")
-        assert not any("PASSWORD" in t for t in span_map)
+        _, _, matches = mask("ลืมรหัสผ่าน")
+        assert not has_match(matches, "password_field")

@@ -91,7 +91,7 @@ def test_RT_01_email_roundtrip_nonstream(client, auth_headers, monkeypatch):
         # already DLP-masked by the orchestrator's pre-dispatch step.
         captured["provider_saw"] = messages[-1].content
         return ProviderResponse(
-            content="ส่งให้ [EMAIL_0] แล้วครับ",
+            content="ส่งให้ <r0> แล้วครับ",
             model=route.model_name,
         )
 
@@ -116,9 +116,9 @@ def test_RT_01_email_roundtrip_nonstream(client, auth_headers, monkeypatch):
     # The provider must have seen the masked placeholder, NOT the
     # raw email. The user must see the restored original.
     assert "john@acme.com" not in captured["provider_saw"]
-    assert "[EMAIL_0]" in captured["provider_saw"]
+    assert "<r0>" in captured["provider_saw"]
     assert "john@acme.com" in user_got
-    assert "[EMAIL_0]" not in user_got
+    assert "<r0>" not in user_got
 
     _print_rt("RT-01", captured["provider_saw"], user_got)
 
@@ -280,9 +280,9 @@ def test_RT_04_outbound_scan_masks_hallucinated_pii(
     assert "hacker@evil.com" not in user_got, (
         f"Outbound DLP failed to mask hallucinated email: {user_got!r}"
     )
-    # The mask token should be present in its indexed form.
-    assert "[EMAIL_" in user_got, (
-        f"Expected an [EMAIL_N] mask in user output, got {user_got!r}"
+    # The mask token should be present in its neutral form.
+    assert "<r" in user_got, (
+        f"Expected a <rN> mask in user output, got {user_got!r}"
     )
     _print_rt("RT-04", captured["provider_saw"], user_got)
 
@@ -310,7 +310,7 @@ def test_RT_05_streaming_email_roundtrip(client, auth_headers, monkeypatch):
         masked_inbound["messages"] = messages[-1].content
         for chunk in (
             "ส่งให้ ",
-            "[EMAIL_0]",
+            "<r0>",
             " แล้วครับ",
         ):
             captured["chunks_sent"] += 1
@@ -359,11 +359,11 @@ def test_RT_05_streaming_email_roundtrip(client, auth_headers, monkeypatch):
             assembled += delta
 
     assert "john@acme.com" not in masked_inbound["messages"]
-    assert "[EMAIL_0]" in masked_inbound["messages"]
+    assert "<r0>" in masked_inbound["messages"]
     assert "john@acme.com" in assembled, (
         f"Streamed body did not restore the email: {assembled!r}"
     )
-    assert "[EMAIL_0]" not in assembled, (
+    assert "<r0>" not in assembled, (
         f"Streamed body leaked the mask token: {assembled!r}"
     )
     _print_rt("RT-05", masked_inbound["messages"], assembled)
@@ -378,7 +378,7 @@ def test_RT_06_multiturn_vault_resolves_orphan(
 ):
     """Turn 1 leaks no token in the AI reply (we simulate a benign
     response). Turn 2 has a clean input — empty span_map locally —
-    but the AI echoes ``[EMAIL_0]`` from its memory of turn 1. The
+    but the AI echoes ``<r0>`` from its memory of turn 1. The
     vault must resolve that orphan back to the original."""
     conv_id = f"rt06-{uuid.uuid4()}"
 
@@ -408,7 +408,7 @@ def test_RT_06_multiturn_vault_resolves_orphan(
 
     # The vault should have learned exactly one EMAIL token bound
     # to ``john@acme.com``. Token shape depends on mode:
-    #   - counter mode (no conversation_id) → ``[EMAIL_0]``
+    #   - counter mode (no conversation_id) → ``<r0>``
     #   - deterministic mode (with conversation_id) → ``[EMAIL_xxxxxxxx]``
     # This test supplies a ``conversation_id`` so deterministic mode
     # is active. Pull the actual minted token from the vault rather

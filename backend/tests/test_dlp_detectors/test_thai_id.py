@@ -19,44 +19,48 @@ INVALID_ID = "3100112345671"  # wrong check digit
 NOT_A_VALID_ID_BUT_LABELLED = "1101700203451"  # fails checksum
 
 
+def _has_thai_id(matches) -> bool:
+    return any(ma.match.detector_name == "thai_national_id" for ma in matches)
+
+
 class TestThaiIdHappyPath:
     def test_bare_valid_id_en(self):
-        _, span_map, _ = mask(VALID_ID)
-        assert tokens_in(span_map, "THAI_ID") == ["[THAI_ID_0]"]
+        _, span_map, matches = mask(VALID_ID)
+        assert tokens_in(span_map, "THAI_ID", matches) == ["<r0>"]
 
     def test_label_preserved_en(self):
-        masked, span_map, _ = mask(f"Thai ID: {VALID_ID}")
+        masked, _, _ = mask(f"Thai ID: {VALID_ID}")
         assert "Thai ID:" in masked
-        assert "[THAI_ID_0]" in masked
+        assert "<r0>" in masked
 
     def test_thai_label(self):
         text = f"เลขบัตรประชาชน: {VALID_ID}"
-        _, span_map, _ = mask(text)
-        assert any("THAI_ID" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_thai_id(matches)
 
     def test_dashed_form_thai(self):
         text = "บัตรประชาชนเลข 3-1001-12345-67-4"
-        _, span_map, _ = mask(text)
-        assert any("THAI_ID" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_thai_id(matches)
 
 
 class TestThaiIdBoundary:
     def test_dashed_form_en(self):
-        _, span_map, _ = mask("3-1001-12345-67-4")
-        assert any("THAI_ID" in t for t in span_map)
+        _, _, matches = mask("3-1001-12345-67-4")
+        assert _has_thai_id(matches)
 
     def test_thai_long_label(self):
         text = f"หมายเลขประจำตัวประชาชน {VALID_ID}"
-        _, span_map, _ = mask(text)
-        assert any("THAI_ID" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_thai_id(matches)
 
     def test_keyword_overrides_checksum(self):
         # The keyword-gated path masks even when the checksum fails —
         # an operator-labelled ID field is itself the signal.
-        masked, span_map, _ = mask(
+        _, _, matches = mask(
             f"เลขบัตรประชาชน: {NOT_A_VALID_ID_BUT_LABELLED}"
         )
-        assert any("THAI_ID" in t for t in span_map)
+        assert _has_thai_id(matches)
 
 
 class TestThaiIdNegative:

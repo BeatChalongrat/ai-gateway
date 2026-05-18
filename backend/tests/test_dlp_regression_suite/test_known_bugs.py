@@ -10,7 +10,7 @@ and the *fix* (commit / change that resolved it).
 
 from __future__ import annotations
 
-from ..test_dlp_detectors._helpers import mask, restore
+from ..test_dlp_detectors._helpers import has_match, mask, restore
 
 
 # ---------------------------------------------------------------------------
@@ -44,13 +44,13 @@ def test_religion_false_positive_on_thai_polite_phrase():
 
 
 def test_phone_priority_over_ner_en():
-    # Bug: ``+66 81-234-5678`` rendered as ``[NAME_1]`` because NER
+    # Bug: ``+66 81-234-5678`` rendered as a NAME token because NER
     # PERSON and phone matched the same span and NER had stable
     # ordering. The phone detector now carries priority=5 which beats
     # NER's default priority=0.
-    _, span_map, _ = mask("+66 81-234-5678")
-    assert any("PHONE_NUMBER" in t for t in span_map)
-    assert not any("NAME" in t for t in span_map)
+    _, _, matches = mask("+66 81-234-5678")
+    assert has_match(matches, "phone")
+    assert not has_match(matches, "presidio_ner", "thai_name", "thai_name_no_prefix")
 
 
 # ---------------------------------------------------------------------------
@@ -63,18 +63,18 @@ def test_health_condition_does_not_eat_salary_en():
         "Medical: diabetes and high blood pressure, "
         "Salary: 120,000 THB/month"
     )
-    masked, span_map, _ = mask(text)
-    assert any("HEALTH_CONDITION" in t for t in span_map)
-    assert any("INCOME" in t for t in span_map)
+    masked, span_map, matches = mask(text)
+    assert has_match(matches, "health_condition")
+    assert has_match(matches, "income")
     # Round-trip is the strongest guarantee: nothing got eaten.
     assert restore(masked, span_map) == text
 
 
 def test_health_condition_does_not_eat_salary_th():
     text = "ผมป่วยเป็นเบาหวาน, เงินเดือน: 85,000 บาท"
-    _, span_map, _ = mask(text)
-    assert any("HEALTH_CONDITION" in t for t in span_map)
-    assert any("INCOME" in t for t in span_map)
+    _, _, matches = mask(text)
+    assert has_match(matches, "health_condition")
+    assert has_match(matches, "income")
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +85,11 @@ def test_health_condition_does_not_eat_salary_th():
 def test_ip_address_not_double_tagged_in_credential():
     text = "postgresql://admin:pass@192.168.1.105:5432/prod"
     _, span_map, _ = mask(text)
-    cred_count = sum(1 for t in span_map if "CREDENTIAL" in t)
-    ip_count = sum(1 for t in span_map if "IP_ADDRESS" in t)
-    assert cred_count == 1
-    assert ip_count == 0
+    # Overlap resolution must keep exactly one span — the full URL —
+    # with no separate IP span minted alongside it.
+    assert len(span_map) == 1
+    [value] = span_map.values()
+    assert value == text
 
 
 # ---------------------------------------------------------------------------
@@ -126,41 +127,39 @@ def test_salary_word_not_tagged_as_name():
 
 def test_own_tokens_not_retagged_by_presidio():
     # The orchestrator scans the inbound prompt AFTER inbound masking
-    # has run. Tokens like ``[EMAIL_0]`` are already-redacted markers
-    # and must NOT be re-classified as names.
-    text = "Your email is [EMAIL_0] and your name is [NAME_0]"
+    # has run. Tokens like ``<r0>`` are already-redacted markers and
+    # must NOT be re-classified as names.
+    text = "Your email is <r0> and your name is <r1>"
     masked, _, _ = mask(text)
     assert masked == text
 
 
 # ---------------------------------------------------------------------------
-# Double-bracket sanitizer — model emits ``[[PHONE_NUMBER_0]]``
+# Double-angle sanitizer — model emits ``<<r0>>``
 # ---------------------------------------------------------------------------
 
 
-def test_double_bracket_sanitizer_en():
-    # Some models occasionally over-bracket the masked tokens we
-    # passed in. The sanitizer unwraps ``[[…]]`` to ``[…]`` when the
-    # inner token is in span_map; otherwise it replaces with
-    # ``[REDACTED]`` so the panel never shows ``Phone: [[NAME_1]]``.
+def test_double_angle_sanitizer_en():
+    # Some models occasionally over-wrap the masked tokens we passed
+    # in. The sanitizer unwraps ``<<…>>`` to ``<…>`` when the inner
+    # token is in span_map; otherwise it replaces with ``[REDACTED]``
+    # so the panel never shows ``Phone: <<r1>>``.
     from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
-    span_map = {"[PHONE_NUMBER_0]": "+66 81-234-5678"}
+    span_map = {"<r0>": "+66 81-234-5678"}
     assert (
-        sanitize_hallucinated_brackets(
-            "Phone: [[PHONE_NUMBER_0]]", span_map
-        )
-        == "Phone: [PHONE_NUMBER_0]"
+        sanitize_hallucinated_brackets("Phone: <<r0>>", span_map)
+        == "Phone: <r0>"
     )
 
 
-def test_double_bracket_sanitizer_redacts_unknown():
+def test_double_angle_sanitizer_redacts_unknown():
     # Inner token NOT in span_map — sanitizer falls back to literal
     # ``[REDACTED]``.
     from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
     assert (
-        sanitize_hallucinated_brackets("Phone: [[NAME_1]]", {})
+        sanitize_hallucinated_brackets("Phone: <<r1>>", {})
         == "Phone: [REDACTED]"
     )
 
@@ -221,5 +220,5 @@ def test_thai_national_id_invalid_checksum_not_detected():
 
 def test_thai_national_id_valid_checksum_detected():
     valid = "3100112345674"  # mod-11 verified
-    _, span_map, _ = mask(valid)
-    assert any("THAI_ID" in t for t in span_map)
+    _, _, matches = mask(valid)
+    assert has_match(matches, "thai_national_id")

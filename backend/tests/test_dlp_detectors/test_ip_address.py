@@ -5,38 +5,46 @@ from __future__ import annotations
 from ._helpers import detector_names_for, mask, tokens_in
 
 
+def _has_match(matches, name: str) -> bool:
+    return any(ma.match.detector_name == name for ma in matches)
+
+
+def _count_match(matches, name: str) -> int:
+    return sum(1 for ma in matches if ma.match.detector_name == name)
+
+
 class TestIpAddressHappyPath:
     def test_ipv4_lan(self):
-        _, span_map, _ = mask("192.168.1.105")
-        assert tokens_in(span_map, "IP_ADDRESS") == ["[IP_ADDRESS_0]"]
+        _, span_map, matches = mask("192.168.1.105")
+        assert tokens_in(span_map, "IP_ADDRESS", matches) == ["<r0>"]
 
     def test_two_distinct_ipv4s(self):
-        _, span_map, _ = mask("Servers 10.0.0.254 and 172.16.0.1")
-        ips = tokens_in(span_map, "IP_ADDRESS")
+        _, span_map, matches = mask("Servers 10.0.0.254 and 172.16.0.1")
+        ips = tokens_in(span_map, "IP_ADDRESS", matches)
         assert len(ips) == 2
 
     def test_thai_label(self):
         # ``อยู่ที่`` is also a Thai address keyword — keep it out of
         # this case so the IP detector wins the span unambiguously.
         text = "เซิร์ฟเวอร์ IP 192.168.1.105"
-        _, span_map, _ = mask(text)
-        assert any("IP_ADDRESS" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_match(matches, "ip_address")
 
 
 class TestIpAddressBoundary:
     def test_ipv6_loopback(self):
         # `::1` is the canonical IPv6 loopback.
-        _, span_map, _ = mask("::1")
-        assert any("IP_ADDRESS" in t for t in span_map)
+        _, _, matches = mask("::1")
+        assert _has_match(matches, "ip_address")
 
     def test_ipv6_documentation_prefix(self):
-        _, span_map, _ = mask("2001:db8::1")
-        assert any("IP_ADDRESS" in t for t in span_map)
+        _, _, matches = mask("2001:db8::1")
+        assert _has_match(matches, "ip_address")
 
     def test_label_preserved_en(self):
         masked, span_map, _ = mask("IP: 172.16.0.1")
         assert "IP:" in masked
-        assert "[IP_ADDRESS_0]" in masked
+        assert "<r0>" in masked
 
 
 class TestIpAddressNegative:
@@ -50,10 +58,10 @@ class TestIpAddressNegative:
     def test_ip_inside_credential_url(self):
         # Overlap resolution: when the IP lives inside a DB URL with
         # embedded credentials, CREDENTIAL wins. The IP must NOT be
-        # double-tagged as its own span.
+        # double-tagged as its own span — only one entry in span_map,
+        # and its value covers the entire URL (with the IP inside).
         text = "postgresql://admin:pass@192.168.1.105:5432/prod"
         _, span_map, _ = mask(text)
-        cred_tokens = [t for t in span_map if "CREDENTIAL" in t]
-        ip_tokens = [t for t in span_map if "IP_ADDRESS" in t]
-        assert len(cred_tokens) == 1
-        assert len(ip_tokens) == 0
+        assert len(span_map) == 1, f"expected one mask span, got {len(span_map)}: {span_map}"
+        [value] = span_map.values()
+        assert value == text, f"expected full URL masked as one span, got {value!r}"

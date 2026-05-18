@@ -51,7 +51,7 @@ def _record() -> RequestRecord:
         dlp_categories=["EMAIL", "PHONE"],
         router_used="semantic",
         policy_profile_id="default",
-        input_masked="hello [EMAIL_0]",
+        input_masked="hello <r0>",
         output_final="bye",
         input_raw_encrypted="b64ciphertext",
     )
@@ -78,7 +78,7 @@ def test_record_to_proto_maps_all_scalar_fields():
     assert proto.original_provider == "openai"
     assert proto.original_model == "gpt-4o"
     assert proto.policy_profile_id == "default"
-    assert proto.input_masked == "hello [EMAIL_0]"
+    assert proto.input_masked == "hello <r0>"
     assert proto.output_final == "bye"
     assert proto.input_raw_encrypted == "b64ciphertext"
 

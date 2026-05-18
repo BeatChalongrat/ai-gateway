@@ -8,7 +8,7 @@ unmatched.
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
 
 
 class TestThaiAddressHappyPath:
@@ -17,13 +17,13 @@ class TestThaiAddressHappyPath:
             "ที่อยู่: 99/88 ถนนสุขุมวิท แขวงคลองเตย "
             "กรุงเทพฯ 10110"
         )
-        _, span_map, _ = mask(text)
-        assert any("ADDRESS" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "thai_address", "address")
 
     def test_yu_thi_prefix(self):
         text = "อาศัยอยู่ที่ 99/88 ถนนสุขุมวิท กรุงเทพ 10110"
-        _, span_map, _ = mask(text)
-        assert any("ADDRESS" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "thai_address", "address")
 
 
 class TestThaiAddressBoundary:
@@ -32,8 +32,8 @@ class TestThaiAddressBoundary:
             "บ้านเลขที่ 99/88 หมู่ 3 ต.คลองเตย "
             "อ.คลองเตย จ.กรุงเทพฯ 10110"
         )
-        _, span_map, _ = mask(text)
-        assert any("ADDRESS" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "thai_address", "address")
 
     def test_silom_address(self):
         # ``ส่งที่`` is the matching prefix in the keyword list — the
@@ -41,8 +41,8 @@ class TestThaiAddressBoundary:
         # not anchored, but using the exact keyword makes the
         # detector-vs-test contract explicit.
         text = "ส่งที่ 99 ถนนสีลม แขวงสีลม เขตบางรัก กทม 10500"
-        _, span_map, _ = mask(text)
-        assert any("ADDRESS" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "thai_address", "address")
 
 
 class TestThaiAddressNegative:

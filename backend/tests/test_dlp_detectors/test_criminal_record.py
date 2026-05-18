@@ -2,32 +2,32 @@
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
 
 
 class TestCriminalRecordHappyPath:
     def test_english_prior_conviction(self):
         # Need pronoun-anchored personal context per detector design.
         text = "I was convicted of a felony in 2015"
-        _, span_map, _ = mask(text)
-        assert any("CRIMINAL_RECORD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "criminal_record")
 
     def test_thai_history_label(self):
         text = "ผมมีประวัติอาชญากรรม คดีลักทรัพย์"
-        _, span_map, _ = mask(text)
-        assert any("CRIMINAL_RECORD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "criminal_record")
 
     def test_thai_drug_case(self):
         text = "เขาเคยต้องหาคดียาเสพติด"
-        _, span_map, _ = mask(text)
-        assert any("CRIMINAL_RECORD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "criminal_record")
 
 
 class TestCriminalRecordBoundary:
     def test_english_served_time(self):
         text = "he served time in prison for fraud"
-        _, span_map, _ = mask(text)
-        assert any("CRIMINAL_RECORD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "criminal_record")
 
 
 class TestCriminalRecordNegative:

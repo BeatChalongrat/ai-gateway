@@ -2,29 +2,29 @@
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
 
 
 class TestMedicalRecordHappyPath:
     def test_hn_label(self):
-        _, span_map, _ = mask("HN: 1234567")
-        assert any("MEDICAL_RECORD" in t for t in span_map)
+        _, _, matches = mask("HN: 1234567")
+        assert has_match(matches, "medical_record")
 
     def test_hn_prefix(self):
-        _, span_map, _ = mask("HN 1234567")
-        assert any("MEDICAL_RECORD" in t for t in span_map)
+        _, _, matches = mask("HN 1234567")
+        assert has_match(matches, "medical_record")
 
     def test_thai_label(self):
         text = "เลขที่ผู้ป่วย: 1234567"
-        _, span_map, _ = mask(text)
-        assert any("MEDICAL_RECORD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "medical_record")
 
 
 class TestMedicalRecordBoundary:
     def test_with_hospital_context(self):
         text = "ผู้ป่วย HN: 00123456 โรงพยาบาลสมิติเวช"
-        _, span_map, _ = mask(text)
-        assert any("MEDICAL_RECORD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "medical_record")
 
 
 class TestMedicalRecordNegative:

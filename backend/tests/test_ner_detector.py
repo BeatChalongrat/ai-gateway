@@ -301,7 +301,7 @@ class TestNerEnabledForTenantRunsPresidio:
         assert fake.last_kwargs.get("language") == "en"
         # Response content was produced by the stubbed dispatcher
         # (conftest _stub_dispatch echoes the last message). After
-        # restore(), the indexed mask "[NAME_0]" should have been
+        # restore(), the indexed mask "<r0>" should have been
         # replaced with the original "Alice".
         content = body["choices"][0]["message"]["content"]
         # Mask token appeared somewhere in the pipeline — either
@@ -309,7 +309,7 @@ class TestNerEnabledForTenantRunsPresidio:
         # visible in the response log (which we don't check here).
         # The critical assertions are: policy_action=mask + analyzer
         # was invoked + stub echoed the masked token.
-        assert "[NAME_0]" in content or "Alice" in content
+        assert "<r0>" in content or "Alice" in content
 
 
 class TestNerEnabledViaOrgGlobal:
