@@ -35,3 +35,22 @@ perf_audit_tmp/
 measure.js
 hero-*.png
 traces/
+
+# Report & audit docs (root level)
+*_REPORT.md
+*_AUDIT_REPORT.md
+*_VERIFICATION_REPORT.md
+*_PLAN.md
+*_LOG.md
+BASELINE_STATUS.md
+IMPLEMENTATION_ROADMAP.md
+RUNBOOK.md
+TASK_BOARD.md
+POST_*.md
+THREE_FIXES_REPORT.md
+UX_CLEANUP_REPORT.md
+RUNTIME_CONSOLIDATION_REPORT.md
+
+# Shell test scripts
+real-loop-test.sh
+sran-pii-test.sh
