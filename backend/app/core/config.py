@@ -142,6 +142,26 @@ class Settings(BaseSettings):
     request_log_flush_interval_ms: int = 100
     request_log_queue_max: int = 10000
 
+    # Phase-3 Go log-worker sidecar.
+    #
+    # ``log_worker_engine`` selects which sink ``request_log_queue.enqueue``
+    # dispatches to:
+    #
+    #   * "python" (default) — keeps the legacy in-process asyncio
+    #     queue + ORM-based bulk insert. Backward compatible; no
+    #     external service required.
+    #   * "go" — fire-and-forget gRPC to the ``log-worker`` sidecar,
+    #     which buffers + COPY-inserts on its own connection pool.
+    #     Falls back to the legacy persist on the caller's session if
+    #     the RPC times out so a sidecar outage cannot lose audit rows.
+    #
+    # The address is the in-cluster DNS name; the timeout is small on
+    # purpose (audit writes are fire-and-forget and the gateway must
+    # never block on a slow sidecar).
+    log_worker_engine: str = "python"
+    log_worker_grpc_address: str = "log-worker:50052"
+    log_worker_grpc_timeout_seconds: float = 0.5
+
     # Semantic router (intent classification via sentence-transformers).
     # Off by default — flipping this to true requires the optional
     # sentence-transformers + torch stack (see requirements-semantic.txt).
