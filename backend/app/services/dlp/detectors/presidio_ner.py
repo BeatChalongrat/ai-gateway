@@ -103,6 +103,59 @@ _NER_FALSE_POSITIVE_DENYLIST = frozenset({
 })
 
 
+# AI model / vendor names that Presidio routinely flags as PERSON or
+# ORGANIZATION when they appear in a model's self-introduction
+# ("I am based on OpenAI's GPT-4 architecture"). Masking these turns
+# downstream answers into nonsense (``based on OpenAI's [NAME_0]
+# architecture``) while protecting no user data. Comparison is
+# case-insensitive against ``matched_text.strip()``.
+_NER_AI_MODEL_NAMES = frozenset({
+    "gpt", "gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-3.5", "gpt-3.5-turbo",
+    "gpt-4-turbo", "o1", "o3",
+    "claude", "claude-3", "claude-3.5", "claude-sonnet", "claude-opus",
+    "claude-haiku",
+    "gemini", "gemini-pro", "gemini-flash",
+    "llama", "llama-3", "llama-3.1", "llama-3.3",
+    "mistral", "mixtral", "codestral",
+    "grok",
+    "deepseek",
+    "qwen",
+    "kimi", "moonshot",
+    "minimax",
+    "openai", "anthropic", "google", "meta", "xai", "cohere",
+    "perplexity", "openrouter",
+})
+
+
+def _is_ner_false_positive(matched_text: str, category: str) -> bool:
+    """Return True if a NER match should be silently dropped.
+
+    Three filters, all OR-ed:
+
+    1. The match's text (case-insensitive, stripped) appears in the
+       hand-curated denylist of recurring label / adjective false
+       positives.
+    2. The match's text is a known AI model / vendor name. Real users
+       almost never reference these as PII; the model echoing them
+       back triggered ``[NAME_0]`` substitutions that broke responses.
+    3. Very short matches (``<= 3`` chars) tagged as ``pii``. Presidio
+       over-confidently tags 2-3 letter acronyms (``GPT``, ``API``)
+       as PERSON; the cost of dropping a real 3-letter name is much
+       lower than the cost of mangling a model self-introduction in
+       every reply.
+    """
+    text = matched_text.strip().lower()
+    if not text:
+        return True
+    if text in _NER_FALSE_POSITIVE_DENYLIST:
+        return True
+    if text in _NER_AI_MODEL_NAMES:
+        return True
+    if len(text) <= 3 and category == "pii":
+        return True
+    return False
+
+
 class PresidioDetector(BaseDetector):
     name = "presidio_ner"
     category = "pii"
@@ -187,11 +240,10 @@ class PresidioDetector(BaseDetector):
             if getattr(r, "score", 1.0) < self.SCORE_THRESHOLD:
                 continue
             matched_text = text[r.start:r.end]
-            # Drop label / nationality adjectives the analyzer
-            # mis-tags. Checked across all entity types because the
-            # same word can flip between PERSON / NRP / ORGANIZATION
-            # depending on context.
-            if matched_text.strip().lower() in _NER_FALSE_POSITIVE_DENYLIST:
+            # Drop label / nationality adjectives the analyzer mis-tags,
+            # AI model / vendor names, and very short acronyms — see
+            # ``_is_ner_false_positive`` for the rationale.
+            if _is_ner_false_positive(matched_text, self.category):
                 continue
             matches.append(
                 DetectionMatch(
@@ -233,7 +285,7 @@ class PresidioDetector(BaseDetector):
             if e.score < self.SCORE_THRESHOLD:
                 continue
             matched_text = text[e.start : e.end]
-            if matched_text.strip().lower() in _NER_FALSE_POSITIVE_DENYLIST:
+            if _is_ner_false_positive(matched_text, self.category):
                 continue
             matches.append(
                 DetectionMatch(

@@ -269,10 +269,16 @@ class GatewayOrchestrator:
             with record_phase("dlp_regex"), DLP_SCAN_DURATION.labels(
                 phase="regex"
             ).time():
-                input_detection = active_registry.scan_messages(
+                # Phase-3c engine selector. ``_run_dlp_scan`` routes
+                # to the Rust sidecar / shadow comparison / legacy
+                # in-process registry per ``dlp_engine`` setting.
+                input_detection = await self._run_dlp_scan(
+                    active_registry,
                     payload.messages,
                     direction="input",
                     scan_system_messages=profile.scan_system_messages,
+                    ctx=ctx,
+                    session=session,
                 )
             if "presidio_ner" in active_registry:
                 # The registry combines detectors in a single pass, so we
@@ -1106,13 +1112,13 @@ class GatewayOrchestrator:
                 {ma.match.category for ma in input_enforcement.match_actions}
                 | {ma.match.category for ma in response_enforcement.match_actions}
             )
-            import json as _json
-            fallback_attempts_json = None
+            # JSONB column handles serialization — pass the list, not
+            # a json.dumps string (would double-encode).
+            fallback_attempts_list: list[dict] | None = None
             if fallback_result and fallback_result.attempts:
-                fallback_attempts_json = _json.dumps(
-                    [a.to_dict() for a in fallback_result.attempts],
-                    ensure_ascii=False,
-                )
+                fallback_attempts_list = [
+                    a.to_dict() for a in fallback_result.attempts
+                ]
 
             record = RequestRecord(
                 request_id=request_id,
@@ -1129,7 +1135,7 @@ class GatewayOrchestrator:
                 total_tokens=usage.total_tokens,
                 estimated_cost_usd=usage.estimated_cost_usd,
                 fallback_used=fallback_result is not None,
-                fallback_attempts=fallback_attempts_json,
+                fallback_attempts=fallback_attempts_list,
                 original_provider=original_provider,
                 original_model=original_model,
                 dlp_input_findings=len(input_enforcement.match_actions),
@@ -1418,6 +1424,144 @@ class GatewayOrchestrator:
         call this with ``ner_enabled=True`` to keep parity with the
         pre-fix behaviour."""
         return self._registry_ner_on if ner_enabled else self._registry_ner_off
+
+    def _select_dlp_engine(
+        self,
+        ctx: RequestContext,
+        session: Session | None,
+    ) -> str:
+        """Resolve the effective DLP engine for this request.
+
+        Per-tenant ``tenants.dlp_engine`` override beats the global
+        ``settings.dlp_engine`` when it isn't ``inherit``. Migration
+        043 ensures every row has a value (default ``inherit``).
+        """
+        if session is None:
+            return settings.dlp_engine
+        try:
+            from app.models.tenant import TenantORM
+
+            tenant = session.get(TenantORM, ctx.tenant_id)
+            tenant_engine = (
+                getattr(tenant, "dlp_engine", "inherit") if tenant else "inherit"
+            )
+        except Exception:  # noqa: BLE001
+            return settings.dlp_engine
+        if tenant_engine and tenant_engine != "inherit":
+            return tenant_engine
+        return settings.dlp_engine
+
+    async def _run_dlp_scan(
+        self,
+        registry,
+        messages,
+        *,
+        direction: str,
+        scan_system_messages: bool,
+        ctx: RequestContext,
+        session: Session | None,
+    ):
+        """Route the DLP scan through the selected engine.
+
+        - ``python`` (default) → in-process registry call.
+        - ``rust`` → gRPC call to ``dlp-sidecar``. Any failure falls
+          back to Python so a sidecar incident never downgrades
+          coverage.
+        - ``shadow`` → run BOTH in parallel, use Python on the hot
+          path, log ``dlp_shadow_diff`` events.
+        """
+        engine = self._select_dlp_engine(ctx, session)
+
+        def _python_scan():
+            return registry.scan_messages(
+                messages,
+                direction=direction,
+                scan_system_messages=scan_system_messages,
+            )
+
+        if engine == "rust":
+            from app.services.dlp.rust_dlp_client import RustDlpClient
+            try:
+                client = RustDlpClient.instance()
+                rust_result = await client.scan_messages(
+                    messages,
+                    direction=direction,
+                    scan_system_messages=scan_system_messages,
+                    ner_enabled=getattr(ctx, "ner_enabled", True),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "dlp_rust_engine_exception", error=str(exc)[:200]
+                )
+                rust_result = None
+            if rust_result is not None:
+                return rust_result
+            logger.warning("dlp_rust_fallback_to_python")
+            return _python_scan()
+
+        if engine == "shadow":
+            import asyncio as _asyncio
+            from app.services.dlp.rust_dlp_client import RustDlpClient
+            rust_task = None
+            try:
+                client = RustDlpClient.instance()
+                rust_task = _asyncio.create_task(
+                    client.scan_messages(
+                        messages,
+                        direction=direction,
+                        scan_system_messages=scan_system_messages,
+                        ner_enabled=getattr(ctx, "ner_enabled", True),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "dlp_shadow_rust_dispatch_failed", error=str(exc)[:200]
+                )
+
+            python_result = _python_scan()
+
+            if rust_task is not None:
+                try:
+                    rust_result = await _asyncio.wait_for(rust_task, timeout=2.0)
+                    if rust_result is not None:
+                        self._log_shadow_diff(python_result, rust_result, ctx)
+                except Exception:  # noqa: BLE001
+                    logger.info("dlp_shadow_rust_timed_out_or_errored")
+            return python_result
+
+        # Default: python
+        return _python_scan()
+
+    def _log_shadow_diff(
+        self,
+        python_result,
+        rust_result,
+        ctx: RequestContext,
+    ) -> None:
+        """Structured diff between Python and Rust DLP results.
+
+        Cutover gate: 7 consecutive days of ``diff_count = 0`` on
+        production traffic before flipping ``DLP_ENGINE`` from
+        ``shadow`` to ``rust``.
+        """
+        python_set = {
+            (m.detector_name, m.start, m.end) for m in python_result.matches
+        }
+        rust_set = {
+            (m.detector_name, m.start, m.end) for m in rust_result.matches
+        }
+        only_python = python_set - rust_set
+        only_rust = rust_set - python_set
+        logger.info(
+            "dlp_shadow_diff",
+            python_count=len(python_result.matches),
+            rust_count=len(rust_result.matches),
+            diff_count=len(only_python) + len(only_rust),
+            only_python=[list(t) for t in list(only_python)[:5]],
+            only_rust=[list(t) for t in list(only_rust)[:5]],
+            request_id=getattr(ctx, "request_id", None),
+            tenant_id=getattr(ctx, "tenant_id", None),
+        )
 
     def _scan_and_evaluate(
         self,

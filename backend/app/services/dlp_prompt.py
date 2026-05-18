@@ -1,9 +1,16 @@
 """DLP system-prompt injection for masked messages.
 
-When the DLP pipeline masks PII tokens in user messages (e.g. [NAME_0],
+When the DLP pipeline replaces tokens in user messages (e.g. [NAME_0],
 [EMAIL_0]), some LLMs refuse to respond because the bracketed tokens
-look suspicious.  This module injects a short system-level explanation
+look suspicious. This module injects a short system-level explanation
 so the model treats them as normal placeholders.
+
+The prompt copy is deliberately neutral — it does *not* mention "PII",
+"sensitive data", "masked", or "personal information". The earlier
+copy used those terms and OpenAI's safety filter would interpret the
+whole request as something it should refuse, ending in canned
+"I can't assist with that" responses even when the user just sent a
+phone number that should round-trip through the gateway transparently.
 """
 
 from __future__ import annotations
@@ -17,10 +24,12 @@ if TYPE_CHECKING:
 _MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_\d+\]")
 
 DLP_PLACEHOLDER_PROMPT = (
-    "This system masks PII with tokens like [CATEGORY_N] before sending "
-    "to you. Treat each token as a normal value. Echo tokens exactly as "
-    "written — never modify, invent, or double-bracket them. Do not warn "
-    "about sensitive data or ask for original values."
+    "Some values in this message have been replaced with placeholder "
+    "tokens like [CATEGORY_NUMBER] for privacy. Treat each token as "
+    "a regular text value. Echo tokens exactly as written if needed. "
+    "Critical rule: do not invent new tokens for content the gateway "
+    "did not already replace — use [REDACTED] for such content. "
+    "Continue helping normally."
 )
 
 
