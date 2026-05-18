@@ -852,10 +852,23 @@ class GatewayOrchestrator:
             with record_phase("dlp_regex"), DLP_SCAN_DURATION.labels(
                 phase="regex"
             ).time():
+                # Outbound scan runs with ``ner_enabled=False`` regardless
+                # of ``ctx.ner_enabled``. Presidio's English-only spaCy
+                # model produces arbitrary spans on Thai AI replies (no
+                # Thai tokeniser shipped), which then get masked to
+                # ``[THAI_NAME_N]`` tokens that have no entry in the
+                # inbound ``span_map`` and survive restore as user-visible
+                # mid-word splices ("ขอบ[THAI_NAME_0]"). The Thai regex
+                # detector (``thai_name.py``, title-prefix-gated) still
+                # runs and catches real Thai names in the response.
+                # Trade-off: loses English-NER outbound coverage too;
+                # acceptable because outbound restore is regex-driven and
+                # the inbound NER already masked anything the AI is
+                # supposed to echo.
                 response_detection = self._scan_text_as_result(
                     response_content,
                     direction="output",
-                    ner_enabled=ctx.ner_enabled,
+                    ner_enabled=False,
                 )
             response_enforcement = self._scan_and_evaluate(
                 response_detection, pre_restore_profile
@@ -1005,10 +1018,12 @@ class GatewayOrchestrator:
             with record_phase("dlp_regex"), DLP_SCAN_DURATION.labels(
                 phase="regex"
             ).time():
+                # Section 8c — final outbound scan after restore. Same
+                # NER=False rationale as Section 8 above.
                 final_response_detection = self._scan_text_as_result(
                     response_content,
                     direction="output",
-                    ner_enabled=ctx.ner_enabled,
+                    ner_enabled=False,
                 )
             response_enforcement = self._scan_and_evaluate(
                 final_response_detection, profile
@@ -1650,9 +1665,30 @@ class GatewayOrchestrator:
                         return True
                 return False
 
+            # Outbound-only suppression list. NER + Thai-name detectors
+            # are inbound-oriented: NER mints arbitrary spans on Thai AI
+            # replies (no Thai tokeniser), and ``thai_name`` /
+            # ``thai_name_no_prefix`` regexes are greedy on the
+            # second-Thai-char group, capturing the next-noun-phrase
+            # alongside the actual name (e.g. ``คุณค่ะ และจะดำเนินการ``
+            # matched as one span). All three mint ``[THAI_NAME_N]``
+            # tokens that don't exist in the inbound ``span_map``, so
+            # they survive restore as visible orphan splices in the
+            # user's reply. Suppressing them on output direction has no
+            # privacy cost — the inbound pass already masked anything
+            # the AI is supposed to be quoting, and the dedicated
+            # outbound restore is regex-driven for emails / phones /
+            # account numbers, which DO still run here.
+            _OUTBOUND_SUPPRESSED = {
+                "presidio_ner",
+                "thai_name",
+                "thai_name_no_prefix",
+            }
+
             matches = [
                 m for m in matches
-                if not _MASK_TOKEN_RE.fullmatch(m.matched_text.strip())
+                if m.detector_name not in _OUTBOUND_SUPPRESSED
+                and not _MASK_TOKEN_RE.fullmatch(m.matched_text.strip())
                 and not _inside_mask_token(m.start, m.end)
             ]
         return DetectionResult(
