@@ -22,7 +22,7 @@ The backend is FastAPI on Postgres + Redis. The spaCy/Presidio NER model runs in
  │  ┌──────────────────────────────────────────────────────────────────────────┐ │
  │  │  GatewayOrchestrator                                                     │ │
  │  │   1. cache lookup (Redis)                                                │ │
- │  │   2. DLP inbound:  29 regex detectors  +  NER ──► ner-service :8001 ────┼─┼─► spaCy / Presidio
+ │  │   2. DLP inbound:  30 regex detectors  +  NER ──► ner-service :8001 ────┼─┼─► spaCy / Presidio
  │  │   3. policy evaluator (block / mask / restore per finding)               │ │
  │  │   4. mask + token-map  (deterministic w/ DLP_HMAC_KEY when conv_id set)  │ │
  │  │   5. moderation + guardrail                                              │ │
@@ -64,6 +64,9 @@ The backend is FastAPI on Postgres + Redis. The spaCy/Presidio NER model runs in
 | `backend` | 8080 | built from `./backend` | FastAPI gateway. 4 gunicorn workers × uvicorn. Hot-reload in dev via `docker-compose.override.yml`. |
 | `admin-ui` | 3000 | built from `./admin-ui` | Next.js admin console. Cookie-auth, CSRF, rate-limited login. |
 | `portal` | 3001 | built from `./portal` | Next.js customer portal. NextAuth for OAuth, JWT for API access. |
+| `log-worker` | 50052 | built from `./log-worker` | Go async batch logger. Receives `LogRecord` via gRPC, batches into Postgres `COPY`. Default off (`LOG_WORKER_ENGINE=go` to activate). |
+| `rate-limiter` | 50053 | built from `./rate-limiter` | Rust sliding-window rate limiter. 3-scope parallel Redis pipeline. Default off (`RATE_LIMITER_ENGINE=rust`). |
+| `dlp-sidecar` | 50051 | built from `./dlp-sidecar` | Rust DLP regex engine. 22/30 detectors ported. Default off (`DLP_ENGINE=rust|shadow`). |
 
 `docker-compose.override.yml` swaps `backend`, `admin-ui`, and `portal` into hot-reload mode with bind mounts when you run `docker compose up` directly (which `make up` does).
 
@@ -84,14 +87,26 @@ Then:
 
 | URL | What | Credentials |
 |---|---|---|
-| http://localhost:3000 | Admin UI | `admin` / `admin1234`  (or `admin@audit.test`) |
-| http://localhost:3001 | Customer portal | `alice@acme.test` / `Alice!2345` |
+| http://localhost:3000 | Admin UI | `admin` / `admin1234` |
+| http://localhost:3001 | Customer portal | `somchai@acme.ai.gateway` / `Demo@2025!` |
 | http://localhost:8080/health | Backend health | — |
 | http://localhost:8080/docs | Backend OpenAPI | — |
 | http://localhost:8001/health | NER service | — |
 | http://localhost:9090/health | Mock provider | — |
 
-Additional seeded portal users: `bob@globex.test`, `charlie@acme.test` (low credit), `dave@acme.test` (suspended), `eve@globex.test` (email unverified) — all password `<Name>!2345`.
+**Seeded portal users** (all password `Demo@2025!`):
+
+| Email | Name | Role | Tenant |
+|---|---|---|---|
+| `somchai@acme.ai.gateway` | สมชาย ใจดี | owner | Acme Corporation |
+| `suda@acme.ai.gateway` | สุดา รักงาน | member | Acme Corporation |
+| `wichai@techstart.ai.gateway` | วิชัย เทคโนโลยี | owner | TechStart |
+| `malee@techstart.ai.gateway` | มาลี สมาร์ท | member | TechStart |
+
+**Seeded tenants:** Acme Corporation (`acme-corp-001`), TechStart (`techstart-001`).
+**Seeded projects:** Customer Support Bot, Internal Assistant (Acme) · AI Chatbot MVP (TechStart).
+
+For a customer-facing UAT box, see `scripts/uat/README.md` — bundled `01_truncate.sql` → `02_seed_uat.py` → `03_verify.sql` runbook.
 
 Useful targets (`make help` for the full list):
 
@@ -111,7 +126,7 @@ Useful targets (`make help` for the full list):
 
 ### 4.1 DLP pipeline
 
-The DLP scanner runs **29 regex detectors + 1 NER detector** by default, in registration order, against every inbound message (and outbound completion if the policy profile sets `scan_responses=true`). System-role messages are skipped unless `scan_system_messages=true`.
+The DLP scanner runs **30 regex detectors + 1 NER detector** by default, in registration order, against every inbound message (and outbound completion if the policy profile sets `scan_responses=true`). System-role messages are skipped unless `scan_system_messages=true`.
 
 Pipeline stages (`backend/app/services/dlp/`):
 
@@ -312,10 +327,14 @@ ai-gateway/
 ├── admin-ui/                   # Next.js admin (18 pages)
 ├── portal/                     # Next.js customer portal (19 pages)
 ├── mock/                       # Mock LLM provider used in tests
+├── dlp-sidecar/                # Rust DLP sidecar (22/30 detectors, gRPC :50051)
+├── log-worker/                 # Go async batch logger (gRPC :50052, COPY to Postgres)
+├── rate-limiter/               # Rust rate-limiter sidecar (gRPC :50053)
 ├── infra/
 │   ├── docker/, terraform/
 │   └── k8s/                    # backend, admin-ui, ner-service deployments
 ├── scripts/                    # dev/seed/migrate/smoke (.sh + .ps1)
+│   └── uat/                    # UAT bringup: 01_truncate.sql, 02_seed_uat.py, 03_verify.sql, .env.uat.template
 ├── docs/                       # architecture notes, runbooks
 ├── examples/
 ├── docker-compose.yml          # base stack
@@ -355,7 +374,7 @@ The `Makefile`'s `make test` target deliberately unsets compose-injected env var
 
 Measurements from the live dev stack on this repo (single host, defaults, idle baseline; see `RUNBOOK.md` for the full audit):
 
-- **Per-request gateway latency (no provider):** ~65–115 ms — dominated by 29 sequential regex detectors (~15–25 ms), one NER HTTP call (21 ms warm, p95 ~27 ms), AES encrypt (5–10 ms, blocks event loop), 8–12 Postgres SELECTs, one INSERT.
+- **Per-request gateway latency (no provider):** ~65–115 ms — dominated by 30 sequential regex detectors (~15–25 ms), one NER HTTP call (21 ms warm, p95 ~27 ms), AES encrypt (5–10 ms, blocks event loop), 8–12 Postgres SELECTs, one INSERT.
 - **NER service is the first bottleneck.** Single uvicorn worker, GIL-bound spaCy → ~47 analyze/sec ceiling per pod. Each chat completion is one NER call inbound + (optionally) one outbound — effective **23–47 chat-completions/sec per NER pod**.
 - **Postgres connections:** 4 backend workers × `pool_size=10 + overflow=20` requests up to 120 connections vs. the default `max_connections=100`. Under sustained load this becomes the second wall.
 - **`synchronous_commit=on` + `fsync=on`** on Postgres — every write blocks for fsync. Acceptable on local SSD, much heavier on networked storage.
@@ -368,3 +387,24 @@ Measurements from the live dev stack on this repo (single host, defaults, idle b
   4. Set `maxmemory` + an eviction policy on Redis.
 
 These are honest figures from this build, not theoretical headroom.
+
+### Phase 1–3 improvements (shipped)
+
+The four scaling items above have largely landed. The legacy / Python path is still the default everywhere so the gateway behaves identically to the pre-Phase-1 build; each replacement is gated by an env var and falls back to the legacy path on any error (timeout, missing dep, sidecar unreachable).
+
+| Area | Before | After | Method |
+|---|---|---|---|
+| NER throughput | ~47 RPS | ~200 RPS | 4 uvicorn workers in `ner-service` |
+| DB pool | `pool=10 overflow=20` | `pool=20 overflow=10` | explicit `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` |
+| PG write latency | 3–5 ms/write | <1 ms | `synchronous_commit=off` + `wal_writer_delay=200ms` |
+| Request logging | sync INSERT, blocks event loop | fire-and-forget Go COPY batch | Go `log-worker` sidecar (:50052) |
+| Rate limiter | Python async Redis pipeline | Rust sliding-window (:50053) | Rust `rate-limiter` sidecar |
+| Fallback routing | 503 on provider failure | 3-tier model fallback chain | `FallbackOrchestrator` + `model_tiers.py` |
+| DLP engine *(in progress)* | Python regex 15–25 ms | Rust <1 ms (target) | `dlp-sidecar` Rust sidecar (:50051) — 22/30 detectors ported, shadow mode pending |
+
+**Activation** (all default to the Python / legacy path):
+
+- `LOG_WORKER_ENGINE=go` — route request logs through the Go COPY worker.
+- `RATE_LIMITER_ENGINE=rust` — route rate-limit checks through the Rust sidecar.
+- `DLP_ENGINE=shadow` — run the Rust DLP scanner in parallel with Python and log diffs (no cutover yet).
+- `DLP_ENGINE=rust` — full cutover (only after a 7-day shadow window with diff = 0).
