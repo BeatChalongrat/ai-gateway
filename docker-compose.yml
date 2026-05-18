@@ -274,6 +274,11 @@ services:
       DLP_ENGINE: ${DLP_ENGINE:-python}
       DLP_GRPC_ADDRESS: ${DLP_GRPC_ADDRESS:-dlp-sidecar:50051}
       DLP_GRPC_TIMEOUT_SECONDS: ${DLP_GRPC_TIMEOUT_SECONDS:-1.0}
+      # DLP system-prompt variant. ``v1`` (default) = verbose
+      # "Critical rule: do not invent" copy with [CATEGORY_NUMBER]
+      # example. ``v3`` = no-example variant audited to lower
+      # hallucination rate. A/B by flipping per deployment.
+      DLP_PROMPT_VARIANT: ${DLP_PROMPT_VARIANT:-v1}
     volumes:
       # Mount the DLP parity fixtures so the Python parity test can
       # read them from inside the backend container. Read-only and

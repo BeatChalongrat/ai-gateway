@@ -60,6 +60,29 @@ _THAI_PASSWORD_RE = re.compile(
 )
 
 
+# English no-separator variant — catches the prose forms the May 2026
+# audit surfaced ("username admin password admin123", "SMTP password
+# smtp_pass_123456") that the strict label+separator form above
+# misses. The double-lookahead pins down two conditions on the value:
+#
+#   1. Minimum 8 non-whitespace characters
+#   2. At least one digit OR special character
+#
+# The entropy gate keeps natural-English follow-words ("recovery",
+# "protection", "verification") from firing as false positives —
+# without it, every "password protection" / "password recovery"
+# phrase in user prose would mask a benign noun.
+_PASSWORD_NOSEP_RE = re.compile(
+    r"\bpassword\s+"
+    r"(?P<value>"
+    r"(?=\S{8,})"                              # ≥ 8 chars
+    r"(?=\S*[\d!@#$%^&*+\-=_./\\<>?,;:])"      # ≥ 1 digit or special
+    r"\S+"
+    r")",
+    re.IGNORECASE,
+)
+
+
 class PasswordFieldDetector(BaseDetector):
     name = "password_field"
     category = "secret"
@@ -88,5 +111,7 @@ class PasswordFieldDetector(BaseDetector):
         for m in _PASSWORD_RE.finditer(text):
             _emit(m.start("value"), m.end("value"), "password_in_config")
         for m in _THAI_PASSWORD_RE.finditer(text):
+            _emit(m.start("value"), m.end("value"), "password_in_text")
+        for m in _PASSWORD_NOSEP_RE.finditer(text):
             _emit(m.start("value"), m.end("value"), "password_in_text")
         return matches
