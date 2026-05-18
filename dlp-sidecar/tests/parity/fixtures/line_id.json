@@ -1,0 +1,65 @@
+{
+  "detector": "line_id",
+  "entity_type": "line_id",
+  "category": "pii",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "line_id_basic",
+      "input": "LINE @somchai_dev for help",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 17
+        }
+      ]
+    },
+    {
+      "id": "line_id_with_id",
+      "input": "LINE ID: @sales_bangkok please",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 23
+        }
+      ]
+    },
+    {
+      "id": "line_id_lowercase",
+      "input": "line: @helpdesk now",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "id": "twitter_mention_no_match",
+      "input": "follow @username on twitter",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "at_price_no_match",
+      "input": "ราคา @100 บาท",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "everyone_no_match",
+      "input": "@everyone meeting at 3pm",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

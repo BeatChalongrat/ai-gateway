@@ -1,0 +1,69 @@
+{
+  "detector": "email",
+  "entity_type": "email_address",
+  "category": "pii",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "simple_email",
+      "input": "contact me at user@example.com please",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 14,
+          "end": 30
+        }
+      ]
+    },
+    {
+      "id": "plus_address",
+      "input": "ping alice+work@foo.co.uk now",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "two_emails",
+      "input": "from a@b.com to c@d.com hi",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 12
+        },
+        {
+          "start": 16,
+          "end": 23
+        }
+      ]
+    },
+    {
+      "id": "no_at_sign",
+      "input": "plain text no email here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_tld",
+      "input": "user@host with no dot",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "just_at",
+      "input": "@ alone is not an email",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}
