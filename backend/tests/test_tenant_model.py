@@ -43,6 +43,7 @@ class TestTenantSchema:
             "status",
             "region",
             "ner_enabled",  # added by migration 019
+            "dlp_engine",  # added by migration 043 (Phase-3c Rust DLP sidecar)
             "created_at",
             "updated_at",
         }
@@ -261,7 +262,10 @@ class TestMigration002:
         # Columns added by migrations AFTER 002 are expected to be
         # present on the ORM but absent from the 002-only migration
         # snapshot. Exclude them from the equality check.
-        post_002 = {"ner_enabled"}  # added in migration 019
+        post_002 = {
+            "ner_enabled",  # added in migration 019
+            "dlp_engine",   # added in migration 043 (Phase-3c)
+        }
         assert migration_cols == (orm_cols - post_002)
         engine.dispose()
 

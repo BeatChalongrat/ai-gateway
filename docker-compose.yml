@@ -261,6 +261,13 @@ services:
       RATE_LIMITER_ENGINE: ${RATE_LIMITER_ENGINE:-python}
       RATE_LIMITER_GRPC_ADDRESS: ${RATE_LIMITER_GRPC_ADDRESS:-rate-limiter:50053}
       RATE_LIMITER_GRPC_TIMEOUT_SECONDS: ${RATE_LIMITER_GRPC_TIMEOUT_SECONDS:-0.5}
+      # Phase-3c Rust DLP sidecar engine selector. ``python`` keeps
+      # the in-process registry; ``rust`` dispatches scans via gRPC
+      # (fail-open fallback to Python); ``shadow`` runs both in
+      # parallel and logs diffs.
+      DLP_ENGINE: ${DLP_ENGINE:-python}
+      DLP_GRPC_ADDRESS: ${DLP_GRPC_ADDRESS:-dlp-sidecar:50051}
+      DLP_GRPC_TIMEOUT_SECONDS: ${DLP_GRPC_TIMEOUT_SECONDS:-1.0}
     volumes:
       # Mount the DLP parity fixtures so the Python parity test can
       # read them from inside the backend container. Read-only and
