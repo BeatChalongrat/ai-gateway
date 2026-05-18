@@ -21,7 +21,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.schemas.common import Message
 
-_MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_\d+\]")
+# Matches both the indexed (``[NAME_0]``) and the HMAC-suffixed
+# (``[NAME_aB3kM9xQ]``) token forms emitted by ``transformer.py``.
+# The previous numeric-only pattern silently missed every
+# conversation-mode request (``DLP_HMAC_KEY`` + ``conversation_id``)
+# so the placeholder system prompt was never injected and the AI
+# fell back to refusing the request — same failure mode that
+# motivated the prompt rewrite in the first place. Pattern is kept
+# in lockstep with ``transformer._MASK_TOKEN_RE``.
+_MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]")
 
 DLP_PLACEHOLDER_PROMPT = (
     "Some values in this message have been replaced with placeholder "

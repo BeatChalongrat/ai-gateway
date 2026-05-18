@@ -1,10 +1,27 @@
-//! Detector registry — all 4 batches (30 detectors total).
+//! Detector registry — all 4 batches (up to 30 detectors).
+//!
+//! ``thai_name_no_prefix`` is the **only NER-gated detector**:
+//! Python's ``get_default_registry`` registers it solely when
+//! ``ner_enabled=False`` (the regex acts as a coarse fallback when
+//! Presidio's PERSON recognizer isn't running). When NER *is* on,
+//! the regex would just shadow Presidio and inflate the finding
+//! count with duplicates. We mirror that gate here so shadow-mode
+//! comparisons between Python and Rust don't see a constant
+//! ``only_rust`` delta on every request.
+//!
+//! The bool flag is threaded all the way from the gRPC request
+//! (``ScanRequest.ner_enabled`` / ``MessagesRequest.ner_enabled``)
+//! so the registry composition is per-request, not per-process.
 
 use crate::detectors::base::{Detector, RawMatch};
 use crate::detectors::*;
 
-pub fn default_detectors() -> Vec<Box<dyn Detector>> {
-    vec![
+/// Build the registry for one request.
+///
+/// * ``ner_enabled = true``  → omit ``thai_name_no_prefix`` (29 detectors)
+/// * ``ner_enabled = false`` → include ``thai_name_no_prefix`` (30 detectors)
+pub fn default_detectors(ner_enabled: bool) -> Vec<Box<dyn Detector>> {
+    let mut detectors: Vec<Box<dyn Detector>> = vec![
         // Batch 1 — simple regex
         Box::new(email::EmailDetector),
         Box::new(ssn::SsnDetector),
@@ -37,15 +54,21 @@ pub fn default_detectors() -> Vec<Box<dyn Detector>> {
         Box::new(thai_promptpay::ThaiPromptPayDetector),
         // Batch 4 — name / credit_card / passport
         Box::new(thai_name::ThaiNameDetector),
-        Box::new(thai_name_no_prefix::ThaiNameNoPrefixDetector),
         Box::new(credit_card::CreditCardDetector),
         Box::new(passport::PassportDetector),
-    ]
+    ];
+    if !ner_enabled {
+        detectors.push(Box::new(thai_name_no_prefix::ThaiNameNoPrefixDetector));
+    }
+    detectors
 }
 
 pub fn scan_all(text: &str) -> Vec<(String, RawMatch)> {
     let mut out = Vec::new();
-    for det in default_detectors() {
+    // ``scan_all`` is used by ad-hoc tests / benchmarks that want
+    // the broadest detector coverage — ``ner_enabled=false`` to
+    // include the regex fallback.
+    for det in default_detectors(false) {
         let name = det.name().to_string();
         for m in det.detect(text) {
             out.push((name.clone(), m));
