@@ -3,6 +3,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!scripts/uat/.env.uat.template
 .venv/
 venv/
 node_modules/
