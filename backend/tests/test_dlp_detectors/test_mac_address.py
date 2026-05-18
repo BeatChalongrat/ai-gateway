@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
 
 
 class TestMacAddressHappyPath:
     def test_colon_separated(self):
-        masked, span_map, _ = mask("MAC: 00:1A:2B:3C:4D:5E")
+        masked, _, matches = mask("MAC: 00:1A:2B:3C:4D:5E")
         assert masked.startswith("MAC:")
-        assert any("MAC_ADDRESS" in t for t in span_map)
+        assert has_match(matches, "mac_address")
 
     def test_hyphen_separated(self):
-        _, span_map, _ = mask("00-1A-2B-3C-4D-5E")
-        assert any("MAC_ADDRESS" in t for t in span_map)
+        _, _, matches = mask("00-1A-2B-3C-4D-5E")
+        assert has_match(matches, "mac_address")
 
     def test_thai_label(self):
         text = "MAC แอดเดรส: 00:1A:2B:3C:4D:5E"
-        _, span_map, _ = mask(text)
-        assert any("MAC_ADDRESS" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "mac_address")
 
 
 class TestMacAddressNegative:

@@ -9,24 +9,27 @@ overall masking pipeline rather than the named detector itself.
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
+
+
+_NAME_DETECTORS = ("thai_name", "thai_name_no_prefix", "presidio_ner")
 
 
 class TestThaiNameHappyPath:
     def test_title_nai(self):
         text = "นาย สมศักดิ์ มีสุข"
-        _, span_map, _ = mask(text)
-        assert any("THAI_NAME" in t or "NAME" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, *_NAME_DETECTORS)
 
     def test_title_nang_sao(self):
         text = "นางสาว วิไลพร สุขใส"
-        _, span_map, _ = mask(text)
-        assert any("THAI_NAME" in t or "NAME" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, *_NAME_DETECTORS)
 
     def test_academic_title(self):
         text = "ดร.สมชาย ใจดี"
-        _, span_map, _ = mask(text)
-        assert any("THAI_NAME" in t or "NAME" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, *_NAME_DETECTORS)
 
 
 class TestThaiNameBoundary:
@@ -34,10 +37,9 @@ class TestThaiNameBoundary:
         # Both the name and the phone should be masked — overlap
         # resolution must not collapse them into one token.
         text = "ติดต่อ นายสมชาย ใจดี โทร 081-234-5678"
-        _, span_map, _ = mask(text)
-        has_name = any("NAME" in t for t in span_map)
-        has_phone = any("PHONE_NUMBER" in t for t in span_map)
-        assert has_name and has_phone
+        _, _, matches = mask(text)
+        assert has_match(matches, *_NAME_DETECTORS)
+        assert has_match(matches, "phone")
 
 
 class TestThaiNameNegative:

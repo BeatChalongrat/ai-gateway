@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask, tokens_in
+from ._helpers import detector_names_for, mask
+
+
+def _has_credit_card(matches) -> bool:
+    return any(ma.match.detector_name == "credit_card" for ma in matches)
 
 VISA = "4111 1111 1111 1111"
 VISA_NO_SPACES = "4111111111111111"
@@ -16,37 +20,37 @@ FAKE_CARD = "1234 5678 9012 3456"
 
 class TestCreditCardHappyPath:
     def test_visa_with_spaces(self):
-        _, span_map, _ = mask(VISA)
-        assert any("CREDIT_CARD" in t for t in span_map)
+        _, _, matches = mask(VISA)
+        assert _has_credit_card(matches)
 
     def test_label_preserved_en(self):
-        masked, span_map, _ = mask(f"Credit card: {VISA}")
+        masked, _, _ = mask(f"Credit card: {VISA}")
         assert masked.startswith("Credit card:")
-        assert "[CREDIT_CARD_0]" in masked
+        assert "<r0>" in masked
 
     def test_thai_label(self):
         text = f"หมายเลขบัตรเครดิต: {VISA}"
-        _, span_map, _ = mask(text)
-        assert any("CREDIT_CARD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_credit_card(matches)
 
 
 class TestCreditCardBoundary:
     def test_no_separators(self):
-        _, span_map, _ = mask(VISA_NO_SPACES)
-        assert any("CREDIT_CARD" in t for t in span_map)
+        _, _, matches = mask(VISA_NO_SPACES)
+        assert _has_credit_card(matches)
 
     def test_dashed(self):
-        _, span_map, _ = mask(VISA_DASHED)
-        assert any("CREDIT_CARD" in t for t in span_map)
+        _, _, matches = mask(VISA_DASHED)
+        assert _has_credit_card(matches)
 
     def test_amex_15_digit(self):
-        _, span_map, _ = mask(AMEX)
-        assert any("CREDIT_CARD" in t for t in span_map)
+        _, _, matches = mask(AMEX)
+        assert _has_credit_card(matches)
 
     def test_thai_label_no_spaces(self):
         text = f"บัตรเครดิต {VISA_NO_SPACES}"
-        _, span_map, _ = mask(text)
-        assert any("CREDIT_CARD" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_credit_card(matches)
 
 
 class TestCreditCardNegative:

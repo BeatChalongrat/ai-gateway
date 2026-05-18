@@ -38,39 +38,30 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-# Any bracketed ALL-CAPS token with a trailing identifier — covers both
-# token shapes the transformer emits:
-#   - counter form    ``[EMAIL_0]``       (digits-only suffix)
-#   - deterministic   ``[EMAIL_aB3kM9xQ]`` (8-char base64url suffix)
-#   - deterministic   ``[EMAIL_aB3kM9xQ_x9Pq]`` (collision-disambiguated)
-# Used by ``restore`` to detect tokens that survive restore (orphans)
-# and by ``orchestrator._scan_text_as_result`` to filter mask-token
-# literals out of outbound scan results.
-_MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]")
-
-# Double-bracketed variant the LLM occasionally invents despite the
-# system prompt's "do NOT invent new bracketed placeholder tokens"
-# clause. Example: gpt-4o-mini emitting ``[[NAME_1]]`` for a phone it
-# saw as ``[PHONE_NUMBER_0]``. The inner part still matches a token
-# shape so we can pattern-match to either unwrap (if the inner token
-# exists in span_map) or redact.
-_DOUBLE_BRACKET_TOKEN_RE = re.compile(r"\[\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\]\]")
-
-# Asymmetric bracket variants the model produces in practice — observed
-# in the May 2026 100-trace audit:
+# Neutral ``<rN>`` token shape — May 2026 switch from ``[CATEGORY_N]``.
+# Why: OpenAI's safety filter refuses prompts containing tokens like
+# ``[BEARER_TOKEN_0]`` / ``[NATIONAL_ID_0]`` because the category name
+# itself reads as a sensitive-data marker. The ``<rN>`` shape carries
+# no semantic hint and avoids the refusal.
 #
-#   * ``[[NAME_0]``  — double open, single close (3/100 traces)
-#   * ``[NAME_0]]``  — single open, trailing close (1/100 traces)
+# Both emission paths produce this shape:
+#   - counter form        ``<r0>`` / ``<r1>``        (digits-only suffix)
+#   - deterministic       ``<r{hmac_suffix}>``       (8-char base64url)
+#   - deterministic       ``<r{hmac_suffix}_{disambig}>`` (collision)
 #
-# The strict ``[[NAME_0]]`` pattern above misses both. We rewrite
-# them in ``sanitize_hallucinated_brackets`` so the user never sees a
-# stray ``[``/``]`` in the final reply.
-_DOUBLE_OPEN_TOKEN_RE = re.compile(
-    r"\[\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\](?!\])"
-)
-_DOUBLE_CLOSE_TOKEN_RE = re.compile(
-    r"(?<!\[)\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\]\]"
-)
+# Used by ``restore`` to detect surviving tokens (orphans) and by
+# ``orchestrator._scan_text_as_result`` to filter mask-token literals
+# out of outbound scan results.
+_MASK_TOKEN_RE = re.compile(r"<r[A-Za-z0-9_\-]+>")
+
+# Doubled-bracket variants the LLM occasionally invents — same failure
+# mode as the legacy ``[[NAME_0]]`` shape but for the new ``<rN>``
+# tokens. ``<<r0>>`` is the strict double; ``<<r0>`` / ``<r0>>`` are
+# the asymmetric forms observed in the May 2026 audit on the legacy
+# shape and likely to recur in the same proportions here.
+_DOUBLE_BRACKET_TOKEN_RE = re.compile(r"<<(r[A-Za-z0-9_\-]+)>>")
+_DOUBLE_OPEN_TOKEN_RE = re.compile(r"<<(r[A-Za-z0-9_\-]+)>(?!>)")
+_DOUBLE_CLOSE_TOKEN_RE = re.compile(r"(?<!<)<(r[A-Za-z0-9_\-]+)>>")
 
 
 def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
@@ -126,11 +117,11 @@ def sanitize_hallucinated_brackets(text: str, span_map: dict[str, str]) -> str:
     Returns the rewritten text; no-op when no double-bracket tokens
     are present.
     """
-    if not text or "[" not in text:
+    if not text or ("<<" not in text and ">>" not in text):
         return text
 
     def _unwrap_or_redact(m: "re.Match[str]") -> str:
-        inner = f"[{m.group(1)}]"
+        inner = f"<{m.group(1)}>"
         if span_map and inner in span_map:
             return inner
         return "[REDACTED]"
@@ -152,7 +143,7 @@ def sanitize_hallucinated_brackets(text: str, span_map: dict[str, str]) -> str:
     # here is rescue the stray bracket so the user-visible text isn't
     # corrupted by ``[ID_0]]"`` and friends.
     def _strip_trailing_close(m: "re.Match[str]") -> str:
-        return f"[{m.group(1)}]"
+        return f"<{m.group(1)}>"
 
     result = _DOUBLE_CLOSE_TOKEN_RE.sub(_strip_trailing_close, result)
 
@@ -160,35 +151,34 @@ def sanitize_hallucinated_brackets(text: str, span_map: dict[str, str]) -> str:
 
 # Tolerant variant of ``_MASK_TOKEN_RE`` used by ``_normalize_tokens`` to
 # rewrite near-miss token shapes the model may emit back to us. We accept
-# any letter case and incidental whitespace immediately inside the
-# brackets — anything else (missing brackets, mangled body) is left alone
-# because we cannot recover its identity. The capture group is the body
-# without the surrounding brackets / spaces so the replacer can uppercase
-# it and rebuild the canonical ``[BASE_N]`` form.
+# any letter case (``<R0>`` / ``<r0>``) and incidental whitespace inside
+# the angles. The capture group is the body without the surrounding
+# brackets / spaces so the replacer can rebuild the canonical ``<rN>``
+# form.
 _FUZZY_TOKEN_RE = re.compile(
-    r'\[\s*([A-Za-z][A-Za-z0-9_]*_\d+)\s*\]'
+    r'<\s*[Rr]\s*(\d+|[A-Za-z0-9_\-]+)\s*>'
 )
 
 
 def _normalize_tokens(text: str, span_map: dict[str, str]) -> str:
-    """Rewrite near-miss token variants to their canonical ``[BASE_N]`` form.
+    """Rewrite near-miss token variants to their canonical ``<rN>`` form.
 
     Restore relies on exact ``str.replace`` against the keys in
     ``span_map``. LLMs occasionally echo tokens back with cosmetic
-    drift — lowercase (``[email_0]``), padded brackets
-    (``[ EMAIL_0 ]``), a single trailing space (``[EMAIL_0 ]``) — and
-    every such variant misses the replace and leaks the literal token
-    to the user. This pre-pass canonicalises any bracketed token shape
-    matching ``_FUZZY_TOKEN_RE`` to the uppercase, whitespace-free form
-    *iff* that canonical form is present in ``span_map``; otherwise the
-    original substring is preserved untouched so we don't accidentally
-    rewrite unrelated bracketed text the model produced.
+    drift — uppercase (``<R0>``), padded angles (``< r0 >``), a single
+    trailing space (``<r0 >``) — and every such variant misses the
+    replace and leaks the literal token to the user. This pre-pass
+    canonicalises any token shape matching ``_FUZZY_TOKEN_RE`` to the
+    lowercase, whitespace-free form *iff* that canonical form is
+    present in ``span_map``; otherwise the original substring is
+    preserved untouched so we don't accidentally rewrite unrelated
+    angle-bracketed text the model produced.
     """
     if not span_map:
         return text
 
     def replacer(m: re.Match) -> str:
-        canonical = f"[{m.group(1).upper()}]"
+        canonical = f"<r{m.group(1)}>"
         return canonical if canonical in span_map else m.group(0)
 
     return _FUZZY_TOKEN_RE.sub(replacer, text)
@@ -262,25 +252,34 @@ def _mask_base_name(detector_name: str) -> str:
 
 
 def _indexed_token(detector_name: str, index: int) -> str:
-    """Return an indexed mask token like '[EMAIL_0]' so multiple
+    """Return a neutral indexed mask token like ``<r0>`` so multiple
     occurrences of the same detector stay distinguishable for restore.
+
+    The ``detector_name`` parameter is retained for callsite symmetry
+    with the legacy ``[CATEGORY_N]`` shape but no longer affects the
+    emitted token — the new shape is intentionally category-free so
+    upstream safety filters (notably OpenAI's) cannot pattern-match a
+    sensitive category name like ``BEARER_TOKEN`` / ``NATIONAL_ID``
+    embedded in the prompt and refuse the request.
     """
-    return f"[{_mask_base_name(detector_name)}_{index}]"
+    return f"<r{index}>"
 
 
 def mask_token_base(token: str) -> str:
-    """Return the base name from an indexed mask token.
+    """Return the body of a ``<rN>`` mask token without the brackets.
+
+    The legacy shape carried a category prefix (``[EMAIL_0]`` -> ``EMAIL``);
+    the new neutral shape does not, so this returns the ``r``-prefixed
+    identifier instead. Kept for any external caller that wants a key
+    derivable from the token alone.
 
     Examples:
-        ``[EMAIL_0]`` -> ``EMAIL``
-        ``[BEARER_TOKEN_abcd1234]`` -> ``BEARER_TOKEN``
+        ``<r0>`` -> ``r0``
+        ``<rAbCd1234>`` -> ``rAbCd1234``
     """
-    if not token.startswith("[") or not token.endswith("]"):
+    if not token.startswith("<") or not token.endswith(">"):
         return ""
-    body = token[1:-1]
-    if "_" not in body:
-        return body
-    return body.rsplit("_", 1)[0]
+    return token[1:-1]
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +354,11 @@ def _make_deterministic_token(
         hashlib.sha256,
     ).digest()
     suffix = base64.urlsafe_b64encode(digest).decode("ascii")[:_TOKEN_SUFFIX_LEN]
-    return f"[{category}_{suffix}]"
+    # ``category`` is intentionally unused in the emitted token under
+    # the neutral ``<rN>`` shape — preserved as a parameter so callers
+    # remain unchanged across the format flip.
+    del category
+    return f"<r{suffix}>"
 
 
 def _allocate_deterministic_token(
@@ -397,7 +400,9 @@ def _allocate_deterministic_token(
         disambig = base64.urlsafe_b64encode(
             original.encode("utf-8")
         ).decode("ascii")[:4]
-        token = f"[{base}_{token.strip('[]').split('_', 1)[1]}_{disambig}]"
+        # ``token`` is ``<rXXXXXXXX>``; insert disambig before the
+        # closing ``>`` to keep the shape neutral.
+        token = f"<{token.strip('<>')}_{disambig}>"
         logger.warning(
             "dlp_deterministic_token_collision",
             base=base,
@@ -433,15 +438,28 @@ def _allocate_token(
     introduces a new collision pattern fails loud instead of
     corrupting data silently.
     """
-    base = _mask_base_name(detector_name)
-    idx = counters.get(base, 0)
-    token = f"[{base}_{idx}]"
-    counters[base] = idx + 1
+    # Single shared counter under the neutral ``<rN>`` shape. The
+    # legacy per-base counter dict can't be used because the emitted
+    # token no longer carries the base — two detectors starting at 0
+    # would both mint ``<r0>`` for different values. ``__global__`` is
+    # the canonical key; legacy per-base entries written by
+    # ``start_counters`` callers are absorbed by taking the max across
+    # all values so an outbound pass still continues past the inbound
+    # high-water mark.
+    if "__global__" in counters:
+        idx = counters["__global__"]
+    elif counters:
+        idx = max(counters.values())
+    else:
+        idx = 0
+    token = f"<r{idx}>"
+    counters["__global__"] = idx + 1
 
     existing = span_map.get(token)
     if existing is not None and existing != original:
-        # Base-keyed counter failed to avoid collision — bail to a
-        # high-offset slot rather than overwrite the existing binding.
+        # Counter collision across two distinct values that landed on
+        # the same ``<rN>`` slot — log and bail to a high-offset slot
+        # rather than overwrite the existing binding.
         logger.error(
             "dlp_span_map_collision",
             token=token,
@@ -452,10 +470,10 @@ def _allocate_token(
         fallback = idx
         while True:
             fallback += 1
-            alt = f"[{base}_{fallback}]"
+            alt = f"<r{fallback}>"
             if alt not in span_map:
                 token = alt
-                counters[base] = fallback + 1
+                counters["__global__"] = fallback + 1
                 break
 
     span_map[token] = original

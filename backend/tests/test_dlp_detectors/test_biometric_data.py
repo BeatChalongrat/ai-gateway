@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
 
 
 class TestBiometricHappyPath:
     def test_english_fingerprint_personal(self):
         text = "I registered my fingerprint at the office"
-        _, span_map, _ = mask(text)
-        assert any("BIOMETRIC" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "biometric_data")
 
     def test_english_face_scan(self):
         # The English biometric regex expects ``face`` followed by
@@ -17,25 +17,25 @@ class TestBiometricHappyPath:
         # cluster, not a verb-object phrase. ``face scan`` with a
         # registration verb is the canonical form.
         text = "We register their face scan for entry"
-        _, span_map, _ = mask(text)
-        assert any("BIOMETRIC" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "biometric_data")
 
     def test_thai_fingerprint(self):
         text = "ผมลงทะเบียนลายนิ้วมือกับบริษัท"
-        _, span_map, _ = mask(text)
-        assert any("BIOMETRIC" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "biometric_data")
 
     def test_thai_face_scan(self):
         text = "เราใช้สแกนใบหน้าเข้าออฟฟิศ"
-        _, span_map, _ = mask(text)
-        assert any("BIOMETRIC" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "biometric_data")
 
 
 class TestBiometricBoundary:
     def test_retinal_scan_english(self):
         text = "We register her retina scan for the vault"
-        _, span_map, _ = mask(text)
-        assert any("BIOMETRIC" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "biometric_data")
 
 
 class TestBiometricNegative:

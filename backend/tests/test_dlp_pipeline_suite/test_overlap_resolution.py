@@ -12,28 +12,29 @@ specific detector.
 
 from __future__ import annotations
 
-from ..test_dlp_detectors._helpers import mask
+from ..test_dlp_detectors._helpers import has_match, mask
 
 VALID_THAI_ID = "3100112345674"  # passes mod-11
+
+_NAME_DETECTORS = ("thai_name", "thai_name_no_prefix", "presidio_ner")
 
 
 def test_phone_wins_over_ner():
     # A Thai-format phone could theoretically be picked up by NER as
     # an organisation / number entity. The phone detector has
     # priority=5 (NER default is 0), so it wins.
-    masked, span_map, _ = mask("+66 81-234-5678")
-    assert any("PHONE_NUMBER" in t for t in span_map)
-    # NAME token from NER must not steal the same span.
-    assert not any("NAME" in t for t in span_map)
+    _, _, matches = mask("+66 81-234-5678")
+    assert has_match(matches, "phone")
+    assert not has_match(matches, *_NAME_DETECTORS)
 
 
 def test_credential_wins_over_ip_inside_url():
     text = "postgresql://admin:pass@192.168.1.105:5432/prod"
     _, span_map, _ = mask(text)
-    cred_count = sum(1 for t in span_map if "CREDENTIAL" in t)
-    ip_count = sum(1 for t in span_map if "IP_ADDRESS" in t)
-    assert cred_count == 1
-    assert ip_count == 0
+    # Overlap resolution keeps a single span — the full URL.
+    assert len(span_map) == 1
+    [value] = span_map.values()
+    assert value == text
 
 
 def test_health_condition_wins_over_ner_person():
@@ -41,8 +42,8 @@ def test_health_condition_wins_over_ner_person():
     # blood pressure`` as a single span. NER might tag a substring as
     # ORG/PERSON; the longer health span wins by overlap resolution.
     text = "Medical: diabetes and high blood pressure"
-    _, span_map, _ = mask(text)
-    assert any("HEALTH_CONDITION" in t for t in span_map)
+    _, _, matches = mask(text)
+    assert has_match(matches, "health_condition")
 
 
 def test_thai_name_wins_over_presidio_ner():
@@ -51,8 +52,8 @@ def test_thai_name_wins_over_presidio_ner():
     # resolution must produce exactly one NAME-family token per name.
     text = "นาย สมชาย ใจดี ติดต่อ"
     _, span_map, _ = mask(text)
-    name_tokens = [t for t in span_map if "NAME" in t]
-    assert len(name_tokens) == 1
+    # Exactly one mask span — the name.
+    assert len(span_map) == 1
 
 
 def test_thai_id_priority_over_generic_number():
@@ -60,8 +61,6 @@ def test_thai_id_priority_over_generic_number():
     # has priority=10 so it beats the generic phone matcher on the
     # same 13-digit span.
     text = f"เลขประจำตัวประชาชน {VALID_THAI_ID}"
-    _, span_map, _ = mask(text)
-    # We accept either THAI_ID or PROMPTPAY winning (both have
-    # priority 10 and the keyword path could match either) — the
-    # crucial check is that no PHONE_NUMBER token surfaces.
-    assert not any("PHONE_NUMBER" in t for t in span_map)
+    _, _, matches = mask(text)
+    # The crucial check is that no PHONE_NUMBER finding surfaces.
+    assert not has_match(matches, "phone")

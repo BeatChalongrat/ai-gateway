@@ -26,9 +26,10 @@ class TestBearerTokenHappyPath:
     def test_api_key_label_preserved(self):
         # The credential_assignment branch of api_key_secret masks the
         # value; the label survives.
-        masked, span_map, _ = mask("API Key: sk-live-abc12345abcdef")
+        from ._helpers import has_match
+        masked, _, matches = mask("API Key: sk-live-abc12345abcdef")
         assert "API Key:" in masked
-        assert any("CREDENTIAL" in t for t in span_map)
+        assert has_match(matches, "api_key_secret", "bearer_token", "db_connection_string")
 
 
 class TestBearerTokenBoundary:

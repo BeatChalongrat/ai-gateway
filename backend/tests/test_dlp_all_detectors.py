@@ -163,14 +163,19 @@ class TestTC1ThaiMega:
     def test_full_pipeline_masks_all(self):
         masked, span_map, count = _full_pipeline(TC1_THAI_MEGA)
         assert count >= 7
-        assert "[THAI_NAME_0]" in masked
-        assert "[THAI_ID_0]" in masked
-        assert "[ADDRESS_0]" in masked
-        assert "[PHONE_NUMBER_0]" in masked
-        assert "[EMAIL_0]" in masked
-        assert "[BANK_ACCOUNT_0]" in masked
-        assert "somsak.m@gmail.com" not in masked
-        assert "089-999-1234" not in masked
+        # Under the neutral ``<rN>`` shape we can't peg a specific token
+        # to a specific category, so assert (a) tokens were emitted and
+        # (b) each original PII value is gone from the masked output and
+        # present in span_map.
+        assert "<r0>" in masked
+        for original in [
+            "somsak.m@gmail.com",
+            "089-999-1234",
+            "3-1001-12345-67-4",
+            "012-3-98765-4",
+        ]:
+            assert original not in masked
+            assert original in span_map.values()
 
     def test_original_text_not_in_masked(self):
         masked, _, _ = _full_pipeline(TC1_THAI_MEGA)
@@ -210,27 +215,33 @@ class TestTC2HRReport:
             )
 
     def test_full_pipeline_masks_all_pdpa(self):
+        # Every PDPA-class value should be moved into span_map and gone
+        # from masked. Per-category token literals no longer apply
+        # under the neutral ``<rN>`` shape.
         masked, span_map, _ = _full_pipeline(TC2_HR_REPORT)
-        assert "[RELIGION_0]" in masked
-        assert "[CRIMINAL_RECORD_0]" in masked
-        assert "[HEALTH_CONDITION_0]" in masked
-        assert "[BIOMETRIC_0]" in masked
-        assert "[PHONE_NUMBER_0]" in masked
-        assert "[THAI_NAME_0]" in masked
-        assert "[DATE_OF_BIRTH_0]" in masked
-        assert "[THAI_ID_0]" in masked
+        for original in [
+            "062-888-7777",
+            "1-1007-54321-89-1",
+            "22/08/1997",
+        ]:
+            assert original not in masked
+            assert original in span_map.values()
+        # At minimum one token must be emitted for the run.
+        assert "<r0>" in masked
 
-    def test_no_triple_religion_tokens(self):
-        """Religion should be 1 merged token, not 3 separate ones."""
-        masked, _, _ = _full_pipeline(TC2_HR_REPORT)
-        assert "[RELIGION_0]" in masked
-        assert "[RELIGION_1]" not in masked
-        assert "[RELIGION_2]" not in masked
+    def test_religion_merged_to_single_token(self):
+        """Religion should produce a single merged finding (one span)."""
+        from app.services.dlp.detectors.religion_belief import ReligionBeliefDetector
+        det = ReligionBeliefDetector()
+        matches = det.detect(TC2_HR_REPORT)
+        assert len(matches) == 1, (
+            f"expected 1 merged religion span, got {len(matches)}"
+        )
 
     def test_phone_masked_despite_nfkc_shift(self):
-        masked, _, _ = _full_pipeline(TC2_HR_REPORT)
+        masked, span_map, _ = _full_pipeline(TC2_HR_REPORT)
         assert "062-888-7777" not in masked
-        assert "[PHONE_NUMBER_0]" in masked
+        assert "062-888-7777" in span_map.values()
 
     def test_span_map_has_all_entries(self):
         _, span_map, _ = _full_pipeline(TC2_HR_REPORT)
@@ -267,12 +278,15 @@ class TestTC3EnglishEmployee:
         assert "phone" in hits
 
     def test_full_pipeline_masks_sensitive(self):
-        masked, _, _ = _full_pipeline(TC3_ENGLISH_EMPLOYEE)
-        assert "123-45-6789" not in masked
-        assert "john.smith@company.com" not in masked
-        assert "[SSN_0]" in masked
-        assert "[EMAIL_0]" in masked
-        assert "[PHONE_NUMBER_0]" in masked
+        masked, span_map, _ = _full_pipeline(TC3_ENGLISH_EMPLOYEE)
+        for original in [
+            "123-45-6789",
+            "john.smith@company.com",
+            "+1-555-012-3456",
+        ]:
+            assert original not in masked
+            assert original in span_map.values()
+        assert "<r0>" in masked
 
 
 # ---------------------------------------------------------------------------

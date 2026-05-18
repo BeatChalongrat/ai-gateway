@@ -13,8 +13,8 @@ Also checks two integration-level invariants:
       ``thai_bank_account``, ``thai_promptpay``, ``medical_record``)
       declare ``priority = 10`` on the class.
     - An end-to-end scan through the default registry + transformer
-      masks a 13-digit Thai ID with ``[THAI_ID_0]``, not the generic
-      ``[PHONE_NUMBER_0]`` that used to win the tiebreak.
+      masks a 13-digit Thai ID — the priority system ensures the
+      thai_national_id detector wins on the shared span, not phone.
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ class TestDetectorClassPriorities:
 
 class TestThaiIdBeatsPhoneEndToEnd:
     def test_thai_id_mask_token_wins_over_phone_on_13_digit_span(self):
-        """The 13-digit Thai ID must be masked as [THAI_ID_0], never as phone.
+        """The 13-digit Thai ID must be masked, never picked up as phone.
 
         History: pre-priority-fix, phone.py's bare ``\\b\\d{10,15}\\b``
         branch matched the 13-digit span and the overlap resolver picked
@@ -196,9 +196,9 @@ class TestThaiIdBeatsPhoneEndToEnd:
 
         Post Fix 2 (context-gated bare digits), phone no longer fires on
         this input at all — there is no phone-context keyword near the
-        digits — so the overlap doesn't even arise. The test still
-        asserts the user-visible guarantee: the ID is masked with the
-        Thai-ID token, not a phone token.
+        digits — so the overlap doesn't even arise. The test asserts
+        the user-visible guarantee under the neutral ``<rN>`` shape:
+        the ID is the only span that's masked.
         """
         text = f"citizen id {VALID_THAI_ID}"
         registry = get_default_registry(disabled_detectors=[])
@@ -209,7 +209,7 @@ class TestThaiIdBeatsPhoneEndToEnd:
         # "phone" no longer matches bare 13-digit runs without phone
         # context (Fix 2). The priority system still protects the
         # user-visible invariant below even if phone ever re-matches
-        # later — the transformer would still pick [THAI_ID_0].
+        # later — the transformer would still pick thai_national_id.
         assert "phone" not in names
 
         from app.domain.dlp import EnforcementAction, MatchAction
@@ -222,8 +222,8 @@ class TestThaiIdBeatsPhoneEndToEnd:
             )
             for m in matches
         ]
-        masked_text, _, _ = DLPTransformer().mask_text(text, actions)
+        masked_text, span_map, _ = DLPTransformer().mask_text(text, actions)
 
         assert VALID_THAI_ID not in masked_text
-        assert "[THAI_ID_0]" in masked_text
-        assert "[PHONE_NUMBER_0]" not in masked_text
+        assert "<r0>" in masked_text
+        assert VALID_THAI_ID in span_map.values()
