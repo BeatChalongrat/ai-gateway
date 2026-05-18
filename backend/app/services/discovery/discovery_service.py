@@ -204,12 +204,21 @@ class ModelDiscoveryService:
 
         seen_keys: set[tuple[str, str]] = set()
         all_discovered: list[DiscoveredModel] = []
+        # Providers we have authoritative results for. A provider that
+        # returned [] (missing API key, network failure, schema drift)
+        # is intentionally NOT added — soft-deactivate must skip those
+        # providers entirely so their seed/auto rows survive transient
+        # outages instead of getting wiped to is_active=False.
+        synced_providers: set[str] = set()
         for (provider_name, _), entry in zip(providers.items(), discovered_lists):
             if isinstance(entry, BaseException):
                 result.errors.append(
                     f"{provider_name}: adapter raised: {entry}"
                 )
                 continue
+            if not entry:
+                continue
+            synced_providers.add(provider_name)
             for model in entry:
                 _enrich_with_pricing(model, self.pricing_fetcher)
                 all_discovered.append(model)
@@ -222,6 +231,7 @@ class ModelDiscoveryService:
                 db,
                 discovered=all_discovered,
                 seen_keys=seen_keys,
+                synced_providers=synced_providers,
                 provider_filter=provider_filter,
             )
 
@@ -255,6 +265,7 @@ class ModelDiscoveryService:
         *,
         discovered: list[DiscoveredModel],
         seen_keys: set[tuple[str, str]],
+        synced_providers: set[str],
         provider_filter: str | None,
     ) -> tuple[int, int, int, int]:
         """Apply the upsert + soft-deactivate logic.
@@ -326,8 +337,17 @@ class ModelDiscoveryService:
                 updated += 1
 
             # --- soft-deactivate models that vanished ---
+            # Only consider rows whose provider successfully reported a
+            # non-empty model list this run. A provider that returned []
+            # (missing API key, network failure, schema drift) carries no
+            # signal that its rows have actually disappeared upstream, so
+            # leaving them active is the safe default. This guards the
+            # seed catalog from being silently wiped on a fresh install
+            # where keys haven't been entered yet.
             for (provider_name, model_name), row in existing.items():
                 if (provider_name, model_name) in seen_keys:
+                    continue
+                if provider_name not in synced_providers:
                     continue
                 # When syncing a single provider, only consider rows
                 # belonging to that provider for deactivation. A full
