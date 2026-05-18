@@ -81,6 +81,12 @@ services:
     image: ai-gateway-ner-service:latest
     environment:
       NER_WORKERS: ${NER_WORKERS:-4}
+      # Per-language confidence floors. Thai NER is noisier than
+      # English on conversational prose, so its floor stays higher
+      # by default. Both are overridable per-deployment if a
+      # particular workload needs tuning.
+      NER_SCORE_THRESHOLD_EN: ${NER_SCORE_THRESHOLD_EN:-0.7}
+      NER_SCORE_THRESHOLD_TH: ${NER_SCORE_THRESHOLD_TH:-0.85}
     ports:
       - "8001:8001"
     deploy:

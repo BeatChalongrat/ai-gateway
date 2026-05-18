@@ -32,6 +32,22 @@ RUN (pip install --no-cache-dir "https://github.com/explosion/spacy-models/relea
     && (pip install --no-cache-dir "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.7.1/en_core_web_lg-3.7.1-py3-none-any.whl" \
         || echo "en_core_web_lg install skipped")
 
+# Thai NER: deliberately NOT installed here. spaCy does not publish
+# official Thai models — ``explosion/spacy-models`` has no
+# ``th_core_news_*`` release tags (catalog query returns an empty
+# version that 404s), and the PyThaiNLP HuggingFace mirror is a
+# gated repo (401 without an auth token). The code path in
+# ``main.py::_load_analyzer`` still probes for ``th_core_news_lg``
+# / ``th_core_news_sm`` and registers Thai with Presidio if either
+# is present — that's the route forward whenever a wheel becomes
+# available, e.g. via an air-gapped artifact registry the operator
+# bakes into the image at deploy time.
+#
+# Until then, Thai coverage rides on the regex ``thai_name``
+# detector (title-prefix gated, ``backend/app/services/dlp/
+# detectors/thai_name.py``) plus the conservative Thai
+# false-positive deny-list in ``presidio_ner.py``.
+
 # Copy only the ner_service package — narrower than ``COPY .`` so the
 # 7+ unrelated backend dirs (app/, migrations/, tests/) don't end up
 # inside the NER image. The package lands at /app/ner_service so
