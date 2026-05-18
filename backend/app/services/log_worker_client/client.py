@@ -93,7 +93,14 @@ def record_to_proto(record: "RequestRecord") -> Any:
         error_code=record.error_code or "",
         router_used=record.router_used or "",
         fallback_used=bool(record.fallback_used),
-        fallback_attempts_json=record.fallback_attempts or "",
+        # RequestRecord.fallback_attempts is now a list[dict] (the JSONB
+        # column handles serialization for the Python path). The proto
+        # wire format keeps a string — serialize here.
+        fallback_attempts_json=(
+            json.dumps(record.fallback_attempts, ensure_ascii=False)
+            if record.fallback_attempts
+            else ""
+        ),
         original_provider=record.original_provider or "",
         original_model=record.original_model or "",
         dlp_input_findings=int(record.dlp_input_findings or 0),

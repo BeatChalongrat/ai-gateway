@@ -98,7 +98,13 @@ class RequestRecord:
     # requests (set by the orchestrator on every success path).
     # ``fallback_used`` is already declared above as a legacy field —
     # the Phase-2 wiring just starts populating it for real.
-    fallback_attempts: str | None = None  # JSON-encoded list
+    # List of attempt dicts (``[{"provider","model","error_code",...}]``).
+    # Pass the list directly — the ``RequestLogORM.fallback_attempts``
+    # JSONB column handles serialization. JSON-encoding here would
+    # cause double-encoding (`"\"[...]\""`) once SQLAlchemy serializes
+    # again. The gRPC client (``log_worker_client``) json-encodes at
+    # the wire boundary.
+    fallback_attempts: list[dict] | None = None
     original_provider: str | None = None
     original_model: str | None = None
 
