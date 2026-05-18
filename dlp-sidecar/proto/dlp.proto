@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package dlp;
+
+// DlpService — Rust port of ``backend/app/services/dlp/detectors/``.
+//
+// The Python registry runs ~30 detectors per request; offloading
+// them to this sidecar removes regex CPU from the gateway's hot
+// path and gives the orchestrator a single gRPC round-trip per
+// scan instead of N module imports.
+//
+// Phase-3 / Batch 1 ships **only** the scaffold + simple-regex
+// detectors (email, ssn, iban, ip_address, mac_address,
+// bearer_token, private_key, password_field, line_id). The full
+// server impl, registry routing, and parity wiring arrive in
+// Batches 2-4.
+service DlpService {
+  rpc ScanText     (ScanRequest)     returns (ScanResponse);
+  rpc ScanMessages (MessagesRequest) returns (ScanResponse);
+  rpc Health       (HealthRequest)   returns (HealthResponse);
+}
+
+message ScanRequest {
+  string text                       = 1;
+  string language                   = 2;   // "en" | "th"
+  repeated string disabled_detectors = 3;
+  bool   ner_enabled                = 4;
+}
+
+message MessagesRequest {
+  repeated Message messages           = 1;
+  string           direction          = 2;  // "input" | "output"
+  bool             scan_system_messages = 3;
+  repeated string  disabled_detectors  = 4;
+  bool             ner_enabled         = 5;
+}
+
+message Message {
+  string role    = 1;
+  string content = 2;
+}
+
+// DetectionMatch — mirrors ``app.domain.dlp.DetectionMatch`` one-for-one.
+// ``severity`` is the int value of the SensitivityLevel enum
+// (0=NONE 1=LOW 2=MEDIUM 3=HIGH 4=CRITICAL).
+message DetectionMatch {
+  string detector_name  = 1;
+  string entity_type    = 2;
+  string category       = 3;
+  int32  start          = 4;
+  int32  end            = 5;
+  string matched_text   = 6;
+  int32  severity       = 7;
+  float  confidence     = 8;
+  int32  priority       = 9;
+  string metadata_json  = 10;  // JSON-encoded string or ""
+}
+
+message ScanResponse {
+  repeated DetectionMatch matches           = 1;
+  string                  scanned_direction = 2;
+  string                  scan_target       = 3;
+  double                  latency_ms        = 4;
+}
+
+message HealthRequest  {}
+message HealthResponse {
+  string status         = 1;        // "ready" | "degraded"
+  int32  detector_count = 2;
+}

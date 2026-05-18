@@ -1,0 +1,65 @@
+{
+  "detector": "private_key",
+  "entity_type": "private_key_header",
+  "category": "secret",
+  "severity": 4,
+  "cases": [
+    {
+      "id": "rsa_header",
+      "input": "-----BEGIN RSA PRIVATE KEY-----\nMIIE...",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 31
+        }
+      ]
+    },
+    {
+      "id": "openssh_header",
+      "input": "-----BEGIN OPENSSH PRIVATE KEY-----\nbody",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 35
+        }
+      ]
+    },
+    {
+      "id": "plain_private_key",
+      "input": "before -----BEGIN PRIVATE KEY----- after",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 34
+        }
+      ]
+    },
+    {
+      "id": "public_key_header_no_match",
+      "input": "-----BEGIN PUBLIC KEY----- nope",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_pem_block",
+      "input": "no key material here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "end_only",
+      "input": "-----END PRIVATE KEY----- no begin",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

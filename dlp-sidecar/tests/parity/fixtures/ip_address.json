@@ -1,0 +1,77 @@
+{
+  "detector": "ip_address",
+  "entity_type": "ipv4_address",
+  "category": "network",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "ipv4_simple",
+      "input": "server at 192.168.1.1 listening",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "ipv4_high_octets",
+      "input": "edge 255.255.255.255 broadcast",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "ipv6_full",
+      "input": "addr 2001:0db8:85a3:0000:0000:8a2e:0370:7334 reached",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 44
+        }
+      ]
+    },
+    {
+      "id": "ipv6_compressed",
+      "input": "addr ::1 here",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 8
+        }
+      ]
+    },
+    {
+      "id": "ipv4_octet_overflow",
+      "input": "999.999.999.999 invalid",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_dots_no_match",
+      "input": "version 12345 deployed",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_ip_present",
+      "input": "no addresses here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}
