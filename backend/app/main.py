@@ -63,6 +63,15 @@ async def lifespan(app: FastAPI):
     # Seed admin user (runs blocking bcrypt in thread)
     await asyncio.to_thread(_seed_admin_user)
 
+    # Import env-configured provider API keys into provider_keys.
+    # Without this, OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY
+    # are reachable to the routing path but invisible to the admin UI —
+    # the Providers page surfaces them as an opaque "via env" badge that
+    # cannot be tested or rotated. Importing them once at boot gives the
+    # operator a real row to manage and unifies key management behind a
+    # single source.
+    await asyncio.to_thread(_import_env_provider_keys)
+
     # Per-worker NER pre-load. ``ner_status`` module-level state is
     # process-local — a ``PATCH /admin/settings`` call routes to one
     # gunicorn worker, which loads the analyzer in *its* process only,
@@ -162,6 +171,60 @@ def _seed_admin_user() -> None:
     except Exception as e:
         session.rollback()
         print(f"[startup] Admin seed skipped: {e}")
+    finally:
+        session.close()
+
+
+def _import_env_provider_keys() -> None:
+    """Import env-configured provider API keys into ``provider_keys``.
+
+    Sync function — runs in a thread via ``asyncio.to_thread``. Idempotent:
+    skips any provider whose ``provider_keys`` row set already contains a
+    key (active or soft-deleted), so a reboot never duplicates, and never
+    overrides a key the operator added manually through the admin UI. If
+    the operator soft-deletes our imported key, the soft-deleted row keeps
+    us from re-creating it on the next boot — the deletion stands.
+
+    Keys are inserted with no test status; the admin UI's Test button
+    populates ``last_test_status`` on demand.
+    """
+    from app.core.db import SessionLocal
+    from app.services.provider_key_service import ProviderKeyService
+
+    env_keys = {
+        "openai": settings.openai_api_key,
+        "anthropic": settings.anthropic_api_key,
+        "openrouter": settings.openrouter_api_key,
+    }
+
+    session = SessionLocal()
+    try:
+        svc = ProviderKeyService()
+        imported: list[str] = []
+        for provider, raw_key in env_keys.items():
+            raw_key = (raw_key or "").strip()
+            if not raw_key:
+                continue
+            if svc.list_keys(session, provider):
+                # Provider already has at least one row (active or
+                # historically soft-deleted) — leave it alone.
+                continue
+            svc.add_key(
+                session,
+                provider,
+                raw_key,
+                label="Imported from environment",
+            )
+            imported.append(provider)
+        session.commit()
+        if imported:
+            print(
+                "[startup] Imported env API keys into provider_keys: "
+                + ", ".join(imported)
+            )
+    except Exception as exc:
+        session.rollback()
+        print(f"[startup] env-key import skipped: {exc}")
     finally:
         session.close()
 
