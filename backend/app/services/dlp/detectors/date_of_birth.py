@@ -53,9 +53,16 @@ _DATE_ALT = (
 _DOB_RE = re.compile(
     rf"(?:"
     rf"born|d\.?o\.?b\.?|date\s*of\s*birth|birthday|birthdate"
-    # Thai keywords need a non-Thai-letter prefix so 'เกิด' as a
-    # substring of words like 'เหตุเกิด' / 'ประชุมเกิดวันที่' is NOT
-    # treated as a DOB keyword.
+    # Thai keywords need a non-Thai-letter prefix so 'เกิด' / 'เกิดวันที่'
+    # / 'วันเกิด' as substrings of compound Thai words like
+    # ``เหตุเกิด`` / ``ประชุมเกิดวันที่`` / ``อุบัติเหตุเกิด`` are NOT
+    # treated as DOB keywords. The regression tests in
+    # ``test_dlp_dob_thai.TestDobNegativeCases`` lock this contract
+    # in; relaxing the lookbehind here re-introduces those false
+    # positives. A patient real-prose case like
+    # ``ลูกค้าเกิดวันที่ 12/05/1998`` is the cost — it falls back to
+    # NER/thai_name to catch the person component, which is what
+    # masks the broader sentence.
     rf"|(?<![฀-๿])(?:วันเกิด|เกิดวันที่|เกิด)"
     rf")"
     rf"(?:\s+(?:on|in|at|is|was|=|:))?"

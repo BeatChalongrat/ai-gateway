@@ -12,21 +12,47 @@ import re
 
 from app.domain.dlp import DetectionMatch, SensitivityLevel
 from app.services.dlp.detectors.base import BaseDetector
-from app.services.dlp.detectors.thai_national_id import _thai_id_valid
+from app.services.dlp.detectors.thai_national_id import _WEIGHTS
 
 _NUMBER_RE = re.compile(
     r"(?<!\d)(\d[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d)(?!\d)"
 )
 
+
+def _thai_tax_id_valid(digits: str) -> bool:
+    """Same mod-11 weighted checksum as the citizen ID — but corporate
+    tax IDs are issued in the ``0xxxxxxxxxxxx`` range, so we do NOT
+    reject leading-zero values the way ``_thai_id_valid`` does. The
+    keyword gate in ``_has_tax_context`` is what disambiguates a tax
+    ID from any other 13-digit run that happens to pass the checksum.
+    """
+    if len(digits) != 13 or not digits.isdigit():
+        return False
+    total = sum(int(digits[i]) * _WEIGHTS[i] for i in range(12))
+    check = (11 - (total % 11)) % 10
+    return int(digits[12]) == check
+
+
 # Keywords that indicate a tax ID context (Thai + English).
+# Extended on 2026-05-18 after the E2E test caught
+# ``เลขผู้เสียภาษีบริษัทคือ 0105558123456`` slipping through —
+# ``เลขผู้เสียภาษี`` (no ``ประจำตัว`` middle) wasn't in the list,
+# nor were the corporate-registration variants.
 _TAX_KEYWORDS = (
     "เลขประจำตัวผู้เสียภาษี",
+    "เลขผู้เสียภาษี",
     "เลขภาษี",
     "ผู้เสียภาษี",
+    "เลขทะเบียนนิติบุคคล",
+    "เลขนิติบุคคล",
     "tax id",
-    "taxpayer id",
-    "tin",
+    "tax id number",
     "tax number",
+    "taxpayer id",
+    "taxpayer number",
+    "tin",
+    "tax registration",
+    "vat registration",
 )
 
 _CONTEXT_WINDOW = 60
@@ -55,7 +81,7 @@ class ThaiTaxIdDetector(BaseDetector):
         for m in _NUMBER_RE.finditer(text):
             raw = m.group(1)
             digits = "".join(ch for ch in raw if ch.isdigit())
-            if not _thai_id_valid(digits):
+            if not _thai_tax_id_valid(digits):
                 continue
             if not _has_tax_context(text, m.start(1), m.end(1)):
                 continue

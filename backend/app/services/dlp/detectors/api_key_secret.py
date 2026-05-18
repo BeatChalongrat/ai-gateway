@@ -65,6 +65,21 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b"
         ),
     ),
+    (
+        # GitHub classic personal-access token. Format is fixed:
+        # ``ghp_`` prefix + exactly 36 alphanumerics. Negative
+        # boundaries prevent fusing with adjacent identifiers.
+        "github_pat",
+        re.compile(r"(?<![A-Za-z0-9])ghp_[A-Za-z0-9]{36}(?![A-Za-z0-9])"),
+    ),
+    (
+        # GitHub fine-grained PAT. Newer format, longer body (82
+        # characters of base-58-ish alphabet + underscore).
+        "github_pat",
+        re.compile(
+            r"(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{82}(?![A-Za-z0-9])"
+        ),
+    ),
 ]
 
 # Generic `key=value` or `key: "value"` assignments for sensitive field names.
