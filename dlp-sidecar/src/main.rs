@@ -116,7 +116,9 @@ impl DlpService for DlpServer {
         let req = request.into_inner();
         let t0 = Instant::now();
         let normalized = nfkc(&req.text);
-        let detectors = registry::default_detectors();
+        // Per-request registry composition so ``thai_name_no_prefix``
+        // is registered iff NER is *off* — same gate Python uses.
+        let detectors = registry::default_detectors(req.ner_enabled);
         let raw = run_registry(&normalized, &detectors, &req.disabled_detectors);
         let matches: Vec<ProtoMatch> = raw
             .into_iter()
@@ -137,37 +139,26 @@ impl DlpService for DlpServer {
     ) -> Result<RpcResponse<ScanResponse>, Status> {
         let req = request.into_inner();
         let t0 = Instant::now();
-        let detectors = registry::default_detectors();
+        let detectors = registry::default_detectors(req.ner_enabled);
 
-        // Join messages with a newline + role-prefix-ish separator
-        // so cross-message boundary patterns can't accidentally
-        // chain across roles. Python's path scans each message
-        // independently — we mirror that here by accumulating
-        // per-message offsets via a running base.
+        // Scan each message independently — same contract as
+        // Python's ``DetectorRegistry.scan_messages``: spans index
+        // into the *individual* ``messages[i].content``, not into
+        // any joined concatenation. The earlier ``base_char``
+        // accumulator produced offsets that diverged from the
+        // Python path's, causing constant ``only_rust`` /
+        // ``only_python`` deltas in shadow-mode comparison.
         //
         // ``scan_system_messages=false`` skips role="system". Other
-        // roles are always scanned. Matches the Python registry's
-        // ``scan_messages`` contract.
+        // roles are always scanned.
         let mut all: Vec<(String, &'static str, &'static str, u32, RawMatch)> = Vec::new();
-        let mut base_char: usize = 0;
-        for (i, msg) in req.messages.iter().enumerate() {
+        for msg in req.messages.iter() {
             if !req.scan_system_messages && msg.role == "system" {
                 continue;
             }
             let normalized = nfkc(&msg.content);
-            let mut per_msg = run_registry(&normalized, &detectors, &req.disabled_detectors);
-            // Offset each match by the running ``base_char`` so the
-            // returned spans index into the implicit concatenation
-            // ``messages[0].content + "\n" + messages[1].content …``.
-            for entry in &mut per_msg {
-                entry.4.start += base_char;
-                entry.4.end += base_char;
-            }
+            let per_msg = run_registry(&normalized, &detectors, &req.disabled_detectors);
             all.extend(per_msg);
-            base_char += normalized.chars().count() + 1; // +1 for the "\n"
-            // ``i`` is unused but kept for future per-message metadata
-            // (e.g. attaching message index into ``metadata_json``).
-            let _ = i;
         }
 
         all.sort_by_key(|(_, _, _, _, m)| (m.start, m.end));
@@ -189,9 +180,14 @@ impl DlpService for DlpServer {
         &self,
         _request: RpcRequest<HealthRequest>,
     ) -> Result<RpcResponse<HealthResponse>, Status> {
+        // Health/metrics count uses the NER-on composition (29) —
+        // that's Python's default for ``get_default_registry``
+        // (``ner_enabled: bool = True``) and is the right thing
+        // for dashboards / alerts that compare against the Python
+        // count.
         Ok(RpcResponse::new(HealthResponse {
             status: "ready".into(),
-            detector_count: registry::default_detectors().len() as i32,
+            detector_count: registry::default_detectors(true).len() as i32,
         }))
     }
 }
@@ -210,7 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!(
         grpc_port,
         metrics_port,
-        detector_count = registry::default_detectors().len(),
+        detector_count = registry::default_detectors(true).len(),
         "dlp-sidecar booting"
     );
 
@@ -251,8 +247,8 @@ async fn http_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> 
             .header("content-type", "text/plain; version=0.0.4")
             .body(Body::from(format!(
                 "# dlp-sidecar detector_count {}\ndlp_sidecar_detector_count {}\n",
-                registry::default_detectors().len(),
-                registry::default_detectors().len()
+                registry::default_detectors(true).len(),
+                registry::default_detectors(true).len()
             )))
             .unwrap()),
         _ => Ok(Response::builder()
