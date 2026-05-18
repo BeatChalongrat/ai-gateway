@@ -1,4 +1,4 @@
-//! Detector registry — Batch 1 + Batch 2 detectors.
+//! Detector registry — Batch 1 + Batch 2 + Batch 3 detectors.
 
 use crate::detectors::base::{Detector, RawMatch};
 use crate::detectors::*;
@@ -30,6 +30,11 @@ pub fn default_detectors() -> Vec<Box<dyn Detector>> {
         Box::new(health_condition::HealthConditionDetector),
         Box::new(criminal_record::CriminalRecordDetector),
         Box::new(biometric_data::BiometricDataDetector),
+        // Batch 3 — checksum / banking / promptpay
+        Box::new(thai_national_id::ThaiNationalIdDetector),
+        Box::new(thai_tax_id::ThaiTaxIdDetector),
+        Box::new(thai_bank_account::ThaiBankAccountDetector),
+        Box::new(thai_promptpay::ThaiPromptPayDetector),
     ]
 }
 

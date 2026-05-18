@@ -29,6 +29,10 @@ pub mod private_key;
 pub mod religion_belief;
 pub mod ssn;
 pub mod thai_address;
+pub mod thai_bank_account;
+pub mod thai_national_id;
+pub mod thai_promptpay;
+pub mod thai_tax_id;
 pub mod vehicle_plate;
 
 use base::{Detector, RawMatch};
@@ -64,6 +68,15 @@ pub fn detector_for(name: &str) -> Option<Box<dyn Detector>> {
         }
         "criminal_record" => Some(Box::new(criminal_record::CriminalRecordDetector)),
         "biometric_data" => Some(Box::new(biometric_data::BiometricDataDetector)),
+        // Batch 3 — checksum / banking / promptpay
+        "thai_national_id" => {
+            Some(Box::new(thai_national_id::ThaiNationalIdDetector))
+        }
+        "thai_tax_id" => Some(Box::new(thai_tax_id::ThaiTaxIdDetector)),
+        "thai_bank_account" => {
+            Some(Box::new(thai_bank_account::ThaiBankAccountDetector))
+        }
+        "thai_promptpay" => Some(Box::new(thai_promptpay::ThaiPromptPayDetector)),
         _ => None,
     }
 }
