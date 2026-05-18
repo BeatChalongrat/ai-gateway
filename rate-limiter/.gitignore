@@ -1,0 +1,3 @@
+# Rust build artefacts — never committed. Reproducible from
+# Cargo.toml + Cargo.lock + source + ``cargo build``.
+target/

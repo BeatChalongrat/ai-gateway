@@ -162,6 +162,26 @@ class Settings(BaseSettings):
     log_worker_grpc_address: str = "log-worker:50052"
     log_worker_grpc_timeout_seconds: float = 0.5
 
+    # Phase-3b Rust rate-limiter sidecar.
+    #
+    # ``rate_limiter_engine`` selects which implementation handles
+    # ``RateLimitService.check_all_async``:
+    #
+    #   * "python" (default) — keeps the legacy in-process Redis
+    #     ZSET pipeline that ships with the gateway. No external
+    #     service required.
+    #   * "rust" — dispatches one CheckAll gRPC to the
+    #     ``rate-limiter`` sidecar. On *any* failure (timeout,
+    #     RPC error, sidecar unreachable, grpcio import error)
+    #     the service falls back to the Python pipeline so a
+    #     sidecar outage cannot block requests.
+    #
+    # Default ``python`` keeps the behaviour identical to the
+    # pre-Phase-3b runtime.
+    rate_limiter_engine: str = "python"
+    rate_limiter_grpc_address: str = "rate-limiter:50053"
+    rate_limiter_grpc_timeout_seconds: float = 0.5
+
     # Semantic router (intent classification via sentence-transformers).
     # Off by default — flipping this to true requires the optional
     # sentence-transformers + torch stack (see requirements-semantic.txt).
