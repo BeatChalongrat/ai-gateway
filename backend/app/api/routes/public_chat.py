@@ -537,7 +537,86 @@ async def chat_completions(
     from app.core.db import SessionLocal as _SessionLocal
     log_session_factory = _SessionLocal
 
+    # ----------------------------------------------------------------
+    # Phase-2 streaming fallback (pre-check).
+    #
+    # Mid-stream provider swaps would corrupt SSE because headers and
+    # content-type are already on the wire, so we do the fallback
+    # decision BEFORE the response is built. Two mechanisms:
+    #
+    #   1. Redis pre-check — if the primary provider has a recent
+    #      ``provider:health:{name}`` marker (set by any failed
+    #      dispatch in the last 60s), swap to the first viable
+    #      streaming candidate from the fallback chain right here.
+    #      Headers will reflect the post-swap route.
+    #
+    #   2. In-generator retry (below) — if the first chunk fetch
+    #      raises a fallback-eligible GatewayError BEFORE any byte
+    #      has been yielded to the client, the generator walks the
+    #      fallback chain a second time. Headers cannot be rewritten
+    #      after StreamingResponse construction, so this path is
+    #      a best-effort body recovery — the X-Gateway-* headers will
+    #      describe the primary even though the body came from the
+    #      fallback. The retry is gated on ``first_chunk_yielded``
+    #      so a successful partial stream is never abandoned.
+    # ----------------------------------------------------------------
+    from app.services.gateway.fallback_orchestrator import (
+        clear_provider_health as _clear_health,
+        is_fallback_eligible as _is_fallback_eligible,
+        is_provider_unhealthy as _is_unhealthy,
+        mark_provider_unhealthy as _mark_unhealthy,
+    )
+    from datetime import datetime as _dt, timezone as _tz
+
+    _stream_original_provider = route.provider_name
+    _stream_original_model = route.model_name
+    _stream_fallback_used = False
+    _stream_attempt_number = 1
+    _stream_fallback_attempts: list[dict] = []
+
+    if await _is_unhealthy(route.provider_name):
+        fb_runner = orchestrator._get_fallback_orchestrator()
+        fb_candidate = fb_runner.select_streaming_candidate(
+            original_provider=_stream_original_provider,
+            original_model=_stream_original_model,
+            session=session,
+        )
+        if fb_candidate is not None:
+            log.info(
+                "streaming_pre_check_swap",
+                original_provider=_stream_original_provider,
+                original_model=_stream_original_model,
+                fallback_provider=fb_candidate["provider"],
+                fallback_model=fb_candidate["model"],
+            )
+            route.provider_name = fb_candidate["provider"]
+            route.model_name = fb_candidate["model"]
+            provider_api_key = fb_candidate["api_key"]
+            adapter = orchestrator.provider_dispatcher.adapters[
+                fb_candidate["provider"]
+            ]
+            _stream_fallback_used = True
+            _stream_attempt_number = 2
+            _stream_fallback_attempts.append(
+                {
+                    "provider": _stream_original_provider,
+                    "model": _stream_original_model,
+                    "error_code": "health_marker_skip",
+                    "error_message": (
+                        "Skipped at streaming pre-check — Redis health "
+                        "marker indicated recent failure within TTL."
+                    ),
+                    "latency_ms": 0.0,
+                    "attempted_at": _dt.now(_tz.utc).isoformat(),
+                }
+            )
+
     async def event_generator():
+        # ``nonlocal`` so the in-generator fallback can rebind the
+        # flags captured by the StreamingResponse headers and the
+        # request_log persist block below. Pre-check fallback (above)
+        # runs in the enclosing function so it doesn't need nonlocal.
+        nonlocal _stream_fallback_used, _stream_attempt_number
         # Phase 3.5 Commits 30-31 — incremental DLP streaming.
         # Phase 2C (C13) closed P0-7 by buffering the whole response,
         # running DLP on the full body, then emitting as a single
@@ -658,55 +737,160 @@ async def chat_completions(
 
         from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
-        async for chunk in adapter.stream_chat(
-            payload, messages_to_send,
-            resolved_model=route.model_name,
-            api_key=provider_api_key,
-        ):
-            if chunk.delta:
-                cumulative_raw += chunk.delta
-                # Combine retained masked tail + new raw chunk text.
-                # The scanner won't re-match already-masked placeholders
-                # (`<EMAIL_1>` is not a valid email), so keeping masked
-                # text in the tail is safe and deduplication-friendly.
-                window = tail_masked + chunk.delta
-                masked_window, actions = _dlp_scan_and_mask(window)
-                # Drop ``[[CAT_N]]`` shapes the model invented. Runs on
-                # the full window (which already buffers split tokens
-                # via ``tail_masked``) so a double-bracket spanning two
-                # chunks is still caught when the closing ``]]`` lands.
-                masked_window = sanitize_hallucinated_brackets(masked_window, span_map)
-                if actions:
-                    accumulated_outbound_actions.extend(actions)
+        # Mutable state for the in-generator fallback retry. The outer
+        # ``while True`` walks the fallback chain at most
+        # ``MAX_STREAMING_FALLBACKS`` times after the primary; once any
+        # chunk has been emitted (``first_chunk_yielded = True``), a
+        # mid-stream error is logged and the SSE is closed gracefully
+        # instead of attempting a swap that would corrupt the body.
+        first_chunk_yielded = False
+        skip_providers: set[str] = set()
+        MAX_STREAMING_FALLBACKS = 2
 
-                if len(masked_window) > MIN_TAIL_CHARS:
-                    safe = masked_window[:-MIN_TAIL_CHARS]
-                    tail_masked = masked_window[-MIN_TAIL_CHARS:]
-                    masked_provider_parts.append(safe)
-                    # When a conversation_id is bound, every emit
-                    # needs the vault resolver so a token echoed from
-                    # an earlier turn is unmasked even though the
-                    # per-window scan returned no new findings.
-                    if span_map or _vault_resolver_stream is not None:
-                        emit_text = orchestrator.transformer.restore(
-                            safe, span_map,
-                            vault_resolver=_vault_resolver_stream,
-                            allowed_tokens=restore_allowed_tokens,
-                        )
-                    else:
-                        emit_text = safe
-                    if emit_text:
-                        emitted_parts.append(emit_text)
-                        yield _emit_chunk(emit_text)
-                else:
-                    tail_masked = masked_window
+        # Local refs we may rebind on fallback. ``adapter`` /
+        # ``provider_api_key`` come from the enclosing scope; we keep
+        # nonlocal bindings via these copies so the retry block can
+        # point ``stream_chat`` at the new candidate.
+        stream_adapter = adapter
+        stream_api_key = provider_api_key
 
-            if chunk.model:
-                final_model = chunk.model
-            if chunk.finish_reason is not None:
-                final_finish_reason = chunk.finish_reason
-            if chunk.usage is not None:
-                provider_usage = chunk.usage
+        while True:
+            try:
+                async for chunk in stream_adapter.stream_chat(
+                    payload, messages_to_send,
+                    resolved_model=route.model_name,
+                    api_key=stream_api_key,
+                ):
+                    if chunk.delta:
+                        cumulative_raw += chunk.delta
+                        # Combine retained masked tail + new raw chunk text.
+                        # The scanner won't re-match already-masked placeholders
+                        # (`<EMAIL_1>` is not a valid email), so keeping masked
+                        # text in the tail is safe and deduplication-friendly.
+                        window = tail_masked + chunk.delta
+                        masked_window, actions = _dlp_scan_and_mask(window)
+                        # Drop ``[[CAT_N]]`` shapes the model invented. Runs on
+                        # the full window (which already buffers split tokens
+                        # via ``tail_masked``) so a double-bracket spanning two
+                        # chunks is still caught when the closing ``]]`` lands.
+                        masked_window = sanitize_hallucinated_brackets(masked_window, span_map)
+                        if actions:
+                            accumulated_outbound_actions.extend(actions)
+
+                        if len(masked_window) > MIN_TAIL_CHARS:
+                            safe = masked_window[:-MIN_TAIL_CHARS]
+                            tail_masked = masked_window[-MIN_TAIL_CHARS:]
+                            masked_provider_parts.append(safe)
+                            # When a conversation_id is bound, every emit
+                            # needs the vault resolver so a token echoed from
+                            # an earlier turn is unmasked even though the
+                            # per-window scan returned no new findings.
+                            if span_map or _vault_resolver_stream is not None:
+                                emit_text = orchestrator.transformer.restore(
+                                    safe, span_map,
+                                    vault_resolver=_vault_resolver_stream,
+                                    allowed_tokens=restore_allowed_tokens,
+                                )
+                            else:
+                                emit_text = safe
+                            if emit_text:
+                                emitted_parts.append(emit_text)
+                                yield _emit_chunk(emit_text)
+                                first_chunk_yielded = True
+                        else:
+                            tail_masked = masked_window
+
+                    if chunk.model:
+                        final_model = chunk.model
+                    if chunk.finish_reason is not None:
+                        final_finish_reason = chunk.finish_reason
+                    if chunk.usage is not None:
+                        provider_usage = chunk.usage
+                # Stream completed successfully — clear the health
+                # marker for the provider that just answered so the
+                # next request's pre-check stops skipping it.
+                await _clear_health(route.provider_name)
+                break
+            except Exception as stream_exc:  # noqa: BLE001
+                from app.core.exceptions import GatewayError as _GwErr
+
+                # Mid-stream errors cannot be recovered — headers and
+                # part of the body are already on the wire. Log and
+                # close the SSE gracefully; the client sees the partial
+                # response with no extra error frame.
+                if first_chunk_yielded:
+                    log.warning(
+                        "stream_mid_stream_error",
+                        provider=route.provider_name,
+                        model=route.model_name,
+                        error=str(stream_exc)[:200],
+                    )
+                    if isinstance(stream_exc, _GwErr) and _is_fallback_eligible(
+                        stream_exc
+                    ):
+                        await _mark_unhealthy(route.provider_name)
+                    return
+
+                # Pre-yield error → eligible for body-level fallback.
+                if not isinstance(stream_exc, _GwErr) or not _is_fallback_eligible(
+                    stream_exc
+                ):
+                    raise
+
+                failed_provider = route.provider_name
+                _stream_fallback_attempts.append(
+                    {
+                        "provider": failed_provider,
+                        "model": route.model_name,
+                        "error_code": getattr(
+                            stream_exc, "code", "provider_error"
+                        ),
+                        "error_message": str(stream_exc)[:200],
+                        "latency_ms": 0.0,
+                        "attempted_at": _dt.now(_tz.utc).isoformat(),
+                    }
+                )
+                await _mark_unhealthy(failed_provider)
+                skip_providers.add(failed_provider)
+
+                if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
+                    raise
+
+                fb_runner = orchestrator._get_fallback_orchestrator()
+                # Mint a fresh session for the key lookup — the
+                # dependency-injected ``session`` is already closed by
+                # the time the generator runs (FastAPI's
+                # ``get_db_session`` finally-block fires as soon as the
+                # route handler returns ``StreamingResponse``).
+                _lookup_session = log_session_factory()
+                try:
+                    fb_candidate = fb_runner.select_streaming_candidate(
+                        original_provider=_stream_original_provider,
+                        original_model=_stream_original_model,
+                        session=_lookup_session,
+                        skip_providers=skip_providers,
+                    )
+                finally:
+                    _lookup_session.close()
+
+                if fb_candidate is None:
+                    raise
+
+                log.info(
+                    "stream_in_generator_fallback",
+                    from_provider=failed_provider,
+                    to_provider=fb_candidate["provider"],
+                    to_model=fb_candidate["model"],
+                )
+                route.provider_name = fb_candidate["provider"]
+                route.model_name = fb_candidate["model"]
+                stream_adapter = orchestrator.provider_dispatcher.adapters[
+                    fb_candidate["provider"]
+                ]
+                stream_api_key = fb_candidate["api_key"]
+                _stream_fallback_used = True
+                _stream_attempt_number += 1
+                continue
 
         # Flush the remaining tail. The tail already went through a
         # DLP scan in its most recent iteration; no need to re-mask.
@@ -820,6 +1004,17 @@ async def chat_completions(
 
         latency_ms = int((time.perf_counter() - t_start) * 1000)
 
+        # Serialize the streaming fallback attempt log (if any) for
+        # the request_log row. Mirrors the non-streaming orchestrator's
+        # ``fallback_attempts`` JSON shape so the admin dashboard
+        # query treats both paths uniformly.
+        import json as _stream_json
+        _stream_fallback_attempts_json = (
+            _stream_json.dumps(_stream_fallback_attempts, ensure_ascii=False)
+            if _stream_fallback_attempts
+            else None
+        )
+
         log_session = log_session_factory()
         try:
             orchestrator.request_log_service.persist(
@@ -838,6 +1033,10 @@ async def chat_completions(
                     completion_tokens=usage.completion_tokens,
                     total_tokens=usage.total_tokens,
                     estimated_cost_usd=usage.estimated_cost_usd,
+                    fallback_used=_stream_fallback_used,
+                    fallback_attempts=_stream_fallback_attempts_json,
+                    original_provider=_stream_original_provider,
+                    original_model=_stream_original_model,
                     dlp_input_findings=len(input_enforcement.match_actions),
                     dlp_input_action=input_enforcement.overall_action.name.lower(),
                     dlp_output_findings=len(response_enforcement.match_actions),
@@ -909,13 +1108,25 @@ async def chat_completions(
         }))
         yield "data: [DONE]\n\n"
 
+    # Headers are sealed before the generator runs; they describe the
+    # route we DECIDED to stream from after the Redis pre-check (which
+    # is the right answer in the steady state). The rare in-generator
+    # fallback (when pre-check misses and the first chunk fails) will
+    # serve the right body but leave these headers describing the
+    # primary — accept as a documented limitation; the body never lies.
+    _stream_headers = {
+        "Cache-Control": "no-cache",
+        "X-Request-Id": ctx.request_id or "",
+        "X-Gateway-Provider": route.provider_name,
+        "X-Gateway-Model": route.model_name,
+        "X-Gateway-Attempt": str(_stream_attempt_number),
+    }
+    if _stream_fallback_used:
+        _stream_headers["X-Gateway-Fallback"] = "true"
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Request-Id": ctx.request_id or "",
-        },
+        headers=_stream_headers,
     )
 
 
