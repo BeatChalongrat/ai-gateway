@@ -149,6 +149,16 @@ _THAI_COMMON_WORDS = frozenset({
     "ขอบคุณ", "ขอบใจ", "ขอขอบคุณ", "ขอบพระคุณ",
     "ลูกค้า", "ผู้ใช้", "ท่าน", "คุณ", "พี่", "น้อง",
     "เรียน", "ขอแสดงความนับถือ",
+    # ``ช่วย + verb`` imperative compounds the English NER tags as
+    # PERSON on Thai prompts. The 50-case E2E audit (May 2026) caught
+    # ``ช่วยแปล`` (T44) and ``ช่วยอธิบาย`` (T45) — both 6-9 Thai chars,
+    # below the >10-char length filter, with whitespace boundaries on
+    # both sides so the substring guard doesn't fire either. Listed
+    # explicitly so additions are tracked by trace, not by a blanket
+    # widening of the length filter that would risk real Thai names.
+    "ช่วยแปล", "ช่วยอธิบาย", "ช่วยเขียน", "ช่วยตรวจ",
+    "ช่วย rewrite", "ช่วยทำ", "ช่วยตอบ",
+    "อธิบาย", "แปล", "rewrite",
 })
 
 

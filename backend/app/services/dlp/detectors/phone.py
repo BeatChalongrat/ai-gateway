@@ -96,6 +96,16 @@ class PhoneDetector(BaseDetector):
         def _emit(start: int, end: int, matched_text: str) -> None:
             if (start, end) in seen_spans:
                 return
+            # Reject trivial all-same-digit numbers (000-000-0000,
+            # 111-111-1111, …). Real phones never have this shape, but
+            # prompts about *sample / example* phone numbers use them
+            # routinely. The E2E audit (May 2026) caught
+            # ``เบอร์ติดต่อคือ 000-000-0000 อันนี้เป็นข้อมูลตัวอย่าง``
+            # masking the example number — the correct behaviour is to
+            # leave it untouched so the LLM can explain the format.
+            digits_only = "".join(c for c in matched_text if c.isdigit())
+            if digits_only and len(set(digits_only)) == 1:
+                return
             seen_spans.add((start, end))
             matches.append(
                 DetectionMatch(

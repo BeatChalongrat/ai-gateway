@@ -131,11 +131,22 @@ class TestRedactedRuleInPrompt:
                 f"prompt must not seed concrete token names: found {ex}"
             )
 
-    def test_neutral_token_shape_described(self):
-        # The prompt must describe the new neutral token shape so the
-        # model knows what to echo back. The literal ``<r0>`` (or any
-        # ``<rN>``) is the canonical example.
-        assert "<r0>" in DLP_PLACEHOLDER_PROMPT or "<r" in DLP_PLACEHOLDER_PROMPT
+    def test_no_literal_token_in_prompt(self):
+        # The prompt must describe the placeholder shape WITHOUT
+        # showing a literal example like ``<r0>``. Showing the literal
+        # taught the model the grammar and it invented ``<rN>`` tokens
+        # in replies even when no PII had been masked, producing
+        # orphan tokens visible to the end user (May 2026 E2E audit
+        # T09 / T34 / T45 / T46 / T48 / T49). The new contract is
+        # "describe by shape, never by example."
+        import re as _re
+        assert _re.search(r"<r\d", DLP_PLACEHOLDER_PROMPT) is None, (
+            "preamble must not contain a literal <rN> token: "
+            f"{DLP_PLACEHOLDER_PROMPT!r}"
+        )
+        # Still must tell the model what to do with placeholders.
+        lower = DLP_PLACEHOLDER_PROMPT.lower()
+        assert "placeholder" in lower or "angle-bracket" in lower
 
 
 class TestOrphanTokenPassthrough:
