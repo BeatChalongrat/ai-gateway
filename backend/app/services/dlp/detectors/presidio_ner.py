@@ -141,6 +141,14 @@ _THAI_COMMON_WORDS = frozenset({
     "สวัสดี", "ครับ", "ค่ะ", "นะ", "นะครับ", "นะคะ",
     "ได้เลย", "ได้เลยครับ", "บ้าง", "อะไร",
     "มีอะไร", "ยังไง",
+    # Politeness + service-template phrases that Presidio English NER
+    # routinely mis-tags as PERSON on AI replies. These are NOT names
+    # in Thai prose — adding them here prevents mid-word splices like
+    # ``ขอบ[THAI_NAME_0]`` when the AI's reply contains ``ขอบคุณ``.
+    # The 100-trace audit caught 5 splices on ``ขอบคุณ`` variants.
+    "ขอบคุณ", "ขอบใจ", "ขอขอบคุณ", "ขอบพระคุณ",
+    "ลูกค้า", "ผู้ใช้", "ท่าน", "คุณ", "พี่", "น้อง",
+    "เรียน", "ขอแสดงความนับถือ",
 })
 
 
@@ -164,8 +172,46 @@ def _thai_char_count(text: str) -> int:
     return sum(1 for ch in text if _THAI_MIN <= ch <= _THAI_MAX)
 
 
+def _is_thai_char(ch: str) -> bool:
+    return _THAI_MIN <= ch <= _THAI_MAX
+
+
+def _has_thai_word_boundary(
+    full_text: str, start: int, end: int
+) -> bool:
+    """True iff the match span has a non-Thai boundary on at least one
+    side (start/end of text, whitespace, or punctuation).
+
+    Presidio with the English-only spaCy model produces arbitrary
+    spans on Thai prose because spaCy has no Thai tokeniser — the
+    May 2026 audit caught ``ขอบคุณ`` being tagged as PERSON span
+    ``[0,6]``, then mid-word splicing into ``ขอบ[THAI_NAME_0]ที่...``
+    once mask_text rewrote the span. Real Thai names don't sit
+    embedded inside compound words; they have at least one boundary
+    on each side. Treating substring-matches as false positives is
+    the cheapest mitigation until a Thai segmenter ships.
+    """
+    if not full_text:
+        return True  # no context to judge; pass through
+    before_is_thai = start > 0 and _is_thai_char(full_text[start - 1])
+    after_is_thai = end < len(full_text) and _is_thai_char(full_text[end])
+    # Either-side rule: even one Thai-char neighbour is enough to
+    # flag the match as a substring split, because Thai compound
+    # words carry no internal whitespace. The earlier both-sides
+    # rule (AND) let ``ขอบคุณ + space`` slip through — Thai-left,
+    # space-right, which was treated as "boundary exists" even
+    # though "คุณ" is mid-word in "ขอบคุณ".
+    return not (before_is_thai or after_is_thai)
+
+
 def _is_ner_false_positive(
-    matched_text: str, category: str, confidence: float
+    matched_text: str,
+    category: str,
+    confidence: float,
+    *,
+    full_text: str = "",
+    start: int = 0,
+    end: int = 0,
 ) -> bool:
     """Return True if a NER match should be silently dropped.
 
@@ -194,6 +240,16 @@ def _is_ner_false_positive(
     7. Short matches (``<= 4`` chars) with sub-0.9 confidence. Catches
        the borderline single-word PERSON hits from spaCy that the
        0.85 floor lets through but which are almost always noise.
+    8. Thai-script match that sits inside a longer Thai word (both
+       sides bounded by Thai chars). Without a Thai tokeniser the
+       English NER routinely tags ``คุณ`` inside ``ขอบคุณ`` as PERSON,
+       and the resulting mask splices the user-visible reply mid-
+       word. ``full_text`` / ``start`` / ``end`` carry the spaCy span
+       coordinates so we can inspect the surrounding glyphs.
+    9. Thai-script match longer than 10 chars. Real Thai given names
+       cap around 8-10 chars; longer runs are Presidio over-extending
+       into whole phrases on Thai prose ("ขอบคุณที่ติดต่อเรามาที่อีเมล"
+       observed as a span_len=28 PERSON match in the audit).
     """
     text = matched_text.strip().lower()
     if not text:
@@ -218,6 +274,14 @@ def _is_ner_false_positive(
         return True
     if len(text) <= 4 and confidence < 0.9:
         return True
+    # Thai-substring guard (audit-driven). Only applies when the
+    # match contains Thai chars AND the caller passed positional
+    # context.
+    if thai_chars > 0 and full_text:
+        if not _has_thai_word_boundary(full_text, start, end):
+            return True
+        if thai_chars > 10:
+            return True
     return False
 
 
@@ -312,9 +376,17 @@ class PresidioDetector(BaseDetector):
             matched_text = text[r.start:r.end]
             # Drop label / nationality adjectives the analyzer mis-tags,
             # AI model / vendor names, common Thai conversational words,
-            # ``ๆ``-suffixed reduplications, and short / low-confidence
-            # acronyms — see ``_is_ner_false_positive`` for the rationale.
-            if _is_ner_false_positive(matched_text, self.category, score):
+            # ``ๆ``-suffixed reduplications, short / low-confidence
+            # acronyms, and Thai-substring artefacts — see
+            # ``_is_ner_false_positive`` for the full rationale.
+            if _is_ner_false_positive(
+                matched_text,
+                self.category,
+                score,
+                full_text=text,
+                start=r.start,
+                end=r.end,
+            ):
                 continue
             matches.append(
                 DetectionMatch(
@@ -356,7 +428,14 @@ class PresidioDetector(BaseDetector):
             if e.score < self.SCORE_THRESHOLD:
                 continue
             matched_text = text[e.start : e.end]
-            if _is_ner_false_positive(matched_text, self.category, e.score):
+            if _is_ner_false_positive(
+                matched_text,
+                self.category,
+                e.score,
+                full_text=text,
+                start=e.start,
+                end=e.end,
+            ):
                 continue
             matches.append(
                 DetectionMatch(

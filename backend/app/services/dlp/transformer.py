@@ -56,6 +56,22 @@ _MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]")
 # exists in span_map) or redact.
 _DOUBLE_BRACKET_TOKEN_RE = re.compile(r"\[\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\]\]")
 
+# Asymmetric bracket variants the model produces in practice — observed
+# in the May 2026 100-trace audit:
+#
+#   * ``[[NAME_0]``  — double open, single close (3/100 traces)
+#   * ``[NAME_0]]``  — single open, trailing close (1/100 traces)
+#
+# The strict ``[[NAME_0]]`` pattern above misses both. We rewrite
+# them in ``sanitize_hallucinated_brackets`` so the user never sees a
+# stray ``[``/``]`` in the final reply.
+_DOUBLE_OPEN_TOKEN_RE = re.compile(
+    r"\[\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\](?!\])"
+)
+_DOUBLE_CLOSE_TOKEN_RE = re.compile(
+    r"(?<!\[)\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\]\]"
+)
+
 
 def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
     """Replace single-bracket ``[CATEGORY_N]`` tokens that survived
@@ -110,16 +126,37 @@ def sanitize_hallucinated_brackets(text: str, span_map: dict[str, str]) -> str:
     Returns the rewritten text; no-op when no double-bracket tokens
     are present.
     """
-    if not text or "[[" not in text:
+    if not text or "[" not in text:
         return text
 
-    def _replace(m: re.Match) -> str:
+    def _unwrap_or_redact(m: "re.Match[str]") -> str:
         inner = f"[{m.group(1)}]"
         if span_map and inner in span_map:
             return inner
         return "[REDACTED]"
 
-    return _DOUBLE_BRACKET_TOKEN_RE.sub(_replace, text)
+    # Pass 1 — ``[[NAME_0]]`` (full double). Existing behaviour: unwrap
+    # to the single-bracket form when the inner is a real binding,
+    # otherwise [REDACTED].
+    result = _DOUBLE_BRACKET_TOKEN_RE.sub(_unwrap_or_redact, text)
+
+    # Pass 2 — ``[[NAME_0]`` (double open, single close). Same
+    # treatment as the full double form: it's a model artefact and the
+    # inner token is the meaningful part.
+    result = _DOUBLE_OPEN_TOKEN_RE.sub(_unwrap_or_redact, result)
+
+    # Pass 3 — ``[NAME_0]]`` (single open, trailing close). Strip the
+    # extra ``]`` regardless of whether the inner is a real binding:
+    # downstream restore handles unbinding the legitimate inner token,
+    # and ``redact_orphan_tokens`` handles unmapped inners. All we do
+    # here is rescue the stray bracket so the user-visible text isn't
+    # corrupted by ``[ID_0]]"`` and friends.
+    def _strip_trailing_close(m: "re.Match[str]") -> str:
+        return f"[{m.group(1)}]"
+
+    result = _DOUBLE_CLOSE_TOKEN_RE.sub(_strip_trailing_close, result)
+
+    return result
 
 # Tolerant variant of ``_MASK_TOKEN_RE`` used by ``_normalize_tokens`` to
 # rewrite near-miss token shapes the model may emit back to us. We accept
