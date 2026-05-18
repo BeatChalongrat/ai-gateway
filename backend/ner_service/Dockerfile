@@ -44,4 +44,10 @@ EXPOSE 8001
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=60s \
     CMD curl -fsS http://localhost:8001/health | grep -q '"status":"ready"' || exit 1
 
-CMD ["uvicorn", "ner_service.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# Multi-worker uvicorn — each worker is its own process with its own
+# spaCy/Presidio analyzer (loaded via the lifespan hook in main.py).
+# Worker count is driven by ${NER_WORKERS} so it can be tuned per env
+# without rebuilding the image; default of 4 matches the 4-core
+# reservation in docker-compose.yml.
+ENV NER_WORKERS=4
+CMD ["sh", "-c", "exec uvicorn ner_service.main:app --host 0.0.0.0 --port 8001 --workers ${NER_WORKERS}"]

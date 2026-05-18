@@ -114,6 +114,17 @@ DB_POOL_ACTIVE = Gauge(
     registry=metrics_registry,
 )
 
+# Phase-1 async request-log queue depth. Sampled at every enqueue() and
+# after every batch flush so saturation is visible in /metrics without
+# needing a separate sampler task. A persistent non-zero value means
+# the worker can't keep up with incoming records — bump
+# ``REQUEST_LOG_BATCH_SIZE`` or check Postgres write latency.
+REQUEST_LOG_QUEUE_SIZE = Gauge(
+    "request_log_queue_size",
+    "Pending RequestRecord items in the async request-log queue.",
+    registry=metrics_registry,
+)
+
 REDIS_COMMAND_DURATION = Histogram(
     "redis_command_duration_seconds",
     "Duration of Redis commands instrumented at the rate-limiter and "
