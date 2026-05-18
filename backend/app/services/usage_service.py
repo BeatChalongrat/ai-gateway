@@ -6,7 +6,10 @@ from app.domain.observability import UsageRecord
 from app.domain.providers import ProviderResponse
 from app.schemas.common import UsageInfo
 
-# Simple cost-per-token estimates by model prefix (USD per token)
+# Legacy fallback table — flat $/token by model prefix. Consulted only
+# when ``model_registry.get_candidate`` returns no ``cost_per_input_token``
+# for the requested model. Kept intentionally so that requests for
+# in-flight or yet-unregistered models still get a sensible bill.
 _COST_PER_TOKEN: dict[str, float] = {
     "gpt-4o-mini": 0.00000015,
     "gpt-4o": 0.0000025,
@@ -17,26 +20,69 @@ _COST_PER_TOKEN: dict[str, float] = {
     "claude-3-haiku": 0.00000025,
 }
 
+_LEGACY_DEFAULT_RATE = 0.000001
 
-def _estimate_cost(model: str, total_tokens: int) -> float:
+
+def _legacy_flat_rate(model: str) -> float:
+    """Pick the per-token rate for ``model`` from the legacy prefix table.
+
+    Falls back to ``_LEGACY_DEFAULT_RATE`` for any model that isn't a
+    prefix match. Returned in $/token (same as ``_COST_PER_TOKEN``).
+    """
     for prefix, cost in _COST_PER_TOKEN.items():
         if model.startswith(prefix):
-            return round(total_tokens * cost, 8)
-    return round(total_tokens * 0.000001, 8)
+            return cost
+    return _LEGACY_DEFAULT_RATE
+
+
+def _estimate_cost(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> float:
+    """Estimate request cost in USD.
+
+    Uses per-token rates from ``model_registry.get_candidate`` when the
+    candidate has at least one non-zero rate (input or output). Falls
+    back to the legacy flat rate table for unknown models — multiplied
+    by total tokens so existing prefix entries keep their historical
+    numbers within float precision.
+    """
+    from app.services.providers.model_registry import get_candidate
+
+    candidate = get_candidate(model)
+    if candidate and (
+        candidate.cost_per_input_token > 0.0
+        or candidate.cost_per_output_token > 0.0
+    ):
+        return round(
+            prompt_tokens * candidate.cost_per_input_token
+            + completion_tokens * candidate.cost_per_output_token,
+            8,
+        )
+
+    rate = _legacy_flat_rate(model)
+    return round((prompt_tokens + completion_tokens) * rate, 8)
 
 
 class UsageService:
 
     def estimate(self, payload, response_text: str, model_name: str) -> UsageInfo:
         """Heuristic token estimation when provider doesn't report usage."""
+        from app.services.currency_service import currency_service
+
         prompt_tokens = sum(max(1, len(m.content) // 4) for m in payload.messages)
         completion_tokens = max(1, len(response_text) // 4)
         total_tokens = prompt_tokens + completion_tokens
+        usd = _estimate_cost(model_name, prompt_tokens, completion_tokens)
+        cost_info = currency_service.format_cost(usd)
         return UsageInfo(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
-            estimated_cost_usd=_estimate_cost(model_name, total_tokens),
+            estimated_cost_usd=usd,
+            cost_thb=cost_info["thb"],
+            cost_display=cost_info["display"],
         )
 
     def build_usage_record(
@@ -62,7 +108,9 @@ class UsageService:
                 prompt_tokens=u.prompt_tokens,
                 completion_tokens=u.completion_tokens,
                 total_tokens=u.total_tokens,
-                estimated_cost_usd=_estimate_cost(model, u.total_tokens),
+                estimated_cost_usd=_estimate_cost(
+                    model, u.prompt_tokens, u.completion_tokens
+                ),
                 is_estimate=False,
             )
 

@@ -28,8 +28,9 @@ class PolicyEvaluator:
     """Evaluates DLP findings against a policy profile.
 
     For each match, the evaluator decides an action by checking (in order):
-    1. severity_threshold_block — if the match severity >= threshold → BLOCK
-    2. category_actions — look up the match's category → mapped action
+    1. category_actions — look up the match's category → mapped action
+    2. severity_threshold_block — fallback block for categories without an
+       explicit action
     3. fallback — ALLOW
     """
 
@@ -112,7 +113,22 @@ class PolicyEvaluator:
         ``profile.category_actions`` for input scans or
         ``profile.category_actions_output`` (when set) for output scans.
         """
-        # Check 1: severity threshold block
+        # Check 1: explicit category action from profile (direction-resolved).
+        # This is the operator-visible policy surface in the Admin UI, so it
+        # must win over the generic severity fallback. A category configured
+        # to BLOCK still blocks; MASK/ALLOW do not get escalated just because
+        # a detector assigned CRITICAL severity.
+        category_action = category_actions.get(match.category)
+        if category_action is not None:
+            action_name = category_action.name.lower()
+            return (
+                category_action,
+                f"{match.category}_{action_name}_policy",
+                f"Category '{match.category}' is configured to {action_name} "
+                f"by profile '{profile.name}'.",
+            )
+
+        # Check 2: severity threshold block for uncategorized findings.
         if (
             profile.severity_threshold_block is not None
             and match.severity >= profile.severity_threshold_block
@@ -122,17 +138,6 @@ class PolicyEvaluator:
                 "severity_threshold",
                 f"Finding severity {match.severity.name} meets or exceeds "
                 f"block threshold {profile.severity_threshold_block.name}.",
-            )
-
-        # Check 2: category action from profile (direction-resolved)
-        category_action = category_actions.get(match.category)
-        if category_action is not None:
-            action_name = category_action.name.lower()
-            return (
-                category_action,
-                f"{match.category}_{action_name}_policy",
-                f"Category '{match.category}' is configured to {action_name} "
-                f"by profile '{profile.name}'.",
             )
 
         # Check 3: fallback — allow

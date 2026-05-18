@@ -7,6 +7,8 @@ never see "auto" as the model name.
 
 from __future__ import annotations
 
+import structlog
+
 from app.domain.entities import RequestContext, RouteDecision
 from app.domain.routing import (
     ModelCandidate,
@@ -21,20 +23,77 @@ from app.services.providers.model_registry import (
     resolve_provider,
 )
 
+logger = structlog.get_logger(__name__)
+
+# Tier-fallback scores (used when the candidate has no real $/token).
 _COST_SCORE = {"budget": 1, "standard": 2, "premium": 3}
 _LATENCY_SCORE = {"fast": 1, "standard": 2, "slow": 3}
 
+# Soft bias applied to a candidate's score when it lives on the
+# request's preferred_provider. Lower score = better, so subtracting
+# pulls preferred candidates to the front of the sort. Sized larger
+# than the max possible cost+latency contribution so the preference
+# always wins ties within the registry but stays a *soft* preference:
+# when no candidate from the preferred provider survives filtering,
+# the next-best alternative is still returned normally.
+_PREFERRED_PROVIDER_BIAS = 100
 
-def _score_candidate(c: ModelCandidate, prefer_cost: bool, prefer_latency: bool) -> int:
-    """Lower score = better candidate."""
+# When a candidate has no real $/token (cost_per_input_token == 0.0)
+# *and* no derived cost_tier match, use this neutral penalty — same
+# numeric weight as the "standard" tier so unknown models neither
+# win nor lose against the average bucket.
+_COST_UNKNOWN_PENALTY = 2
+
+# Scale factor applied to ``cost_per_input_token`` ($/token) when
+# converting to the integer score space shared with the tier buckets.
+# Sized so that:
+#   gpt-4o-mini  (0.00000015 $/tok) → 1     (≈ budget tier)
+#   gpt-4o       (0.0000025  $/tok) → 25    (clearly above budget)
+#   claude-opus  (0.000015   $/tok) → 150   (clearly premium)
+# i.e. real-cost candidates spread across a range that dwarfs the
+# 1..3 tier bucket but stays well below the preferred-provider bias
+# of 100 for moderately-priced models so preference still wins ties.
+_COST_REAL_SCALE = 10_000_000
+
+
+def _score_candidate(
+    c: ModelCandidate,
+    prefer_cost: bool,
+    prefer_latency: bool,
+    preferred_provider: str | None = None,
+) -> int:
+    """Lower score = better candidate.
+
+    Cost component prefers real per-token pricing
+    (``cost_per_input_token``) when available, falling back to the
+    coarse ``cost_tier`` bucket for models with unknown pricing
+    (``cost_per_input_token == 0.0``).
+    """
     score = 0
+
+    # --- Cost component ---
+    if c.cost_per_input_token > 0.0:
+        # Real pricing available. Input cost only — output token count
+        # varies by response length and is unknown at routing time.
+        cost_score = int(c.cost_per_input_token * _COST_REAL_SCALE)
+    else:
+        # Unknown pricing: fall back to the tier bucket.
+        cost_score = _COST_SCORE.get(c.cost_tier, _COST_UNKNOWN_PENALTY)
+
     if prefer_cost:
-        score += _COST_SCORE.get(c.cost_tier, 2) * 2
+        score += cost_score * 2
+    score += cost_score
+
+    # --- Latency component ---
+    latency_score = _LATENCY_SCORE.get(c.latency_tier, 2)
     if prefer_latency:
-        score += _LATENCY_SCORE.get(c.latency_tier, 2) * 2
-    # Default: prefer standard
-    score += _COST_SCORE.get(c.cost_tier, 2)
-    score += _LATENCY_SCORE.get(c.latency_tier, 2)
+        score += latency_score * 2
+    score += latency_score
+
+    # --- Preferred provider soft bias ---
+    if preferred_provider and c.provider == preferred_provider:
+        score -= _PREFERRED_PROVIDER_BIAS
+
     return score
 
 def _build_auto_defaults() -> dict[str, ModelCandidate]:
@@ -53,6 +112,66 @@ _AUTO_FALLBACK = _AUTO_DEFAULTS["general"]
 
 
 class RoutingService:
+
+    def _find_compatible_provider(
+        self,
+        model_name: str,
+        allowed_providers: frozenset[str],
+        preferred_provider: str | None = None,
+    ) -> tuple[str, str]:
+        """Pick a provider from ``allowed_providers`` that owns ``model_name``.
+
+        Replaces the legacy ``next(iter(allowed_providers), 'openai')``
+        fallback, which was both non-deterministic (frozenset iteration
+        order varies across Python runs) and capability-blind (would
+        happily route ``claude-3-5-sonnet`` to openai → 404 at the
+        adapter). The new contract:
+
+        1. If ``preferred_provider`` is in the allowed set *and* owns
+           the model per the registry, it wins immediately.
+        2. Otherwise iterate ``sorted(allowed_providers)`` (lexical,
+           deterministic) and return the first provider whose registry
+           entry matches ``model_name``.
+        3. If no provider in the allowed set owns the model, log a
+           ``routing_no_compatible_provider`` warning and fall back to
+           ``"openai"`` so the existing error path at the adapter
+           continues to fire — but now with explicit operator
+           visibility instead of a silent 404.
+
+        Returns ``(provider, reason)`` so callers can fold the
+        explanation into the ``RoutingResult.reasons`` trace.
+        """
+        canonical = resolve_provider(model_name)
+
+        if (
+            preferred_provider
+            and preferred_provider in allowed_providers
+            and canonical == preferred_provider
+        ):
+            return preferred_provider, (
+                f"preferred_provider '{preferred_provider}' is "
+                f"compatible with '{model_name}' — selected as swap target."
+            )
+
+        for provider in sorted(allowed_providers):
+            if canonical == provider:
+                return provider, (
+                    f"Selected '{provider}' from sorted(allowed_providers) "
+                    f"as the compatible owner of '{model_name}'."
+                )
+
+        logger.warning(
+            "routing_no_compatible_provider",
+            model=model_name,
+            allowed=sorted(allowed_providers),
+            preferred=preferred_provider,
+            canonical=canonical,
+        )
+        return "openai", (
+            f"No provider in allowed set {sorted(allowed_providers)} "
+            f"owns model '{model_name}' — falling back to 'openai' "
+            f"(request will likely 404 at the adapter)."
+        )
 
     def route(self, request: RoutingRequest) -> RoutingResult:
         """Route a request to a provider/model using deterministic rules.
@@ -78,8 +197,17 @@ class RoutingService:
         # Check provider against allowed_providers constraint (from region/policy)
         if request.allowed_providers and provider not in request.allowed_providers:
             reason += f" BLOCKED by region/policy (provider '{provider}' not allowed)."
-            # Fall back to first allowed provider
-            fallback_provider = next(iter(request.allowed_providers), "openai")
+            # Deterministic, model-aware swap: prefer the project's
+            # preferred_provider if it owns the model; otherwise pick
+            # the lexically-first allowed provider that owns it; only
+            # if none match do we fall back to 'openai' with a loud
+            # warning (the legacy ``next(iter(frozenset))`` behaviour
+            # was both non-deterministic and capability-blind).
+            fallback_provider, fallback_reason = self._find_compatible_provider(
+                request.requested_model,
+                request.allowed_providers,
+                request.preferred_provider,
+            )
             candidate = ModelCandidate(
                 provider=fallback_provider, model=request.requested_model
             )
@@ -89,7 +217,7 @@ class RoutingService:
                     candidate=ModelCandidate(provider=provider, model=request.requested_model),
                     reason=f"Provider '{provider}' blocked by region/policy constraint",
                 )],
-                reasons=[reason],
+                reasons=[reason, fallback_reason],
                 constrained_by_policy=True,
             )
 
@@ -104,6 +232,38 @@ class RoutingService:
     def _route_auto(self, request: RoutingRequest) -> RoutingResult:
         preferred = _AUTO_DEFAULTS.get(request.use_case, _AUTO_FALLBACK)
         rejected: list[RejectedCandidate] = []
+        preferred_provider_reason: str | None = None
+
+        # Soft preference: when the project has set ``preferred_provider``
+        # and the registry has at least one candidate on that provider
+        # that survives capability/policy filtering, override the auto
+        # default. Falls back silently to the hardcoded default when no
+        # such candidate exists — this is preference, not constraint.
+        if request.preferred_provider:
+            preferred_pool = [
+                c for c in get_all_candidates()
+                if c.provider == request.preferred_provider
+            ]
+            preferred_pool = filter_candidates(
+                preferred_pool,
+                requires_streaming=request.stream,
+                allowed_providers=request.allowed_providers,
+                blocked_models=request.blocked_models,
+            )
+            if preferred_pool:
+                preferred_pool.sort(
+                    key=lambda c: _score_candidate(
+                        c,
+                        request.prefer_cost,
+                        request.prefer_latency,
+                        preferred_provider=request.preferred_provider,
+                    )
+                )
+                preferred = preferred_pool[0]
+                preferred_provider_reason = (
+                    f"preferred_provider='{request.preferred_provider}' "
+                    f"override selected '{preferred.model}'."
+                )
 
         # Check if preferred candidate passes filters
         filtered = filter_candidates(
@@ -126,11 +286,21 @@ class RoutingService:
                 allowed_providers=request.allowed_providers,
                 blocked_models=request.blocked_models,
             )
-            fallbacks.sort(key=lambda c: _score_candidate(c, request.prefer_cost, request.prefer_latency))
+            fallbacks.sort(
+                key=lambda c: _score_candidate(
+                    c,
+                    request.prefer_cost,
+                    request.prefer_latency,
+                    preferred_provider=request.preferred_provider,
+                )
+            )
+            reasons = [reason]
+            if preferred_provider_reason:
+                reasons.append(preferred_provider_reason)
             return RoutingResult(
                 selected=preferred,
                 fallbacks=fallbacks[:2],
-                reasons=[reason],
+                reasons=reasons,
                 constrained_by_policy=request.allowed_providers is not None,
             )
 
@@ -148,7 +318,14 @@ class RoutingService:
             blocked_models=request.blocked_models,
         )
 
-        alternatives.sort(key=lambda c: _score_candidate(c, request.prefer_cost, request.prefer_latency))
+        alternatives.sort(
+            key=lambda c: _score_candidate(
+                c,
+                request.prefer_cost,
+                request.prefer_latency,
+                preferred_provider=request.preferred_provider,
+            )
+        )
         if alternatives:
             selected = alternatives[0]
             return RoutingResult(

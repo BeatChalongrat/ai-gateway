@@ -196,6 +196,8 @@ class DetectorRegistry:
 
 def get_default_registry(
     disabled_detectors: list[str] | None = None,
+    *,
+    ner_enabled: bool = True,
 ) -> DetectorRegistry:
     """Return a registry with all built-in detectors, minus any disabled ones.
 
@@ -203,7 +205,23 @@ def get_default_registry(
     ----------
     disabled_detectors : list[str] | None
         Detector names to exclude.  If None, reads from settings.
+    ner_enabled : bool
+        Controls the *NER axis* of the registry:
+
+        * ``True`` (the default) → Presidio's PERSON / LOCATION / …
+          recognizer is registered (when ``presidio_analyzer`` is
+          importable) and the regex-based ``thai_name_no_prefix``
+          fallback is **omitted** to avoid duplicate findings.
+        * ``False`` → Presidio is skipped entirely AND the
+          ``thai_name_no_prefix`` fallback is registered, so a tenant
+          who has opted out of NER (or a deployment without Presidio)
+          still gets coverage for un-prefixed Thai names.
+
+        The orchestrator constructs both variants once at startup and
+        selects per-request from ``ctx.ner_enabled`` — see
+        ``GatewayOrchestrator._select_registry``.
     """
+    from app.services.dlp.detectors.address import AddressDetector
     from app.services.dlp.detectors.api_key_secret import APIKeySecretDetector
     from app.services.dlp.detectors.bearer_token import BearerTokenDetector
     from app.services.dlp.detectors.biometric_data import BiometricDataDetector
@@ -214,6 +232,7 @@ def get_default_registry(
     from app.services.dlp.detectors.email import EmailDetector
     from app.services.dlp.detectors.health_condition import HealthConditionDetector
     from app.services.dlp.detectors.iban import IBANDetector
+    from app.services.dlp.detectors.income import IncomeDetector
     from app.services.dlp.detectors.ip_address import IPAddressDetector
     from app.services.dlp.detectors.line_id import LineIdDetector
     from app.services.dlp.detectors.mac_address import MacAddressDetector
@@ -227,6 +246,7 @@ def get_default_registry(
     from app.services.dlp.detectors.thai_address import ThaiAddressDetector
     from app.services.dlp.detectors.thai_bank_account import ThaiBankAccountDetector
     from app.services.dlp.detectors.thai_name import ThaiNameDetector
+    from app.services.dlp.detectors.thai_name_no_prefix import ThaiNameNoPrefixDetector
     from app.services.dlp.detectors.thai_national_id import ThaiNationalIdDetector
     from app.services.dlp.detectors.thai_promptpay import ThaiPromptPayDetector
     from app.services.dlp.detectors.thai_tax_id import ThaiTaxIdDetector
@@ -258,6 +278,8 @@ def get_default_registry(
         ThaiBankAccountDetector(),
         ThaiPromptPayDetector(),
         ThaiAddressDetector(),
+        AddressDetector(),
+        IncomeDetector(),
         ThaiNameDetector(),
         DbConnectionStringDetector(),
         MedicalRecordDetector(),
@@ -271,6 +293,14 @@ def get_default_registry(
         LineIdDetector(),
     ]
 
+    # Fallback Thai-name detector — included only when NER is disabled.
+    # When ``ner_enabled=True`` Presidio's PERSON recognizer handles
+    # bare Thai names; we keep this regex out of the registry to avoid
+    # duplicate findings + noise. When NER is off this detector is the
+    # only line of defence against un-prefixed Thai names.
+    if not ner_enabled:
+        all_detectors.append(ThaiNameNoPrefixDetector())
+
     # Presidio NER is optional at runtime. Gate registration on the
     # underlying ``presidio_analyzer`` package being importable — the
     # detector module itself is always importable (its presidio import
@@ -280,13 +310,19 @@ def get_default_registry(
     # detector count / set assertions in ``test_dlp_config.py`` and
     # ``test_detector_registry.py`` on environments where presidio
     # isn't installed (e.g. Python 3.14 local dev).
-    try:
-        import importlib
-        importlib.import_module("presidio_analyzer")
-        from app.services.dlp.detectors.presidio_ner import PresidioDetector
-        all_detectors.append(PresidioDetector())
-    except ImportError:
-        pass
+    #
+    # Skipped entirely when ``ner_enabled=False`` — the fallback
+    # ``thai_name_no_prefix`` registered above takes over the bare-name
+    # coverage and we avoid loading the (potentially expensive) spaCy
+    # analyzer for a registry that won't use it.
+    if ner_enabled:
+        try:
+            import importlib
+            importlib.import_module("presidio_analyzer")
+            from app.services.dlp.detectors.presidio_ner import PresidioDetector
+            all_detectors.append(PresidioDetector())
+        except ImportError:
+            pass
 
     registry = DetectorRegistry()
     for detector in all_detectors:

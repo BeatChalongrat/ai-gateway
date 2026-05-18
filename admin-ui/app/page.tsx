@@ -479,36 +479,63 @@ function PeriodSelector({ period, onChange }: { period: Period; onChange: (p: Pe
 
 /* ── Page ────────────────────────────────────────────────────────── */
 
+type SectionState<T> =
+  | { status: "loading" }
+  | { status: "ok"; data: T }
+  | { status: "error" };
+
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>("24h");
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [volume, setVolume] = useState<VolumeResp | null>(null);
-  const [topModels, setTopModels] = useState<TopModelsResp | null>(null);
+  const [overviewState, setOverviewState] = useState<SectionState<Overview>>({ status: "loading" });
+  const [volumeState, setVolumeState] = useState<SectionState<VolumeResp>>({ status: "loading" });
+  const [topModelsState, setTopModelsState] = useState<SectionState<TopModelsResp>>({ status: "loading" });
   const [recent, setRecent] = useState<RecentRequest[]>([]);
-  const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
 
+  const overview = overviewState.status === "ok" ? overviewState.data : null;
+  const volume = volumeState.status === "ok" ? volumeState.data : null;
+  const topModels = topModelsState.status === "ok" ? topModelsState.data : null;
+
+  // Per-section fetch: each endpoint resolves independently so one slow or
+  // failing call can't pin the others on "Loading…". Previously a shared
+  // ``loading`` flag combined with Promise.all + the api-client dedup map
+  // could leave sections stuck whenever the effect's cleanup fired before
+  // the requests completed (StrictMode double-mount, fast period flips).
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    Promise.all([
-      api.get(`/admin/dashboard/overview?period=${period}`),
-      api.get(`/admin/dashboard/volume?period=${period}`),
-      api.get(`/admin/dashboard/top-models?period=${period}&limit=5`),
-    ])
-      .then(([o, v, t]) => {
+    setOverviewState({ status: "loading" });
+    setVolumeState({ status: "loading" });
+    setTopModelsState({ status: "loading" });
+
+    api
+      .get(`/admin/dashboard/overview?period=${period}`)
+      .then((o: Overview) => {
         if (cancelled) return;
-        setOverview(o);
-        setVolume(v);
-        setTopModels(t);
+        setOverviewState({ status: "ok", data: o });
         setLastUpdated(Date.now());
       })
       .catch(() => {
-        /* handled per-section */
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setOverviewState({ status: "error" });
       });
+
+    api
+      .get(`/admin/dashboard/volume?period=${period}`)
+      .then((v: VolumeResp) => {
+        if (!cancelled) setVolumeState({ status: "ok", data: v });
+      })
+      .catch(() => {
+        if (!cancelled) setVolumeState({ status: "error" });
+      });
+
+    api
+      .get(`/admin/dashboard/top-models?period=${period}&limit=5`)
+      .then((t: TopModelsResp) => {
+        if (!cancelled) setTopModelsState({ status: "ok", data: t });
+      })
+      .catch(() => {
+        if (!cancelled) setTopModelsState({ status: "error" });
+      });
+
     return () => {
       cancelled = true;
     };
@@ -626,8 +653,8 @@ export default function DashboardPage() {
           marginBottom: 10,
         }}
       >
-        <VolumeChart data={volume} loading={loading} />
-        <TopModelsList data={topModels} loading={loading} />
+        <VolumeChart state={volumeState} />
+        <TopModelsList state={topModelsState} />
       </div>
 
       {/* Row 3: Recent requests full width */}
@@ -638,7 +665,8 @@ export default function DashboardPage() {
 
 /* ── Volume chart ────────────────────────────────────────────────── */
 
-function VolumeChart({ data, loading }: { data: VolumeResp | null; loading: boolean }) {
+function VolumeChart({ state }: { state: SectionState<VolumeResp> }) {
+  const data = state.status === "ok" ? state.data : null;
   const buckets = data?.buckets ?? [];
   const total = useMemo(
     () => buckets.reduce((acc, b) => acc + b.openai + b.anthropic + b.google + b.other, 0),
@@ -674,9 +702,13 @@ function VolumeChart({ data, loading }: { data: VolumeResp | null; loading: bool
       </div>
 
       <div style={{ width: "100%", height: 220, marginTop: 8 }}>
-        {loading && !data ? (
+        {state.status === "loading" ? (
           <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-muted)", fontSize: 12 }}>
             Loading…
+          </div>
+        ) : state.status === "error" ? (
+          <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--accent-warning)", fontSize: 12 }}>
+            Failed to load volume data
           </div>
         ) : total === 0 ? (
           <div
@@ -785,7 +817,8 @@ function VolumeChart({ data, loading }: { data: VolumeResp | null; loading: bool
 
 /* ── Top models list ─────────────────────────────────────────────── */
 
-function TopModelsList({ data, loading }: { data: TopModelsResp | null; loading: boolean }) {
+function TopModelsList({ state }: { state: SectionState<TopModelsResp> }) {
+  const data = state.status === "ok" ? state.data : null;
   const items = data?.items ?? [];
   const max = items.length ? items[0].count : 1;
   return (
@@ -801,8 +834,10 @@ function TopModelsList({ data, loading }: { data: TopModelsResp | null; loading:
       <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>Top models</h3>
       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, marginBottom: 10 }}>By request count</div>
 
-      {loading && !data ? (
+      {state.status === "loading" ? (
         <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Loading…</div>
+      ) : state.status === "error" ? (
+        <div style={{ color: "var(--accent-warning)", fontSize: 12 }}>Failed to load top models</div>
       ) : items.length === 0 ? (
         <div
           style={{

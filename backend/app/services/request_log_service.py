@@ -38,6 +38,7 @@ class RequestLogService:
             output_raw=record.output_raw,
             output_final=record.output_final,
             dlp_findings_json=record.dlp_findings_json,
+            input_raw_encrypted=record.input_raw_encrypted,
         )
         session.add(log)
         session.flush()

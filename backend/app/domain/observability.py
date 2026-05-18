@@ -3,12 +3,9 @@
 These types define the internal representation of request lifecycle events,
 provider calls, usage tracking, and audit records.
 
-Most fields are privacy-safe (counts, IDs, timing) but ``RequestRecord``
-also carries the four DLP trace snapshots — ``input_raw``, ``input_masked``,
-``output_raw``, ``output_final`` — which DO contain raw user content.
-These exist so the admin Request Detail view can show what was filtered;
-they are written only when the orchestrator captures them and read only
-through admin-authenticated endpoints.
+Most fields are privacy-safe (counts, IDs, timing). Trace snapshots are
+stored only after DLP-safe substitution; raw blocked prompts and raw matched
+values must never be persisted.
 """
 
 from __future__ import annotations
@@ -33,12 +30,9 @@ class RequestStatus(str, Enum):
 class RequestRecord:
     """Complete record of a single request through the gateway.
 
-    Most fields are privacy-safe metadata. The DLP trace fields
-    (``input_raw``, ``input_masked``, ``output_raw``, ``output_final``,
-    ``dlp_findings_json``) DO contain raw user content and exist so the
-    admin Request Detail view can audit the DLP pipeline. They are
-    populated only by the orchestrator and exposed only via admin-
-    authenticated endpoints.
+    Most fields are privacy-safe metadata. DLP trace fields are expected to
+    carry masked/redacted snapshots only; raw user content belongs in memory
+    for the duration of a request, not in persisted request logs.
     """
 
     request_id: str
@@ -85,7 +79,7 @@ class RequestRecord:
     error_code: str | None = None
     error_message: str | None = None
 
-    # DLP trace (migration 021). Raw user content — see class docstring.
+    # DLP trace (migration 021). Persist only DLP-safe snapshots.
     # All five default to None so existing call sites continue to compile
     # without touching them; the orchestrator fills them in at the build
     # sites that have the necessary state in scope.
@@ -94,6 +88,9 @@ class RequestRecord:
     output_raw: str | None = None
     output_final: str | None = None
     dlp_findings_json: str | None = None
+    # AES-256-GCM ciphertext of the raw user prompt (stage 1 of the
+    # 4-stage trace). See ``request_log.py`` column docstring.
+    input_raw_encrypted: str | None = None
 
     def complete(
         self,
@@ -198,16 +195,10 @@ def build_dlp_findings_json(
                 "entity_type": match.entity_type,
                 "category": match.category,
                 "severity": match.severity.name if hasattr(match.severity, "name") else str(match.severity),
-                "start": match.start,
-                "end": match.end,
-                # ``matched_text`` is the raw PII value — gated to ADMIN-tier
-                # callers at the API layer. ``matched_text_len`` is always
-                # safe to expose: it preserves enough context for debugging
-                # ("a 17-char value was masked here") without leaking the
-                # value itself, so non-admin trace views and post-retention
-                # rows can still surface useful per-finding info.
-                "matched_text": raw_text,
+                "span_start": match.start,
+                "span_end": match.end,
                 "matched_text_len": len(raw_text),
+                "confidence": match.confidence,
                 "action": ma.action.name.lower() if hasattr(ma.action, "name") else str(ma.action),
                 "mask_token": value_to_token.get(match.matched_text),
             })
@@ -215,6 +206,103 @@ def build_dlp_findings_json(
     if not findings:
         return None
     return json.dumps(findings, ensure_ascii=False)
+
+
+def safe_input_snapshot(
+    input_raw: str | None,
+    input_masked: str | None,
+    enforcement: Any,
+    *,
+    blocked_placeholder: str = "[BLOCKED_BY_DLP]",
+) -> str | None:
+    """Return a DB-safe snapshot for the ``input_raw`` column.
+
+    Stage 1 of the 4-stage trace (User → Service). The raw user input
+    contains PII when DLP fires, so we never persist it — only a
+    fixed placeholder. Use ``safe_input_masked_snapshot`` for the
+    ``input_masked`` column, which keeps the actual masked text
+    (tokens only, no PII).
+    """
+    if getattr(enforcement, "is_blocked", False):
+        return blocked_placeholder
+    if getattr(enforcement, "match_actions", None):
+        return "[MASKED_BY_DLP]"
+    return input_raw
+
+
+def safe_input_masked_snapshot(
+    input_masked: str | None,
+    enforcement: Any,
+    *,
+    blocked_placeholder: str = "[BLOCKED_BY_DLP]",
+) -> str | None:
+    """Return a DB-safe snapshot for the ``input_masked`` column.
+
+    Stage 2 of the 4-stage trace (Service → AI). By the time the
+    transformer has run, ``input_masked`` carries only mask tokens
+    like ``[EMAIL_0]`` / ``[NAME_aB3kM9xQ]`` — no raw PII — so it is
+    safe to persist verbatim. Falls back to the legacy placeholder
+    on the off-chance the caller has no masked text to record (e.g.
+    block path that fired before transform).
+    """
+    if getattr(enforcement, "is_blocked", False):
+        return blocked_placeholder
+    if input_masked is None:
+        return "[MASKED_BY_DLP]" if getattr(enforcement, "match_actions", None) else None
+    return input_masked
+
+
+def safe_output_snapshot(
+    output_raw: str | None,
+    output_final: str | None,
+    enforcement: Any,
+    *,
+    blocked_placeholder: str = "[BLOCKED_BY_DLP]",
+) -> str | None:
+    """Return the snapshot for the ``output_final`` column.
+
+    Stage 4 of the 4-stage trace (Service → User). Stores the actual
+    post-restore plaintext the user received — the same text the
+    Safe Trace panel surfaces to admins for audit.
+
+    Privacy posture (deliberate trade-off):
+      - Anyone with DB access AND ``Role.ADMIN`` on the API layer
+        can now read the restored response, including any PII that
+        was unmasked for the user. This matches how
+        ``input_masked`` / ``output_raw`` are already stored (no
+        raw-PII placeholders — tokens only, but still plaintext).
+      - The ``[BLOCKED_BY_DLP]`` placeholder is retained for the
+        blocked path: a blocked request never produces a meaningful
+        user-facing response, so there is nothing to persist there.
+      - The ``app.jobs.dlp_retention`` job NULLs this column after
+        ``settings.dlp_raw_retention_days`` along with the other
+        raw-content columns — same retention contract as before.
+    """
+    if getattr(enforcement, "is_blocked", False):
+        return blocked_placeholder
+    return output_final if output_final is not None else output_raw
+
+
+def safe_output_raw_snapshot(
+    output_after_outbound_mask: str | None,
+    enforcement: Any,
+    *,
+    blocked_placeholder: str = "[BLOCKED_BY_DLP]",
+) -> str | None:
+    """Return a DB-safe snapshot for the ``output_raw`` column.
+
+    Stage 3 of the 4-stage trace (AI → Service). The caller must pass
+    the response **after the outbound DLP pass** (in the orchestrator
+    this is ``ai_to_service_masked``; in the streaming path it's the
+    aggregated masked-provider text). That text contains only mask
+    tokens — any fresh PII the model emitted has already been
+    transformed — so it is safe to persist.
+    """
+    if getattr(enforcement, "is_blocked", False):
+        return blocked_placeholder
+    if output_after_outbound_mask is None:
+        return "[MASKED_BY_DLP]" if getattr(enforcement, "match_actions", None) else None
+    return output_after_outbound_mask
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,9 @@ Design constraints:
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac as _hmac
 import re
 from typing import TYPE_CHECKING
 
@@ -35,10 +38,89 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-# Any bracketed ALL-CAPS token with a trailing index — same shape produced
-# by ``_indexed_token``. Used by ``restore`` to detect tokens that survive
-# restore because they are not in the span_map (orphans).
-_MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_\d+\]")
+# Any bracketed ALL-CAPS token with a trailing identifier — covers both
+# token shapes the transformer emits:
+#   - counter form    ``[EMAIL_0]``       (digits-only suffix)
+#   - deterministic   ``[EMAIL_aB3kM9xQ]`` (8-char base64url suffix)
+#   - deterministic   ``[EMAIL_aB3kM9xQ_x9Pq]`` (collision-disambiguated)
+# Used by ``restore`` to detect tokens that survive restore (orphans)
+# and by ``orchestrator._scan_text_as_result`` to filter mask-token
+# literals out of outbound scan results.
+_MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]")
+
+# Double-bracketed variant the LLM occasionally invents despite the
+# system prompt's "do NOT invent new bracketed placeholder tokens"
+# clause. Example: gpt-4o-mini emitting ``[[NAME_1]]`` for a phone it
+# saw as ``[PHONE_NUMBER_0]``. The inner part still matches a token
+# shape so we can pattern-match to either unwrap (if the inner token
+# exists in span_map) or redact.
+_DOUBLE_BRACKET_TOKEN_RE = re.compile(r"\[\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\]\]")
+
+
+def sanitize_hallucinated_brackets(text: str, span_map: dict[str, str]) -> str:
+    """Rewrite ``[[CAT_N]]`` tokens the model invented in its reply.
+
+    Runs against the **raw provider response** before any output DLP
+    scan or restore step. Two outcomes per double-bracket match:
+
+    * Inner ``[CAT_N]`` is a real binding in ``span_map``: unwrap to
+      the single-bracket form so ``restore`` can resolve it as
+      intended. (The model just over-bracketed — clumsy but not a
+      privacy event.)
+    * Inner token is not in ``span_map``: replace the whole
+      ``[[…]]`` with the literal text ``[REDACTED]``. This is the
+      shape the orphan path used to surface verbatim in the user's
+      reply; the sanitizer turns it into a deterministic safe value
+      so the panel never reads ``Phone: [[NAME_1]]``.
+
+    Returns the rewritten text; no-op when no double-bracket tokens
+    are present.
+    """
+    if not text or "[[" not in text:
+        return text
+
+    def _replace(m: re.Match) -> str:
+        inner = f"[{m.group(1)}]"
+        if span_map and inner in span_map:
+            return inner
+        return "[REDACTED]"
+
+    return _DOUBLE_BRACKET_TOKEN_RE.sub(_replace, text)
+
+# Tolerant variant of ``_MASK_TOKEN_RE`` used by ``_normalize_tokens`` to
+# rewrite near-miss token shapes the model may emit back to us. We accept
+# any letter case and incidental whitespace immediately inside the
+# brackets — anything else (missing brackets, mangled body) is left alone
+# because we cannot recover its identity. The capture group is the body
+# without the surrounding brackets / spaces so the replacer can uppercase
+# it and rebuild the canonical ``[BASE_N]`` form.
+_FUZZY_TOKEN_RE = re.compile(
+    r'\[\s*([A-Za-z][A-Za-z0-9_]*_\d+)\s*\]'
+)
+
+
+def _normalize_tokens(text: str, span_map: dict[str, str]) -> str:
+    """Rewrite near-miss token variants to their canonical ``[BASE_N]`` form.
+
+    Restore relies on exact ``str.replace`` against the keys in
+    ``span_map``. LLMs occasionally echo tokens back with cosmetic
+    drift — lowercase (``[email_0]``), padded brackets
+    (``[ EMAIL_0 ]``), a single trailing space (``[EMAIL_0 ]``) — and
+    every such variant misses the replace and leaks the literal token
+    to the user. This pre-pass canonicalises any bracketed token shape
+    matching ``_FUZZY_TOKEN_RE`` to the uppercase, whitespace-free form
+    *iff* that canonical form is present in ``span_map``; otherwise the
+    original substring is preserved untouched so we don't accidentally
+    rewrite unrelated bracketed text the model produced.
+    """
+    if not span_map:
+        return text
+
+    def replacer(m: re.Match) -> str:
+        canonical = f"[{m.group(1).upper()}]"
+        return canonical if canonical in span_map else m.group(0)
+
+    return _FUZZY_TOKEN_RE.sub(replacer, text)
 
 
 # Descriptive placeholder tokens. Keyed on DetectionMatch.detector_name so
@@ -65,13 +147,19 @@ MASK_TOKENS: dict[str, str] = {
     # "[NAME]" token in v1. Lossy vs entity type but keeps the token
     # readable and avoids per-entity config at the mask site.
     "presidio_ner": "[NAME]",
+    # Regex-based fallback for bare Thai names — shares the [NAME]
+    # token (and base-keyed counter) with presidio_ner so an output
+    # restore step never has to distinguish the two sources.
+    "thai_name_no_prefix": "[NAME]",
     # Additional detectors from the DLP coverage expansion.
     "thai_national_id": "[THAI_ID]",
     "thai_tax_id": "[TAX_ID]",
     "thai_bank_account": "[BANK_ACCOUNT]",
     "thai_promptpay": "[PROMPTPAY]",
     "thai_address": "[ADDRESS]",
+    "address": "[ADDRESS]",
     "thai_name": "[THAI_NAME]",
+    "income": "[INCOME]",
     "db_connection_string": "[CREDENTIAL]",
     "medical_record": "[MEDICAL_RECORD]",
     "mac_address": "[MAC_ADDRESS]",
@@ -107,6 +195,149 @@ def _indexed_token(detector_name: str, index: int) -> str:
     occurrences of the same detector stay distinguishable for restore.
     """
     return f"[{_mask_base_name(detector_name)}_{index}]"
+
+
+def mask_token_base(token: str) -> str:
+    """Return the base name from an indexed mask token.
+
+    Examples:
+        ``[EMAIL_0]`` -> ``EMAIL``
+        ``[BEARER_TOKEN_abcd1234]`` -> ``BEARER_TOKEN``
+    """
+    if not token.startswith("[") or not token.endswith("]"):
+        return ""
+    body = token[1:-1]
+    if "_" not in body:
+        return body
+    return body.rsplit("_", 1)[0]
+
+
+# ---------------------------------------------------------------------------
+# Deterministic-tokenization helpers (May 2026)
+# ---------------------------------------------------------------------------
+#
+# Counter-based tokens (``[EMAIL_0]``, ``[EMAIL_1]``, …) have two
+# problems in multi-turn scenarios:
+#
+# 1. Counter resets per request. Turn 1 mints ``[EMAIL_0]`` for
+#    ``alice@x.com``; turn 2 (fresh counter) mints ``[EMAIL_0]`` for
+#    ``bob@y.com``. The vault binds the same key twice and one
+#    original is lost.
+# 2. The token reveals ordering. ``[EMAIL_0]`` always means "first
+#    email in this message", which is mild metadata leakage.
+#
+# The deterministic scheme below uses an HMAC of the original value
+# under a per-conversation key. Properties:
+#
+#   - Same value + same conversation_key → same token, every time.
+#   - Different values (or different conversations) → different
+#     tokens (collision probability ≈ 2⁻⁴⁸ per pair at 8-char
+#     suffix).
+#   - The token leaks no information about the original value or
+#     position — only the category prefix is human-readable.
+#
+# The counter mode is preserved as the default (``conversation_key
+# = None``) so existing tests and callers continue to work.
+
+_TOKEN_SUFFIX_LEN = 8
+
+
+def _make_conversation_key(
+    hmac_secret: str,
+    conversation_id: str,
+) -> bytes:
+    """Derive a per-conversation HMAC key from the global DLP secret.
+
+    Returning the *derived* bytes (not the raw secret) gives an
+    extra layer of isolation: leaking one conversation's key does
+    not reveal the global secret. The downstream
+    ``_make_deterministic_token`` uses these derived bytes directly.
+    """
+    return _hmac.new(
+        hmac_secret.encode("utf-8"),
+        conversation_id.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+
+
+def _make_deterministic_token(
+    category: str,
+    value: str,
+    conversation_key: bytes,
+) -> str:
+    """Mint an opaque ``[CATEGORY_xxxxxxxx]`` token for ``value``.
+
+    ``category`` is the bracket-free mask-token base name
+    (``"EMAIL"``, ``"PHONE_NUMBER"``, …). ``value`` is the original
+    PII string. ``conversation_key`` is the per-conversation HMAC
+    key from ``_make_conversation_key``.
+
+    The 8-char base64url suffix gives ~2⁴⁸ slots per category —
+    collision probability negligible even at 10⁴ PII items per
+    conversation. The caller is responsible for the disambiguator
+    fallback when a same-suffix collision *does* hit a different
+    value (see ``_allocate_deterministic_token``).
+    """
+    digest = _hmac.new(
+        conversation_key,
+        value.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    suffix = base64.urlsafe_b64encode(digest).decode("ascii")[:_TOKEN_SUFFIX_LEN]
+    return f"[{category}_{suffix}]"
+
+
+def _allocate_deterministic_token(
+    detector_name: str,
+    conversation_key: bytes,
+    span_map: dict[str, str],
+    reverse_map: dict[str, str],
+    original: str,
+) -> str:
+    """Pick the deterministic token for ``original`` and bind it.
+
+    Three properties enforced here:
+
+    1. **Dedup** — if ``original`` has already been masked in this
+       call, return the previously-minted token (one token per
+       value, even when the value appears N times).
+    2. **Collision guard** — if the HMAC suffix already maps to a
+       *different* value in ``span_map`` (birthday paradox), append
+       a short disambiguator derived from the value itself. After
+       the disambiguator the token remains deterministic for the
+       same value.
+    3. **Stable binding** — record the binding in both ``span_map``
+       (token → original) and ``reverse_map`` (original → token) so
+       subsequent lookups in this call hit the cache.
+    """
+    existing_token = reverse_map.get(original)
+    if existing_token is not None:
+        return existing_token
+
+    base = _mask_base_name(detector_name)
+    token = _make_deterministic_token(base, original, conversation_key)
+
+    existing = span_map.get(token)
+    if existing is not None and existing != original:
+        # Suffix collision with a different value — extremely
+        # unlikely but the bind must not overwrite. Append a short
+        # base64 fragment of the value to disambiguate; this keeps
+        # the new token deterministic for the same input.
+        disambig = base64.urlsafe_b64encode(
+            original.encode("utf-8")
+        ).decode("ascii")[:4]
+        token = f"[{base}_{token.strip('[]').split('_', 1)[1]}_{disambig}]"
+        logger.warning(
+            "dlp_deterministic_token_collision",
+            base=base,
+            existing_value_prefix=existing[:20],
+            new_value_prefix=original[:20],
+            disambiguated_token=token,
+        )
+
+    span_map[token] = original
+    reverse_map[original] = token
+    return token
 
 
 def _allocate_token(
@@ -274,6 +505,8 @@ class DLPTransformer:
         self,
         messages: list[Message],
         match_actions: list[MatchAction],
+        *,
+        conversation_key: bytes | None = None,
     ) -> tuple[list[Message], dict[str, str], dict[str, int]]:
         """Mask messages using indexed tokens and return a span_map.
 
@@ -300,6 +533,13 @@ class DLPTransformer:
         user's own input PII into positions where the provider wrote
         something different.
 
+        When ``conversation_key`` is supplied the legacy counter is
+        replaced by deterministic per-value HMAC tokens
+        (``[EMAIL_xxxxxxxx]``). Same value → same token across calls
+        within the conversation; the counter return slot in that mode
+        is reused to carry the (unused) counter dict for caller
+        compatibility.
+
         REDACT actions keep the static ``[REDACTED]`` replacement and
         are intentionally NOT added to the span_map — redaction is
         meant to be permanent.
@@ -317,6 +557,10 @@ class DLPTransformer:
         # single request. Per-message keying would let the base counter
         # reset between messages and reintroduce the collision.
         counters: dict[str, int] = {}
+        # Reverse map for the deterministic path — value → token so
+        # the same PII string masked twice in this call reuses its
+        # first token. No-op in counter mode.
+        reverse_map: dict[str, str] = {}
 
         for msg in messages:
             # Find match_actions whose spans fall within this message.
@@ -344,15 +588,27 @@ class DLPTransformer:
             # then apply replacements in REVERSE so offsets stay valid.
             resolved.sort(key=lambda ma: ma.match.start)
 
-            # First pass: assign indexed tokens in reading order.
+            # First pass: assign tokens in reading order. The
+            # allocator differs by mode:
+            #   - counter mode (legacy, conversation_key is None)
+            #   - deterministic mode (HMAC, opt-in via the caller)
             replacements: list[tuple[int, int, str, str]] = []
             # (start, end, replacement, original)
             for ma in resolved:
                 if ma.action == EnforcementAction.MASK:
                     original = msg.content[ma.match.start:ma.match.end]
-                    token = _allocate_token(
-                        ma.match.detector_name, counters, span_map, original
-                    )
+                    if conversation_key is not None:
+                        token = _allocate_deterministic_token(
+                            ma.match.detector_name,
+                            conversation_key,
+                            span_map,
+                            reverse_map,
+                            original,
+                        )
+                    else:
+                        token = _allocate_token(
+                            ma.match.detector_name, counters, span_map, original
+                        )
                     replacements.append(
                         (ma.match.start, ma.match.end, token, original)
                     )
@@ -380,6 +636,7 @@ class DLPTransformer:
         match_actions: list[MatchAction],
         *,
         start_counters: dict[str, int] | None = None,
+        conversation_key: bytes | None = None,
     ) -> tuple[str, dict[str, str], dict[str, int]]:
         """Mask a single text string using indexed tokens + span_map.
 
@@ -410,13 +667,23 @@ class DLPTransformer:
 
         replacements: list[tuple[int, int, str]] = []
         span_map: dict[str, str] = {}
+        reverse_map: dict[str, str] = {}
 
         for ma in resolved:
             if ma.action == EnforcementAction.MASK:
                 original = text[ma.match.start:ma.match.end]
-                token = _allocate_token(
-                    ma.match.detector_name, counters, span_map, original
-                )
+                if conversation_key is not None:
+                    token = _allocate_deterministic_token(
+                        ma.match.detector_name,
+                        conversation_key,
+                        span_map,
+                        reverse_map,
+                        original,
+                    )
+                else:
+                    token = _allocate_token(
+                        ma.match.detector_name, counters, span_map, original
+                    )
                 replacements.append((ma.match.start, ma.match.end, token))
             else:  # REDACT
                 replacements.append((ma.match.start, ma.match.end, "[REDACTED]"))
@@ -429,24 +696,40 @@ class DLPTransformer:
 
         return result_text, span_map, counters
 
-    def restore(self, text: str, span_map: dict[str, str]) -> str:
+    def restore(
+        self,
+        text: str,
+        span_map: dict[str, str],
+        vault_resolver=None,
+        *,
+        allowed_tokens: set[str] | None = None,
+    ) -> str:
         """Reverse indexed masking by replacing each token with its original.
 
         Processes longer tokens first so that ``[EMAIL_10]`` is replaced
         before ``[EMAIL_1]`` — otherwise the shorter token would match
         the prefix of the longer one and corrupt the output.
 
-        If the text still contains indexed mask tokens *after* restore
-        (so: tokens the caller never registered in ``span_map``), emit
-        an ``dlp_orphan_mask_tokens`` warning. Behavior is intentionally
-        unchanged — the literal token passes through to the user — but
-        operators get visibility on the orphan so they can diagnose
-        stale history replays, split-vault bugs, or provider echoes
-        of tokens the gateway never issued.
+        ``vault_resolver`` is an optional callable
+        ``(list[str]) -> dict[str, str]`` that the caller wires to a
+        cross-turn store (``ConversationVault``). When the local
+        ``span_map`` doesn't cover a token surviving in the text — a
+        multi-turn echo of a placeholder minted in an earlier turn —
+        the resolver gets a chance to fill the gap. Anything the
+        resolver still can't map is logged as
+        ``dlp_orphan_unresolvable`` and passes through to the user
+        as the literal token (unchanged failure mode).
         """
         if not text:
             return text
         result = text
+        active_span_map = span_map
+        if allowed_tokens is not None:
+            active_span_map = {
+                token: value
+                for token, value in span_map.items()
+                if token in allowed_tokens
+            }
         # Diagnostic snapshot BEFORE restore — kept at debug level so
         # operators can flip ``LOG_LEVEL=DEBUG`` to reproduce the
         # span_map / orphan analysis used during the May 2026 audit
@@ -455,13 +738,18 @@ class DLPTransformer:
             "dlp_restore_debug_start",
             span_map_size=len(span_map),
             span_map_tokens=list(span_map.keys()),
-            span_map_values_preview={k: (v[:40] + "...") if len(v) > 40 else v for k, v in span_map.items()},
-            text_preview=text[:300],
+            span_map_value_lengths={k: len(v) for k, v in active_span_map.items()},
+            text_len=len(text),
             tokens_in_text=sorted(set(_MASK_TOKEN_RE.findall(text))),
         )
-        if span_map:
-            for token in sorted(span_map, key=len, reverse=True):
-                result = result.replace(token, span_map[token])
+        if active_span_map:
+            # Canonicalise lowercase / whitespace-padded variants the
+            # model may have echoed back before the exact-match replace
+            # loop runs — otherwise ``[ EMAIL_0 ]`` would never match the
+            # ``[EMAIL_0]`` key and would leak as a literal token.
+            result = _normalize_tokens(result, active_span_map)
+            for token in sorted(active_span_map, key=len, reverse=True):
+                result = result.replace(token, active_span_map[token])
         # Orphan detection runs whether or not span_map was empty: a
         # bracketed [DETECTOR_N] surviving to this point is suspicious
         # either way.
@@ -470,17 +758,42 @@ class DLPTransformer:
         # _start event above.
         logger.debug(
             "dlp_restore_debug_end",
-            matched_tokens_in_input=[t for t in span_map if t in text],
-            unmatched_span_map_tokens=[t for t in span_map if t not in text],
+            matched_tokens_in_input=[t for t in active_span_map if t in text],
+            unmatched_span_map_tokens=[t for t in active_span_map if t not in text],
             orphans_in_output=sorted(orphans),
-            output_preview=result[:300],
+            output_len=len(result),
         )
-        if orphans:
+        if orphans and vault_resolver is not None:
+            # Cross-turn fallback. ``vault_resolver`` may raise (caller
+            # contract: it must not) — wrap defensively so a vault bug
+            # never breaks a response.
+            try:
+                resolved = vault_resolver(sorted(orphans)) or {}
+            except Exception as exc:
+                logger.warning(
+                    "dlp_vault_resolver_failed",
+                    error=str(exc)[:200],
+                )
+                resolved = {}
+            for token, value in resolved.items():
+                result = result.replace(token, value)
+                logger.info(
+                    "dlp_orphan_resolved_from_vault",
+                    token=token,
+                )
+            orphans = set(_MASK_TOKEN_RE.findall(result))
+            if orphans:
+                logger.warning(
+                    "dlp_orphan_unresolvable",
+                    orphan_tokens=sorted(orphans),
+                    output_len=len(result),
+                )
+        elif orphans:
             logger.warning(
                 "dlp_orphan_mask_tokens",
                 orphan_tokens=sorted(orphans),
                 span_map_size=len(span_map),
-                text_snippet=result[:120],
+                output_len=len(result),
             )
         return result
 

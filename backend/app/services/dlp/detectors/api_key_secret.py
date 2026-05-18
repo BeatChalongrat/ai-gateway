@@ -23,8 +23,37 @@ from app.services.dlp.detectors.base import BaseDetector
 # Standalone tokens
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
+        # Long-form Anthropic keys — the canonical 32+ char body length
+        # of real production keys. Kept alongside the shorter (20+)
+        # ``api03`` / ``admin01`` variants below so this stricter
+        # pattern still preferentially matches a real key's full body
+        # even when a shorter alternative would also fire (dedup via
+        # ``seen_spans`` in ``detect``).
         "anthropic_api_key",
         re.compile(r"\bsk-ant-(?:api\d+-)?[A-Za-z0-9_\-]{32,}\b"),
+    ),
+    (
+        # Newer Anthropic key forms with a known role prefix
+        # (``api03``, ``admin01``) and a body of at least 12 chars.
+        # The literal ``sk-ant-(api03|admin01)-`` prefix is itself a
+        # strong discriminator — anything matching that prefix with
+        # ≥12 trailing chars is almost certainly an issued key
+        # (full or truncated), not random text.
+        "anthropic_api_key",
+        re.compile(r"\bsk-ant-(?:api03|admin01)-[A-Za-z0-9_\-]{12,}\b"),
+    ),
+    (
+        # OpenAI project keys (issued via the dashboard's "project"
+        # scope) — distinct prefix from the legacy ``sk-`` user keys
+        # that ``bearer_token`` handles.
+        "openai_project_key",
+        re.compile(r"\bsk-proj-[A-Za-z0-9_\-]{12,}\b"),
+    ),
+    (
+        # OpenAI live / org keys — rare in normal traffic but still
+        # an issued credential format.
+        "openai_live_key",
+        re.compile(r"\bsk-live-[A-Za-z0-9_\-]{12,}\b"),
     ),
     (
         "google_api_key",

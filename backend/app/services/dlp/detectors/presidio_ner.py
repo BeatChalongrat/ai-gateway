@@ -83,6 +83,26 @@ def _check_spacy_models() -> None:
 _check_spacy_models()
 
 
+# Tokens NER routinely mis-tags as named entities (PERSON / NRP /
+# ORGANIZATION) but which are almost always section labels or
+# nationality adjectives in our prompts. Filter applies to any
+# entity type the analyzer emits, since the same word can be tagged
+# differently depending on context (``Thai`` → NRP in "Thai ID:",
+# PERSON in "I met Thai yesterday"). Comparison is
+# case-insensitive against ``matched_text.strip()``.
+#
+# Keep this list tight — broad denylists risk suppressing legitimate
+# names. Add entries only when a production trace shows a recurring
+# false positive on a common label / adjective.
+_NER_FALSE_POSITIVE_DENYLIST = frozenset({
+    # Nationality adjective (NRP) — appears as "Thai ID:".
+    "thai",
+    # Field-label noun (PERSON) — surfaced once the
+    # health_condition over-match stopped swallowing the line.
+    "salary",
+})
+
+
 class PresidioDetector(BaseDetector):
     name = "presidio_ner"
     category = "pii"
@@ -107,6 +127,17 @@ class PresidioDetector(BaseDetector):
     def detect(
         self, text: str, language: str = "en"
     ) -> list[DetectionMatch]:
+        # Prefer the dedicated NER microservice when configured. The
+        # service hosts the spaCy model once per pod (vs once per
+        # worker) and returns identically-shaped findings, so the rest
+        # of this method's contract is unchanged. When the service URL
+        # is empty we fall back to the legacy in-process Presidio
+        # analyzer — keeps dev machines without docker-compose working.
+        from app.core.config import settings
+
+        if settings.ner_service_url:
+            return self._detect_via_service(text, language=language)
+
         from app.services.dlp.ner_status import get_analyzer
 
         analyzer = get_analyzer()
@@ -155,6 +186,13 @@ class PresidioDetector(BaseDetector):
         for r in results:
             if getattr(r, "score", 1.0) < self.SCORE_THRESHOLD:
                 continue
+            matched_text = text[r.start:r.end]
+            # Drop label / nationality adjectives the analyzer
+            # mis-tags. Checked across all entity types because the
+            # same word can flip between PERSON / NRP / ORGANIZATION
+            # depending on context.
+            if matched_text.strip().lower() in _NER_FALSE_POSITIVE_DENYLIST:
+                continue
             matches.append(
                 DetectionMatch(
                     detector_name=self.name,
@@ -162,9 +200,51 @@ class PresidioDetector(BaseDetector):
                     category=self.category,
                     start=r.start,
                     end=r.end,
-                    matched_text=text[r.start:r.end],
+                    matched_text=matched_text,
                     severity=self.default_sensitivity,
                     confidence=float(getattr(r, "score", 1.0)),
+                )
+            )
+        return matches
+
+    def _detect_via_service(
+        self, text: str, *, language: str
+    ) -> list[DetectionMatch]:
+        """Call the NER microservice and convert its entities to matches.
+
+        Failure path is enforced by ``ner_service_client.analyze_sync``
+        — any timeout / 5xx / network error returns ``[]`` so the
+        detector silently degrades to "no NER findings" instead of
+        breaking the DLP pipeline.
+        """
+        from app.services.ner_service_client import analyze_sync
+
+        entities = analyze_sync(
+            text,
+            language=language,
+            entities=list(self.ENTITIES),
+            score_threshold=self.SCORE_THRESHOLD,
+        )
+        if not entities:
+            return []
+
+        matches: list[DetectionMatch] = []
+        for e in entities:
+            if e.score < self.SCORE_THRESHOLD:
+                continue
+            matched_text = text[e.start : e.end]
+            if matched_text.strip().lower() in _NER_FALSE_POSITIVE_DENYLIST:
+                continue
+            matches.append(
+                DetectionMatch(
+                    detector_name=self.name,
+                    entity_type=e.label.lower(),
+                    category=self.category,
+                    start=e.start,
+                    end=e.end,
+                    matched_text=matched_text,
+                    severity=self.default_sensitivity,
+                    confidence=e.score,
                 )
             )
         return matches

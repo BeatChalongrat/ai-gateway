@@ -199,17 +199,18 @@ class TestBlockStopsRequest:
         assert captured["called"] is False
 
 
-class TestProviderIntroducedPiiPassesThroughUnderDefault:
-    def test_provider_introduced_pii_is_allowed_by_default(self, monkeypatch):
-        """Fix 3: outbound PII (email) under DEFAULT_PROFILE is ALLOW.
+class TestProviderIntroducedPiiMaskedUnderDefault:
+    def test_provider_introduced_pii_is_masked_by_default(self, monkeypatch):
+        """Outbound PII (email) is MASKED under DEFAULT_PROFILE
+        (May 2026 tightening).
 
-        Pre-Fix-3 the gateway masked AI-generated emails to ``[EMAIL_0]``
-        even when the user explicitly asked for an example. The new
-        ``category_actions_output`` on DEFAULT_PROFILE narrows outbound
-        masking to credentials/secrets only — PII / financial / network /
-        identity flow through to the user untouched. The companion
-        unit suite (test_dlp_per_direction_policy.py) covers the
-        credential-still-masks path.
+        Earlier the default profile let AI-generated PII flow through.
+        The audit's RT-04 round-trip showed this was a real outbound
+        leak surface (an LLM hallucinating a fake email delivers it
+        verbatim to the user). The profile now masks ``pii`` outbound
+        — the user sees ``[EMAIL_N]`` instead of the raw value. The
+        ``network`` category is still ALLOW; tenants who genuinely
+        want raw outbound PII opt into a custom profile.
         """
         _install_capture(
             monkeypatch,
@@ -222,17 +223,15 @@ class TestProviderIntroducedPiiPassesThroughUnderDefault:
         body = resp.json()
         content = body["choices"][0]["message"]["content"]
 
-        # The AI's example email reaches the user — outbound PII is ALLOW.
-        assert "john@example.com" in content
-        assert "[EMAIL_" not in content
+        # The AI's email is now masked before reaching the user.
+        assert "john@example.com" not in content
+        assert "[EMAIL_" in content
 
-        # No transformation happened on either direction (input had no
-        # PII; outbound PII is ALLOW under default).
-        assert body["policy_action"] == "allow"
+        # Outbound transformation fired; overall action reflects the mask.
+        assert body["policy_action"] == "mask"
 
         log = _log_for(body["id"])
         assert log is not None
         assert log.dlp_input_findings == 0
-        # Output detector still fires for trace/audit; the policy decision
-        # is what changes — action="allow" rather than "mask".
+        # Output detector + masking both fire.
         assert log.dlp_output_findings >= 1

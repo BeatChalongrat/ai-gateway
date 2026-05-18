@@ -1,0 +1,95 @@
+"""ORM model for the DB-backed model registry.
+
+Mirrors ``ModelCandidate`` (``app/domain/routing.py``) for the routing
+hot-path fields, plus discovery metadata that lets the periodic sync
+job upsert without overwriting admin edits.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+import sqlalchemy as sa
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base
+
+
+class ModelConfigORM(Base):
+    """A single model registry row.
+
+    ``(provider, model)`` is unique. The registry singleton in
+    ``app/services/providers/model_registry.py`` loads only
+    ``is_active=True`` rows; the discovery sync flips
+    ``is_active=False`` for models that disappear upstream rather
+    than hard-deleting them, so historical request_logs that
+    reference the row still resolve.
+    """
+
+    __tablename__ = "model_configs"
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "provider", "model",
+            name="uq_model_configs_provider_model",
+        ),
+        sa.Index("ix_model_configs_provider", "provider"),
+        sa.Index("ix_model_configs_is_active", "is_active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    # --- Capability ---
+    supports_streaming: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("true")
+    )
+    supports_tools: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    supports_vision: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    max_context_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=sa.text("128000")
+    )
+
+    # --- Cost / latency ---
+    cost_tier: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=sa.text("'standard'")
+    )
+    latency_tier: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=sa.text("'standard'")
+    )
+    cost_per_input_token: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default=sa.text("0.0")
+    )
+    cost_per_output_token: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default=sa.text("0.0")
+    )
+
+    # --- Discovery metadata ---
+    # source ∈ {"auto", "manual", "seed"}.
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=sa.text("'auto'")
+    )
+    # is_manual_override=True means discovery sync skips this row.
+    is_manual_override: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("true")
+    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

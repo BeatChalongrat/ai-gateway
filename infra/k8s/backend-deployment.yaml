@@ -1,9 +1,36 @@
+# Backend gateway deployment + autoscaling.
+#
+# The May 2026 scalability audit found this manifest was severely
+# under-dimensioned for the 5M-user target: 2 static replicas, no
+# resource requests/limits, no HPA, no probes. This file replaces all
+# of that.
+#
+# Postgres HA — NOT changed here (deployment is intentionally
+# scoped to the gateway). For 5M users the recommended setup is:
+#
+#   * AWS: RDS for PostgreSQL Multi-AZ + 2 read replicas behind a
+#     read endpoint, automated failover < 60s.
+#   * Self-hosted: Patroni + 2 hot standbys + pgbouncer for connection
+#     pooling, automatic primary election via etcd/Consul.
+#
+# That sits OUTSIDE the K8s cluster (or in a dedicated stateful
+# namespace with proper PVC + anti-affinity). The gateway pods connect
+# to its endpoint via the standard DATABASE_URL env var — no app
+# changes required.
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: secure-ai-gateway-backend
+  labels:
+    app: secure-ai-gateway-backend
 spec:
-  replicas: 2
+  replicas: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: secure-ai-gateway-backend
@@ -17,3 +44,100 @@ spec:
           image: secure-ai-gateway/backend:latest
           ports:
             - containerPort: 8080
+              name: http
+          env:
+            - name: NER_SERVICE_URL
+              value: "http://ner-service:8001"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-ai-gateway-backend
+spec:
+  selector:
+    app: secure-ai-gateway-backend
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: secure-ai-gateway-backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: secure-ai-gateway-backend
+  minReplicas: 10
+  maxReplicas: 100
+  metrics:
+    # Primary signal — CPU is the cheapest portable indicator. At 60%
+    # average utilisation the cluster has headroom for traffic bursts
+    # while keeping per-pod request latency stable.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    # Secondary — request rate per pod. Requires prometheus-adapter or
+    # an equivalent custom-metrics provider in the cluster; the HPA
+    # silently ignores this entry when the metric source is missing,
+    # so it's safe to leave wired up even in clusters that haven't
+    # installed the adapter yet.
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "500"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 120
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: secure-ai-gateway-backend
+spec:
+  minAvailable: 50%
+  selector:
+    matchLabels:
+      app: secure-ai-gateway-backend
