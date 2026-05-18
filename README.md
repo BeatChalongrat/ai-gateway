@@ -88,13 +88,13 @@ Then:
 | URL | What | Credentials |
 |---|---|---|
 | http://localhost:3000 | Admin UI | `admin` / `admin1234` |
-| http://localhost:3001 | Customer portal | `somchai@acme.ai.gateway` / `Demo@2025!` |
+| http://localhost:3001 | Customer portal | `somchai@acme.ai.gateway` / `P@ssword` |
 | http://localhost:8080/health | Backend health | — |
 | http://localhost:8080/docs | Backend OpenAPI | — |
 | http://localhost:8001/health | NER service | — |
 | http://localhost:9090/health | Mock provider | — |
 
-**Seeded portal users** (all password `Demo@2025!`):
+**Seeded portal users** (all password `P@ssword`):
 
 | Email | Name | Role | Tenant |
 |---|---|---|---|
