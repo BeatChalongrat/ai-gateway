@@ -144,6 +144,69 @@ class RateLimitService:
         project_id: str,
         tenant_id: str,
     ) -> dict:
+        # Phase-3b: when the operator flips ``RATE_LIMITER_ENGINE``
+        # to ``rust``, hand off to the Rust sidecar. Any failure
+        # (timeout, RpcError, sidecar unreachable, grpcio import
+        # error) falls through to the legacy Python pipeline below
+        # — same fail-open contract the limiter has always had.
+        from app.core.config import settings
+
+        if settings.rate_limiter_engine == "rust":
+            try:
+                from app.services.rate_limiter_client import (
+                    RateLimiterClient,
+                    RateLimiterUnavailable,
+                )
+            except Exception:  # noqa: BLE001
+                return await self._check_all_python(key_id, project_id, tenant_id)
+
+            try:
+                client = RateLimiterClient.instance()
+            except RateLimiterUnavailable:
+                return await self._check_all_python(key_id, project_id, tenant_id)
+
+            try:
+                # Per-project / per-tenant overrides — the Rust
+                # service receives the same effective limits the
+                # Python path would compute (perf-test overrides
+                # included).
+                project_limit = DEFAULT_PROJECT_LIMIT
+                if project_id == _PERF_PROJECT_ID:
+                    override = _perf_project_limit_override()
+                    if override is not None:
+                        project_limit = override
+                tenant_limit = DEFAULT_TENANT_LIMIT
+                if tenant_id == _PERF_TENANT_ID:
+                    override = _perf_tenant_limit_override()
+                    if override is not None:
+                        tenant_limit = override
+                return await client.check_all(
+                    key_id=key_id,
+                    project_id=project_id,
+                    tenant_id=tenant_id,
+                    key_limit=DEFAULT_KEY_LIMIT,
+                    project_limit=project_limit,
+                    tenant_limit=tenant_limit,
+                    window_seconds=DEFAULT_WINDOW_SECONDS,
+                )
+            except Exception:  # noqa: BLE001
+                # RPC error / timeout — fall back to the local engine
+                # so a sidecar incident cannot block the request path.
+                return await self._check_all_python(key_id, project_id, tenant_id)
+
+        return await self._check_all_python(key_id, project_id, tenant_id)
+
+    async def _check_all_python(
+        self,
+        key_id: str,
+        project_id: str,
+        tenant_id: str,
+    ) -> dict:
+        """Legacy in-process pipeline — three sequential ZSET checks.
+
+        Pulled out of ``check_all_async`` so the Rust engine branch
+        can call back here on any failure without duplicating logic.
+        """
         key_result = await self.check_key_async(key_id)
         if not key_result["allowed"]:
             return {**key_result, "scope": "api_key"}

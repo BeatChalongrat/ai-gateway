@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package ratelimit;
+
+// RateLimitService — Rust sidecar that runs the gateway's per-key /
+// per-project / per-tenant sliding-window rate limit against the
+// shared Redis. The Python backend dispatches one CheckAll RPC per
+// inbound request when ``RATE_LIMITER_ENGINE=rust``; the default
+// (python) path keeps the legacy in-process implementation.
+//
+// On Redis errors the service returns ``allowed=true`` — a fail-
+// open contract that matches the Python implementation. The gateway
+// must never be blocked from serving traffic because the limiter
+// itself is unhealthy.
+service RateLimitService {
+  rpc CheckAll (CheckAllRequest) returns (CheckAllResponse);
+  rpc Health   (HealthRequest)   returns (HealthResponse);
+}
+
+// CheckAllRequest — single round-trip describing the three scopes
+// the gateway needs evaluated for one request. Limits / window are
+// passed in rather than read from a config in the sidecar so the
+// limiter never drifts from the gateway's per-tenant policy
+// resolution.
+message CheckAllRequest {
+  string key_id         = 1;
+  string project_id     = 2;
+  string tenant_id      = 3;
+  int32  key_limit      = 4;   // default 60 if 0 supplied
+  int32  project_limit  = 5;   // default 300 if 0 supplied
+  int32  tenant_limit   = 6;   // default 1000 if 0 supplied
+  int32  window_seconds = 7;   // default 60 if 0 supplied
+}
+
+// ScopeResult — per-scope outcome. ``scope`` is one of
+// ``"api_key"`` / ``"project"`` / ``"tenant"`` matching the Python
+// service's labels (used by the public error-response details).
+message ScopeResult {
+  bool   allowed   = 1;
+  int32  remaining = 2;
+  int64  reset_at  = 3;
+  int32  limit     = 4;
+  string scope     = 5;
+}
+
+// CheckAllResponse — top-level ``allowed`` is the AND of every
+// scope's allowed flag; ``results`` is the full per-scope payload.
+// ``denied_scope`` matches the Python service's "scope" field on a
+// deny — empty when allowed.
+message CheckAllResponse {
+  bool                 allowed       = 1;
+  repeated ScopeResult results       = 2;
+  double               latency_ms    = 3;
+  string               denied_scope  = 4;
+}
+
+message HealthRequest  {}
+message HealthResponse {
+  string status = 1;        // "ready" | "degraded"
+  bool   redis_connected = 2;
+}
