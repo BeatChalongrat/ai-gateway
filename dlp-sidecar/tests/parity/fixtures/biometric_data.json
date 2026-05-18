@@ -1,0 +1,65 @@
+{
+  "detector": "biometric_data",
+  "entity_type": "biometric_data",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "english_my_fingerprint",
+      "input": "I use my fingerprint to unlock the door",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "thai_fingerprint",
+      "input": "ผมลงทะเบียนลายนิ้วมือ ที่บริษัท เรียบร้อย",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "face_id_personal",
+      "input": "He uses face ID on his phone every day",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 8,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "id": "biometric_textbook",
+      "input": "Biometric authentication is a security concept here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_thai_prose",
+      "input": "วันนี้ทำงานหนัก",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_biometric_keyword",
+      "input": "she went to lunch with friends",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

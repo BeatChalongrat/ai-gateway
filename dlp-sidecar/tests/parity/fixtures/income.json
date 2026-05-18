@@ -1,0 +1,65 @@
+{
+  "detector": "income",
+  "entity_type": "income",
+  "category": "financial",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "salary_english",
+      "input": "Salary: 120,000 THB / month ok",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 8,
+          "end": 19
+        }
+      ]
+    },
+    {
+      "id": "monthly_income",
+      "input": "Monthly income: 75000 baht confirmed",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 16,
+          "end": 26
+        }
+      ]
+    },
+    {
+      "id": "thai_salary",
+      "input": "เงินเดือน 50,000 บาท เดือน ครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 26
+        }
+      ]
+    },
+    {
+      "id": "product_price",
+      "input": "this item costs 500 baht only",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_label",
+      "input": "120,000 alone",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "label_no_value",
+      "input": "salary:",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

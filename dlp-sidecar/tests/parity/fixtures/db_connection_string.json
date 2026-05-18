@@ -1,0 +1,70 @@
+{
+  "detector": "db_connection_string",
+  "entity_type": "db_connection_string",
+  "category": "credential",
+  "severity": 4,
+  "cases": [
+    {
+      "id": "postgres_url",
+      "input": "DSN postgresql://user:pass@host:5432/db now",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 39
+        }
+      ]
+    },
+    {
+      "id": "mysql_url",
+      "input": "url mysql://admin:secret@db.example.com/app done",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 43
+        }
+      ]
+    },
+    {
+      "id": "mongodb_srv",
+      "input": "uri mongodb+srv://u:p@cluster.mongodb.net/x ready",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 43
+        }
+      ]
+    },
+    {
+      "id": "redis_password_only",
+      "input": "redis://:hunter2@cache:6379 used",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 27
+        }
+      ]
+    },
+    {
+      "id": "no_credentials",
+      "input": "postgresql://host:5432/db readonly",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose",
+      "input": "we use mysql for our analytics db",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

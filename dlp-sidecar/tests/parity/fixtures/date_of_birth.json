@@ -1,0 +1,70 @@
+{
+  "detector": "date_of_birth",
+  "entity_type": "date_of_birth",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "english_dob_iso",
+      "input": "DOB: 1990-05-15 confirmed",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "id": "english_born_phrase",
+      "input": "born May 15, 1990 in Bangkok",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 17
+        }
+      ]
+    },
+    {
+      "id": "thai_full_month",
+      "input": "วันเกิด 15 มีนาคม 2532 ตรวจ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 8,
+          "end": 22
+        }
+      ]
+    },
+    {
+      "id": "thai_short_month_dotted",
+      "input": "เกิด 15 มี.ค. 32 บัตร",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 16
+        }
+      ]
+    },
+    {
+      "id": "date_alone_no_keyword",
+      "input": "meeting on 2024-05-01 next week",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "compound_thai_no_match",
+      "input": "เหตุเกิดวันที่ไม่ระบุ ส่งต่อ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}
