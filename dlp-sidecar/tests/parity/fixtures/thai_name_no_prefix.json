@@ -1,0 +1,53 @@
+{
+  "detector": "thai_name_no_prefix",
+  "entity_type": "thai_name",
+  "category": "pii",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "two_word_with_context_kw",
+      "input": "ลูกค้า สมชาย ใจดี ลงทะเบียน",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 17
+        }
+      ]
+    },
+    {
+      "id": "song_word_chue",
+      "input": "ชื่อ สมหญิง สมบูรณ์ ครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 19
+        }
+      ]
+    },
+    {
+      "id": "no_context_kw",
+      "input": "สมชาย ใจดี ไปทำงาน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_thai_prose",
+      "input": "วันนี้ฝนตกหนัก",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "english_prose",
+      "input": "no thai content here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

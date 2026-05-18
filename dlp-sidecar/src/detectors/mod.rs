@@ -12,6 +12,7 @@ pub mod api_key_secret;
 pub mod base;
 pub mod bearer_token;
 pub mod biometric_data;
+pub mod credit_card;
 pub mod criminal_record;
 pub mod date_of_birth;
 pub mod db_connection_string;
@@ -23,6 +24,7 @@ pub mod ip_address;
 pub mod line_id;
 pub mod mac_address;
 pub mod medical_record;
+pub mod passport;
 pub mod password_field;
 pub mod phone;
 pub mod private_key;
@@ -30,6 +32,8 @@ pub mod religion_belief;
 pub mod ssn;
 pub mod thai_address;
 pub mod thai_bank_account;
+pub mod thai_name;
+pub mod thai_name_no_prefix;
 pub mod thai_national_id;
 pub mod thai_promptpay;
 pub mod thai_tax_id;
@@ -77,6 +81,13 @@ pub fn detector_for(name: &str) -> Option<Box<dyn Detector>> {
             Some(Box::new(thai_bank_account::ThaiBankAccountDetector))
         }
         "thai_promptpay" => Some(Box::new(thai_promptpay::ThaiPromptPayDetector)),
+        // Batch 4 — name / credit_card / passport
+        "thai_name" => Some(Box::new(thai_name::ThaiNameDetector)),
+        "thai_name_no_prefix" => {
+            Some(Box::new(thai_name_no_prefix::ThaiNameNoPrefixDetector))
+        }
+        "credit_card" => Some(Box::new(credit_card::CreditCardDetector)),
+        "passport" => Some(Box::new(passport::PassportDetector)),
         _ => None,
     }
 }
