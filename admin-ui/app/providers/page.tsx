@@ -123,7 +123,15 @@ function ProviderLogo({ name, size = 28 }: { name: string; size?: number }) {
 
 /* ── Keys management panel ──────────────────────────────────────── */
 
-function KeysPanel({ providerName, onClose }: { providerName: string; onClose: () => void }) {
+function KeysPanel({
+  providerName,
+  envConfigured,
+  onClose,
+}: {
+  providerName: string;
+  envConfigured: boolean;
+  onClose: () => void;
+}) {
   const [keys, setKeys] = useState<ProviderKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [label, setLabel] = useState("");
@@ -258,6 +266,22 @@ function KeysPanel({ providerName, onClose }: { providerName: string; onClose: (
               ))}
             </tbody>
           </table>
+        </div>
+      ) : envConfigured ? (
+        <div
+          style={{
+            padding: "0.625rem 0.75rem",
+            color: "var(--color-text-secondary)",
+            fontSize: "var(--font-size-sm)",
+            marginBottom: "1rem",
+            background: "color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 25%, transparent)",
+            borderRadius: "var(--radius-md)",
+          }}
+        >
+          A key is currently being read from the <code>{providerName.toUpperCase()}_API_KEY</code> environment
+          variable. Adding a key here will <strong>override</strong> the env value and let you rotate or test
+          keys without redeploying.
         </div>
       ) : (
         <div style={{ padding: "0.75rem 0", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)", marginBottom: "1rem" }}>
@@ -426,7 +450,12 @@ function ProviderCard({
             {validKeys}/{totalKeys} keys
           </Badge>
         ) : keyStatus?.source === "environment" ? (
-          <Badge variant="warning">via env</Badge>
+          <Badge
+            variant="warning"
+            title="Key set via environment variable — add a key below to override it from the UI"
+          >
+            via env
+          </Badge>
         ) : keyStatus?.configured ? (
           <Badge variant="success">key set</Badge>
         ) : (
@@ -663,6 +692,7 @@ export default function ProvidersPage() {
                 {isExpanded && (
                   <KeysPanel
                     providerName={p.provider_name}
+                    envConfigured={keyStatuses[p.provider_name]?.source === "environment"}
                     onClose={() => handleClosePanel(p.provider_name)}
                   />
                 )}

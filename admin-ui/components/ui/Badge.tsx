@@ -9,12 +9,18 @@ const VARIANTS: Record<string, string> = {
 export default function Badge({
   children,
   variant = "neutral",
+  title,
 }: {
   children: React.ReactNode;
   variant?: keyof typeof VARIANTS;
+  title?: string;
 }) {
   return (
-    <span className={`sran-badge ${VARIANTS[variant] || VARIANTS.neutral}`}>
+    <span
+      className={`sran-badge ${VARIANTS[variant] || VARIANTS.neutral}`}
+      title={title}
+      style={title ? { cursor: "help" } : undefined}
+    >
       {children}
     </span>
   );

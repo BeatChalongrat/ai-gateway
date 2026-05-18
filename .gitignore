@@ -58,3 +58,7 @@ sran-pii-test.sh
 
 # Rust sidecar build artifacts
 dlp-sidecar/target/
+
+# UAT seed output — contains raw API keys printed once by 02_seed_uat.py.
+# Keep on disk only until copied into the customer's secret manager.
+uat-seed-output.txt
