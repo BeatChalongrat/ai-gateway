@@ -333,6 +333,12 @@ _STATIC_MODELS: dict[str, list[str]] = {
         "yi-large",
         "yi-medium",
     ],
+    "google": [
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+    ],
 }
 
 
@@ -378,6 +384,14 @@ async def discover_zai(api_key: str | None) -> list[DiscoveredModel]:
     return _discover_static("zai")
 
 
+async def discover_google(api_key: str | None) -> list[DiscoveredModel]:
+    # Google's generativelanguage.googleapis.com /v1/models endpoint
+    # requires an API key. Use the static list so the seed catalog
+    # stays visible whenever the key is absent — the discovery sync
+    # would otherwise soft-deactivate every google row.
+    return _discover_static("google")
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
@@ -387,6 +401,7 @@ async def discover_zai(api_key: str | None) -> list[DiscoveredModel]:
 PROVIDER_DISCOVERY = {
     "openai": discover_openai,
     "anthropic": discover_anthropic,
+    "google": discover_google,
     "groq": discover_groq,
     "mistral": discover_mistral,
     "cohere": discover_cohere,
