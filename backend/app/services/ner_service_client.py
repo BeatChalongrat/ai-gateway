@@ -92,10 +92,25 @@ async def analyze(
     Returns ``[]`` if the service is not configured, unreachable, or
     returns an error — never raises. Callers can treat this as "NER
     saw nothing".
+
+    Belt-and-braces language routing: the orchestrator's
+    ``DetectorRegistry.scan_messages`` already calls
+    ``language.detect_language`` once across the joined message text
+    and threads the result down — but if a caller bypasses that
+    (direct service call, test fixture, future async detector), we
+    re-detect here so Thai text never gets analyzed by the English
+    model just because the default kwarg said so.
     """
     client = _client_for_current_loop()
     if client is None:
         return []
+
+    if language == "en":
+        from app.services.dlp.language import detect_language
+
+        detected = detect_language(text)
+        if detected != "en":
+            language = detected
 
     payload: dict[str, Any] = {"text": text, "language": language}
     if entities is not None:

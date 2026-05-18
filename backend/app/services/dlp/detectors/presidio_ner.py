@@ -128,19 +128,31 @@ _NER_AI_MODEL_NAMES = frozenset({
 
 
 # Conversational Thai particles, verbs, and politeness markers that
-# Presidio's English-trained NER routinely mis-tags as PERSON (high-
-# confidence false positives — they sit in the 0.60-0.85 band). The
-# ``thai_name`` regex detector handles real Thai names (title prefix
-# + first + last), so dropping these from the NER stream protects no
-# data and stops the model from inventing ``[NAME_N]`` substitutions
-# for everyday conversation. Compared case-insensitively against
-# ``matched_text.strip()``.
+# Presidio routinely mis-tags as PERSON (false positives that sit in
+# the 0.60-0.85 confidence band, plus a few that survive even after
+# the 0.85 floor). The ``thai_name`` regex detector handles real
+# Thai names (title prefix + first + last), so dropping these from
+# the NER stream protects no data and stops the model from inventing
+# ``[NAME_N]`` substitutions for everyday conversation. Compared
+# case-insensitively against ``matched_text.strip()``.
 _THAI_COMMON_WORDS = frozenset({
     "ตอบ", "ตอบสั้น", "ตอบสั้นๆ", "สรุป", "สรุปข้อมูล",
     "ช่วย", "ช่วยสรุป", "ข้อมูล", "ให้หน่อย", "หน่อย",
     "สวัสดี", "ครับ", "ค่ะ", "นะ", "นะครับ", "นะคะ",
     "ได้เลย", "ได้เลยครับ", "บ้าง", "อะไร",
+    "มีอะไร", "ยังไง",
 })
+
+
+# Unicode range for the modern Thai script (basic Thai block,
+# U+0E00–U+0E7F). Escape sequences keep the source file safe to
+# diff in editors that don't render Thai glyphs.
+_THAI_MIN = "฀"
+_THAI_MAX = "๿"
+
+
+def _thai_char_count(text: str) -> int:
+    return sum(1 for ch in text if _THAI_MIN <= ch <= _THAI_MAX)
 
 
 def _is_ner_false_positive(
@@ -163,10 +175,14 @@ def _is_ner_false_positive(
        Thai prose.
     4. The match ends in ``ๆ`` (Thai reduplication marker) — never
        part of a person's name; always means "repeat the prior word".
-    5. Very short matches (``<= 3`` chars) tagged as ``pii``. Presidio
+    5. A Thai-script match with ``<= 2`` Thai characters. Real Thai
+       given names start at 3 characters once vowels and tone marks
+       are counted, so anything shorter is almost certainly a
+       function word the NER mis-tagged.
+    6. Very short matches (``<= 3`` chars) tagged as ``pii``. Presidio
        over-confidently tags 2-3 letter acronyms (``GPT``, ``API``)
        as PERSON.
-    6. Short matches (``<= 4`` chars) with sub-0.9 confidence. Catches
+    7. Short matches (``<= 4`` chars) with sub-0.9 confidence. Catches
        the borderline single-word PERSON hits from spaCy that the
        0.85 floor lets through but which are almost always noise.
     """
@@ -180,6 +196,9 @@ def _is_ner_false_positive(
     if text in _THAI_COMMON_WORDS:
         return True
     if text.endswith("ๆ"):
+        return True
+    thai_chars = _thai_char_count(text)
+    if thai_chars > 0 and thai_chars <= 2:
         return True
     if len(text) <= 3 and category == "pii":
         return True
