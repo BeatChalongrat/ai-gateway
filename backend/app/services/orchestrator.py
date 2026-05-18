@@ -1067,22 +1067,29 @@ class GatewayOrchestrator:
                     span_map=span_map,
                 ),
             )
+            # Fire-and-forget enqueue. When the background worker is
+            # running (production) the record is queued and inserted in
+            # a batch by the worker on its own session. When the worker
+            # is not running (pytest, pre-startup, post-shutdown) the
+            # queue falls back to a synchronous persist on the caller's
+            # session — preserving the legacy contract exactly.
+            from app.services import request_log_queue
             try:
-                self.request_log_service.persist(session, record)
+                request_log_queue.enqueue(record, fallback_session=session)
             except Exception as exc:
-                log.warning("request_log_persist_failed", error=str(exc))
+                log.warning("request_log_enqueue_failed", error=str(exc))
 
-            # Alert evaluation — fire any matching rule against the just-
-            # persisted row. Must never break the request response, so
-            # any error (DB, webhook, etc.) is logged and swallowed.
+            # Alert evaluation — uses an in-memory ORM built from the
+            # record so the path does not depend on the queue having
+            # flushed yet. The evaluator only reads tenant_id /
+            # project_id from this object (see
+            # ``AlertEvaluator._scope_matches``); all analytical work
+            # runs against the live ``session`` and the persisted history.
             try:
-                persisted_row = self.request_log_service.get_by_id(
-                    session, request_id
+                in_memory_row = request_log_queue.build_request_log_orm(record)
+                await self.alert_evaluator.evaluate_after_request(
+                    session, in_memory_row
                 )
-                if persisted_row is not None:
-                    await self.alert_evaluator.evaluate_after_request(
-                        session, persisted_row
-                    )
             except Exception as exc:
                 log.warning("alert_evaluator_failed", error=str(exc))
 
