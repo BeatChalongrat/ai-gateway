@@ -104,6 +104,13 @@ class TestSchemaFromORM:
             "output_raw",
             "output_final",
             "dlp_findings_json",
+            # Added in migration 039_add_input_raw_encrypted
+            "input_raw_encrypted",
+            # Added in migration 042_add_fallback_columns
+            "fallback_used",
+            "fallback_attempts",
+            "original_provider",
+            "original_model",
         }
         assert expected == cols
 

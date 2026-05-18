@@ -91,3 +91,25 @@ class RequestLogORM(Base):
     # is not enough to recover plaintext; the key (DLP_AUDIT_KEY env)
     # lives only in the backend process. See migration 039.
     input_raw_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Phase-2 fallback routing (migration 042).
+    #
+    # When the primary dispatch fails with a fallback-eligible error
+    # (see ``FALLBACK_ELIGIBLE_ERRORS`` in fallback_orchestrator), the
+    # gateway tries up to 2 cross-provider candidates. ``provider`` /
+    # ``model`` always describe what *actually answered*, while
+    # ``original_provider`` / ``original_model`` describe what the
+    # routing engine *originally picked*. On non-fallback requests the
+    # pairs are equal so dashboard queries don't need NULL handling.
+    #
+    # ``fallback_attempts`` is JSON-encoded text on the ORM side (we
+    # round-trip ``[{"provider","model","error_code","error_message",
+    # "latency_ms","attempted_at"}]``); migration 042 stores it as
+    # ``jsonb`` on Postgres so the admin dashboard can aggregate via
+    # the ``->`` operator without parsing strings.
+    fallback_used: Mapped[bool] = mapped_column(
+        sa.Boolean, server_default=sa.text("false"), default=False
+    )
+    fallback_attempts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_model: Mapped[str | None] = mapped_column(Text, nullable=True)
