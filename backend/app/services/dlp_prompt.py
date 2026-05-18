@@ -29,6 +29,9 @@ DLP_PLACEHOLDER_PROMPT = (
     "a regular text value. Echo tokens exactly as written if needed. "
     "Critical rule: do not invent new tokens for content the gateway "
     "did not already replace — use [REDACTED] for such content. "
+    "Never create new tokens. If you want to refer to a replaced "
+    "value, use the exact token already provided. Do not number new "
+    "tokens. "
     "Continue helping normally."
 )
 
