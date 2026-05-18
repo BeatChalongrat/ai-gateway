@@ -1,0 +1,65 @@
+{
+  "detector": "criminal_record",
+  "entity_type": "criminal_record",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "english_personal",
+      "input": "I was arrested for theft last summer here",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 14
+        }
+      ]
+    },
+    {
+      "id": "thai_personal",
+      "input": "เขาถูกจับเมื่อวานนี้ที่บ้าน ตามข่าว",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 3,
+          "end": 9
+        }
+      ]
+    },
+    {
+      "id": "english_my_record",
+      "input": "my criminal record was sealed by the court",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "news_no_pronoun",
+      "input": "Court news report from yesterday",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_thai_prose",
+      "input": "ตลาดเปิดเช้าวันนี้",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "legal_no_personal",
+      "input": "Criminal law studies are interesting",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "detector": "religion_belief",
+  "entity_type": "religion_belief",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "english_practicing",
+      "input": "I am a practicing Buddhist actually",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 26
+        }
+      ]
+    },
+    {
+      "id": "thai_religion_with_pronoun",
+      "input": "ผมนับถือศาสนาพุทธ มานานแล้ว",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 2,
+          "end": 17
+        }
+      ]
+    },
+    {
+      "id": "english_their_faith",
+      "input": "their faith is important to them, said the elder",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 11
+        }
+      ]
+    },
+    {
+      "id": "tourism_no_personal",
+      "input": "The temple is a beautiful tourist site daily",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "the_following_prose",
+      "input": "Please review the following document carefully",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_thai_prose",
+      "input": "ฝนตกหนักวันนี้",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

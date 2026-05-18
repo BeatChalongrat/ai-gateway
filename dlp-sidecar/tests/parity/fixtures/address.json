@@ -1,0 +1,65 @@
+{
+  "detector": "address",
+  "entity_type": "address",
+  "category": "pii",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "home_address_label",
+      "input": "Home Address: 123 Sukhumvit Road, Bangkok 10110 ok",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 14,
+          "end": 50
+        }
+      ]
+    },
+    {
+      "id": "shipping_address",
+      "input": "Shipping Address: 456 Rama IV Road Bangkok 10500 confirmed",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 18,
+          "end": 58
+        }
+      ]
+    },
+    {
+      "id": "thai_address_label",
+      "input": "ที่อยู่: 789/12 ถนนสุขุมวิท กรุงเทพ 10110 ครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 46
+        }
+      ]
+    },
+    {
+      "id": "address_label_no_content",
+      "input": "address: hi",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_walk_prose",
+      "input": "I walked on Sukhumvit Road today",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_label",
+      "input": "123 Sukhumvit Road, Bangkok 10110",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

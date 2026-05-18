@@ -48,6 +48,21 @@ from app.services.dlp.detectors.private_key import PrivateKeyDetector  # noqa: E
 from app.services.dlp.detectors.password_field import PasswordFieldDetector  # noqa: E402
 from app.services.dlp.detectors.line_id import LineIdDetector  # noqa: E402
 
+# Batch 2
+from app.services.dlp.detectors.phone import PhoneDetector  # noqa: E402
+from app.services.dlp.detectors.api_key_secret import APIKeySecretDetector  # noqa: E402
+from app.services.dlp.detectors.db_connection_string import DbConnectionStringDetector  # noqa: E402
+from app.services.dlp.detectors.medical_record import MedicalRecordDetector  # noqa: E402
+from app.services.dlp.detectors.date_of_birth import DateOfBirthDetector  # noqa: E402
+from app.services.dlp.detectors.vehicle_plate import VehiclePlateDetector  # noqa: E402
+from app.services.dlp.detectors.address import AddressDetector  # noqa: E402
+from app.services.dlp.detectors.thai_address import ThaiAddressDetector  # noqa: E402
+from app.services.dlp.detectors.income import IncomeDetector  # noqa: E402
+from app.services.dlp.detectors.religion_belief import ReligionBeliefDetector  # noqa: E402
+from app.services.dlp.detectors.health_condition import HealthConditionDetector  # noqa: E402
+from app.services.dlp.detectors.criminal_record import CriminalRecordDetector  # noqa: E402
+from app.services.dlp.detectors.biometric_data import BiometricDataDetector  # noqa: E402
+
 
 # Allow override so the script can run inside a backend container
 # (where the fixtures don't live on disk) and dump to /tmp instead.
@@ -246,6 +261,296 @@ SPECS = [
             Case("twitter_mention_no_match", "follow @username on twitter", False),
             Case("at_price_no_match", "ราคา @100 บาท", False),
             Case("everyone_no_match", "@everyone meeting at 3pm", False),
+        ],
+    ),
+    # ---------------------------------------------------------------
+    # Batch 2 — context-window detectors
+    # ---------------------------------------------------------------
+    DetectorSpec(
+        name="phone",
+        entity_type="phone_number",
+        category="pii",
+        severity=3,
+        detector=PhoneDetector(),
+        cases=[
+            Case("formatted_thai_mobile", "โทร 081-234-5678 ครับ", True),
+            Case("formatted_intl", "Phone: +66 81 234 5678 today", True),
+            Case("thai_landline", "office 02-555-1234 line", True),
+            Case("bare_with_thai_context", "เบอร์ 0812345678 ติดต่อ", True),
+            Case("bare_without_context", "0812345678 alone is just digits", False),
+            Case("plain_prose_no_phone", "no contact info here", False),
+        ],
+    ),
+    DetectorSpec(
+        name="api_key_secret",
+        entity_type="api_key_secret",
+        category="credential",
+        severity=4,
+        detector=APIKeySecretDetector(),
+        cases=[
+            Case(
+                "anthropic_long",
+                "key sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa committed",
+                True,
+            ),
+            Case(
+                "google_api_key",
+                "GOOGLE_API_KEY=AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q here",
+                True,
+            ),
+            Case(
+                "jwt_token",
+                "token eyJhbGciOiJI.eyJzdWIiOiIxMjM.SflKxwRJSMeKKF here",
+                True,
+            ),
+            Case(
+                "assignment_capture",
+                'config api_key="abcd1234EFGHabcd1234EFGH" loaded',
+                True,
+            ),
+            Case("no_secret_present", "normal text no credentials", False),
+            Case("anthropic_too_short", "sk-ant-api03-short bad", False),
+            Case("low_entropy_no_label", "abcdefghij just letters", False),
+        ],
+    ),
+    DetectorSpec(
+        name="db_connection_string",
+        entity_type="db_connection_string",
+        category="credential",
+        severity=4,
+        detector=DbConnectionStringDetector(),
+        cases=[
+            Case("postgres_url", "DSN postgresql://user:pass@host:5432/db now", True),
+            Case("mysql_url", "url mysql://admin:secret@db.example.com/app done", True),
+            Case("mongodb_srv", "uri mongodb+srv://u:p@cluster.mongodb.net/x ready", True),
+            Case("redis_password_only", "redis://:hunter2@cache:6379 used", True),
+            Case("no_credentials", "postgresql://host:5432/db readonly", False),
+            Case("plain_prose", "we use mysql for our analytics db", False),
+        ],
+    ),
+    DetectorSpec(
+        name="medical_record",
+        entity_type="medical_record",
+        category="pii",
+        severity=3,
+        detector=MedicalRecordDetector(),
+        cases=[
+            Case("hn_thai_keyword", "ผู้ป่วย HN 123456 admitted today", True),
+            Case("mrn_english", "MRN 7890123 transferred to ward 5", True),
+            Case("patient_id", "Patient ID 4567890 ready for surgery", True),
+            Case("bare_six_digits_no_context", "code 123456 unrelated", False),
+            Case("hn_substring_no_match", "Johnson 123456 stayed home", False),
+            Case("no_number_present", "HN keyword alone no number", False),
+        ],
+    ),
+    DetectorSpec(
+        name="date_of_birth",
+        entity_type="date_of_birth",
+        category="pii",
+        severity=3,
+        detector=DateOfBirthDetector(),
+        cases=[
+            Case("english_dob_iso", "DOB: 1990-05-15 confirmed", True),
+            Case("english_born_phrase", "born May 15, 1990 in Bangkok", True),
+            Case("thai_full_month", "วันเกิด 15 มีนาคม 2532 ตรวจ", True),
+            Case("thai_short_month_dotted", "เกิด 15 มี.ค. 32 บัตร", True),
+            Case("date_alone_no_keyword", "meeting on 2024-05-01 next week", False),
+            Case("compound_thai_no_match", "เหตุเกิดวันที่ไม่ระบุ ส่งต่อ", False),
+        ],
+    ),
+    DetectorSpec(
+        name="vehicle_plate",
+        entity_type="vehicle_plate",
+        category="identity",
+        severity=2,
+        detector=VehiclePlateDetector(),
+        cases=[
+            Case("thai_keyword_plate", "ทะเบียน กข 1234 ของผม", True),
+            Case("english_keyword_plate", "license plate AB 1234 lost", True),
+            Case("plate_then_province", "AB 1234 Bangkok seen", True),
+            Case("plate_thai_province", "กข 1234 ภูเก็ต พบ", True),
+            Case("no_keyword_no_province", "AB 1234 unrelated", False),
+            Case("plain_prose", "we drove around for hours", False),
+        ],
+    ),
+    DetectorSpec(
+        name="address",
+        entity_type="address",
+        category="pii",
+        severity=2,
+        detector=AddressDetector(),
+        cases=[
+            Case(
+                "home_address_label",
+                "Home Address: 123 Sukhumvit Road, Bangkok 10110 ok",
+                True,
+            ),
+            Case(
+                "shipping_address",
+                "Shipping Address: 456 Rama IV Road Bangkok 10500 confirmed",
+                True,
+            ),
+            Case(
+                "thai_address_label",
+                "ที่อยู่: 789/12 ถนนสุขุมวิท กรุงเทพ 10110 ครับ",
+                True,
+            ),
+            Case("address_label_no_content", "address: hi", False),
+            Case("plain_walk_prose", "I walked on Sukhumvit Road today", False),
+            Case("no_label", "123 Sukhumvit Road, Bangkok 10110", False),
+        ],
+    ),
+    DetectorSpec(
+        name="thai_address",
+        entity_type="thai_address",
+        category="pii",
+        severity=2,
+        detector=ThaiAddressDetector(),
+        cases=[
+            Case(
+                "thai_address_full",
+                "ที่อยู่ 123/45 ซอย 7 ถนนสุขุมวิท กรุงเทพ 10110 ครับ",
+                True,
+            ),
+            Case(
+                "house_number_keyword",
+                "บ้านเลขที่ 99/1 ซอย 5 ถนน A กรุงเทพ 10120 ส่ง",
+                True,
+            ),
+            Case(
+                "deliver_to_keyword",
+                "ส่งที่ 100 ถนน B จังหวัด นนทบุรี 11000 ขอบคุณ",
+                True,
+            ),
+            Case("plain_thai_prose", "วันนี้อากาศดีครับ", False),
+            Case("english_prose_no_keyword", "today is a good day", False),
+        ],
+    ),
+    DetectorSpec(
+        name="income",
+        entity_type="income",
+        category="financial",
+        severity=3,
+        detector=IncomeDetector(),
+        cases=[
+            Case("salary_english", "Salary: 120,000 THB / month ok", True),
+            Case("monthly_income", "Monthly income: 75000 baht confirmed", True),
+            Case("thai_salary", "เงินเดือน 50,000 บาท เดือน ครับ", True),
+            Case("product_price", "this item costs 500 baht only", False),
+            Case("no_label", "120,000 alone", False),
+            Case("label_no_value", "salary:", False),
+        ],
+    ),
+    DetectorSpec(
+        name="religion_belief",
+        entity_type="religion_belief",
+        category="pii",
+        severity=3,
+        detector=ReligionBeliefDetector(),
+        cases=[
+            Case("english_practicing", "I am a practicing Buddhist actually", True),
+            Case("thai_religion_with_pronoun", "ผมนับถือศาสนาพุทธ มานานแล้ว", True),
+            Case(
+                "english_their_faith",
+                "their faith is important to them, said the elder",
+                True,
+            ),
+            Case(
+                "tourism_no_personal",
+                "The temple is a beautiful tourist site daily",
+                False,
+            ),
+            Case(
+                "the_following_prose",
+                "Please review the following document carefully",
+                False,
+            ),
+            Case("plain_thai_prose", "ฝนตกหนักวันนี้", False),
+        ],
+    ),
+    DetectorSpec(
+        name="health_condition",
+        entity_type="health_condition",
+        category="pii",
+        severity=3,
+        detector=HealthConditionDetector(),
+        cases=[
+            Case("english_diagnosed", "I was diagnosed with diabetes last year", True),
+            Case(
+                "thai_health_with_pronoun",
+                "ผมป่วยเป็นเบาหวาน มาห้าปี ครับ",
+                True,
+            ),
+            Case(
+                "labelled_medical_value",
+                "Medical: diabetes and high blood pressure now",
+                True,
+            ),
+            Case(
+                "generic_disease_discussion",
+                "Diabetes is a common disease worldwide today",
+                False,
+            ),
+            Case("plain_thai_prose", "อากาศเปลี่ยนแปลงบ่อย", False),
+            Case("no_health_keyword", "she went to the market today", False),
+        ],
+    ),
+    DetectorSpec(
+        name="criminal_record",
+        entity_type="criminal_record",
+        category="pii",
+        severity=3,
+        detector=CriminalRecordDetector(),
+        cases=[
+            Case(
+                "english_personal",
+                "I was arrested for theft last summer here",
+                True,
+            ),
+            Case("thai_personal", "เขาถูกจับเมื่อวานนี้ที่บ้าน ตามข่าว", True),
+            Case(
+                "english_my_record",
+                "my criminal record was sealed by the court",
+                True,
+            ),
+            Case(
+                "news_no_pronoun",
+                "Court news report from yesterday",
+                False,
+            ),
+            Case("plain_thai_prose", "ตลาดเปิดเช้าวันนี้", False),
+            Case("legal_no_personal", "Criminal law studies are interesting", False),
+        ],
+    ),
+    DetectorSpec(
+        name="biometric_data",
+        entity_type="biometric_data",
+        category="pii",
+        severity=3,
+        detector=BiometricDataDetector(),
+        cases=[
+            Case(
+                "english_my_fingerprint",
+                "I use my fingerprint to unlock the door",
+                True,
+            ),
+            Case(
+                "thai_fingerprint",
+                "ผมลงทะเบียนลายนิ้วมือ ที่บริษัท เรียบร้อย",
+                True,
+            ),
+            Case(
+                "face_id_personal",
+                "He uses face ID on his phone every day",
+                True,
+            ),
+            Case(
+                "biometric_textbook",
+                "Biometric authentication is a security concept here",
+                False,
+            ),
+            Case("plain_thai_prose", "วันนี้ทำงานหนัก", False),
+            Case("no_biometric_keyword", "she went to lunch with friends", False),
         ],
     ),
 ]
