@@ -3,7 +3,7 @@
 The orchestrator's ``_scan_text_as_result`` is the single chokepoint
 for outbound DLP scanning (called from the non-streaming and streaming
 response paths). Heavy-scenario live testing surfaced a self-feedback
-loop: the model echoed mask tokens like ``[DATE_OF_BIRTH_0]`` /
+loop: the model echoed mask tokens like ``<r0>`` /
 ``[PHONE_NUMBER_0]`` in its reply, presidio_ner then classified those
 literals as PII, and the gateway recorded findings against its own
 placeholders.
@@ -31,15 +31,15 @@ class TestOutboundDropsSelfFeedbackToken:
         orch = _new_orch()
         # Bare token literal in the response, sitting in a sentence
         # the model would plausibly produce.
-        text = "Confirmed [DATE_OF_BIRTH_0] received."
+        text = "Confirmed <r0> received."
         result = orch._scan_text_as_result(text, direction="output")
         # No finding whose matched_text IS the token literal.
         offending = [
             m for m in result.matches
-            if m.matched_text.strip() == "[DATE_OF_BIRTH_0]"
+            if m.matched_text.strip() == "<r0>"
         ]
         assert offending == [], (
-            "outbound scan must not flag [DATE_OF_BIRTH_0] as PII: "
+            "outbound scan must not flag <r0> as PII: "
             f"{[(m.detector_name, m.matched_text) for m in offending]}"
         )
 
@@ -61,7 +61,7 @@ class TestOutboundKeepsPiiAdjacentToToken:
         # Email finding sits NEXT to a token, not AT it. Filter must
         # only drop findings whose matched_text IS a token, never
         # findings that merely appear in token-adjacent prose.
-        text = "[NAME_0] can be reached at bob@example.com"
+        text = "<r0> can be reached at bob@example.com"
         result = orch._scan_text_as_result(text, direction="output")
         emails = [m for m in result.matches if m.detector_name == "email"]
         assert any("bob@example.com" in m.matched_text for m in emails)
@@ -74,7 +74,7 @@ class TestInputDirectionUnaffected:
         # filter is output-only so an inbound caller can't accidentally
         # lose findings.
         orch = _new_orch()
-        text = "Some token-shaped string [FAKE_PII_0] here"
+        text = "Some token-shaped string <r0> here"
         result = orch._scan_text_as_result(text, direction="input")
         # The exact behavior on a token literal under "input" depends on
         # which detectors fire — the contract we test is "no filtering
@@ -87,7 +87,7 @@ class TestInputDirectionUnaffected:
 
 class TestFilterHandlesTokenWithWhitespace:
     def test_whitespace_mangled_token_not_filtered(self):
-        # ``[ EMAIL_0 ]`` with internal spaces is NOT a valid mask
+        # ``< r0 >`` with internal spaces is NOT a valid mask
         # token (the orchestrator's mask path never emits whitespace
         # inside brackets — see transformer.MASK_TOKENS). It's a
         # malformation, possibly a model hallucination or a downstream
@@ -96,7 +96,7 @@ class TestFilterHandlesTokenWithWhitespace:
         # operators need to see them to triage, separate from the
         # restore()-orphan concern in known-issues.
         orch = _new_orch()
-        text = "Sent [ EMAIL_0 ] today."
+        text = "Sent < r0 > today."
         result = orch._scan_text_as_result(text, direction="output")
         # If a detector ever matches the malformed literal, it must
         # NOT be silently filtered. Easiest invariant: any matches
@@ -104,7 +104,7 @@ class TestFilterHandlesTokenWithWhitespace:
         # (No detector fires on this exact string today, so the test
         # is forward-looking — but the loop below documents the rule.)
         for m in result.matches:
-            if "[ EMAIL_0 ]" in m.matched_text:
+            if "< r0 >" in m.matched_text:
                 # Must have survived the filter — the assert just
                 # confirms the code path didn't drop it.
                 assert m.matched_text  # tautology; presence is the contract

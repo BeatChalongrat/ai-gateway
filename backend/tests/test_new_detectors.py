@@ -779,7 +779,7 @@ class TestDlpTestEndpoint:
         assert VALID_THAI_ID not in body["masked_text"]
         # And with priority tiebreak in place, the Thai ID mask token
         # wins over the generic phone token on the same span.
-        assert "[THAI_ID_0]" in body["masked_text"]
+        assert "<r0>" in body["masked_text"]
 
     def test_masks_credit_card(self):
         # Test number that passes Luhn.
@@ -793,7 +793,7 @@ class TestDlpTestEndpoint:
         assert any(
             f["detector"] == "credit_card" for f in body["findings"]
         )
-        assert "[CREDIT_CARD_0]" in body["masked_text"]
+        assert "<r0>" in body["masked_text"]
 
     def test_masks_db_connection_string(self):
         resp = client.post(

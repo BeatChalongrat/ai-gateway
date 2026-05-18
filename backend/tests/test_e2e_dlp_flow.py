@@ -3,7 +3,7 @@
 These tests verify the round-trip wiring added in the orchestrator:
 
     1. Inbound messages are scanned, blocking categories raise 403.
-    2. Mask spans are rewritten to indexed tokens ([EMAIL_0], [CREDENTIAL_0])
+    2. Mask spans are rewritten to indexed tokens (<r0>, [CREDENTIAL_0])
        before the provider is called.
     3. The provider receives only the masked text (verified via a
        capturing stub that records the messages passed to dispatch).
@@ -119,16 +119,16 @@ class TestPiiMaskedBeforeProvider:
         # Provider received masked text — NOT the raw email.
         # DLP system prompt injection may prepend a system message,
         # so check the user message specifically.
-        user_msgs = [m for m in captured["messages"] if "john" in m or "[EMAIL_0]" in m]
+        user_msgs = [m for m in captured["messages"] if "john" in m or "<r0>" in m]
         assert len(user_msgs) >= 1
         sent = user_msgs[0]
         assert "john@acme.com" not in sent
-        assert "[EMAIL_0]" in sent
+        assert "<r0>" in sent
 
         # User sees the original email restored in the final response.
         content = body["choices"][0]["message"]["content"]
         assert "john@acme.com" in content
-        assert "[EMAIL_0]" not in content
+        assert "<r0>" not in content
 
         assert body["policy_action"] == "mask"
 

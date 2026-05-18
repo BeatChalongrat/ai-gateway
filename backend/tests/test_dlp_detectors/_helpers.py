@@ -84,15 +84,65 @@ def detector_names_for(text: str) -> set[str]:
     return {m.detector_name for m in scan_only(text)}
 
 
-def tokens_in(span_map: dict[str, str], base: str) -> list[str]:
-    """Return mask tokens in ``span_map`` whose base name equals *base*.
+def has_match(match_actions, *detector_names: str) -> bool:
+    """Return True iff any MatchAction names one of *detector_names*."""
+    wanted = set(detector_names)
+    return any(ma.match.detector_name in wanted for ma in match_actions)
+
+
+def matches_for(match_actions, *detector_names: str) -> list:
+    """Return MatchActions whose detector name is in *detector_names*."""
+    wanted = set(detector_names)
+    return [ma for ma in match_actions if ma.match.detector_name in wanted]
+
+
+def tokens_in(
+    span_map: dict[str, str],
+    base: str,
+    match_actions: list | None = None,
+) -> list[str]:
+    """Return mask tokens minted by detectors whose mask-token base equals *base*.
 
     Example::
 
-        tokens_in(span_map, "EMAIL") -> ["[EMAIL_0]", "[EMAIL_1]"]
+        tokens_in(span_map, "EMAIL", matches) -> ["<r0>", "<r1>"]
 
     Lets a test assert "exactly N emails were masked" without having to
     enumerate every counter value the pipeline might mint.
+
+    Under the neutral ``<rN>`` token shape the category is no longer
+    embedded in the token itself, so this helper recovers it by walking
+    the ``match_actions`` list in start-position order — the same order
+    the transformer uses to advance its global counter. Passing
+    ``match_actions`` is required; the legacy two-arg signature still
+    works for span_maps containing legacy ``[CATEGORY_N]`` tokens
+    (transitional support; will be removed once no callers depend on
+    it).
     """
-    prefix = f"[{base}_"
-    return [t for t in span_map if t.startswith(prefix)]
+    if match_actions is None:
+        prefix_legacy = f"[{base}_"
+        return [t for t in span_map if t.startswith(prefix_legacy)]
+
+    from app.domain.dlp import EnforcementAction
+    from app.services.dlp.transformer import _mask_base_name
+
+    actionable = sorted(
+        (
+            ma for ma in match_actions
+            if ma.action in (EnforcementAction.MASK, EnforcementAction.REDACT)
+        ),
+        key=lambda ma: ma.match.start,
+    )
+    result: list[str] = []
+    idx = 0
+    for ma in actionable:
+        if ma.action != EnforcementAction.MASK:
+            # REDACT entries don't consume a counter slot.
+            continue
+        if _mask_base_name(ma.match.detector_name) == base:
+            result.append(f"<r{idx}>")
+        idx += 1
+    # The transformer dedups same-value re-mints in deterministic mode
+    # but not in counter mode, so per-action enumeration matches the
+    # tokens actually present in span_map for the cases unit tests use.
+    return [t for t in result if t in span_map]

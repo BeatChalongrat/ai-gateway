@@ -121,8 +121,11 @@ def test_hop2_no_raw_pii_sent_to_provider(client, auth_headers, monkeypatch):
 
     no_raw_email = raw_email not in hop2
     no_raw_phone = raw_phone not in hop2
-    has_email_token = "[EMAIL_0]" in hop2
-    has_phone_token = "[PHONE_NUMBER_0]" in hop2
+    # Under the global counter, both PII spans receive consecutive
+    # ``<rN>`` tokens — we don't peg specific indices here because the
+    # detection order isn't part of the contract; we assert both ``<r0>``
+    # and ``<r1>`` are present (the only two masked spans in this text).
+    has_two_tokens = "<r0>" in hop2 and "<r1>" in hop2
 
     _print_hops(
         label="hop2_no_raw_pii_sent_to_provider",
@@ -130,12 +133,11 @@ def test_hop2_no_raw_pii_sent_to_provider(client, auth_headers, monkeypatch):
         assertions={
             "Hop 2 no raw email": no_raw_email,
             "Hop 2 no raw phone": no_raw_phone,
-            "Hop 2 has [EMAIL_0]": has_email_token,
-            "Hop 2 has [PHONE_NUMBER_0]": has_phone_token,
+            "Hop 2 has two <rN> tokens": has_two_tokens,
         },
     )
     assert no_raw_email and no_raw_phone
-    assert has_email_token and has_phone_token
+    assert has_two_tokens
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +177,7 @@ def test_hop4_ai_hallucinated_pii_masked_before_user(
 
     no_raw_email = fake_email not in hop4
     no_raw_phone = fake_phone not in hop4
-    has_email_token = "[EMAIL_" in hop4
-    has_phone_token = "[PHONE_NUMBER_" in hop4
+    has_token = "<r" in hop4
 
     _print_hops(
         label="hop4_ai_hallucinated_pii_masked",
@@ -184,14 +185,12 @@ def test_hop4_ai_hallucinated_pii_masked_before_user(
         assertions={
             "Hop 4 no fake email": no_raw_email,
             "Hop 4 no fake phone": no_raw_phone,
-            "Hop 4 has [EMAIL_N]": has_email_token,
-            "Hop 4 has [PHONE_NUMBER_N]": has_phone_token,
+            "Hop 4 has <rN> tokens": has_token,
         },
     )
     assert no_raw_email
     assert no_raw_phone
-    assert has_email_token
-    assert has_phone_token
+    assert has_token
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +205,7 @@ def test_hop4_ai_echoed_token_restored(client, auth_headers, monkeypatch):
     async def _echo_token(self, route, payload, messages, api_key=None):
         captured["hop2"] = messages[-1].content
         return ProviderResponse(
-            content="รับทราบ [EMAIL_0] แล้วครับ",
+            content="รับทราบ <r0> แล้วครับ",
             model=route.model_name,
         )
 
@@ -223,11 +222,11 @@ def test_hop4_ai_echoed_token_restored(client, auth_headers, monkeypatch):
     )
     assert resp.status_code == 200, resp.text
     hop2 = captured["hop2"]
-    hop3 = "รับทราบ [EMAIL_0] แล้วครับ"
+    hop3 = "รับทราบ <r0> แล้วครับ"
     hop4 = resp.json()["choices"][0]["message"]["content"]
 
     has_original = raw_email in hop4
-    no_leftover_token = "[EMAIL_0]" not in hop4
+    no_leftover_token = "<r0>" not in hop4
 
     _print_hops(
         label="hop4_ai_echoed_token_restored",
@@ -327,14 +326,14 @@ def test_hop2_system_prompt_has_no_raw_pii(client, auth_headers, monkeypatch):
     system_concat = "\n".join(system_blocks)
 
     system_clean = raw_email not in system_concat
-    user_message_has_token = "[EMAIL_0]" in hop2
+    user_message_has_token = "<r0>" in hop2
 
     _print_hops(
         label="hop2_system_prompt_has_no_raw_pii",
         hop1=hop1, hop2=hop2, hop3=hop3, hop4=hop4,
         assertions={
             "System block has no raw email": system_clean,
-            "User message has [EMAIL_0]": user_message_has_token,
+            "User message has <r0>": user_message_has_token,
             "System block count >= 1": len(system_blocks) >= 1,
         },
     )

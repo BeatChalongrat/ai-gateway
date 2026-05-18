@@ -121,7 +121,7 @@ class TestDlpFindingsHelper:
             reason_code="pii_mask",
             reason_message="PII masked",
         )
-        span_map = {"[EMAIL_0]": "alice@example.com"}
+        span_map = {"<r0>": "alice@example.com"}
 
         raw = build_dlp_findings_json([ma], [], span_map)
         assert raw is not None
@@ -152,7 +152,7 @@ class TestDlpFindingsHelper:
         assert "matched_text" not in f
         assert f["matched_text_len"] == len("alice@example.com")
         assert f["action"] == "mask"
-        assert f["mask_token"] == "[EMAIL_0]"
+        assert f["mask_token"] == "<r0>"
         assert f["direction"] == "input"
 
 

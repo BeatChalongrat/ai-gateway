@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
 
 
 class TestLineIdHappyPath:
     def test_line_id_with_at_handle(self):
-        _, span_map, _ = mask("LINE ID: @somchai99")
-        assert any("LINE_ID" in t for t in span_map)
+        _, _, matches = mask("LINE ID: @somchai99")
+        assert has_match(matches, "line_id")
 
     def test_line_keyword_with_dotted_handle(self):
-        _, span_map, _ = mask("Line: @somchai.jaidee")
-        assert any("LINE_ID" in t for t in span_map)
+        _, _, matches = mask("Line: @somchai.jaidee")
+        assert has_match(matches, "line_id")
 
     def test_thai_text_with_line_keyword(self):
         # The detector requires the literal ``LINE`` keyword (ASCII) —
@@ -20,14 +20,14 @@ class TestLineIdHappyPath:
         # with surrounding Thai prose still work as long as ``LINE``
         # appears before the @-handle.
         text = "ติดต่อผ่าน LINE: @somchai_99"
-        _, span_map, _ = mask(text)
-        assert any("LINE_ID" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "line_id")
 
 
 class TestLineIdBoundary:
     def test_line_lowercase_at_handle(self):
-        _, span_map, _ = mask("line: @somchai.jaidee")
-        assert any("LINE_ID" in t for t in span_map)
+        _, _, matches = mask("line: @somchai.jaidee")
+        assert has_match(matches, "line_id")
 
 
 class TestLineIdNegative:

@@ -6,10 +6,10 @@ that map and the map dies with the request. No cross-turn carry-over.
 
 When the AI echoes a placeholder from a previous turn — for example,
 the user pasted ``john@acme.com`` in turn 1, the gateway masked it to
-``[EMAIL_0]``, the AI remembered the token, and now in turn 3 the AI
-writes "I'll send your reply to [EMAIL_0]" — the new turn's
-``span_map`` doesn't carry that key, so ``transformer.restore`` leaves
-the literal token in the user-facing text and logs an orphan warning.
+``<r0>``, the AI remembered the token, and now in turn 3 the AI writes
+"I'll send your reply to <r0>" — the new turn's ``span_map`` doesn't
+carry that key, so ``transformer.restore`` leaves the literal token in
+the user-facing text and logs an orphan warning.
 
 This vault closes the gap by writing the span map to Redis keyed on
 ``conversation_id`` with a 2-hour TTL. ``restore`` accepts a

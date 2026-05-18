@@ -1,25 +1,16 @@
 """Regression tests for the mask-token namespace collision bug.
 
-Before the fix, ``mask_messages`` / ``mask_text`` keyed their per-detector
-index counters on ``detector_name``. Two different detectors that share a
-``MASK_TOKENS`` base — notably ``api_key_secret`` and
-``db_connection_string`` both using ``[CREDENTIAL]`` — would each start
-their own counter at 0 and emit ``[CREDENTIAL_0]``. ``span_map`` is a
-plain dict, so the second write silently overwrote the first and
-``restore()`` replaced every ``[CREDENTIAL_0]`` with whichever value
-happened to be written last.
+Pre-fix, ``mask_messages`` / ``mask_text`` keyed their per-detector
+index counters on ``detector_name``. Two different detectors that
+share a ``MASK_TOKENS`` base would each start their own counter at 0
+and emit identical tokens, silently overwriting one another in
+``span_map``.
 
-Live-trace reproduction of the bug looked like:
-
-    input_masked  : API Key: [CREDENTIAL_0] ... Database: [CREDENTIAL_0]
-    output_final  : API Key: postgresql://admin:P@ssw0rd123@...
-                    Database: postgresql://admin:P@ssw0rd123@...
-                    ^^^ the API key's original value was lost
-
-After the fix, counters key on the *base* mask token name
-(``_mask_base_name``) so api_key_secret gets ``[CREDENTIAL_0]``,
-db_connection_string gets ``[CREDENTIAL_1]``, span_map has two distinct
-entries, and restore round-trips both values correctly.
+Under the neutral ``<rN>`` shape the token no longer carries a
+category, so the counter is a single ``__global__`` slot — two
+detectors firing in sequence advance the same counter and produce
+distinct tokens by construction (``<r0>``, ``<r1>``). These tests
+pin that round-trip.
 """
 
 from __future__ import annotations
@@ -80,27 +71,24 @@ def test_api_key_and_db_conn_in_same_message_get_distinct_tokens() -> None:
 
     masked_msgs, span_map, counters = transformer.mask_messages([msg], actions)
 
-    # Both detectors share the ``[CREDENTIAL]`` base. Pre-fix they would
-    # both have been assigned [CREDENTIAL_0]; post-fix they must get
-    # distinct indices.
+    # Two sequential detections — global counter advances, distinct tokens.
     assert len(span_map) == 2, f"expected 2 span_map entries, got {len(span_map)}: {list(span_map)}"
 
     tokens = sorted(span_map.keys())
-    assert tokens == ["[CREDENTIAL_0]", "[CREDENTIAL_1]"], tokens
+    assert tokens == ["<r0>", "<r1>"], tokens
 
     # Both raw values must be recoverable from span_map — neither was
     # overwritten by the other.
     assert set(span_map.values()) == {api_key, db_url}
 
-    # Counter is keyed on the base name, not detector name.
-    assert counters == {"CREDENTIAL": 2}
+    assert counters == {"__global__": 2}
 
     # End-to-end round-trip: inbound mask → restore must return both
     # original values in their original positions.
     restored = transformer.restore(masked_msgs[0].content, span_map)
     assert api_key in restored
     assert db_url in restored
-    assert "[CREDENTIAL_" not in restored
+    assert "<r" not in restored
 
 
 def test_counter_shared_across_mask_messages_and_mask_text() -> None:
@@ -127,11 +115,10 @@ def test_counter_shared_across_mask_messages_and_mask_text() -> None:
     _msgs, inbound_span, inbound_counters = transformer.mask_messages(
         [inbound_msg], [inbound_action]
     )
-    assert "[CREDENTIAL_0]" in inbound_span
-    assert inbound_counters["CREDENTIAL"] == 1
+    assert "<r0>" in inbound_span
+    assert inbound_counters["__global__"] == 1
 
-    # Outbound pass — same base, different detector. Must get index 1,
-    # not 0 (which would collide with the inbound entry on span_map).
+    # Outbound pass — global counter continues from 1, no collision.
     outbound_text = "Hint: connect at postgresql://admin:pw@db:5432/x"
     db_url = "postgresql://admin:pw@db:5432/x"
     db_start = outbound_text.index(db_url)
@@ -144,14 +131,14 @@ def test_counter_shared_across_mask_messages_and_mask_text() -> None:
         outbound_text, [out_action], start_counters=inbound_counters
     )
 
-    assert list(out_span.keys()) == ["[CREDENTIAL_1]"]
-    assert out_span["[CREDENTIAL_1]"] == db_url
-    assert out_counters["CREDENTIAL"] == 2
+    assert list(out_span.keys()) == ["<r1>"]
+    assert out_span["<r1>"] == db_url
+    assert out_counters["__global__"] == 2
 
 
 def test_multiple_same_detector_still_get_incremental_indices() -> None:
-    """A single detector firing twice keeps its existing behavior —
-    [EMAIL_0] and [EMAIL_1] on two different emails."""
+    """A single detector firing twice keeps the per-occurrence index
+    behaviour — ``<r0>`` and ``<r1>`` on two different emails."""
     transformer = DLPTransformer()
     content = "contact alice@x.com or bob@y.com for details"
     a = content.index("alice")
@@ -163,5 +150,5 @@ def test_multiple_same_detector_still_get_incremental_indices() -> None:
     _msgs, span_map, counters = transformer.mask_messages(
         [Message(role="user", content=content)], actions
     )
-    assert sorted(span_map.keys()) == ["[EMAIL_0]", "[EMAIL_1]"]
-    assert counters == {"EMAIL": 2}
+    assert sorted(span_map.keys()) == ["<r0>", "<r1>"]
+    assert counters == {"__global__": 2}

@@ -12,17 +12,17 @@ from ._helpers import detector_names_for, mask, tokens_in
 
 class TestAddressHappyPath:
     def test_thai_bangkok_address(self):
-        _, span_map, _ = mask(
+        _, span_map, matches = mask(
             "address: 99/88 Sukhumvit Road, Bangkok 10110"
         )
-        assert tokens_in(span_map, "ADDRESS")
+        assert tokens_in(span_map, "ADDRESS", matches)
 
     def test_us_style_address(self):
-        masked, span_map, _ = mask(
+        masked, _, _ = mask(
             "Address: 123 Main Street, New York, NY 10001"
         )
         assert "Address:" in masked
-        assert "[ADDRESS_0]" in masked
+        assert "<r0>" in masked
 
 
 class TestAddressNegative:

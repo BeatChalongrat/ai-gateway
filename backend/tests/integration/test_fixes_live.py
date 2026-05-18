@@ -396,8 +396,8 @@ class TestFix1DLPRestore:
         assert unique_email not in masked, (
             f"Raw email leaked into input_masked: {masked!r}"
         )
-        assert "[EMAIL_" in masked, (
-            f"Expected an [EMAIL_N] placeholder in input_masked: {masked!r}"
+        assert "<r" in masked, (
+            f"Expected a <rN> placeholder in input_masked: {masked!r}"
         )
 
     def test_1b_transformer_restore_handles_token_variants(self):
@@ -414,20 +414,20 @@ class TestFix1DLPRestore:
                 "backend container)."
             )
         transformer = DLPTransformer()
-        span_map = {"[EMAIL_0]": "alice@example.com"}
+        span_map = {"<r0>": "alice@example.com"}
         variants = [
-            "[email_0]",       # lowercase body
-            "[ EMAIL_0 ]",     # padded brackets
-            "[EMAIL_0 ]",      # trailing space
-            "[EMAIL_0]",       # canonical
+            "<R0>",            # uppercase
+            "< r0 >",          # padded angles
+            "<r0 >",           # trailing space
+            "<r0>",            # canonical
         ]
         for variant in variants:
             result = transformer.restore(variant, span_map)
             assert "alice@example.com" in result, (
                 f"Restore failed for variant {variant!r}: got {result!r}"
             )
-            assert "[" not in result, (
-                f"Bracket leaked through restore for variant {variant!r}: "
+            assert "<" not in result and ">" not in result, (
+                f"Token angle leaked through restore for variant {variant!r}: "
                 f"{result!r}"
             )
 
@@ -597,8 +597,8 @@ class TestFix3ThaiNameNoPrefix:
         assert "สมชาย" not in masked, (
             f"Bare Thai name leaked into input_masked: {masked!r}"
         )
-        assert "[NAME_" in masked, (
-            f"Expected a [NAME_N] placeholder, got: {masked!r}"
+        assert "<r" in masked, (
+            f"Expected a <rN> placeholder, got: {masked!r}"
         )
 
     def test_3b_prefixed_thai_name_and_phone_still_masked(
@@ -624,12 +624,12 @@ class TestFix3ThaiNameNoPrefix:
         assert "0812345678" not in masked, (
             f"Phone number leaked into input_masked: {masked!r}"
         )
-        # thai_name → [THAI_NAME_N], phone → [PHONE_NUMBER_N]
-        assert "[THAI_NAME_" in masked or "[NAME_" in masked, (
-            f"Expected a name placeholder, got: {masked!r}"
-        )
-        assert "[PHONE_NUMBER_" in masked, (
-            f"Expected a phone placeholder, got: {masked!r}"
+        # Both name and phone produce ``<rN>`` placeholders — at least
+        # two distinct tokens must be present.
+        import re
+        tokens = set(re.findall(r"<r\d+>", masked))
+        assert len(tokens) >= 2, (
+            f"Expected at least two <rN> placeholders, got: {masked!r}"
         )
 
 

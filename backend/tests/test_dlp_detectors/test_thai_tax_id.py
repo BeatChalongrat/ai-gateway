@@ -12,29 +12,29 @@ example does NOT actually fire — we use a valid mod-11 ID instead.
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask, tokens_in
+from ._helpers import detector_names_for, has_match, mask
 
 VALID_ID = "3100112345674"
+_ID_DETECTORS = ("thai_tax_id", "thai_national_id")
 
 
 class TestThaiTaxIdHappyPath:
     def test_en_tax_label(self):
-        _, span_map, _ = mask(f"Tax ID: {VALID_ID}")
+        _, _, matches = mask(f"Tax ID: {VALID_ID}")
         # Either thai_tax_id or thai_national_id can mask this — both
-        # paths target the same span; we care that a TAX_ID or THAI_ID
-        # token shows up in the span_map.
-        assert any(("TAX_ID" in t or "THAI_ID" in t) for t in span_map)
+        # paths target the same span.
+        assert has_match(matches, *_ID_DETECTORS)
 
     def test_thai_tax_label(self):
         text = f"เลขประจำตัวผู้เสียภาษี: {VALID_ID}"
-        _, span_map, _ = mask(text)
-        assert any(("TAX_ID" in t or "THAI_ID" in t) for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, *_ID_DETECTORS)
 
 
 class TestThaiTaxIdBoundary:
     def test_dashed_form(self):
-        _, span_map, _ = mask("Tax ID: 3-1001-12345-67-4")
-        assert any(("TAX_ID" in t or "THAI_ID" in t) for t in span_map)
+        _, _, matches = mask("Tax ID: 3-1001-12345-67-4")
+        assert has_match(matches, *_ID_DETECTORS)
 
 
 class TestThaiTaxIdNegative:
