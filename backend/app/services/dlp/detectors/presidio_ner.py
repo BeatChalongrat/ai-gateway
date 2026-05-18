@@ -144,6 +144,15 @@ _THAI_COMMON_WORDS = frozenset({
 })
 
 
+# Letter-number-letter codes that NER mis-tags as PERSON.
+# Real names don't contain hyphenated digit groups, so a strict
+# structural match catches product / inventory / order codes
+# (``ABC-1234-TH``, ``XX-99-EN``) without touching legitimate
+# people's names. Pattern is intentionally narrow.
+import re as _re  # local alias — keep the top-of-file imports tidy
+_PRODUCT_CODE_RE = _re.compile(r"^[A-Z]{1,5}-\d{1,6}-[A-Z]{1,5}$")
+
+
 # Unicode range for the modern Thai script (basic Thai block,
 # U+0E00–U+0E7F). Escape sequences keep the source file safe to
 # diff in editors that don't render Thai glyphs.
@@ -196,6 +205,11 @@ def _is_ner_false_positive(
     if text in _THAI_COMMON_WORDS:
         return True
     if text.endswith("ๆ"):
+        return True
+    # Product / inventory code structural filter — compares against
+    # ``matched_text`` (case-preserved) because product codes are
+    # conventionally uppercase, e.g. ``ABC-1234-TH``.
+    if _PRODUCT_CODE_RE.match(matched_text.strip()):
         return True
     thai_chars = _thai_char_count(text)
     if thai_chars > 0 and thai_chars <= 2:

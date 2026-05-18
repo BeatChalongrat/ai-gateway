@@ -57,6 +57,40 @@ _MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]")
 _DOUBLE_BRACKET_TOKEN_RE = re.compile(r"\[\[([A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+)\]\]")
 
 
+def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
+    """Replace single-bracket ``[CATEGORY_N]`` tokens that survived
+    ``restore`` and have no entry in ``span_map`` with the literal
+    string ``[REDACTED]``.
+
+    Runs in the orchestrator's success path AFTER ``restore`` so the
+    user-facing reply never carries an AI-hallucinated mask token.
+    The streaming path has its own equivalent inside
+    ``sanitize_hallucinated_brackets`` (which handles the
+    double-bracket variant); this helper is the single-bracket
+    counterpart for the non-streaming path.
+
+    Why both: ``sanitize_hallucinated_brackets`` deliberately only
+    touches ``[[CAT_N]]`` shapes because that pattern is the
+    model's way of escaping a real token. A bare ``[CAT_N]`` in the
+    final response is something else entirely — the model invented
+    it from the example we showed it in the system prompt. Those
+    must be redacted, not unwrapped.
+
+    No-op when the text contains no bracketed tokens or when every
+    token in the text is mapped by ``span_map``.
+    """
+    if not text or "[" not in text:
+        return text
+
+    def _replace(m: "re.Match[str]") -> str:
+        token = m.group()
+        if span_map and token in span_map:
+            return token  # real binding — restore handled it
+        return "[REDACTED]"
+
+    return _MASK_TOKEN_RE.sub(_replace, text)
+
+
 def sanitize_hallucinated_brackets(text: str, span_map: dict[str, str]) -> str:
     """Rewrite ``[[CAT_N]]`` tokens the model invented in its reply.
 

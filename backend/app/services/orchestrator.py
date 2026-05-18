@@ -815,6 +815,13 @@ class GatewayOrchestrator:
         )
         ai_to_service_masked = response_content
         response_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
+        # Outbound mask span_maps — initialised outside the
+        # ``dlp_scan_responses`` gate so the post-restore orphan
+        # redactor at the end of section 8 can always merge them
+        # into the protected-tokens set even when scan-responses is
+        # disabled. Sections 8 / 8c populate these conditionally.
+        outbound_span_map: dict[str, str] = {}
+        _final_outbound_span_map: dict[str, str] = {}
 
         if settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses:
             # First scan the provider's raw response with RESTORE treated as
@@ -1013,6 +1020,28 @@ class GatewayOrchestrator:
                     start_counters=inbound_counters,
                     conversation_key=conversation_key,
                 )
+
+        # P3 — orphan-token sanitiser. After ALL legitimate masking
+        # (sections 8 + 8c) and restore (8b), any bracketed token
+        # left in ``response_content`` that isn't in one of the three
+        # span_maps is something the model invented from the
+        # ``[CATEGORY_NUMBER]`` example in the placeholder system
+        # prompt. Replace those with ``[REDACTED]`` so the user never
+        # sees a leaked ``[NAME_3]`` / ``[BEARER_TOKEN_0]`` in their
+        # reply. Legitimate outbound-mask tokens (from sections 8 +
+        # 8c) are protected by being included in the combined map.
+        # Streaming has its own equivalent via
+        # ``sanitize_hallucinated_brackets`` per chunk.
+        from app.services.dlp.transformer import redact_orphan_tokens
+        _all_tokens = {**span_map, **outbound_span_map, **_final_outbound_span_map}
+        _before_redact = response_content
+        response_content = redact_orphan_tokens(response_content, _all_tokens)
+        if _before_redact != response_content:
+            log.info(
+                "dlp_orphan_redacted",
+                before_len=len(_before_redact),
+                after_len=len(response_content),
+            )
 
         # 9. Determine overall policy action (highest across input + output)
         overall_action = max(

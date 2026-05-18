@@ -47,6 +47,19 @@ _PASSWORD_RE = re.compile(
 )
 
 
+# Thai-locale variant. Real users write things like
+# ``รหัสผ่านคือ P@ssw0rd123!`` — no ``=`` / ``:`` separator and no
+# English label. We accept ``คือ`` / ``ว่า`` (or no connector at
+# all) as the bridge between the keyword and the value. ``\S{6,}``
+# floor keeps the trivial case ``รหัสผ่านสั้น`` (just "the password
+# is short") from minting a spurious finding.
+_THAI_PASSWORD_RE = re.compile(
+    r"(?:รหัสผ่าน|พาสเวิร์ด)"
+    r"\s*(?:คือ|ว่า|=|:)?\s*"
+    r"(?P<value>\S{6,})",
+)
+
+
 class PasswordFieldDetector(BaseDetector):
     name = "password_field"
     category = "secret"
@@ -54,17 +67,26 @@ class PasswordFieldDetector(BaseDetector):
 
     def detect(self, text: str) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []
-        for m in _PASSWORD_RE.finditer(text):
-            v_start, v_end = m.start("value"), m.end("value")
+        seen: set[tuple[int, int]] = set()
+
+        def _emit(start: int, end: int, entity: str) -> None:
+            if (start, end) in seen:
+                return
+            seen.add((start, end))
             matches.append(
                 DetectionMatch(
                     detector_name=self.name,
-                    entity_type="password_in_config",
+                    entity_type=entity,
                     category=self.category,
-                    start=v_start,
-                    end=v_end,
-                    matched_text=text[v_start:v_end],
+                    start=start,
+                    end=end,
+                    matched_text=text[start:end],
                     severity=self.default_sensitivity,
                 )
             )
+
+        for m in _PASSWORD_RE.finditer(text):
+            _emit(m.start("value"), m.end("value"), "password_in_config")
+        for m in _THAI_PASSWORD_RE.finditer(text):
+            _emit(m.start("value"), m.end("value"), "password_in_text")
         return matches
