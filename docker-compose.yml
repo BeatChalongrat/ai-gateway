@@ -123,14 +123,16 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # Distroless has no shell, so we use a TCP probe via the
-      # plain HTTP /healthz on the metrics port instead of
-      # grpc_health_probe.
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:9100/healthz || exit 1"]
+      # Distroless static has no shell or wget, so we ship a tiny
+      # Go ``/healthcheck`` binary alongside the worker (see the
+      # log-worker Dockerfile). It HTTP-GETs :9100/healthz and
+      # exits 0 / 1; Docker invokes the binary directly without
+      # going through a shell.
+      test: ["CMD", "/healthcheck"]
       interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   backend:

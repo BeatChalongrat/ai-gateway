@@ -3,6 +3,7 @@ package worker
 import (
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,11 @@ import (
 
 	pb "github.com/beatchalongrat/ai-gateway/log-worker/pb"
 )
+
+// errFakeTransient is the sentinel insertFn stubs return to simulate
+// a Postgres outage that the retry path should absorb (or eventually
+// give up on).
+var errFakeTransient = errors.New("fake transient error")
 
 // ---------------------------------------------------------------------------
 // Stub sql/driver so tests run without a live Postgres. We can't easily
@@ -169,6 +175,100 @@ func TestTickerFlushTrigger(t *testing.T) {
 	}
 }
 
+// TestFlushRetriesOnError exercises the audit-fix retry-with-backoff
+// path: two failures then a success should result in three insertFn
+// calls total and zero dropped batches.
+func TestFlushRetriesOnError(t *testing.T) {
+	// Shrink the backoff so the test runs in milliseconds, not the
+	// real ~600ms total. We swap in tiny delays then restore so
+	// sibling tests are unaffected.
+	origBackoffs := flushBackoffs
+	flushBackoffs = []time.Duration{
+		1 * time.Millisecond,
+		1 * time.Millisecond,
+	}
+	defer func() { flushBackoffs = origBackoffs }()
+
+	calls := atomic.Int32{}
+	stub := stubInsertWithBehavior(&calls, func(n int32) error {
+		// Fail the first two attempts, then succeed.
+		if n < 3 {
+			return errFakeTransient
+		}
+		return nil
+	})
+	defer stub.restore()
+
+	w := newTestWorker(t, Config{
+		BufferSize:    100,
+		BatchSize:     1,
+		FlushInterval: 50 * time.Millisecond,
+	})
+	w.Start()
+	defer w.Stop(time.Second)
+
+	w.Enqueue(&pb.LogRecord{RequestId: "retry-me"})
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if calls.Load() >= 3 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("expected 3 insertFn calls (2 retries + 1 success), got %d", got)
+	}
+	if _, _, flushed := w.Stats(); flushed != 1 {
+		t.Errorf("expected 1 record flushed after retry success, got %d", flushed)
+	}
+}
+
+// TestFlushDropsAfterMaxRetries verifies the batch is dropped once
+// the retry budget is exhausted — the worker keeps running, the
+// records are simply lost.
+func TestFlushDropsAfterMaxRetries(t *testing.T) {
+	origBackoffs := flushBackoffs
+	flushBackoffs = []time.Duration{
+		1 * time.Millisecond,
+		1 * time.Millisecond,
+	}
+	defer func() { flushBackoffs = origBackoffs }()
+
+	calls := atomic.Int32{}
+	stub := stubInsertWithBehavior(&calls, func(_ int32) error {
+		return errFakeTransient
+	})
+	defer stub.restore()
+
+	w := newTestWorker(t, Config{
+		BufferSize:    100,
+		BatchSize:     1,
+		FlushInterval: 50 * time.Millisecond,
+	})
+	w.Start()
+	defer w.Stop(time.Second)
+
+	w.Enqueue(&pb.LogRecord{RequestId: "doomed"})
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if calls.Load() >= int32(1+len(flushBackoffs)) {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	wantCalls := int32(1 + len(flushBackoffs)) // initial + retries
+	if got := calls.Load(); got != wantCalls {
+		t.Fatalf("expected %d insertFn calls, got %d", wantCalls, got)
+	}
+	if _, _, flushed := w.Stats(); flushed != 0 {
+		t.Errorf("expected 0 flushed after retry exhaustion, got %d", flushed)
+	}
+}
+
 // TestGracefulShutdownDrains verifies pending records are flushed
 // before Stop() returns.
 func TestGracefulShutdownDrains(t *testing.T) {
@@ -213,6 +313,21 @@ func stubInsert(calls *atomic.Int32) *insertStub {
 	insertFn = func(_ *sql.DB, batch []*pb.LogRecord) error {
 		calls.Add(1)
 		return nil
+	}
+	return s
+}
+
+// stubInsertWithBehavior installs a stub whose return value depends
+// on the call index — used by the retry tests to simulate "fail N
+// times then succeed".
+func stubInsertWithBehavior(
+	calls *atomic.Int32,
+	behavior func(callNum int32) error,
+) *insertStub {
+	s := &insertStub{orig: insertFn}
+	insertFn = func(_ *sql.DB, batch []*pb.LogRecord) error {
+		n := calls.Add(1)
+		return behavior(n)
 	}
 	return s
 }

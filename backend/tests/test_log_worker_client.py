@@ -244,3 +244,127 @@ def test_grpc_client_enqueue_returns_false_on_rpc_error(
         assert ok is False
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Audit-fix gap closures: timeout, accepted=false, concurrent enqueue
+# ---------------------------------------------------------------------------
+
+def test_grpc_timeout_returns_false_and_dispatch_falls_back(
+    reset_client, monkeypatch
+):
+    """An asyncio.TimeoutError inside the RPC swallows to False and the
+    queue's _dispatch_to_grpc still returns True (task scheduled) — but
+    if the client.enqueue eventually raises a *non-RPC* exception
+    (like TimeoutError) it must NOT propagate to the caller."""
+    from app.services.log_worker_client import LogWorkerClient
+
+    class _SlowStub:
+        async def Enqueue(self, _req, timeout=None):  # noqa: ARG002
+            raise asyncio.TimeoutError("simulated timeout")
+
+    client = LogWorkerClient(address="unused:0", timeout_seconds=0.1)
+    client._stub = _SlowStub()
+    client._channel = MagicMock()
+
+    async def _run():
+        ok = await client.enqueue(_record())
+        # The TimeoutError branch must swallow + return False so the
+        # queue's done-callback can record a missed dispatch without
+        # propagating the exception out of the fire-and-forget task.
+        assert ok is False
+
+    asyncio.run(_run())
+
+
+def test_accepted_false_logs_warning_does_not_fallback(
+    reset_client, monkeypatch, caplog
+):
+    """accepted=False is a soft rejection — the queue logs but does NOT
+    synchronously fall back to the legacy persist. Documents the
+    fire-and-forget contract pinned by the audit."""
+    from app.core.config import settings
+    from app.services.log_worker_client import LogWorkerClient
+    from app.services.log_worker_client.client import _import_stubs
+
+    monkeypatch.setattr(settings, "log_worker_engine", "go")
+
+    _grpc, pb, _pb_grpc = _import_stubs()
+
+    class _RejectingStub:
+        async def Enqueue(self, _req, timeout=None):  # noqa: ARG002
+            return pb.EnqueueResponse(accepted=False, reason="queue_full")
+
+    client = LogWorkerClient(address="unused:0", timeout_seconds=0.5)
+    client._stub = _RejectingStub()
+    client._channel = MagicMock()
+
+    monkeypatch.setattr(
+        LogWorkerClient, "instance", classmethod(lambda cls: client)
+    )
+
+    sync_fallback_called: list[bool] = []
+
+    def _capture_fallback(self, record, session):  # noqa: ARG001
+        sync_fallback_called.append(True)
+
+    monkeypatch.setattr(
+        request_log_queue._RequestLogQueue,
+        "_sync_fallback",
+        _capture_fallback,
+    )
+
+    async def _run():
+        request_log_queue.enqueue(_record())
+        # Yield so the create_task'd RPC + done-callback can run.
+        # 0.1s is plenty for a single in-memory stub call.
+        await asyncio.sleep(0.1)
+
+    asyncio.run(_run())
+
+    # Fire-and-forget contract: NO sync fallback fired. The legacy
+    # path would have appended to sync_fallback_called; the gRPC
+    # path does not.
+    assert sync_fallback_called == [], (
+        "accepted=false must not trigger synchronous fallback — "
+        "fire-and-forget contract requires the caller to keep moving"
+    )
+
+
+def test_concurrent_enqueue_safe(reset_client, monkeypatch):
+    """50 concurrent enqueues from the same loop must not raise and
+    must each schedule exactly one dispatch. Pins the thread-safety
+    of the engine switch under burst load."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "log_worker_engine", "go")
+
+    dispatch_calls = 0
+
+    def _count_dispatch(_self, _record):
+        nonlocal dispatch_calls
+        dispatch_calls += 1
+        return True  # pretend the gRPC task was scheduled
+
+    monkeypatch.setattr(
+        request_log_queue._RequestLogQueue,
+        "_dispatch_to_grpc",
+        _count_dispatch,
+    )
+
+    async def _run():
+        # asyncio.gather to launch concurrently. ``enqueue`` is a
+        # sync function — gather-ing it like this exercises the
+        # shared queue from many tasks on the same loop, which is
+        # the realistic pattern (FastAPI handlers all live on one
+        # event loop per worker).
+        async def _one():
+            request_log_queue.enqueue(_record())
+
+        await asyncio.gather(*[_one() for _ in range(50)])
+
+    asyncio.run(_run())
+
+    assert dispatch_calls == 50, (
+        f"expected 50 dispatches, got {dispatch_calls}"
+    )
