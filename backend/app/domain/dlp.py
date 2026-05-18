@@ -51,9 +51,10 @@ class EnforcementAction(enum.IntEnum):
     """
 
     ALLOW = 0
-    MASK = 1
-    REDACT = 2
-    BLOCK = 3
+    RESTORE = 1
+    MASK = 2
+    REDACT = 3
+    BLOCK = 4
 
 
 # ---------------------------------------------------------------------------

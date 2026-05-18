@@ -9,14 +9,22 @@ dashboards keep working on historical traffic.
 
 What gets cleared on each affected row:
 
-- ``input_raw``     → NULL  (user's verbatim message)
-- ``output_raw``    → NULL  (provider response before restore)
+- ``input_raw``           → NULL  (user's verbatim message)
+- ``input_raw_encrypted`` → NULL  (audit-channel ciphertext of the
+                                   user's raw prompt; encrypted but
+                                   still decryptable by any operator
+                                   holding ``DLP_AUDIT_KEY``)
+- ``output_raw``          → NULL  (provider response before restore;
+                                   contains mask tokens only, but
+                                   cleared together for retention
+                                   consistency)
+- ``output_final``        → NULL  (post-restore plaintext sent to the
+                                   user; carries the original PII)
 - ``dlp_findings_json`` → ``matched_text`` stripped from every entry
 
 What is intentionally retained:
 
 - ``input_masked``     (mask tokens only — no raw values)
-- ``output_final``     (post-restore content the user actually saw)
 - ``dlp_input_findings`` / ``dlp_output_findings`` (counts)
 - ``dlp_categories``   (category names)
 - ``policy_action``    (allow / mask / block)
@@ -106,7 +114,9 @@ def run_dlp_retention_cleanup(
         .filter(RequestLogORM.created_at < cutoff)
         .filter(
             (RequestLogORM.input_raw.isnot(None))
+            | (RequestLogORM.input_raw_encrypted.isnot(None))
             | (RequestLogORM.output_raw.isnot(None))
+            | (RequestLogORM.output_final.isnot(None))
         )
     )
     raw_count = raw_count_q.count()
@@ -135,9 +145,16 @@ def run_dlp_retention_cleanup(
         .where(RequestLogORM.created_at < cutoff)
         .where(
             (RequestLogORM.input_raw.isnot(None))
+            | (RequestLogORM.input_raw_encrypted.isnot(None))
             | (RequestLogORM.output_raw.isnot(None))
+            | (RequestLogORM.output_final.isnot(None))
         )
-        .values(input_raw=None, output_raw=None)
+        .values(
+            input_raw=None,
+            input_raw_encrypted=None,
+            output_raw=None,
+            output_final=None,
+        )
     )
 
     # Step 2 — strip matched_text from each finding object.

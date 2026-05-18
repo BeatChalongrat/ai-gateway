@@ -22,6 +22,14 @@ from dataclasses import dataclass
 from app.services.providers.model_registry import resolve_provider
 
 
+# Floor that ``KeywordRuleService._SCOPE_OFFSET["project"]`` adds to any
+# project-scoped DB rule's numeric priority. Mirrored here so
+# ``get_project_scoped_hint`` can filter the rule list to only the
+# project band without re-importing the service module. Keep these two
+# constants in sync.
+PROJECT_SCOPE_PRIORITY_FLOOR = 10_000_000
+
+
 @dataclass(frozen=True)
 class KeywordRule:
     name: str
@@ -131,6 +139,51 @@ class KeywordRouter:
             return requested_model, None
 
         for rule in self.rules:
+            if not any(keyword.lower() in text for keyword in rule.keywords):
+                continue
+            if allowed_providers is not None:
+                provider = resolve_provider(rule.model_override)
+                if provider is not None and provider not in allowed_providers:
+                    continue
+            return rule.model_override, rule.name
+
+        return requested_model, None
+
+    def get_project_scoped_hint(
+        self,
+        messages: list[dict],
+        requested_model: str,
+        allowed_providers: frozenset[str] | set[str] | None = None,
+    ) -> tuple[str, str | None]:
+        """Return a hint, but consider project-scoped DB rules only.
+
+        Project rules carry a fixed priority offset
+        (``PROJECT_SCOPE_PRIORITY_FLOOR``) applied by
+        :class:`KeywordRuleService`. The orchestrator consults this
+        method *before* the semantic router so a tenant's explicit
+        per-project routing always wins — even when the embedding
+        classifier is highly confident on the same prompt. Without
+        the project band the rule would be drowned out by semantic.
+
+        DEFAULT_RULES and tenant / global DB rules sit below the floor
+        and are deliberately ignored here; they are evaluated later by
+        the regular ``get_model_hint`` pass.
+        """
+        text_parts: list[str] = []
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            content = m.get("content")
+            if isinstance(content, str):
+                text_parts.append(content.lower())
+        text = " ".join(text_parts)
+
+        if not text:
+            return requested_model, None
+
+        for rule in self.rules:
+            if rule.priority < PROJECT_SCOPE_PRIORITY_FLOOR:
+                continue
             if not any(keyword.lower() in text for keyword in rule.keywords):
                 continue
             if allowed_providers is not None:

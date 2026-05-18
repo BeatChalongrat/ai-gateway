@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.domain.dlp import EnforcementAction
+from app.domain.dlp import EnforcementAction, SensitivityLevel
+from app.domain.policy import PolicyProfile
 from app.models.policy_profile import PolicyProfileORM
 from app.services.policy.profiles import DEFAULT_PROFILE, STRICT_PROFILE
 
@@ -35,14 +36,29 @@ KNOWN_CATEGORIES: tuple[str, ...] = (
     "ner",
 )
 
-ALLOWED_ACTIONS: tuple[str, ...] = ("allow", "mask", "block")
+ALLOWED_ACTIONS: tuple[str, ...] = (
+    "allow",
+    "restore",
+    "unmask",
+    "allow_restore",
+    "mask",
+    "block",
+)
 
 _ACTION_STR_TO_ENUM = {
     "allow": EnforcementAction.ALLOW,
+    "restore": EnforcementAction.RESTORE,
+    "unmask": EnforcementAction.RESTORE,
+    "allow_restore": EnforcementAction.RESTORE,
     "mask": EnforcementAction.MASK,
     "block": EnforcementAction.BLOCK,
 }
-_ACTION_ENUM_TO_STR = {v: k for k, v in _ACTION_STR_TO_ENUM.items()}
+_ACTION_ENUM_TO_STR = {
+    EnforcementAction.ALLOW: "allow",
+    EnforcementAction.RESTORE: "restore",
+    EnforcementAction.MASK: "mask",
+    EnforcementAction.BLOCK: "block",
+}
 
 
 @dataclass
@@ -57,6 +73,7 @@ class ProfileView:
     # ``category_actions`` when ``category_actions_output`` is None). The
     # admin UI renders this as "(inherited)" next to the outbound cell.
     category_actions_output: dict[str, str] | None = None
+    severity_threshold_block: str | None = None
 
 
 def _actions_to_str(
@@ -73,6 +90,9 @@ def _builtin_map() -> dict[
         str,
         dict[str, EnforcementAction],
         dict[str, EnforcementAction] | None,
+        SensitivityLevel | None,
+        bool,
+        bool,
     ],
 ]:
     """Snapshot of built-in profiles keyed by profile_id.
@@ -86,6 +106,9 @@ def _builtin_map() -> dict[
             dict(DEFAULT_PROFILE.category_actions_output)
             if DEFAULT_PROFILE.category_actions_output is not None
             else None,
+            DEFAULT_PROFILE.severity_threshold_block,
+            DEFAULT_PROFILE.scan_responses,
+            DEFAULT_PROFILE.moderation_enabled,
         ),
         STRICT_PROFILE.profile_id: (
             STRICT_PROFILE.name,
@@ -93,6 +116,9 @@ def _builtin_map() -> dict[
             dict(STRICT_PROFILE.category_actions_output)
             if STRICT_PROFILE.category_actions_output is not None
             else None,
+            STRICT_PROFILE.severity_threshold_block,
+            STRICT_PROFILE.scan_responses,
+            STRICT_PROFILE.moderation_enabled,
         ),
     }
 
@@ -147,7 +173,7 @@ def list_profiles(session: Session) -> list[ProfileView]:
 
     views: list[ProfileView] = []
     seen: set[str] = set()
-    for profile_id, (name, actions, outbound_actions) in builtins.items():
+    for profile_id, (name, actions, outbound_actions, threshold, _scan_responses, _moderation) in builtins.items():
         merged = _merge(actions, db_overrides.get(profile_id, {}))
         views.append(
             ProfileView(
@@ -155,6 +181,9 @@ def list_profiles(session: Session) -> list[ProfileView]:
                 name=db_names.get(profile_id, name),
                 category_actions=merged,
                 category_actions_output=_actions_to_str(outbound_actions),
+                severity_threshold_block=(
+                    threshold.name.lower() if threshold is not None else None
+                ),
             )
         )
         seen.add(profile_id)
@@ -170,9 +199,46 @@ def list_profiles(session: Session) -> list[ProfileView]:
                 name=db_names.get(profile_id, profile_id),
                 category_actions=_merge({}, overrides),
                 category_actions_output=None,
+                severity_threshold_block=None,
             )
         )
     return views
+
+
+def _actions_to_enum(actions: dict[str, str]) -> dict[str, EnforcementAction]:
+    return {
+        cat: _ACTION_STR_TO_ENUM[action]
+        for cat, action in actions.items()
+        if action in _ACTION_STR_TO_ENUM
+    }
+
+
+def get_runtime_profile(session: Session, profile_id: str) -> PolicyProfile:
+    """Return the effective runtime profile using the same DB overrides as UI."""
+    builtins = _builtin_map()
+    base = builtins.get(profile_id)
+    view = get_profile_view(session, profile_id)
+    if view is None:
+        from app.services.policy.profiles import get_profile
+
+        return get_profile(profile_id)
+
+    threshold = base[3] if base is not None else None
+    scan_responses = base[4] if base is not None else True
+    moderation_enabled = base[5] if base is not None else False
+    return PolicyProfile(
+        profile_id=view.profile_id,
+        name=view.name,
+        category_actions=_actions_to_enum(view.category_actions),
+        category_actions_output=(
+            _actions_to_enum(view.category_actions_output)
+            if view.category_actions_output is not None
+            else None
+        ),
+        severity_threshold_block=threshold,
+        scan_responses=scan_responses,
+        moderation_enabled=moderation_enabled,
+    )
 
 
 def get_profile_view(session: Session, profile_id: str) -> ProfileView | None:

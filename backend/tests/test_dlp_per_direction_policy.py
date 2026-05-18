@@ -54,26 +54,37 @@ def _result(direction: str, *matches: DetectionMatch) -> DetectionResult:
 
 
 @pytest.mark.parametrize(
-    "category,detector",
+    "category,detector,expected_action",
     [
-        ("pii", "email"),
-        ("pii", "phone"),
-        ("financial", "credit_card"),
-        ("financial", "iban"),
-        ("network", "ip_address"),
-        ("identity", "passport"),
+        # Outbound PII / financial / identity now MASK under default —
+        # an LLM that hallucinates a fake email/phone/card/passport
+        # must not deliver the raw value to the user. Tightened in
+        # the May 2026 DLP coverage pass.
+        ("pii",       "email",       EnforcementAction.RESTORE),
+        ("pii",       "phone",       EnforcementAction.RESTORE),
+        ("financial", "credit_card", EnforcementAction.RESTORE),
+        ("financial", "iban",        EnforcementAction.RESTORE),
+        ("identity",  "passport",    EnforcementAction.RESTORE),
+        # Network kept at ALLOW — AI legitimately answers about
+        # RFC-1918 ranges, example IPs, etc.
+        ("network",   "ip_address",  EnforcementAction.ALLOW),
     ],
 )
-def test_default_profile_outbound_reference_categories_are_allow(category: str, detector: str) -> None:
-    """Outbound PII / financial / network / identity → ALLOW under default."""
+def test_default_profile_outbound_reference_categories(
+    category: str, detector: str, expected_action: EnforcementAction
+) -> None:
+    """Outbound action map per category (default profile, post-fix)."""
     evaluator = PolicyEvaluator()
     decision = evaluator.evaluate(
         _result("output", _match(category, detector)), DEFAULT_PROFILE
     )
-    assert decision.overall_action == EnforcementAction.ALLOW, (
-        f"outbound {category} ({detector}) should be ALLOW under DEFAULT_PROFILE"
+    assert decision.overall_action == expected_action, (
+        f"outbound {category} ({detector}) expected {expected_action.name} "
+        f"under DEFAULT_PROFILE, got {decision.overall_action.name}"
     )
-    assert decision.requires_transformation is False
+    assert decision.requires_transformation is (
+        expected_action == EnforcementAction.MASK
+    )
 
 
 @pytest.mark.parametrize(
@@ -86,16 +97,16 @@ def test_default_profile_outbound_reference_categories_are_allow(category: str, 
         ("secret", "password_field"),
     ],
 )
-def test_default_profile_outbound_credentials_and_secrets_are_mask(category: str, detector: str) -> None:
+def test_default_profile_outbound_credentials_and_secrets_restore(category: str, detector: str) -> None:
     """Outbound credential / secret → MASK under default. AI must never leak these."""
     evaluator = PolicyEvaluator()
     decision = evaluator.evaluate(
         _result("output", _match(category, detector)), DEFAULT_PROFILE
     )
-    assert decision.overall_action == EnforcementAction.MASK, (
-        f"outbound {category} ({detector}) must be MASK even under DEFAULT_PROFILE"
+    assert decision.overall_action == EnforcementAction.RESTORE, (
+        f"outbound {category} ({detector}) must be RESTORE under DEFAULT_PROFILE"
     )
-    assert decision.requires_transformation is True
+    assert decision.requires_transformation is False
 
 
 @pytest.mark.parametrize(
@@ -192,7 +203,7 @@ def test_inbound_unaffected_by_output_override() -> None:
     assert outbound.overall_action == EnforcementAction.ALLOW
 
 
-def test_severity_threshold_block_applies_to_both_directions() -> None:
+def test_explicit_category_action_wins_over_severity_threshold() -> None:
     """Threshold check runs before category lookup, regardless of direction."""
     profile = PolicyProfile(
         profile_id="threshold-only",
@@ -207,6 +218,5 @@ def test_severity_threshold_block_applies_to_both_directions() -> None:
     inbound = evaluator.evaluate(_result("input", crit_match), profile)
     outbound = evaluator.evaluate(_result("output", crit_match), profile)
 
-    # Threshold beats both the inbound MASK and the outbound ALLOW rule.
-    assert inbound.overall_action == EnforcementAction.BLOCK
-    assert outbound.overall_action == EnforcementAction.BLOCK
+    assert inbound.overall_action == EnforcementAction.MASK
+    assert outbound.overall_action == EnforcementAction.ALLOW

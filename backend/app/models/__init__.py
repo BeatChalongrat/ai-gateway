@@ -11,6 +11,7 @@ from app.models.alert_rule import AlertEventORM, AlertRuleORM
 from app.models.api_key import ApiKeyORM
 from app.models.credit_transaction import CreditTransactionORM
 from app.models.keyword_rule import KeywordRuleORM
+from app.models.model_config import ModelConfigORM
 from app.models.org_settings import OrgSettingsORM
 from app.models.policy import PolicyORM
 from app.models.policy_profile import PolicyProfileORM
@@ -30,6 +31,7 @@ __all__ = [
     "AiReviewScanRunORM", "AiReviewSettingsORM",
     "AlertEventORM", "AlertRuleORM",
     "ApiKeyORM", "CreditTransactionORM", "KeywordRuleORM",
+    "ModelConfigORM",
     "OrgSettingsORM", "PolicyORM", "PolicyProfileORM",
     "PortalUserORM", "ProjectORM", "ProjectMemberORM", "ProviderORM", "ProviderKeyORM",
     "RequestLogORM", "SystemSettingORM", "TenantORM",

@@ -104,9 +104,12 @@ def _install_presidio_in_orchestrator_registry(monkeypatch):
     """
     from app.services.dlp.detectors.registry import get_default_registry as _original
 
-    def _patched(disabled_detectors=None):
-        reg = _original(disabled_detectors)
-        if "presidio_ner" not in reg:
+    def _patched(disabled_detectors=None, *, ner_enabled=True):
+        reg = _original(disabled_detectors, ner_enabled=ner_enabled)
+        # Only force PresidioDetector when the caller asked for the
+        # NER-enabled registry — the NER-off variant must stay free of
+        # presidio_ner so per-tenant gating semantics are preserved.
+        if ner_enabled and "presidio_ner" not in reg:
             reg.register(PresidioDetector())
         return reg
 

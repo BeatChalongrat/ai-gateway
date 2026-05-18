@@ -31,6 +31,10 @@ from app.domain.observability import (
     RequestStatus,
     build_dlp_findings_json,
     extract_messages_text,
+    safe_input_masked_snapshot,
+    safe_input_snapshot,
+    safe_output_raw_snapshot,
+    safe_output_snapshot,
 )
 from app.models.request_log import RequestLogORM
 from app.schemas.common import ErrorResponse
@@ -42,7 +46,8 @@ from app.schemas.public import (
     FeedbackResponse,
 )
 from app.services.orchestrator import GatewayOrchestrator
-from app.services.policy.profiles import get_profile
+from app.services.policy.profile_service import get_runtime_profile
+from app.services.policy.profiles import get_profile as get_runtime_profile_fallback
 from app.services.usage_service import _estimate_cost
 
 logger = structlog.get_logger(__name__)
@@ -101,15 +106,40 @@ async def chat_completions(
     )
 
     profile_id = ctx.policy_profile_id or settings.dlp_default_profile
-    profile = get_profile(profile_id)
+    profile = (
+        get_runtime_profile(session, profile_id)
+        if session is not None
+        else get_runtime_profile_fallback(profile_id)
+    )
+    log.info(
+        "policy_profile_selected",
+        policy_profile=profile.profile_id,
+        severity_threshold_block=(
+            profile.severity_threshold_block.name.lower()
+            if profile.severity_threshold_block is not None
+            else None
+        ),
+    )
 
     # 1. Inbound DLP: classify, block if needed, mask with indexed tokens.
     # Same flow as GatewayOrchestrator.handle_chat_completion steps 2-4.
-    from app.domain.dlp import EnforcementDecision
+    from app.domain.dlp import EnforcementAction, EnforcementDecision
+    from app.domain.policy import PolicyProfile
 
     # DLP trace snapshot 1/4: raw user input, captured before any DLP /
     # moderation work runs so blocked streams still record what was sent.
     input_raw = extract_messages_text(payload.messages)
+
+    # Safe Trace audit channel — encrypt once for every persist site in
+    # this stream. Mirrors orchestrator.handle_chat_completion.
+    from app.core.dlp_audit_crypto import (
+        DlpAuditCryptoError,
+        encrypt as encrypt_audit_blob,
+    )
+    try:
+        input_raw_encrypted = encrypt_audit_blob(input_raw or "")
+    except DlpAuditCryptoError:
+        input_raw_encrypted = None
 
     messages_to_send = list(payload.messages)
     span_map: dict[str, str] = {}
@@ -119,14 +149,25 @@ async def chat_completions(
     inbound_counters: dict[str, int] = {}
     input_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
 
+    # Deterministic-tokenization key — mirrors the non-streaming
+    # branch in ``orchestrator.handle_chat_completion``. Opt-in via
+    # ``payload.metadata.conversation_id``; without it the masking
+    # call falls back to legacy counter mode so existing streaming
+    # tests keep their fixed token expectations.
+    conversation_key_stream = None
+    _conv_id_for_key = payload.metadata.get("conversation_id")
+    if _conv_id_for_key and settings.dlp_enabled:
+        from app.services.dlp.transformer import _make_conversation_key
+        conversation_key_stream = _make_conversation_key(
+            settings.dlp_hmac_key, _conv_id_for_key
+        )
+
     if settings.dlp_enabled:
         # Per-tenant NER gate — identical to orchestrator.handle_chat_completion.
-        # Drop PresidioDetector from this request's registry if the
-        # tenant has NER off (resolved in project_service against both
-        # the tenant row and the org_settings default).
-        input_registry = orchestrator.detector_registry
-        if not ctx.ner_enabled:
-            input_registry = input_registry.without("presidio_ner")
+        # The orchestrator caches two pre-built registries (one with
+        # Presidio, one with the ``thai_name_no_prefix`` regex
+        # fallback) and we pick by ``ctx.ner_enabled``.
+        input_registry = orchestrator._select_registry(ctx.ner_enabled)
         detection = input_registry.scan_messages(
             payload.messages,
             direction="input",
@@ -158,7 +199,8 @@ async def chat_completions(
                             total_tokens=0,
                             estimated_cost_usd=0.0,
                             error_code="dlp_violation",
-                            input_raw=input_raw,
+                            input_raw="[BLOCKED_BY_DLP]",
+                            input_raw_encrypted=input_raw_encrypted,
                             dlp_findings_json=build_dlp_findings_json(
                                 input_enforcement.match_actions,
                             ),
@@ -176,7 +218,12 @@ async def chat_completions(
             raise DLPViolationError(
                 "Request blocked by DLP policy.",
                 details={
+                    "action": "block",
                     "policy_profile": input_enforcement.policy_profile_id,
+                    "categories": sorted(
+                        {ma.match.category.upper() for ma in input_enforcement.match_actions}
+                    ),
+                    "findings_count": len(input_enforcement.match_actions),
                     "reasons": input_enforcement.reasons,
                     "direction": "input",
                 },
@@ -184,14 +231,67 @@ async def chat_completions(
 
         if input_enforcement.requires_transformation:
             messages_to_send, span_map, inbound_counters = orchestrator.transformer.mask_messages(
-                payload.messages, input_enforcement.match_actions
+                payload.messages,
+                input_enforcement.match_actions,
+                conversation_key=conversation_key_stream,
+            )
+
+    # Cross-turn DLP vault — mirrors the non-streaming branch in
+    # ``orchestrator.handle_chat_completion``. Pulled out of the
+    # ``settings.dlp_enabled`` block above so the resolver can still
+    # run on the response when DLP is disabled inbound but the
+    # caller has sent a ``conversation_id`` referencing an earlier
+    # turn's mask. ``conversation_id`` stays None for callers that
+    # don't opt in — single-turn behaviour is unchanged.
+    conversation_id = payload.metadata.get("conversation_id")
+    if conversation_id and span_map and settings.dlp_conversation_vault_enabled:
+        from app.services.dlp.conversation_vault import conversation_vault
+        conversation_vault.extend(conversation_id, span_map)
+
+    output_actions = (
+        profile.category_actions_output
+        if profile.category_actions_output is not None
+        else profile.category_actions
+    )
+    pre_restore_profile = PolicyProfile(
+        profile_id=profile.profile_id,
+        name=profile.name,
+        category_actions=profile.category_actions,
+        category_actions_output={
+            cat: (
+                EnforcementAction.MASK
+                if action == EnforcementAction.RESTORE
+                else action
+            )
+            for cat, action in output_actions.items()
+        },
+        severity_threshold_block=profile.severity_threshold_block,
+        scan_responses=profile.scan_responses,
+        moderation_enabled=profile.moderation_enabled,
+        scan_system_messages=profile.scan_system_messages,
+    )
+    restore_allowed_tokens: set[str] = set()
+    if span_map:
+        value_to_tokens: dict[str, set[str]] = {}
+        for token, original in span_map.items():
+            value_to_tokens.setdefault(original, set()).add(token)
+        for ma in input_enforcement.match_actions:
+            if output_actions.get(ma.match.category) != EnforcementAction.RESTORE:
+                continue
+            restore_allowed_tokens.update(
+                value_to_tokens.get(ma.match.matched_text, set())
             )
 
     # Inject system prompt explaining DLP placeholders to the model.
-    from app.services.dlp_prompt import inject_dlp_system_prompt, has_mask_tokens
-    if has_mask_tokens(messages_to_send):
+    # Gated on the inbound DLP findings count so clean prompts go
+    # straight to the provider without the DLP-context preamble.
+    if input_enforcement.match_actions:
+        from app.services.dlp_prompt import inject_dlp_system_prompt
         messages_to_send = inject_dlp_system_prompt(messages_to_send)
-        logger.info("dlp_system_prompt_injected", tokens_present=True)
+        logger.info(
+            "dlp_system_prompt_injected",
+            findings=len(input_enforcement.match_actions),
+        )
 
     # DLP trace snapshot 2/4: messages as they will be streamed to the
     # provider — same semantics as the non-streaming path. Equal to
@@ -238,8 +338,13 @@ async def chat_completions(
                         total_tokens=0,
                         estimated_cost_usd=0.0,
                         error_code="guardrail_blocked",
-                        input_raw=input_raw,
-                        input_masked=input_masked,
+                        input_raw=safe_input_snapshot(
+                            input_raw, input_masked, input_enforcement
+                        ),
+                        input_masked=safe_input_masked_snapshot(
+                            input_masked, input_enforcement
+                        ),
+                        input_raw_encrypted=input_raw_encrypted,
                         dlp_findings_json=build_dlp_findings_json(
                             input_enforcement.match_actions,
                             span_map=span_map,
@@ -310,8 +415,13 @@ async def chat_completions(
                                 total_tokens=0,
                                 estimated_cost_usd=0.0,
                                 error_code="moderation_flagged",
-                                input_raw=input_raw,
-                                input_masked=input_masked,
+                                input_raw=safe_input_snapshot(
+                                    input_raw, input_masked, input_enforcement
+                                ),
+                                input_masked=safe_input_masked_snapshot(
+                                    input_masked, input_enforcement
+                                ),
+                                input_raw_encrypted=input_raw_encrypted,
                                 dlp_findings_json=build_dlp_findings_json(
                                     input_enforcement.match_actions,
                                     span_map=span_map,
@@ -376,6 +486,20 @@ async def chat_completions(
             details={"provider": route.provider_name},
         )
 
+    # Bind the cross-turn DLP vault resolver once per request so
+    # every per-window emit + the final tail flush can pass the
+    # same callable into ``transformer.restore``. ``None`` when the
+    # caller didn't send a ``conversation_id`` — the restore path
+    # then falls back to single-turn orphan-warning behaviour.
+    _vault_resolver_stream = None
+    if conversation_id and settings.dlp_conversation_vault_enabled:
+        from app.services.dlp.conversation_vault import (
+            conversation_vault as _stream_vault,
+        )
+        _vault_resolver_stream = lambda tokens, _cid=conversation_id: (
+            _stream_vault.resolve(_cid, tokens)
+        )
+
     # Capture the per-request ``SessionLocal`` factory so
     # ``event_generator`` can mint a fresh session at log-write time
     # without reaching into the module-global ``app.core.db.SessionLocal``
@@ -409,12 +533,18 @@ async def chat_completions(
         # boundaries in a way that their leading fragment individually
         # is NOT a match could leak. In practice, DLP detectors don't
         # match partial patterns (an email regex needs the full `@...`),
-        # so emails/phones/SSNs/credit-cards are safe at N=50.
-        # Documented as a known limitation.
-        MIN_TAIL_CHARS = 50
+        # so emails/phones/SSNs/credit-cards are safe at N=120.
+        # Sized to cover the longest sensitive pattern we detect —
+        # ``db_connection_string`` matches up to ~100 chars
+        # (``postgresql://user:pwd@host:5432/db?sslmode=require…``).
+        # 120 = ~100 + 20-char safety margin for variants like long
+        # Thai-address blocks and the base64 tail of a PEM private key
+        # header line, while still keeping per-chunk emit latency low.
+        MIN_TAIL_CHARS = 120
 
         tail_masked = ""
         cumulative_raw = ""
+        masked_provider_parts: list[str] = []
         emitted_parts: list[str] = []
         accumulated_outbound_actions = []
         counters_mut = dict(inbound_counters)
@@ -443,16 +573,34 @@ async def chat_completions(
                 detection = orchestrator._scan_text_as_result(
                     text, direction="output", ner_enabled=ctx.ner_enabled,
                 )
-                enforcement = orchestrator._scan_and_evaluate(detection, profile)
+                enforcement = orchestrator._scan_and_evaluate(
+                    detection, pre_restore_profile
+                )
                 if enforcement.is_blocked:
                     return "", enforcement.match_actions
                 if not enforcement.requires_transformation:
                     return text, enforcement.match_actions
-                masked, _, new_counters = orchestrator.transformer.mask_text(
+                masked, outbound_window_map, new_counters = orchestrator.transformer.mask_text(
                     text,
                     enforcement.match_actions,
                     start_counters=counters_mut,
+                    conversation_key=conversation_key_stream,
                 )
+                # Mirror the non-streaming branch: outbound tokens
+                # go into the vault (for audit/cross-turn lookups)
+                # but are NEVER merged into ``span_map`` — restore
+                # must not unmask hallucinated values.
+                if (
+                    conversation_id
+                    and outbound_window_map
+                    and settings.dlp_conversation_vault_enabled
+                ):
+                    from app.services.dlp.conversation_vault import (
+                        conversation_vault as _outbound_vault,
+                    )
+                    _outbound_vault.extend(
+                        conversation_id, outbound_window_map
+                    )
                 # Mutate via the enclosing variable binding.
                 counters_mut.clear()
                 counters_mut.update(new_counters)
@@ -486,6 +634,8 @@ async def chat_completions(
                 )
             )
 
+        from app.services.dlp.transformer import sanitize_hallucinated_brackets
+
         async for chunk in adapter.stream_chat(
             payload, messages_to_send,
             resolved_model=route.model_name,
@@ -499,17 +649,30 @@ async def chat_completions(
                 # text in the tail is safe and deduplication-friendly.
                 window = tail_masked + chunk.delta
                 masked_window, actions = _dlp_scan_and_mask(window)
+                # Drop ``[[CAT_N]]`` shapes the model invented. Runs on
+                # the full window (which already buffers split tokens
+                # via ``tail_masked``) so a double-bracket spanning two
+                # chunks is still caught when the closing ``]]`` lands.
+                masked_window = sanitize_hallucinated_brackets(masked_window, span_map)
                 if actions:
                     accumulated_outbound_actions.extend(actions)
 
                 if len(masked_window) > MIN_TAIL_CHARS:
                     safe = masked_window[:-MIN_TAIL_CHARS]
                     tail_masked = masked_window[-MIN_TAIL_CHARS:]
-                    emit_text = (
-                        orchestrator.transformer.restore(safe, span_map)
-                        if span_map
-                        else safe
-                    )
+                    masked_provider_parts.append(safe)
+                    # When a conversation_id is bound, every emit
+                    # needs the vault resolver so a token echoed from
+                    # an earlier turn is unmasked even though the
+                    # per-window scan returned no new findings.
+                    if span_map or _vault_resolver_stream is not None:
+                        emit_text = orchestrator.transformer.restore(
+                            safe, span_map,
+                            vault_resolver=_vault_resolver_stream,
+                            allowed_tokens=restore_allowed_tokens,
+                        )
+                    else:
+                        emit_text = safe
                     if emit_text:
                         emitted_parts.append(emit_text)
                         yield _emit_chunk(emit_text)
@@ -526,11 +689,18 @@ async def chat_completions(
         # Flush the remaining tail. The tail already went through a
         # DLP scan in its most recent iteration; no need to re-mask.
         if tail_masked:
-            final_emit = (
-                orchestrator.transformer.restore(tail_masked, span_map)
-                if span_map
-                else tail_masked
-            )
+            # One last sanitize pass so a ``[[…]]`` that landed in the
+            # tail buffer at end-of-stream is rewritten before emit.
+            tail_masked = sanitize_hallucinated_brackets(tail_masked, span_map)
+            masked_provider_parts.append(tail_masked)
+            if span_map or _vault_resolver_stream is not None:
+                final_emit = orchestrator.transformer.restore(
+                    tail_masked, span_map,
+                    vault_resolver=_vault_resolver_stream,
+                    allowed_tokens=restore_allowed_tokens,
+                )
+            else:
+                final_emit = tail_masked
             if final_emit:
                 emitted_parts.append(final_emit)
                 yield _emit_chunk(final_emit)
@@ -539,6 +709,7 @@ async def chat_completions(
         # from the per-chunk match actions we accumulated. overall_action
         # is computed from match_actions automatically.
         output_raw = cumulative_raw
+        ai_to_service_masked = "".join(masked_provider_parts)
         full_text = "".join(emitted_parts)
         response_enforcement = EnforcementDecision(
             match_actions=accumulated_outbound_actions,
@@ -557,6 +728,43 @@ async def chat_completions(
             input_enforcement.overall_action,
             response_enforcement.overall_action,
         )
+
+        # Admin Secure Trace is request-process memory only. It must never be
+        # written to request_logs or emitted to app logs.
+        try:
+            from app.services.secure_trace_store import (
+                SecureTraceRecord,
+                secure_trace_store,
+            )
+
+            secure_trace_store.put(
+                SecureTraceRecord(
+                    request_id=ctx.request_id or "",
+                    tenant_id=ctx.tenant_id,
+                    project_id=ctx.project_id,
+                    user_to_service=input_raw,
+                    service_to_ai=input_masked,
+                    ai_to_service=ai_to_service_masked,
+                    service_to_user=full_text,
+                    policy_action=overall_action.name.lower(),
+                    findings_count=(
+                        len(input_enforcement.match_actions)
+                        + len(response_enforcement.match_actions)
+                    ),
+                    detectors=sorted(
+                        {
+                            ma.match.detector_name
+                            for ma in (
+                                input_enforcement.match_actions
+                                + response_enforcement.match_actions
+                            )
+                        }
+                    ),
+                    created_at=time.time(),
+                )
+            )
+        except Exception as exc:
+            log.warning("secure_trace_capture_failed", error=str(exc)[:200])
         dlp_categories = sorted(
             {ma.match.category for ma in input_enforcement.match_actions}
             | {ma.match.category for ma in response_enforcement.match_actions}
@@ -566,13 +774,20 @@ async def chat_completions(
         # usage chunk under stream_options.include_usage); fall back to the
         # heuristic estimator when the provider didn't surface them.
         if provider_usage is not None:
+            from app.services.currency_service import currency_service
+            _usd = _estimate_cost(
+                route.model_name,
+                provider_usage.prompt_tokens,
+                provider_usage.completion_tokens,
+            )
+            _cost_info = currency_service.format_cost(_usd)
             usage = UsageInfo(
                 prompt_tokens=provider_usage.prompt_tokens,
                 completion_tokens=provider_usage.completion_tokens,
                 total_tokens=provider_usage.total_tokens,
-                estimated_cost_usd=_estimate_cost(
-                    route.model_name, provider_usage.total_tokens
-                ),
+                estimated_cost_usd=_usd,
+                cost_thb=_cost_info["thb"],
+                cost_display=_cost_info["display"],
             )
         else:
             usage = orchestrator.usage_service.estimate(
@@ -606,10 +821,24 @@ async def chat_completions(
                     dlp_output_findings=len(response_enforcement.match_actions),
                     dlp_categories=dlp_categories,
                     router_used=router_used,
-                    input_raw=input_raw,
-                    input_masked=input_masked,
-                    output_raw=output_raw,
-                    output_final=full_text,
+                    # 4-stage DLP trace — see orchestrator success path
+                    # for column semantics. Streaming captures the
+                    # outbound-masked AI text in ``ai_to_service_masked``
+                    # (joined ``masked_provider_parts``); ``full_text`` is
+                    # the post-restore content the user actually saw.
+                    input_raw=safe_input_snapshot(
+                        input_raw, input_masked, input_enforcement
+                    ),
+                    input_masked=safe_input_masked_snapshot(
+                        input_masked, input_enforcement
+                    ),
+                    output_raw=safe_output_raw_snapshot(
+                        ai_to_service_masked, response_enforcement
+                    ),
+                    output_final=safe_output_snapshot(
+                        output_raw, full_text, response_enforcement
+                    ),
+                    input_raw_encrypted=input_raw_encrypted,
                     dlp_findings_json=build_dlp_findings_json(
                         input_enforcement.match_actions,
                         response_enforcement.match_actions,

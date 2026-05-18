@@ -17,8 +17,12 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.domain.dlp import EnforcementAction, MatchAction
 from app.main import app
+from app.services.dlp.detectors.address import AddressDetector
 from app.services.dlp.detectors.db_connection_string import DbConnectionStringDetector
+from app.services.dlp.detectors.health_condition import HealthConditionDetector
+from app.services.dlp.detectors.income import IncomeDetector
 from app.services.dlp.detectors.mac_address import MacAddressDetector
 from app.services.dlp.detectors.medical_record import MedicalRecordDetector
 from app.services.dlp.detectors.registry import get_default_registry
@@ -30,6 +34,7 @@ from app.services.dlp.detectors.thai_national_id import (
 )
 from app.services.dlp.detectors.thai_promptpay import ThaiPromptPayDetector
 from app.services.dlp.detectors.thai_tax_id import ThaiTaxIdDetector
+from app.services.dlp.transformer import DLPTransformer
 
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -152,18 +157,26 @@ class TestThaiNationalIdDetector:
         matches = self.det.detect("ref 12345678901234 logged")
         assert matches == []
 
-    def test_thirteen_digits_invalid_checksum_rejected(self):
-        # Heavy-scenario shape exactly: 13 digits in the canonical layout
-        # whose check digit doesn't validate. The regex matches but the
-        # checksum gate must reject. This is the bug-class that produced
-        # the false alarm in the heavy live test.
+    def test_thirteen_digits_invalid_checksum_with_keyword_is_matched(self):
+        # Policy change (DLP coverage audit, May 2026): a 13-digit run
+        # preceded by an ID-labelling keyword is treated as an ID even
+        # when the checksum fails. The keyword (operator-supplied field
+        # label like ``เลขบัตรประชาชน``) is the strongest possible
+        # signal that this column holds IDs; checksum-invalid
+        # placeholders in such columns are still PDPA-sensitive (they
+        # identify the row even if not the canonical citizen). Better
+        # to over-mask the rare invalid-checksum placeholder than to
+        # leak a labelled ID field.
         text = "เลขบัตรประชาชน 1234567890123"
         matches = self.det.detect(text)
-        assert matches == []
+        assert len(matches) == 1
+        assert matches[0].matched_text == "1234567890123"
 
-    def test_thirteen_digits_invalid_checksum_with_dashes_rejected(self):
-        # Same digits, hyphenated form. Identical outcome — checksum
-        # operates on stripped digits.
+    def test_thirteen_digits_invalid_checksum_with_dashes_still_rejected(self):
+        # Hyphenated form does NOT hit the keyword-context gate (which
+        # requires the bare 13-digit run to follow the keyword); the
+        # checksum gate still rejects the dashed shape, so this case
+        # remains a non-match.
         text = "เลขบัตรประชาชน 1-2345-67890-12-3"
         matches = self.det.detect(text)
         assert matches == []
@@ -406,10 +419,162 @@ class TestThaiAddressDetector:
         matches = self.det.detect(text)
         assert matches == []
 
+
+# ---------------------------------------------------------------------------
+# Labeled address detector
+# ---------------------------------------------------------------------------
+
+
+class TestAddressDetector:
+    def setup_method(self):
+        self.det = AddressDetector()
+
+    def test_detects_english_address(self):
+        text = "Address: 99/88 Sukhumvit Road, Bangkok 10110"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].entity_type == "address"
+        assert matches[0].matched_text == "99/88 Sukhumvit Road, Bangkok 10110"
+
+    def test_detects_home_address(self):
+        text = "Home Address: 123 Rama 9 Road, Huai Khwang, Bangkok 10310"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+
+    def test_detects_thai_labeled_address(self):
+        text = "ที่อยู่: 55/12 ถนนสุขุมวิท กรุงเทพ 10110"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert "55/12" in matches[0].matched_text
+
+    def test_unlabeled_road_sentence_not_detected(self):
+        assert self.det.detect("I walked on Sukhumvit Road yesterday") == []
+
+
+# ---------------------------------------------------------------------------
+# Health condition detector
+# ---------------------------------------------------------------------------
+
+
+class TestHealthConditionDetector:
+    def setup_method(self):
+        self.det = HealthConditionDetector()
+
+    def test_detects_medical_label(self):
+        text = "Medical: diabetes and high blood pressure"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].entity_type == "health_condition"
+        assert matches[0].matched_text == "diabetes and high blood pressure"
+
+    def test_detects_diagnosis_label(self):
+        matches = self.det.detect("Diagnosis: hypertension")
+        assert len(matches) == 1
+
+    def test_detects_health_condition_label(self):
+        matches = self.det.detect("Health condition: asthma")
+        assert len(matches) == 1
+
+    def test_detects_thai_disease_label(self):
+        matches = self.det.detect("โรค: เบาหวาน ความดันสูง")
+        assert len(matches) == 1
+
+    def test_generic_sick_sentence_not_detected(self):
+        assert self.det.detect("I feel sick and bad today") == []
+
+
+# ---------------------------------------------------------------------------
+# Income detector
+# ---------------------------------------------------------------------------
+
+
+class TestIncomeDetector:
+    def setup_method(self):
+        self.det = IncomeDetector()
+
+    def test_detects_salary_thb(self):
+        text = "Salary: 85,000 THB/month"
+        matches = self.det.detect(text)
+        assert len(matches) == 1
+        assert matches[0].entity_type == "income"
+        assert matches[0].category == "financial"
+
+    def test_detects_monthly_income_baht(self):
+        matches = self.det.detect("Monthly income: 120000 baht per month")
+        assert len(matches) == 1
+
+    def test_detects_thai_salary(self):
+        matches = self.det.detect("เงินเดือน: 45000 บาท")
+        assert len(matches) == 1
+
+    def test_detects_thai_income_month(self):
+        matches = self.det.detect("รายได้: 60,000 บาท/เดือน")
+        assert len(matches) == 1
+
+    def test_product_price_not_detected(self):
+        assert self.det.detect("The item costs 500 baht") == []
+
+
+class TestSyntheticProfileCoverage:
+    def test_full_profile_detects_address_health_and_income(self):
+        reg = get_default_registry(disabled_detectors=[], ner_enabled=True)
+        text = (
+            "Please summarize this customer profile and store it:\n"
+            "Name: Somchai Jaidee\n"
+            "Thai National ID: 1101700203451\n"
+            "Passport: AA1234567\n"
+            "Email: somchai.jaidee@example.com\n"
+            "Phone: +66 81-234-5678\n"
+            "Address: 99/88 Sukhumvit Road, Bangkok 10110\n"
+            "Credit Card: 4111 1111 1111 1111\n"
+            "Bank Account: 123-4-56789-0\n"
+            "Password: P@ssw0rd123!\n"
+            "API Key: sk-test-1234567890abcdef\n"
+            "Medical: diabetes and high blood pressure\n"
+            "Salary: 85,000 THB/month\n"
+        )
+        detectors = {m.detector_name for m in reg.scan_text(text)}
+        assert "address" in detectors
+        assert "health_condition" in detectors
+        assert "income" in detectors
+
+    def test_full_profile_masks_new_sensitive_fields(self):
+        reg = get_default_registry(disabled_detectors=[], ner_enabled=True)
+        text = (
+            "Address: 99/88 Sukhumvit Road, Bangkok 10110\n"
+            "Medical: diabetes and high blood pressure\n"
+            "Salary: 85,000 THB/month\n"
+        )
+        matches = reg.scan_text(text)
+        actions = [
+            MatchAction(
+                match=m,
+                action=EnforcementAction.MASK,
+                reason_code="test_mask",
+                reason_message="test",
+            )
+            for m in matches
+            if m.detector_name in {"address", "health_condition", "income"}
+        ]
+
+        masked, span_map, _ = DLPTransformer().mask_text(text, actions)
+
+        assert "99/88 Sukhumvit Road" not in masked
+        assert "diabetes and high blood pressure" not in masked
+        assert "85,000 THB/month" not in masked
+        assert "[ADDRESS_" in masked
+        assert "[HEALTH_CONDITION_" in masked
+        assert "[INCOME_" in masked
+        assert set(span_map.values()) == {
+            "99/88 Sukhumvit Road, Bangkok 10110",
+            "diabetes and high blood pressure",
+            "Salary: 85,000 THB/month",
+        }
+
     def test_rejects_too_short(self):
         # Short trailing text doesn't qualify (< 6 char body).
         text = "ที่อยู่ a"
-        matches = self.det.detect(text)
+        matches = ThaiAddressDetector().detect(text)
         assert matches == []
 
 
@@ -536,7 +701,7 @@ class TestRegistryIncludesNewDetectors:
         for new in (
             "thai_national_id", "thai_tax_id", "thai_bank_account",
             "thai_promptpay", "thai_address", "db_connection_string",
-            "medical_record", "mac_address",
+            "medical_record", "mac_address", "address", "income",
         ):
             assert new in names, f"missing detector: {new}"
 
@@ -545,7 +710,7 @@ class TestRegistryIncludesNewDetectors:
         for new in (
             "thai_national_id", "thai_tax_id", "thai_bank_account",
             "thai_promptpay", "thai_address", "db_connection_string",
-            "medical_record", "mac_address",
+            "medical_record", "mac_address", "address", "income",
         ):
             assert new in MASK_TOKENS, f"mask token missing for {new}"
 
@@ -560,8 +725,8 @@ class TestCoverageEndpoint:
         resp = client.get("/admin/dlp/coverage", headers=_HEADERS)
         assert resp.status_code == 200
         body = resp.json()
-        # 28 = 21 original + 4 PDPA Section 26 + 1 thai_name + 1 presidio_ner + 1 line_id
-        assert body["summary"]["total"] == 28
+        # 30 = previous 28 + labeled address + income.
+        assert body["summary"]["total"] == 30
 
         names = {d["name"] for d in body["detectors"]}
         assert "thai_national_id" in names
@@ -588,6 +753,8 @@ class TestCoverageEndpoint:
         # The PII category must include thai_address and medical_record.
         assert "thai_address" in by_cat["pii"]["detectors"]
         assert "medical_record" in by_cat["pii"]["detectors"]
+        assert "address" in by_cat["pii"]["detectors"]
+        assert "income" in by_cat["financial"]["detectors"]
 
 
 # ---------------------------------------------------------------------------

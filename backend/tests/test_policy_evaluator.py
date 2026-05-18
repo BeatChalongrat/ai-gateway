@@ -176,13 +176,13 @@ class TestEvaluatorCategoryMapping:
         assert len(decision.match_actions) == 1
         assert decision.match_actions[0].action == EnforcementAction.MASK
 
-    def test_secret_blocked_by_default_profile(self):
+    def test_secret_masked_by_default_profile(self):
         decision = self.evaluator.evaluate(
             _result(_match(category="secret", severity=SensitivityLevel.CRITICAL)),
             DEFAULT_PROFILE,
         )
-        assert decision.overall_action == EnforcementAction.BLOCK
-        assert decision.is_blocked is True
+        assert decision.overall_action == EnforcementAction.MASK
+        assert decision.is_blocked is False
 
     def test_secret_blocked_by_strict_profile(self):
         decision = self.evaluator.evaluate(
@@ -229,14 +229,14 @@ class TestEvaluatorCategoryMapping:
 class TestEvaluatorSeverityThreshold:
     evaluator = PolicyEvaluator()
 
-    def test_critical_finding_blocked_by_strict_threshold(self):
+    def test_critical_finding_uses_explicit_category_action_before_threshold(self):
         """Strict profile blocks CRITICAL regardless of category action."""
         decision = self.evaluator.evaluate(
             _result(_match(category="pii", severity=SensitivityLevel.CRITICAL)),
             STRICT_PROFILE,
         )
-        assert decision.overall_action == EnforcementAction.BLOCK
-        assert decision.match_actions[0].reason_code == "severity_threshold"
+        assert decision.overall_action == EnforcementAction.MASK
+        assert decision.match_actions[0].reason_code == "pii_mask_policy"
 
     def test_high_finding_not_blocked_by_critical_threshold(self):
         """HIGH severity is below CRITICAL threshold → uses category rule."""
@@ -247,13 +247,13 @@ class TestEvaluatorSeverityThreshold:
         # Falls through to category rule: pii → MASK
         assert decision.overall_action == EnforcementAction.MASK
 
-    def test_default_threshold_blocks_critical_pii(self):
+    def test_default_threshold_does_not_override_explicit_mask(self):
         """Default profile has severity_threshold_block=CRITICAL → CRITICAL pii is blocked."""
         decision = self.evaluator.evaluate(
             _result(_match(category="pii", severity=SensitivityLevel.CRITICAL)),
             DEFAULT_PROFILE,
         )
-        assert decision.overall_action == EnforcementAction.BLOCK
+        assert decision.overall_action == EnforcementAction.MASK
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ class TestEvaluatorSeverityThreshold:
 class TestEvaluatorEscalation:
     evaluator = PolicyEvaluator()
 
-    def test_mixed_pii_and_secret_overall_blocked_in_default(self):
+    def test_mixed_pii_and_secret_overall_masked_in_default(self):
         """Email (pii→mask) + AWS key (secret, CRITICAL→block) → overall BLOCK."""
         decision = self.evaluator.evaluate(
             _result(
@@ -273,8 +273,8 @@ class TestEvaluatorEscalation:
             ),
             DEFAULT_PROFILE,
         )
-        assert decision.overall_action == EnforcementAction.BLOCK
-        assert decision.is_blocked is True
+        assert decision.overall_action == EnforcementAction.MASK
+        assert decision.is_blocked is False
 
     def test_mixed_pii_and_secret_overall_blocked_in_strict(self):
         """Strict still blocks on secret."""
@@ -333,8 +333,8 @@ class TestEvaluatorReasons:
             STRICT_PROFILE,
         )
         ma = decision.match_actions[0]
-        assert ma.reason_code == "severity_threshold"
-        assert "CRITICAL" in ma.reason_message
+        assert ma.reason_code == "pii_mask_policy"
+        assert "mask" in ma.reason_message.lower()
 
     def test_fallback_has_reason_code(self):
         decision = self.evaluator.evaluate(

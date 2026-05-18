@@ -35,7 +35,36 @@ interface RequestDetail {
   created_at?: string | null;
   input_raw?: string | null; input_masked?: string | null;
   output_raw?: string | null; output_final?: string | null;
+  input_raw_encrypted?: string | null;
   dlp_findings?: any[] | null;
+}
+
+interface SecureTrace {
+  request_id: string;
+  trace_mode: "admin_secure" | "persisted";
+  stages: Record<string, { visibility: string; content: string | null; source?: string }>;
+  dlp: {
+    policy_action: string;
+    findings_count?: number;
+    detectors?: string[];
+    input_findings_count?: number;
+    output_findings_count?: number;
+  };
+  decrypt_status?: string;
+}
+
+// Composite shape rendered in the Safe Trace panel — stages 2/3 read
+// from the persisted /trace endpoint; stage 1 prefers /trace (decrypted
+// from ``input_raw_encrypted``) but falls back to /secure-trace for
+// rows written before the audit ciphertext column existed; stage 4
+// reads the ``output_final`` column directly (post-restore plaintext).
+interface SafeTracePanelData {
+  user_to_service: string | null;
+  service_to_ai: string | null;
+  ai_to_service: string | null;
+  service_to_user: string | null;
+  source_user: "persisted" | "secure_trace" | "placeholder" | "unavailable";
+  source_final: "persisted" | "placeholder" | "unavailable";
 }
 
 const CSS = `
@@ -149,6 +178,9 @@ export default function RequestsPage() {
   const { data, loading, error, refetch } = useApi<{ items: any[] }>("/admin/requests");
   const [selected, setSelected] = useState<any | null>(null);
   const [detail, setDetail] = useState<RequestDetail | null>(null);
+  const [secureTrace, setSecureTrace] = useState<SecureTrace | null>(null);
+  const [secureTraceLoading, setSecureTraceLoading] = useState(false);
+  const [safeTracePanel, setSafeTracePanel] = useState<SafeTracePanelData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -177,10 +209,113 @@ export default function RequestsPage() {
   async function selectRow(r: any) {
     setSelected(r);
     setDetail(null);
+    setSecureTrace(null);
+    setSafeTracePanel(null);
     setDetailLoading(true);
-    try { const d = await api.get(`/admin/requests/${r.request_id}`); setDetail(d as RequestDetail); }
-    catch { setDetail(null); }
-    finally { setDetailLoading(false); }
+    try {
+      const d = (await api.get(`/admin/requests/${r.request_id}`)) as RequestDetail;
+      setDetail(d);
+      // Auto-load Safe Trace panel content: /trace decrypts stage 1
+      // from input_raw_encrypted; stage 4 (post-restore plaintext) is
+      // never persisted, so we ask /secure-trace as a best-effort
+      // backfill while the in-memory record exists (~15 min).
+      void loadSafeTracePanel(r.request_id, d);
+    } catch {
+      setDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function loadSafeTracePanel(requestId: string, d: RequestDetail) {
+    let user_to_service: string | null = null;
+    let source_user: SafeTracePanelData["source_user"] = "unavailable";
+    let service_to_ai: string | null = d.input_masked ?? null;
+    let ai_to_service: string | null = d.output_raw ?? null;
+
+    // 1. Try /trace — persisted, decrypted, no 15-min TTL.
+    try {
+      const trace = (await api.get(`/admin/requests/${requestId}/trace?reason=safe-trace-panel-auto`)) as SecureTrace;
+      const u = trace.stages?.user_to_service?.content ?? null;
+      if (u) {
+        user_to_service = u;
+        source_user = "persisted";
+      }
+      // Stages 2 and 3 from /trace are the same DB columns we already
+      // have on ``detail`` — keep ``detail`` as the source so we don't
+      // double-fetch when the user toggles filter/search.
+      service_to_ai = trace.stages?.service_to_ai?.content ?? service_to_ai;
+      ai_to_service = trace.stages?.ai_to_service?.content ?? ai_to_service;
+    } catch {
+      // /trace 403 / 404 — fall through to /secure-trace below.
+    }
+
+    // 2. Backfill stage 1 only when /trace had no ciphertext (legacy
+    //    rows). Stage 4 (Service → User) deliberately never reads from
+    //    the in-memory secure-trace store here — that path leaks the
+    //    AI's full restored response (which may include curl examples,
+    //    code blocks, or any text the model produced) directly under
+    //    the [MASKED_BY_DLP] placeholder in the panel UI. The explicit
+    //    "Admin Secure Trace" button still surfaces it under a separate
+    //    consent flow.
+    if (!user_to_service) {
+      try {
+        const sec = (await api.get(
+          `/admin/requests/${requestId}/secure-trace?reason=safe-trace-panel-stage1-fallback`,
+        )) as SecureTrace;
+        if (sec.stages?.user_to_service?.content) {
+          user_to_service = sec.stages.user_to_service.content;
+          source_user = "secure_trace";
+        }
+      } catch {
+        // No in-memory record — stage 1 stays on the placeholder below.
+      }
+    }
+
+    if (!user_to_service) {
+      user_to_service = d.input_raw ?? null;
+      source_user = "placeholder";
+    }
+
+    // Stage 4 renders the persisted ``output_final`` column directly.
+    // It now stores the actual post-restore plaintext the user
+    // received (admin-only via the Role.ADMIN gate on this route);
+    // legacy rows / blocked requests may still hold the
+    // ``[MASKED_BY_DLP]`` / ``[BLOCKED_BY_DLP]`` placeholder, in which
+    // case we surface that verbatim with the placeholder badge.
+    const service_to_user: string | null = d.output_final ?? null;
+    const looks_like_placeholder =
+      service_to_user === "[MASKED_BY_DLP]" || service_to_user === "[BLOCKED_BY_DLP]";
+    const source_final: SafeTracePanelData["source_final"] = looks_like_placeholder
+      ? "placeholder"
+      : "persisted";
+
+    setSafeTracePanel({
+      user_to_service,
+      service_to_ai,
+      ai_to_service,
+      service_to_user,
+      source_user,
+      source_final,
+    });
+  }
+
+  async function loadSecureTrace() {
+    if (!detail || secureTraceLoading) return;
+    const reason = window.prompt("Reason for viewing sensitive raw trace");
+    if (reason === null) return;
+    setSecureTraceLoading(true);
+    try {
+      const path = `/admin/requests/${detail.request_id}/secure-trace?reason=${encodeURIComponent(reason || "admin-debug")}`;
+      const d = await api.get(path);
+      setSecureTrace(d as SecureTrace);
+      toast("Secure trace loaded. Access was audited.");
+    } catch {
+      toast("Secure trace unavailable or permission denied");
+      setSecureTrace(null);
+    } finally {
+      setSecureTraceLoading(false);
+    }
   }
 
   const okCount = items.filter((x) => x.status === "success").length;
@@ -445,30 +580,120 @@ export default function RequestsPage() {
                 {/* Trace: 4 stages */}
                 {(detail.input_raw || detail.input_masked || detail.output_raw || detail.output_final) && (
                   <div style={{ marginBottom: 18 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt, marginBottom: 10 }}>Trace</div>
-                    {[
-                      { label: "User → Service", value: detail.input_raw, tone: "#3b6cf6" },
-                      { label: "Service → AI", value: detail.input_masked, tone: "#f59e0b" },
-                      { label: "AI → Service", value: detail.output_raw, tone: "#10b981" },
-                      { label: "Service → User", value: detail.output_final, tone: "#6366f1" },
-                    ].map((stage) => (
-                      <div key={stage.label} style={{ marginBottom: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: stage.tone, flexShrink: 0 }} />
-                          <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
-                        </div>
-                        <pre style={{
-                          background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, borderRadius: 6,
-                          padding: "8px 10px", margin: 0, fontFamily: T.mono, fontSize: "11px",
-                          lineHeight: 1.5, color: T.tp, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                          maxHeight: 140, overflowY: "auto",
-                        }}>{stage.value ?? "—"}</pre>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt }}>Safe Trace</div>
+                        <div style={{ fontSize: 11, color: T.tt, marginTop: 2 }}>Persisted logs are masked for support and monitoring.</div>
                       </div>
-                    ))}
+                      <button
+                        onClick={loadSecureTrace}
+                        disabled={secureTraceLoading}
+                        style={{
+                          border: `1px solid ${T.bl}`, background: "var(--bg-elevated)",
+                          color: T.tp, borderRadius: 6, padding: "7px 10px",
+                          fontSize: 11, fontWeight: 700, cursor: secureTraceLoading ? "wait" : "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {secureTraceLoading ? "Loading..." : "Admin Secure Trace"}
+                      </button>
+                    </div>
+                    {(() => {
+                      const panel = safeTracePanel;
+                      const stages = [
+                        {
+                          label: "User → Service",
+                          value: panel?.user_to_service ?? detail.input_raw,
+                          tone: "#3b6cf6",
+                          source: panel?.source_user,
+                        },
+                        {
+                          label: "Service → AI",
+                          value: panel?.service_to_ai ?? detail.input_masked,
+                          tone: "#f59e0b",
+                          source: "persisted" as const,
+                        },
+                        {
+                          label: "AI → Service",
+                          value: panel?.ai_to_service ?? detail.output_raw,
+                          tone: "#10b981",
+                          source: "persisted" as const,
+                        },
+                        {
+                          label: "Service → User",
+                          value: panel?.service_to_user ?? detail.output_final,
+                          tone: "#6366f1",
+                          source: panel?.source_final,
+                        },
+                      ];
+                      const sourceBadge = (src?: string) => {
+                        if (!src) return null;
+                        const label =
+                          src === "persisted" ? "decrypted" :
+                          src === "secure_trace" ? "in-memory" :
+                          src === "placeholder" ? "placeholder" :
+                          src;
+                        const tint =
+                          src === "persisted" ? "rgba(99,102,241,0.14)" :
+                          src === "secure_trace" ? "rgba(245,158,11,0.14)" :
+                          "rgba(100,116,139,0.12)";
+                        const fg =
+                          src === "persisted" ? "#6366f1" :
+                          src === "secure_trace" ? "#d97706" :
+                          "var(--text-tertiary)";
+                        return (
+                          <span style={{
+                            fontSize: 9, fontWeight: 600, textTransform: "uppercase",
+                            letterSpacing: "0.05em", color: fg, background: tint,
+                            padding: "1px 6px", borderRadius: 4, marginLeft: 6,
+                          }}>{label}</span>
+                        );
+                      };
+                      return stages.map((stage) => (
+                        <div key={stage.label} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: stage.tone, flexShrink: 0 }} />
+                            <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
+                            {sourceBadge(stage.source)}
+                          </div>
+                          <pre style={{
+                            background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, borderRadius: 6,
+                            padding: "8px 10px", margin: 0, fontFamily: T.mono, fontSize: "11px",
+                            lineHeight: 1.5, color: T.tp, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                            maxHeight: 140, overflowY: "auto",
+                          }}>{stage.value ?? "—"}</pre>
+                        </div>
+                      ));
+                    })()}
                     {detail.dlp_findings && detail.dlp_findings.length > 0 && (
                       <div style={{ marginTop: 10 }}>
                         <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>DLP Findings ({detail.dlp_findings.length})</div>
                         <JsonBlock data={detail.dlp_findings} />
+                      </div>
+                    )}
+                    {secureTrace && (
+                      <div style={{ marginTop: 12, border: `1px solid rgba(220,38,38,0.35)`, borderRadius: 8, padding: 10, background: "rgba(220,38,38,0.04)" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#dc2626", marginBottom: 4 }}>Admin Secure Trace</div>
+                        <div style={{ fontSize: 11, color: T.tt, marginBottom: 10 }}>Sensitive raw data visible. Access is audited.</div>
+                        {[
+                          { label: "User -> Service", value: secureTrace.stages.user_to_service?.content, tone: "#3b6cf6" },
+                          { label: "Service -> AI", value: secureTrace.stages.service_to_ai?.content, tone: "#f59e0b" },
+                          { label: "AI -> Service", value: secureTrace.stages.ai_to_service?.content, tone: "#10b981" },
+                          { label: "Service -> User", value: secureTrace.stages.service_to_user?.content, tone: "#6366f1" },
+                        ].map((stage) => (
+                          <div key={`secure-${stage.label}`} style={{ marginBottom: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: stage.tone, flexShrink: 0 }} />
+                              <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
+                            </div>
+                            <pre style={{
+                              background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, borderRadius: 6,
+                              padding: "8px 10px", margin: 0, fontFamily: T.mono, fontSize: "11px",
+                              lineHeight: 1.5, color: T.tp, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                              maxHeight: 140, overflowY: "auto",
+                            }}>{stage.value ?? "—"}</pre>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

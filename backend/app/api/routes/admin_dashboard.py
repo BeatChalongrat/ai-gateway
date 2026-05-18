@@ -217,6 +217,16 @@ def dashboard_overview(
 
     from app.services.providers.model_registry import get_all_candidates
 
+    # THB display layer — additive to ``spend_usd``. Uses the cached
+    # currency rate (or the settings fallback) so the endpoint stays
+    # sync. The series is converted bucket-by-bucket with the same
+    # rate so percentage deltas match across currencies.
+    from app.services.currency_service import currency_service
+    spend_thb_value = currency_service.convert(current["spend"])
+    spend_thb_series = [
+        round(currency_service.convert(s), 4) for s in series["spend_series"]
+    ]
+
     return {
         "period": period,
         "requests": {
@@ -239,12 +249,18 @@ def dashboard_overview(
             "delta_pct": spend_delta,
             "direction": spend_dir,
         },
+        "spend_thb": {
+            "value": spend_thb_value,
+            "delta_pct": spend_delta,
+            "direction": spend_dir,
+        },
         "resources": {
             "tenants": int(tenants),
             "projects": int(projects),
             "models": len(get_all_candidates()),
         },
         **series,
+        "spend_thb_series": spend_thb_series,
     }
 
 

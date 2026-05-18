@@ -84,15 +84,38 @@ async def lifespan(app: FastAPI):
     # If that becomes a concern, promote to a distributed lock.
     retention_task = asyncio.create_task(_daily_dlp_retention())
 
+    # Daily archive — moves request_logs rows older than
+    # ``settings.log_archive_days`` into ``request_logs_archive``.
+    # Same pattern as DLP retention: cancel-safe, idempotent, sleeps
+    # 24h between runs. See app/jobs/log_archive_job.py.
+    archive_task = asyncio.create_task(_daily_log_archive())
+
+    # Monthly partition maintenance — creates next month's partition
+    # if it doesn't exist yet. Sleeps 24h between checks; the CREATE
+    # statement itself is idempotent so the actual frequency doesn't
+    # matter as long as it runs at least once before each month rolls.
+    partition_task = asyncio.create_task(_daily_partition_maintenance())
+
     # DB pool sampler — every 5s reads SQLAlchemy pool stats and
     # pushes them to the Prometheus gauge. Load tests consume this
     # via /metrics to correlate saturation with pool contention.
     pool_task = asyncio.create_task(_db_pool_sampler())
 
+    # Model registry: swap the import-time seed snapshot for the
+    # current DB contents, then start the APScheduler job that
+    # refreshes ``model_configs`` daily. Failures here are logged
+    # and swallowed — the seed snapshot is a valid fallback and
+    # the gateway must still serve requests on a cold DB.
+    await asyncio.to_thread(_initial_registry_reload)
+    _start_model_discovery_scheduler()
+
     yield
 
+    _stop_model_discovery_scheduler()
     monitor_task.cancel()
     retention_task.cancel()
+    archive_task.cancel()
+    partition_task.cancel()
     pool_task.cancel()
     executor.shutdown(wait=False)
 
@@ -229,6 +252,107 @@ async def _daily_dlp_retention() -> None:
         await asyncio.sleep(24 * 60 * 60)
 
 
+def _initial_registry_reload() -> None:
+    """Refresh the in-memory model registry from the DB at startup.
+
+    Runs synchronously in a thread (lifespan dispatches via
+    ``asyncio.to_thread``). On any failure the import-time seed
+    snapshot remains in place — the registry is never empty.
+    """
+    import asyncio as _asyncio
+
+    from app.core.db import SessionLocal
+    from app.services.providers.model_registry import _registry
+
+    session = SessionLocal()
+    try:
+        # ``_registry.reload`` is async (it dispatches the query back
+        # to a thread for psycopg). We're already on a worker thread
+        # so we run it on a fresh event loop just for this call.
+        _asyncio.run(_registry.reload(session))
+    except Exception as exc:
+        print(f"[startup] Model registry reload skipped: {exc}")
+    finally:
+        session.close()
+
+
+def _start_model_discovery_scheduler() -> None:
+    """Register and start the daily ``model_configs`` sync job."""
+    try:
+        from app.scheduler import start_scheduler
+        from app.services.discovery.discovery_service import (
+            ModelDiscoveryService,
+        )
+        start_scheduler(ModelDiscoveryService())
+    except Exception as exc:
+        print(f"[startup] Model discovery scheduler skipped: {exc}")
+
+
+def _stop_model_discovery_scheduler() -> None:
+    """Stop the scheduler on shutdown — best-effort, never raises."""
+    try:
+        from app.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception as exc:
+        print(f"[shutdown] Scheduler stop skipped: {exc}")
+
+
+async def _daily_log_archive() -> None:
+    """Run the log-archive job once every 24 hours."""
+    import asyncio
+
+    # Stagger the start so archive and retention don't both fight the
+    # DB on a cold boot — retention starts at +60s, archive at +120s.
+    await asyncio.sleep(120)
+    while True:
+        try:
+            await asyncio.to_thread(_run_log_archive_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[log-archive] run failed: {exc}")
+        await asyncio.sleep(24 * 60 * 60)
+
+
+async def _daily_partition_maintenance() -> None:
+    """Run partition maintenance once every 24 hours."""
+    import asyncio
+
+    await asyncio.sleep(180)  # third in the daily-task stagger
+    while True:
+        try:
+            await asyncio.to_thread(_run_partition_maintenance_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[partition-maint] run failed: {exc}")
+        await asyncio.sleep(24 * 60 * 60)
+
+
+def _run_log_archive_once() -> None:
+    """Open a session, run the archive job, close the session."""
+    from app.core.db import SessionLocal
+    from app.jobs.log_archive_job import run_log_archive
+
+    session = SessionLocal()
+    try:
+        run_log_archive(session)
+    finally:
+        session.close()
+
+
+def _run_partition_maintenance_once() -> None:
+    """Open a session, run the maintenance job, close the session."""
+    from app.core.db import SessionLocal
+    from app.jobs.partition_maintenance_job import run_partition_maintenance
+
+    session = SessionLocal()
+    try:
+        run_partition_maintenance(session)
+    finally:
+        session.close()
+
+
 def _run_dlp_retention_once() -> None:
     """Open a session, run the cleanup, close the session."""
     import structlog
@@ -315,6 +439,12 @@ app.include_router(portal_team_router, prefix="/portal/team", tags=["portal-team
 app.include_router(admin_portal_users_router, prefix="/admin/portal-users", tags=["admin-portal"])
 app.include_router(admin_system_settings_router, prefix="/admin/system-settings", tags=["admin-settings"])
 app.include_router(admin_token_packs_router, prefix="/admin/token-packs", tags=["admin-packs"])
+
+# Admin endpoints for the DB-backed model registry (status, sync,
+# list, override). Mounted at /admin/models; backed by
+# ``model_configs`` and the APScheduler-driven discovery sync.
+from app.api.routes.admin_model_discovery import router as admin_model_discovery_router
+app.include_router(admin_model_discovery_router, prefix="/admin/models", tags=["admin-models"])
 
 # --- Admin auth gate (Phase 2A Commit 5) ---
 # Backfill a default @require_role(PROJECT_ADMIN) marker onto every

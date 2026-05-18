@@ -84,3 +84,10 @@ class RequestLogORM(Base):
     output_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_final: Mapped[str | None] = mapped_column(Text, nullable=True)
     dlp_findings_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # AES-256-GCM ciphertext of the user's original prompt — written
+    # by the orchestrator BEFORE DLP masking. Decrypted on demand by
+    # ``GET /admin/requests/{id}/trace`` (audited). The DB row alone
+    # is not enough to recover plaintext; the key (DLP_AUDIT_KEY env)
+    # lives only in the backend process. See migration 039.
+    input_raw_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -31,17 +31,43 @@ DEFAULT_PROFILE = PolicyProfile(
         # placeholder so users get a response rather than a hard failure.
         "secret": EnforcementAction.MASK,
     },
-    # Outbound override. Only mask categories that the AI should never
-    # leak back to the user regardless of context — credentials and
-    # secret tokens. PII / financial / network / identity findings on the
-    # outbound side fall through to ALLOW (categories absent from this
-    # dict default to ALLOW per evaluator logic), so AI answers about
-    # public test card numbers, RFC-1918 IPs, fictional emails, and
-    # similar reference data reach the user untouched. Inbound behavior
-    # is unchanged.
+    # Outbound action map (DLP-coverage tightening, May 2026).
+    #
+    # Previous behaviour masked only credentials/secrets on the
+    # outbound side and let PII fall through to ALLOW. That left a
+    # gap where an LLM hallucinating an email / phone / Thai ID
+    # would deliver the fake value verbatim to the end user, and a
+    # gap where an LLM echoing back the user's own PII (after the
+    # masked-token round-trip) could surface real values if the
+    # vault failed to restore.
+    #
+    # New defaults RESTORE the same categories outbound as inbound
+    # masked — including ``network``. The original default left
+    # ``network`` at ALLOW on the theory that a user asking about an
+    # RFC-1918 range still wanted the AI to mention it freely, but in
+    # the round-trip case ("confirm these IPs back to me") the user
+    # got ``[IP_ADDRESS_0]`` placeholders instead of their own IPs.
+    # RESTORE here means: the IP tokens we minted on the inbound side
+    # get swapped back to the user-supplied originals when the AI
+    # echoes them; fresh IPs the AI volunteers are still masked
+    # because the orchestrator only restores tokens that exist in the
+    # request-scoped span_map.
+    #
+    # Tenants who explicitly want raw outbound PII (e.g. assistants
+    # that need to repeat a user-typed address) should opt into a
+    # custom profile rather than relax the default for everyone.
     category_actions_output={
-        "credential": EnforcementAction.MASK,
-        "secret": EnforcementAction.MASK,
+        "credential": EnforcementAction.RESTORE,
+        "secret":     EnforcementAction.RESTORE,
+        "pii":        EnforcementAction.RESTORE,
+        "identity":   EnforcementAction.RESTORE,
+        "financial":  EnforcementAction.RESTORE,
+        "network":    EnforcementAction.RESTORE,
+        # thai_name isn't a runtime category today (all Thai-name
+        # detectors emit ``pii``) — listed explicitly so a future
+        # detector that does choose a dedicated category gets the
+        # right treatment without another profile edit.
+        "thai_name":  EnforcementAction.RESTORE,
     },
     # BLOCK inbound CRITICAL severity items (api_key_secret, private_key,
     # bearer_token, db_connection_string). These should never reach an LLM

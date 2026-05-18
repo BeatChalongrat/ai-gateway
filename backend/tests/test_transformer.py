@@ -421,3 +421,51 @@ class TestEdgeCases:
         assert mask_token_for("ssn") == "[SSN]"
         assert mask_token_for("credit_card") == "[CREDIT_CARD]"
         assert mask_token_for("unknown_detector") == DEFAULT_MASK_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# Restore — tolerant token normalization
+# ---------------------------------------------------------------------------
+
+
+class TestRestoreTokenNormalization:
+    """LLMs occasionally echo masked tokens back with cosmetic drift
+    (lowercase, padded brackets). ``restore`` must canonicalise those
+    near-misses before the exact-match replace loop so the original
+    value is spliced back in instead of leaking the literal token."""
+
+    def _span_map(self) -> dict[str, str]:
+        return {"[EMAIL_0]": "alice@example.com"}
+
+    def test_lowercase_token_restored(self):
+        text = "Reply to [email_0] for details."
+        out = transformer.restore(text, self._span_map())
+        assert out == "Reply to alice@example.com for details."
+
+    def test_padded_brackets_restored(self):
+        text = "Reply to [ EMAIL_0 ] for details."
+        out = transformer.restore(text, self._span_map())
+        assert out == "Reply to alice@example.com for details."
+
+    def test_trailing_space_restored(self):
+        text = "Reply to [EMAIL_0 ] for details."
+        out = transformer.restore(text, self._span_map())
+        assert out == "Reply to alice@example.com for details."
+
+    def test_unknown_token_left_intact(self):
+        text = "Mystery token [UNKNOWN_0] remains untouched."
+        out = transformer.restore(text, self._span_map())
+        # The unknown token must survive verbatim — _normalize_tokens
+        # only canonicalises shapes whose uppercase form is in span_map.
+        assert "[UNKNOWN_0]" in out
+        # And the registered EMAIL token (absent from this text) leaves
+        # the rest of the sentence unchanged.
+        assert out == "Mystery token [UNKNOWN_0] remains untouched."
+
+    def test_canonical_token_still_restored(self):
+        # Backwards-compat: the exact ``[EMAIL_0]`` form continues to
+        # restore identically — the normalize pre-pass is a no-op when
+        # the token is already canonical.
+        text = "Hello [EMAIL_0]."
+        out = transformer.restore(text, self._span_map())
+        assert out == "Hello alice@example.com."

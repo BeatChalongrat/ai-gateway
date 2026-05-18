@@ -158,17 +158,13 @@ class TestStreamingBlockReturns403:
     def test_streaming_block_returns_403(self, monkeypatch):
         # Force strict profile so credential → BLOCK.
         monkeypatch.setattr(
-            "app.api.routes.public_chat.get_profile",
-            lambda _pid: STRICT_PROFILE,
+            "app.api.routes.public_chat.get_runtime_profile",
+            lambda _session, _pid: STRICT_PROFILE,
         )
         captured = _install_stream_spy(monkeypatch, chunks=["should never run"])
 
-        # Unique marker — the integration DB is shared session-wide and
-        # other tests also produce ``dlp_violation`` rows; filtering by
-        # ``input_raw LIKE %marker%`` disambiguates our own row.
-        marker = "streaming-dlp-block-test-marker"
         key = "sk-ant-api03-" + ("a" * 40)
-        resp = _chat_stream(f"my key is {key} ({marker})")
+        resp = _chat_stream(f"my key is {key}")
 
         assert resp.status_code == 403
         body = resp.json()
@@ -187,7 +183,6 @@ class TestStreamingBlockReturns403:
             row = (
                 s.query(RequestLogORM)
                 .filter(RequestLogORM.error_code == "dlp_violation")
-                .filter(RequestLogORM.input_raw.like(f"%{marker}%"))
                 .order_by(RequestLogORM.created_at.desc())
                 .first()
             )
@@ -197,20 +192,21 @@ class TestStreamingBlockReturns403:
         assert row.status == "blocked"
         assert row.policy_action == "block"
         assert row.error_code == "dlp_violation"
-        assert row.input_masked is None, (
-            "streaming DLP block runs before the mask step; input_masked "
-            "must be None on this row"
-        )
+        assert row.input_raw == "[BLOCKED_BY_DLP]"
+        assert key not in (row.input_raw or "")
+        assert key not in (row.input_masked or "")
+        assert key not in (row.dlp_findings_json or "")
 
 
-class TestStreamingProviderPiiPassesThroughUnderDefault:
-    def test_streaming_provider_pii_is_allowed_by_default(self, monkeypatch):
-        """Streaming counterpart of the non-streaming Fix-3 test.
+class TestStreamingProviderPiiMaskedUnderDefault:
+    def test_streaming_provider_pii_is_masked_by_default(self, monkeypatch):
+        """Streaming counterpart of the non-streaming outbound-mask test.
 
-        Outbound PII under DEFAULT_PROFILE is ALLOW (Fix 3). The
-        streaming path uses the same direction-aware evaluator as the
-        non-streaming path — provider-introduced PII reaches the user
-        through the SSE buffer untouched.
+        Outbound PII under DEFAULT_PROFILE now MASKs (May 2026
+        tightening). The streaming path shares the same direction-aware
+        evaluator as non-streaming, so an AI-introduced email gets
+        replaced with an indexed token before the user sees the SSE
+        body. Closes the same leak surface RT-04 caught in the audit.
         """
         captured = _install_stream_spy(
             monkeypatch,
@@ -226,9 +222,9 @@ class TestStreamingProviderPiiPassesThroughUnderDefault:
 
         events = _parse_sse(resp.content)
         full = _full_content(events)
-        # Provider-introduced PII reaches the user — outbound PII is ALLOW.
-        assert "jane@example.com" in full
-        assert "[EMAIL_" not in full
+        # Provider-introduced PII is now masked before the user sees it.
+        assert "jane@example.com" not in full
+        assert "[EMAIL_" in full
 
 
 class TestStreamingCleanMessagePassesThrough:
