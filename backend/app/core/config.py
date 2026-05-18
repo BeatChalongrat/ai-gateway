@@ -108,6 +108,23 @@ class Settings(BaseSettings):
     # analytics and post-hoc audits.
     dlp_raw_retention_days: int = 90
 
+    # NER microservice — the gateway delegates Presidio NER to a
+    # dedicated service so the heavy spaCy model loads once per pod
+    # instead of once per worker. Leave the URL empty to fall back to
+    # in-process Presidio (the legacy path) on dev machines without
+    # docker-compose. The client treats any error as "no entities"
+    # so DLP regex detectors continue to fire even if the service is
+    # unreachable.
+    ner_service_url: str = ""
+    ner_service_timeout_seconds: float = 2.0
+
+    # Archive retention — rows older than this are moved from
+    # ``request_logs`` to ``request_logs_archive`` by the daily job
+    # in ``app.jobs.log_archive_job``. 90 days matches the DLP raw
+    # retention window so cold storage never holds raw PII for
+    # longer than the live table did.
+    log_archive_days: int = 90
+
     # Semantic router (intent classification via sentence-transformers).
     # Off by default — flipping this to true requires the optional
     # sentence-transformers + torch stack (see requirements-semantic.txt).
@@ -135,6 +152,43 @@ class Settings(BaseSettings):
     # Absolute URL to prefix verification / password-reset links with.
     # Must match the portal origin the user browses from.
     portal_public_url: str = "http://localhost:3010"
+
+    # Cost display — ``estimated_cost_usd`` stays the canonical
+    # numeric on every response / DB row, but UIs in the TH market
+    # need a Baht surface alongside. ``display_currency`` selects
+    # the secondary unit shown in API responses; ``usd_to_thb_rate``
+    # is the offline fallback when the live exchangerate-api lookup
+    # fails or is disabled. Pydantic-settings reads from
+    # ``DISPLAY_CURRENCY`` / ``USD_TO_THB_RATE`` env vars.
+    display_currency: str = "THB"
+    usd_to_thb_rate: float = 35.0
+
+    # DLP deterministic-tokenization secret.
+    # When a request supplies ``metadata.conversation_id``, the DLP
+    # transformer derives a per-conversation HMAC key from this
+    # secret and uses it to mint opaque, content-stable tokens of
+    # the form ``[CATEGORY_xxxxxxxx]`` (8-char base64url suffix).
+    # Same PII value in the same conversation always produces the
+    # same token; different conversations produce different tokens.
+    # MUST be replaced in production — generate with
+    # ``python3 -c "import secrets; print(secrets.token_hex(32))"``.
+    dlp_hmac_key: str = "dev-dlp-hmac-key-change-in-production"
+    # Redis-backed cross-turn token vault stores raw token->original mappings.
+    # Current-request restore does not need it, so keep it off by default.
+    dlp_conversation_vault_enabled: bool = False
+
+    # AES-256-GCM key for the admin Safe Trace audit channel
+    # (``request_logs.input_raw_encrypted``). The orchestrator
+    # encrypts the user's raw prompt with this key before masking; the
+    # ``/admin/requests/{id}/trace`` endpoint decrypts on demand for
+    # the admin UI. Held only in the backend process — leaking a DB
+    # snapshot alone does not reveal the raw prompts.
+    #
+    # Empty in dev (auto-derived from ``master_encryption_key`` via
+    # HKDF in :mod:`app.core.dlp_audit_crypto` so the dev box just
+    # works); production deploys MUST set a dedicated 32-byte value.
+    # Generate with ``python3 -c "import secrets; print(secrets.token_hex(32))"``.
+    dlp_audit_key: str = ""
 
     @property
     def redis_url(self) -> str:
@@ -218,6 +272,16 @@ class Settings(BaseSettings):
         _check("JWT_SECRET", self.jwt_secret)
         _check("MASTER_ENCRYPTION_KEY", self.master_encryption_key)
         _check("PORTAL_JWT_SECRET", self.portal_jwt_secret)
+        # Required in production so the Safe Trace audit channel is
+        # not silently encrypted with an HKDF-of-master fallback that
+        # would be invalidated if the master key ever rotated.
+        if not (self.dlp_audit_key or "").strip():
+            issues.append(
+                "DLP_AUDIT_KEY is empty — set a 32-byte hex value "
+                "(generate with `python3 -c \"import secrets; print(secrets.token_hex(32))\"`)"
+            )
+        else:
+            _check("DLP_AUDIT_KEY", self.dlp_audit_key)
 
         signing = self.session_signing_secrets_list
         if not signing:

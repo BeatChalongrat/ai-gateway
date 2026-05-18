@@ -45,6 +45,13 @@ class RequestContext:
     # to decide whether to run PresidioDetector — it is NOT consulted
     # by the detector itself, which is stateless.
     ner_enabled: bool = False
+    # DLP conversation vault — when the caller supplies
+    # ``metadata.conversation_id`` the orchestrator threads it through
+    # so ``ConversationVault`` can carry the span_map across turns.
+    # ``None`` means "no cross-turn carry-over" (current per-request
+    # behaviour). Optional + last in the field list keeps every
+    # existing positional ``RequestContext(...)`` call site working.
+    conversation_id: Optional[str] = None
 
 
 @dataclass

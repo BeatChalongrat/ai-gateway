@@ -263,15 +263,34 @@ def _isolate_stateful_redis_services(request, monkeypatch):
                 "limit": 999,
             }
 
+        async def _allow_all_async(self, *args, **kwargs):
+            return _allow_all(self, *args, **kwargs)
+
         monkeypatch.setattr(RateLimitService, "check_all", _allow_all)
+        # May 2026 Redis async refactor — the orchestrator's hot path
+        # now calls ``check_all_async``. Override both names so the
+        # rate limiter is neutralised regardless of which caller a
+        # test exercises.
+        monkeypatch.setattr(
+            RateLimitService, "check_all_async", _allow_all_async
+        )
 
     # Exempt dedicated cache tests and the scale integration round-trip,
     # both of which inject their own fake Redis and need the real methods.
     if "test_cache_service" not in nodeid and "TestCacheIntegration" not in nodeid:
         from app.services.cache_service import CacheService
 
+        async def _async_none(self, *args, **kwargs):
+            return None
+
+        async def _async_noop(self, *args, **kwargs):
+            return None
+
         monkeypatch.setattr(CacheService, "get", lambda self, *args, **kwargs: None)
         monkeypatch.setattr(CacheService, "set", lambda self, *args, **kwargs: None)
+        # Mirror the async API patched by the May 2026 refactor.
+        monkeypatch.setattr(CacheService, "get_async", _async_none)
+        monkeypatch.setattr(CacheService, "set_async", _async_noop)
 
 
 @pytest.fixture()

@@ -22,14 +22,29 @@ from app.services.dlp.detectors.base import BaseDetector
 
 
 _CONTEXT_RE = re.compile(
-    r"(?:passport|หนังสือเดินทาง|pp\s*no)"
+    # Keyword set covers English (``passport``, ``passport number``),
+    # the colloquial Thai transliteration (``พาสปอร์ต``), the formal
+    # Thai noun (``หนังสือเดินทาง``) optionally prefixed with the
+    # word ``เลข`` (literally "number-of"), the short-form ``pp no``,
+    # and the generic ``travel document``. Adding these closes the
+    # audit's Thai-prefixed FN gap.
+    r"(?:passport(?:\s*(?:number|no\.?))?"
+    r"|เลขหนังสือเดินทาง"
+    r"|หนังสือเดินทาง"
+    r"|พาสปอร์ต"
+    r"|travel\s*document"
+    r"|pp\s*no)"
     # Zero-or-more joiner tokens so combinations like "number:" work.
     # With a single-optional group, "passport number: AA1234567" would
     # consume "number" but then fail on the following colon.
     r"(?:\s*(?:is|=|:|number|no\.?|#))*"
     r"\s*"
     r"(?P<value>"
-    r"[A-Z]{1,2}\d{7,8}"     # 1-2 letters + 7-8 digits
+    # Broadened from \d{7,8} to \d{6,9}: real-world passport numbers
+    # range 6-9 digits (diplomatic 6, common 7-8, US/UK 9). Keyword
+    # gating above keeps FP risk negligible — random alphanumeric
+    # runs without a passport-context word are still ignored.
+    r"[A-Z]{1,2}\d{6,9}"     # 1-2 letters + 6-9 digits
     r"|\d{9}"                # US bare 9-digit
     r")",
     re.IGNORECASE,

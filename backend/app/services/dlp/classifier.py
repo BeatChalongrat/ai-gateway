@@ -57,6 +57,8 @@ DEFAULT_SEVERITY_MAP: dict[str, SensitivityLevel] = {
     "thai_bank_account": SensitivityLevel.HIGH,
     "thai_promptpay": SensitivityLevel.MEDIUM,
     "thai_address": SensitivityLevel.MEDIUM,
+    "address": SensitivityLevel.MEDIUM,
+    "income": SensitivityLevel.HIGH,
     "db_connection_string": SensitivityLevel.CRITICAL,
     "medical_record": SensitivityLevel.HIGH,
     "mac_address": SensitivityLevel.LOW,

@@ -137,9 +137,9 @@ class TestDlpFindingsHelper:
             "entity_type",
             "category",
             "severity",
-            "start",
-            "end",
-            "matched_text",
+            "span_start",
+            "span_end",
+            "matched_text_len",
             "action",
             "mask_token",
         ):
@@ -149,7 +149,8 @@ class TestDlpFindingsHelper:
         assert f["entity_type"] == "email_address"
         assert f["category"] == "pii"
         assert f["severity"] == "MEDIUM"
-        assert f["matched_text"] == "alice@example.com"
+        assert "matched_text" not in f
+        assert f["matched_text_len"] == len("alice@example.com")
         assert f["action"] == "mask"
         assert f["mask_token"] == "[EMAIL_0]"
         assert f["direction"] == "input"

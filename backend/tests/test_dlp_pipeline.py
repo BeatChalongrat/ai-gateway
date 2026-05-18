@@ -181,18 +181,18 @@ class TestResponseSideScanning:
         result = orch._scan_text_as_result("nothing sensitive here")
         assert result.has_sensitive_content is False
 
-    def test_response_with_email_is_allowed_under_default(self):
-        """Outbound PII is ALLOW under the default profile (Fix 3).
+    def test_response_with_email_is_masked_under_default(self):
+        """Outbound PII is MASK under the default profile (May 2026 tightening).
 
-        Before Fix 3, every category in ``category_actions`` applied
-        identically to input and output, so an AI-generated email in
-        the response was masked. The new ``category_actions_output``
-        on DEFAULT_PROFILE narrows outbound masking to credentials and
-        secrets only — letting the AI's answers about emails / cards /
-        IPs flow through to the user untouched. This test pins that
-        contract; the SECRET-category companion test below confirms
-        the masking-still-applies path.
+        The previous narrower outbound map (credentials/secrets only)
+        let LLM-hallucinated emails reach the user verbatim, which
+        was the entire failure mode RT-04 of the live audit caught.
+        The default profile's ``category_actions_output`` now mirrors
+        the inbound map for PII categories — an outbound email is
+        masked with an indexed token. Network stays ALLOW (see the
+        companion category test).
         """
+        from app.domain.dlp import EnforcementAction
         from app.services.orchestrator import GatewayOrchestrator
         from app.services.policy.profiles import DEFAULT_PROFILE
 
@@ -202,9 +202,9 @@ class TestResponseSideScanning:
         detection = orch._scan_text_as_result(response_text)
         enforcement = orch._scan_and_evaluate(detection, DEFAULT_PROFILE)
 
-        # PII outbound under default is ALLOW — no transformation needed.
-        assert enforcement.requires_transformation is False
-        # The match was still recorded for trace/audit purposes.
+        # PII outbound under default now masks.
+        assert enforcement.requires_transformation is True
+        assert enforcement.overall_action == EnforcementAction.MASK
         assert any(
             ma.match.detector_name == "email"
             for ma in enforcement.match_actions

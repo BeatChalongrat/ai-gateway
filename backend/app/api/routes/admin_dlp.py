@@ -91,6 +91,7 @@ def list_policy_profiles(
                 "name": v.name,
                 "category_actions": v.category_actions,
                 "category_actions_output": v.category_actions_output,
+                "severity_threshold_block": v.severity_threshold_block,
             }
             for v in views
         ]
@@ -121,6 +122,7 @@ def patch_policy_profile_category_action(
         "profile_id": view.profile_id,
         "name": view.name,
         "category_actions": view.category_actions,
+        "severity_threshold_block": view.severity_threshold_block,
     }
 
 
@@ -300,6 +302,18 @@ _DETECTOR_META: dict[str, dict[str, Any]] = {
         "mask_token": "[ADDRESS]",
         "coverage_note": "Thai postal addresses anchored on บ้านเลขที่ / ที่อยู่",
         "example_patterns": [],
+    },
+    "address": {
+        "method": "regex",
+        "mask_token": "[ADDRESS]",
+        "coverage_note": "Labeled English/Thai address fields",
+        "example_patterns": ["Address: 99/88 Sukhumvit Road, Bangkok 10110"],
+    },
+    "income": {
+        "method": "regex",
+        "mask_token": "[INCOME]",
+        "coverage_note": "Labeled salary / monthly income fields",
+        "example_patterns": ["Salary: 85,000 THB/month"],
     },
     "thai_name": {
         "method": "regex",

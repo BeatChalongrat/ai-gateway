@@ -1,0 +1,116 @@
+# Dedicated NER service deployment + autoscaling.
+#
+# Hosts the heavy spaCy model (~580MB for en_core_web_lg) ONCE per
+# pod and serves /analyze over HTTP. The gateway backend talks to it
+# via the cluster-local Service DNS ``ner-service`` on port 8001.
+# No external ingress — keep this strictly internal.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ner-service
+  labels:
+    app: ner-service
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: ner-service
+  template:
+    metadata:
+      labels:
+        app: ner-service
+    spec:
+      containers:
+        - name: ner-service
+          image: ai-gateway-ner-service:latest
+          ports:
+            - containerPort: 8001
+              name: http
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            # Cold start is 30-60s when loading en_core_web_lg.
+            # Don't roll the pod into service until /health flips to
+            # "ready" — the probe checks the JSON body in the gateway
+            # client, but at the K8s level we accept any 2xx.
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ner-service
+spec:
+  selector:
+    app: ner-service
+  ports:
+    - port: 8001
+      targetPort: 8001
+      name: http
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ner-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ner-service
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Percent
+          value: 20
+          periodSeconds: 120
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ner-service
+spec:
+  minAvailable: 50%
+  selector:
+    matchLabels:
+      app: ner-service

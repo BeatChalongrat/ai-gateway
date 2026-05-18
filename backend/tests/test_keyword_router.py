@@ -260,3 +260,122 @@ class TestAllowedProvidersGuardAndDBRules:
         )
         assert rule == "project_rule"
         assert model == "gpt-4o"
+
+
+# ---------------------------------------------------------------------------
+# Project-scope pre-check used by the orchestrator before semantic routing
+# ---------------------------------------------------------------------------
+
+
+class TestProjectScopedHint:
+    """``get_project_scoped_hint`` ignores every rule whose priority sits
+    below the project floor (``+10_000_000`` offset applied by
+    KeywordRuleService). This is the chokepoint the orchestrator uses
+    to give per-project routing precedence over the semantic router."""
+
+    def test_project_rule_matches(self, db_session):
+        _insert_keyword_rule(
+            db_session,
+            name="route_analyze_to_qwen",
+            keywords=["analyze"],
+            model_override="qwen-plus",
+            priority=1,
+            scope="project",
+            scope_id="proj-X",
+        )
+        rules = KeywordRuleService().get_rules_for_request(
+            db_session, tenant_id="t", project_id="proj-X"
+        )
+        router = KeywordRouter(db_rules=rules)
+
+        model, rule = router.get_project_scoped_hint(
+            [{"role": "user", "content": "please analyze the q4 results"}],
+            requested_model="auto",
+        )
+        assert rule == "route_analyze_to_qwen"
+        assert model == "qwen-plus"
+
+    def test_tenant_rule_ignored(self, db_session):
+        # Tenant rules carry a smaller offset (+5_000_000) and must
+        # NOT win the project-scope pre-check — they're handled later
+        # in the regular keyword pass.
+        _insert_keyword_rule(
+            db_session,
+            name="tenant_rule",
+            keywords=["analyze"],
+            model_override="qwen-plus",
+            priority=1,
+            scope="tenant",
+            scope_id="t",
+        )
+        rules = KeywordRuleService().get_rules_for_request(
+            db_session, tenant_id="t", project_id="proj-X"
+        )
+        router = KeywordRouter(db_rules=rules)
+
+        model, rule = router.get_project_scoped_hint(
+            [{"role": "user", "content": "please analyze the q4 results"}],
+            requested_model="gpt-4o-mini",
+        )
+        assert model == "gpt-4o-mini"
+        assert rule is None
+
+    def test_default_rules_ignored(self):
+        # DEFAULT_RULES top out at priority=10 — far below the floor —
+        # so a stock router with no DB rules has nothing to contribute
+        # at the project layer.
+        router = KeywordRouter()
+        model, rule = router.get_project_scoped_hint(
+            [{"role": "user", "content": "please debug this function"}],
+            requested_model="claude-3-5-sonnet-20241022",
+        )
+        assert model == "claude-3-5-sonnet-20241022"
+        assert rule is None
+
+    def test_allowed_providers_filters_project_rule(self, db_session):
+        # When the project rule's target provider is excluded by the
+        # request's allowed_providers, the pre-check must defer so the
+        # downstream layers can pick a different route instead of
+        # silently overriding with a forbidden provider.
+        _insert_keyword_rule(
+            db_session,
+            name="route_to_anthropic",
+            keywords=["analyze"],
+            model_override="claude-3-5-sonnet-20241022",
+            priority=1,
+            scope="project",
+            scope_id="proj-X",
+        )
+        rules = KeywordRuleService().get_rules_for_request(
+            db_session, tenant_id="t", project_id="proj-X"
+        )
+        router = KeywordRouter(db_rules=rules)
+
+        model, rule = router.get_project_scoped_hint(
+            [{"role": "user", "content": "please analyze the q4 results"}],
+            requested_model="gpt-4o-mini",
+            allowed_providers=frozenset(["openai"]),
+        )
+        assert model == "gpt-4o-mini"
+        assert rule is None
+
+    def test_no_match_returns_requested_model(self, db_session):
+        _insert_keyword_rule(
+            db_session,
+            name="route_compare",
+            keywords=["compare"],
+            model_override="qwen-plus",
+            priority=1,
+            scope="project",
+            scope_id="proj-X",
+        )
+        rules = KeywordRuleService().get_rules_for_request(
+            db_session, tenant_id="t", project_id="proj-X"
+        )
+        router = KeywordRouter(db_rules=rules)
+        model, rule = router.get_project_scoped_hint(
+            [{"role": "user", "content": "hello"}],
+            requested_model="auto",
+        )
+        assert model == "auto"
+        assert rule is None
