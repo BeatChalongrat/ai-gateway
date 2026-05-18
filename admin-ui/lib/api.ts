@@ -59,7 +59,11 @@ const _inflight = new Map<string, Promise<any>>();
 async function request(path: string, options: RequestInit = {}) {
   const method = (options.method || "GET").toUpperCase();
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    // Explicit charset matches the backend's UTF8JSONResponse
+    // contract — browsers default to UTF-8 anyway, but pinning it
+    // here keeps the wire signal unambiguous if a proxy ever
+    // synthesises a different default.
+    "Content-Type": "application/json; charset=utf-8",
     ...(options.headers as Record<string, string>),
   };
 

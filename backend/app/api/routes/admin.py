@@ -487,7 +487,7 @@ def create_policy(
         profile_id=body.profile_id,
         name=body.name,
         action=body.action,
-        rules_json=json.dumps(body.rules),
+        rules_json=json.dumps(body.rules, ensure_ascii=False),
     )
     session.add(row)
     session.flush()
@@ -517,7 +517,7 @@ def update_policy(
     if body.action is not None:
         row.action = body.action
     if body.rules is not None:
-        row.rules_json = json.dumps(body.rules)
+        row.rules_json = json.dumps(body.rules, ensure_ascii=False)
     session.flush()
     return {
         "profile_id": row.profile_id,

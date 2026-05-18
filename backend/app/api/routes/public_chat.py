@@ -716,7 +716,13 @@ async def chat_completions(
                 return "", []
 
         def _emit_chunk(body_text: str) -> str:
-            """Serialise a content-delta SSE frame."""
+            """Serialise a content-delta SSE frame.
+
+            ``ensure_ascii=False`` keeps Thai / CJK content in the
+            stream as UTF-8 instead of ``\\uXXXX`` escapes — matches
+            the project-wide UTF8JSONResponse contract and reads
+            cleanly when piping the stream through ``curl``.
+            """
             return "data: {}\n\n".format(
                 json.dumps(
                     {
@@ -731,7 +737,8 @@ async def chat_completions(
                                 "finish_reason": None,
                             }
                         ],
-                    }
+                    },
+                    ensure_ascii=False,
                 )
             )
 
@@ -1103,7 +1110,7 @@ async def chat_completions(
                 "delta": {},
                 "finish_reason": final_finish_reason,
             }],
-        }))
+        }, ensure_ascii=False))
         yield "data: [DONE]\n\n"
 
     # Headers are sealed before the generator runs; they describe the

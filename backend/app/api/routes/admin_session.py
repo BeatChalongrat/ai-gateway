@@ -258,7 +258,7 @@ def _attach_csrf(
     redis = session_manager._redis  # intentionally reach in; narrow API
     key = f"session:{sid}"
     ttl = redis.ttl(key)
-    redis.set(key, json.dumps(payload), ex=max(ttl, 1))
+    redis.set(key, json.dumps(payload, ensure_ascii=False), ex=max(ttl, 1))
 
 
 # ---------------------------------------------------------------------------

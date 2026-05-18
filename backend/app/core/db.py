@@ -52,6 +52,17 @@ print(
     flush=True,
 )
 
+# Pin client_encoding=utf8 explicitly on Postgres. The postgres:16
+# image we use defaults to UTF-8, so this is belt-and-braces — but
+# making the contract explicit at the SQLAlchemy boundary survives a
+# future psycopg release or a non-default image. SQLite (used by the
+# in-memory test engine) doesn't accept this connect_arg, so we
+# guard on the URL scheme.
+_is_postgres = settings.database_url.startswith(
+    ("postgres://", "postgresql://", "postgresql+")
+)
+_connect_args = {"client_encoding": "utf8"} if _is_postgres else {}
+
 engine = create_engine(
     settings.database_url,
     future=True,
@@ -60,6 +71,7 @@ engine = create_engine(
     pool_timeout=10,
     pool_recycle=300,
     pool_pre_ping=True,
+    connect_args=_connect_args,
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

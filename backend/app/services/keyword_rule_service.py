@@ -97,7 +97,10 @@ class KeywordRuleService:
 
     @staticmethod
     def serialize_keywords(keywords: list[str]) -> str:
-        return json.dumps(keywords)
+        # Keyword rules routinely contain Thai / CJK substrings — keep
+        # the on-disk bytes legible (and 3-6x smaller than the
+        # ``\uXXXX`` form) so admin UI edits round-trip cleanly.
+        return json.dumps(keywords, ensure_ascii=False)
 
     @staticmethod
     def deserialize_keywords(raw: str | None) -> list[str]:
