@@ -35,7 +35,7 @@ const signupSlides: Slide[] = [
       "Route automatically to the best model for each request — based on cost, latency, or quality.",
     stats: [
       { value: "14", label: "Providers" },
-      { value: "22", label: "Detectors" },
+      { value: "30", label: "Detectors" },
       { value: "No expiry", label: "Tokens" },
     ],
   },
