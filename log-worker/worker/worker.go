@@ -94,7 +94,20 @@ var (
 		Name: "log_worker_flushed_total",
 		Help: "Records successfully written via COPY.",
 	})
+	metricRetryTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "log_worker_retry_total",
+		Help: "COPY retries (post-failure re-attempts before drop).",
+	})
 )
+
+// flushBackoffs is the per-attempt sleep between COPY retries.
+// Length implicitly defines the retry budget (here: 2 retries after
+// the initial attempt → up to 3 attempts total). Sized so a short
+// Postgres restart (~1s) is absorbed without dropping a batch.
+var flushBackoffs = []time.Duration{
+	100 * time.Millisecond,
+	500 * time.Millisecond,
+}
 
 // New constructs a worker but does NOT start the background flusher.
 // Call Start() once after registering the gRPC server so the channel
@@ -204,14 +217,36 @@ func (w *Worker) runFlusher() {
 		size := len(batch)
 		metricBatchSize.Observe(float64(size))
 
+		// Retry the COPY a couple of times before dropping the batch.
+		// A short Postgres restart (graceful reload, primary-failover
+		// promotion, network blip) often falls inside the backoff
+		// budget, and audit completeness > liveness on a small
+		// recoverable outage.
 		start := time.Now()
-		err := insertFn(w.cfg.DB, batch)
+		var err error
+		for attempt := 0; attempt <= len(flushBackoffs); attempt++ {
+			if attempt > 0 {
+				metricRetryTotal.Inc()
+				time.Sleep(flushBackoffs[attempt-1])
+			}
+			err = insertFn(w.cfg.DB, batch)
+			if err == nil {
+				break
+			}
+			log.Printf(
+				"flush attempt %d/%d failed batch=%d err=%v",
+				attempt+1, len(flushBackoffs)+1, size, err,
+			)
+		}
 		elapsedMS := float64(time.Since(start).Milliseconds())
 		metricInsertLatency.Observe(elapsedMS)
 
 		if err != nil {
 			metricInsertErrors.Inc()
-			log.Printf("flush failed batch=%d err=%v", size, err)
+			log.Printf(
+				"flush exhausted retries batch=%d dropping records last_err=%v",
+				size, err,
+			)
 		} else {
 			w.flushedTotal.Add(int64(size))
 			metricFlushedTotal.Add(float64(size))
