@@ -98,6 +98,10 @@ def build_request_log_orm(record: RequestRecord) -> RequestLogORM:
         output_final=record.output_final,
         dlp_findings_json=record.dlp_findings_json,
         input_raw_encrypted=record.input_raw_encrypted,
+        fallback_used=bool(record.fallback_used),
+        fallback_attempts=record.fallback_attempts,
+        original_provider=record.original_provider,
+        original_model=record.original_model,
     )
 
 

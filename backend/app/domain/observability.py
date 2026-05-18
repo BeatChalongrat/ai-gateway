@@ -92,6 +92,16 @@ class RequestRecord:
     # 4-stage trace). See ``request_log.py`` column docstring.
     input_raw_encrypted: str | None = None
 
+    # Phase-2 fallback routing. ``provider`` / ``model`` describe what
+    # *answered*; ``original_provider`` / ``original_model`` describe
+    # what the routing engine originally picked. Equal on non-fallback
+    # requests (set by the orchestrator on every success path).
+    # ``fallback_used`` is already declared above as a legacy field —
+    # the Phase-2 wiring just starts populating it for real.
+    fallback_attempts: str | None = None  # JSON-encoded list
+    original_provider: str | None = None
+    original_model: str | None = None
+
     def complete(
         self,
         status: RequestStatus = RequestStatus.SUCCESS,
