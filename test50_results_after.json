@@ -1,0 +1,1089 @@
+[
+  {
+    "id": "T01",
+    "prompt": "ช่วยสรุปข้อความนี้ให้หน่อย: ลูกค้า Somchai อีเมล somchai@test.com แจ้งว่าระบบเข้าไม่ได้",
+    "expected": [
+      "somchai@test.com"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุปข้อความนี้ให้หน่อย: ลูกค้า <r0> อีเมล <r1> แจ้งว่าระบบเข้าไม่ได้",
+    "output_raw": "ลูกค้า <r0> ได้ส่งอีเมล <r1> แจ้งว่ามีปัญหาเข้าใช้งานระบบไม่ได้",
+    "output_final": "ลูกค้า Somchai ได้ส่งอีเมล somchai@test.com แจ้งว่ามีปัญหาเข้าใช้งานระบบไม่ได้",
+    "mask_hits": [
+      "somchai@test.com"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T02",
+    "prompt": "ช่วยเขียนข้อความตอบกลับลูกค้า somchai@test.com ว่าเราได้รับเรื่องแล้ว",
+    "expected": [
+      "somchai@test.com"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยเขียนข้อความตอบกลับลูกค้า <r0> ว่าเราได้รับเรื่องแล้ว",
+    "output_raw": "เรียนคุณ <r0>,\n\nเราขอขอบคุณที่ติดต่อเรา ตอนนี้เราได้รับเรื่องของท่านเรียบร้อยแล้ว และจะดำเนินการสอบสวนและติดต่อกลับโดยเร็วที่สุด\n\nหากท่านมีคำถามเพิ่มเติม สามารถติดต่อเราได้ตลอดเวลา\n\nขอบคุณครับ/ค่ะ\n\n[ชื่อคุณ]  \n[ตำแหน่ง]  \n[บริษัท]  \n[เบอร์ติดต่อ]  \n[อีเมล]  ",
+    "output_final": "เรียนคุณ somchai@test.com,\n\nเราขอขอบคุณที่ติดต่อเรา ตอนนี้เราได้รับเรื่องของท่านเรียบร้อยแล้ว และจะดำเนินการสอบสวนและติดต่อกลับโดยเร็วที่สุด\n\nหากท่านมีคำถามเพิ่มเติม สามารถติดต่อเราได้ตลอดเวลา\n\nขอบคุณครับ/ค่ะ\n\n[ชื่อคุณ]  \n[ตำแหน่ง]  \n[บริษัท]  \n[เบอร์ติดต่อ]  \n[อีเมล]  ",
+    "mask_hits": [
+      "somchai@test.com"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T03",
+    "prompt": "ช่วย rewrite ให้สุภาพ: คุณสมชาย เบอร์ 081-234-5678 แจ้งว่าชำระเงินแล้วแต่ยังไม่ได้รับสินค้า",
+    "expected": [
+      "081-234-5678"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite ให้สุภาพ: <r0> <r1> แจ้งว่าชำระเงินแล้วแต่ยังไม่ได้รับสินค้า",
+    "output_raw": "เรียน <r0> <r1> \n\nดิฉันขอแจ้งว่าได้ดำเนินการชำระเงินเรียบร้อยแล้ว แต่ยังไม่ได้รับสินค้ามือถือค่ะ \n\nขอความกรุณาตรวจสอบสถานะการจัดส่งให้ด้วยนะคะ \n\nขอบคุณค่ะ",
+    "output_final": "เรียน คุณสมชาย เบอร์ 081-234-5678 \n\nดิฉันขอแจ้งว่าได้ดำเนินการชำระเงินเรียบร้อยแล้ว แต่ยังไม่ได้รับสินค้ามือถือค่ะ \n\nขอความกรุณาตรวจสอบสถานะการจัดส่งให้ด้วยนะคะ \n\nขอบคุณค่ะ",
+    "mask_hits": [
+      "081-234-5678"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T04",
+    "prompt": "ช่วยแปลเป็นอังกฤษ: ลูกค้าชื่อวิภา ติดต่อกลับที่ 089-111-2222",
+    "expected": [
+      "089-111-2222"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยแปลเป็นอังกฤษ: ลูกค้าชื่อวิภา ติดต่อกลับที่ <r0>",
+    "output_raw": "The customer named Wipha can be reached at <r0>.",
+    "output_final": "The customer named Wipha can be reached at 089-111-2222.",
+    "mask_hits": [
+      "089-111-2222"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T05",
+    "prompt": "Please summarize this message: John Doe, john@test.com, called about a login issue.",
+    "expected": [
+      "john@test.com"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease summarize this message: <r0>, <r1>, called about a login issue.",
+    "output_raw": "<r0> and <r1> called regarding a login issue.",
+    "output_final": "John Doe and john@test.com called regarding a login issue.",
+    "mask_hits": [
+      "john@test.com"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T06",
+    "prompt": "Please rewrite politely: Sarah Lee can be contacted at +66 89 111 2222.",
+    "expected": [
+      "+66 89 111 2222"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease rewrite politely: <r0> can be contacted at <r1>.",
+    "output_raw": "You may reach out to <r0> at <r1>.",
+    "output_final": "You may reach out to Sarah Lee at +66 89 111 2222.",
+    "mask_hits": [
+      "+66 89 111 2222"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T07",
+    "prompt": "ช่วยสรุป customer profile: Somchai Jaidee, email somchai.j@example.com, phone 0812345678",
+    "expected": [
+      "somchai.j@example.com",
+      "0812345678"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป customer profile: <r0>, email <r1>, phone <r2>",
+    "output_raw": "เพื่อสรุป customer profile สำหรับข้อมูลที่ระบุ:\n\n- ชื่อ: <r0>\n- อีเมล: <r1>\n- เบอร์โทรศัพท์: <r2>\n\nหากต้องการรายละเอียดเพิ่มเติมหรือต้องการให้ช่วยอะไรเพิ่มเติม แจ้งได้เลย!",
+    "output_final": "เพื่อสรุป customer profile สำหรับข้อมูลที่ระบุ:\n\n- ชื่อ: Somchai Jaidee\n- อีเมล: somchai.j@example.com\n- เบอร์โทรศัพท์: 0812345678\n\nหากต้องการรายละเอียดเพิ่มเติมหรือต้องการให้ช่วยอะไรเพิ่มเติม แจ้งได้เลย!",
+    "mask_hits": [
+      "somchai.j@example.com",
+      "0812345678"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T08",
+    "prompt": "ช่วยทำข้อความนี้ให้อ่านง่ายขึ้น: ติดต่อ finance@abc.co.th ได้เลยครับ",
+    "expected": [
+      "finance@abc.co.th"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยทำข้อความนี้ให้อ่านง่ายขึ้น: ติดต่อ <r0> ได้เลยครับ",
+    "output_raw": "ติดต่อ <r0> ได้เลยครับ!",
+    "output_final": "ติดต่อ finance@abc.co.th ได้เลยครับ!",
+    "mask_hits": [
+      "finance@abc.co.th"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T09",
+    "prompt": "ช่วยเขียนคำตอบสั้นๆ: ลูกค้าแจ้งว่า email john.doe@company.com ใช้งานไม่ได้",
+    "expected": [
+      "john.doe@company.com"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยเขียนคำตอบสั้นๆ: ลูกค้าแจ้งว่า email <r0> ใช้งานไม่ได้",
+    "output_raw": "ขอบคุณที่แจ้งให้ทราบค่ะ เราจะตรวจสอบปัญหาที่เกิดขึ้นกับ email <r0> และจะแจ้งผลกลับโดยเร็วที่สุดค่ะ",
+    "output_final": "ขอบคุณที่แจ้งให้ทราบค่ะ เราจะตรวจสอบปัญหาที่เกิดขึ้นกับ email john.doe@company.com และจะแจ้งผลกลับโดยเร็วที่สุดค่ะ",
+    "mask_hits": [
+      "john.doe@company.com"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T10",
+    "prompt": "ช่วยแปลข้อความนี้: My phone number is 080-123-4567 and I cannot access my account.",
+    "expected": [
+      "080-123-4567"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยแปลข้อความนี้: My phone number is <r0> and I cannot access my account.",
+    "output_raw": "หมายเลขโทรศัพท์ของฉันคือ <r0> และฉันไม่สามารถเข้าถึงบัญชีของฉันได้ค่ะ/ครับ",
+    "output_final": "หมายเลขโทรศัพท์ของฉันคือ 080-123-4567 และฉันไม่สามารถเข้าถึงบัญชีของฉันได้ค่ะ/ครับ",
+    "mask_hits": [
+      "080-123-4567"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T11",
+    "prompt": "ช่วยสรุปเคสนี้: เลขบัตรประชาชน 1101700203451 ใช้ยืนยันตัวตนไม่ได้",
+    "expected": [
+      "1101700203451"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุปเคสนี้: เลขบัตรประชาชน <r0> ใช้ยืนยันตัวตนไม่ได้",
+    "output_raw": "เคสนี้เกี่ยวกับการใช้เลขบัตรประชาชน <r0> ที่ไม่สามารถใช้ยืนยันตัวตนได้ อาจเกิดจากสาเหตุต่างๆ เช่น ข้อมูลไม่ตรงกับฐานข้อมูล หรือระบบการยืนยันตัวตนมีปัญหา จำเป็นต้องตรวจสอบข้อมูลและแก้ไขปัญหาที่เกิดขึ้นเพื่อให้สามารถยืนยันตัวตนได้.",
+    "output_final": "เคสนี้เกี่ยวกับการใช้เลขบัตรประชาชน 1101700203451 ที่ไม่สามารถใช้ยืนยันตัวตนได้ อาจเกิดจากสาเหตุต่างๆ เช่น ข้อมูลไม่ตรงกับฐานข้อมูล หรือระบบการยืนยันตัวตนมีปัญหา จำเป็นต้องตรวจสอบข้อมูลและแก้ไขปัญหาที่เกิดขึ้นเพื่อให้สามารถยืนยันตัวตนได้.",
+    "mask_hits": [
+      "1101700203451"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T12",
+    "prompt": "ช่วย rewrite แบบไม่เปิดเผยข้อมูล: ลูกค้าแจ้งเลขบัตรประชาชน 1101700203451 ผิด",
+    "expected": [
+      "1101700203451"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite แบบไม่เปิดเผยข้อมูล: ลูกค้าแจ้งเลขบัตรประชาชน <r0> ผิด",
+    "output_raw": "ลูกค้าแจ้งว่าหมาย<r1>",
+    "output_final": "ลูกค้าแจ้งว่าหมาย<r1>",
+    "mask_hits": [
+      "1101700203451"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": false,
+    "orphan_tokens": [
+      "<r1>"
+    ],
+    "error": null
+  },
+  {
+    "id": "T13",
+    "prompt": "Customer passport AA1234567 has an issue during registration. Please summarize.",
+    "expected": [
+      "AA1234567"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nCustomer passport <r0> has an issue during registration. Please summarize.",
+    "output_raw": "The customer passport <r0> encountered an issue during the registration process. Please provide further details about the nature of the problem for a more comprehensive summary.",
+    "output_final": "The customer passport AA1234567 encountered an issue during the registration process. Please provide further details about the nature of the problem for a more comprehensive summary.",
+    "mask_hits": [
+      "AA1234567"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T14",
+    "prompt": "ช่วยสรุป: passport TH1234567 ถูกใช้สมัครสมาชิกไม่ได้",
+    "expected": [
+      "TH1234567"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป: passport <r0> ถูกใช้สมัครสมาชิกไม่ได้",
+    "output_raw": "สรุป: ไม่สามารถใช้พาสปอร์ต <r0> ในการสมัครสมาชิกได้",
+    "output_final": "สรุป: ไม่สามารถใช้พาสปอร์ต TH1234567 ในการสมัครสมาชิกได้",
+    "mask_hits": [
+      "TH1234567"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T15",
+    "prompt": "ช่วยย่อข้อความนี้: ลูกค้าเกิดวันที่ 12/05/1998 และต้องการแก้ข้อมูลส่วนตัว",
+    "expected": [
+      "12/05/1998"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยย่อข้อความนี้: ลูกค้าเกิดวันที่ <r0> และต้องการแก้ข้อมูลส่วนตัว",
+    "output_raw": "ลูกค้าเกิดวันที่ <r0> ต้องการแก้ข้อมูลส่วนตัว",
+    "output_final": "ลูกค้าเกิดวันที่ 12/05/1998 ต้องการแก้ข้อมูลส่วนตัว",
+    "mask_hits": [
+      "12/05/1998"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T16",
+    "prompt": "ช่วย rewrite: เลขผู้เสียภาษีบริษัท 0105558123456 ใช้เปิดใบกำกับไม่ได้",
+    "expected": [
+      "0105558123456"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite: เลขผู้เสียภาษีบริษัท <r0> ใช้เปิดใบกำกับไม่ได้",
+    "output_raw": "เลขผู้เสียภาษีของบริษัท <r0> ไม่สามารถใช้ในการเปิดใบกำกับได้",
+    "output_final": "เลขผู้เสียภาษีของบริษัท 0105558123456 ไม่สามารถใช้ในการเปิดใบกำกับได้",
+    "mask_hits": [
+      "0105558123456"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T17",
+    "prompt": "ช่วยสรุปข้อความนี้: ทะเบียนรถ กข 1234 กรุงเทพ มีปัญหาในการลงทะเบียน",
+    "expected": [
+      "กข 1234"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุปข้อความนี้: ทะเบียนรถ <r0> กรุงเทพ มีปัญหาในการลงทะเบียน",
+    "output_raw": "ทะเบียนรถ <r0> ในกรุงเทพมีปัญหาในการลงทะเบียน.",
+    "output_final": "ทะเบียนรถ กข 1234 ในกรุงเทพมีปัญหาในการลงทะเบียน.",
+    "mask_hits": [
+      "กข 1234"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T18",
+    "prompt": "ช่วยแปลเป็นอังกฤษ: ลูกค้าแจ้งที่อยู่ 99/88 ถนนสุขุมวิท กรุงเทพ 10110",
+    "expected": [
+      "99/88 ถนนสุขุมวิท กรุงเทพ 10110"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยแปลเป็นอังกฤษ: ลูกค้าแจ้ง<r0>",
+    "output_raw": "The customer reported <r0>.",
+    "output_final": "The customer reported ที่อยู่ 99/88 ถนนสุขุมวิท กรุงเทพ 10110.",
+    "mask_hits": [
+      "99/88 ถนนสุขุมวิท กรุงเทพ 10110"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T19",
+    "prompt": "ช่วยสรุปแบบ professional: ลูกค้ามีโรคเบาหวานและความดันสูง ต้องการเลื่อนนัด",
+    "expected": [],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุปแบบ professional: ลูกค้ามีโรค<r0>และ<r1> ต้องการเลื่อนนัด",
+    "output_raw": "ลูกค้ามีปัญหาสุขภาพเกี่ยวกับโรค <r0> และ <r1> จึงต้องการทำการเลื่อนนัดหมายเพื่อสะดวกในการดูแลสุขภาพของตนเอง",
+    "output_final": "ลูกค้ามีปัญหาสุขภาพเกี่ยวกับโรค เบาหวาน และ ความดันสูง จึงต้องการทำการเลื่อนนัดหมายเพื่อสะดวกในการดูแลสุขภาพของตนเอง",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": true,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T20",
+    "prompt": "ช่วย rewrite ให้ปลอดภัย: ลูกค้าแจ้งข้อมูลสุขภาพว่าเป็นภูมิแพ้รุนแรง",
+    "expected": [],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite ให้ปลอดภัย: ลูกค้าแจ้งข้อมูลสุขภาพว่าเป็น<r0>รุนแรง",
+    "output_raw": "ลูกค้าแจ้งข้อมูลสุขภาพว่าเป็น<r0>ซึ่งมีความรุนแรง",
+    "output_final": "ลูกค้าแจ้งข้อมูลสุขภาพว่าเป็นภูมิแพ้ซึ่งมีความรุนแรง",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": true,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T21",
+    "prompt": "ช่วยสรุปข้อความนี้: บัตรเครดิต 4111 1111 1111 1111 ถูกปฏิเสธตอนชำระเงิน",
+    "expected": [
+      "4111 1111 1111 1111"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุปข้อความนี้: บัตรเครดิต <r0> ถูกปฏิเสธตอนชำระเงิน",
+    "output_raw": "บัตรเครดิต <r0> ไม่ได้รับการอนุมัติในการทำรายการชำระเงิน.",
+    "output_final": "บัตรเครดิต 4111 1111 1111 1111 ไม่ได้รับการอนุมัติในการทำรายการชำระเงิน.",
+    "mask_hits": [
+      "4111 1111 1111 1111"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T22",
+    "prompt": "Please summarize: credit card 5555 5555 5555 4444 failed during checkout.",
+    "expected": [
+      "5555 5555 5555 4444"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease summarize: credit card <r0> failed during checkout.",
+    "output_raw": "The checkout process was unsuccessful due to credit card <r0> failure.",
+    "output_final": "The checkout process was unsuccessful due to credit card 5555 5555 5555 4444 failure.",
+    "mask_hits": [
+      "5555 5555 5555 4444"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T23",
+    "prompt": "ช่วย rewrite: ลูกค้าแจ้งเลขบัญชี 123-4-56789-0 เพื่อขอคืนเงิน",
+    "expected": [
+      "123-4-56789-0"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite: ลูกค้าแจ้งเลขบัญชี <r0> เพื่อขอคืนเงิน",
+    "output_raw": "ลูกค้าได้แจ้งหมายเลขบัญชี <r0> เพื่อขอทำการคืนเงิน",
+    "output_final": "ลูกค้าได้แจ้งหมายเลขบัญชี 123-4-56789-0 เพื่อขอทำการคืนเงิน",
+    "mask_hits": [
+      "123-4-56789-0"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T24",
+    "prompt": "ช่วยสรุป: โอนเงินไปที่บัญชี 987-6-54321-0 แล้วแต่ระบบยังไม่อัปเดต",
+    "expected": [
+      "987-6-54321-0"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป: โอนเงินไปที่บัญชี <r0> แล้วแต่ระบบยังไม่อัปเดต",
+    "output_raw": "สรุป: ได้ทำการโอนเงินไปที่บัญชี <r0> แต่ระบบยังไม่อัปเดตสถานะการโอนเงินค่ะ",
+    "output_final": "สรุป: ได้ทำการโอนเงินไปที่บัญชี 987-6-54321-0 แต่ระบบยังไม่อัปเดตสถานะการโอนเงินค่ะ",
+    "mask_hits": [
+      "987-6-54321-0"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T25",
+    "prompt": "ช่วยแปลเป็นอังกฤษ: PromptPay 0812345678 ยังไม่ได้รับยอดเงิน",
+    "expected": [
+      "0812345678"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยแปลเป็นอังกฤษ: PromptPay <r0> ยังไม่ได้รับยอดเงิน",
+    "output_raw": "The translation is: \"PromptPay <r0> has not yet received the amount of money.\"",
+    "output_final": "The translation is: \"PromptPay 0812345678 has not yet received the amount of money.\"",
+    "mask_hits": [
+      "0812345678"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T26",
+    "prompt": "Please summarize: IBAN DE89370400440532013000 was rejected by the payment system.",
+    "expected": [
+      "DE89370400440532013000"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease summarize: IBAN <r0> was rejected by the payment system.",
+    "output_raw": "The payment system rejected IBAN <r0>.",
+    "output_final": "The payment system rejected IBAN DE89370400440532013000.",
+    "mask_hits": [
+      "DE89370400440532013000"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T27",
+    "prompt": "ช่วยสรุป: เงินเดือน 85,000 บาทต่อเดือน ใช้ประกอบการสมัครสินเชื่อ",
+    "expected": [],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป: เงินเดือน <r0> ใช้ประกอบการสมัครสินเชื่อ",
+    "output_raw": "สรุป: เงินเดือน <r0> เป็นข้อมูลสำคัญที่ใช้ในการสมัครสินเชื่อ เพื่อประเมินความสามารถในการชำระหนี้และการอนุมัติสินเชื่อของผู้สมัคร",
+    "output_final": "สรุป: เงินเดือน 85,000 บาทต่อเดือน เป็นข้อมูลสำคัญที่ใช้ในการสมัครสินเชื่อ เพื่อประเมินความสามารถในการชำระหนี้และการอนุมัติสินเชื่อของผู้สมัคร",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": true,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T28",
+    "prompt": "ช่วย rewrite: ลูกค้าส่งสลิปที่มีเลขบัญชีและยอดเงิน 25,000 บาทมาในแชท",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "ช่วย rewrite: ลูกค้าส่งสลิปที่มีเลขบัญชีและยอดเงิน 25,000 บาทมาในแชท",
+    "input_masked": "ช่วย rewrite: ลูกค้าส่งสลิปที่มีเลขบัญชีและยอดเงิน 25,000 บาทมาในแชท",
+    "output_raw": "ลูกค้าได้ส่งสลิปที่มีเลขบัญชีและยอดเงิน 25,000 บาทผ่านทางแชทมาแล้ว",
+    "output_final": "ลูกค้าได้ส่งสลิปที่มีเลขบัญชีและยอดเงิน 25,000 บาทผ่านทางแชทมาแล้ว",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T29",
+    "prompt": "ช่วยดูว่าข้อความนี้เสี่ยงไหม: API key sk-test-1234567890abcdef หลุดในแชท",
+    "expected": [
+      "sk-test-1234567890abcdef"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยดูว่าข้อความนี้เสี่ยงไหม: API key <r0> หลุดในแชท",
+    "output_raw": "ข้อความที่คุณส่งมามีความเสี่ยง เนื่องจาก API key <r0> อาจถูกใช้โดยบุคคลที่ไม่หวังดีในการเข้าถึงข้อมูลหรือบริการที่ไม่ควรเข้าถึงได้ ควรสงวน<r1> API key และไม่เปิดเผยในที่สาธารณะ หรือแชทที่อาจไม่ปลอดภัย เพื่อป้องกันไม่ให้เกิดปัญหาด้านความปลอดภัย แนะนำให้รีเซ็ต API key นั้นทันทีและสร้าง key ใหม่ขึ้นมาแทน",
+    "output_final": "ข้อความที่คุณส่งมามีความเสี่ยง เนื่องจาก API key sk-test-1234567890abcdef อาจถูกใช้โดยบุคคลที่ไม่หวังดีในการเข้าถึงข้อมูลหรือบริการที่ไม่ควรเข้าถึงได้ ควรสงวน<r1> API key และไม่เปิดเผยในที่สาธารณะ หรือแชทที่อาจไม่ปลอดภัย เพื่อป้องกันไม่ให้เกิดปัญหาด้านความปลอดภัย แนะนำให้รีเซ็ต API key นั้นทันทีและสร้าง key ใหม่ขึ้นมาแทน",
+    "mask_hits": [
+      "sk-test-1234567890abcdef"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [
+      "<r1>"
+    ],
+    "error": null
+  },
+  {
+    "id": "T30",
+    "prompt": "ช่วยสรุป security issue: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx ถูกส่งมา",
+    "expected": [
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป security issue: <r0> ถูกส่งมา",
+    "output_raw": "เรื่อง security issue ที่เกี่ยวกับ <r0> อาจเกี่ยวข้องกับความปลอดภัยของข้อมูลหรือระบบที่มีการเข้าถึง ไม่ว่าจะเป็น การรั่วไหลของข้อมูล การโจมตีจากภายนอก หรือปัญหาที่เกี่ยวกับการจัดการสิทธิ์การเข้าถึง\n\nเพื่อให้ได้ข้อมูลที่ชัดเจนและเหมาะสมเพิ่มเติม คุณสามารถบอกบริบทหรือรายละเอียดเกี่ยวกับ <r0> ได้ไหมครับ?",
+    "output_final": "เรื่อง security issue ที่เกี่ยวกับ Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx อาจเกี่ยวข้องกับความปลอดภัยของข้อมูลหรือระบบที่มีการเข้าถึง ไม่ว่าจะเป็น การรั่วไหลของข้อมูล การโจมตีจากภายนอก หรือปัญหาที่เกี่ยวกับการจัดการสิทธิ์การเข้าถึง\n\nเพื่อให้ได้ข้อมูลที่ชัดเจนและเหมาะสมเพิ่มเติม คุณสามารถบอกบริบทหรือรายละเอียดเกี่ยวกับ Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx ได้ไหมครับ?",
+    "mask_hits": [
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T31",
+    "prompt": "ช่วย rewrite ให้ปลอดภัย: รหัสผ่าน P@ssw0rd123! ใช้งานไม่ได้",
+    "expected": [
+      "P@ssw0rd123!"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite ให้ปลอดภัย: รหัสผ่าน <r0> ใช้งานไม่ได้",
+    "output_raw": "รหัสผ่าน <r0> ไม่ถูกต้องหรือไม่สามารถใช้งานได้",
+    "output_final": "รหัสผ่าน P@ssw0rd123! ไม่ถูกต้องหรือไม่สามารถใช้งานได้",
+    "mask_hits": [
+      "P@ssw0rd123!"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T32",
+    "prompt": "Please summarize this issue: DB connection string postgres://admin:pass123@localhost:5432/app is exposed.",
+    "expected": [
+      "postgres://admin:pass123@localhost:5432/app"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease summarize this issue: DB connection string <r0> is exposed.",
+    "output_raw": "The issue involves the exposure of a database connection string, indicated as <r0>, which poses a security risk. This could potentially allow unauthorized access to the database.",
+    "output_final": "The issue involves the exposure of a database connection string, indicated as postgres://admin:pass123@localhost:5432/app, which poses a security risk. This could potentially allow unauthorized access to the database.",
+    "mask_hits": [
+      "postgres://admin:pass123@localhost:5432/app"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T33",
+    "prompt": "ช่วยทำข้อความนี้ให้สุภาพ: private key -----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY----- ถูก paste มา",
+    "expected": [
+      "-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยทำข้อความนี้ให้สุภาพ: private key <r0> abcdef -----END PRIVATE KEY----- ถูก paste มา",
+    "output_raw": "ข้อความที่สุภาพมากขึ้นสามารถเป็นดังนี้:\n\n\"ขออนุญาตแจ้งว่าได้มีการวางข้อความที่มี Private Key <r0> abcdef -----END PRIVATE KEY----- กรุณาตรวจสอบและดำเนินการตามความเหมาะสมด้วยครับ/ค่ะ\"",
+    "output_final": "ข้อความที่สุภาพมากขึ้นสามารถเป็นดังนี้:\n\n\"ขออนุญาตแจ้งว่าได้มีการวางข้อความที่มี Private Key -----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY----- กรุณาตรวจสอบและดำเนินการตามความเหมาะสมด้วยครับ/ค่ะ\"",
+    "mask_hits": [
+      "-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T34",
+    "prompt": "ช่วยสรุป: GitHub token ghp_1234567890abcdef1234567890abcdef หลุดใน ticket",
+    "expected": [
+      "ghp_1234567890abcdef1234567890abcdef"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป: GitHub token <r0> หลุดใน ticket",
+    "output_raw": "จากข้อมูลที่ให้มา ดูเหมือนว่า GitHub token <r0> หลุดออกไปใน ticket ซึ่งอาจหมายถึงว่า token ที่ใช้ในการเข้าถึง GitHub ถูกเผยแพร่โดยไม่ตั้งใจในที่สาธารณะ เช่น ในกระทู้หรือการสนทนา ทำให้ความปลอดภัยของบัญชีและข้อมูลที่เกี่ยวข้องอาจถูกคุกคามได้ ควรดำเนินการทันที เช่น ยกเลิก token ที่หลุดแล้วสร้างใหม่ รวมถึงตรวจสอบกิจกรรมที่ไม่ปกติในบัญชีด้วย",
+    "output_final": "จากข้อมูลที่ให้มา ดูเหมือนว่า GitHub token ghp_1234567890abcdef1234567890abcdef หลุดออกไปใน ticket ซึ่งอาจหมายถึงว่า token ที่ใช้ในการเข้าถึง GitHub ถูกเผยแพร่โดยไม่ตั้งใจในที่สาธารณะ เช่น ในกระทู้หรือการสนทนา ทำให้ความปลอดภัยของบัญชีและข้อมูลที่เกี่ยวข้องอาจถูกคุกคามได้ ควรดำเนินการทันที เช่น ยกเลิก token ที่หลุดแล้วสร้างใหม่ รวมถึงตรวจสอบกิจกรรมที่ไม่ปกติในบัญชีด้วย",
+    "mask_hits": [
+      "ghp_1234567890abcdef1234567890abcdef"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T35",
+    "prompt": "ช่วยอธิบายความเสี่ยงของข้อความนี้: username admin password admin123 ถูกส่งในแชท",
+    "expected": [
+      "admin123"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยอธิบายความเสี่ยงของข้อความนี้: username admin password <r0> ถูกส่งในแชท",
+    "output_raw": "การส่งข้อความที่มีข้อมูลสำคัญ เช่น username และ password ผ่านแชท มีความเสี่ยงหลายประการที่ควรพิจารณา:\n\n1. **การเข้าถึงไม่อนุญาต**: หากข้อความนี้ถูกส่งไปยังบุคคลที่ไม่เหมาะสม หรือแฮ็กเกอร์ สามารถใช้ข้อมูลนี้ในการเข้าถึงบัญชี admin และอาจทำให้เกิดความเสียหายได้\n\n2. **การขโมยข้อมูล**: ข้อมูลที่สำคัญเช่น username และ password อาจถูกเก็บ<r1>โดยบริการแชท ซึ่งอาจเสี่ยงต่อการถูกขโมยในกรณีที่บริการนั้นถูกแฮ็ก\n\n3. **การบันทึกข้อมูล**: แชทบางบริการอาจมีการบันทึกประวัติการสนทนา ซึ่งอาจทำให้ข้อมูลเหล่านี้ตกไปอยู่ในมือคนที่ไม่ควรได้เห็น\n\n4. **การหลอกลวง**: ผู้ไม่หวังดีอาจแอบอ้างเป็นผู้ใช้ที่มีสิทธิ์เข้าถึงแล้วขอให้ส่งข้อมูลที่ละเอียด เช่น username และ password ผ่านแชท\n\n5. **ขาดการเข้ารหัส**: หากแชทนั้นไม่ได้มีการเข้ารหัสข้อมูล การส่งข้อความที่มีข้อมูลสำคัญอาจถูกดักจับโดยบุคคลภายนอกได้ง่าย\n\nโดยสรุป การแชร์ข้อมูลการเข้าสู่ระบบผ่านแชทถือเป็นความเสี่ยงที่สูง ควรใช้วิธีการที่ปลอดภัยกว่า เช่น การใช้แอปพลิเคชันที่เข้ารหัสหรือระบบการจัดการรหัสผ่าน<r2>",
+    "output_final": "การส่งข้อความที่มีข้อมูลสำคัญ เช่น username และ password ผ่านแชท มีความเสี่ยงหลายประการที่ควรพิจารณา:\n\n1. **การเข้าถึงไม่อนุญาต**: หากข้อความนี้ถูกส่งไปยังบุคคลที่ไม่เหมาะสม หรือแฮ็กเกอร์ สามารถใช้ข้อมูลนี้ในการเข้าถึงบัญชี admin และอาจทำให้เกิดความเสียหายได้\n\n2. **การขโมยข้อมูล**: ข้อมูลที่สำคัญเช่น username และ password อาจถูกเก็บ<r1>โดยบริการแชท ซึ่งอาจเสี่ยงต่อการถูกขโมยในกรณีที่บริการนั้นถูกแฮ็ก\n\n3. **การบันทึกข้อมูล**: แชทบางบริการอาจมีการบันทึกประวัติการสนทนา ซึ่งอาจทำให้ข้อมูลเหล่านี้ตกไปอยู่ในมือคนที่ไม่ควรได้เห็น\n\n4. **การหลอกลวง**: ผู้ไม่หวังดีอาจแอบอ้างเป็นผู้ใช้ที่มีสิทธิ์เข้าถึงแล้วขอให้ส่งข้อมูลที่ละเอียด เช่น username และ password ผ่านแชท\n\n5. **ขาดการเข้ารหัส**: หากแชทนั้นไม่ได้มีการเข้ารหัสข้อมูล การส่งข้อความที่มีข้อมูลสำคัญอาจถูกดักจับโดยบุคคลภายนอกได้ง่าย\n\nโดยสรุป การแชร์ข้อมูลการเข้าสู่ระบบผ่านแชทถือเป็นความเสี่ยงที่สูง ควรใช้วิธีการที่ปลอดภัยกว่า เช่น การใช้แอปพลิเคชันที่เข้ารหัสหรือระบบการจัดการรหัสผ่าน<r2>",
+    "mask_hits": [
+      "admin123"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": false,
+    "orphan_tokens": [
+      "<r1>",
+      "<r2>"
+    ],
+    "error": null
+  },
+  {
+    "id": "T36",
+    "prompt": "ช่วย rewrite: SMTP password smtp_pass_123456 ถูกแชร์ในข้อความ",
+    "expected": [
+      "smtp_pass_123456"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite: SMTP password <r0> ถูกแชร์ในข้อความ",
+    "output_raw": "SMTP password <r0> ได้ถูกแชร์ในข้อความ",
+    "output_final": "SMTP password smtp_pass_123456 ได้ถูกแชร์ในข้อความ",
+    "mask_hits": [
+      "smtp_pass_123456"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T37",
+    "prompt": "ช่วยสรุป customer profile: Somchai, somchai@test.com, 1101700203451, เบอร์ 0812345678",
+    "expected": [
+      "somchai@test.com",
+      "1101700203451",
+      "0812345678"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป customer profile: Somchai, <r0>, <r1>, เบอร์ <r2>",
+    "output_raw": "Customer Profile: \n\n- ชื่อ: Somchai\n- รายละเอียดเพิ่มเติม: <r0>, <r1>\n- เบอร์โทรศัพท์: <r2> \n\nหากต้องการข้อมูลเพิ่มเติมหรือสถิติอื่น ๆ สามารถระบุได้เลย!",
+    "output_final": "Customer Profile: \n\n- ชื่อ: Somchai\n- รายละเอียดเพิ่มเติม: somchai@test.com, 1101700203451\n- เบอร์โทรศัพท์: 0812345678 \n\nหากต้องการข้อมูลเพิ่มเติมหรือสถิติอื่น ๆ สามารถระบุได้เลย!",
+    "mask_hits": [
+      "somchai@test.com",
+      "1101700203451",
+      "0812345678"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T38",
+    "prompt": "Please summarize: John Doe, john@test.com, passport AA1234567, password P@ssw0rd123!",
+    "expected": [
+      "john@test.com",
+      "AA1234567",
+      "P@ssw0rd123!"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease summarize: <r0>, <r1>, passport <r2>, password <r3>",
+    "output_raw": "It appears you are asking for a summary that involves specific placeholders. However, without additional context regarding what <r0>, <r1>, <r2>, and <r3> represent, it’s difficult to provide a meaningful summary. Please provide more details or explanation related to those placeholders, and I would be happy to help!",
+    "output_final": "It appears you are asking for a summary that involves specific placeholders. However, without additional context regarding what John Doe, john@test.com, AA1234567, and P@ssw0rd123! represent, it’s difficult to provide a meaningful summary. Please provide more details or explanation related to those placeholders, and I would be happy to help!",
+    "mask_hits": [
+      "john@test.com",
+      "AA1234567",
+      "P@ssw0rd123!"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T39",
+    "prompt": "ช่วย rewrite: ลูกค้าให้ email john@test.com และเลขบัตร 4111 1111 1111 1111 มาในแชท",
+    "expected": [
+      "john@test.com",
+      "4111 1111 1111 1111"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite: <r0> email <r1> และเลขบัตร <r2> มาในแชท",
+    "output_raw": "กรุณาส่งอีเมล <r0> และหมายเลขบัตร <r2> มาในแชทค่ะ",
+    "output_final": "กรุณาส่งอีเมล ลูกค้าให้ และหมายเลขบัตร 4111 1111 1111 1111 มาในแชทค่ะ",
+    "mask_hits": [
+      "john@test.com",
+      "4111 1111 1111 1111"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": false,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T40",
+    "prompt": "ช่วยสรุป: ลูกค้า Somchai ใช้บัญชี 123-4-56789-0 และเบอร์ 0812345678",
+    "expected": [
+      "123-4-56789-0",
+      "0812345678"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป: ลูกค้า <r0> ใช้บัญชี <r1> และเบอร์ <r2>",
+    "output_raw": "ลูกค้า <r0> ใช้บัญชี <r1> และเบอร์โทรศัพท์ <r2> ในการติดต่อหรือทำธุรกรรม.",
+    "output_final": "ลูกค้า Somchai ใช้บัญชี 123-4-56789-0 และเบอร์โทรศัพท์ 0812345678 ในการติดต่อหรือทำธุรกรรม.",
+    "mask_hits": [
+      "123-4-56789-0",
+      "0812345678"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T41",
+    "prompt": "ช่วยตอบแบบสุภาพ: ลูกค้าส่ง API key sk-test-abc123 และ email somchai@test.com มาในแชท",
+    "expected": [
+      "sk-test-abc123",
+      "somchai@test.com"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยตอบแบบสุภาพ: ลูกค้าส่ง API key sk-test-abc123 และ email <r0> มาในแชท",
+    "output_raw": "เรียนคุณลูกค้า,\n\nขอบคุณที่ส่งข้อมูล API key และ email มาให้เรา ในการ<r1>ความปลอดภัย ขอความกรุณาอย่าเปิดเผยข้อมูลเหล่านี้ในที่สาธารณะ หากมีคำถามหรือข้อสงสัยเพิ่มเติม สามารถสอบถามได้เลยนะคะ\n\nขอบคุณค่ะ  \n[ชื่อของคุณ]  ",
+    "output_final": "เรียนคุณลูกค้า,\n\nขอบคุณที่ส่งข้อมูล API key และ email มาให้เรา ในการ<r1>ความปลอดภัย ขอความกรุณาอย่าเปิดเผยข้อมูลเหล่านี้ในที่สาธารณะ หากมีคำถามหรือข้อสงสัยเพิ่มเติม สามารถสอบถามได้เลยนะคะ\n\nขอบคุณค่ะ  \n[ชื่อของคุณ]  ",
+    "mask_hits": [
+      "somchai@test.com"
+    ],
+    "mask_misses": [
+      "sk-test-abc123"
+    ],
+    "false_positive_mask": false,
+    "unmask_ok": false,
+    "orphan_tokens": [
+      "<r1>"
+    ],
+    "error": null
+  },
+  {
+    "id": "T42",
+    "prompt": "ช่วยแปลเป็นอังกฤษ: ลูกค้าแจ้งเลขบัตรประชาชน 1101700203451 และเบอร์ 0899998888",
+    "expected": [
+      "1101700203451",
+      "0899998888"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยแปลเป็นอังกฤษ: ลูกค้าแจ้งเลขบัตรประชาชน <r0> และเบอร์ <r1>",
+    "output_raw": "The customer provided their ID card number <r0> and phone number <r1>.",
+    "output_final": "The customer provided their ID card number 1101700203451 and phone number 0899998888.",
+    "mask_hits": [
+      "1101700203451",
+      "0899998888"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T43",
+    "prompt": "ช่วยตรวจ grammar: My email is test@example.com and I cannot login.",
+    "expected": [
+      "test@example.com"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยตรวจ grammar: My email is <r0> and I cannot login.",
+    "output_raw": "ประโยคที่คุณให้มาถูกต้องตามหลักไวยากรณ์แล้ว แต่สามารถปรับให้ฟังดูเป็นทางการหรือชัดเจนยิ่งขึ้นได้ เช่น:\n\n\"My email address is <r0>, and I cannot log in.\"\n\nการใช้ \"log in\" แทน \"login\" นั้นถูกต้องมากขึ้นในบริบทนี้ เนื่องจาก \"log in\" เป็นคำกริยา ส่วน \"login\" เป็นคำนาม โดยรวมแล้ว ประโยคของคุณก็สามารถเข้าใจได้ดีอยู่แล้วค่ะ",
+    "output_final": "ประโยคที่คุณให้มาถูกต้องตามหลักไวยากรณ์แล้ว แต่สามารถปรับให้ฟังดูเป็นทางการหรือชัดเจนยิ่งขึ้นได้ เช่น:\n\n\"My email address is test@example.com, and I cannot log in.\"\n\nการใช้ \"log in\" แทน \"login\" นั้นถูกต้องมากขึ้นในบริบทนี้ เนื่องจาก \"log in\" เป็นคำกริยา ส่วน \"login\" เป็นคำนาม โดยรวมแล้ว ประโยคของคุณก็สามารถเข้าใจได้ดีอยู่แล้วค่ะ",
+    "mask_hits": [
+      "test@example.com"
+    ],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T44",
+    "prompt": "ช่วยแปล: เบอร์ติดต่อคือ 000-000-0000 อันนี้เป็นข้อมูลตัวอย่าง",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "ช่วยแปล: เบอร์ติดต่อคือ 000-000-0000 อันนี้เป็นข้อมูลตัวอย่าง",
+    "input_masked": "ช่วยแปล: เบอร์ติดต่อคือ 000-000-0000 อันนี้เป็นข้อมูลตัวอย่าง",
+    "output_raw": "เบอร์ติดต่อคือ 000-000-0000 ซึ่งเป็นข้อมูลตัวอย่างค่ะ",
+    "output_final": "เบอร์ติดต่อคือ 000-000-0000 ซึ่งเป็นข้อมูลตัวอย่างค่ะ",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T45",
+    "prompt": "ช่วยอธิบาย regex สำหรับตรวจ email โดยไม่ใช้ข้อมูลจริง",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "ช่วยอธิบาย regex สำหรับตรวจ email โดยไม่ใช้ข้อมูลจริง",
+    "input_masked": "ช่วยอธิบาย regex สำหรับตรวจ email โดยไม่ใช้ข้อมูลจริง",
+    "output_raw": "แน่นอน! Regex หรือ Regular Expression เป็นเครื่องมือที่ใช้สำหรับการค้นหาและจับคู่รูปแบบข้อความ โดยเฉพาะอย่างยิ่งในงานด้านการตรวจสอบและการจัดการข้อมูล เช่น การตรวจสอบรูปแบบ[REDACTED]\n\nสำหรับการตรวจสอบ[REDACTED]\n\n```\n^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.([a-zA-Z]{2,})$\n```\n\nมาดูรายละเอียดส่วนประกอบกัน:\n\n1. `^` - หมายถึงจุดเริ่มต้นของสตริง (string) \n2. `[a-zA-Z0-9._%+-]+` - หมายถึงตัวอักษรที่อนุญาตให้ใช้ในคนส่วนต้น (local part) ของ email:\n   - `a-z` คือ ตัวอักษรภาษาอังกฤษตัวเล็ก \n   - `A-Z` คือ ตัวอักษรภาษาอังกฤษตัวใหญ่ \n   - `0-9` คือ ตัวเลข \n   - `._%+-` คือ สัญลักษณ์ที่อนุญาตให้ใช้ได้\n   - `+` หมายถึงว่าต้องมีอย่างน้อย 1 ตัว\n3. `@` - หมายถึงตัวอักษร “@” ที่แยกระหว่างคนส่วนต้นและโดเมน\n4. `[a-zA-Z0-9.-]+` - หมายถึงโดเมน:\n   - `a-z` และ `A-Z` คือ ตัวอักษรภาษาอังกฤษ\n   - `0-9` คือ ตัวเลข \n   - `.-` คือ สัญลักษณ์ที่อนุญาตให้ใช้ได้ในโดเมน (จุดและขีด)\n   - `+` หมายถึงว่าต้องมีอย่างน้อย 1 ตัว\n5. `\\.` - หมายถึงจุด (.) ที่จะคั่นระหว่างชื่อโดเมนกับส่วนที่เป็นนามสกุล (TLD)\n6. `([a-zA-Z]{2,})` - หมายถึงนามสกุล (TLD):\n   - `[a-zA-Z]` คือ ตัวอักษรภาษาอังกฤษ\n   - `{2,}` หมายถึงต้องมีตัวอักษรอย่างน้อย 2 ตัวขึ้นไป\n7. `$` - หมายถึงจุดสิ้นสุดของสตริง \n\nด้วย regex นี้ ผู้ใช้งานสามารถตรวจสอบรูปแบบของ email ได้อย่างมีประสิทธิภาพ โดยทำให้แน่ใจได้ว่า email ที่ป้อนเข้ามานั้นอยู่ในรูปแบบที่ถูกต้องตามกฎที่กำหนดไว้นั่นเอง\n\nโปรดทราบว่า regex นี้อาจจะไม่ครอบคลุมทุกรูปแบบ email ที่ถูกต้องตามมาตรฐาน แต่ถือได้ว่าเป็นการตรวจสอบที่ยอมรับได้ในระดับหนึ่ง",
+    "output_final": "แน่นอน! Regex หรือ Regular Expression เป็นเครื่องมือที่ใช้สำหรับการค้นหาและจับคู่รูปแบบข้อความ โดยเฉพาะอย่างยิ่งในงานด้านการตรวจสอบและการจัดการข้อมูล เช่น การตรวจสอบรูปแบบ[REDACTED]\n\nสำหรับการตรวจสอบ[REDACTED]\n\n```\n^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.([a-zA-Z]{2,})$\n```\n\nมาดูรายละเอียดส่วนประกอบกัน:\n\n1. `^` - หมายถึงจุดเริ่มต้นของสตริง (string) \n2. `[a-zA-Z0-9._%+-]+` - หมายถึงตัวอักษรที่อนุญาตให้ใช้ในคนส่วนต้น (local part) ของ email:\n   - `a-z` คือ ตัวอักษรภาษาอังกฤษตัวเล็ก \n   - `A-Z` คือ ตัวอักษรภาษาอังกฤษตัวใหญ่ \n   - `0-9` คือ ตัวเลข \n   - `._%+-` คือ สัญลักษณ์ที่อนุญาตให้ใช้ได้\n   - `+` หมายถึงว่าต้องมีอย่างน้อย 1 ตัว\n3. `@` - หมายถึงตัวอักษร “@” ที่แยกระหว่างคนส่วนต้นและโดเมน\n4. `[a-zA-Z0-9.-]+` - หมายถึงโดเมน:\n   - `a-z` และ `A-Z` คือ ตัวอักษรภาษาอังกฤษ\n   - `0-9` คือ ตัวเลข \n   - `.-` คือ สัญลักษณ์ที่อนุญาตให้ใช้ได้ในโดเมน (จุดและขีด)\n   - `+` หมายถึงว่าต้องมีอย่างน้อย 1 ตัว\n5. `\\.` - หมายถึงจุด (.) ที่จะคั่นระหว่างชื่อโดเมนกับส่วนที่เป็นนามสกุล (TLD)\n6. `([a-zA-Z]{2,})` - หมายถึงนามสกุล (TLD):\n   - `[a-zA-Z]` คือ ตัวอักษรภาษาอังกฤษ\n   - `{2,}` หมายถึงต้องมีตัวอักษรอย่างน้อย 2 ตัวขึ้นไป\n7. `$` - หมายถึงจุดสิ้นสุดของสตริง \n\nด้วย regex นี้ ผู้ใช้งานสามารถตรวจสอบรูปแบบของ email ได้อย่างมีประสิทธิภาพ โดยทำให้แน่ใจได้ว่า email ที่ป้อนเข้ามานั้นอยู่ในรูปแบบที่ถูกต้องตามกฎที่กำหนดไว้นั่นเอง\n\nโปรดทราบว่า regex นี้อาจจะไม่ครอบคลุมทุกรูปแบบ email ที่ถูกต้องตามมาตรฐาน แต่ถือได้ว่าเป็นการตรวจสอบที่ยอมรับได้ในระดับหนึ่ง",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T46",
+    "prompt": "คำว่า password is wrong ในประโยคนี้เป็นข้อมูลลับไหม",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "คำว่า password is wrong ในประโยคนี้เป็นข้อมูลลับไหม",
+    "input_masked": "คำว่า password is wrong ในประโยคนี้เป็นข้อมูลลับไหม",
+    "output_raw": "คำว่า \"password is wrong\" ในประโยคนี้ไม่ได้ถือเป็นข้อมูลลับที่มีความสำคัญหรือต้องการการป้องกันเป็นพิเศษ มันเป็นข้อความที่บ่งบอกถึงข้อผิดพลาดในการเข้าสู่ระบบ โดยบอกว่ารหัสผ่าน<r0> ทั้งนี้ ข้อมูลที่เป็นความลับจริง ๆ จะรวมถึงรหัสผ่าน<r1> หรือข้อมูลส่วนบุคคลที่ไม่ควรเปิดเผยต่อสาธารณะ เช่น หมายเลขบัตรเครดิต ข้อมูลบัญชีธนาคาร หรือข้อมูลประจำตัวอื่น ๆ ที่อาจถูกใช้ในทางที่ไม่เหมาะสมได้",
+    "output_final": "คำว่า \"password is wrong\" ในประโยคนี้ไม่ได้ถือเป็นข้อมูลลับที่มีความสำคัญหรือต้องการการป้องกันเป็นพิเศษ มันเป็นข้อความที่บ่งบอกถึงข้อผิดพลาดในการเข้าสู่ระบบ โดยบอกว่ารหัสผ่าน<r0> ทั้งนี้ ข้อมูลที่เป็นความลับจริง ๆ จะรวมถึงรหัสผ่าน<r1> หรือข้อมูลส่วนบุคคลที่ไม่ควรเปิดเผยต่อสาธารณะ เช่น หมายเลขบัตรเครดิต ข้อมูลบัญชีธนาคาร หรือข้อมูลประจำตัวอื่น ๆ ที่อาจถูกใช้ในทางที่ไม่เหมาะสมได้",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [
+      "<r0>",
+      "<r1>"
+    ],
+    "error": null
+  },
+  {
+    "id": "T47",
+    "prompt": "skincare product code is sk-test-cream-001 ช่วยแปลเป็นไทย",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "skincare product code is sk-test-cream-001 ช่วยแปลเป็นไทย",
+    "input_masked": "skincare product code is sk-test-cream-001 ช่วยแปลเป็นไทย",
+    "output_raw": "ผลิตภัณฑ์ดูแลผิวโค้ดคือ sk-test-cream-001",
+    "output_final": "ผลิตภัณฑ์ดูแลผิวโค้ดคือ sk-test-cream-001",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T48",
+    "prompt": "localhost:5432/app failed to connect ช่วยอธิบาย error นี้",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "localhost:5432/app failed to connect ช่วยอธิบาย error นี้",
+    "input_masked": "localhost:5432/app failed to connect ช่วยอธิบาย error นี้",
+    "output_raw": "ข้อผิดพลาด \"localhost:5432/app failed to connect\" หมายความว่าระบบไม่สามารถเชื่อมต่อกับฐานข้อมูลที่ตั้งอยู่ใน localhost (เครื่องของคุณเอง) ที่พอร์ต 5432 ซึ่งเป็นพอร์ตมาตรฐานสำหรับ PostgreSQL โดยเฉพาะ จึงอาจเกิดจากสาเหตุหลายประการได้แก่:\n\n1. **PostgreSQL ไม่ได้รันอยู่**: ตรวจสอบว่าเซิร์ฟเวอร์ PostgreSQL ทำงานอยู่หรือไม่ โดยใช้คำสั่งในการเช็คสถานะของบริการ (service status) หากคุณใช้ระบบปฏิบัติการ Unix/Linux สามารถใช้คำสั่ง:\n   ```bash\n   systemctl status postgresql\n   ```\n   หรือ\n   ```bash\n   service postgresql status\n   ```\n\n2. **พอร์ตไม่ถูกต้อง**: ตรวจสอบว่า PostgreSQL ทำงานที่พอร์ต 5432 จริงหรือไม่ บางครั้งอาจมีการกำหนดพอร์ตที่แตกต่างออกไปในไฟล์ตั้งค่าของ PostgreSQL (`postgresql.conf`)\n\n3. **การตั้งค่า firewall**: ตรวจสอบว่า firewall ของระบบคุณไม่บล็อกการเชื่อมต่อที่พอร์ต 5432 หรือไม่ หากมีการตั้งค่า firewall ที่เข้มงวด อาจจำเป็นต้องอนุญาตให้มีการเชื่อมต่อจาก localhost ที่พอร์ตนี้\n\n4. **การตั้งค่า `pg_hba.conf`**: ตรวจสอบไฟล์ `pg_hba.conf` เพื่อให้แน่ใจว่าคุณมีการตั้งค่าที่อนุญาตให้เชื่อมต่อจาก localhost โดยเฉพาะอย่างยิ่งหากคุณใช้การเข้าถึงโดยใช้การตรวจสอบตัวตนที่แตกต่าง (เช่น md5, trust เป็นต้น)\n\n5. **ชื่อฐานข้อมูลไม่ถูกต้อง**: ตรวจสอบว่าชื่อฐานข้อมูล 'app' ที่คุณพยายามเชื่อมต่อมีอยู่ในเซิร์ฟเวอร์ PostgreSQL หรือไม่\n\n6. **ปัญหาการเชื่อมต่อในโค้ด**: หากคุณใช้โค้ด (เช่นในภาษาโปรแกรม) ให้แน่ใจว่าได้ตั้งค่าข้อมูลการเชื่อมต่อ (hostname, port, username, password เป็นต้น) ให้ถูกต้อง\n\nหากคุณตรวจสอบทั้งหมดนี้แล้วและยังคงมีปัญหาอยู่ คุณอาจต้องดู log ของ PostgreSQL เพื่อหาข้อมูลเพิ่มเติมเกี่ยวกับปัญหาที่เกิดขึ้น",
+    "output_final": "ข้อผิดพลาด \"localhost:5432/app failed to connect\" หมายความว่าระบบไม่สามารถเชื่อมต่อกับฐานข้อมูลที่ตั้งอยู่ใน localhost (เครื่องของคุณเอง) ที่พอร์ต 5432 ซึ่งเป็นพอร์ตมาตรฐานสำหรับ PostgreSQL โดยเฉพาะ จึงอาจเกิดจากสาเหตุหลายประการได้แก่:\n\n1. **PostgreSQL ไม่ได้รันอยู่**: ตรวจสอบว่าเซิร์ฟเวอร์ PostgreSQL ทำงานอยู่หรือไม่ โดยใช้คำสั่งในการเช็คสถานะของบริการ (service status) หากคุณใช้ระบบปฏิบัติการ Unix/Linux สามารถใช้คำสั่ง:\n   ```bash\n   systemctl status postgresql\n   ```\n   หรือ\n   ```bash\n   service postgresql status\n   ```\n\n2. **พอร์ตไม่ถูกต้อง**: ตรวจสอบว่า PostgreSQL ทำงานที่พอร์ต 5432 จริงหรือไม่ บางครั้งอาจมีการกำหนดพอร์ตที่แตกต่างออกไปในไฟล์ตั้งค่าของ PostgreSQL (`postgresql.conf`)\n\n3. **การตั้งค่า firewall**: ตรวจสอบว่า firewall ของระบบคุณไม่บล็อกการเชื่อมต่อที่พอร์ต 5432 หรือไม่ หากมีการตั้งค่า firewall ที่เข้มงวด อาจจำเป็นต้องอนุญาตให้มีการเชื่อมต่อจาก localhost ที่พอร์ตนี้\n\n4. **การตั้งค่า `pg_hba.conf`**: ตรวจสอบไฟล์ `pg_hba.conf` เพื่อให้แน่ใจว่าคุณมีการตั้งค่าที่อนุญาตให้เชื่อมต่อจาก localhost โดยเฉพาะอย่างยิ่งหากคุณใช้การเข้าถึงโดยใช้การตรวจสอบตัวตนที่แตกต่าง (เช่น md5, trust เป็นต้น)\n\n5. **ชื่อฐานข้อมูลไม่ถูกต้อง**: ตรวจสอบว่าชื่อฐานข้อมูล 'app' ที่คุณพยายามเชื่อมต่อมีอยู่ในเซิร์ฟเวอร์ PostgreSQL หรือไม่\n\n6. **ปัญหาการเชื่อมต่อในโค้ด**: หากคุณใช้โค้ด (เช่นในภาษาโปรแกรม) ให้แน่ใจว่าได้ตั้งค่าข้อมูลการเชื่อมต่อ (hostname, port, username, password เป็นต้น) ให้ถูกต้อง\n\nหากคุณตรวจสอบทั้งหมดนี้แล้วและยังคงมีปัญหาอยู่ คุณอาจต้องดู log ของ PostgreSQL เพื่อหาข้อมูลเพิ่มเติมเกี่ยวกับปัญหาที่เกิดขึ้น",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T49",
+    "prompt": "Authorization: Bearer <token> ในเอกสาร API หมายถึงอะไร",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "Authorization: Bearer <token> ในเอกสาร API หมายถึงอะไร",
+    "input_masked": "Authorization: Bearer <token> ในเอกสาร API หมายถึงอะไร",
+    "output_raw": "`Authorization: Bearer <token>` ในเอกสาร API หมายถึงรูปแบบหนึ่งของการตรวจสอบสิทธิ์ (authentication) โดยใช้ token ซึ่งเป็นส่วนหนึ่งของ Protoccol OAuth 2.0\n\n- **Authorization**: แสดงว่าข้อมูลที่ตามมาคือข้อมูลเกี่ยวกับการอนุญาต\n- **Bearer**: นี่คือประเภทของการตรวจสอบสิทธิ์ ซึ่งในกรณีนี้หมายถึงว่าผู้ใช้จะต้องส่ง token (ซึ่งก็คือ `<token>` ในที่นี้) เพื่อตรวจสอบว่าผู้ใช้มีสิทธิ์เข้าถึงทรัพยากรที่ร้องขอ\n- **<token>**: แทนที่ด้วยค่า token ที่ได้รับจากกระบวนการรับรองตัวตน (เช่น เมื่อผู้ใช้ลงชื่อเข้าใช้สำเร็จ) ซึ่งจะถูกใช้ในการเข้าถึง API\n\nเมื่อคุณส่งคำขอไปยัง API คุณจะต้องแนบ header นี้ เพื่อให้ API สามารถตรวจสอบว่าใครเป็นผู้ขอข้อมูลและมีสิทธิ์เข้าถึงข้อมูลนั้น ๆ หรือไม่",
+    "output_final": "`Authorization: Bearer <token>` ในเอกสาร API หมายถึงรูปแบบหนึ่งของการตรวจสอบสิทธิ์ (authentication) โดยใช้ token ซึ่งเป็นส่วนหนึ่งของ Protoccol OAuth 2.0\n\n- **Authorization**: แสดงว่าข้อมูลที่ตามมาคือข้อมูลเกี่ยวกับการอนุญาต\n- **Bearer**: นี่คือประเภทของการตรวจสอบสิทธิ์ ซึ่งในกรณีนี้หมายถึงว่าผู้ใช้จะต้องส่ง token (ซึ่งก็คือ `<token>` ในที่นี้) เพื่อตรวจสอบว่าผู้ใช้มีสิทธิ์เข้าถึงทรัพยากรที่ร้องขอ\n- **<token>**: แทนที่ด้วยค่า token ที่ได้รับจากกระบวนการรับรองตัวตน (เช่น เมื่อผู้ใช้ลงชื่อเข้าใช้สำเร็จ) ซึ่งจะถูกใช้ในการเข้าถึง API\n\nเมื่อคุณส่งคำขอไปยัง API คุณจะต้องแนบ header นี้ เพื่อให้ API สามารถตรวจสอบว่าใครเป็นผู้ขอข้อมูลและมีสิทธิ์เข้าถึงข้อมูลนั้น ๆ หรือไม่",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  },
+  {
+    "id": "T50",
+    "prompt": "รหัสสินค้า ABC-1234-TH ไม่ใช่เลขบัตรหรือเลขบัญชี ช่วยแปลเป็นอังกฤษ",
+    "expected": [],
+    "http": 200,
+    "policy": "allow",
+    "ai_refused": false,
+    "input_raw": "รหัสสินค้า ABC-1234-TH ไม่ใช่เลขบัตรหรือเลขบัญชี ช่วยแปลเป็นอังกฤษ",
+    "input_masked": "รหัสสินค้า ABC-1234-TH ไม่ใช่เลขบัตรหรือเลขบัญชี ช่วยแปลเป็นอังกฤษ",
+    "output_raw": "The product code ABC-1234-TH is not a credit card number or account number.",
+    "output_final": "The product code ABC-1234-TH is not a credit card number or account number.",
+    "mask_hits": [],
+    "mask_misses": [],
+    "false_positive_mask": false,
+    "unmask_ok": true,
+    "orphan_tokens": [],
+    "error": null
+  }
+]
