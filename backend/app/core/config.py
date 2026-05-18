@@ -182,6 +182,30 @@ class Settings(BaseSettings):
     rate_limiter_grpc_address: str = "rate-limiter:50053"
     rate_limiter_grpc_timeout_seconds: float = 0.5
 
+    # Phase-3c Rust DLP sidecar.
+    #
+    # ``dlp_engine`` selects which engine the orchestrator runs:
+    #
+    #   * "python" (default) — keeps the legacy in-process registry.
+    #     No external service required.
+    #   * "rust" — dispatches every scan to ``dlp-sidecar`` over
+    #     gRPC. On any failure (timeout, RpcError, sidecar
+    #     unreachable, grpcio import error) the orchestrator falls
+    #     back to the Python registry so a sidecar incident cannot
+    #     downgrade DLP coverage.
+    #   * "shadow" — runs BOTH engines in parallel, uses the Python
+    #     result on the hot path, and logs a structured ``dlp_shadow_diff``
+    #     event whenever the two engines disagree. Cutover from
+    #     ``shadow`` → ``rust`` is gated on diff_count = 0 across a
+    #     7-day sample of production traffic (see Phase 3c brief).
+    #
+    # Per-tenant override lives on ``tenants.dlp_engine`` (migration
+    # 043). Tenants with ``dlp_engine != "inherit"`` ignore this
+    # global setting.
+    dlp_engine: str = "python"
+    dlp_grpc_address: str = "dlp-sidecar:50051"
+    dlp_grpc_timeout_seconds: float = 1.0
+
     # Semantic router (intent classification via sentence-transformers).
     # Off by default — flipping this to true requires the optional
     # sentence-transformers + torch stack (see requirements-semantic.txt).
