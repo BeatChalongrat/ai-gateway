@@ -428,27 +428,35 @@ def dashboard_fallback_stats(
         for provider, v in by_provider.items()
     }
 
-    # by_tier: requires the model tier mapping. We compute the per-tier
-    # denominator (all requests in the window whose model is in a tier)
-    # in one query so the rate is real, not "fallbacks / fallbacks".
+    # by_tier: per-tier fallback rate. The previous implementation
+    # pulled every row in the window and rolled up in Python, which
+    # was O(N) data transfer and hit the request from the dashboard
+    # path. Push the rollup into Postgres via GROUP BY so the result
+    # set is bounded by (distinct models × 2 fallback states) — a few
+    # dozen rows at most. Postgres uses HashAggregate over the index
+    # on (created_at) for the predicate; the partition pruner trims
+    # the partitions outside the window before the scan.
     from app.services.providers.model_tiers import get_tier
 
     tier_total: dict[str, int] = defaultdict(int)
     tier_fallback: dict[str, int] = defaultdict(int)
     period_models = session.execute(
         sa.select(
-            RequestLogORM.model, RequestLogORM.fallback_used
+            RequestLogORM.model,
+            RequestLogORM.fallback_used,
+            sa.func.count().label("cnt"),
         )
         .where(RequestLogORM.created_at >= start)
         .where(RequestLogORM.created_at < end)
+        .group_by(RequestLogORM.model, RequestLogORM.fallback_used)
     ).all()
-    for model, fb_used in period_models:
+    for model, fb_used, cnt in period_models:
         tier = get_tier(model or "")
         if tier is None:
             continue
-        tier_total[tier] += 1
+        tier_total[tier] += int(cnt or 0)
         if fb_used:
-            tier_fallback[tier] += 1
+            tier_fallback[tier] += int(cnt or 0)
     by_tier_out = {
         tier: {
             "fallback_rate": round(

@@ -73,6 +73,7 @@ TIERS: dict[str, dict] = {
             "claude-sonnet-4-5",
             "gemini-1.5-flash",
             "llama-3.1-70b",
+            "llama-3.1-70b-versatile",
         ],
         "fallback_chain": [
             "openai",
@@ -106,6 +107,23 @@ TIERS: dict[str, dict] = {
                 "groq": "llama-3.1-70b-versatile",
                 "openrouter": "auto",
             },
+            # Llama on Groq is the primary; the chain rescues to a
+            # mid-cost vendor when Groq has an incident. The canonical
+            # short name (``llama-3.1-70b``) and the Groq-specific
+            # long name (``-versatile``) both map to the same chain so
+            # callers that route by either name get equivalent rescue.
+            "llama-3.1-70b": {
+                "openai": "gpt-4o-mini",
+                "anthropic": "claude-sonnet-4",
+                "google": "gemini-1.5-flash",
+                "openrouter": "auto",
+            },
+            "llama-3.1-70b-versatile": {
+                "openai": "gpt-4o-mini",
+                "anthropic": "claude-sonnet-4",
+                "google": "gemini-1.5-flash",
+                "openrouter": "auto",
+            },
         },
     },
     "fast": {
@@ -115,6 +133,7 @@ TIERS: dict[str, dict] = {
             "claude-haiku-3",
             "gemini-flash",
             "llama-3.1-8b",
+            "llama-3.1-8b-instant",
         ],
         "fallback_chain": ["groq", "openai", "anthropic", "openrouter"],
         "model_map": {
@@ -137,6 +156,20 @@ TIERS: dict[str, dict] = {
                 "openai": "gpt-3.5-turbo",
                 "anthropic": "claude-haiku-4-5",
                 "groq": "llama-3.1-8b-instant",
+                "openrouter": "auto",
+            },
+            # Fast-tier Llama: same dual-name convention as the
+            # standard-tier 70b entry — the short canonical name and
+            # the Groq-specific ``-instant`` long name both wire to
+            # the same cross-vendor rescue list.
+            "llama-3.1-8b": {
+                "openai": "gpt-3.5-turbo",
+                "anthropic": "claude-haiku-4-5",
+                "openrouter": "auto",
+            },
+            "llama-3.1-8b-instant": {
+                "openai": "gpt-3.5-turbo",
+                "anthropic": "claude-haiku-4-5",
                 "openrouter": "auto",
             },
         },
