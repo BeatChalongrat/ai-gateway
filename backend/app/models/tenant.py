@@ -22,6 +22,13 @@ class TenantORM(Base):
     ner_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sa.text("false")
     )
+    # Phase-3c per-tenant DLP engine override. ``inherit`` defers to
+    # the global ``DLP_ENGINE`` setting; ``python`` / ``rust`` /
+    # ``shadow`` pin this tenant regardless of the global. Migration
+    # 043 backfills every existing row with ``inherit``.
+    dlp_engine: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="inherit"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
