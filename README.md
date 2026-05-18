@@ -1,410 +1,393 @@
-# AI Gateway
+# SRAN AI Gateway
 
-Multi-tenant gateway in front of 11 LLM providers, with PDPA-aware DLP, policy/quota/budget enforcement, encrypted audit logging, and dedicated admin + customer portals.
+Multi-tenant AI proxy with DLP, guardrails, routing, and observability.
 
-The backend is FastAPI on Postgres + Redis. The spaCy/Presidio NER model runs in its own container so backend workers stay lean. The Next.js admin app drives all governance; a separate Next.js customer portal owns the self-service surface (signup, billing, projects, team).
+PDPA-aware DLP scans every request, masks sensitive values before they reach
+an LLM, and restores them in the response. A policy profile decides per
+detector category whether to allow / mask / block / restore. Routing picks
+the cheapest model that satisfies the matched keyword rule, with a
+3-tier fallback chain on provider failures. Everything is logged into a
+monthly-partitioned `request_logs` table for the admin audit surface.
+
+Tagged release: **`v0.1.0-uat`** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
 ## 1. Architecture
 
+Four functional modules in one FastAPI process, with three sidecar
+services (NER, log-worker, rate-limiter) and two Next.js apps:
+
+| Module | Responsibility | Where |
+|---|---|---|
+| **Safety** | DLP scanning, masking, restore; guardrails; moderation | `app/services/dlp/`, `guardrail_service.py`, `moderation_service.py` |
+| **Model routing** | Keyword → semantic → cost-tier scoring → fallback chain | `routing_service.py`, `keyword_router.py`, `semantic_router.py`, `provider_dispatcher.py` |
+| **Governance** | Rate limiting, response cache, quotas, budgets, policy profiles, token packs | `rate_limit_service.py`, `cache_service.py`, `quota_service.py`, `budget_service.py`, `policy/` |
+| **Observability** | Request logs, encrypted audit blob, secure trace store, alerts, metrics | `request_log_service.py`, `core/dlp_audit_crypto.py`, `secure_trace_store.py`, `alert_service.py` |
+
+Stack: FastAPI + Next.js (admin + portal) + PostgreSQL 16 + Redis 7.
+Multi-provider, 11 active adapters: **OpenAI, Anthropic, Google (Gemini),
+Groq, xAI (Grok), DeepSeek, Qwen, Kimi, Z.AI, Minimax, OpenRouter**.
+
 ```
-                         ┌────────────────────────────────────────────────────┐
-                         │            HTTP clients (SDKs, curl)               │
-                         └────────────────┬───────────────────────────────────┘
-                                          │  POST /v1/chat/completions  (API key)
-                                          ▼
- ┌────────────────────────────────────────────────────────────────────────────────┐
- │                       Backend  ·  FastAPI  ·  :8080                            │
- │                                                                                │
- │  middleware ─►  rate-limit ─►  api-key resolve ─►  policy resolve ─►          │
- │                                                                                │
- │  ┌──────────────────────────────────────────────────────────────────────────┐ │
- │  │  GatewayOrchestrator                                                     │ │
- │  │   1. cache lookup (Redis)                                                │ │
- │  │   2. DLP inbound:  30 regex detectors  +  NER ──► ner-service :8001 ────┼─┼─► spaCy / Presidio
- │  │   3. policy evaluator (block / mask / restore per finding)               │ │
- │  │   4. mask + token-map  (deterministic w/ DLP_HMAC_KEY when conv_id set)  │ │
- │  │   5. moderation + guardrail                                              │ │
- │  │   6. routing engine  (keyword → semantic → cost-tier → fallback chain)   │ │
- │  │   7. provider dispatcher (11 adapters + fallback)  ──────────────────────┼─┼─► OpenAI / Anthropic /
- │  │   8. DLP outbound + restore                                              │ │   Google / Groq / xAI /
- │  │   9. encrypt input_raw_encrypted (AES-256-GCM)                           │ │   DeepSeek / Qwen / Kimi /
- │  │  10. INSERT request_logs (monthly partitioned)                           │ │   Z.AI / Minimax /
- │  │  11. usage + budget + alert evaluator                                    │ │   OpenRouter
- │  └──────────────────────────────────────────────────────────────────────────┘ │
- │                                                                                │
- └──────────────┬──────────────────────────┬───────────────────────────┬─────────┘
-                │                          │                           │
-                ▼                          ▼                           ▼
-        Postgres :5432             Redis :6379                  Mock provider :9090
-        (24 tables, partitioned    (rate-limit ZSETs,           (drop-in for tests
-         request_logs, alembic     response cache, NER          when PROVIDER_BASE_
-         to 041)                   degrade flag)                URL_OVERRIDES set)
-                ▲                          ▲
-                │                          │
-   ┌────────────┴────────────┐  ┌──────────┴─────────────┐
-   │  Admin UI  :3000        │  │  Portal     :3001      │
-   │  (Next.js, 18 pages)    │  │  (Next.js, 19 pages)   │
-   │  governance, policies,  │  │  signup, billing,      │
-   │  audit, alerts, models  │  │  projects, team        │
-   └─────────────────────────┘  └────────────────────────┘
+HTTP clients (SDK, curl)
+        │
+        ▼  POST /v1/chat/completions  (API key)
+┌──────────────────────────────────────────────────────────────┐
+│ Backend · FastAPI · :8080                                    │
+│                                                              │
+│  rate-limit → api-key → policy → orchestrator:               │
+│    1. cache lookup (Redis)                                   │
+│    2. DLP inbound: regex detectors + NER ─► ner-service:8001 │
+│    3. policy evaluate (block / mask / restore)               │
+│    4. mask → <rN> tokens (deterministic w/ DLP_HMAC_KEY)     │
+│    5. moderation + guardrail                                 │
+│    6. routing (keyword → semantic → cost-tier → fallback)    │
+│    7. provider dispatch ─► OpenAI / Anthropic / 9 others     │
+│    8. DLP outbound + restore + orphan sanitiser              │
+│    9. encrypt input_raw_encrypted (AES-256-GCM)              │
+│   10. INSERT request_logs (monthly partitions)               │
+└──────────────────────────────────────────────────────────────┘
+        │                  │                    │
+        ▼                  ▼                    ▼
+  Postgres :5432    Redis :6379         Mock provider :9090
+                                        (for tests via
+                                        PROVIDER_BASE_URL_OVERRIDES)
+
+  Admin UI :3000  ·  Customer Portal :3001
 ```
 
 ---
 
-## 2. Services
+## 2. DLP Pipeline
 
-| Service | Port | Image | Role |
-|---|---|---|---|
-| `postgres` | 5432 | `postgres:16` | Application DB. 24 tables, monthly-partitioned `request_logs`. |
-| `redis` | 6379 | `redis:7` | Rate-limit ZSETs, response cache, NER-degrade marker. |
-| `mock-provider` | 9090 | built from `./mock` | Stand-in for OpenAI/Anthropic during local dev and tests; activate by setting `PROVIDER_BASE_URL_OVERRIDES`. |
-| `ner-service` | 8001 | built from `./backend/ner_service` | spaCy + Presidio in a dedicated container. CPU/mem-bounded (`2 CPU / 2 GB`). Endpoints: `POST /analyze`, `GET /health`. |
-| `backend` | 8080 | built from `./backend` | FastAPI gateway. 4 gunicorn workers × uvicorn. Hot-reload in dev via `docker-compose.override.yml`. |
-| `admin-ui` | 3000 | built from `./admin-ui` | Next.js admin console. Cookie-auth, CSRF, rate-limited login. |
-| `portal` | 3001 | built from `./portal` | Next.js customer portal. NextAuth for OAuth, JWT for API access. |
-| `log-worker` | 50052 | built from `./log-worker` | Go async batch logger. Receives `LogRecord` via gRPC, batches into Postgres `COPY`. Default off (`LOG_WORKER_ENGINE=go` to activate). |
-| `rate-limiter` | 50053 | built from `./rate-limiter` | Rust sliding-window rate limiter. 3-scope parallel Redis pipeline. Default off (`RATE_LIMITER_ENGINE=rust`). |
-| `dlp-sidecar` | 50051 | built from `./dlp-sidecar` | Rust DLP regex engine. 22/30 detectors ported. Default off (`DLP_ENGINE=rust|shadow`). |
+The most mature module. Every chat completion runs through it.
 
-`docker-compose.override.yml` swaps `backend`, `admin-ui`, and `portal` into hot-reload mode with bind mounts when you run `docker compose up` directly (which `make up` does).
+### `<rN>` neutral tokens
+
+Masked values are replaced with sequential opaque tokens:
+`<r0>`, `<r1>`, `<r2>`, …
+
+The format is **deliberately category-free**. The previous format
+(`[EMAIL_0]`, `[BEARER_TOKEN_0]`, `[NATIONAL_ID_0]`) caused two failure
+modes the audit caught repeatedly:
+
+1. **AI refusal** — OpenAI's safety filter reads `[BEARER_TOKEN_0]` as a
+   sensitive-data marker and refuses the whole prompt.
+2. **Restore breakage** — the LLM renames tokens (`[AUTH_TOKEN_0]`
+   instead of `[BEARER_TOKEN_0]`), and the unmask map can't find them.
+
+`<rN>` carries no semantic hint, so the safety filter ignores it and the
+LLM echoes tokens verbatim. When `metadata.conversation_id` is set on the
+request, tokens are HMAC-derived from `DLP_HMAC_KEY` so the same value
+gets the same token across turns — needed for multi-turn restore.
+
+### Round-trip flow
+
+```
+user input   ─► detect ─► mask ─► [LLM input has <rN>]
+                                       │
+                                       ▼ provider returns text with <rN>
+                                       │
+LLM output ─► outbound scan ─► restore ─► orphan-sanitiser ─► user
+                                                 │
+                                                 └─ any leftover <rN>
+                                                    (LLM hallucination)
+                                                    becomes [REDACTED]
+```
+
+### Detectors (31 total)
+
+Registered in `backend/app/services/dlp/detectors/registry.py`:
+
+| Category | Detectors |
+|---|---|
+| **Identity** | `passport`, `thai_national_id` (mod-11), `thai_tax_id` (mod-11 + strong-prefix relax), `date_of_birth` |
+| **Financial** | `credit_card` (Luhn), `iban`, `thai_bank_account`, `thai_promptpay`, `income` |
+| **Credential / secret** | `bearer_token`, `api_key_secret`, `private_key`, `password_field`, `db_connection_string` |
+| **Standard PII** | `email`, `phone` (trivial-digit guard), `ssn`, `address`, `thai_address`, `thai_name`, `line_id`, `vehicle_plate` |
+| **PDPA Section 26 (sensitive)** | `religion_belief`, `health_condition`, `criminal_record`, `biometric_data`, `medical_record` |
+| **Network** | `ip_address`, `mac_address` |
+| **NER (via microservice)** | `presidio_ner` — PERSON / LOCATION / ORGANIZATION / GPE / NRP |
+| **NER-off fallback** | `thai_name_no_prefix` — only when `ner_enabled=false` |
+
+### Policy profiles
+
+Two seeded profiles in `app/services/policy/`:
+
+| Profile | Behaviour |
+|---|---|
+| `default` | Mask PII categories; restore identity / financial on outbound (user sees own values back); block on `severity=critical` credentials |
+| `strict` | Block on any `secret` / `credential` / sensitive-category finding |
+
+Per-category action is per-direction (inbound vs outbound), stored in
+`policy_profiles` (migration 015), edited from the admin UI.
+
+### E2E test results (`v0.1.0-uat`)
+
+50-case round-trip suite (`test_dlp_e2e_50.py` at repo root):
+
+| Metric | Score |
+|---|---|
+| Fully correct end-to-end | **41 / 50** |
+| Mask accuracy | 38 / 39 (97%) |
+| Round-trip restore | 35 / 39 (90%) |
+| AI refusal rate | **0 / 50** |
+| False positives | 3 (documented limitations) |
+| False negatives | 1 (documented limitation) |
+
+Before / after traces are committed at repo root as
+`test50_results_before.json` and `test50_results_after.json` for diff.
 
 ---
 
-## 3. Quick start
+## 3. Quick Start
 
-**Prereqs:** Docker Desktop 4.27+ (Compose v2.24+).
+**Prereqs**: Docker Desktop 4.27+ (Compose v2.24+).
 
 ```bash
+git clone https://github.com/BeatChalongrat/ai-gateway.git
+cd ai-gateway
 cp .env.example .env
 make up         # Linux / macOS / WSL
-.\scripts\dev.ps1 up   # Windows PowerShell (alternative)
+# or:  .\scripts\dev.ps1 up   (Windows PowerShell)
 make seed       # first boot — creates admin + portal users
 ```
 
-Then:
-
-| URL | What | Credentials |
+| URL | What | Default credentials |
 |---|---|---|
+| http://localhost:8080/health | Backend health | — |
+| http://localhost:8080/docs | OpenAPI (Swagger) | — |
 | http://localhost:3000 | Admin UI | `admin` / `admin1234` |
 | http://localhost:3001 | Customer portal | `somchai@acme.ai.gateway` / `P@ssword` |
-| http://localhost:8080/health | Backend health | — |
-| http://localhost:8080/docs | Backend OpenAPI | — |
 | http://localhost:8001/health | NER service | — |
-| http://localhost:9090/health | Mock provider | — |
+| http://localhost:9090/health | Mock LLM provider | — |
 
-**Seeded portal users** (all password `P@ssword`):
+Ports inside the stack: Postgres `:5432`, Redis `:6379`.
 
-| Email | Name | Role | Tenant |
-|---|---|---|---|
-| `somchai@acme.ai.gateway` | สมชาย ใจดี | owner | Acme Corporation |
-| `suda@acme.ai.gateway` | สุดา รักงาน | member | Acme Corporation |
-| `wichai@techstart.ai.gateway` | วิชัย เทคโนโลยี | owner | TechStart |
-| `malee@techstart.ai.gateway` | มาลี สมาร์ท | member | TechStart |
-
-**Seeded tenants:** Acme Corporation (`acme-corp-001`), TechStart (`techstart-001`).
-**Seeded projects:** Customer Support Bot, Internal Assistant (Acme) · AI Chatbot MVP (TechStart).
-
-For a customer-facing UAT box, see `scripts/uat/README.md` — bundled `01_truncate.sql` → `02_seed_uat.py` → `03_verify.sql` runbook.
-
-Useful targets (`make help` for the full list):
+Useful `make` targets (`make help` for the full list):
 
 | Command | Effect |
 |---|---|
 | `make up` / `make down` | Start / stop, keep volumes |
 | `make clean` | Stop + wipe Postgres + Redis volumes |
-| `make fresh` | `clean` + rebuild images + seed (use after adding Next.js routes — stale `.next` cache survives plain restart) |
+| `make fresh` | `clean` + rebuild images + seed |
 | `make seed` | Re-run idempotent seeder |
-| `make clean-portal-users` | Remove portal users not in the seed set |
-| `make test` | Run backend pytest inside the container |
-| `make shell-backend` / `shell-admin` / `shell-portal` | Exec into the container |
+| `make test` | Backend pytest inside the container |
+| `make shell-backend` | Exec into the backend container |
+
+For a clean UAT box, see `scripts/uat/README.md` —
+`01_truncate.sql` → `02_seed_uat.py` → `03_verify.sql` runbook plus an
+`.env.uat.template`.
 
 ---
 
-## 4. Module breakdown
+## 4. API Usage
 
-### 4.1 DLP pipeline
+### Issue an API key
 
-The DLP scanner runs **30 regex detectors + 1 NER detector** by default, in registration order, against every inbound message (and outbound completion if the policy profile sets `scan_responses=true`). System-role messages are skipped unless `scan_system_messages=true`.
+Admin UI → **API Keys** → create a project-scoped key. Keys start with
+`gw_`.
 
-Pipeline stages (`backend/app/services/dlp/`):
+### Chat completion (OpenAI-compatible schema)
 
-1. **`preprocessor.py`** — NFKC normalization, zero-width strip, homoglyph fold, base64 decode-and-scan (findings are mapped back to original offsets).
-2. **`language.py`** — single language detect across the joined message text so every Presidio call uses the same spaCy pipeline.
-3. **`detectors/registry.py`** — runs each detector and merges matches.
-4. **`classifier.py`** — assigns baseline severity per finding category.
-5. **`transformer.py`** — masks each match with an indexed placeholder (`[EMAIL_0]`, `[PHONE_1]`) and builds a `span_map` for restore. When `metadata.conversation_id` is set, tokens are HMAC-derived from `DLP_HMAC_KEY` so the same value gets the same token across turns.
-6. **`conversation_vault.py`** — Redis-backed store keyed by `conversation_id` for restoring tokens the model echoes back from earlier turns.
+```bash
+curl -sS -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer gw_<your_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "Summarize: customer somchai@test.com called about a login issue."}
+    ]
+  }'
+```
 
-#### Detectors (`backend/app/services/dlp/detectors/`)
+DLP runs transparently. The LLM never sees `somchai@test.com` — it
+sees `<r0>`. The reply is restored to the user with the original email
+in place. The response includes a `policy_action` field
+(`allow` / `mask` / `block`) and `policy_reasons`.
 
-| Category | Detectors |
+### Multi-turn restore
+
+Add `metadata.conversation_id` to derive deterministic tokens across
+turns:
+
+```bash
+curl -sS -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer gw_<your_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "Reply to John at john@test.com"}
+    ],
+    "metadata": {"conversation_id": "thread-42"}
+  }'
+```
+
+A later turn in `thread-42` that echoes `<r0>` will resolve to
+`john@test.com` via the Redis-backed conversation vault.
+
+### Models
+
+```bash
+curl -sS http://localhost:8080/v1/models -H "Authorization: Bearer gw_<your_key>"
+```
+
+Returns the DB-backed model registry (`model_configs` table) — the same
+list the admin UI's **Models** page edits.
+
+---
+
+## 5. Admin UI (`:3000`)
+
+Cookie session auth, CSRF-protected, rate-limited login. Routes live in
+`backend/app/api/routes/admin*.py`.
+
+| Page | What |
 |---|---|
-| **Standard PII** | `email`, `phone`, `ssn`, `credit_card`, `iban`, `passport`, `date_of_birth`, `address`, `ip_address`, `mac_address`, `vehicle_plate` |
-| **Credentials / secrets** | `bearer_token`, `api_key_secret`, `private_key`, `password_field`, `db_connection_string` |
-| **Thai-specific** | `thai_national_id` (with checksum), `thai_tax_id`, `thai_bank_account`, `thai_promptpay`, `thai_address`, `thai_name`, `line_id` |
-| **PDPA Section 26** *(sensitive special category)* | `religion_belief`, `health_condition`, `criminal_record`, `biometric_data`, `medical_record` |
-| **Financial** | `income` |
-| **NER (via microservice)** | `presidio_ner` — PERSON, LOCATION, ORGANIZATION, GPE, NRP |
-| **NER-disabled fallback** | `thai_name_no_prefix` — only registered when `ner_enabled=false`, to keep coverage for bare Thai names |
-
-#### NER microservice (`backend/ner_service/`)
-
-A separate FastAPI process — `main.py` + `Dockerfile` — preloads `en_core_web_lg` (preferred) or `en_core_web_sm` (fallback) into a Presidio `AnalyzerEngine` on startup. Optional Thai model `th_core_news_*` is registered if installed. The container is the only place where the heavyweight spaCy model lives; gateway workers stay light. The client at `backend/app/services/ner_service_client.py` has a 2.0 s default timeout and fails open — a NER outage degrades DLP coverage but does not drop the request.
-
-#### Guardrails
-
-`guardrail_service.py` and `moderation_service.py` run after DLP. `dlp_prompt.py` adds DLP-aware system prompt suffixes that warn the model not to echo masked tokens.
-
-### 4.2 Model routing
-
-Selection happens in `app/services/routing_service.py` with helpers in `keyword_router.py`, `keyword_rule_service.py`, and `semantic_router.py`. The order:
-
-1. **Keyword router** — DB-backed rules in `keyword_rules` (migration 018). Match on substring → force a specific model. Edited from the admin UI under **Routing**.
-2. **Semantic router** — only loaded if `requirements-semantic.txt` is installed; embedding-based fallback.
-3. **Cost-tier scoring** — `model_registry._derive_cost_tier()` buckets candidates into `budget` / `standard` / `premium` from real input-token prices.
-4. **Fallback chain** — `provider_dispatcher.dispatch_with_fallback` walks the routing result's fallback list on `ProviderError`.
-
-#### Model registry (`providers/model_registry.py`)
-
-DB-backed (`model_configs` table, migrations 036–038). Seeded with concrete models for every wired provider; reloaded into an in-memory singleton at FastAPI startup. The admin UI **Models** page edits live rows; **Model Discovery** (`services/discovery/`) pulls fresh model lists and pricing from upstream catalogs.
-
-### 4.3 Governance
-
-| Concern | Service | Storage |
-|---|---|---|
-| Rate limiting | `rate_limit_service.py` — per-key, per-project, per-tenant sliding window | Redis sorted sets (one pipeline per scope) |
-| Response cache | `cache_service.py` — fail-open, gated off when DLP findings present | Redis `SETEX` |
-| Quota | `quota_service.py` — daily request count per project | Postgres count on `request_logs` |
-| Budget | `budget_service.py` — running cost cap per project | Postgres SUM on `request_logs.estimated_cost_usd` |
-| Policies | `policy/profile_service.py` + `policy/evaluator.py` — per-direction per-detector actions (`allow` / `mask` / `block` / `restore`) | `policy_profiles` table (migration 015) |
-| Token packs | `services/portal/` — prepaid credit grants | `token_pack`, `credit_transaction` (migrations 025, 031) |
-| Retention | `jobs/dlp_retention.py`, `jobs/log_archive_job.py` | `request_logs_archive` partition |
-| Partition maintenance | `jobs/partition_maintenance_job.py` — pre-creates next-month partition | `request_logs` (migration 041) |
-
-The job scheduler in `backend/app/scheduler.py` registers all three jobs.
-
-### 4.4 Observability
-
-| Surface | Module | Notes |
-|---|---|---|
-| Request logs | `request_log_service.py` + `models/request_log.py` | One INSERT per request. Columns include masked + raw text snapshots (size-capped), `dlp_findings_json`, `dlp_trace`, `policy_profile_id`, `estimated_cost_usd`. |
-| Encrypted audit blob | `core/dlp_audit_crypto.py` + `request_logs.input_raw_encrypted` (migration 039) | AES-256-GCM, key derived from `MASTER_ENCRYPTION_KEY`. |
-| Secure trace store | `services/secure_trace_store.py` | Off-DB store for full request/response traces; admin-only access via `routes/admin.py`. |
-| Admin audit log | `admin_audit_service.py` + `models/admin_audit_log.py` | Every admin mutation. Integrity chain via `audit_integrity.py`. |
-| Alerts | `alert_service.py` + `alert_evaluator.py` | Post-request evaluation; rules in `alert_rules` (migrations 014, 017). |
-| Usage rollups | `usage_service.py` | Aggregates for the admin Usage page and the portal Usage page. |
-| Metrics | `observability/metrics.py`, `observability/phase_timer.py` | Per-stage latency hooks the orchestrator emits. |
-
-### 4.5 Provider adapters (`backend/app/services/providers/`)
-
-11 active adapters dispatched via `provider_dispatcher.py`:
-
-| Provider | Adapter file | Notes |
-|---|---|---|
-| OpenAI | `openai_adapter.py` | Native API |
-| Anthropic | `anthropic_adapter.py` | Native API |
-| Google AI (Gemini) | `google_adapter.py` | Native API |
-| Groq | `groq_adapter.py` | OpenAI-compatible |
-| xAI (Grok) | `xai_adapter.py` | OpenAI-compatible |
-| DeepSeek | `deepseek_adapter.py` | OpenAI-compatible |
-| Qwen (Alibaba) | `qwen_adapter.py` | OpenAI-compatible |
-| Kimi (Moonshot) | `kimi_adapter.py` | OpenAI-compatible |
-| Z.AI (Yi) | `zai_adapter.py` | OpenAI-compatible |
-| Minimax | `minimax_adapter.py` | Native API |
-| OpenRouter | `openrouter_adapter.py` | Meta-provider, used as a fallback aggregator |
-
-Shared infrastructure: `base.py` (adapter ABC), `base_urls.py` (URL overrides honored from `PROVIDER_BASE_URL_OVERRIDES`), `http_client.py` (shared httpx client with 5/30/5/5 s timeouts), `parsers.py` (response normalization), `error_handler.py` (provider-error classification for fallback decisions), `openai_compatible_adapter.py` (mixin used by the five OpenAI-compat adapters).
-
-A `_pending/` folder holds Mistral, Cohere, and Perplexity adapters that the dispatcher imports but which are not part of the seeded model registry yet.
+| **Dashboard** | Request volume, cost, top models, recent activity |
+| **Requests** | Full audit log — input/output snapshots, masked vs raw, `dlp_findings_json`, latency, cost |
+| **Secure Trace** | Per-request 4-stage trace (user→service, service→AI, AI→service, service→user) — admin-only |
+| **DLP** | Per-detector toggles, policy profile editor (per-category + per-direction action), `<rN>` round-trip preview |
+| **Routing** | Keyword rules, semantic router config, cost-tier weights |
+| **Models** | Live `model_configs` table — pricing, fallback tiers; **Model Discovery** pulls fresh upstream catalogs |
+| **Providers** | Per-provider API key + base URL overrides |
+| **Alerts** | Rule editor + delivery channels (email / webhook) |
+| **Token Packs** | Prepaid credit grants (per-tenant) |
+| **Portal Users** | Operator view of customer portal users |
+| **Settings** | NER toggle, retention days, system flags |
 
 ---
 
-## 5. Multi-tenancy
+## 6. Testing
 
-| Entity | Model | Migration |
-|---|---|---|
-| Tenant | `models/tenant.py` | 002 |
-| API key | `models/api_key.py` (tenant- + project-scoped) | 003, 005 |
-| Project | `models/project.py` | — |
-| Project member (RBAC inside a tenant) | `models/project_member.py` | 034 |
-| Portal user | `models/portal_user.py` (email + OAuth) | 025, 026, 032 |
-| Tenant invite | `models/tenant_invite.py` (with role + revoke) | 033 |
-| Token pack (prepaid credits) | `models/token_pack.py` (tenant-scoped) | 031 |
-| Credit transaction | `models/credit_transaction.py` | — |
-| Org settings | `models/org_settings.py` (global NER toggle, defaults) | 015, 024 |
-| System setting | `models/system_setting.py` (singleton-style flags) | 024 |
+```bash
+make test                                            # full backend pytest
+docker compose exec backend pytest tests/test_dlp_pipeline_suite/   # subset
+docker compose exec backend pytest -k orchestrator                  # filter
+python test_dlp_e2e_50.py                            # E2E round-trip (requires running stack)
+```
 
-The customer portal at `/projects/[id]` exposes project-scoped API keys, team members, usage, and billing. The admin UI at `/portal-users`, `/portal-token-packs`, `/portal-settings` is the operator counterpart.
+Test layout (`backend/tests/`):
 
----
+- `test_dlp_detectors/` — per-detector accuracy
+- `test_dlp_pipeline_suite/` — mask/restore round-trip, indexing, overlap resolution
+- `test_dlp_regression_suite/test_known_bugs.py` — anchored regressions for each shipped bug fix
+- `integration/` — `test_dlp_roundtrip_live.py`, `test_multiturn_vault.py`, etc. (require live stack)
+- `test_routing_*`, `test_policy_*`, `test_streaming_dlp.py`, `test_e2e_dlp_flow.py`
 
-## 6. Database migrations
-
-Alembic versions live in `backend/migrations/versions/`. Forward-only; tested by `make test`.
-
-| Range | Theme |
-|---|---|
-| **001–010** | Schema bootstrap: tenants, API keys, usage columns, quotas, admin audit log, provider keys, dashboard indexes |
-| **011–017** | Governance v1: policies → policy profiles + org settings, DLP findings on `request_logs`, alert rules + delivery fields, admin users table, audit actor-key widening |
-| **018–023** | DLP / routing add-ons: keyword rules, per-tenant NER toggle, policy-profile-id + DLP trace on `request_logs`, AI review + provider config |
-| **024–028** | Portal foundation: system settings, portal users + OAuth, seeded demo tenant, admin audit log extensions |
-| **029–035** | Multi-tenancy maturity: portal tenancy + finalize, tenant-scoped token packs, preferred-language, invite roles + revoke, project members + archive, project-creator backfill |
-| **036–038** | Model registry → DB: `model_configs`, seed rows, zero-price fill |
-| **039–041** | Storage hardening: encrypted audit blob (`input_raw_encrypted`), compound indexes on `request_logs`, **monthly range partitioning of `request_logs`** |
+**Current status**: 2449 passing · 95 failing (baseline, pre-existing) ·
+19 skipped · 3 xfailed. The 95 failures are not regressions from
+`v0.1.0-uat` — they pre-date this branch and are tracked in the
+roadmap below.
 
 ---
 
-## 7. API routes (`backend/app/api/routes/`)
+## 7. Known Limitations
 
-| Surface | Routes |
-|---|---|
-| **Gateway (public, API-key auth)** | `public_chat.py` — `POST /v1/chat/completions` (streaming + non-streaming) · `public_models.py` — `GET /v1/models` · `health.py` — `GET /health` |
-| **Auth** | `auth.py` (gateway), `portal_auth.py` (portal email + OAuth), `admin_session.py` (admin cookie session + CSRF) |
-| **Admin (cookie auth, RBAC)** | `admin.py`, `admin_dashboard.py`, `admin_dlp.py`, `admin_ai_review.py`, `admin_system_settings.py`, `admin_token_packs.py`, `admin_portal_users.py`, `admin_model_discovery.py` |
-| **Portal (JWT)** | `portal_me.py`, `portal_billing.py`, `portal_team.py`, `portal_projects.py` |
+Pulled from [`CHANGELOG.md`](./CHANGELOG.md):
 
-Interactive OpenAPI is at `http://localhost:8080/docs`.
+- **Medical condition names** (เบาหวาน, ภูมิแพ้, ความดันสูง) mask even
+  in generic role-noun contexts ("the customer has diabetes"). This is
+  intentional under **PDPA Section 26** (health is sensitive). Cases
+  T19 / T20 in the E2E test.
+- **Labeled salary amounts** ("เงินเดือน 85,000 บาท") mask when an
+  income label is present. Income is PII under most frameworks.
+  Case T27.
+- **Short `sk-test-*` API keys** (under 20 chars after the prefix) are
+  not detected — the gateway can't distinguish them from product codes
+  like `sk-test-cream-001`. Precision over recall for credentials.
+  Case T41.
+- **Orphan `<rN>` may appear in ~5% of LLM responses**. The orphan
+  sanitiser strips hallucinated tokens, but the outbound scan can mint
+  new tokens whose index happens to match a hallucinated one and the
+  sanitiser preserves them as legitimate. Run-to-run variance from
+  LLM stochasticity.
 
 ---
 
-## 8. Environment variables
+## 8. Roadmap
 
-Required in production (the values in `docker-compose.yml` are dev-only defaults):
+Near-term:
+- Close out the 95 baseline pytest failures (mix of pre-Phase-3 churn
+  and integration tests that need a fresh DB)
+- Outbound token-index allocation rework so hallucinated indices
+  cannot collide with newly-minted outbound masks
+- Address detector v2: structural form rather than keyword list
+- Medical NER refinement (Thai-specific) instead of the keyword regex
+- Full Rust DLP cutover (`DLP_ENGINE=rust`) — currently 22/30
+  detectors ported, in shadow mode
+
+Production hardening:
+- Move AES encrypt off the event loop
+- Reconcile backend DB pool with Postgres `max_connections`
+- Set `maxmemory` + eviction policy on Redis
+- K8s manifests under `infra/k8s/` need probes + HPAs
+
+---
+
+## 9. Repo Layout
+
+```
+ai-gateway/
+├── backend/                       # FastAPI gateway
+│   ├── app/
+│   │   ├── api/routes/            # admin / portal / gateway routes
+│   │   ├── services/
+│   │   │   ├── dlp/               # detectors/, classifier, transformer, ...
+│   │   │   ├── providers/         # 11 adapters
+│   │   │   ├── policy/            # profile_service, evaluator
+│   │   │   └── orchestrator.py
+│   │   └── models/                # SQLAlchemy ORM
+│   ├── migrations/versions/       # alembic 001 → 041
+│   ├── ner_service/               # FastAPI + spaCy/Presidio (own image)
+│   └── tests/
+├── admin-ui/                      # Next.js admin
+├── portal/                        # Next.js customer portal
+├── mock/                          # Mock LLM provider for tests
+├── dlp-sidecar/                   # Rust DLP sidecar (22/30 detectors)
+├── log-worker/                    # Go batch logger
+├── rate-limiter/                  # Rust sliding-window rate limiter
+├── scripts/uat/                   # UAT bringup
+├── test_dlp_e2e_50.py             # 50-case DLP round-trip E2E
+├── CHANGELOG.md                   # release notes
+└── docker-compose.yml             # base stack
+```
+
+---
+
+## 10. Environment Variables
+
+Required in production (dev defaults live in `docker-compose.yml`):
 
 | Var | Purpose |
 |---|---|
 | `JWT_SECRET` | Backend JWT signing |
 | `PORTAL_JWT_SECRET` | Portal-issued JWT signing |
-| `MASTER_ENCRYPTION_KEY` | AES-256-GCM key derivation for `input_raw_encrypted` |
-| `DLP_HMAC_KEY` | Deterministic per-conversation token derivation |
+| `MASTER_ENCRYPTION_KEY` | AES-256-GCM key for `input_raw_encrypted` |
+| `DLP_HMAC_KEY` | Deterministic per-conversation `<rN>` derivation |
 | `NEXTAUTH_SECRET` | NextAuth on the portal |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, plus per-provider keys via the admin **Providers** page | Provider auth |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, … | Provider auth (or set via admin **Providers** page) |
 
 Optional:
 
 | Var | Default | Effect |
 |---|---|---|
-| `NER_SERVICE_URL` | `http://ner-service:8001` | Where the gateway calls NER. Unset → legacy in-process loader. |
-| `NER_SERVICE_TIMEOUT_SECONDS` | `2.0` | Client timeout before NER falls open. |
-| `PROVIDER_BASE_URL_OVERRIDES` | empty | Comma-list of `provider=url`. Set to redirect `openai/anthropic/openrouter` at the in-cluster mock for tests. |
-| `PORTAL_PUBLIC_URL` | `http://localhost:3001` | Stamped into verification + invite emails. |
-| `CORS_ORIGINS` | dev defaults | Admin + portal origins. |
-| `GOOGLE_CLIENT_ID` / `GITHUB_CLIENT_ID` (+ secrets) | empty | Portal OAuth providers. |
-| `NEXT_PUBLIC_OAUTH_ENABLED` | `false` | Surface OAuth buttons in the portal. |
+| `NER_SERVICE_URL` | `http://ner-service:8001` | Where the gateway calls NER |
+| `NER_SERVICE_TIMEOUT_SECONDS` | `2.0` | Client timeout (fails open) |
+| `PROVIDER_BASE_URL_OVERRIDES` | empty | Redirect providers at the mock for tests |
+| `LOG_WORKER_ENGINE` | `python` | Set to `go` to enable the gRPC log sidecar |
+| `RATE_LIMITER_ENGINE` | `python` | Set to `rust` to enable the gRPC rate-limit sidecar |
+| `DLP_ENGINE` | `python` | `shadow` runs Rust+Python in parallel (diff logged); `rust` cuts over |
+| `CORS_ORIGINS` | dev defaults | Admin + portal origins |
+
+Full list: `backend/app/core/config.py` and `.env.example`.
 
 ---
 
-## 9. Repo layout
+## 11. License & Contributing
 
-```
-ai-gateway/
-├── backend/
-│   ├── app/
-│   │   ├── api/routes/         # 18 route modules (admin / portal / gateway)
-│   │   ├── core/               # config, db, exceptions, dlp_audit_crypto
-│   │   ├── domain/             # dataclasses (dlp, routing, providers, ...)
-│   │   ├── jobs/               # dlp_retention, log_archive, partition_maintenance
-│   │   ├── middleware/         # error_handler, ...
-│   │   ├── models/             # 22 SQLAlchemy ORM models
-│   │   ├── observability/      # metrics, phase_timer
-│   │   ├── repositories/
-│   │   ├── schemas/            # pydantic request/response
-│   │   ├── services/
-│   │   │   ├── dlp/            # detectors/, classifier, transformer, language, ...
-│   │   │   ├── discovery/      # model + pricing discovery
-│   │   │   ├── policy/         # profile_service, evaluator, built-in profiles
-│   │   │   ├── providers/      # 11 active adapters + base + http_client
-│   │   │   ├── admin/, portal/, gateway/, email/
-│   │   │   └── orchestrator.py, routing_service.py, cache_service.py, ...
-│   │   ├── main.py, scheduler.py
-│   ├── migrations/versions/    # alembic 001 → 041
-│   ├── ner_service/            # FastAPI + spaCy/Presidio (own image)
-│   ├── tests/                  # pytest, integration/, dlp_detectors/, ...
-│   ├── scripts/                # seed_*, clean_portal_residue, ...
-│   └── Dockerfile, requirements*.txt
-├── admin-ui/                   # Next.js admin (18 pages)
-├── portal/                     # Next.js customer portal (19 pages)
-├── mock/                       # Mock LLM provider used in tests
-├── dlp-sidecar/                # Rust DLP sidecar (22/30 detectors, gRPC :50051)
-├── log-worker/                 # Go async batch logger (gRPC :50052, COPY to Postgres)
-├── rate-limiter/               # Rust rate-limiter sidecar (gRPC :50053)
-├── infra/
-│   ├── docker/, terraform/
-│   └── k8s/                    # backend, admin-ui, ner-service deployments
-├── scripts/                    # dev/seed/migrate/smoke (.sh + .ps1)
-│   └── uat/                    # UAT bringup: 01_truncate.sql, 02_seed_uat.py, 03_verify.sql, .env.uat.template
-├── docs/                       # architecture notes, runbooks
-├── examples/
-├── docker-compose.yml          # base stack
-├── docker-compose.override.yml # dev hot-reload + bind mounts
-├── Makefile                    # up/down/seed/test/clean/fresh
-├── RUNBOOK.md
-└── README.md
-```
-
----
-
-## 10. Running tests
-
-```bash
-make test                              # full backend pytest
-docker compose exec backend pytest tests/test_dlp_pipeline_suite/   # subset
-docker compose exec backend pytest -k orchestrator                  # filter
-```
-
-Test areas (`backend/tests/`):
-
-- `test_dlp_detectors/` — per-detector accuracy (`test_email.py`, `test_thai_national_id.py`, `test_passport.py`, ...).
-- `test_dlp_pipeline_suite/` — mask/restore round-trip, multi-value indexing, overlap resolution, token scope.
-- `test_dlp_regression_suite/test_known_bugs.py` — anchored regressions.
-- `integration/` — `test_dlp_roundtrip_live.py`, `test_dlp_dataflow_hops.py`, `test_multiturn_vault.py`, `test_fixes_live.py` (require a running stack).
-- `test_routing_engine.py`, `test_routing_priority.py`, `test_routing_cost_scoring.py` — model selection.
-- `test_policy_evaluator.py`, `test_policy_*.py` — policy profile semantics.
-- `test_streaming_dlp.py` — outbound DLP across SSE chunks.
-- `test_e2e_dlp_flow.py` — end-to-end DLP path.
-- `test_admin_secure_trace.py`, `test_usage_cost_split.py`, `test_currency_service.py`, `test_model_discovery.py`, ...
-
-The `Makefile`'s `make test` target deliberately unsets compose-injected env vars (`POSTGRES_HOST`, `REDIS_HOST`, ...) so tests that assert pydantic `Settings` defaults see the class defaults, not the container env.
-
----
-
-## 11. Performance notes
-
-Measurements from the live dev stack on this repo (single host, defaults, idle baseline; see `RUNBOOK.md` for the full audit):
-
-- **Per-request gateway latency (no provider):** ~65–115 ms — dominated by 30 sequential regex detectors (~15–25 ms), one NER HTTP call (21 ms warm, p95 ~27 ms), AES encrypt (5–10 ms, blocks event loop), 8–12 Postgres SELECTs, one INSERT.
-- **NER service is the first bottleneck.** Single uvicorn worker, GIL-bound spaCy → ~47 analyze/sec ceiling per pod. Each chat completion is one NER call inbound + (optionally) one outbound — effective **23–47 chat-completions/sec per NER pod**.
-- **Postgres connections:** 4 backend workers × `pool_size=10 + overflow=20` requests up to 120 connections vs. the default `max_connections=100`. Under sustained load this becomes the second wall.
-- **`synchronous_commit=on` + `fsync=on`** on Postgres — every write blocks for fsync. Acceptable on local SSD, much heavier on networked storage.
-- **Redis** is not a throughput bottleneck (3–6 ops/request, ceiling well above 100k ops/sec), but `maxmemory=0 / noeviction` means a leak will OOM the box.
-- **Request log row size** is currently ~1 KB average in dev; production traffic with retained snapshots and the encrypted blob lands around 3–10 KB. `request_logs` is monthly range-partitioned (migration 041) and a `request_logs_archive` partition exists for cold rows.
-- **Scaling path:**
-  1. Replicate the NER service (`--workers N` in the Dockerfile CMD, or scale the K8s `Deployment` — `infra/k8s/ner-service-deployment.yaml`).
-  2. Reconcile backend pool with `max_connections`.
-  3. Move AES encrypt off the event loop and run regex detectors in a threadpool.
-  4. Set `maxmemory` + an eviction policy on Redis.
-
-These are honest figures from this build, not theoretical headroom.
-
-### Phase 1–3 improvements (shipped)
-
-The four scaling items above have largely landed. The legacy / Python path is still the default everywhere so the gateway behaves identically to the pre-Phase-1 build; each replacement is gated by an env var and falls back to the legacy path on any error (timeout, missing dep, sidecar unreachable).
-
-| Area | Before | After | Method |
-|---|---|---|---|
-| NER throughput | ~47 RPS | ~200 RPS | 4 uvicorn workers in `ner-service` |
-| DB pool | `pool=10 overflow=20` | `pool=20 overflow=10` | explicit `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` |
-| PG write latency | 3–5 ms/write | <1 ms | `synchronous_commit=off` + `wal_writer_delay=200ms` |
-| Request logging | sync INSERT, blocks event loop | fire-and-forget Go COPY batch | Go `log-worker` sidecar (:50052) |
-| Rate limiter | Python async Redis pipeline | Rust sliding-window (:50053) | Rust `rate-limiter` sidecar |
-| Fallback routing | 503 on provider failure | 3-tier model fallback chain | `FallbackOrchestrator` + `model_tiers.py` |
-| DLP engine *(in progress)* | Python regex 15–25 ms | Rust <1 ms (target) | `dlp-sidecar` Rust sidecar (:50051) — 22/30 detectors ported, shadow mode pending |
-
-**Activation** (all default to the Python / legacy path):
-
-- `LOG_WORKER_ENGINE=go` — route request logs through the Go COPY worker.
-- `RATE_LIMITER_ENGINE=rust` — route rate-limit checks through the Rust sidecar.
-- `DLP_ENGINE=shadow` — run the Rust DLP scanner in parallel with Python and log diffs (no cutover yet).
-- `DLP_ENGINE=rust` — full cutover (only after a 7-day shadow window with diff = 0).
+See repo top-level for license. PRs welcome — open against `main` with
+a passing `make test` (failures must not exceed the 95 baseline).
