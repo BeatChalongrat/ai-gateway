@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     # unreachable.
     ner_service_url: str = ""
     ner_service_timeout_seconds: float = 2.0
+    # NER service worker count — the ner-service container uses this
+    # to size its uvicorn worker pool (Dockerfile CMD reads
+    # ``${NER_WORKERS}``). Documented here so a single .env file
+    # controls the whole stack's tuning; the backend process itself
+    # does not consume the value.
+    ner_workers: int = 4
 
     # Archive retention — rows older than this are moved from
     # ``request_logs`` to ``request_logs_archive`` by the daily job
@@ -124,6 +130,17 @@ class Settings(BaseSettings):
     # retention window so cold storage never holds raw PII for
     # longer than the live table did.
     log_archive_days: int = 90
+
+    # Phase-1 async request-log queue (``app.services.request_log_queue``).
+    # The orchestrator's success path enqueues records instead of
+    # synchronously persisting; a background worker started by the
+    # lifespan hook drains the queue every ``flush_interval_ms`` (or
+    # whenever ``batch_size`` is reached) and bulk-inserts. ``queue_max``
+    # caps memory pressure under a Postgres outage — once the queue is
+    # full, the oldest record is dropped to make room.
+    request_log_batch_size: int = 50
+    request_log_flush_interval_ms: int = 100
+    request_log_queue_max: int = 10000
 
     # Semantic router (intent classification via sentence-transformers).
     # Off by default — flipping this to true requires the optional

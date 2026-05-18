@@ -1,5 +1,5 @@
-import logging
 import os
+import sys
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
@@ -30,13 +30,26 @@ def _env_int(name: str, default: int) -> int:
 
 _pool_size = _env_int("DB_POOL_SIZE", _DEFAULT_POOL_SIZE)
 _max_overflow = _env_int("DB_MAX_OVERFLOW", _DEFAULT_MAX_OVERFLOW)
+_peak_per_worker = _pool_size + _max_overflow
+# Display the Postgres max_connections value we expect on the other end
+# of the wire so a misconfigured cap is obvious in the boot log.
+# ``POSTGRES_MAX_CONNECTIONS`` is informational only — the value is
+# enforced server-side by the postgres ``-c max_connections=…`` flag
+# in docker-compose.yml.
+_pg_max_connections = os.environ.get("POSTGRES_MAX_CONNECTIONS", "200")
 
-logging.getLogger(__name__).info(
-    "db_pool_configured pool_size=%d max_overflow=%d (defaults=%d/%d)",
-    _pool_size,
-    _max_overflow,
-    _DEFAULT_POOL_SIZE,
-    _DEFAULT_MAX_OVERFLOW,
+# Use print() rather than logging — db.py is imported BEFORE
+# configure_logging() runs in main.py, so a logging.info() call here
+# is suppressed by Python's default root level (WARNING). Emitting via
+# stdout guarantees the operator sees the effective pool settings on
+# every boot. Tag matches the grep target documented in the runbook.
+print(
+    f"db_pool_configured pool_size={_pool_size} "
+    f"max_overflow={_max_overflow} peak_per_worker={_peak_per_worker} "
+    f"pg_max_connections={_pg_max_connections} "
+    f"(defaults={_DEFAULT_POOL_SIZE}/{_DEFAULT_MAX_OVERFLOW})",
+    file=sys.stderr,
+    flush=True,
 )
 
 engine = create_engine(
