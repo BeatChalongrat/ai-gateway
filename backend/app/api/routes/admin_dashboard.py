@@ -358,6 +358,142 @@ def dashboard_top_models(
     return {"period": period, "total": int(total), "items": items}
 
 
+@router.get("/fallback-stats")
+def dashboard_fallback_stats(
+    period_hours: int = Query(24, ge=1, le=720),
+    session: Session = Depends(get_db_session),
+):
+    """Aggregate Phase-2 fallback usage over the last ``period_hours``.
+
+    Surfaces four numbers operators care about during an upstream
+    incident:
+
+      * ``total_requests``       — overall request volume in the window
+      * ``fallback_triggered``   — how many rows have ``fallback_used = true``
+      * ``fallback_success_rate``— of those, the share that ended in ``status = success``
+      * ``by_provider``          — per *original* provider, count of failures and
+                                   where the fallback chain steered the rescue
+      * ``by_tier``              — per-tier fallback rate (uses the model_tiers registry)
+
+    The window only ever looks at the partitioned ``request_logs``
+    table — archive rows are excluded so the dashboard stays fast.
+    """
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=period_hours)
+
+    total_requests = int(
+        session.execute(
+            sa.select(sa.func.count())
+            .select_from(RequestLogORM)
+            .where(RequestLogORM.created_at >= start)
+            .where(RequestLogORM.created_at < end)
+        ).scalar()
+        or 0
+    )
+
+    # Pull only the rows where fallback fired — usually a small subset
+    # of the window so we can hydrate full ORM rows without paying for
+    # everything.
+    fallback_rows = (
+        session.execute(
+            sa.select(RequestLogORM)
+            .where(RequestLogORM.created_at >= start)
+            .where(RequestLogORM.created_at < end)
+            .where(RequestLogORM.fallback_used == True)  # noqa: E712
+        )
+        .scalars()
+        .all()
+    )
+
+    triggered = len(fallback_rows)
+    successful = sum(1 for r in fallback_rows if r.status == "success")
+    success_rate = (successful / triggered) if triggered else 0.0
+
+    # by_provider: keyed on the *original* provider so operators see
+    # "openai had 40 failures → 35 rescued by anthropic, 5 by google".
+    by_provider: dict[str, dict] = {}
+    for r in fallback_rows:
+        op = r.original_provider or r.provider or "unknown"
+        bucket = by_provider.setdefault(
+            op, {"failures": 0, "fallback_to": defaultdict(int)}
+        )
+        bucket["failures"] += 1
+        if r.status == "success" and r.provider:
+            bucket["fallback_to"][r.provider] += 1
+    by_provider_out = {
+        provider: {
+            "failures": v["failures"],
+            "fallback_to": dict(v["fallback_to"]),
+        }
+        for provider, v in by_provider.items()
+    }
+
+    # by_tier: requires the model tier mapping. We compute the per-tier
+    # denominator (all requests in the window whose model is in a tier)
+    # in one query so the rate is real, not "fallbacks / fallbacks".
+    from app.services.providers.model_tiers import get_tier
+
+    tier_total: dict[str, int] = defaultdict(int)
+    tier_fallback: dict[str, int] = defaultdict(int)
+    period_models = session.execute(
+        sa.select(
+            RequestLogORM.model, RequestLogORM.fallback_used
+        )
+        .where(RequestLogORM.created_at >= start)
+        .where(RequestLogORM.created_at < end)
+    ).all()
+    for model, fb_used in period_models:
+        tier = get_tier(model or "")
+        if tier is None:
+            continue
+        tier_total[tier] += 1
+        if fb_used:
+            tier_fallback[tier] += 1
+    by_tier_out = {
+        tier: {
+            "fallback_rate": round(
+                tier_fallback[tier] / tier_total[tier], 4
+            )
+        }
+        for tier in tier_total
+        if tier_total[tier] > 0
+    }
+
+    return {
+        "period_hours": period_hours,
+        "total_requests": total_requests,
+        "fallback_triggered": triggered,
+        "fallback_success_rate": round(success_rate, 4),
+        "by_provider": by_provider_out,
+        "by_tier": by_tier_out,
+    }
+
+
+@router.get("/partition-health")
+def dashboard_partition_health(
+    session: Session = Depends(get_db_session),
+):
+    """Operational read-out of the ``request_logs`` partition layout.
+
+    Surfaces:
+      * Per-partition row estimate (uses ``pg_class.reltuples`` so the
+        endpoint stays cheap even on a 1B-row hot table).
+      * Oldest / newest monthly partition names so operators can
+        eyeball the retention window at a glance.
+      * A ``next_month_missing`` flag to call out when the daily
+        partition_maintenance job has slipped — a true value here
+        means new writes will land in ``request_logs_default`` until
+        the job catches up.
+
+    On non-Postgres engines (SQLite test env) the response is a
+    structured "unsupported" stub so the admin UI can render a
+    friendly message instead of a 500.
+    """
+    from app.jobs.partition_maintenance_job import list_partition_health
+
+    return list_partition_health(session)
+
+
 @router.get("/recent-requests")
 def dashboard_recent_requests(
     limit: int = Query(10, ge=1, le=50),
