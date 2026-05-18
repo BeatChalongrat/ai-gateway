@@ -85,7 +85,9 @@ from app.services.semantic_router import (
 )
 from app.services.gateway.fallback_orchestrator import (
     FallbackOrchestrator,
+    clear_provider_health,
     is_fallback_eligible,
+    mark_provider_unhealthy,
 )
 
 logger = structlog.get_logger(__name__)
@@ -691,10 +693,16 @@ class GatewayOrchestrator:
                     messages=messages_to_send,
                     api_key=provider_api_key,
                 )
+            # Primary succeeded — clear any stale health marker so the
+            # streaming pre-check stops skipping this provider.
+            await clear_provider_health(original_provider)
         except Exception as exc:  # noqa: BLE001
             from app.core.exceptions import GatewayError as _GwErr
 
             if isinstance(exc, _GwErr) and is_fallback_eligible(exc):
+                # Tag the primary as unhealthy so the next streaming
+                # request bypasses it via the Redis pre-check.
+                await mark_provider_unhealthy(original_provider)
                 log.warning(
                     "primary_dispatch_failed_attempting_fallback",
                     provider=route.provider_name,
