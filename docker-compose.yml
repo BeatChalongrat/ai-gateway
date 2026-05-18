@@ -99,6 +99,40 @@ services:
       start_period: 90s
     restart: unless-stopped
 
+  # Phase-3b Rust rate-limiter — gRPC sidecar that runs the same
+  # sliding-window check as the legacy Python service against the
+  # shared Redis. Gated by RATE_LIMITER_ENGINE=rust on the backend;
+  # default (python) leaves this service idle.
+  rate-limiter:
+    build:
+      context: ./rate-limiter
+    image: ai-gateway-rate-limiter:latest
+    environment:
+      REDIS_URL: "redis://redis:6379"
+      GRPC_PORT: "50053"
+      METRICS_PORT: "9101"
+    ports:
+      - "50053:50053"
+      - "9101:9101"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "128m"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Distroless cc has no shell — the Rust ``/healthcheck``
+      # binary (built by the same Dockerfile) HTTP-GETs the metrics
+      # port's /healthz and exits 0/1.
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
   # Phase-3 Go log-worker — asynchronous sink for request_logs.
   #
   # Activated only when the gateway sets LOG_WORKER_ENGINE=go; the
@@ -192,6 +226,12 @@ services:
       LOG_WORKER_ENGINE: ${LOG_WORKER_ENGINE:-python}
       LOG_WORKER_GRPC_ADDRESS: ${LOG_WORKER_GRPC_ADDRESS:-log-worker:50052}
       LOG_WORKER_GRPC_TIMEOUT_SECONDS: ${LOG_WORKER_GRPC_TIMEOUT_SECONDS:-0.5}
+      # Phase-3b Rust rate-limiter sidecar. ``python`` keeps the
+      # legacy in-process sliding-window; ``rust`` dispatches to the
+      # gRPC sidecar (fail-open fallback to Python on any error).
+      RATE_LIMITER_ENGINE: ${RATE_LIMITER_ENGINE:-python}
+      RATE_LIMITER_GRPC_ADDRESS: ${RATE_LIMITER_GRPC_ADDRESS:-rate-limiter:50053}
+      RATE_LIMITER_GRPC_TIMEOUT_SECONDS: ${RATE_LIMITER_GRPC_TIMEOUT_SECONDS:-0.5}
     ports:
       - "8080:8080"
     depends_on:
