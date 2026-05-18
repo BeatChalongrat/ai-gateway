@@ -21,6 +21,8 @@ _HEALTH_KEYWORDS_RE = re.compile(
     # Common disease names (Thai)
     r"เบาหวาน|มะเร็ง|ความดัน(?:สูง|ต่ำ)?|หัวใจ|ไต(?:วาย|เรื้อรัง)|"
     r"เอดส์|HIV|โควิด|วัณโรค|หอบหืด|ลมชัก|ไทรอยด์|"
+    r"ภูมิแพ้|โรคภูมิแพ้|"
+    r"allergy|allergic|"
     r"โรงพยาบาล(?:.{0,20})(?:ให้ยา|รักษา|ผ่าตัด|นอน|ตรวจ)|"
     r"(?:ผม|ฉัน|เขา|เธอ)(?:.{0,10})(?:โรค|ป่วย|ผ่าตัด|แพ้|เป็น)|"
     # English with personal context built-in
@@ -78,6 +80,7 @@ _CONDITION_VALUE_RE = re.compile(
     r"(?:"
     r"diabetes|blood\s+pressure|hypertension|asthma|cancer|depression|"
     r"HIV|covid|heart\s+disease|kidney\s+disease|pregnan|allerg|"
+    r"ภูมิแพ้|"
     r"\u0e40\u0e1a\u0e32\u0e2b\u0e27\u0e32\u0e19|"
     r"\u0e04\u0e27\u0e32\u0e21\u0e14\u0e31\u0e19|"
     r"\u0e04\u0e27\u0e32\u0e21\u0e14\u0e31\u0e19\u0e2a\u0e39\u0e07|"

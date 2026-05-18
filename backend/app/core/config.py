@@ -244,6 +244,22 @@ class Settings(BaseSettings):
     display_currency: str = "THB"
     usd_to_thb_rate: float = 35.0
 
+    # DLP system-prompt variant (A/B-able).
+    #
+    #   * ``v1`` (default) — verbose "Critical rule: do not invent"
+    #     copy that has shipped to date. Contains a ``[CATEGORY_NUMBER]``
+    #     example token; regression tests in test_dlp_prompt.py lock
+    #     in this shape.
+    #   * ``v3`` — drops the literal example token to remove the
+    #     pattern seed the May 2026 50-request audit identified as
+    #     the leading hallucination driver (~48% of replies invented
+    #     tokens). Positive-frame instruction in place of the prior
+    #     negative list.
+    #
+    # Switch per-deployment via ``DLP_PROMPT_VARIANT=v3`` to A/B.
+    # Unknown values silently fall back to v1.
+    dlp_prompt_variant: str = "v1"
+
     # DLP deterministic-tokenization secret.
     # When a request supplies ``metadata.conversation_id``, the DLP
     # transformer derives a per-conversation HMAC key from this
