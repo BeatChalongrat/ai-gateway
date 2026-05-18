@@ -207,7 +207,10 @@ class AlertService:
             alert_type=alert.alert_type.value,
             severity=alert.severity.value,
             message=alert.message,
-            details_json=json.dumps(alert.details) if alert.details else None,
+            details_json=(
+                json.dumps(alert.details, ensure_ascii=False)
+                if alert.details else None
+            ),
             tenant_id=alert.tenant_id or None,
             project_id=alert.project_id or None,
             webhook_url=webhook_url,

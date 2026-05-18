@@ -41,6 +41,8 @@ from app.observability.metrics import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from app.core.responses import UTF8JSONResponse
+
 configure_logging()
 
 # Fail loud + early if any security-critical secret is a known-insecure
@@ -449,7 +451,12 @@ def _run_dlp_retention_once() -> None:
         session.close()
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title=settings.app_name,
+    version="0.1.0",
+    lifespan=lifespan,
+    default_response_class=UTF8JSONResponse,
+)
 
 # --- Middleware (outermost first) ---
 # Note: CORSMiddleware must be outermost to handle preflight OPTIONS

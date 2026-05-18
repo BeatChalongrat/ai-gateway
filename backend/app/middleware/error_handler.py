@@ -10,7 +10,7 @@ from __future__ import annotations
 import structlog
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from app.core.responses import UTF8JSONResponse as JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.exceptions import (

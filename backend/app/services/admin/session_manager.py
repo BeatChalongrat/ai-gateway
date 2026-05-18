@@ -99,7 +99,7 @@ class SessionManager:
 
         self._redis.set(
             f"session:{session_id}",
-            json.dumps(payload),
+            json.dumps(payload, ensure_ascii=False),
             ex=self._idle_ttl,
         )
         self._redis.sadd(f"session:user:{user_id}", session_id)
