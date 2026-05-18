@@ -678,8 +678,12 @@ async def chat_completions(
             ):
                 return text, []
             try:
+                # NER disabled on outbound scan — same rationale as the
+                # non-streaming orchestrator (Section 8 + 8c). Presidio
+                # English NER over Thai AI output mints noise tokens
+                # that survive restore as mid-word splices.
                 detection = orchestrator._scan_text_as_result(
-                    text, direction="output", ner_enabled=ctx.ner_enabled,
+                    text, direction="output", ner_enabled=False,
                 )
                 enforcement = orchestrator._scan_and_evaluate(
                     detection, pre_restore_profile
