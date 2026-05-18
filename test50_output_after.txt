@@ -1,0 +1,135 @@
+﻿docker : db_pool_configured pool_size=20 max_overflow=10 peak_per_worker=30 pg_max_connections=200 (defaults=10/20)
+At line:1 char:1
++ docker compose exec -T backend python /app/test_dlp_e2e_50.py 2>&1 |  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (db_pool_configu...defaults=10/20):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  -> T01
+T01 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | somchai@test.com
+  -> T02
+T02 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | somchai@test.com
+  -> T03
+T03 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 081-234-5678
+  -> T04
+T04 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 089-111-2222
+  -> T05
+T05 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | john@test.com
+  -> T06
+T06 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | +66 89 111 2222
+  -> T07
+T07 | MASK: ✅ 2/2 | UNMASK: ✅ | AI: ✅ | somchai.j@example.com
+  -> T08
+T08 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | finance@abc.co.th
+  -> T09
+T09 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | john.doe@company.com
+  -> T10
+T10 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 080-123-4567
+  -> T11
+T11 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 1101700203451
+  -> T12
+T12 | MASK: ✅ 1/1 | UNMASK: ❌ | AI: ✅ | 1101700203451
+  -> T13
+T13 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | AA1234567
+  -> T14
+T14 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | TH1234567
+  -> T15
+T15 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 12/05/1998
+  -> T16
+T16 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 0105558123456
+  -> T17
+T17 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | กข 1234
+  -> T18
+T18 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 99/88 ถนนสุขุมวิท กรุงเทพ 1011…
+  -> T19
+T19 | MASK: ❌ false-positive | AI: ✅ | input_masked has tokens
+  -> T20
+T20 | MASK: ❌ false-positive | AI: ✅ | input_masked has tokens
+  -> T21
+T21 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 4111 1111 1111 1111
+  -> T22
+T22 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 5555 5555 5555 4444
+  -> T23
+T23 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 123-4-56789-0
+  -> T24
+T24 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 987-6-54321-0
+  -> T25
+T25 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | 0812345678
+  -> T26
+T26 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | DE89370400440532013000
+  -> T27
+T27 | MASK: ❌ false-positive | AI: ✅ | input_masked has tokens
+  -> T28
+T28 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+  -> T29
+T29 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | sk-test-1234567890abcdef
+  -> T30
+T30 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | eyJhbGciOiJIUzI1NiIsInR5cCI6Ik…
+  -> T31
+T31 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | P@ssw0rd123!
+  -> T32
+T32 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | postgres://admin:pass123@local…
+  -> T33
+T33 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | -----BEGIN PRIVATE KEY----- ab…
+  -> T34
+T34 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | ghp_1234567890abcdef1234567890…
+  -> T35
+T35 | MASK: ✅ 1/1 | UNMASK: ❌ | AI: ✅ | admin123
+  -> T36
+T36 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | smtp_pass_123456
+  -> T37
+T37 | MASK: ✅ 3/3 | UNMASK: ✅ | AI: ✅ | somchai@test.com
+  -> T38
+T38 | MASK: ✅ 3/3 | UNMASK: ✅ | AI: ✅ | john@test.com
+  -> T39
+T39 | MASK: ✅ 2/2 | UNMASK: ❌ | AI: ✅ | john@test.com
+  -> T40
+T40 | MASK: ✅ 2/2 | UNMASK: ✅ | AI: ✅ | 123-4-56789-0
+  -> T41
+T41 | MASK: ❌ 1/2 | UNMASK: ❌ | AI: ✅ | sk-test-abc123
+  -> T42
+T42 | MASK: ✅ 2/2 | UNMASK: ✅ | AI: ✅ | 1101700203451
+  -> T43
+T43 | MASK: ✅ 1/1 | UNMASK: ✅ | AI: ✅ | test@example.com
+  -> T44
+T44 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+  -> T45
+T45 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+  -> T46
+T46 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+  -> T47
+T47 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+  -> T48
+T48 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+  -> T49
+T49 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+  -> T50
+T50 | MASK: ✅ no-mask (correct) | AI: ✅ | left untouched
+
+════════════════════════════════════════════════════════════
+SUMMARY
+════════════════════════════════════════════════════════════
+Total:            50
+MASK correct:     38/39
+UNMASK correct:   35/39
+AI helpful:       50/50
+False positives:  3  (no-PII cases that were masked)
+False negatives:  1  (expected masks that were missed)
+Orphan tokens:    5  (restore bugs in output_final)
+
+FALSE NEGATIVES (expected mask but value still present):
+  - T41: missed ['sk-test-abc123']
+
+FALSE POSITIVES (no-PII case got masked):
+  - T19: input_masked='If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not inve'
+  - T20: input_masked='If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not inve'
+  - T27: input_masked='If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not inve'
+
+ORPHANS (tokens left in output_final):
+  - T12: ['<r1>']
+  - T29: ['<r1>']
+  - T35: ['<r1>', '<r2>']
+  - T41: ['<r1>']
+  - T46: ['<r0>', '<r1>']
+
+FULLY CORRECT:    41/50
