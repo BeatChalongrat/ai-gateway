@@ -57,6 +57,20 @@ _TAX_KEYWORDS = (
 
 _CONTEXT_WINDOW = 60
 
+# Stronger gate: the "this number IS a tax ID" labels. When one of
+# these appears IMMEDIATELY before the digit run (within 30 chars),
+# the user is explicitly labelling the value as a tax/corporate ID
+# and we relax the mod-11 checksum gate. This is the only path that
+# accepts checksum-invalid IDs — e.g. masked / typo'd / fake test
+# values like ``0105558123456`` (E2E audit May 2026, T16).
+_STRONG_TAX_LABELS = (
+    "เลขประจำตัวผู้เสียภาษี",
+    "เลขผู้เสียภาษี",
+    "เลขทะเบียนนิติบุคคล",
+    "เลขนิติบุคคล",
+)
+_STRONG_PREFIX_WINDOW = 30
+
 
 def _has_tax_context(text: str, start: int, end: int) -> bool:
     """Return True iff a tax keyword is within the context window."""
@@ -64,6 +78,21 @@ def _has_tax_context(text: str, start: int, end: int) -> bool:
     high = min(len(text), end + _CONTEXT_WINDOW)
     window = text[low:high].lower()
     return any(kw in window for kw in _TAX_KEYWORDS)
+
+
+def _has_strong_tax_prefix(text: str, start: int) -> bool:
+    """Return True iff an explicit tax-ID label sits in the
+    ``_STRONG_PREFIX_WINDOW`` chars immediately preceding ``start``.
+
+    Used to relax the checksum gate when the user's intent is
+    unambiguous ("เลขผู้เสียภาษีบริษัท 0105558123456"). The wider
+    ``_has_tax_context`` window is too permissive for checksum
+    bypass — a stray "ภาษี" 60 chars away from a random 13-digit
+    number would be enough.
+    """
+    low = max(0, start - _STRONG_PREFIX_WINDOW)
+    window = text[low:start]
+    return any(kw in window for kw in _STRONG_TAX_LABELS)
 
 
 class ThaiTaxIdDetector(BaseDetector):
@@ -81,10 +110,19 @@ class ThaiTaxIdDetector(BaseDetector):
         for m in _NUMBER_RE.finditer(text):
             raw = m.group(1)
             digits = "".join(ch for ch in raw if ch.isdigit())
-            if not _thai_tax_id_valid(digits):
+            if len(digits) != 13:
                 continue
-            if not _has_tax_context(text, m.start(1), m.end(1)):
-                continue
+            checksum_ok = _thai_tax_id_valid(digits)
+            if checksum_ok:
+                if not _has_tax_context(text, m.start(1), m.end(1)):
+                    continue
+            else:
+                # Checksum-invalid path: only fire if a strong
+                # tax-ID label sits in the 30 chars immediately
+                # before the number. Catches user-supplied fake /
+                # masked / typo'd IDs that still need to be redacted.
+                if not _has_strong_tax_prefix(text, m.start(1)):
+                    continue
             matches.append(
                 DetectionMatch(
                     detector_name=self.name,
