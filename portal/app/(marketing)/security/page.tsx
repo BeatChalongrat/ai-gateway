@@ -17,7 +17,7 @@ export default function SecurityPage() {
       <h2>Data protection on every request</h2>
       <p>
         Before a prompt reaches a model provider, SRAN scans it for sensitive
-        data. 22 built-in detectors cover the categories that actually show up
+        data. 30 built-in detectors cover the categories that actually show up
         in AI workflows.
       </p>
       <h3>What we detect by default</h3>
