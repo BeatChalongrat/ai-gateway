@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 # in lockstep with ``transformer._MASK_TOKEN_RE``.
 _MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]")
 
-DLP_PLACEHOLDER_PROMPT = (
+DLP_PLACEHOLDER_PROMPT_V1 = (
     "Some values in this message have been replaced with placeholder "
     "tokens like [CATEGORY_NUMBER] for privacy. Treat each token as "
     "a regular text value. Echo tokens exactly as written if needed. "
@@ -42,6 +42,49 @@ DLP_PLACEHOLDER_PROMPT = (
     "tokens. "
     "Continue helping normally."
 )
+
+
+# Variant v3 — drops the literal ``[CATEGORY_NUMBER]`` example entirely.
+# The May 2026 50-request audit showed ``gpt-4o-mini`` invents tokens in
+# ~48% of replies; the leading hallucination driver was the model
+# pattern-matching the ``[CATEGORY_NUMBER]`` example and emitting
+# similar shapes (``[NAME_1]``, ``[BEARER_TOKEN_0]``,
+# ``[YOUR_COMPANY]``) verbatim. Removing the example removes the
+# pattern seed. Positive-frame instruction ("echo each one back
+# unchanged") replaces the prior negative list. ``[REDACTED]`` stays
+# as the orphan-substitute (keeps the regression tests around the
+# critical-rule contract happy).
+DLP_PLACEHOLDER_PROMPT_V3 = (
+    "If the message contains bracketed tokens, echo each one back "
+    "unchanged when you reference its value. When you need to refer "
+    "to anything else that looks like personal data, write [REDACTED]. "
+    "Do not generate any other bracketed text. Continue helping the "
+    "user."
+)
+
+
+def _select_prompt() -> str:
+    """Return the active prompt based on ``DLP_PROMPT_VARIANT``.
+
+    Defaults to v1 so the existing regression suite
+    (``TestRedactedRuleInPrompt``: requires ``Critical rule`` +
+    ``[CATEGORY_NUMBER]``) keeps passing without an env override.
+    Operators wanting to A/B v3 set ``DLP_PROMPT_VARIANT=v3`` on the
+    backend container. Unknown values silently fall back to v1.
+    """
+    from app.core.config import settings
+
+    variant = (getattr(settings, "dlp_prompt_variant", "v1") or "v1").lower()
+    if variant == "v3":
+        return DLP_PLACEHOLDER_PROMPT_V3
+    return DLP_PLACEHOLDER_PROMPT_V1
+
+
+# Back-compat alias — call sites (and the regression tests) import this
+# symbol directly. Default = v1 string so the regression assertions
+# (``[REDACTED]``, ``Critical rule``, ``[CATEGORY_NUMBER]``) still hold
+# without an env override.
+DLP_PLACEHOLDER_PROMPT = DLP_PLACEHOLDER_PROMPT_V1
 
 
 def has_mask_tokens(messages: list[Message]) -> bool:
@@ -65,12 +108,13 @@ def inject_dlp_system_prompt(messages: list[Message]) -> list[Message]:
 
     result = list(messages)
 
+    active_prompt = _select_prompt()
     if result and result[0].role == "system":
         result[0] = Msg(
             role="system",
-            content=DLP_PLACEHOLDER_PROMPT + "\n\n" + result[0].content,
+            content=active_prompt + "\n\n" + result[0].content,
         )
     else:
-        result.insert(0, Msg(role="system", content=DLP_PLACEHOLDER_PROMPT))
+        result.insert(0, Msg(role="system", content=active_prompt))
 
     return result
