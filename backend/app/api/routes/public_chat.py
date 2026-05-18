@@ -649,6 +649,13 @@ async def chat_completions(
         emitted_parts: list[str] = []
         accumulated_outbound_actions = []
         counters_mut = dict(inbound_counters)
+        # Streaming-side accumulator of every outbound mask token minted
+        # across the per-chunk DLP passes. Fed by ``mask_text`` calls in
+        # the chunk helper; consumed at the tail flush so the orphan-
+        # redact pass can distinguish AI-invented placeholders from
+        # legitimate outbound masks (same contract as the non-streaming
+        # orchestrator path).
+        _stream_outbound_span_map: dict[str, str] = {}
         final_finish_reason: str | None = None
         final_model: str = route.model_name
         provider_usage = None
@@ -705,6 +712,12 @@ async def chat_completions(
                 # Mutate via the enclosing variable binding.
                 counters_mut.clear()
                 counters_mut.update(new_counters)
+                # Accumulate the outbound mask tokens for the tail-
+                # flush orphan redact below. Per-chunk maps don't
+                # overlap by construction (start_counters threads
+                # across) so a plain update is safe.
+                if outbound_window_map:
+                    _stream_outbound_span_map.update(outbound_window_map)
                 return masked, list(enforcement.match_actions)
             except Exception as exc:
                 log.warning(
@@ -914,6 +927,18 @@ async def chat_completions(
                 )
             else:
                 final_emit = tail_masked
+            # Orphan-redact pass — same idea as the non-streaming
+            # path's ``redact_orphan_tokens`` call: any ``[CAT_N]``
+            # surviving in the tail that isn't in the combined
+            # inbound + outbound maps is something the model
+            # invented from the placeholder system prompt's example
+            # token. Streaming can only catch orphans on the tail
+            # (earlier chunks are already on the wire), but that's
+            # where they tend to cluster — the model writes its
+            # "Hope this helps, [YOUR_NAME]" template at the end.
+            from app.services.dlp.transformer import redact_orphan_tokens
+            _stream_all_tokens = {**span_map, **_stream_outbound_span_map}
+            final_emit = redact_orphan_tokens(final_emit, _stream_all_tokens)
             if final_emit:
                 emitted_parts.append(final_emit)
                 yield _emit_chunk(final_emit)
