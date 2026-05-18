@@ -51,3 +51,105 @@ pub fn byte_to_char(text: &str, byte_offset: usize) -> usize {
     }
     text[..byte_offset].chars().count()
 }
+
+/// Convert a CHARACTER (code-point) offset to a byte offset.
+///
+/// Mirror of :fn:`byte_to_char`. Used when we want to slice the
+/// original string by Python-style codepoint window bounds — the
+/// context-window helper below uses it to size the ``[lo..hi]``
+/// slice it scans for keywords.
+pub fn char_to_byte(text: &str, char_offset: usize) -> usize {
+    if char_offset == 0 {
+        return 0;
+    }
+    let mut byte = text.len();
+    for (i, (b, _)) in text.char_indices().enumerate() {
+        if i == char_offset {
+            byte = b;
+            break;
+        }
+    }
+    byte
+}
+
+/// True iff one of ``keywords`` appears (case-insensitively) in the
+/// character window ``[start - radius, end + radius)`` of ``text``.
+///
+/// ``start`` / ``end`` are CHARACTER offsets so the helper composes
+/// cleanly with each detector's regex result. ``keywords`` are
+/// matched as plain ASCII substrings — Thai keywords need no
+/// special handling because the input has already been NFKC-
+/// normalised upstream and Thai letter sequences are unique.
+///
+/// This is intentionally a substring contains check rather than a
+/// regex pass: the Python detectors that ship a keyword *list*
+/// (medical_record, biometric_data, religion_belief, ...) use the
+/// same plain substring semantics under the hood. Detectors that
+/// need word boundaries (medical_record's `\b(?:mrn|hn|...)\b`)
+/// embed that into the regex directly and bypass this helper.
+pub fn has_context_keyword(
+    text: &str,
+    start: usize,
+    end: usize,
+    radius: usize,
+    keywords: &[&str],
+) -> bool {
+    let total_chars = text.chars().count();
+    let lo = start.saturating_sub(radius);
+    let hi = (end + radius).min(total_chars);
+    let lo_b = char_to_byte(text, lo);
+    let hi_b = char_to_byte(text, hi);
+    let window = &text[lo_b..hi_b];
+    let window_lower = window.to_lowercase();
+    keywords
+        .iter()
+        .any(|kw| window_lower.contains(&kw.to_lowercase()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_to_char_ascii_is_identity() {
+        assert_eq!(byte_to_char("hello world", 6), 6);
+    }
+
+    #[test]
+    fn byte_to_char_thai_diverges() {
+        // "abc" + 3 Thai chars (3 bytes each in UTF-8) + space + "x".
+        // Byte offsets: a=0 b=1 c=2 น=3-5 า=6-8 น=9-11 ' '=12 x=13.
+        // Char offsets: a=0 b=1 c=2 น=3   า=4   น=5   ' '=6  x=7.
+        let text = "abcนาน x";
+        let byte_x = text.find('x').unwrap();
+        assert_eq!(byte_x, 13);
+        assert_eq!(byte_to_char(text, byte_x), 7);
+    }
+
+    #[test]
+    fn has_context_keyword_finds_thai() {
+        // Thai keyword "โทร" within the window.
+        let text = "โทร 0812345678 ครับ";
+        let chars: Vec<char> = text.chars().collect();
+        let dig_start = chars.iter().position(|c| *c == '0').unwrap();
+        let dig_end = dig_start + 10;
+        let _ = dig_end;
+        assert!(has_context_keyword(text, dig_start, dig_start + 10, 25, &["โทร"]));
+    }
+
+    #[test]
+    fn has_context_keyword_misses_when_out_of_window() {
+        let text = "phone:                                          0812345678";
+        // keyword far from digits — should not match with tight radius
+        let dig_start = text.find('0').unwrap();
+        let dig_end = dig_start + 10;
+        let chars_before = text[..dig_start].chars().count();
+        assert!(!has_context_keyword(
+            text,
+            chars_before,
+            chars_before + 10,
+            5,  // tight radius
+            &["phone"]
+        ));
+    }
+}

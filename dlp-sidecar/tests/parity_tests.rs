@@ -94,3 +94,20 @@ parity_test!(bearer_token, "tests/parity/fixtures/bearer_token.json");
 parity_test!(private_key, "tests/parity/fixtures/private_key.json");
 parity_test!(password_field, "tests/parity/fixtures/password_field.json");
 parity_test!(line_id, "tests/parity/fixtures/line_id.json");
+// Batch 2 — context-window detectors
+parity_test!(phone, "tests/parity/fixtures/phone.json");
+parity_test!(api_key_secret, "tests/parity/fixtures/api_key_secret.json");
+parity_test!(
+    db_connection_string,
+    "tests/parity/fixtures/db_connection_string.json"
+);
+parity_test!(medical_record, "tests/parity/fixtures/medical_record.json");
+parity_test!(date_of_birth, "tests/parity/fixtures/date_of_birth.json");
+parity_test!(vehicle_plate, "tests/parity/fixtures/vehicle_plate.json");
+parity_test!(address, "tests/parity/fixtures/address.json");
+parity_test!(thai_address, "tests/parity/fixtures/thai_address.json");
+parity_test!(income, "tests/parity/fixtures/income.json");
+parity_test!(religion_belief, "tests/parity/fixtures/religion_belief.json");
+parity_test!(health_condition, "tests/parity/fixtures/health_condition.json");
+parity_test!(criminal_record, "tests/parity/fixtures/criminal_record.json");
+parity_test!(biometric_data, "tests/parity/fixtures/biometric_data.json");

@@ -1,0 +1,69 @@
+{
+  "detector": "health_condition",
+  "entity_type": "health_condition",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "english_diagnosed",
+      "input": "I was diagnosed with diabetes last year",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "thai_health_with_pronoun",
+      "input": "ผมป่วยเป็นเบาหวาน มาห้าปี ครับ",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 10
+        },
+        {
+          "start": 10,
+          "end": 17
+        }
+      ]
+    },
+    {
+      "id": "labelled_medical_value",
+      "input": "Medical: diabetes and high blood pressure now",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 45
+        }
+      ]
+    },
+    {
+      "id": "generic_disease_discussion",
+      "input": "Diabetes is a common disease worldwide today",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_thai_prose",
+      "input": "อากาศเปลี่ยนแปลงบ่อย",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_health_keyword",
+      "input": "she went to the market today",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}
