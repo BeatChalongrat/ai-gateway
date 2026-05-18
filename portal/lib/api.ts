@@ -41,7 +41,7 @@ async function doRefresh(): Promise<boolean> {
   try {
     const r = await fetch(`${PREFIX}/portal/auth/refresh`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=utf-8" },
       body: JSON.stringify({ refresh_token: refresh }),
     });
     if (!r.ok) return false;
@@ -81,7 +81,11 @@ async function call<T = unknown>(
 ): Promise<T> {
   const token = opts.auth === false ? null : getToken();
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    // Explicit charset matches the backend's UTF8JSONResponse
+    // contract — browsers default to UTF-8 anyway, but pinning it
+    // here keeps the wire signal unambiguous if a proxy ever
+    // synthesises a different default.
+    "Content-Type": "application/json; charset=utf-8",
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 

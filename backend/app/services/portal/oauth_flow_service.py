@@ -81,7 +81,7 @@ class OAuthStateStore:
         }
         self._redis.set(
             f"{_KEY_PREFIX}{state}",
-            json.dumps(payload),
+            json.dumps(payload, ensure_ascii=False),
             ex=self._ttl,
         )
         return state
