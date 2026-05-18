@@ -1,0 +1,58 @@
+{
+  "detector": "thai_address",
+  "entity_type": "thai_address",
+  "category": "pii",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "thai_address_full",
+      "input": "ที่อยู่ 123/45 ซอย 7 ถนนสุขุมวิท กรุงเทพ 10110 ครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 46
+        }
+      ]
+    },
+    {
+      "id": "house_number_keyword",
+      "input": "บ้านเลขที่ 99/1 ซอย 5 ถนน A กรุงเทพ 10120 ส่ง",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 41
+        }
+      ]
+    },
+    {
+      "id": "deliver_to_keyword",
+      "input": "ส่งที่ 100 ถนน B จังหวัด นนทบุรี 11000 ขอบคุณ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 38
+        }
+      ]
+    },
+    {
+      "id": "plain_thai_prose",
+      "input": "วันนี้อากาศดีครับ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "english_prose_no_keyword",
+      "input": "today is a good day",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}
