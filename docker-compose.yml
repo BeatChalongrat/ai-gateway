@@ -1,6 +1,28 @@
 services:
   postgres:
     image: postgres:16
+    # Phase-1 tuning. Two motivations:
+    #   1. max_connections=200 — backend (4 workers × pool 30) + admin-ui +
+    #      portal + alembic + ad-hoc psql must coexist below the cap.
+    #      Defaulting to 100 leaves no margin once we add a second
+    #      backend pod.
+    #   2. synchronous_commit=off — request_logs is non-financial; durability
+    #      lag of a few hundred ms on a crash is acceptable in exchange for
+    #      removing fsync from every INSERT. audit_log, portal_users, and
+    #      provider_keys still carry application-level integrity (AES-GCM
+    #      audit blob, bcrypt, encrypted provider secrets) so a crash window
+    #      cannot forge admin actions or leak credentials.
+    # shared_buffers / effective_cache_size / wal_writer_delay /
+    # checkpoint_completion_target are sized for the 8 GB dev box; bump
+    # on production hardware via a compose override.
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c synchronous_commit=off
+      -c wal_writer_delay=200ms
+      -c checkpoint_completion_target=0.9
+      -c effective_cache_size=512MB
     environment:
       POSTGRES_DB: ai_gateway
       POSTGRES_USER: postgres
@@ -45,21 +67,30 @@ services:
   # Dedicated NER service — owns the heavy spaCy model so the gateway
   # workers stay light. The gateway calls this via NER_SERVICE_URL;
   # leaving the URL unset falls back to the legacy in-process loader.
+  #
+  # Multi-worker: each of the 4 uvicorn workers is its own process with
+  # its own spaCy/Presidio analyzer (~12 MB for en_core_web_sm; lazy-
+  # loaded via the lifespan hook). Concurrent requests across workers
+  # are CPU-parallel; within one worker spaCy holds the GIL during
+  # analyze() but the read-only AnalyzerEngine is safe to share across
+  # coroutines.
   ner-service:
     build:
       context: ./backend
       dockerfile: ner_service/Dockerfile
     image: ai-gateway-ner-service:latest
+    environment:
+      NER_WORKERS: ${NER_WORKERS:-4}
     ports:
       - "8001:8001"
     deploy:
       resources:
         limits:
+          cpus: "4.0"
+          memory: "4g"
+        reservations:
           cpus: "2.0"
           memory: "2g"
-        reservations:
-          cpus: "1.0"
-          memory: "1g"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health | grep -q '\"status\":\"ready\"' || exit 1"]
       interval: 10s
@@ -87,6 +118,12 @@ services:
       POSTGRES_DB: ai_gateway
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      # Phase-1 explicit pool sizing. 4 backend workers × (20+10) = 120
+      # peak connections, well under Postgres max_connections=200 set
+      # on the postgres service. db.py reads these at import time;
+      # missing values fall back to 10/20 (the legacy default).
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:-dev-stable-key-change-in-prod}

@@ -109,8 +109,19 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(_initial_registry_reload)
     _start_model_discovery_scheduler()
 
+    # Phase-1 async request-log queue. Starts the background worker
+    # that drains the queue every ~100ms or whenever a 50-record batch
+    # is ready. Until this completes ``enqueue()`` falls back to a
+    # synchronous persist on the caller's session, so requests served
+    # during the startup window still get logged correctly.
+    from app.services import request_log_queue
+    await request_log_queue.start_worker()
+
     yield
 
+    # Drain + stop the queue first so any in-flight records make it
+    # to Postgres before the worker pool tears down.
+    await request_log_queue.stop_worker()
     _stop_model_discovery_scheduler()
     monitor_task.cancel()
     retention_task.cancel()
