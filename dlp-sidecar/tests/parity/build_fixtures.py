@@ -69,6 +69,12 @@ from app.services.dlp.detectors.thai_tax_id import ThaiTaxIdDetector  # noqa: E4
 from app.services.dlp.detectors.thai_bank_account import ThaiBankAccountDetector  # noqa: E402
 from app.services.dlp.detectors.thai_promptpay import ThaiPromptPayDetector  # noqa: E402
 
+# Batch 4
+from app.services.dlp.detectors.thai_name import ThaiNameDetector  # noqa: E402
+from app.services.dlp.detectors.thai_name_no_prefix import ThaiNameNoPrefixDetector  # noqa: E402
+from app.services.dlp.detectors.credit_card import CreditCardDetector  # noqa: E402
+from app.services.dlp.detectors.passport import PassportDetector  # noqa: E402
+
 
 # Allow override so the script can run inside a backend container
 # (where the fixtures don't live on disk) and dump to /tmp instead.
@@ -737,6 +743,83 @@ SPECS = [
             ),
             Case("plain_prose", "today is a good day", False),
             Case("thai_prose", "ฝนตกหนักวันนี้", False),
+        ],
+    ),
+    # ---------------------------------------------------------------
+    # Batch 4 — names / credit card / passport
+    # ---------------------------------------------------------------
+    DetectorSpec(
+        name="thai_name",
+        entity_type="thai_name",
+        category="pii",
+        severity=3,
+        detector=ThaiNameDetector(),
+        cases=[
+            Case("thai_prefix_full", "ลูกค้าชื่อ นาย สมชาย ใจดี", True),
+            Case("nang_sao", "ผู้รับ นางสาว สมหญิง สมบูรณ์", True),
+            Case("doctor", "ดร. สมศักดิ์ มากมี เข้าร่วม", True),
+            Case("english_dr_thai_name", "Dr. สมชาย ใจดี attended", True),
+            Case("nayok_compound_no_match", "นายกรัฐมนตรี กล่าวต่อ", False),
+            Case("nay_pol_compound_no_match", "นายพล ผู้บัญชาการ", False),
+            Case("plain_prose_no_match", "วันนี้ฝนตก", False),
+        ],
+    ),
+    DetectorSpec(
+        name="thai_name_no_prefix",
+        entity_type="thai_name",
+        category="pii",
+        severity=2,
+        detector=ThaiNameNoPrefixDetector(),
+        cases=[
+            Case(
+                "two_word_with_context_kw",
+                "ลูกค้า สมชาย ใจดี ลงทะเบียน",
+                True,
+            ),
+            Case(
+                "song_word_chue",
+                "ชื่อ สมหญิง สมบูรณ์ ครับ",
+                True,
+            ),
+            Case(
+                "no_context_kw",
+                "สมชาย ใจดี ไปทำงาน",
+                False,
+            ),
+            Case("plain_thai_prose", "วันนี้ฝนตกหนัก", False),
+            Case("english_prose", "no thai content here", False),
+        ],
+    ),
+    DetectorSpec(
+        name="credit_card",
+        entity_type="credit_card_number",
+        category="financial",
+        severity=3,
+        detector=CreditCardDetector(),
+        cases=[
+            Case("visa_no_separators", "card 4111111111111111 expires", True),
+            Case("visa_dashed", "card 4111-1111-1111-1111 ok", True),
+            Case("mastercard_spaces", "card 5500 0055 5555 5559 ok", True),
+            Case("amex_15_digits", "card 378282246310005 charged", True),
+            Case("discover_test", "card 6011111111111117 saved", True),
+            Case("invalid_luhn", "the number 4111111111111112 wrong", False),
+            Case("too_short", "card 411111111111 only 12", False),
+            Case("plain_prose", "no card here", False),
+        ],
+    ),
+    DetectorSpec(
+        name="passport",
+        entity_type="passport_number",
+        category="identity",
+        severity=3,
+        detector=PassportDetector(),
+        cases=[
+            Case("passport_no_letter_prefix", "passport AB1234567 issued", True),
+            Case("passport_number_colon", "passport number: A1234567 ok", True),
+            Case("thai_keyword", "หนังสือเดินทาง AA1234567 ของผม", True),
+            Case("us_bare_9_digit", "passport 123456789 confirmed", True),
+            Case("no_keyword_no_match", "AB1234567 just sitting there", False),
+            Case("plain_prose", "no travel info today", False),
         ],
     ),
 ]

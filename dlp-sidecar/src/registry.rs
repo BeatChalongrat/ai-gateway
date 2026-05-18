@@ -1,4 +1,4 @@
-//! Detector registry — Batch 1 + Batch 2 + Batch 3 detectors.
+//! Detector registry — all 4 batches (30 detectors total).
 
 use crate::detectors::base::{Detector, RawMatch};
 use crate::detectors::*;
@@ -35,6 +35,11 @@ pub fn default_detectors() -> Vec<Box<dyn Detector>> {
         Box::new(thai_tax_id::ThaiTaxIdDetector),
         Box::new(thai_bank_account::ThaiBankAccountDetector),
         Box::new(thai_promptpay::ThaiPromptPayDetector),
+        // Batch 4 — name / credit_card / passport
+        Box::new(thai_name::ThaiNameDetector),
+        Box::new(thai_name_no_prefix::ThaiNameNoPrefixDetector),
+        Box::new(credit_card::CreditCardDetector),
+        Box::new(passport::PassportDetector),
     ]
 }
 
