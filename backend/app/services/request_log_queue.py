@@ -181,13 +181,31 @@ class _RequestLogQueue:
     ) -> None:
         """Fire-and-forget enqueue.
 
-        When the worker is running the record is queued and returns
-        immediately. When the worker is **not** running (tests, the
-        brief window before ``start_worker`` has finished, or after
-        ``stop_worker`` on shutdown) the record is persisted inline:
-        on the ``fallback_session`` when one is provided, otherwise
-        on a fresh ``SessionLocal``.
+        Phase-3 fan-out: when ``settings.log_worker_engine == "go"``,
+        the record is dispatched to the Go ``log-worker`` sidecar over
+        gRPC. The RPC is fire-and-forget (max 0.5s timeout); any
+        failure (sidecar down, RPC error, grpcio not installed) falls
+        through to the legacy asyncio queue or the inline sync path,
+        so a sidecar outage is silently survived.
+
+        When the engine is ``python`` (default) and the worker is
+        running, the record is queued and returns immediately. When
+        the worker is **not** running (tests, the brief window before
+        ``start_worker`` has finished, or after ``stop_worker`` on
+        shutdown) the record is persisted inline: on the
+        ``fallback_session`` when one is provided, otherwise on a
+        fresh ``SessionLocal``.
         """
+        if settings.log_worker_engine == "go":
+            # Schedule the gRPC call on the running loop without
+            # blocking the caller. If there is no running loop (sync
+            # call from a thread), we drop straight to the legacy
+            # queue/sync path so this path stays universally non-
+            # blocking.
+            if self._dispatch_to_grpc(record):
+                return
+            # fall through on grpc dispatch failure → legacy path
+
         if self._queue is None:
             self._sync_fallback(record, fallback_session)
             return
@@ -223,6 +241,60 @@ class _RequestLogQueue:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _dispatch_to_grpc(self, record: RequestRecord) -> bool:
+        """Schedule a fire-and-forget gRPC Enqueue on the running loop.
+
+        Returns True if the dispatch was scheduled (caller can return);
+        False on any setup failure (caller falls through to the legacy
+        queue path). Per-RPC failures are NOT returned — they're
+        swallowed in the awaited task so a slow sidecar never blocks
+        the request handler.
+        """
+        try:
+            from app.services.log_worker_client import (
+                LogWorkerClient,
+                LogWorkerUnavailable,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "log_worker_client_import_failed", error=str(exc)[:200]
+            )
+            return False
+
+        try:
+            client = LogWorkerClient.instance()
+        except LogWorkerUnavailable as exc:
+            # grpcio missing or stubs broken — fall back to legacy
+            # path. Logged at info so a misconfiguration shows up
+            # without flooding production WARN.
+            logger.info("log_worker_unavailable", reason=str(exc)[:200])
+            return False
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — the caller is a sync thread. Skip the
+            # gRPC path; the legacy queue / sync persist still runs.
+            return False
+
+        # ``ensure_future`` schedules on the running loop without
+        # blocking. The done-callback logs failures but never raises.
+        task = loop.create_task(client.enqueue(record))
+        task.add_done_callback(self._on_grpc_done)
+        return True
+
+    @staticmethod
+    def _on_grpc_done(task: asyncio.Task) -> None:
+        try:
+            ok = task.result()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "log_worker_grpc_task_failed", error=str(exc)[:200]
+            )
+            return
+        if not ok:
+            logger.info("log_worker_grpc_rejected")
 
     def _sync_fallback(
         self,

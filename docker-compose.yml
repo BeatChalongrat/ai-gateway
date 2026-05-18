@@ -99,6 +99,40 @@ services:
       start_period: 90s
     restart: unless-stopped
 
+  # Phase-3 Go log-worker — asynchronous sink for request_logs.
+  #
+  # Activated only when the gateway sets LOG_WORKER_ENGINE=go; the
+  # default (python) path runs the legacy in-process queue and never
+  # touches this service. Sidecar is a small distroless image
+  # (~30MB) so leaving it running idle has negligible cost.
+  log-worker:
+    build:
+      context: ./log-worker
+    image: ai-gateway-log-worker:latest
+    environment:
+      POSTGRES_DSN: "host=postgres port=5432 dbname=ai_gateway user=postgres password=postgres sslmode=disable"
+      GRPC_PORT: "50052"
+      METRICS_PORT: "9100"
+      BATCH_SIZE: ${LOG_WORKER_BATCH_SIZE:-100}
+      FLUSH_INTERVAL_MS: ${LOG_WORKER_FLUSH_INTERVAL_MS:-100}
+      QUEUE_BUFFER: ${LOG_WORKER_QUEUE_BUFFER:-50000}
+    ports:
+      - "50052:50052"
+      - "9100:9100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Distroless has no shell, so we use a TCP probe via the
+      # plain HTTP /healthz on the metrics port instead of
+      # grpc_health_probe.
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9100/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -149,6 +183,13 @@ services:
       # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
       # anthropic/openrouter at the in-cluster mock-provider service.
       PROVIDER_BASE_URL_OVERRIDES: ${PROVIDER_BASE_URL_OVERRIDES:-}
+      # Phase-3 log-worker engine selector. ``python`` keeps the
+      # legacy in-process queue; ``go`` dispatches to the Go sidecar
+      # over gRPC. Falls back to the legacy path automatically when
+      # the sidecar is unreachable or grpcio is missing.
+      LOG_WORKER_ENGINE: ${LOG_WORKER_ENGINE:-python}
+      LOG_WORKER_GRPC_ADDRESS: ${LOG_WORKER_GRPC_ADDRESS:-log-worker:50052}
+      LOG_WORKER_GRPC_TIMEOUT_SECONDS: ${LOG_WORKER_GRPC_TIMEOUT_SECONDS:-0.5}
     ports:
       - "8080:8080"
     depends_on:

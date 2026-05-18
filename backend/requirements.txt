@@ -18,6 +18,12 @@ authlib==1.3.2
 Pillow>=10.2.0
 prometheus-client==0.25.0
 python-multipart>=0.0.9
+# Phase-3: gRPC client for the Go log-worker sidecar. Installed
+# unconditionally so LOG_WORKER_ENGINE=go works without a rebuild;
+# the LogWorkerClient falls through to the legacy queue on any
+# import-time failure (LogWorkerUnavailable).
+grpcio==1.65.0
+protobuf>=5.27,<6.0
 resend==2.5.1
 apscheduler>=3.10.0
 pytest==8.3.3
