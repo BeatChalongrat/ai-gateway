@@ -73,7 +73,7 @@ docker exec -it ai-gateway-backend-1 python /work/seed_uat.py | tee uat-seed-out
 The bottom of `uat-seed-output.txt` will contain:
 
 - `admin / admin1234`
-- 4 portal user emails + their shared password (`Demo@2025!`)
+- 4 portal user emails + their shared password (`P@ssword`)
 - 3 raw API keys (one per project) — these are shown ONCE, never again
 
 Store the API keys in the customer's secret manager immediately; the
@@ -141,9 +141,9 @@ in.
 
 ### Portal — http://&lt;ip&gt;:3001
 
-- [ ] Login `somchai@acme.ai.gateway / Demo@2025!` succeeds
+- [ ] Login `somchai@acme.ai.gateway / P@ssword` succeeds
 - [ ] Sees Acme projects only (Customer Support Bot, Internal Assistant)
-- [ ] Login `wichai@techstart.ai.gateway / Demo@2025!` succeeds
+- [ ] Login `wichai@techstart.ai.gateway / P@ssword` succeeds
 - [ ] Sees TechStart projects only (AI Chatbot MVP) — tenant isolation OK
 - [ ] Credit balance shows 1,000,000 (somchai) / 500,000 (wichai)
 - [ ] Profile page can update display name
@@ -175,7 +175,7 @@ Send the customer:
 
 1. The server URL (`http://<ip>:3000` admin, `http://<ip>:3001` portal)
 2. Admin credentials: `admin / admin1234`
-3. The 4 portal user emails + shared password `Demo@2025!`
+3. The 4 portal user emails + shared password `P@ssword`
 4. The 3 raw API keys (per project) from `uat-seed-output.txt`
 5. A 2-line note: "Change the admin password and rotate the API keys
    before any non-test workload."
