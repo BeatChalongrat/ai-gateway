@@ -20,7 +20,7 @@ What it seeds
 * tenants           — demo-tenant-000 (portal compat) + acme-corp-001 + techstart-001
 * projects          — 3 projects per task spec
 * api_keys          — 1 per project (raw keys printed once to stdout)
-* portal_users      — 4 demo accounts (somchai/suda/wichai/malee, all Demo@2025!)
+* portal_users      — 4 demo accounts (somchai/suda/wichai/malee, all P@ssword)
 * policy_profiles   — "strict" profile (mask PII)
 * portal credits    — credit_balance pre-loaded per owner
 
@@ -65,7 +65,7 @@ from app.services.api_key_service import ApiKeyService  # noqa: E402
 from app.services.providers.model_registry import SEED_CANDIDATES  # noqa: E402
 
 
-PORTAL_USER_PASSWORD = "Demo@2025!"
+PORTAL_USER_PASSWORD = "P@ssword"
 ADMIN_PASSWORD = "admin1234"
 
 TENANTS = [
