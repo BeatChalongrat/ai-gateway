@@ -45,7 +45,27 @@ _EN_CANDIDATES = ("en_core_web_lg", "en_core_web_sm")
 _TH_CANDIDATES = ("th_core_news_lg", "th_core_news_sm")
 
 _DEFAULT_ENTITIES = ("PERSON", "LOCATION", "ORGANIZATION", "GPE", "NRP")
-_DEFAULT_SCORE_THRESHOLD = float(os.environ.get("NER_SCORE_THRESHOLD", "0.7"))
+# Per-language confidence floors. Thai NER routinely emits 0.7-0.85
+# PERSON hits on conversational verbs ("ตอบสั้นๆ", "ช่วยสรุป") that
+# the English model never produces because those words don't exist
+# in its vocabulary. Raising the Thai floor compensates for the
+# noisier base distribution. ``NER_SCORE_THRESHOLD`` is kept as a
+# back-compat alias for ``NER_SCORE_THRESHOLD_EN``.
+_DEFAULT_SCORE_THRESHOLD_EN = float(
+    os.environ.get(
+        "NER_SCORE_THRESHOLD_EN",
+        os.environ.get("NER_SCORE_THRESHOLD", "0.7"),
+    )
+)
+_DEFAULT_SCORE_THRESHOLD_TH = float(
+    os.environ.get("NER_SCORE_THRESHOLD_TH", "0.85")
+)
+
+
+def _default_threshold_for(language: str) -> float:
+    if language == "th":
+        return _DEFAULT_SCORE_THRESHOLD_TH
+    return _DEFAULT_SCORE_THRESHOLD_EN
 
 
 def _first_installed(candidates: tuple[str, ...]) -> str | None:
@@ -182,7 +202,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     threshold = (
         req.score_threshold
         if req.score_threshold is not None
-        else _DEFAULT_SCORE_THRESHOLD
+        else _default_threshold_for(req.language)
     )
 
     supported = set(getattr(analyzer, "supported_languages", ["en"]) or ["en"])
