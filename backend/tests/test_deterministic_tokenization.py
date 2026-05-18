@@ -1,15 +1,17 @@
 """Deterministic HMAC tokenization tests.
 
-The DLP transformer supports two token modes:
+The DLP transformer supports two token modes, both emitting the
+neutral ``<rN>`` shape:
 
 - **Counter** (legacy, ``conversation_key=None``) — sequential
-  ``[EMAIL_0]``, ``[EMAIL_1]``. Counter resets per request.
+  ``<r0>``, ``<r1>``. Counter resets per request.
 - **Deterministic** (``conversation_key=bytes``) — HMAC-derived
-  opaque suffix. Same value + same conversation always produce the
-  same token; different conversations produce different tokens.
+  opaque suffix (``<rAbCd1234>``). Same value + same conversation
+  always produce the same token; different conversations produce
+  different tokens.
 
 These tests pin the deterministic-mode contract and verify that the
-counter mode remains untouched (backward compat).
+counter mode remains intact across the format flip.
 """
 
 from __future__ import annotations
@@ -137,27 +139,28 @@ def test_outbound_hallucinated_pii_gets_different_token():
     assert "fake@evil.com" not in restored
 
 
-def test_legacy_counter_mode_when_no_key():
-    """conversation_key=None → counter-format tokens, identical to
-    the pre-2026-05 behaviour all existing tests rely on."""
+def test_counter_mode_when_no_key():
+    """conversation_key=None → counter-format ``<rN>`` tokens."""
     transformer = DLPTransformer()
     masked, span_map = _mask_one(transformer, "john@acme.com here", key=None)
-    assert "[EMAIL_0]" in masked, (
-        f"legacy mode must emit counter tokens, got: {masked!r}"
+    assert "<r0>" in masked, (
+        f"counter mode must emit <rN> tokens, got: {masked!r}"
     )
-    assert span_map.get("[EMAIL_0]") == "john@acme.com"
+    assert span_map.get("<r0>") == "john@acme.com"
 
 
 def test_token_format_is_opaque():
     """The deterministic suffix is base64url and reveals nothing
     about the input — none of the original characters, words, or
-    domain parts should appear."""
+    domain parts should appear. Under the neutral shape the category
+    name is also no longer in the token."""
     key = _make_conversation_key("secret", "conv-opaque")
     token = _make_deterministic_token("EMAIL", "john@acme.com", key)
     assert "john" not in token
     assert "acme" not in token
     assert "@" not in token
-    # 8-char base64url body (no padding) inside an [EMAIL_…] wrapper.
-    assert re.match(r"^\[EMAIL_[A-Za-z0-9_-]{8}\]$", token), (
+    assert "EMAIL" not in token  # neutral shape — no category leak
+    # ``<r`` + 8-char base64url body (no padding) + ``>``.
+    assert re.match(r"^<r[A-Za-z0-9_-]{8}>$", token), (
         f"unexpected token shape: {token!r}"
     )

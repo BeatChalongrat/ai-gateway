@@ -12,11 +12,11 @@ from app.services.dlp_prompt import (
 
 class TestHasMaskTokens:
     def test_detects_single_token(self):
-        msgs = [Message(role="user", content="Hello [NAME_0]")]
+        msgs = [Message(role="user", content="Hello <r0>")]
         assert has_mask_tokens(msgs) is True
 
     def test_detects_multiple_tokens(self):
-        msgs = [Message(role="user", content="[NAME_0] email [EMAIL_0] phone [PHONE_NUMBER_0]")]
+        msgs = [Message(role="user", content="<r0> email <r1> phone <r2>")]
         assert has_mask_tokens(msgs) is True
 
     def test_clean_text_returns_false(self):
@@ -29,7 +29,7 @@ class TestHasMaskTokens:
     def test_system_message_with_token(self):
         msgs = [
             Message(role="system", content="You are helpful."),
-            Message(role="user", content="Help [NAME_0] with their order"),
+            Message(role="user", content="Help <r0> with their order"),
         ]
         assert has_mask_tokens(msgs) is True
 
@@ -40,12 +40,12 @@ class TestHasMaskTokens:
 
 class TestInjectDlpSystemPrompt:
     def test_injected_when_masked(self):
-        msgs = [Message(role="user", content="Hello [NAME_0]")]
+        msgs = [Message(role="user", content="Hello <r0>")]
         result = inject_dlp_system_prompt(msgs)
         assert len(result) == 2
         assert result[0].role == "system"
         assert DLP_PLACEHOLDER_PROMPT in result[0].content
-        assert result[1].content == "Hello [NAME_0]"
+        assert result[1].content == "Hello <r0>"
 
     def test_not_injected_when_clean(self):
         msgs = [Message(role="user", content="Hello world")]
@@ -56,7 +56,7 @@ class TestInjectDlpSystemPrompt:
     def test_existing_system_prompt_preserved(self):
         msgs = [
             Message(role="system", content="You are a helpful assistant."),
-            Message(role="user", content="Help [NAME_0]"),
+            Message(role="user", content="Help <r0>"),
         ]
         result = inject_dlp_system_prompt(msgs)
         assert len(result) == 2
@@ -66,7 +66,7 @@ class TestInjectDlpSystemPrompt:
 
     def test_multiple_tokens_single_injection(self):
         msgs = [
-            Message(role="user", content="[NAME_0] email [EMAIL_0] phone [PHONE_NUMBER_0]"),
+            Message(role="user", content="<r0> email <r1> phone <r2>"),
         ]
         result = inject_dlp_system_prompt(msgs)
         assert len(result) == 2
@@ -74,7 +74,7 @@ class TestInjectDlpSystemPrompt:
         assert system_count == 1
 
     def test_original_list_not_mutated(self):
-        msgs = [Message(role="user", content="Hello [NAME_0]")]
+        msgs = [Message(role="user", content="Hello <r0>")]
         original_len = len(msgs)
         inject_dlp_system_prompt(msgs)
         assert len(msgs) == original_len
@@ -86,33 +86,36 @@ class TestInjectDlpSystemPrompt:
 
 
 class TestRedactedRuleInPrompt:
-    """Verify the [REDACTED] critical rule is present in the system prompt.
+    """Verify the [REDACTED] rule is present in the system prompt.
 
     Locks in the post-diagnosis fix that tells the model to use [REDACTED]
-    (rather than invent new bracketed tokens) for sensitive-looking
+    (rather than invent new placeholder tokens) for sensitive-looking
     content the gateway didn't already mask. A regression here would
     re-open the orphan-token hallucination behavior observed in
     sran-pii-test scenarios 2 + 5.
     """
 
-    def test_critical_rule_present(self):
+    def test_redacted_substitute_present(self):
         assert "[REDACTED]" in DLP_PLACEHOLDER_PROMPT
-        assert "Critical rule" in DLP_PLACEHOLDER_PROMPT
 
     def test_explicitly_forbids_new_tokens(self):
         # Must instruct the model NOT to invent placeholder tokens.
         # Phrasing can change; the negation must remain.
         lower = DLP_PLACEHOLDER_PROMPT.lower()
-        assert "do not invent" in lower or "do not echo" in lower
+        assert (
+            "do not invent" in lower
+            or "do not echo" in lower
+            or "never create new tokens" in lower
+            or "never invent" in lower
+        )
 
     def test_no_concrete_token_examples(self):
         # The prior version listed [NAME_0], [EMAIL_0], [DATE_OF_BIRTH_0],
         # [SSN_0], [RELIGION_0], [HEALTH_CONDITION_0] as examples.
         # The model picked those up as "valid token names" and invented
-        # them in replies even when the gateway never minted them
-        # (heavy multi-detector scenario). The example list must stay
-        # generic — concrete category names belong only in the user's
-        # actual masked message.
+        # them in replies even when the gateway never minted them.
+        # Under the neutral ``<rN>`` shape the prompt no longer needs
+        # category examples at all.
         forbidden = [
             "[NAME_0]",
             "[EMAIL_0]",
@@ -121,17 +124,18 @@ class TestRedactedRuleInPrompt:
             "[RELIGION_0]",
             "[HEALTH_CONDITION_0]",
             "[PHONE_NUMBER_0]",
+            "[CATEGORY_NUMBER]",
         ]
         for ex in forbidden:
             assert ex not in DLP_PLACEHOLDER_PROMPT, (
                 f"prompt must not seed concrete token names: found {ex}"
             )
 
-    def test_generic_format_described(self):
-        # The prompt must still describe the token shape so the model
-        # knows what to look for. Use a generic placeholder name
-        # ([CATEGORY_NUMBER]) rather than a real category.
-        assert "[CATEGORY_NUMBER]" in DLP_PLACEHOLDER_PROMPT
+    def test_neutral_token_shape_described(self):
+        # The prompt must describe the new neutral token shape so the
+        # model knows what to echo back. The literal ``<r0>`` (or any
+        # ``<rN>``) is the canonical example.
+        assert "<r0>" in DLP_PLACEHOLDER_PROMPT or "<r" in DLP_PLACEHOLDER_PROMPT
 
 
 class TestOrphanTokenPassthrough:
@@ -146,14 +150,14 @@ class TestOrphanTokenPassthrough:
 
     def test_orphan_token_passes_through_unchanged(self):
         transformer = DLPTransformer()
-        span_map = {"[EMAIL_0]": "alice@example.com"}
-        text_from_provider = "Sent to [EMAIL_0] and also [PHONE_NUMBER_99]"
+        span_map = {"<r0>": "alice@example.com"}
+        text_from_provider = "Sent to <r0> and also <r99>"
         result = transformer.restore(text_from_provider, span_map)
         # Mapped token restored.
         assert "alice@example.com" in result
-        assert "[EMAIL_0]" not in result
+        assert "<r0>" not in result
         # Orphan token survives as a literal.
-        assert "[PHONE_NUMBER_99]" in result
+        assert "<r99>" in result
 
     def test_orphan_warning_fires_in_logs(self, caplog):
         # The orphan path emits ``dlp_orphan_mask_tokens`` at WARNING
@@ -163,8 +167,8 @@ class TestOrphanTokenPassthrough:
         transformer = DLPTransformer()
         with caplog.at_level(logging.WARNING):
             transformer.restore(
-                "[EMAIL_0] and [PHONE_NUMBER_99]",
-                {"[EMAIL_0]": "x@y.z"},
+                "<r0> and <r99>",
+                {"<r0>": "x@y.z"},
             )
         assert any("dlp_orphan_mask_tokens" in r.message for r in caplog.records)
 

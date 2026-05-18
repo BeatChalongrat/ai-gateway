@@ -47,7 +47,7 @@ def _seed_request_log(role_label: str = "rbac-test") -> str:
             "matched_text": "AA1234567",
             "matched_text_len": 9,
             "action": "mask",
-            "mask_token": "[PASSPORT_0]",
+            "mask_token": "<r0>",
         }
     ]
     try:
@@ -63,7 +63,7 @@ def _seed_request_log(role_label: str = "rbac-test") -> str:
                 latency_ms=42,
                 policy_profile_id="default",
                 input_raw="My passport number is AA1234567",
-                input_masked="My passport number is [PASSPORT_0]",
+                input_masked="My passport number is <r0>",
                 output_raw="OK.",
                 output_final="OK.",
                 dlp_findings_json=json.dumps(findings, ensure_ascii=False),
@@ -144,12 +144,12 @@ def test_admin_role_sees_raw_columns_and_matched_text(monkeypatch) -> None:
 
     assert body["input_raw"] == "My passport number is AA1234567"
     assert body["output_raw"] == "OK."
-    assert body["input_masked"].endswith("[PASSPORT_0]")
+    assert body["input_masked"].endswith("<r0>")
     assert body["output_final"] == "OK."
     [finding] = body["dlp_findings"]
     assert finding["matched_text"] == "AA1234567"
     assert finding["matched_text_len"] == 9
-    assert finding["mask_token"] == "[PASSPORT_0]"
+    assert finding["mask_token"] == "<r0>"
 
 
 def test_lower_admin_tier_does_not_see_raw_columns(monkeypatch) -> None:
@@ -166,7 +166,7 @@ def test_lower_admin_tier_does_not_see_raw_columns(monkeypatch) -> None:
     assert body["output_raw"] is None
     # Masked / final snapshots still visible — they contain only mask
     # tokens / restored content.
-    assert "[PASSPORT_0]" in body["input_masked"]
+    assert "<r0>" in body["input_masked"]
     assert body["output_final"] == "OK."
 
     [finding] = body["dlp_findings"]
@@ -175,15 +175,15 @@ def test_lower_admin_tier_does_not_see_raw_columns(monkeypatch) -> None:
     assert finding["matched_text_len"] == 9
     # Other metadata still present so the trace is still useful.
     assert finding["detector"] == "passport"
-    assert finding["mask_token"] == "[PASSPORT_0]"
+    assert finding["mask_token"] == "<r0>"
 
 
 def test_strip_helper_backfills_matched_text_len_on_legacy_rows() -> None:
     """Rows written before Fix 4c don't carry matched_text_len. The helper
     synthesizes it from matched_text before stripping."""
     legacy = [
-        {"detector": "email", "matched_text": "old@x.com", "mask_token": "[EMAIL_0]"},
-        {"detector": "phone", "mask_token": "[PHONE_0]"},  # no matched_text either
+        {"detector": "email", "matched_text": "old@x.com", "mask_token": "<r0>"},
+        {"detector": "phone", "mask_token": "<r1>"},  # no matched_text either
         "not-a-dict",
     ]
     cleaned = _strip_raw_from_findings(legacy)
@@ -216,7 +216,7 @@ def _seed_aged_log(days_old: int, suffix: str) -> str:
             "matched_text": "old@example.com",
             "matched_text_len": 15,
             "action": "mask",
-            "mask_token": "[EMAIL_0]",
+            "mask_token": "<r0>",
         }
     ]
     try:
@@ -233,7 +233,7 @@ def _seed_aged_log(days_old: int, suffix: str) -> str:
                 latency_ms=12,
                 created_at=backdated,
                 input_raw="email me at old@example.com",
-                input_masked="email me at [EMAIL_0]",
+                input_masked="email me at <r0>",
                 output_raw="ok",
                 output_final="ok",
                 dlp_findings_json=json.dumps(findings, ensure_ascii=False),
@@ -275,7 +275,7 @@ def test_retention_clears_raw_columns_for_old_rows() -> None:
     # Old row: raw columns nulled, masked snapshots retained.
     assert old.input_raw is None
     assert old.output_raw is None
-    assert old.input_masked == "email me at [EMAIL_0]"
+    assert old.input_masked == "email me at <r0>"
     assert old.output_final == "ok"
 
     # New row: untouched.
@@ -302,7 +302,7 @@ def test_retention_strips_matched_text_from_findings_for_old_rows() -> None:
     assert "matched_text" not in f
     # All non-raw metadata preserved.
     assert f["detector"] == "email"
-    assert f["mask_token"] == "[EMAIL_0]"
+    assert f["mask_token"] == "<r0>"
     assert f["matched_text_len"] == 15
 
 

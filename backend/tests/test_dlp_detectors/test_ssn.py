@@ -14,13 +14,13 @@ from ._helpers import detector_names_for, mask
 
 class TestSsnHappyPath:
     def test_dashed_ssn(self):
-        _, span_map, _ = mask("SSN: 123-45-6789")
-        assert any("SSN" in t for t in span_map)
+        _, _, matches = mask("SSN: 123-45-6789")
+        assert any(ma.match.detector_name == "ssn" for ma in matches)
 
     def test_label_preserved_en(self):
         masked, _, _ = mask("Social Security: 123-45-6789")
         assert "Social Security:" in masked
-        assert "[SSN_0]" in masked
+        assert "<r0>" in masked
 
 
 class TestSsnNegative:

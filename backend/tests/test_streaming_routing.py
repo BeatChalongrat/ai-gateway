@@ -291,11 +291,11 @@ class TestStreamingRouterChainRunsOnMaskedText:
         # must be. This is the primary assertion: if the router chain
         # had run BEFORE DLP, the semantic embedding and keyword text
         # would have seen the raw email.
-        user_msgs = [m for m in captured["messages"] if "[EMAIL_0]" in m or "test@secret.com" in m]
+        user_msgs = [m for m in captured["messages"] if "<r0>" in m or "test@secret.com" in m]
         assert len(user_msgs) >= 1
         sent_to_provider = user_msgs[0]
         assert "test@secret.com" not in sent_to_provider
-        assert "[EMAIL_0]" in sent_to_provider
+        assert "<r0>" in sent_to_provider
         # And the keyword rule still fired on the surviving "hola".
         assert captured["resolved_model"] == "gpt-4o"
 

@@ -8,40 +8,38 @@ merged into a single token.
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask
+from ._helpers import detector_names_for, has_match, mask
 
 
 class TestReligionHappyPath:
     def test_english_conversion(self):
         text = "he converted to Islam after meeting his wife"
-        _, span_map, _ = mask(text)
-        assert any("RELIGION" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "religion_belief")
 
     def test_english_practicing(self):
         text = "she is a practicing Buddhist and meditates daily"
-        _, span_map, _ = mask(text)
-        assert any("RELIGION" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "religion_belief")
 
     def test_thai_personal_with_religion_word(self):
         text = "ผมนับถือศาสนาอิสลาม"
-        _, span_map, _ = mask(text)
-        assert any("RELIGION" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "religion_belief")
 
     def test_thai_explicit_buddhism(self):
         text = "เขานับถือพระพุทธศาสนา"
-        _, span_map, _ = mask(text)
-        assert any("RELIGION" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert has_match(matches, "religion_belief")
 
 
 class TestReligionNegative:
     def test_the_following_en(self):
         # Regression: ``follow`` inside ``following`` used to trigger
         # the bare-verb branch.
-        masked, span_map, _ = mask(
-            "Please complete the following tasks"
-        )
+        masked, _, matches = mask("Please complete the following tasks")
         assert masked == "Please complete the following tasks"
-        assert not any("RELIGION" in t for t in span_map)
+        assert not has_match(matches, "religion_belief")
 
     def test_the_following_details(self):
         masked, _, _ = mask("See the following details")
@@ -52,8 +50,8 @@ class TestReligionNegative:
         # the keyword regex ties belief verbs to personal pronouns to
         # cover the "I worship", "I pray" cases. We assert here that
         # phrases without any pronoun or belief verb stay quiet.
-        masked, span_map, _ = mask("this statement is correct")
-        assert not any("RELIGION" in t for t in span_map)
+        _, _, matches = mask("this statement is correct")
+        assert not has_match(matches, "religion_belief")
 
     def test_thai_confidence_word(self):
         # ``ความเชื่อมั่น`` = confidence — substring of ``ความเชื่อ``

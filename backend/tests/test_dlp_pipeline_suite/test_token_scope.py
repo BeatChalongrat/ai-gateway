@@ -1,9 +1,10 @@
 """Token scope: each mask() call produces an independent span_map.
 
-The counter starts at zero per call, so ``[EMAIL_0]`` always refers
-to "the first email in THIS request". Cross-request restore must be a
-no-op for tokens that weren't minted in this request's span_map —
-otherwise an old conversation's PII could leak into a new one.
+The global counter starts at zero per call, so ``<r0>`` always refers
+to "the first masked span in THIS request". Cross-request restore
+must be a no-op for tokens that weren't minted in this request's
+span_map — otherwise an old conversation's PII could leak into a new
+one.
 """
 
 from __future__ import annotations
@@ -16,9 +17,9 @@ def test_independent_counters():
     _, sm_b, _ = mask("Contact bob@example.com")
     _, sm_c, _ = mask("ส่งอีเมลไปที่ somchai@example.co.th")
 
-    assert sm_a["[EMAIL_0]"] == "alice@example.com"
-    assert sm_b["[EMAIL_0]"] == "bob@example.com"
-    assert sm_c["[EMAIL_0]"] == "somchai@example.co.th"
+    assert sm_a["<r0>"] == "alice@example.com"
+    assert sm_b["<r0>"] == "bob@example.com"
+    assert sm_c["<r0>"] == "somchai@example.co.th"
 
 
 def test_span_maps_are_independent_objects():
@@ -26,8 +27,8 @@ def test_span_maps_are_independent_objects():
     _, sm_b, _ = mask("b@b.com")
     assert sm_a is not sm_b
     # Mutating one must not affect the other.
-    sm_a["[CANARY]"] = "leak"
-    assert "[CANARY]" not in sm_b
+    sm_a["<canary>"] = "leak"
+    assert "<canary>" not in sm_b
 
 
 def test_cross_request_restore_is_lossy():
@@ -40,7 +41,7 @@ def test_cross_request_restore_is_lossy():
     masked_a, sm_a, _ = mask("Contact alice@example.com")
     masked_b, sm_b, _ = mask("Contact bob@example.com")
 
-    # masked_a == masked_b == "Contact [EMAIL_0]"
+    # masked_a == masked_b == "Contact <r0>"
     assert masked_a == masked_b
 
     # Restoring A with B's span_map gives bob@..., not alice@...

@@ -128,11 +128,11 @@ class TestStreamingPiiMaskedToProvider:
         resp = _chat_stream("my email is john@acme.com, summarise this")
 
         assert resp.status_code == 200
-        user_msgs = [m for m in captured["messages"] if "john" in m or "[EMAIL_0]" in m]
+        user_msgs = [m for m in captured["messages"] if "john" in m or "<r0>" in m]
         assert len(user_msgs) >= 1
         sent = user_msgs[0]
         assert "john@acme.com" not in sent
-        assert "[EMAIL_0]" in sent
+        assert "<r0>" in sent
 
 
 class TestStreamingPiiRestoredInResponse:
@@ -142,7 +142,7 @@ class TestStreamingPiiRestoredInResponse:
         # original value.
         _install_stream_spy(
             monkeypatch,
-            chunks=["reply to ", "[EMAIL_0]", " tomorrow"],
+            chunks=["reply to ", "<r0>", " tomorrow"],
         )
 
         resp = _chat_stream("my email is john@acme.com, draft a reply")
@@ -151,7 +151,7 @@ class TestStreamingPiiRestoredInResponse:
         events = _parse_sse(resp.content)
         full = _full_content(events)
         assert "john@acme.com" in full
-        assert "[EMAIL_0]" not in full
+        assert "<r0>" not in full
 
 
 class TestStreamingBlockReturns403:
@@ -224,7 +224,7 @@ class TestStreamingProviderPiiMaskedUnderDefault:
         full = _full_content(events)
         # Provider-introduced PII is now masked before the user sees it.
         assert "jane@example.com" not in full
-        assert "[EMAIL_" in full
+        assert "<r" in full
 
 
 class TestStreamingCleanMessagePassesThrough:

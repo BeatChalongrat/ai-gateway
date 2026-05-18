@@ -1,9 +1,9 @@
 """DLP system-prompt injection for masked messages.
 
-When the DLP pipeline replaces tokens in user messages (e.g. [NAME_0],
-[EMAIL_0]), some LLMs refuse to respond because the bracketed tokens
-look suspicious. This module injects a short system-level explanation
-so the model treats them as normal placeholders.
+When the DLP pipeline replaces tokens in user messages (e.g. <r0>,
+<r1>), some LLMs may still refuse to respond because the placeholder
+tokens look suspicious. This module injects a short system-level
+explanation so the model treats them as normal placeholders.
 
 The prompt copy is deliberately neutral — it does *not* mention "PII",
 "sensitive data", "masked", or "personal information". The earlier
@@ -21,70 +21,42 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.schemas.common import Message
 
-# Matches both the indexed (``[NAME_0]``) and the HMAC-suffixed
-# (``[NAME_aB3kM9xQ]``) token forms emitted by ``transformer.py``.
-# The previous numeric-only pattern silently missed every
-# conversation-mode request (``DLP_HMAC_KEY`` + ``conversation_id``)
-# so the placeholder system prompt was never injected and the AI
-# fell back to refusing the request — same failure mode that
-# motivated the prompt rewrite in the first place. Pattern is kept
-# in lockstep with ``transformer._MASK_TOKEN_RE``.
-_MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]")
+# Matches the neutral ``<rN>`` token shape emitted by
+# ``transformer.py`` — both the counter form (``<r0>``) and the
+# HMAC-suffixed form (``<rAbCd1234>``). Pattern is kept in lockstep
+# with ``transformer._MASK_TOKEN_RE``.
+_MASK_TOKEN_RE = re.compile(r"<r[A-Za-z0-9_\-]+>")
 
-DLP_PLACEHOLDER_PROMPT_V1 = (
-    "Some values in this message have been replaced with placeholder "
-    "tokens like [CATEGORY_NUMBER] for privacy. Treat each token as "
-    "a regular text value. Echo tokens exactly as written if needed. "
-    "Critical rule: do not invent new tokens for content the gateway "
-    "did not already replace — use [REDACTED] for such content. "
-    "Never create new tokens. If you want to refer to a replaced "
-    "value, use the exact token already provided. Do not number new "
-    "tokens. "
-    "Continue helping normally."
-)
-
-
-# Variant v3 — drops the literal ``[CATEGORY_NUMBER]`` example entirely.
-# The May 2026 50-request audit showed ``gpt-4o-mini`` invents tokens in
-# ~48% of replies; the leading hallucination driver was the model
-# pattern-matching the ``[CATEGORY_NUMBER]`` example and emitting
-# similar shapes (``[NAME_1]``, ``[BEARER_TOKEN_0]``,
-# ``[YOUR_COMPANY]``) verbatim. Removing the example removes the
-# pattern seed. Positive-frame instruction ("echo each one back
-# unchanged") replaces the prior negative list. ``[REDACTED]`` stays
-# as the orphan-substitute (keeps the regression tests around the
-# critical-rule contract happy).
 DLP_PLACEHOLDER_PROMPT_V3 = (
-    "If the message contains bracketed tokens, echo each one back "
-    "unchanged when you reference its value. When you need to refer "
-    "to anything else that looks like personal data, write [REDACTED]. "
-    "Do not generate any other bracketed text. Continue helping the "
-    "user."
+    "Echo any <r0>-style tokens back exactly. Write [REDACTED] for "
+    "other sensitive data. Never invent new tokens. Help normally."
 )
+
+# ``V1`` was the long-form variant carrying a ``[CATEGORY_NUMBER]``
+# example. Under the neutral ``<rN>`` shape the long form is replaced
+# entirely by the v3 wording — both names point at the same string so
+# call sites that imported v1 keep working without an env override.
+DLP_PLACEHOLDER_PROMPT_V1 = DLP_PLACEHOLDER_PROMPT_V3
 
 
 def _select_prompt() -> str:
     """Return the active prompt based on ``DLP_PROMPT_VARIANT``.
 
-    Defaults to v1 so the existing regression suite
-    (``TestRedactedRuleInPrompt``: requires ``Critical rule`` +
-    ``[CATEGORY_NUMBER]``) keeps passing without an env override.
-    Operators wanting to A/B v3 set ``DLP_PROMPT_VARIANT=v3`` on the
-    backend container. Unknown values silently fall back to v1.
+    Both v1 and v3 now point at the same neutral wording — the env
+    knob is preserved for forward-compat in case a future variant
+    needs A/B comparison.
     """
     from app.core.config import settings
 
-    variant = (getattr(settings, "dlp_prompt_variant", "v1") or "v1").lower()
-    if variant == "v3":
-        return DLP_PLACEHOLDER_PROMPT_V3
-    return DLP_PLACEHOLDER_PROMPT_V1
+    variant = (getattr(settings, "dlp_prompt_variant", "v3") or "v3").lower()
+    if variant == "v1":
+        return DLP_PLACEHOLDER_PROMPT_V1
+    return DLP_PLACEHOLDER_PROMPT_V3
 
 
 # Back-compat alias — call sites (and the regression tests) import this
-# symbol directly. Default = v1 string so the regression assertions
-# (``[REDACTED]``, ``Critical rule``, ``[CATEGORY_NUMBER]``) still hold
-# without an env override.
-DLP_PLACEHOLDER_PROMPT = DLP_PLACEHOLDER_PROMPT_V1
+# symbol directly.
+DLP_PLACEHOLDER_PROMPT = DLP_PLACEHOLDER_PROMPT_V3
 
 
 def has_mask_tokens(messages: list[Message]) -> bool:

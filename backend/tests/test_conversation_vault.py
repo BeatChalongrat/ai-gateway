@@ -40,18 +40,18 @@ def vault():
 # ---------------------------------------------------------------------------
 
 def test_vault_extend_and_resolve(vault):
-    vault.extend("conv-1", {"[EMAIL_0]": "a@b.com"})
-    out = vault.resolve("conv-1", ["[EMAIL_0]"])
-    assert out == {"[EMAIL_0]": "a@b.com"}
+    vault.extend("conv-1", {"<r0>": "a@b.com"})
+    out = vault.resolve("conv-1", ["<r0>"])
+    assert out == {"<r0>": "a@b.com"}
 
 
 def test_vault_resolve_missing_token_returns_empty(vault):
-    out = vault.resolve("conv-empty", ["[PHONE_0]"])
+    out = vault.resolve("conv-empty", ["<r0>"])
     assert out == {}, "Cold conversation must return empty, not raise"
 
 
 def test_vault_ttl_set_on_extend(vault):
-    vault.extend("conv-ttl", {"[EMAIL_0]": "x@y.com"})
+    vault.extend("conv-ttl", {"<r0>": "x@y.com"})
     # fakeredis preserves TTL semantics — ttl() returns seconds.
     ttl = vault._redis.ttl(vault._key("conv-ttl"))
     assert 0 < ttl <= VAULT_TTL_SECONDS, (
@@ -64,7 +64,7 @@ def test_vault_redis_down_returns_empty():
     bad_client = MagicMock()
     bad_client.hmget.side_effect = ConnectionError("simulated outage")
     vault = ConversationVault(redis_client=bad_client)
-    out = vault.resolve("conv-x", ["[EMAIL_0]"])
+    out = vault.resolve("conv-x", ["<r0>"])
     assert out == {}
 
 
@@ -77,9 +77,9 @@ def test_orphan_resolved_from_vault_in_restore():
     in the vault must be replaced with the original."""
     transformer = DLPTransformer()
     result = transformer.restore(
-        "[EMAIL_0] is your address",
+        "<r0> is your address",
         span_map={},
-        vault_resolver=lambda tokens: {"[EMAIL_0]": "x@y.com"},
+        vault_resolver=lambda tokens: {"<r0>": "x@y.com"},
     )
     assert result == "x@y.com is your address"
 
@@ -91,8 +91,8 @@ def test_orphan_unresolvable_logs_warning_not_raise():
     transformer = DLPTransformer()
     # Resolver returns empty — vault doesn't know this token either.
     result = transformer.restore(
-        "I'll forward to [EMAIL_99] soon",
+        "I'll forward to <r99> soon",
         span_map={},
         vault_resolver=lambda tokens: {},
     )
-    assert "[EMAIL_99]" in result, "Literal token must remain in output"
+    assert "<r99>" in result, "Literal token must remain in output"

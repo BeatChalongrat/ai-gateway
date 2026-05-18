@@ -2,40 +2,44 @@
 
 from __future__ import annotations
 
-from ._helpers import detector_names_for, mask, tokens_in
+from ._helpers import detector_names_for, mask
+
+
+def _has_passport(matches) -> bool:
+    return any(ma.match.detector_name == "passport" for ma in matches)
 
 
 class TestPassportHappyPath:
     def test_label_then_value(self):
-        _, span_map, _ = mask("passport AA1234567")
-        assert any("PASSPORT" in t for t in span_map)
+        _, _, matches = mask("passport AA1234567")
+        assert _has_passport(matches)
 
     def test_label_preserved_en(self):
-        masked, span_map, _ = mask("Passport: AA1234567")
+        masked, _, _ = mask("Passport: AA1234567")
         assert "Passport:" in masked
-        assert "[PASSPORT_0]" in masked
+        assert "<r0>" in masked
 
     def test_thai_label(self):
         text = "หนังสือเดินทาง: AA1234567"
-        _, span_map, _ = mask(text)
-        assert any("PASSPORT" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_passport(matches)
 
 
 class TestPassportBoundary:
     def test_one_letter_eight_digits(self):
-        _, span_map, _ = mask("passport A12345678")
-        assert any("PASSPORT" in t for t in span_map)
+        _, _, matches = mask("passport A12345678")
+        assert _has_passport(matches)
 
     def test_lowercase_value_en(self):
         # IGNORECASE regex — lowercase value is accepted when adjacent
         # to a context keyword.
-        _, span_map, _ = mask("passport aa1234567")
-        assert any("PASSPORT" in t for t in span_map)
+        _, _, matches = mask("passport aa1234567")
+        assert _has_passport(matches)
 
     def test_thai_short_label(self):
         text = "พาสปอร์ต AA1234567"
-        _, span_map, _ = mask(text)
-        assert any("PASSPORT" in t for t in span_map)
+        _, _, matches = mask(text)
+        assert _has_passport(matches)
 
 
 class TestPassportNegative:
