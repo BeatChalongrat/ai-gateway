@@ -28,6 +28,27 @@ _THAI_ID_RE = re.compile(
 )
 _WEIGHTS = (13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2)
 
+# Keyword-context gate. A 13-digit run preceded by any of these
+# tokens (with optional separator / colon) is treated as a Thai ID
+# even when the check-digit fails — admin / DBA CSV dumps frequently
+# contain placeholder or test IDs that don't checksum but are still
+# in fields the operator has labelled as ``บัตรประชาชน`` / ``ID:``.
+# Better to over-mask here than leak any number sitting in an
+# explicitly-labelled ID field.
+_KEYWORD_CONTEXT_RE = re.compile(
+    r"(?:เลขประจำตัวประชาชน"
+    r"|เลขประจำตัว"
+    r"|บัตรประจำตัว"
+    r"|บัตรประชาชน"
+    r"|เลขบัตร"
+    r"|national\s*id"
+    r"|citizen\s*id"
+    r"|ID)"
+    r"\s*[:#]?\s*"
+    r"(\d{13})(?!\d)",
+    re.IGNORECASE,
+)
+
 
 def _thai_id_valid(digits: str) -> bool:
     """Return True iff *digits* (exactly 13 digits) passes the Thai ID checksum."""
@@ -51,21 +72,45 @@ class ThaiNationalIdDetector(BaseDetector):
 
     def detect(self, text: str) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []
-        for m in _THAI_ID_RE.finditer(text):
-            raw = m.group(1)
-            digits = "".join(ch for ch in raw if ch.isdigit())
-            if not _thai_id_valid(digits):
-                continue
+        # Track (start, end) so the keyword path doesn't double-emit
+        # a span the checksum path has already covered.
+        seen_spans: set[tuple[int, int]] = set()
+
+        def _emit(start: int, end: int, raw: str) -> None:
+            if (start, end) in seen_spans:
+                return
+            seen_spans.add((start, end))
             matches.append(
                 DetectionMatch(
                     detector_name=self.name,
                     entity_type="thai_national_id",
                     category=self.category,
-                    start=m.start(1),
-                    end=m.end(1),
+                    start=start,
+                    end=end,
                     matched_text=raw,
                     severity=self.default_sensitivity,
                     priority=self.priority,
                 )
             )
+
+        # Gate 1: checksum-validated path (existing behaviour). Catches
+        # both the canonical dashed form and any raw 13-digit run whose
+        # check digit checks out. Low FP because random 13-digit runs
+        # almost never pass the mod-11 weighted sum.
+        for m in _THAI_ID_RE.finditer(text):
+            raw = m.group(1)
+            digits = "".join(ch for ch in raw if ch.isdigit())
+            if not _thai_id_valid(digits):
+                continue
+            _emit(m.start(1), m.end(1), raw)
+
+        # Gate 2: keyword-context path. A 13-digit run preceded by an
+        # ID-labelling keyword is masked regardless of checksum — the
+        # operator's column header is the strongest possible signal
+        # that this IS an ID field, and checksum-invalid placeholders
+        # in such fields are still PDPA-sensitive (they identify the
+        # row, even if not the canonical citizen).
+        for m in _KEYWORD_CONTEXT_RE.finditer(text):
+            _emit(m.start(1), m.end(1), m.group(1))
+
         return matches

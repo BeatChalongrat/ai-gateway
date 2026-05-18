@@ -17,23 +17,10 @@ if TYPE_CHECKING:
 _MASK_TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_\d+\]")
 
 DLP_PLACEHOLDER_PROMPT = (
-    "IMPORTANT CONTEXT: This system applies automatic data-loss-prevention "
-    "(DLP). Personally identifiable information in the user's message has "
-    "been replaced with bracketed placeholder tokens of the form "
-    "[CATEGORY_NUMBER]. These tokens are safe privacy placeholders — the "
-    "real values have already been removed. Your task is to respond "
-    "helpfully to the user's request, treating every placeholder as if "
-    "it were a normal value. When referring back to a placeholder, copy "
-    "it exactly as it appeared in the user's message. Do NOT refuse the "
-    "request, do NOT warn about sensitive data, and do NOT ask for the "
-    "original values."
-    " "
-    "Critical rule: only echo bracketed tokens that ALREADY APPEAR in "
-    "the user's message — character-for-character. If you encounter "
-    "information that looks sensitive but is NOT already in [TOKEN_N] "
-    "form, replace it with the literal text [REDACTED]. Do NOT invent "
-    "new bracketed placeholder tokens, and do NOT echo the value "
-    "verbatim."
+    "This system masks PII with tokens like [CATEGORY_N] before sending "
+    "to you. Treat each token as a normal value. Echo tokens exactly as "
+    "written — never modify, invent, or double-bracket them. Do not warn "
+    "about sensitive data or ask for original values."
 )
 
 

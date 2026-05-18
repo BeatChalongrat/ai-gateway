@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import ResolvedApiKey
 from app.core.config import settings
+from app.core.dlp_audit_crypto import DlpAuditCryptoError, encrypt as encrypt_audit_blob
 from app.core.exceptions import (
     DLPViolationError,
     GuardrailViolationError,
@@ -34,6 +35,7 @@ from app.core.exceptions import (
 )
 from app.domain.dlp import DetectionResult, EnforcementAction, EnforcementDecision
 from app.domain.entities import RequestContext, RouteDecision
+from app.domain.policy import PolicyProfile
 from app.schemas.common import Message, UsageInfo
 from app.schemas.public import (
     ChatCompletionsChoice,
@@ -44,6 +46,10 @@ from app.api.routes.admin_ai_review import maybe_ai_review_background
 from app.domain.observability import (
     build_dlp_findings_json,
     extract_messages_text,
+    safe_input_masked_snapshot,
+    safe_input_snapshot,
+    safe_output_raw_snapshot,
+    safe_output_snapshot,
 )
 from app.observability.metrics import (
     DLP_SCAN_DURATION,
@@ -55,7 +61,8 @@ from app.services.dlp.classifier import SensitivityClassifier
 from app.services.dlp.detectors.registry import get_default_registry, DetectorRegistry
 from app.services.dlp.transformer import DLPTransformer
 from app.services.policy.evaluator import PolicyEvaluator
-from app.services.policy.profiles import get_profile
+from app.services.policy.profile_service import get_runtime_profile
+from app.services.policy.profiles import get_profile as get_runtime_profile_fallback
 from app.services.project_service import ProjectService
 from app.services.provider_dispatcher import ProviderDispatcher
 from app.services.routing_service import RoutingService
@@ -83,7 +90,15 @@ logger = structlog.get_logger(__name__)
 class GatewayOrchestrator:
     def __init__(self) -> None:
         self.project_service = ProjectService()
-        self.detector_registry = get_default_registry()
+        # Two cached registries — one per NER axis. Building both at
+        # startup means each request just picks the right pre-built
+        # instance via ``_select_registry(ctx.ner_enabled)`` instead of
+        # re-running detector registration (and any spaCy model loads
+        # behind ``presidio_ner``) on the hot path. The orchestrator
+        # is stateless wrt these registries; ``DetectorRegistry`` is
+        # safe to share across concurrent requests.
+        self._registry_ner_on = get_default_registry(ner_enabled=True)
+        self._registry_ner_off = get_default_registry(ner_enabled=False)
         self.classifier = SensitivityClassifier()
         self.policy_evaluator = PolicyEvaluator()
         self.transformer = DLPTransformer()
@@ -146,11 +161,24 @@ class GatewayOrchestrator:
         # respective pipeline stages further down.
         input_raw = extract_messages_text(payload.messages)
 
+        # Safe Trace audit channel: encrypt the raw prompt once here so
+        # every downstream persist site (success / cache hit / guardrail
+        # block / moderation block / DLP block) can include the same
+        # ciphertext without re-running the KDF + GCM. ``input_raw``
+        # itself is still clobbered to ``[MASKED_BY_DLP]`` by the safe
+        # snapshot helpers — this is the recoverable side channel that
+        # /admin/requests/{id}/trace decrypts for ADMIN callers.
+        try:
+            input_raw_encrypted = encrypt_audit_blob(input_raw or "")
+        except DlpAuditCryptoError as exc:
+            log.warning("dlp_audit_encrypt_failed", error=str(exc)[:200])
+            input_raw_encrypted = None
+
         # 1b. Rate limit check (Redis sliding window — per key, project, tenant)
         with record_phase("rate_limit"), REDIS_COMMAND_DURATION.labels(
             operation="rate_limit_pipeline"
         ).time():
-            rl = self.rate_limit_service.check_all(
+            rl = await self.rate_limit_service.check_all_async(
                 key_id=str(auth.key_id),
                 project_id=str(ctx.project_id),
                 tenant_id=str(ctx.tenant_id),
@@ -185,17 +213,27 @@ class GatewayOrchestrator:
 
         # Resolve policy profile: project-level → settings default → "default"
         profile_id = ctx.policy_profile_id or settings.dlp_default_profile
-        profile = get_profile(profile_id)
+        profile = (
+            get_runtime_profile(session, profile_id)
+            if session is not None
+            else get_runtime_profile_fallback(profile_id)
+        )
+        log.info(
+            "policy_profile_selected",
+            policy_profile=profile.profile_id,
+            severity_threshold_block=(
+                profile.severity_threshold_block.name.lower()
+                if profile.severity_threshold_block is not None
+                else None
+            ),
+        )
 
         # 2. DLP scan input (skip entirely if DLP disabled).
-        # Per-tenant NER gate: the shared detector_registry always
-        # contains PresidioDetector (when presidio is installed), but
-        # we drop it for this request when the tenant has NER off.
-        # ``without()`` returns a shallow copy so the shared singleton
-        # is never mutated.
-        active_registry = self.detector_registry
-        if not ctx.ner_enabled:
-            active_registry = active_registry.without("presidio_ner")
+        # Per-tenant NER gate: pick the right pre-built registry from
+        # the cached pair on the orchestrator. The NER-off variant has
+        # the regex ``thai_name_no_prefix`` fallback in place of
+        # Presidio so bare Thai names are still covered.
+        active_registry = self._select_registry(ctx.ner_enabled)
 
         t_dlp = time.perf_counter()
         input_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
@@ -259,7 +297,8 @@ class GatewayOrchestrator:
                             total_tokens=0,
                             estimated_cost_usd=0.0,
                             error_code="dlp_violation",
-                            input_raw=input_raw,
+                            input_raw="[BLOCKED_BY_DLP]",
+                            input_raw_encrypted=input_raw_encrypted,
                             dlp_findings_json=build_dlp_findings_json(
                                 input_enforcement.match_actions,
                             ),
@@ -276,7 +315,12 @@ class GatewayOrchestrator:
             raise DLPViolationError(
                 "Request blocked by DLP policy.",
                 details={
+                    "action": "block",
                     "policy_profile": input_enforcement.policy_profile_id,
+                    "categories": sorted(
+                        {ma.match.category.upper() for ma in input_enforcement.match_actions}
+                    ),
+                    "findings_count": len(input_enforcement.match_actions),
                     "reasons": input_enforcement.reasons,
                     "direction": "input",
                 },
@@ -290,22 +334,49 @@ class GatewayOrchestrator:
         # continue where inbound left off — preventing an outbound [EMAIL_0]
         # from clashing with an inbound [EMAIL_0] (which would make restore
         # splice the user's own PII over the AI-generated value).
+        # Deterministic-tokenization opt-in: when the caller threads
+        # ``conversation_id`` through metadata, derive a stable HMAC
+        # key so the same PII value produces the same token across
+        # turns (and across detector invocations within a turn).
+        # Without ``conversation_id`` we fall through to legacy
+        # counter mode — keeps every pre-2026-05 test contract working.
+        conversation_id = payload.metadata.get("conversation_id")
+        conversation_key = None
+        if conversation_id and settings.dlp_enabled:
+            from app.services.dlp.transformer import _make_conversation_key
+            conversation_key = _make_conversation_key(
+                settings.dlp_hmac_key, conversation_id
+            )
+
         messages_to_send = list(payload.messages)
         span_map: dict[str, str] = {}
         inbound_counters: dict[str, int] = {}
         if input_enforcement.requires_transformation:
             messages_to_send, span_map, inbound_counters = self.transformer.mask_messages(
-                payload.messages, input_enforcement.match_actions
+                payload.messages,
+                input_enforcement.match_actions,
+                conversation_key=conversation_key,
             )
 
+        # Cross-turn DLP vault: persist this turn's span_map to Redis
+        # so the next turn's ``restore`` can resolve orphaned echoes
+        # of these tokens. Pure best-effort — Redis outage means no
+        # carry-over, never a failed request.
+        if conversation_id and span_map and settings.dlp_conversation_vault_enabled:
+            from app.services.dlp.conversation_vault import conversation_vault
+            conversation_vault.extend(conversation_id, span_map)
+
         # 4a. Inject a system prompt explaining DLP placeholders so the
-        # model doesn't refuse masked messages.
-        from app.services.dlp_prompt import inject_dlp_system_prompt, has_mask_tokens
-        if has_mask_tokens(messages_to_send):
+        # model doesn't refuse masked messages. Gated on the inbound
+        # DLP findings count — a clean request (no findings) reaches
+        # the model with its messages untouched, so a "What is 2+2?"
+        # prompt doesn't pay the DLP-context tokens.
+        if input_enforcement.match_actions:
+            from app.services.dlp_prompt import inject_dlp_system_prompt
             messages_to_send = inject_dlp_system_prompt(messages_to_send)
             log.info(
                 "dlp_system_prompt_injected",
-                tokens_present=True,
+                findings=len(input_enforcement.match_actions),
             )
 
         # DLP trace snapshot 2/4: messages as they will be sent to the
@@ -350,8 +421,13 @@ class GatewayOrchestrator:
                             total_tokens=0,
                             estimated_cost_usd=0.0,
                             error_code="guardrail_blocked",
-                            input_raw=input_raw,
-                            input_masked=input_masked,
+                            input_raw=safe_input_snapshot(
+                                input_raw, input_masked, input_enforcement
+                            ),
+                            input_masked=safe_input_masked_snapshot(
+                                input_masked, input_enforcement
+                            ),
+                            input_raw_encrypted=input_raw_encrypted,
                             dlp_findings_json=build_dlp_findings_json(
                                 input_enforcement.match_actions,
                                 span_map=span_map,
@@ -419,8 +495,13 @@ class GatewayOrchestrator:
                                     total_tokens=0,
                                     estimated_cost_usd=0.0,
                                     error_code="moderation_flagged",
-                                    input_raw=input_raw,
-                                    input_masked=input_masked,
+                                    input_raw=safe_input_snapshot(
+                                        input_raw, input_masked, input_enforcement
+                                    ),
+                                    input_masked=safe_input_masked_snapshot(
+                                        input_masked, input_enforcement
+                                    ),
+                                    input_raw_encrypted=input_raw_encrypted,
                                     dlp_findings_json=build_dlp_findings_json(
                                         input_enforcement.match_actions,
                                         span_map=span_map,
@@ -481,11 +562,11 @@ class GatewayOrchestrator:
         # We cache the already-DLP-scanned response, so a hit is safe to return as-is.
         cache_messages = [m.model_dump() for m in payload.messages]
         cache_hit = None
-        if not payload.stream:
+        if not payload.stream and not input_enforcement.match_actions:
             with record_phase("cache"), REDIS_COMMAND_DURATION.labels(
                 operation="cache_get"
             ).time():
-                cache_hit = self.cache_service.get(
+                cache_hit = await self.cache_service.get_async(
                     model=route.model_name,
                     messages=cache_messages,
                     project_id=ctx.project_id,
@@ -528,10 +609,28 @@ class GatewayOrchestrator:
                             completion_tokens=cache_hit.get("usage", {}).get("completion_tokens", 0),
                             total_tokens=cache_hit.get("usage", {}).get("total_tokens", 0),
                             estimated_cost_usd=0.0,  # cached responses cost nothing
-                            input_raw=input_raw,
-                            input_masked=input_masked,
-                            output_raw=cached_text,
-                            output_final=cached_text,
+                            dlp_input_findings=len(input_enforcement.match_actions),
+                            dlp_input_action=input_enforcement.overall_action.name.lower(),
+                            input_raw=safe_input_snapshot(
+                                input_raw, input_masked, input_enforcement
+                            ),
+                            input_masked=safe_input_masked_snapshot(
+                                input_masked, input_enforcement
+                            ),
+                            input_raw_encrypted=input_raw_encrypted,
+                            # Cache hits never invoke the AI again, so the
+                            # cached text *is* both the AI's last response
+                            # and what the user receives. We treat it as
+                            # the safe AI-side snapshot for stage 3 and as
+                            # PII-bearing for stage 4 (cached value may
+                            # have had input PII restored at original cache
+                            # time).
+                            output_raw=safe_output_raw_snapshot(
+                                cached_text, input_enforcement
+                            ),
+                            output_final=safe_output_snapshot(
+                                cached_text, cached_text, input_enforcement
+                            ),
                             dlp_findings_json=build_dlp_findings_json(
                                 input_enforcement.match_actions,
                                 span_map=span_map,
@@ -566,13 +665,20 @@ class GatewayOrchestrator:
 
         # 7. Estimate usage (falls back to heuristic when provider doesn't report usage)
         if provider_response.usage:
+            from app.services.currency_service import currency_service
+            _usd = _estimate_cost(
+                route.model_name,
+                provider_response.usage.prompt_tokens,
+                provider_response.usage.completion_tokens,
+            )
+            _cost_info = currency_service.format_cost(_usd)
             usage = UsageInfo(
                 prompt_tokens=provider_response.usage.prompt_tokens,
                 completion_tokens=provider_response.usage.completion_tokens,
                 total_tokens=provider_response.usage.total_tokens,
-                estimated_cost_usd=_estimate_cost(
-                    route.model_name, provider_response.usage.total_tokens
-                ),
+                estimated_cost_usd=_usd,
+                cost_thb=_cost_info["thb"],
+                cost_display=_cost_info["display"],
             )
         else:
             usage = self.usage_service.estimate(
@@ -601,9 +707,48 @@ class GatewayOrchestrator:
         # work — captures exactly what the model returned, even if a
         # later mask/restore step rewrites it.
         output_raw = response_content
+        # Output sanitizer pass — runs BEFORE the outbound DLP scan +
+        # the inbound restore. Some models (gpt-4o-mini in particular)
+        # ignore the system prompt's "do not invent bracketed tokens"
+        # rule and emit ``[[CAT_N]]`` instead of echoing the original
+        # ``[CAT_N]``. Left alone, those reach the user as a literal
+        # ``[[NAME_1]]`` because restore() has no span_map binding for
+        # the invented name. The sanitizer either unwraps the over-
+        # bracketed form (when the inner token is a real binding) or
+        # replaces the whole thing with ``[REDACTED]``.
+        from app.services.dlp.transformer import sanitize_hallucinated_brackets
+        response_content = sanitize_hallucinated_brackets(
+            response_content, span_map
+        )
+        ai_to_service_masked = response_content
         response_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
 
         if settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses:
+            # First scan the provider's raw response with RESTORE treated as
+            # MASK. This catches any brand-new sensitive value the provider
+            # invented before we restore our own request-scoped tokens.
+            output_actions = (
+                profile.category_actions_output
+                if profile.category_actions_output is not None
+                else profile.category_actions
+            )
+            pre_restore_profile = PolicyProfile(
+                profile_id=profile.profile_id,
+                name=profile.name,
+                category_actions=profile.category_actions,
+                category_actions_output={
+                    cat: (
+                        EnforcementAction.MASK
+                        if action == EnforcementAction.RESTORE
+                        else action
+                    )
+                    for cat, action in output_actions.items()
+                },
+                severity_threshold_block=profile.severity_threshold_block,
+                scan_responses=profile.scan_responses,
+                moderation_enabled=profile.moderation_enabled,
+                scan_system_messages=profile.scan_system_messages,
+            )
             with record_phase("dlp_regex"), DLP_SCAN_DURATION.labels(
                 phase="regex"
             ).time():
@@ -613,7 +758,7 @@ class GatewayOrchestrator:
                     ner_enabled=ctx.ner_enabled,
                 )
             response_enforcement = self._scan_and_evaluate(
-                response_detection, profile
+                response_detection, pre_restore_profile
             )
 
             if response_enforcement.is_blocked:
@@ -642,9 +787,14 @@ class GatewayOrchestrator:
                                 total_tokens=usage.total_tokens if usage else 0,
                                 estimated_cost_usd=usage.estimated_cost_usd if usage else 0.0,
                                 error_code="dlp_violation",
-                                input_raw=input_raw,
-                                input_masked=input_masked,
-                                output_raw=output_raw,
+                                input_raw=safe_input_snapshot(
+                                    input_raw, input_masked, input_enforcement
+                                ),
+                                input_masked=safe_input_masked_snapshot(
+                                    input_masked, input_enforcement
+                                ),
+                                input_raw_encrypted=input_raw_encrypted,
+                                output_raw="[BLOCKED_BY_DLP]",
                                 dlp_findings_json=build_dlp_findings_json(
                                     input_enforcement.match_actions,
                                     response_enforcement.match_actions,
@@ -663,7 +813,12 @@ class GatewayOrchestrator:
                 raise DLPViolationError(
                     "Response blocked by DLP policy — provider response contained sensitive data.",
                     details={
+                        "action": "block",
                         "policy_profile": response_enforcement.policy_profile_id,
+                        "categories": sorted(
+                            {ma.match.category.upper() for ma in response_enforcement.match_actions}
+                        ),
+                        "findings_count": len(response_enforcement.match_actions),
                         "reasons": response_enforcement.reasons,
                         "direction": "output",
                     },
@@ -682,22 +837,132 @@ class GatewayOrchestrator:
                 # span_map. The subsequent restore() would then overwrite
                 # the AI's newly-generated value with the user's original
                 # PII. See transformer.mask_text docstring.
-                response_content, _, _ = self.transformer.mask_text(
+                response_content, outbound_span_map, _ = self.transformer.mask_text(
                     response_content,
                     response_enforcement.match_actions,
                     start_counters=inbound_counters,
+                    conversation_key=conversation_key,
                 )
+                # Outbound tokens are intentionally NOT merged into
+                # the inbound ``span_map``: the restore step below
+                # must not unmask a hallucinated value the AI
+                # invented. They DO go into the vault so an audit
+                # query can still resolve them — and the deterministic
+                # mode means the same hallucinated value gets the
+                # same token if echoed in a later turn.
+                if (
+                    conversation_id
+                    and outbound_span_map
+                    and settings.dlp_conversation_vault_enabled
+                ):
+                    from app.services.dlp.conversation_vault import (
+                        conversation_vault,
+                    )
+                    conversation_vault.extend(
+                        conversation_id, outbound_span_map
+                    )
+
+            ai_to_service_masked = response_content
 
         # 8b. Restore indexed input tokens AFTER output scan+mask.
         # See the rationale block in step 8 above for why order matters.
+        # ``vault_resolver`` is wired only when a ``conversation_id``
+        # was supplied — without one, there's no cross-turn store to
+        # consult and ``restore`` falls back to the single-turn orphan
+        # warning path. The lambda is created here (not closed over a
+        # mutating variable) so the resolver always sees the same id.
+        # Product requirement: the provider sees only placeholders, while the
+        # caller gets their own values restored when the outbound policy says
+        # RESTORE. The span_map is request-scoped; only tokens minted from this
+        # request can be restored here.
+        restore_allowed_tokens: set[str] = set()
         if span_map:
-            response_content = self.transformer.restore(response_content, span_map)
+            output_actions = (
+                profile.category_actions_output
+                if profile.category_actions_output is not None
+                else profile.category_actions
+            )
+            value_to_tokens: dict[str, set[str]] = {}
+            for token, original in span_map.items():
+                value_to_tokens.setdefault(original, set()).add(token)
+            for ma in input_enforcement.match_actions:
+                if output_actions.get(ma.match.category) != EnforcementAction.RESTORE:
+                    continue
+                restore_allowed_tokens.update(
+                    value_to_tokens.get(ma.match.matched_text, set())
+                )
+        if restore_allowed_tokens:
+            response_content = self.transformer.restore(
+                response_content,
+                span_map,
+                allowed_tokens=restore_allowed_tokens,
+            )
+
+        # 8c. Scan the final restored response again. RESTORE findings are
+        # allowed to reach the user, but MASK/BLOCK findings are still enforced
+        # and nothing raw from this final text is persisted to request_logs.
+        if settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses:
+            with record_phase("dlp_regex"), DLP_SCAN_DURATION.labels(
+                phase="regex"
+            ).time():
+                final_response_detection = self._scan_text_as_result(
+                    response_content,
+                    direction="output",
+                    ner_enabled=ctx.ner_enabled,
+                )
+            response_enforcement = self._scan_and_evaluate(
+                final_response_detection, profile
+            )
+            if response_enforcement.requires_transformation:
+                response_content, _final_outbound_span_map, _ = self.transformer.mask_text(
+                    response_content,
+                    response_enforcement.match_actions,
+                    start_counters=inbound_counters,
+                    conversation_key=conversation_key,
+                )
 
         # 9. Determine overall policy action (highest across input + output)
         overall_action = max(
             input_enforcement.overall_action,
             response_enforcement.overall_action,
         )
+
+        # Admin Secure Trace is request-process memory only. It must never be
+        # written to request_logs or emitted to app logs.
+        try:
+            from app.services.secure_trace_store import (
+                SecureTraceRecord,
+                secure_trace_store,
+            )
+
+            secure_trace_store.put(
+                SecureTraceRecord(
+                    request_id=request_id,
+                    tenant_id=ctx.tenant_id,
+                    project_id=ctx.project_id,
+                    user_to_service=input_raw,
+                    service_to_ai=input_masked,
+                    ai_to_service=ai_to_service_masked,
+                    service_to_user=response_content,
+                    policy_action=overall_action.name.lower(),
+                    findings_count=(
+                        len(input_enforcement.match_actions)
+                        + len(response_enforcement.match_actions)
+                    ),
+                    detectors=sorted(
+                        {
+                            ma.match.detector_name
+                            for ma in (
+                                input_enforcement.match_actions
+                                + response_enforcement.match_actions
+                            )
+                        }
+                    ),
+                    created_at=time.time(),
+                )
+            )
+        except Exception as exc:
+            log.warning("secure_trace_capture_failed", error=str(exc)[:200])
 
         # Build direction-prefixed reasons from *actionable* matches only.
         # We skip ALLOW matches (which generate "no matching rule" noise when
@@ -773,13 +1038,29 @@ class GatewayOrchestrator:
                 dlp_output_findings=len(response_enforcement.match_actions),
                 dlp_categories=dlp_categories,
                 router_used=router_used,
-                # DLP trace — snapshot 4/4 is the post-restore content
-                # the user actually saw. ``output_raw`` was captured
-                # above before output mask + restore.
-                input_raw=input_raw,
-                input_masked=input_masked,
-                output_raw=output_raw,
-                output_final=response_content,
+                # 4-stage DLP trace:
+                #   1. input_raw    (User → Service)  — placeholder (raw has PII)
+                #   2. input_masked (Service → AI)    — actual masked text, tokens only
+                #   3. output_raw   (AI → Service)    — AI response AFTER outbound mask;
+                #                                       the variable ``output_raw`` is the
+                #                                       *pre-mask* AI text and may still
+                #                                       carry hallucinated PII, so we
+                #                                       persist ``ai_to_service_masked``
+                #                                       (post-outbound-mask) instead.
+                #   4. output_final (Service → User)  — placeholder (post-restore has PII)
+                input_raw=safe_input_snapshot(
+                    input_raw, input_masked, input_enforcement
+                ),
+                input_masked=safe_input_masked_snapshot(
+                    input_masked, input_enforcement
+                ),
+                output_raw=safe_output_raw_snapshot(
+                    ai_to_service_masked, response_enforcement
+                ),
+                output_final=safe_output_snapshot(
+                    output_raw, response_content, response_enforcement
+                ),
+                input_raw_encrypted=input_raw_encrypted,
                 dlp_findings_json=build_dlp_findings_json(
                     input_enforcement.match_actions,
                     response_enforcement.match_actions,
@@ -848,8 +1129,10 @@ class GatewayOrchestrator:
             and overall_action.name.lower() not in ("block",)
             and not input_enforcement.is_blocked
             and not response_enforcement.is_blocked
+            and not input_enforcement.match_actions
+            and not response_enforcement.match_actions
         ):
-            self.cache_service.set(
+            await self.cache_service.set_async(
                 model=route.model_name,
                 messages=cache_messages,
                 project_id=ctx.project_id,
@@ -891,48 +1174,74 @@ class GatewayOrchestrator:
             frozenset(_meta_allowed) if _meta_allowed else None
         )
 
-        router_used: str = "service"
-        sem_model, sem_intent, sem_confidence = (
-            self.semantic_router.get_model_hint(
-                dict_messages, allowed_providers=allowed_providers
-            )
+        # Load DB keyword rules up-front so both the project-scoped
+        # pre-check and the post-semantic full pass see the same rule
+        # list. Failures are logged but never break routing — the
+        # default-rule fallback still gives reasonable behaviour.
+        db_rules = []
+        if session is not None:
+            try:
+                db_rules = (
+                    self.keyword_rule_service.get_rules_for_request(
+                        session, ctx.tenant_id, ctx.project_id
+                    )
+                )
+            except Exception as exc:
+                log.warning(
+                    "keyword_rule_load_failed", error=str(exc)
+                )
+        router_inst = (
+            KeywordRouter(db_rules=db_rules)
+            if db_rules
+            else self.keyword_router
         )
+
+        router_used: str = "service"
         matched_rule: str | None = None
         hinted_model: str = payload.model
+        sem_intent: str = "general"
+        sem_confidence: float = 0.0
 
-        if sem_model is not None:
-            # High-confidence semantic match — overrides everything else.
-            router_used = "semantic"
-            hinted_model = sem_model
-            payload.model = sem_model
+        # Step 1: project-scoped keyword rules outrank everything else,
+        # including a high-confidence semantic match. A tenant who has
+        # configured per-project routing has made an explicit, narrow
+        # choice that the embedding classifier must not override.
+        project_hint, project_rule = router_inst.get_project_scoped_hint(
+            messages=dict_messages,
+            requested_model=payload.model,
+            allowed_providers=allowed_providers,
+        )
+        if project_rule is not None and project_hint != payload.model:
+            router_used = "keyword_project"
+            matched_rule = project_rule
+            hinted_model = project_hint
+            payload.model = project_hint
         else:
-            # Load DB keyword rules for this tenant/project and merge
-            # them with the hardcoded DEFAULT_RULES.
-            db_rules = []
-            if session is not None:
-                try:
-                    db_rules = (
-                        self.keyword_rule_service.get_rules_for_request(
-                            session, ctx.tenant_id, ctx.project_id
-                        )
-                    )
-                except Exception as exc:
-                    log.warning(
-                        "keyword_rule_load_failed", error=str(exc)
-                    )
-            router_inst = (
-                KeywordRouter(db_rules=db_rules)
-                if db_rules
-                else self.keyword_router
+            # Step 2: semantic router (existing precedence).
+            sem_model, sem_intent, sem_confidence = (
+                self.semantic_router.get_model_hint(
+                    dict_messages, allowed_providers=allowed_providers
+                )
             )
-            hinted_model, matched_rule = router_inst.get_model_hint(
-                messages=dict_messages,
-                requested_model=payload.model,
-                allowed_providers=allowed_providers,
-            )
-            if matched_rule is not None and hinted_model != payload.model:
-                router_used = "keyword"
-                payload.model = hinted_model
+            if sem_model is not None:
+                router_used = "semantic"
+                hinted_model = sem_model
+                payload.model = sem_model
+            else:
+                # Step 3: full keyword pass — tenant + global DB rules
+                # plus DEFAULT_RULES. Project rules already evaluated
+                # above; re-running is harmless because they would
+                # win the same way and the conditional check below
+                # only flips ``router_used`` when the model actually
+                # changes.
+                hinted_model, matched_rule = router_inst.get_model_hint(
+                    messages=dict_messages,
+                    requested_model=payload.model,
+                    allowed_providers=allowed_providers,
+                )
+                if matched_rule is not None and hinted_model != payload.model:
+                    router_used = "keyword"
+                    payload.model = hinted_model
 
         log.info(
             "routing_decision",
@@ -975,6 +1284,19 @@ class GatewayOrchestrator:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _select_registry(self, ner_enabled: bool) -> DetectorRegistry:
+        """Pick the cached registry matching the request's NER axis.
+
+        ``ner_enabled=True`` → registry with ``presidio_ner`` (when
+        installed) and no ``thai_name_no_prefix`` fallback.
+        ``ner_enabled=False`` → registry with the regex fallback in
+        place of Presidio.
+
+        Background paths that have no ``ctx`` (e.g. AI-review) should
+        call this with ``ner_enabled=True`` to keep parity with the
+        pre-fix behaviour."""
+        return self._registry_ner_on if ner_enabled else self._registry_ner_off
+
     def _scan_and_evaluate(
         self,
         detection_result: DetectionResult,
@@ -1000,25 +1322,43 @@ class GatewayOrchestrator:
         scan — used by the outbound response scan when the request's
         tenant has NER off.
 
-        Outbound calls also drop findings whose ``matched_text`` is just
-        a mask-token literal (``[NAME_0]``, ``[DATE_OF_BIRTH_0]``, …).
-        Heavy-scenario testing showed presidio_ner classifying the
-        gateway's own placeholders as PII when scanning the model
-        response — a self-feedback loop where the DLP system flags
-        strings that the DLP system itself emitted upstream. The filter
-        is gated to ``direction == "output"`` so an inbound caller (none
-        today, but the signature allows it) is unaffected.
+        Outbound calls also drop findings that target our own mask
+        tokens, in two shapes:
+
+          1. ``matched_text`` is the full ``[CATEGORY_N]`` literal
+             (caught by ``_MASK_TOKEN_RE.fullmatch``).
+          2. ``matched_text`` is the INNER text of a mask token
+             (e.g. NER returning ``PHONE_NUMBER_0`` for the body of
+             ``[PHONE_NUMBER_0]``). Without this branch the outbound
+             pass re-masks our own token as a PERSON and emits
+             ``[[NAME_1]]`` — a self-feedback loop that survives all
+             the way to the user.
+
+        The filter is gated to ``direction == "output"`` so an inbound
+        caller (none today, but the signature allows it) is unaffected.
         """
         from app.services.dlp_prompt import _MASK_TOKEN_RE
 
-        registry = self.detector_registry
-        if not ner_enabled:
-            registry = registry.without("presidio_ner")
+        registry = self._select_registry(ner_enabled)
         matches = registry.scan_text(text)
         if direction == "output":
+            # Pre-compute the (start, end) spans of every mask-token
+            # literal already in the text so we can drop any finding
+            # whose span is fully contained inside one.
+            mask_token_spans = [
+                (m.start(), m.end()) for m in _MASK_TOKEN_RE.finditer(text)
+            ]
+
+            def _inside_mask_token(start: int, end: int) -> bool:
+                for tstart, tend in mask_token_spans:
+                    if tstart <= start and end <= tend:
+                        return True
+                return False
+
             matches = [
                 m for m in matches
                 if not _MASK_TOKEN_RE.fullmatch(m.matched_text.strip())
+                and not _inside_mask_token(m.start, m.end)
             ]
         return DetectionResult(
             matches=matches,

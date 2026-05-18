@@ -42,10 +42,45 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  # Dedicated NER service — owns the heavy spaCy model so the gateway
+  # workers stay light. The gateway calls this via NER_SERVICE_URL;
+  # leaving the URL unset falls back to the legacy in-process loader.
+  ner-service:
+    build:
+      context: ./backend
+      dockerfile: ner_service/Dockerfile
+    image: ai-gateway-ner-service:latest
+    ports:
+      - "8001:8001"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "2g"
+        reservations:
+          cpus: "1.0"
+          memory: "1g"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health | grep -q '\"status\":\"ready\"' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
     environment:
+      # Pin UTF-8 everywhere so Thai-language request bodies, mask
+      # tokens, and the ฿ symbol travel through Python stdout / SQL
+      # client / JSON encoders without ambient-locale surprises.
+      # The base image already ships C.UTF-8, but setting these
+      # explicitly documents the contract and survives a future
+      # image rebase to a locale-less variant.
+      PYTHONIOENCODING: utf-8
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
       APP_ENV: development
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -57,6 +92,14 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-stable-key-change-in-prod}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-dev-stable-key-change-in-prod}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      # DLP HMAC secret — drives deterministic per-conversation
+      # tokenization when a request supplies metadata.conversation_id.
+      # Generate prod value with: python3 -c "import secrets;print(secrets.token_hex(32))"
+      DLP_HMAC_KEY: ${DLP_HMAC_KEY:-dev-dlp-hmac-key-change-in-production}
+      # NER microservice URL. When set, presidio_ner.py delegates to
+      # this service instead of loading spaCy in-process.
+      NER_SERVICE_URL: ${NER_SERVICE_URL:-http://ner-service:8001}
+      NER_SERVICE_TIMEOUT_SECONDS: ${NER_SERVICE_TIMEOUT_SECONDS:-2.0}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
@@ -77,6 +120,8 @@ services:
       redis:
         condition: service_healthy
       mock-provider:
+        condition: service_healthy
+      ner-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)\""]

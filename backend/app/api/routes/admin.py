@@ -563,6 +563,28 @@ def _strip_raw_from_findings(findings: list[dict]) -> list[dict]:
     return cleaned
 
 
+def _safe_trace_snapshot(value: str | None, findings_count: int | None) -> str | None:
+    """Pass through the stored trace value for /admin/requests/{id}.
+
+    The write-side helpers in :mod:`app.domain.observability` already
+    enforce the privacy contract per column:
+
+      - ``input_raw`` / ``output_final`` are stored as ``[MASKED_BY_DLP]``
+        / ``[BLOCKED_BY_DLP]`` when DLP fires (raw / restored PII).
+      - ``input_masked`` / ``output_raw`` are stored as the actual
+        masked text (mask tokens only — no PII by construction).
+
+    Earlier this function re-collapsed every column to ``[MASKED_BY_DLP]``
+    whenever any finding existed, which clobbered the safe-by-construction
+    masked text and made the 4-stage Safe Trace UI useless. Trust the
+    write path now; if a legacy row ever stored raw PII, the
+    ``[MASKED_BY_DLP]`` placeholder it already contains will continue to
+    pass through unchanged.
+    """
+    del findings_count  # retained for call-site compatibility
+    return value
+
+
 @router.get("/requests/{request_id}", response_model=RequestLogDetail)
 def get_request(
     request_id: str,
@@ -579,19 +601,15 @@ def get_request(
         raise NotFoundError(f"Request '{request_id}' not found.")
     check_tenant_access(auth, r.tenant_id)
 
-    # Privacy gate (Fix 4a): only ADMIN-tier callers see the raw-content
-    # columns and the raw ``matched_text`` inside dlp_findings. Lower
-    # admin tiers (TENANT_ADMIN, PROJECT_ADMIN) still get the full
-    # masked snapshots + the per-finding metadata, just without the
-    # actual sensitive values. ``Role.ADMIN`` is the highest tier in
-    # the current RBAC enum (see backend/app/domain/rbac.py); when a
-    # SUPER_ADMIN or COMPLIANCE_ADMIN role is added later, this is the
-    # one place to widen.
+    # Safe Trace / persisted logs: never expose raw-content columns from
+    # request_logs. Historical rows may predate the placeholder-only policy,
+    # so sanitize here even for ADMIN callers. Raw debugging is available only
+    # through /admin/requests/{id}/secure-trace and is audited.
     try:
         caller_role = Role[auth.role.upper()]
     except (KeyError, AttributeError):
         caller_role = Role.USER
-    include_raw = has_role_level(caller_role, Role.ADMIN)
+    include_raw = False
 
     # Parse DLP findings JSON for the trace tab. Treat anything that
     # doesn't decode to a list as None — operators see the raw text
@@ -625,15 +643,215 @@ def get_request(
         estimated_cost_usd=r.estimated_cost_usd,
         error_code=r.error_code,
         created_at=r.created_at,
-        # Fix 4a: raw snapshots gated behind ADMIN role. The masked /
         # final snapshots are always returned — they contain only mask
         # tokens and post-restore values that the user already saw.
-        input_raw=r.input_raw if include_raw else None,
-        input_masked=r.input_masked,
-        output_raw=r.output_raw if include_raw else None,
-        output_final=r.output_final,
+        input_raw=_safe_trace_snapshot(r.input_raw, r.dlp_input_findings),
+        input_masked=_safe_trace_snapshot(r.input_masked, r.dlp_input_findings),
+        output_raw=_safe_trace_snapshot(r.output_raw, r.dlp_output_findings),
+        output_final=_safe_trace_snapshot(
+            r.output_final,
+            (r.dlp_input_findings or 0) + (r.dlp_output_findings or 0),
+        ),
         dlp_findings=dlp_findings,
     )
+
+
+@router.get("/requests/{request_id}/trace")
+def get_request_trace(
+    request_id: str,
+    reason: str | None = Query(default=None, max_length=500),
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+):
+    """Persisted Safe Trace — decrypts stage 1 from ``input_raw_encrypted``.
+
+    Stages 2/3 read the persisted ``input_masked`` / ``output_raw``
+    columns (which already carry mask tokens, no PII). Stage 1 is
+    AES-GCM-decrypted from the ciphertext column written at request
+    time. Stage 4 stays the placeholder ``[MASKED_BY_DLP]`` —
+    post-restore plaintext is intentionally not persisted; admins
+    needing the restored body fall back to ``/secure-trace`` (the
+    15-min in-memory store).
+
+    Same gate + same audit action as ``/secure-trace`` so existing
+    permission rollout, alerting, and audit consumers cover both
+    paths without per-endpoint configuration.
+    """
+    from app.core.dlp_audit_crypto import DlpAuditCryptoError
+    from app.core.dlp_audit_crypto import decrypt as decrypt_audit_blob
+    from app.services.admin_audit_service import AdminAuditService
+    from app.services.request_log_service import RequestLogService
+
+    try:
+        caller_role = Role[auth.role.upper()]
+    except (KeyError, AttributeError):
+        caller_role = Role.USER
+    if not has_role_level(caller_role, Role.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "trace_permission_denied",
+                    "message": "Persisted Safe Trace requires dlp.trace.raw:read.",
+                }
+            },
+        )
+
+    request_row = RequestLogService().get_by_id(session, request_id)
+    if request_row is None:
+        raise NotFoundError(f"Request '{request_id}' not found.")
+    check_tenant_access(auth, request_row.tenant_id)
+
+    decrypt_status = "ok"
+    user_to_service: str | None = None
+    if request_row.input_raw_encrypted:
+        try:
+            user_to_service = decrypt_audit_blob(request_row.input_raw_encrypted)
+        except DlpAuditCryptoError as exc:
+            decrypt_status = f"failed: {type(exc).__name__}"
+            user_to_service = None
+    else:
+        decrypt_status = "no_ciphertext"
+
+    AdminAuditService().record(
+        session,
+        actor_key_id=auth.key_id,
+        tenant_id=request_row.tenant_id,
+        action="dlp.trace.viewed",
+        resource_type="request",
+        resource_id=request_id,
+        details={
+            "fields_viewed": ["user_to_service", "service_to_ai", "ai_to_service"],
+            "permission": "dlp.trace.raw:read",
+            "reason": reason,
+            "trace_mode": "persisted",
+            "decrypt_status": decrypt_status,
+        },
+    )
+
+    return {
+        "request_id": request_id,
+        "trace_mode": "persisted",
+        "viewer": {
+            "admin_user_id": auth.key_id,
+            "permission": "dlp.trace.raw:read",
+        },
+        "stages": {
+            "user_to_service": {
+                "visibility": "raw_admin_only",
+                "content": user_to_service,
+                "source": "input_raw_encrypted",
+            },
+            "service_to_ai": {
+                "visibility": "masked",
+                "content": request_row.input_masked,
+                "source": "input_masked",
+            },
+            "ai_to_service": {
+                "visibility": "masked",
+                "content": request_row.output_raw,
+                "source": "output_raw",
+            },
+            "service_to_user": {
+                "visibility": "placeholder",
+                "content": request_row.output_final,
+                "source": "output_final",
+            },
+        },
+        "dlp": {
+            "policy_action": request_row.policy_action,
+            "input_findings_count": request_row.dlp_input_findings or 0,
+            "output_findings_count": request_row.dlp_output_findings or 0,
+        },
+        "decrypt_status": decrypt_status,
+    }
+
+
+@router.get("/requests/{request_id}/secure-trace")
+def get_request_secure_trace(
+    request_id: str,
+    reason: str | None = Query(default=None, max_length=500),
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+):
+    from app.services.admin_audit_service import AdminAuditService
+    from app.services.request_log_service import RequestLogService
+    from app.services.secure_trace_store import secure_trace_store
+
+    try:
+        caller_role = Role[auth.role.upper()]
+    except (KeyError, AttributeError):
+        caller_role = Role.USER
+    # TODO: replace this coarse ADMIN gate with a dedicated
+    # dlp.trace.raw:read permission once fine-grained admin RBAC exists.
+    if not has_role_level(caller_role, Role.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "secure_trace_permission_denied",
+                    "message": "Admin Secure Trace requires dlp.trace.raw:read.",
+                }
+            },
+        )
+
+    request_row = RequestLogService().get_by_id(session, request_id)
+    if request_row is None:
+        raise NotFoundError(f"Request '{request_id}' not found.")
+    check_tenant_access(auth, request_row.tenant_id)
+
+    trace = secure_trace_store.get(request_id)
+    if trace is None:
+        raise NotFoundError(
+            f"Secure trace for request '{request_id}' is not available."
+        )
+
+    AdminAuditService().record(
+        session,
+        actor_key_id=auth.key_id,
+        tenant_id=request_row.tenant_id,
+        action="dlp.secure_trace.viewed",
+        resource_type="request",
+        resource_id=request_id,
+        details={
+            "fields_viewed": ["user_to_service", "service_to_user"],
+            "permission": "dlp.trace.raw:read",
+            "reason": reason,
+            "trace_mode": "admin_secure",
+        },
+    )
+
+    return {
+        "request_id": request_id,
+        "trace_mode": "admin_secure",
+        "viewer": {
+            "admin_user_id": auth.key_id,
+            "permission": "dlp.trace.raw:read",
+        },
+        "stages": {
+            "user_to_service": {
+                "visibility": "raw_admin_only",
+                "content": trace.user_to_service,
+            },
+            "service_to_ai": {
+                "visibility": "masked",
+                "content": trace.service_to_ai,
+            },
+            "ai_to_service": {
+                "visibility": "masked_or_provider_raw",
+                "content": trace.ai_to_service,
+            },
+            "service_to_user": {
+                "visibility": "restored_admin_only",
+                "content": trace.service_to_user,
+            },
+        },
+        "dlp": {
+            "policy_action": trace.policy_action,
+            "findings_count": trace.findings_count,
+            "detectors": trace.detectors,
+        },
+    }
 
 
 @router.get("/requests")

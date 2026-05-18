@@ -13,10 +13,15 @@ For each test we monkeypatch:
 
 from __future__ import annotations
 
+import json
+import uuid
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
+from app.models.keyword_rule import KeywordRuleORM
 from app.models.request_log import RequestLogORM
 from app.services.keyword_router import KeywordRouter
 from app.services.orchestrator import GatewayOrchestrator
@@ -129,3 +134,100 @@ class TestRoutingPriority:
         log = _log_for(r["body"]["id"])
         assert log is not None
         assert log.router_used == "service"
+
+
+# ---------------------------------------------------------------------------
+# Project-scoped keyword rules outrank semantic
+# ---------------------------------------------------------------------------
+
+
+def _insert_keyword_rule(
+    *,
+    name: str,
+    keywords: list[str],
+    model_override: str,
+    scope: str,
+    scope_id: str | None,
+    priority: int = 1,
+) -> str:
+    Session = sessionmaker(bind=_integration_engine)
+    s = Session()
+    try:
+        row = KeywordRuleORM(
+            id=str(uuid.uuid4()),
+            name=name,
+            keywords_json=json.dumps(keywords),
+            model_override=model_override,
+            priority=priority,
+            scope=scope,
+            scope_id=scope_id,
+            enabled=True,
+        )
+        s.add(row)
+        s.commit()
+        return row.id
+    finally:
+        s.close()
+
+
+@pytest.fixture
+def _cleanup_keyword_rules():
+    yield
+    Session = sessionmaker(bind=_integration_engine)
+    s = Session()
+    try:
+        s.query(KeywordRuleORM).delete()
+        s.commit()
+    finally:
+        s.close()
+
+
+class TestProjectScopeOverridesSemantic:
+    """Project-scoped DB rules must beat the semantic router even when
+    the embedding classifier is highly confident on the same prompt.
+    Tenant- and global-scoped rules continue to *lose* to semantic —
+    only the project layer is privileged."""
+
+    def test_project_keyword_beats_confident_semantic(
+        self, monkeypatch, _cleanup_keyword_rules
+    ):
+        # Semantic would otherwise force gpt-4o for "analyze" coding/
+        # analysis intent — the project rule must pre-empt it.
+        _install_fake_semantic(monkeypatch, ("gpt-4o", "analysis", 0.95))
+        _insert_keyword_rule(
+            name="project_route_analyze",
+            keywords=["analyze"],
+            model_override="qwen-plus",
+            scope="project",
+            scope_id="test-project",
+        )
+
+        r = _chat("please analyze this dataset")
+        assert r["status"] == 200
+        assert r["body"]["model"] == "qwen-plus"
+
+        log = _log_for(r["body"]["id"])
+        assert log is not None
+        assert log.router_used == "keyword_project"
+
+    def test_tenant_keyword_still_loses_to_semantic(
+        self, monkeypatch, _cleanup_keyword_rules
+    ):
+        # Tenant-scope rules sit below the project floor — they must
+        # not pre-empt semantic. Behaviour unchanged from before Fix 4.
+        _install_fake_semantic(monkeypatch, ("gpt-4o", "analysis", 0.95))
+        _insert_keyword_rule(
+            name="tenant_route_analyze",
+            keywords=["analyze"],
+            model_override="qwen-plus",
+            scope="tenant",
+            scope_id="test-tenant",
+        )
+
+        r = _chat("please analyze this dataset")
+        assert r["status"] == 200
+        assert r["body"]["model"] == "gpt-4o"
+
+        log = _log_for(r["body"]["id"])
+        assert log is not None
+        assert log.router_used == "semantic"

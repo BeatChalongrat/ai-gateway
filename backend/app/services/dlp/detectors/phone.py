@@ -43,6 +43,24 @@ _PHONE_FORMATTED_RE = re.compile(
 # window — see ``_PHONE_CONTEXT_RE``.
 _BARE_DIGITS_RE = re.compile(r"(?<!\d)\+?\d{10,15}(?!\d)")
 
+# Thai landlines are 9 digits total (0 + 2-digit area + 3-digit exchange
+# + 4-digit subscriber) — one digit shorter than the 10-digit floor in
+# ``_PHONE_FORMATTED_RE``'s downstream filter, so they would otherwise
+# be dropped. This branch captures them directly:
+#
+#   02-555-1234   02 555 1234   025551234   053-123-4567
+#
+# Area code is constrained to ``0[2-9]`` (Bangkok 02 + provincial
+# 03x/04x/05x/07x). Trailing alphabetic lookahead rejects version
+# strings like ``02-release``; digit-boundary lookbehind/lookahead
+# prevent fusing with longer numeric runs.
+_PHONE_THAI_LANDLINE_RE = re.compile(
+    r"(?<!\d)"
+    r"(0[2-9])"
+    r"[\s\-]?\d{3}[\s\-]?\d{4}"
+    r"(?!\d)(?![A-Za-z])"
+)
+
 # Words or partial-words in Thai and English that signal a nearby digit run
 # is a phone number. Kept narrow on purpose: "number" alone matches too many
 # unrelated contexts (order number, member number); we require a stronger
@@ -65,6 +83,11 @@ class PhoneDetector(BaseDetector):
     category = "pii"
     default_sensitivity = SensitivityLevel.HIGH
     ACCEPTS_DECODED = True
+    # Beats Presidio NER's default priority=0 on the same span. A
+    # formatted Thai-style number like ``+66 81-234-5678`` would
+    # otherwise tie against an NER PERSON / PHONE_NUMBER match and
+    # fall to "earlier start wins" — fragile when scan order shifts.
+    priority = 5
 
     def detect(self, text: str, *, from_decoded: bool = False) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []
@@ -83,6 +106,7 @@ class PhoneDetector(BaseDetector):
                     end=end,
                     matched_text=matched_text,
                     severity=self.default_sensitivity,
+                    priority=self.priority,
                 )
             )
 
@@ -100,6 +124,16 @@ class PhoneDetector(BaseDetector):
             if len(tail) == 2 and tail[0] in " -." and tail[1].isdigit():
                 continue
             _emit(m.start(), m.end(), span_text)
+
+        # Branch 1b — Thai landlines (9 digits, area code 0[2-9]).
+        # No context-keyword requirement: the 0[2-9] prefix plus the
+        # 2+3+4 digit grouping is specific enough to disambiguate
+        # from timestamps and bare numeric noise. Runs here before
+        # the bare-digits branch so the formatted match wins over a
+        # naked 10+ digit string that would otherwise need a context
+        # keyword.
+        for m in _PHONE_THAI_LANDLINE_RE.finditer(text):
+            _emit(m.start(), m.end(), m.group())
 
         # Branch 2 — bare digits. Require a phone-context keyword inside
         # the ±_CONTEXT_WINDOW chars window. Without this gate, Unix epoch

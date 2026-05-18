@@ -86,6 +86,15 @@ def _build_body(
     return body
 
 
+def _build_gateway_body(exc: GatewayError, request_id: str | None) -> dict:
+    body = _build_body(exc.code, exc.message, exc.details, request_id)
+    if isinstance(exc, DLPViolationError) and isinstance(exc.details, dict):
+        for key in ("action", "categories", "findings_count"):
+            if key in exc.details:
+                body["error"][key] = exc.details[key]
+    return body
+
+
 # ---------------------------------------------------------------------------
 # Exception handlers — registered on the FastAPI app in main.py
 # ---------------------------------------------------------------------------
@@ -106,7 +115,7 @@ async def handle_gateway_error(request: Request, exc: GatewayError) -> JSONRespo
     )
     return JSONResponse(
         status_code=status,
-        content=_build_body(exc.code, exc.message, exc.details, request_id),
+        content=_build_gateway_body(exc, request_id),
         headers=getattr(exc, "headers", None),
     )
 

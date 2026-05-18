@@ -22,6 +22,12 @@ class ModelCandidate:
     max_context_tokens: int = 128000
     cost_tier: str = "standard"  # "budget", "standard", "premium"
     latency_tier: str = "standard"  # "fast", "standard", "slow"
+    # Real $/token costs — single source of truth for both routing scoring
+    # and billing. 0.0 means unknown/unset; consumers should fall back to
+    # ``cost_tier`` for routing and to the legacy ``_COST_PER_TOKEN`` table
+    # in ``usage_service`` for billing.
+    cost_per_input_token: float = 0.0
+    cost_per_output_token: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -238,7 +238,13 @@ def get_usage_summary(
 
     tenant_id = user.tenant_id
     empty: dict = {
-        "totals": {"requests": 0, "tokens": 0, "estimated_cost_usd": 0.0},
+        "totals": {
+            "requests": 0,
+            "tokens": 0,
+            "estimated_cost_usd": 0.0,
+            "estimated_cost_thb": 0.0,
+            "cost_display": "฿0.0000",
+        },
         "windows": {"today": 0, "last_7d": 0, "last_30d": 0},
         "top_models": [],
         "by_project": [],
@@ -302,11 +308,16 @@ def get_usage_summary(
         .order_by(func.count(RequestLogORM.request_id).desc())
     ).all()
 
+    from app.services.currency_service import currency_service
+    _total_usd = float(totals_row[2] or 0.0)
+    _cost_info = currency_service.format_cost(_total_usd)
     return {
         "totals": {
             "requests": int(totals_row[0] or 0),
             "tokens": int(totals_row[1] or 0),
-            "estimated_cost_usd": float(totals_row[2] or 0.0),
+            "estimated_cost_usd": _total_usd,
+            "estimated_cost_thb": _cost_info["thb"],
+            "cost_display": _cost_info["display"],
         },
         "windows": {
             "today": _count_since(today_start),

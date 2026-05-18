@@ -12,6 +12,12 @@ class UsageInfo(BaseModel):
     completion_tokens: int = 0
     total_tokens: int = 0
     estimated_cost_usd: float = 0.0
+    # Display-layer additions populated by ``currency_service.format_cost``.
+    # ``estimated_cost_usd`` stays the canonical numeric — these two are
+    # *additive*, defaulted to None so existing serialisations and
+    # response contracts that don't set them continue to behave.
+    cost_thb: Optional[float] = None
+    cost_display: Optional[str] = None
 
 
 class ErrorDetail(BaseModel):

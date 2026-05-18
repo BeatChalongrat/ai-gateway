@@ -125,10 +125,15 @@ class TestUsageSummary:
         )
         assert r.status_code == 200
         body = r.json()
+        # ``estimated_cost_thb`` + ``cost_display`` were added in the
+        # THB display-layer pass (May 2026). USD totals stay the
+        # canonical numeric; the test asserts the *full* shape.
         assert body["totals"] == {
             "requests": 0,
             "tokens": 0,
             "estimated_cost_usd": 0.0,
+            "estimated_cost_thb": 0.0,
+            "cost_display": "฿0.0000",
         }
         assert body["top_models"] == []
         assert body["by_project"] == []

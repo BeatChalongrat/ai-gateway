@@ -12,20 +12,26 @@ import re
 from app.domain.dlp import DetectionMatch, SensitivityLevel
 from app.services.dlp.detectors.base import BaseDetector
 
+# All English subpatterns are anchored with ``\b`` on every word so the
+# detector can't match substrings inside unrelated tokens. Without the
+# boundaries the pronoun alternation ``(?:I|he|she|they)`` matched the
+# ``he`` inside ``the``, and the bare verb ``follow`` matched inside
+# ``following`` — together they fired the detector on plain phrases
+# like ``the following`` (PROD bug 2026-05-13).
 _RELIGION_KEYWORDS_RE = re.compile(
     r"(?:"
-    # Thai
+    # Thai (Thai script never collides with English substrings, no \b needed)
     r"นับถือ|ศาสนา|ศรัทธา|ละหมาด|สวดมนต์|"
     r"เข้าวัด|ถือศีล|บวช|มุสลิม|อิสลาม|พุทธ|คริสต์|ฮินดู|ซิกข์|"
     r"ยิว|ยูดาย์|"
     # English
-    r"(?:my|his|her|their)\s+(?:religion|faith|belief)|"
-    r"(?:I|he|she|they)\s+(?:am|is|are|was|were)\s+(?:an?\s+)?(?:practicing\s+|devout\s+|observant\s+)?(?:Buddhist|Muslim|Christian|Hindu|Sikh|Jewish|Catholic|Protestant|atheist|agnostic)|"
-    r"I'm\s+(?:an?\s+)?(?:practicing\s+|devout\s+|observant\s+)?(?:Buddhist|Muslim|Christian|Hindu|Sikh|Jewish|Catholic|Protestant|atheist|agnostic)|"
-    r"(?:I|he|she|they)\s+(?:believe|worship|pray|practice)|"
-    r"(?:I|he|she|they)\s+(?:attend|go\s+to|visit)(?:s|ed)?\s+(?:the\s+)?(?:local\s+)?(?:mosque|church|synagogue|temple|gurudwara|chapel|cathedral)|"
-    r"(?:practicing|devout|observant)\s+(?:Muslim|Christian|Buddhist|Hindu|Sikh|Jewish|Catholic|Protestant)|"
-    r"(?:I|he|she|they)\s+(?:converted?\s+to|follow)"
+    r"\b(?:my|his|her|their)\s+(?:religion|faith|belief)\b|"
+    r"\b(?:I|he|she|they)\s+(?:am|is|are|was|were)\s+(?:an?\s+)?(?:practicing\s+|devout\s+|observant\s+)?(?:Buddhist|Muslim|Christian|Hindu|Sikh|Jewish|Catholic|Protestant|atheist|agnostic)\b|"
+    r"\bI'm\s+(?:an?\s+)?(?:practicing\s+|devout\s+|observant\s+)?(?:Buddhist|Muslim|Christian|Hindu|Sikh|Jewish|Catholic|Protestant|atheist|agnostic)\b|"
+    r"\b(?:I|he|she|they)\s+(?:believes?|worships?|prays?|practices?)\b|"
+    r"\b(?:I|he|she|they)\s+(?:attends?|attended|goe?s?\s+to|went\s+to|visits?|visited)\s+(?:the\s+)?(?:local\s+)?(?:mosque|church|synagogue|temple|gurudwara|chapel|cathedral)\b|"
+    r"\b(?:practicing|devout|observant)\s+(?:Muslim|Christian|Buddhist|Hindu|Sikh|Jewish|Catholic|Protestant)\b|"
+    r"\b(?:I|he|she|they)\s+(?:converted?\s+to|follows?)\b"
     r")",
     re.IGNORECASE,
 )
