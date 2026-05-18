@@ -277,26 +277,53 @@ export default function PortalUsersPage() {
                 <button
                   key={f.k}
                   onClick={() => setStatusFilter(f.k)}
+                  aria-pressed={active}
                   style={{
                     padding: "6px 12px",
                     borderRadius: 6,
-                    border: "1px solid transparent",
+                    // Active state uses a fixed dark-navy fill, so the text
+                    // colour must be a fixed white in both themes — the
+                    // theme-aware --text-primary lands at #1A1C23 in light
+                    // mode and disappears against the navy background
+                    // (~1.5:1 contrast). Inactive tabs use --text-primary
+                    // directly so they stay legible on either theme's
+                    // surface.
+                    border: active ? "1px solid #1E3A5F" : "1px solid var(--border-default)",
                     background: active ? "#1E3A5F" : "transparent",
-                    color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                    color: active ? "#FFFFFF" : "var(--text-primary)",
                     fontSize: 12,
-                    fontWeight: 500,
+                    fontWeight: active ? 600 : 500,
                     cursor: "pointer",
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 6,
                     transition: "all 120ms",
                   }}
+                  onMouseEnter={(e) => {
+                    if (!active) {
+                      e.currentTarget.style.background = "var(--bg-elevated)";
+                      e.currentTarget.style.borderColor = "var(--border-strong, var(--border-default))";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.borderColor = "var(--border-default)";
+                    }
+                  }}
                 >
                   {f.dot ? (
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: f.dot, display: active ? "none" : "inline-block" }} />
                   ) : null}
                   {f.label}
-                  <span style={{ fontWeight: 700, fontSize: 10, opacity: active ? 0.9 : 0.6 }}>
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 10,
+                      color: active ? "#FFFFFF" : "var(--text-tertiary)",
+                      opacity: active ? 1 : 0.95,
+                    }}
+                  >
                     {f.count}
                   </span>
                 </button>
