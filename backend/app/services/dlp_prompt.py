@@ -28,8 +28,9 @@ if TYPE_CHECKING:
 _MASK_TOKEN_RE = re.compile(r"<r[A-Za-z0-9_\-]+>")
 
 DLP_PLACEHOLDER_PROMPT_V3 = (
-    "Echo any <r0>-style tokens back exactly. Write [REDACTED] for "
-    "other sensitive data. Never invent new tokens. Help normally."
+    "If the message contains angle-bracket placeholders, preserve them "
+    "exactly in your reply. Do not invent new placeholders. Write "
+    "[REDACTED] for any other sensitive data you notice. Help normally."
 )
 
 # ``V1`` was the long-form variant carrying a ``[CATEGORY_NUMBER]``

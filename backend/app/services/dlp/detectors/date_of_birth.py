@@ -53,16 +53,20 @@ _DATE_ALT = (
 _DOB_RE = re.compile(
     rf"(?:"
     rf"born|d\.?o\.?b\.?|date\s*of\s*birth|birthday|birthdate"
-    # Thai keywords need a non-Thai-letter prefix so 'เกิด' / 'เกิดวันที่'
-    # / 'วันเกิด' as substrings of compound Thai words like
-    # ``เหตุเกิด`` / ``ประชุมเกิดวันที่`` / ``อุบัติเหตุเกิด`` are NOT
-    # treated as DOB keywords. The regression tests in
-    # ``test_dlp_dob_thai.TestDobNegativeCases`` lock this contract
-    # in; relaxing the lookbehind here re-introduces those false
-    # positives. A patient real-prose case like
-    # ``ลูกค้าเกิดวันที่ 12/05/1998`` is the cost — it falls back to
-    # NER/thai_name to catch the person component, which is what
-    # masks the broader sentence.
+    # Person-context-prefix branch (May 2026 E2E audit, T15).
+    # ``ลูกค้าเกิดวันที่ 12/05/1998`` and similar role-noun + DOB
+    # compounds were being rejected by the negative lookbehind that
+    # protects against ``เหตุเกิด`` / ``ประชุมเกิดวันที่``. Explicitly
+    # listing person-role nouns recovers those legitimate DOB shapes
+    # without re-introducing the event-noun false positives — the
+    # regression suite in ``test_dlp_dob_thai.TestDobNegativeCases``
+    # exercises ``เหตุ`` / ``ประชุม`` / ``อุบัติเหตุ`` which are NOT
+    # in this whitelist.
+    rf"|(?:ลูกค้า|ผู้ป่วย|คนไข้|สมาชิก|พนักงาน|ผู้ใช้)\s*(?:วันเกิด|เกิดวันที่)"
+    # Thai keywords with non-Thai-letter lookbehind so the bare
+    # 'เกิด' keyword does not match as a substring of compound Thai
+    # words like ``เหตุเกิด`` ("incident occurred") or
+    # ``ประชุมเกิดวันที่`` ("meeting took place on").
     rf"|(?<![฀-๿])(?:วันเกิด|เกิดวันที่|เกิด)"
     rf")"
     rf"(?:\s+(?:on|in|at|is|was|=|:))?"

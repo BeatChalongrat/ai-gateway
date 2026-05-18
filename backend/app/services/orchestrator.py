@@ -610,19 +610,40 @@ class GatewayOrchestrator:
                 model=route.model_name,
                 total_ms=total_ms,
             )
+            # Extract the cached assistant text for the trace + apply
+            # the same orphan sanitiser that runs on fresh responses.
+            # Cached entries may have been stored before the May 2026
+            # E2E fix; any ``<rN>`` survivor in cached text is by
+            # definition an orphan (no live span_map exists for a
+            # cached request) and must be redacted before we hand it
+            # back to the user.
+            cached_text = ""
+            try:
+                choices = cache_hit.get("choices", [])
+                if choices:
+                    msg = choices[0].get("message", {})
+                    cached_text = msg.get("content", "") or ""
+            except Exception:
+                cached_text = ""
+            if cached_text:
+                from app.services.dlp.transformer import (
+                    redact_orphan_tokens as _redact_orphan_tokens,
+                )
+                _sanitised = _redact_orphan_tokens(cached_text, {})
+                if _sanitised != cached_text:
+                    log.info(
+                        "dlp_orphan_redacted_cached",
+                        before_len=len(cached_text),
+                        after_len=len(_sanitised),
+                    )
+                    cached_text = _sanitised
+                    try:
+                        cache_hit["choices"][0]["message"]["content"] = cached_text
+                    except Exception:
+                        pass
             # Mark and persist as a cache-hit request
             if session is not None:
                 from app.domain.observability import RequestRecord, RequestStatus
-                # Extract the cached assistant text for the trace.
-                # cache_hit is the dict form of ChatCompletionsResponse.
-                cached_text = ""
-                try:
-                    choices = cache_hit.get("choices", [])
-                    if choices:
-                        msg = choices[0].get("message", {})
-                        cached_text = msg.get("content", "") or ""
-                except Exception:
-                    cached_text = ""
                 try:
                     self.request_log_service.persist(
                         session,

@@ -65,9 +65,8 @@ _DOUBLE_CLOSE_TOKEN_RE = re.compile(r"(?<!<)<(r[A-Za-z0-9_\-]+)>>")
 
 
 def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
-    """Replace single-bracket ``[CATEGORY_N]`` tokens that survived
-    ``restore`` and have no entry in ``span_map`` with the literal
-    string ``[REDACTED]``.
+    """Replace ``<rN>`` tokens that survived ``restore`` and have no
+    entry in ``span_map`` with the literal string ``[REDACTED]``.
 
     Runs in the orchestrator's success path AFTER ``restore`` so the
     user-facing reply never carries an AI-hallucinated mask token.
@@ -77,16 +76,15 @@ def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
     counterpart for the non-streaming path.
 
     Why both: ``sanitize_hallucinated_brackets`` deliberately only
-    touches ``[[CAT_N]]`` shapes because that pattern is the
-    model's way of escaping a real token. A bare ``[CAT_N]`` in the
+    touches ``<<rN>>`` shapes because that pattern is the
+    model's way of escaping a real token. A bare ``<rN>`` in the
     final response is something else entirely — the model invented
-    it from the example we showed it in the system prompt. Those
-    must be redacted, not unwrapped.
+    it from the placeholder grammar implied by the system prompt.
+    Those must be redacted, not unwrapped.
 
-    No-op when the text contains no bracketed tokens or when every
-    token in the text is mapped by ``span_map``.
+    No-op when the text is empty or contains no ``<rN>`` tokens.
     """
-    if not text or "[" not in text:
+    if not text or "<r" not in text:
         return text
 
     def _replace(m: "re.Match[str]") -> str:
