@@ -127,10 +127,28 @@ _NER_AI_MODEL_NAMES = frozenset({
 })
 
 
-def _is_ner_false_positive(matched_text: str, category: str) -> bool:
+# Conversational Thai particles, verbs, and politeness markers that
+# Presidio's English-trained NER routinely mis-tags as PERSON (high-
+# confidence false positives — they sit in the 0.60-0.85 band). The
+# ``thai_name`` regex detector handles real Thai names (title prefix
+# + first + last), so dropping these from the NER stream protects no
+# data and stops the model from inventing ``[NAME_N]`` substitutions
+# for everyday conversation. Compared case-insensitively against
+# ``matched_text.strip()``.
+_THAI_COMMON_WORDS = frozenset({
+    "ตอบ", "ตอบสั้น", "ตอบสั้นๆ", "สรุป", "สรุปข้อมูล",
+    "ช่วย", "ช่วยสรุป", "ข้อมูล", "ให้หน่อย", "หน่อย",
+    "สวัสดี", "ครับ", "ค่ะ", "นะ", "นะครับ", "นะคะ",
+    "ได้เลย", "ได้เลยครับ", "บ้าง", "อะไร",
+})
+
+
+def _is_ner_false_positive(
+    matched_text: str, category: str, confidence: float
+) -> bool:
     """Return True if a NER match should be silently dropped.
 
-    Three filters, all OR-ed:
+    Filters (all OR-ed):
 
     1. The match's text (case-insensitive, stripped) appears in the
        hand-curated denylist of recurring label / adjective false
@@ -138,11 +156,19 @@ def _is_ner_false_positive(matched_text: str, category: str) -> bool:
     2. The match's text is a known AI model / vendor name. Real users
        almost never reference these as PII; the model echoing them
        back triggered ``[NAME_0]`` substitutions that broke responses.
-    3. Very short matches (``<= 3`` chars) tagged as ``pii``. Presidio
+    3. The match's text is a common Thai conversational particle /
+       verb that the English NER mis-tags as PERSON. The dedicated
+       ``thai_name`` regex detector catches real Thai names — this
+       filter just suppresses the noise spaCy emits on everyday
+       Thai prose.
+    4. The match ends in ``ๆ`` (Thai reduplication marker) — never
+       part of a person's name; always means "repeat the prior word".
+    5. Very short matches (``<= 3`` chars) tagged as ``pii``. Presidio
        over-confidently tags 2-3 letter acronyms (``GPT``, ``API``)
-       as PERSON; the cost of dropping a real 3-letter name is much
-       lower than the cost of mangling a model self-introduction in
-       every reply.
+       as PERSON.
+    6. Short matches (``<= 4`` chars) with sub-0.9 confidence. Catches
+       the borderline single-word PERSON hits from spaCy that the
+       0.85 floor lets through but which are almost always noise.
     """
     text = matched_text.strip().lower()
     if not text:
@@ -151,7 +177,13 @@ def _is_ner_false_positive(matched_text: str, category: str) -> bool:
         return True
     if text in _NER_AI_MODEL_NAMES:
         return True
+    if text in _THAI_COMMON_WORDS:
+        return True
+    if text.endswith("ๆ"):
+        return True
     if len(text) <= 3 and category == "pii":
+        return True
+    if len(text) <= 4 and confidence < 0.9:
         return True
     return False
 
@@ -173,9 +205,13 @@ class PresidioDetector(BaseDetector):
     ENTITIES = ("PERSON", "LOCATION", "ORGANIZATION", "GPE", "NRP")
 
     # Minimum confidence for a result to be recorded. Presidio scores
-    # cluster tightly around 0.85 for spaCy-backed recognizers, so 0.7
-    # filters out weak / ambiguous hits without losing obvious names.
-    SCORE_THRESHOLD = 0.7
+    # cluster tightly around 0.85 for spaCy-backed recognizers and
+    # 0.6-0.8 for the borderline hits that turn out to be common
+    # Thai verbs / particles ("ตอบสั้นๆ", "ช่วยสรุป") spaCy mis-tags
+    # as PERSON. Raising the floor to 0.85 keeps the strong real-name
+    # hits and drops the noise band — verified end-to-end on the
+    # Thai conversational corpus.
+    SCORE_THRESHOLD = 0.85
 
     def detect(
         self, text: str, language: str = "en"
@@ -237,13 +273,15 @@ class PresidioDetector(BaseDetector):
 
         matches: list[DetectionMatch] = []
         for r in results:
-            if getattr(r, "score", 1.0) < self.SCORE_THRESHOLD:
+            score = float(getattr(r, "score", 1.0))
+            if score < self.SCORE_THRESHOLD:
                 continue
             matched_text = text[r.start:r.end]
             # Drop label / nationality adjectives the analyzer mis-tags,
-            # AI model / vendor names, and very short acronyms — see
-            # ``_is_ner_false_positive`` for the rationale.
-            if _is_ner_false_positive(matched_text, self.category):
+            # AI model / vendor names, common Thai conversational words,
+            # ``ๆ``-suffixed reduplications, and short / low-confidence
+            # acronyms — see ``_is_ner_false_positive`` for the rationale.
+            if _is_ner_false_positive(matched_text, self.category, score):
                 continue
             matches.append(
                 DetectionMatch(
@@ -254,7 +292,7 @@ class PresidioDetector(BaseDetector):
                     end=r.end,
                     matched_text=matched_text,
                     severity=self.default_sensitivity,
-                    confidence=float(getattr(r, "score", 1.0)),
+                    confidence=score,
                 )
             )
         return matches
@@ -285,7 +323,7 @@ class PresidioDetector(BaseDetector):
             if e.score < self.SCORE_THRESHOLD:
                 continue
             matched_text = text[e.start : e.end]
-            if _is_ner_false_positive(matched_text, self.category):
+            if _is_ner_false_positive(matched_text, self.category, e.score):
                 continue
             matches.append(
                 DetectionMatch(
