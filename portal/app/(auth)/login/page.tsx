@@ -40,9 +40,9 @@ const loginSlides: Slide[] = [
     headlineTop: "Data protection,",
     headlineBottom: "built in.",
     subtext:
-      "22 detectors scan every request for credentials, PII, and sensitive data — before it leaves your app.",
+      "30 detectors scan every request for credentials, PII, and sensitive data — before it leaves your app.",
     stats: [
-      { value: "22", label: "Detectors" },
+      { value: "30", label: "Detectors" },
       { value: "SOC 2", label: "Compliant" },
       { value: "0", label: "Data retained" },
     ],
