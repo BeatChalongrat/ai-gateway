@@ -120,6 +120,45 @@ def test_get_fallback_chain_returns_at_least_three_candidates_for_top_models():
         assert len(chain) >= 3, f"{model} has only {len(chain)} fallbacks"
 
 
+def test_llama_70b_has_fallback_chain():
+    """Audit gap-fix: the canonical Groq Llama 70b name now wires fallbacks."""
+    chain = get_fallback_chain("llama-3.1-70b", "groq")
+    assert chain != []
+    providers = [c["provider"] for c in chain]
+    assert "groq" not in providers
+    # Standard tier minus groq → openai / anthropic / google / openrouter
+    # in tier.fallback_chain order.
+    assert providers == ["openai", "anthropic", "google", "openrouter"]
+
+
+def test_llama_70b_versatile_has_fallback_chain():
+    """Long-form Groq model name also resolves."""
+    chain = get_fallback_chain("llama-3.1-70b-versatile", "groq")
+    assert chain != []
+    pairs = {(c["provider"], c["model"]) for c in chain}
+    assert ("openai", "gpt-4o-mini") in pairs
+    assert ("anthropic", "claude-sonnet-4") in pairs
+
+
+def test_llama_8b_has_fallback_chain():
+    """Fast-tier canonical Llama name resolves a chain."""
+    chain = get_fallback_chain("llama-3.1-8b", "groq")
+    assert chain != []
+    providers = [c["provider"] for c in chain]
+    assert "groq" not in providers
+    # Fast tier chain minus groq → openai / anthropic / openrouter
+    assert providers == ["openai", "anthropic", "openrouter"]
+
+
+def test_llama_8b_instant_has_fallback_chain():
+    """Long-form fast Groq model name also resolves."""
+    chain = get_fallback_chain("llama-3.1-8b-instant", "groq")
+    assert chain != []
+    pairs = {(c["provider"], c["model"]) for c in chain}
+    assert ("openai", "gpt-3.5-turbo") in pairs
+    assert ("anthropic", "claude-haiku-4-5") in pairs
+
+
 def test_tiers_registry_invariants():
     """Every model_map entry's models live in the same tier's ``models`` list."""
     for tier_name, tier in TIERS.items():

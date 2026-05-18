@@ -54,6 +54,94 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Redis-backed provider health markers.
+#
+# The streaming branch in ``public_chat.py`` cannot run the same
+# retry-and-fall-back loop the non-streaming orchestrator uses — once
+# the first SSE chunk is on the wire, headers and content type are
+# already committed and a mid-stream provider swap would corrupt the
+# response. Instead we use a short-TTL Redis key as a *health hint*:
+#
+#   * Every fallback-eligible failure SETs ``provider:health:{name}``
+#     with a 60-second TTL.
+#   * Every success DELs the same key.
+#
+# Before a streaming request invokes ``adapter.stream_chat()`` the
+# route's primary provider is checked against this marker; if the
+# key is present, the streaming branch swaps to the first viable
+# fallback candidate BEFORE any bytes are written. Stale markers
+# expire on their own.
+#
+# Failures here are silently ignored — the gateway must keep serving
+# traffic during a Redis outage, and the worst case is a missed
+# health hint (which is recovered by the in-generator try/except
+# anyway).
+# ---------------------------------------------------------------------------
+
+_HEALTH_KEY_PREFIX = "provider:health:"
+_HEALTH_TTL_SECONDS = 60
+
+
+async def mark_provider_unhealthy(provider: str) -> None:
+    """Set ``provider:health:{provider}`` with a 60s TTL.
+
+    Called by the orchestrator + this module whenever a provider
+    returns a fallback-eligible error. Idempotent — repeated calls
+    refresh the TTL.
+    """
+    if not provider:
+        return
+    try:
+        from app.services._redis_pool import get_async_redis
+
+        client = get_async_redis()
+        await client.set(
+            f"{_HEALTH_KEY_PREFIX}{provider}",
+            "unhealthy",
+            ex=_HEALTH_TTL_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        # Health hint is best-effort — Redis outage must not break
+        # the request path.
+        pass
+
+
+async def clear_provider_health(provider: str) -> None:
+    """Delete the health marker for ``provider``.
+
+    Called after every successful dispatch so a recovered provider
+    doesn't keep getting skipped for the rest of the TTL window.
+    """
+    if not provider:
+        return
+    try:
+        from app.services._redis_pool import get_async_redis
+
+        client = get_async_redis()
+        await client.delete(f"{_HEALTH_KEY_PREFIX}{provider}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def is_provider_unhealthy(provider: str) -> bool:
+    """Return True if the health marker for ``provider`` is set.
+
+    Fail-open: any Redis error is treated as "healthy" so a Redis
+    outage degrades to no-pre-check, not request-blocking.
+    """
+    if not provider:
+        return False
+    try:
+        from app.services._redis_pool import get_async_redis
+
+        client = get_async_redis()
+        exists = await client.exists(f"{_HEALTH_KEY_PREFIX}{provider}")
+        return bool(exists)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # Per-attempt timeout. The primary dispatch has its own ~30s upstream
 # timeout; the fallback shrinks the budget so a slow second vendor
 # doesn't extend the user's wait past the original SLA.
@@ -234,6 +322,9 @@ class FallbackOrchestrator:
                         attempted_at=datetime.now(timezone.utc),
                     )
                 )
+                # Mark the failed candidate so the next streaming
+                # request skips it via the Redis health pre-check.
+                await mark_provider_unhealthy(provider)
                 log.warning(
                     "fallback_candidate_failed",
                     candidate_provider=provider,
@@ -255,6 +346,8 @@ class FallbackOrchestrator:
                         attempted_at=datetime.now(timezone.utc),
                     )
                 )
+                if is_fallback_eligible(exc):
+                    await mark_provider_unhealthy(provider)
                 log.warning(
                     "fallback_candidate_failed",
                     candidate_provider=provider,
@@ -263,6 +356,10 @@ class FallbackOrchestrator:
                     latency_ms=int(latency_ms),
                 )
                 continue
+
+            # Success — clear any stale health marker on this provider
+            # so the streaming pre-check doesn't keep skipping it.
+            await clear_provider_health(provider)
 
             # Success — attempt_number counts the primary as 1, so the
             # first fallback that succeeds is 2.
@@ -302,6 +399,72 @@ class FallbackOrchestrator:
                 "original_model": original_model,
             },
         )
+
+
+    def select_streaming_candidate(
+        self,
+        *,
+        original_provider: str,
+        original_model: str,
+        session: "Session | None",
+        skip_providers: set[str] | None = None,
+    ) -> dict | None:
+        """Pick the first viable streaming fallback for a primary.
+
+        Streaming can't reuse :meth:`run` because that method completes
+        a non-streaming dispatch. The streaming branch needs the
+        chain-walk + key-check logic without actually firing the
+        request. Returns ``{"provider", "model", "api_key"}`` on the
+        first candidate that:
+
+          1. Has an API key configured for the tenant (skipped
+             without consuming a slot when missing).
+          2. Has an adapter registered with the dispatcher AND
+             ``supports_streaming=True`` (a non-streaming adapter
+             would force the rare and lossy mid-stream swap).
+          3. Is NOT in ``skip_providers`` (used by the in-generator
+             error path to avoid re-trying a candidate that just
+             failed this same request).
+
+        Returns ``None`` when the chain is exhausted — callers should
+        treat that as "stay with the primary and let the existing
+        error path fire".
+        """
+        if session is None:
+            return None
+
+        skip = skip_providers or set()
+        chain = get_fallback_chain(original_model, original_provider)
+        tried = 0
+
+        for candidate in chain:
+            if tried >= self.max_candidates:
+                break
+            provider = candidate["provider"]
+            model = candidate["model"]
+            if provider in skip:
+                continue
+
+            api_key = self.key_service.get_api_key(session, provider)
+            if not api_key:
+                # No key → skip without consuming a real attempt slot,
+                # mirroring the run() loop's defensive contract.
+                continue
+
+            adapter = self.dispatcher.adapters.get(provider)
+            if adapter is None or not getattr(adapter, "supports_streaming", False):
+                # Adapter exists but can't stream — keep walking the
+                # chain so we don't fall back from streaming to
+                # buffered + a header lie.
+                continue
+
+            tried += 1
+            return {
+                "provider": provider,
+                "model": model,
+                "api_key": api_key,
+            }
+        return None
 
 
 # ---------------------------------------------------------------------------
