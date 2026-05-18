@@ -2,6 +2,7 @@ from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy import String, Integer, Float, DateTime, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
@@ -102,14 +103,24 @@ class RequestLogORM(Base):
     # routing engine *originally picked*. On non-fallback requests the
     # pairs are equal so dashboard queries don't need NULL handling.
     #
-    # ``fallback_attempts`` is JSON-encoded text on the ORM side (we
-    # round-trip ``[{"provider","model","error_code","error_message",
-    # "latency_ms","attempted_at"}]``); migration 042 stores it as
-    # ``jsonb`` on Postgres so the admin dashboard can aggregate via
-    # the ``->`` operator without parsing strings.
+    # ``fallback_attempts`` is a list of attempt dicts shaped as
+    # ``[{"provider","model","error_code","error_message",
+    # "latency_ms","attempted_at"}]``. Mapped to ``JSONB`` so the
+    # parameter is bound natively (psycopg sends the value as JSON,
+    # not VARCHAR) — sending a ``::VARCHAR`` cast against a jsonb
+    # column makes Postgres reject the INSERT with DatatypeMismatch.
+    # The dashboard can aggregate via the ``->`` operator unchanged.
     fallback_used: Mapped[bool] = mapped_column(
         sa.Boolean, server_default=sa.text("false"), default=False
     )
-    fallback_attempts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Portable JSON column: ``JSONB`` on Postgres (native binary,
+    # supports ``->`` operators) and generic ``JSON`` on SQLite so
+    # the test suite's in-memory engine can still create the table.
+    # The ``with_variant`` form is the canonical SQLAlchemy way to
+    # diverge dialect-specific behaviour without forking the column.
+    fallback_attempts: Mapped[list | None] = mapped_column(
+        sa.JSON().with_variant(JSONB(), "postgresql"),
+        nullable=True,
+    )
     original_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     original_model: Mapped[str | None] = mapped_column(Text, nullable=True)

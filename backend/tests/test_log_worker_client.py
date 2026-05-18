@@ -45,7 +45,7 @@ def _record() -> RequestRecord:
         total_tokens=30,
         estimated_cost_usd=0.0123,
         fallback_used=True,
-        fallback_attempts='[{"provider":"openai","model":"gpt-4o"}]',
+        fallback_attempts=[{"provider": "openai", "model": "gpt-4o"}],
         original_provider="openai",
         original_model="gpt-4o",
         dlp_categories=["EMAIL", "PHONE"],

@@ -1005,14 +1005,12 @@ async def chat_completions(
         latency_ms = int((time.perf_counter() - t_start) * 1000)
 
         # Serialize the streaming fallback attempt log (if any) for
-        # the request_log row. Mirrors the non-streaming orchestrator's
-        # ``fallback_attempts`` JSON shape so the admin dashboard
-        # query treats both paths uniformly.
-        import json as _stream_json
-        _stream_fallback_attempts_json = (
-            _stream_json.dumps(_stream_fallback_attempts, ensure_ascii=False)
-            if _stream_fallback_attempts
-            else None
+        # the request_log row. The JSONB column on RequestLogORM
+        # serializes the list itself — keep it as a Python list here
+        # to match the non-streaming orchestrator's contract and
+        # avoid double-encoding.
+        _stream_fallback_attempts_list: list[dict] | None = (
+            _stream_fallback_attempts if _stream_fallback_attempts else None
         )
 
         log_session = log_session_factory()
@@ -1034,7 +1032,7 @@ async def chat_completions(
                     total_tokens=usage.total_tokens,
                     estimated_cost_usd=usage.estimated_cost_usd,
                     fallback_used=_stream_fallback_used,
-                    fallback_attempts=_stream_fallback_attempts_json,
+                    fallback_attempts=_stream_fallback_attempts_list,
                     original_provider=_stream_original_provider,
                     original_model=_stream_original_model,
                     dlp_input_findings=len(input_enforcement.match_actions),
