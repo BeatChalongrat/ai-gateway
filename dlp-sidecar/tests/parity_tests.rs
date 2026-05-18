@@ -111,3 +111,8 @@ parity_test!(religion_belief, "tests/parity/fixtures/religion_belief.json");
 parity_test!(health_condition, "tests/parity/fixtures/health_condition.json");
 parity_test!(criminal_record, "tests/parity/fixtures/criminal_record.json");
 parity_test!(biometric_data, "tests/parity/fixtures/biometric_data.json");
+// Batch 3 — checksum / banking / promptpay
+parity_test!(thai_national_id, "tests/parity/fixtures/thai_national_id.json");
+parity_test!(thai_tax_id, "tests/parity/fixtures/thai_tax_id.json");
+parity_test!(thai_bank_account, "tests/parity/fixtures/thai_bank_account.json");
+parity_test!(thai_promptpay, "tests/parity/fixtures/thai_promptpay.json");

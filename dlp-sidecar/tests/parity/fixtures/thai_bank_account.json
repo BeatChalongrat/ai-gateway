@@ -1,0 +1,65 @@
+{
+  "detector": "thai_bank_account",
+  "entity_type": "thai_bank_account",
+  "category": "financial",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "thai_keyword_dashed",
+      "input": "บัญชี 123-4-56789-0 ออมทรัพย์",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 19
+        }
+      ]
+    },
+    {
+      "id": "english_keyword",
+      "input": "account number 1234567890 confirmed",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 15,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "bank_keyword",
+      "input": "ธนาคารกรุงเทพ 123-4-56789-012 ส่ง",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 14,
+          "end": 29
+        }
+      ]
+    },
+    {
+      "id": "bare_number_no_keyword",
+      "input": "the number 1234567890 unrelated",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "wrong_length",
+      "input": "account number 12345 too short",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose",
+      "input": "today is a good day",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

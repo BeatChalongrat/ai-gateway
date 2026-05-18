@@ -1,0 +1,108 @@
+{
+  "detector": "thai_national_id",
+  "entity_type": "thai_national_id",
+  "category": "identity",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "valid_checksum_no_separator",
+      "input": "ID 1234567890121 verified",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 3,
+          "end": 16
+        }
+      ]
+    },
+    {
+      "id": "valid_checksum_dashed",
+      "input": "ID 1-2345-67890-12-1 verified",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 3,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "another_valid_id",
+      "input": "user has 5000000000001 on file",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 22
+        }
+      ]
+    },
+    {
+      "id": "keyword_overrides_invalid_checksum",
+      "input": "national id: 1234567890123 placeholder",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 13,
+          "end": 26
+        }
+      ]
+    },
+    {
+      "id": "thai_keyword_gate",
+      "input": "บัตรประชาชน 1111111111111 ส่งให้",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 12,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "invalid_checksum_no_keyword",
+      "input": "the number 1234567890123 is here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "starts_with_zero",
+      "input": "0234567890125 is not valid",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "too_short",
+      "input": "123456789012 only twelve",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "digit_immediately_before",
+      "input": "X1234567890121",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 1,
+          "end": 14
+        }
+      ]
+    },
+    {
+      "id": "embedded_in_longer_run",
+      "input": "999912345678901219999",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

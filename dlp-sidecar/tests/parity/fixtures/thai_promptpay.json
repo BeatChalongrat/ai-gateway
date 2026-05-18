@@ -1,0 +1,79 @@
+{
+  "detector": "thai_promptpay",
+  "entity_type": "thai_promptpay",
+  "category": "financial",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "mobile_thai_keyword",
+      "input": "พร้อมเพย์เบอร์ 0812345678 โอนได้",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 15,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "mobile_english_keyword",
+      "input": "promptpay 0812345678 ready",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "valid_id_thai_keyword",
+      "input": "พร้อมเพย์ 1234567890121 ของผม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 23
+        }
+      ]
+    },
+    {
+      "id": "id_invalid_checksum_thai_keyword",
+      "input": "พร้อมเพย์ 1234567890123 placeholder",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "mobile_without_keyword",
+      "input": "the number 0812345678 alone",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "valid_id_without_keyword",
+      "input": "the user 1234567890121 paid",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose",
+      "input": "today is a good day",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "thai_prose",
+      "input": "ฝนตกหนักวันนี้",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

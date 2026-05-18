@@ -1,0 +1,65 @@
+{
+  "detector": "thai_tax_id",
+  "entity_type": "thai_tax_id",
+  "category": "identity",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "thai_keyword_valid",
+      "input": "เลขประจำตัวผู้เสียภาษี 1234567890121 ของบริษัท",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 23,
+          "end": 36
+        }
+      ]
+    },
+    {
+      "id": "english_keyword_valid",
+      "input": "tax id 9876543210121 on the receipt",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "tin_keyword_valid",
+      "input": "TIN: 5000000000001 confirmed",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "valid_checksum_no_keyword",
+      "input": "the number 1234567890121 is here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "keyword_but_invalid_checksum",
+      "input": "tax id 1234567890123 wrong",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "english_prose",
+      "input": "no tax info in this sentence",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

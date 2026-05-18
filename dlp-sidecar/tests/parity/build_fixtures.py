@@ -63,6 +63,12 @@ from app.services.dlp.detectors.health_condition import HealthConditionDetector 
 from app.services.dlp.detectors.criminal_record import CriminalRecordDetector  # noqa: E402
 from app.services.dlp.detectors.biometric_data import BiometricDataDetector  # noqa: E402
 
+# Batch 3
+from app.services.dlp.detectors.thai_national_id import ThaiNationalIdDetector  # noqa: E402
+from app.services.dlp.detectors.thai_tax_id import ThaiTaxIdDetector  # noqa: E402
+from app.services.dlp.detectors.thai_bank_account import ThaiBankAccountDetector  # noqa: E402
+from app.services.dlp.detectors.thai_promptpay import ThaiPromptPayDetector  # noqa: E402
+
 
 # Allow override so the script can run inside a backend container
 # (where the fixtures don't live on disk) and dump to /tmp instead.
@@ -551,6 +557,186 @@ SPECS = [
             ),
             Case("plain_thai_prose", "วันนี้ทำงานหนัก", False),
             Case("no_biometric_keyword", "she went to lunch with friends", False),
+        ],
+    ),
+    # ---------------------------------------------------------------
+    # Batch 3 — checksum-based detectors. Valid IDs are real
+    # checksum-passing 13-digit runs generated from Python (see the
+    # commit message); invalid IDs are deliberately off-by-N on the
+    # check digit so the same regex fires but the validator rejects.
+    # ---------------------------------------------------------------
+    DetectorSpec(
+        name="thai_national_id",
+        entity_type="thai_national_id",
+        category="identity",
+        severity=3,
+        detector=ThaiNationalIdDetector(),
+        cases=[
+            Case(
+                "valid_checksum_no_separator",
+                "ID 1234567890121 verified",
+                True,
+            ),
+            Case(
+                "valid_checksum_dashed",
+                "ID 1-2345-67890-12-1 verified",
+                True,
+            ),
+            Case(
+                "another_valid_id",
+                "user has 5000000000001 on file",
+                True,
+            ),
+            Case(
+                "keyword_overrides_invalid_checksum",
+                "national id: 1234567890123 placeholder",
+                True,
+            ),
+            Case(
+                "thai_keyword_gate",
+                "บัตรประชาชน 1111111111111 ส่งให้",
+                True,
+            ),
+            Case(
+                "invalid_checksum_no_keyword",
+                "the number 1234567890123 is here",
+                False,
+            ),
+            Case(
+                "starts_with_zero",
+                "0234567890125 is not valid",
+                False,
+            ),
+            Case(
+                "too_short",
+                "123456789012 only twelve",
+                False,
+            ),
+            Case(
+                "digit_immediately_before",
+                "X1234567890121",  # leading non-digit, must still match
+                True,
+            ),
+            Case(
+                "embedded_in_longer_run",
+                "999912345678901219999",
+                False,
+            ),
+        ],
+    ),
+    DetectorSpec(
+        name="thai_tax_id",
+        entity_type="thai_tax_id",
+        category="identity",
+        severity=3,
+        detector=ThaiTaxIdDetector(),
+        cases=[
+            Case(
+                "thai_keyword_valid",
+                "เลขประจำตัวผู้เสียภาษี 1234567890121 ของบริษัท",
+                True,
+            ),
+            Case(
+                "english_keyword_valid",
+                "tax id 9876543210121 on the receipt",
+                True,
+            ),
+            Case(
+                "tin_keyword_valid",
+                "TIN: 5000000000001 confirmed",
+                True,
+            ),
+            Case(
+                "valid_checksum_no_keyword",
+                "the number 1234567890121 is here",
+                False,
+            ),
+            Case(
+                "keyword_but_invalid_checksum",
+                "tax id 1234567890123 wrong",
+                False,
+            ),
+            Case(
+                "english_prose",
+                "no tax info in this sentence",
+                False,
+            ),
+        ],
+    ),
+    DetectorSpec(
+        name="thai_bank_account",
+        entity_type="thai_bank_account",
+        category="financial",
+        severity=3,
+        detector=ThaiBankAccountDetector(),
+        cases=[
+            Case(
+                "thai_keyword_dashed",
+                "บัญชี 123-4-56789-0 ออมทรัพย์",
+                True,
+            ),
+            Case(
+                "english_keyword",
+                "account number 1234567890 confirmed",
+                True,
+            ),
+            Case(
+                "bank_keyword",
+                "ธนาคารกรุงเทพ 123-4-56789-012 ส่ง",
+                True,
+            ),
+            Case(
+                "bare_number_no_keyword",
+                "the number 1234567890 unrelated",
+                False,
+            ),
+            Case(
+                "wrong_length",
+                "account number 12345 too short",
+                False,
+            ),
+            Case("plain_prose", "today is a good day", False),
+        ],
+    ),
+    DetectorSpec(
+        name="thai_promptpay",
+        entity_type="thai_promptpay",
+        category="financial",
+        severity=2,
+        detector=ThaiPromptPayDetector(),
+        cases=[
+            Case(
+                "mobile_thai_keyword",
+                "พร้อมเพย์เบอร์ 0812345678 โอนได้",
+                True,
+            ),
+            Case(
+                "mobile_english_keyword",
+                "promptpay 0812345678 ready",
+                True,
+            ),
+            Case(
+                "valid_id_thai_keyword",
+                "พร้อมเพย์ 1234567890121 ของผม",
+                True,
+            ),
+            Case(
+                "id_invalid_checksum_thai_keyword",
+                "พร้อมเพย์ 1234567890123 placeholder",
+                False,
+            ),
+            Case(
+                "mobile_without_keyword",
+                "the number 0812345678 alone",
+                False,
+            ),
+            Case(
+                "valid_id_without_keyword",
+                "the user 1234567890121 paid",
+                False,
+            ),
+            Case("plain_prose", "today is a good day", False),
+            Case("thai_prose", "ฝนตกหนักวันนี้", False),
         ],
     ),
 ]
