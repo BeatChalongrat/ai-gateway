@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -71,15 +71,37 @@ router = APIRouter()
 )
 async def chat_completions(
     payload: ChatCompletionsRequest,
+    response: Response,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
     session: Session = Depends(get_db_session),
 ):
     orchestrator = GatewayOrchestrator()
 
     if not payload.stream:
-        return await orchestrator.handle_chat_completion(
-            auth=auth, payload=payload, session=session
+        # Phase-2 fallback metadata is surfaced through ``out_meta`` —
+        # the orchestrator populates it after dispatch (and after the
+        # fallback chain, if one fired). We translate it into the
+        # X-Gateway-* response headers below so SDK callers can see
+        # which provider actually answered without parsing the body.
+        out_meta: dict = {}
+        result = await orchestrator.handle_chat_completion(
+            auth=auth,
+            payload=payload,
+            session=session,
+            out_meta=out_meta,
         )
+        if out_meta.get("provider_used"):
+            response.headers["X-Gateway-Provider"] = str(
+                out_meta["provider_used"]
+            )
+        if out_meta.get("model_used"):
+            response.headers["X-Gateway-Model"] = str(out_meta["model_used"])
+        if out_meta.get("fallback_used"):
+            response.headers["X-Gateway-Fallback"] = "true"
+        response.headers["X-Gateway-Attempt"] = str(
+            out_meta.get("attempt_number", 1)
+        )
+        return result
 
     # Captured here so the latency we record on the request_log row covers
     # the full request lifetime, not just the time inside event_generator.

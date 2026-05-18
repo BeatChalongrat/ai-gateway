@@ -83,6 +83,10 @@ from app.services.semantic_router import (
     SemanticRouter,
     SemanticRouterDisabled,
 )
+from app.services.gateway.fallback_orchestrator import (
+    FallbackOrchestrator,
+    is_fallback_eligible,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -104,6 +108,10 @@ class GatewayOrchestrator:
         self.transformer = DLPTransformer()
         self.routing_service = RoutingService()
         self.provider_dispatcher = ProviderDispatcher()
+        # Phase-2 cross-provider fallback. Stateless wrapper around the
+        # dispatcher; triggered from ``handle_chat_completion`` when the
+        # primary dispatch raises a fallback-eligible GatewayError.
+        self.fallback_orchestrator: FallbackOrchestrator | None = None
         self.audit_service = AuditService()
         self.request_log_service = RequestLogService()
         self.usage_service = UsageService()
@@ -127,11 +135,26 @@ class GatewayOrchestrator:
         else:
             self.semantic_router = SemanticRouterDisabled()
 
+    def _get_fallback_orchestrator(self) -> FallbackOrchestrator:
+        """Lazy singleton tied to the request orchestrator's services.
+
+        Built on first use so import-time ordering in test fixtures —
+        which monkeypatch ``ProviderDispatcher`` / ``ProviderKeyService``
+        — still affects the dispatcher / key service the fallback sees.
+        """
+        if self.fallback_orchestrator is None:
+            self.fallback_orchestrator = FallbackOrchestrator(
+                dispatcher=self.provider_dispatcher,
+                key_service=self.provider_key_service,
+            )
+        return self.fallback_orchestrator
+
     async def handle_chat_completion(
         self,
         auth: ResolvedApiKey,
         payload: ChatCompletionsRequest,
         session: Session | None = None,
+        out_meta: dict | None = None,
     ) -> ChatCompletionsResponse:
         request_id = f"req_{uuid.uuid4().hex}"
         t_start = time.perf_counter()
@@ -643,17 +666,69 @@ class GatewayOrchestrator:
             cache_hit["id"] = request_id
             return ChatCompletionsResponse(**cache_hit)
 
-        # 7. Dispatch to provider with (potentially transformed) messages
+        # 7. Dispatch to provider with (potentially transformed) messages.
+        #
+        # Phase-2 fallback: a primary dispatch that fails with a
+        # fallback-eligible GatewayError hands off to the
+        # FallbackOrchestrator, which walks the cross-provider chain
+        # from the model's tier. Success returns the alternate vendor's
+        # ProviderResponse; ``provider`` / ``model`` are rewritten so
+        # everything downstream (DLP scan, request_log row, response
+        # body) sees the actual answering provider. The originally
+        # routed pair is kept in ``original_provider`` / ``original_model``
+        # for audit + dashboard aggregation.
+        original_provider = route.provider_name
+        original_model = route.model_name
+        fallback_result = None
         t_provider = time.perf_counter()
-        with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
-            provider=route.provider_name
-        ).time():
-            provider_response = await self.provider_dispatcher.dispatch(
-                route=route,
-                payload=payload,
-                messages=messages_to_send,
-                api_key=provider_api_key,
-            )
+        try:
+            with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
+                provider=route.provider_name
+            ).time():
+                provider_response = await self.provider_dispatcher.dispatch(
+                    route=route,
+                    payload=payload,
+                    messages=messages_to_send,
+                    api_key=provider_api_key,
+                )
+        except Exception as exc:  # noqa: BLE001
+            from app.core.exceptions import GatewayError as _GwErr
+
+            if isinstance(exc, _GwErr) and is_fallback_eligible(exc):
+                log.warning(
+                    "primary_dispatch_failed_attempting_fallback",
+                    provider=route.provider_name,
+                    model=route.model_name,
+                    error_code=getattr(exc, "code", None),
+                )
+                fallback = self._get_fallback_orchestrator()
+                from app.observability.metrics import (
+                    LLM_PROVIDER_LATENCY as _LLM_LAT,
+                )
+                with record_phase("provider_fallback"):
+                    fallback_result = await fallback.run(
+                        original_provider=original_provider,
+                        original_model=original_model,
+                        request=payload,
+                        messages=messages_to_send,
+                        session=session,
+                        ctx=ctx,
+                    )
+                provider_response = fallback_result.response
+                # Rewrite the route so DLP scan, request_log row, and
+                # response body all report the vendor that actually
+                # answered. ``RouteDecision`` is frozen-style but its
+                # attributes are settable (it's a non-frozen dataclass).
+                route.provider_name = fallback_result.provider_used
+                route.model_name = fallback_result.model_used
+                _LLM_LAT.labels(
+                    provider=fallback_result.provider_used
+                ).observe(
+                    sum(a.latency_ms for a in fallback_result.attempts) / 1000.0
+                    + 0.0
+                )
+            else:
+                raise
         provider_ms = int((time.perf_counter() - t_provider) * 1000)
         log.info(
             "provider_complete",
@@ -661,6 +736,10 @@ class GatewayOrchestrator:
             model=provider_response.model,
             finish_reason=provider_response.finish_reason,
             provider_ms=provider_ms,
+            fallback_used=fallback_result is not None,
+            fallback_attempt=(
+                fallback_result.attempt_number if fallback_result else 1
+            ),
         )
 
         # 7. Estimate usage (falls back to heuristic when provider doesn't report usage)
@@ -1019,6 +1098,14 @@ class GatewayOrchestrator:
                 {ma.match.category for ma in input_enforcement.match_actions}
                 | {ma.match.category for ma in response_enforcement.match_actions}
             )
+            import json as _json
+            fallback_attempts_json = None
+            if fallback_result and fallback_result.attempts:
+                fallback_attempts_json = _json.dumps(
+                    [a.to_dict() for a in fallback_result.attempts],
+                    ensure_ascii=False,
+                )
+
             record = RequestRecord(
                 request_id=request_id,
                 tenant_id=ctx.tenant_id,
@@ -1033,6 +1120,10 @@ class GatewayOrchestrator:
                 completion_tokens=usage.completion_tokens,
                 total_tokens=usage.total_tokens,
                 estimated_cost_usd=usage.estimated_cost_usd,
+                fallback_used=fallback_result is not None,
+                fallback_attempts=fallback_attempts_json,
+                original_provider=original_provider,
+                original_model=original_model,
                 dlp_input_findings=len(input_enforcement.match_actions),
                 dlp_input_action=input_enforcement.overall_action.name.lower(),
                 dlp_output_findings=len(response_enforcement.match_actions),
@@ -1105,6 +1196,22 @@ class GatewayOrchestrator:
             total_ms=total_ms,
             provider_ms=provider_ms,
         )
+
+        # 10c. Populate out_meta for response headers. The caller
+        # (public_chat.chat_completions) reads this dict and writes
+        # ``X-Gateway-Provider`` / ``X-Gateway-Model`` /
+        # ``X-Gateway-Attempt`` and, when ``fallback_used``,
+        # ``X-Gateway-Fallback: true``. ``out_meta`` stays None on the
+        # streaming path so we have to gate.
+        if out_meta is not None:
+            out_meta["provider_used"] = route.provider_name
+            out_meta["model_used"] = route.model_name
+            out_meta["fallback_used"] = fallback_result is not None
+            out_meta["attempt_number"] = (
+                fallback_result.attempt_number if fallback_result else 1
+            )
+            out_meta["original_provider"] = original_provider
+            out_meta["original_model"] = original_model
 
         # 11. Build response (assembly phase — small but measured).
         # Wrapping the Pydantic model construction captures the
