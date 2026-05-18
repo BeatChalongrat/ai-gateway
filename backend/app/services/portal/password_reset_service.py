@@ -169,7 +169,7 @@ def request_reset(
     }
     redis_client.set(
         _redis_key(token),
-        json.dumps(payload),
+        json.dumps(payload, ensure_ascii=False),
         ex=_TOKEN_TTL_SECONDS,
     )
 

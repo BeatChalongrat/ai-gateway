@@ -149,19 +149,25 @@ class TestPublicRouteErrorEnvelopes:
 
 
 class TestOpenAPISchema:
+    # FastAPI keys ``content`` by the response class's ``media_type``.
+    # The project-wide UTF8JSONResponse declares its media_type with an
+    # explicit charset suffix so clients see ``application/json;
+    # charset=utf-8`` over the wire — match that here.
+    _CONTENT_TYPE = "application/json; charset=utf-8"
+
     def _schema(self):
         return client.get("/openapi.json").json()
 
     def test_health_schema_has_response_model(self):
         schema = self._schema()
         health = schema["paths"]["/health"]["get"]["responses"]["200"]
-        ref = health["content"]["application/json"]["schema"]["$ref"]
+        ref = health["content"][self._CONTENT_TYPE]["schema"]["$ref"]
         assert "HealthResponse" in ref
 
     def test_models_schema_has_response_model(self):
         schema = self._schema()
         models = schema["paths"]["/v1/models"]["get"]["responses"]["200"]
-        ref = models["content"]["application/json"]["schema"]["$ref"]
+        ref = models["content"][self._CONTENT_TYPE]["schema"]["$ref"]
         assert "ModelListResponse" in ref
 
     def test_chat_schema_declares_error_responses(self):

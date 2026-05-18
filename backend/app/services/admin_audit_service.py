@@ -32,7 +32,7 @@ class AdminAuditService:
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,
-            details=json.dumps(details) if details else None,
+            details=json.dumps(details, ensure_ascii=False) if details else None,
         )
         session.add(entry)
         session.flush()

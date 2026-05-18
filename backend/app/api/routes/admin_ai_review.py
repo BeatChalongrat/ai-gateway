@@ -144,7 +144,7 @@ def patch_ai_review_settings(
     if "monitored_key_ids" in fields:
         row.monitored_key_ids = (
             None if body.monitored_key_ids is None
-            else json.dumps(body.monitored_key_ids)
+            else json.dumps(body.monitored_key_ids, ensure_ascii=False)
         )
 
     if "scan_limit" in fields and body.scan_limit is not None:

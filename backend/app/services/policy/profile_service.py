@@ -290,7 +290,7 @@ def set_category_action(
     except json.JSONDecodeError:
         overrides = {}
     overrides[category] = action
-    row.category_actions_json = json.dumps(overrides)
+    row.category_actions_json = json.dumps(overrides, ensure_ascii=False)
     session.flush()
 
     view = get_profile_view(session, profile_id)
