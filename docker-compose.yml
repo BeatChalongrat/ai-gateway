@@ -99,6 +99,35 @@ services:
       start_period: 90s
     restart: unless-stopped
 
+  # Phase-3c Rust DLP sidecar (Batch 1 stub). Boots a gRPC server
+  # that answers Health/0 and returns UNIMPLEMENTED on the scan
+  # RPCs — the registry + 9 simple-regex detectors live in the
+  # library crate today, exercised by the parity test suite.
+  # Batch 2-4 wire the registry into the gRPC handlers and ship a
+  # Python client + shadow mode.
+  dlp-sidecar:
+    build:
+      context: ./dlp-sidecar
+    image: ai-gateway-dlp-sidecar:latest
+    environment:
+      GRPC_PORT: "50051"
+      METRICS_PORT: "9102"
+    ports:
+      - "50051:50051"
+      - "9102:9102"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "512m"
+    healthcheck:
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
   # Phase-3b Rust rate-limiter — gRPC sidecar that runs the same
   # sliding-window check as the legacy Python service against the
   # shared Redis. Gated by RATE_LIMITER_ENGINE=rust on the backend;
@@ -232,6 +261,11 @@ services:
       RATE_LIMITER_ENGINE: ${RATE_LIMITER_ENGINE:-python}
       RATE_LIMITER_GRPC_ADDRESS: ${RATE_LIMITER_GRPC_ADDRESS:-rate-limiter:50053}
       RATE_LIMITER_GRPC_TIMEOUT_SECONDS: ${RATE_LIMITER_GRPC_TIMEOUT_SECONDS:-0.5}
+    volumes:
+      # Mount the DLP parity fixtures so the Python parity test can
+      # read them from inside the backend container. Read-only and
+      # tiny (<10kB) — purely a test-time convenience.
+      - ./dlp-sidecar/tests/parity/fixtures:/work/dlp-sidecar/tests/parity/fixtures:ro
     ports:
       - "8080:8080"
     depends_on:
