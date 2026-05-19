@@ -19,6 +19,7 @@ from app.domain.routing import (
 from app.services.providers.model_registry import (
     filter_candidates,
     get_all_candidates,
+    get_all_providers,
     get_candidate,
     resolve_provider,
 )
@@ -380,9 +381,16 @@ class RoutingService:
             if allowed_providers:
                 allowed_providers = allowed_providers - region_blocked
             else:
-                # Convert blocked providers to an explicit allowed set
-                all_known = {"openai", "anthropic", "openrouter"}
-                allowed_providers = frozenset(all_known - region_blocked)
+                # Dynamic allowlist: every provider with an active model
+                # in the registry (i.e. every adapter wired into
+                # ``provider_dispatcher.py``) minus the region-blocked
+                # set. Replaces the legacy hardcoded
+                # ``{"openai", "anthropic", "openrouter"}`` which silently
+                # excluded Google / Groq / xAI / DeepSeek / Qwen / Kimi /
+                # Z.AI / Minimax from region-constrained auto-routing
+                # (May 2026 routing audit).
+                all_known = get_all_providers()
+                allowed_providers = all_known - region_blocked
 
         request = RoutingRequest(
             requested_model=payload.model,
@@ -398,4 +406,8 @@ class RoutingService:
             model_name=result.model,
             reasons=result.reasons,
             constrained_by_policy=result.constrained_by_policy,
+            # Layer-1 fallbacks for ``dispatch_with_fallback``. RoutingResult
+            # already caps these at 2 entries (see ``_route_auto``); the
+            # dispatcher applies its own ``max_hops`` cap as a belt-and-braces.
+            fallbacks=[(c.provider, c.model) for c in result.fallbacks],
         )
