@@ -280,9 +280,12 @@ def test_RT_04_outbound_scan_masks_hallucinated_pii(
     assert "hacker@evil.com" not in user_got, (
         f"Outbound DLP failed to mask hallucinated email: {user_got!r}"
     )
-    # The mask token should be present in its neutral form.
-    assert "<r" in user_got, (
-        f"Expected a <rN> mask in user output, got {user_got!r}"
+    # The outbound-mask placeholder is surfaced to the user as
+    # ``[REDACTED]`` (May 2026 orphan-redact alignment) — a bare
+    # ``<rN>`` would just look like a typo to the caller, and there
+    # is no inbound mapping to restore it from.
+    assert "[REDACTED]" in user_got, (
+        f"Expected [REDACTED] in user output for hallucinated PII, got {user_got!r}"
     )
     _print_rt("RT-04", captured["provider_saw"], user_got)
 
