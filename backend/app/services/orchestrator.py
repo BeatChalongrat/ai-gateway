@@ -93,6 +93,25 @@ from app.services.gateway.fallback_orchestrator import (
 logger = structlog.get_logger(__name__)
 
 
+def _profile_uses_restore(profile: PolicyProfile | None) -> bool:
+    # Belt-and-suspenders cache gate. The match-level guards at the
+    # cache read/write sites already skip cache whenever the request's
+    # DLP findings produced any MatchAction. This helper adds a
+    # profile-level skip so a future detector miss on a RESTORE profile
+    # can never seed the shared cache with one user's restored PII —
+    # the cache key (project + model + messages hash) doesn't include
+    # the API key, so a same-project repeat with different PII values
+    # but the same prompt template would otherwise return user A's
+    # data to user B.
+    if profile is None:
+        return False
+    if profile.category_actions and EnforcementAction.RESTORE in profile.category_actions.values():
+        return True
+    if profile.category_actions_output and EnforcementAction.RESTORE in profile.category_actions_output.values():
+        return True
+    return False
+
+
 class GatewayOrchestrator:
     def __init__(self) -> None:
         self.project_service = ProjectService()
@@ -607,7 +626,12 @@ class GatewayOrchestrator:
         # We cache the already-DLP-scanned response, so a hit is safe to return as-is.
         cache_messages = [m.model_dump() for m in payload.messages]
         cache_hit = None
-        if not payload.stream and not input_enforcement.match_actions:
+        cache_eligible = (
+            not payload.stream
+            and not input_enforcement.match_actions
+            and not _profile_uses_restore(profile)
+        )
+        if cache_eligible:
             with record_phase("cache"), REDIS_COMMAND_DURATION.labels(
                 operation="cache_get"
             ).time():
@@ -616,6 +640,8 @@ class GatewayOrchestrator:
                     messages=cache_messages,
                     project_id=ctx.project_id,
                 )
+        elif _profile_uses_restore(profile):
+            log.info("cache_skip_restore_profile", policy_profile=profile.profile_id)
         if cache_hit is not None:
             total_ms = int((time.perf_counter() - t_start) * 1000)
             log.info(
@@ -1370,6 +1396,7 @@ class GatewayOrchestrator:
             and not response_enforcement.is_blocked
             and not input_enforcement.match_actions
             and not response_enforcement.match_actions
+            and not _profile_uses_restore(profile)
         ):
             await self.cache_service.set_async(
                 model=route.model_name,
