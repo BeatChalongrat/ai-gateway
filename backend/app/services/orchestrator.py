@@ -621,17 +621,17 @@ class GatewayOrchestrator:
                 details={"provider": route.provider_name},
             )
 
-        # 6b. Response cache check (only for non-streaming, pre-DLP-transform messages)
-        # Cache keyed on (resolved model, original user messages, project).
-        # We cache the already-DLP-scanned response, so a hit is safe to return as-is.
-        cache_messages = [m.model_dump() for m in payload.messages]
+        # 6b. Response cache check — keyed on the POST-mask messages so two
+        # users in the same project hitting the same prompt template
+        # (different PII values, same surrounding text) share a single
+        # cache entry. The stored value is the LLM's masked response
+        # (``<rN>`` tokens, no PII at rest in Redis). On hit, we re-run
+        # restore + orphan redaction with THIS user's span_map, so each
+        # caller gets their own original PII back. Streaming still
+        # bypasses the cache (no good way to replay an SSE stream).
+        cache_messages = [m.model_dump() for m in messages_to_send]
         cache_hit = None
-        cache_eligible = (
-            not payload.stream
-            and not input_enforcement.match_actions
-            and not _profile_uses_restore(profile)
-        )
-        if cache_eligible:
+        if not payload.stream:
             with record_phase("cache"), REDIS_COMMAND_DURATION.labels(
                 operation="cache_get"
             ).time():
@@ -640,8 +640,6 @@ class GatewayOrchestrator:
                     messages=cache_messages,
                     project_id=ctx.project_id,
                 )
-        elif _profile_uses_restore(profile):
-            log.info("cache_skip_restore_profile", policy_profile=profile.profile_id)
         if cache_hit is not None:
             total_ms = int((time.perf_counter() - t_start) * 1000)
             log.info(
@@ -650,13 +648,6 @@ class GatewayOrchestrator:
                 model=route.model_name,
                 total_ms=total_ms,
             )
-            # Extract the cached assistant text for the trace + apply
-            # the same orphan sanitiser that runs on fresh responses.
-            # Cached entries may have been stored before the May 2026
-            # E2E fix; any ``<rN>`` survivor in cached text is by
-            # definition an orphan (no live span_map exists for a
-            # cached request) and must be redacted before we hand it
-            # back to the user.
             cached_text = ""
             try:
                 choices = cache_hit.get("choices", [])
@@ -666,21 +657,39 @@ class GatewayOrchestrator:
             except Exception:
                 cached_text = ""
             if cached_text:
+                # Same restore + orphan-redact pipeline that runs on a
+                # fresh provider response (sections 8b + final orphan
+                # pass). ``restore_allowed_tokens`` is computed from the
+                # CURRENT user's span_map, so user A's cached <rN>
+                # placeholders resolve to user B's actual PII on B's hit.
+                # Tokens that are not in B's span_map (e.g. outbound
+                # placeholders the LLM minted on A's original call)
+                # become ``[REDACTED]`` — we never replay one user's
+                # hallucinated PII to another.
+                restore_allowed_tokens = self._compute_restore_allowed_tokens(
+                    profile, span_map, input_enforcement
+                )
+                if restore_allowed_tokens:
+                    cached_text = self.transformer.restore(
+                        cached_text,
+                        span_map,
+                        allowed_tokens=restore_allowed_tokens,
+                    )
                 from app.services.dlp.transformer import (
                     redact_orphan_tokens as _redact_orphan_tokens,
                 )
-                _sanitised = _redact_orphan_tokens(cached_text, {})
+                _sanitised = _redact_orphan_tokens(cached_text, span_map)
                 if _sanitised != cached_text:
                     log.info(
                         "dlp_orphan_redacted_cached",
                         before_len=len(cached_text),
                         after_len=len(_sanitised),
                     )
-                    cached_text = _sanitised
-                    try:
-                        cache_hit["choices"][0]["message"]["content"] = cached_text
-                    except Exception:
-                        pass
+                cached_text = _sanitised
+                try:
+                    cache_hit["choices"][0]["message"]["content"] = cached_text
+                except Exception:
+                    pass
             # Mark and persist as a cache-hit request
             if session is not None:
                 from app.domain.observability import RequestRecord, RequestStatus
@@ -1070,6 +1079,16 @@ class GatewayOrchestrator:
 
             ai_to_service_masked = response_content
 
+        # Snapshot for the response cache: the AI's reply with all
+        # outbound-discovered PII masked but inbound ``<rN>`` tokens
+        # still intact (restore hasn't run yet). This is what we want
+        # at rest in Redis — no raw PII, and re-restorable per user.
+        # Captured outside the ``dlp_scan_responses`` gate above so the
+        # snapshot is always defined (it just equals
+        # ``sanitize_hallucinated_brackets``'s output when outbound scan
+        # is disabled, which is still safe to cache).
+        cache_payload_content = response_content
+
         # 8b. Restore indexed input tokens AFTER output scan+mask.
         # See the rationale block in step 8 above for why order matters.
         # ``vault_resolver`` is wired only when a ``conversation_id``
@@ -1081,22 +1100,9 @@ class GatewayOrchestrator:
         # caller gets their own values restored when the outbound policy says
         # RESTORE. The span_map is request-scoped; only tokens minted from this
         # request can be restored here.
-        restore_allowed_tokens: set[str] = set()
-        if span_map:
-            output_actions = (
-                profile.category_actions_output
-                if profile.category_actions_output is not None
-                else profile.category_actions
-            )
-            value_to_tokens: dict[str, set[str]] = {}
-            for token, original in span_map.items():
-                value_to_tokens.setdefault(original, set()).add(token)
-            for ma in input_enforcement.match_actions:
-                if output_actions.get(ma.match.category) != EnforcementAction.RESTORE:
-                    continue
-                restore_allowed_tokens.update(
-                    value_to_tokens.get(ma.match.matched_text, set())
-                )
+        restore_allowed_tokens = self._compute_restore_allowed_tokens(
+            profile, span_map, input_enforcement
+        )
         if restore_allowed_tokens:
             response_content = self.transformer.restore(
                 response_content,
@@ -1388,21 +1394,32 @@ class GatewayOrchestrator:
                 policy_reasons=all_reasons,
             )
 
-        # 12. Response cache store — only safe, non-streaming, non-blocked responses
+        # 12. Response cache store — store the MASKED response (the
+        # ``ai_to_service_masked`` snapshot captured before section 8b).
+        # On hit, we re-run restore + orphan redact with the calling
+        # user's span_map, so two users in the same project hitting the
+        # same prompt template each get their own PII back. Streaming
+        # and blocked responses are still excluded.
         if (
             not payload.stream
             and overall_action.name.lower() not in ("block",)
             and not input_enforcement.is_blocked
             and not response_enforcement.is_blocked
-            and not input_enforcement.match_actions
-            and not response_enforcement.match_actions
-            and not _profile_uses_restore(profile)
         ):
+            cache_response = response.model_dump()
+            try:
+                cache_response["choices"][0]["message"]["content"] = cache_payload_content
+            except (IndexError, KeyError, TypeError):
+                # Defensive: if the response shape ever changes, fall
+                # back to the restored content rather than skipping the
+                # cache write outright. Cross-user safety is preserved
+                # by the orphan-redact pass on cache hit.
+                pass
             await self.cache_service.set_async(
                 model=route.model_name,
                 messages=cache_messages,
                 project_id=ctx.project_id,
-                response=response.model_dump(),
+                response=cache_response,
             )
 
         # 13. Realtime AI review hook (fire-and-forget). Scans the raw
@@ -1789,6 +1806,35 @@ class GatewayOrchestrator:
             request_id=getattr(ctx, "request_id", None),
             tenant_id=getattr(ctx, "tenant_id", None),
         )
+
+    @staticmethod
+    def _compute_restore_allowed_tokens(
+        profile: PolicyProfile,
+        span_map: dict[str, str],
+        input_enforcement: EnforcementDecision,
+    ) -> set[str]:
+        # Token allow-list for the outbound restore step. A mask token
+        # may only be restored to its original value if (a) it was minted
+        # from this request's inbound span_map and (b) the active output
+        # policy maps its detector category to RESTORE. The same logic
+        # runs both at section-8b (fresh provider response) and on cache
+        # hit (replayed masked response).
+        if not span_map:
+            return set()
+        output_actions = (
+            profile.category_actions_output
+            if profile.category_actions_output is not None
+            else profile.category_actions
+        )
+        value_to_tokens: dict[str, set[str]] = {}
+        for token, original in span_map.items():
+            value_to_tokens.setdefault(original, set()).add(token)
+        allowed: set[str] = set()
+        for ma in input_enforcement.match_actions:
+            if output_actions.get(ma.match.category) != EnforcementAction.RESTORE:
+                continue
+            allowed.update(value_to_tokens.get(ma.match.matched_text, set()))
+        return allowed
 
     def _scan_and_evaluate(
         self,
