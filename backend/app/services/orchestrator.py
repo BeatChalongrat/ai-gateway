@@ -17,6 +17,7 @@ DLP can be disabled globally via DLP_ENABLED=false in settings.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 
@@ -1136,25 +1137,31 @@ class GatewayOrchestrator:
                 )
 
         # P3 — orphan-token sanitiser. After ALL legitimate masking
-        # (sections 8 + 8c) and restore (8b), any bracketed token
-        # left in ``response_content`` that isn't in one of the three
-        # span_maps is something the model invented from the
-        # ``[CATEGORY_NUMBER]`` example in the placeholder system
-        # prompt. Replace those with ``[REDACTED]`` so the user never
-        # sees a leaked ``[NAME_3]`` / ``[BEARER_TOKEN_0]`` in their
-        # reply. Legitimate outbound-mask tokens (from sections 8 +
-        # 8c) are protected by being included in the combined map.
-        # Streaming has its own equivalent via
-        # ``sanitize_hallucinated_brackets`` per chunk.
+        # (sections 8 + 8c) and restore (8b), any ``<rN>`` left in
+        # ``response_content`` that isn't in the inbound ``span_map``
+        # is either (a) a token the model invented from the placeholder
+        # grammar in the system prompt, or (b) an outbound mask token
+        # the gateway minted for LLM-generated PII. Both surface to the
+        # user as a meaningless ``<rN>`` if untouched. Replacing them
+        # with ``[REDACTED]`` keeps the masking guarantee (the value is
+        # still not in the user-facing text) while reading naturally.
+        # The same protection set is used on the cache-hit path so both
+        # routes give identical output. Streaming uses the same rule in
+        # public_chat.py via its own redact pass.
         from app.services.dlp.transformer import redact_orphan_tokens
-        _all_tokens = {**span_map, **outbound_span_map, **_final_outbound_span_map}
         _before_redact = response_content
-        response_content = redact_orphan_tokens(response_content, _all_tokens)
+        response_content = redact_orphan_tokens(response_content, span_map)
         if _before_redact != response_content:
+            redacted_tokens = sorted(
+                set(re.findall(r"<r[A-Za-z0-9_\-]+>", _before_redact))
+                - set(span_map.keys())
+            )
             log.info(
                 "dlp_orphan_redacted",
                 before_len=len(_before_redact),
                 after_len=len(response_content),
+                orphan_tokens=redacted_tokens[:10],
+                orphan_count=len(redacted_tokens),
             )
 
         # 9. Determine overall policy action (highest across input + output)

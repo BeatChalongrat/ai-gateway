@@ -177,7 +177,12 @@ def test_hop4_ai_hallucinated_pii_masked_before_user(
 
     no_raw_email = fake_email not in hop4
     no_raw_phone = fake_phone not in hop4
-    has_token = "<r" in hop4
+    # Outbound mask tokens for AI-introduced PII are surfaced to the
+    # user as ``[REDACTED]`` (May 2026 orphan-redact alignment): they
+    # have no inbound original, so a raw ``<rN>`` would just be a
+    # confusing placeholder. The masking guarantee — fake_email /
+    # fake_phone absent from hop4 — is the load-bearing check.
+    has_redacted = "[REDACTED]" in hop4
 
     _print_hops(
         label="hop4_ai_hallucinated_pii_masked",
@@ -185,12 +190,12 @@ def test_hop4_ai_hallucinated_pii_masked_before_user(
         assertions={
             "Hop 4 no fake email": no_raw_email,
             "Hop 4 no fake phone": no_raw_phone,
-            "Hop 4 has <rN> tokens": has_token,
+            "Hop 4 has [REDACTED]": has_redacted,
         },
     )
     assert no_raw_email
     assert no_raw_phone
-    assert has_token
+    assert has_redacted
 
 
 # ---------------------------------------------------------------------------
