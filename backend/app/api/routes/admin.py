@@ -1451,6 +1451,95 @@ def delete_project(
 
 
 # ---------------------------------------------------------------------------
+# Project routing config (migration 044).
+#
+# Per-project defaults for the four routing knobs the gateway reads
+# from ``payload.metadata``. The orchestrator injects these BEFORE
+# the router chain runs; caller-supplied metadata still wins per
+# request, so this is a default, not a constraint.
+# ---------------------------------------------------------------------------
+
+
+class ProjectRoutingConfig(BaseModel):
+    """Shape returned by GET and accepted by PATCH.
+
+    All fields nullable. PATCH semantics: ``None`` means "leave the
+    column alone"; an empty list / empty string explicitly clears
+    the constraint. Provide only the fields you want to change.
+    """
+
+    default_model: str | None = None
+    preferred_provider: str | None = None
+    allowed_providers: list[str] | None = None
+    blocked_models: list[str] | None = None
+
+
+@router.get(
+    "/projects/{project_id}/routing",
+    response_model=ProjectRoutingConfig,
+)
+def get_project_routing(
+    project_id: str,
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+) -> ProjectRoutingConfig:
+    project = session.get(ProjectORM, project_id)
+    if project is None:
+        raise NotFoundError(f"Project '{project_id}' not found.")
+    check_tenant_access(auth, project.tenant_id)
+    return ProjectRoutingConfig(
+        default_model=project.default_model,
+        preferred_provider=project.preferred_provider,
+        allowed_providers=project.allowed_providers,
+        blocked_models=project.blocked_models,
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/routing",
+    response_model=ProjectRoutingConfig,
+)
+def patch_project_routing(
+    project_id: str,
+    body: ProjectRoutingConfig,
+    session: Session = Depends(get_db_session),
+    auth: ResolvedApiKey = Depends(require_admin_session),
+) -> ProjectRoutingConfig:
+    """Update one or more routing-config fields.
+
+    A field present in the request body overwrites the column; a field
+    absent from the JSON body (i.e. left at the Pydantic default
+    ``None``) does NOT clear the column — callers who want to clear a
+    constraint must send the empty list explicitly.
+    """
+    project = session.get(ProjectORM, project_id)
+    if project is None:
+        raise NotFoundError(f"Project '{project_id}' not found.")
+    check_tenant_access(auth, project.tenant_id)
+
+    # Distinguish "field absent" (model_fields_set excludes it) from
+    # "field present and explicitly None / [] / ''".
+    set_fields = body.model_fields_set
+
+    if "default_model" in set_fields:
+        project.default_model = body.default_model or None
+    if "preferred_provider" in set_fields:
+        project.preferred_provider = body.preferred_provider or None
+    if "allowed_providers" in set_fields:
+        project.allowed_providers = body.allowed_providers
+    if "blocked_models" in set_fields:
+        project.blocked_models = body.blocked_models
+
+    session.flush()
+    return ProjectRoutingConfig(
+        default_model=project.default_model,
+        preferred_provider=project.preferred_provider,
+        allowed_providers=project.allowed_providers,
+        blocked_models=project.blocked_models,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Project archive (soft-delete) + member management.
 # Added 2026-04-24 for the admin project-management UI. Hard-delete
 # above stays for ops scripts; day-to-day the admin UI calls archive.

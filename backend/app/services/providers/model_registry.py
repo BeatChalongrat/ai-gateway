@@ -308,6 +308,21 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         cost_tier=_derive_cost_tier(0.0000002), latency_tier="fast",
         supports_streaming=True,
     ),
+    # Mistral / Cohere / Perplexity seed entries moved to
+    # ``_PENDING_PROVIDERS`` below. Their adapters live under
+    # ``providers/_pending/`` and raise ``ProviderNotImplementedError``;
+    # listing their models here would let routing pick one and trigger
+    # a runtime error. Re-add to SEED_CANDIDATES (and re-register in
+    # ``provider_dispatcher.py``) when each provider is production-ready.
+]
+
+
+# Pending providers — adapter stubs exist on disk but are not wired
+# into ``provider_dispatcher.py``. Kept here so the model catalogue
+# (discovery, pricing, future UI toggles) still has authoritative
+# pricing + tier metadata. Read-only; do NOT merge into the routing
+# registry until the corresponding adapter goes live.
+_PENDING_PROVIDERS: list[ModelCandidate] = [
     # --- Mistral ------------------------------------------------------
     ModelCandidate(
         provider="mistral", model="mistral-large-latest",
@@ -398,6 +413,10 @@ _PREFIX_MAP: list[tuple[str, str]] = [
     ("anthropic/", "openrouter"),
     ("meta-llama/", "openrouter"),
     ("google/", "openrouter"),
+    # ``mistralai/`` (OpenRouter-hosted) is still a valid route — the
+    # OpenRouter adapter answers it. The bare ``mistral-`` / ``codestral-``
+    # prefixes that pointed at the native (pending) Mistral adapter were
+    # removed to keep dispatch from picking a non-registered provider.
     ("mistralai/", "openrouter"),
     ("abab", "minimax"),
     ("qwen-", "qwen"),
@@ -406,8 +425,6 @@ _PREFIX_MAP: list[tuple[str, str]] = [
     ("gemini-", "google"),
     ("grok-", "xai"),
     ("deepseek-", "deepseek"),
-    ("codestral-", "mistral"),
-    ("mistral-", "mistral"),
 ]
 
 
@@ -540,6 +557,24 @@ def get_candidate(model_name: str) -> ModelCandidate | None:
 def get_all_candidates() -> list[ModelCandidate]:
     """Return all active model candidates."""
     return _registry.get_all_candidates()
+
+
+def get_all_providers() -> frozenset[str]:
+    """Return the set of provider names that have at least one active
+    model in the registry.
+
+    Used by ``routing_service`` to build the region-allowlist dynamically
+    instead of hardcoding ``{"openai", "anthropic", "openrouter"}`` —
+    which had left auto-routing unable to pick Google / Groq / xAI /
+    DeepSeek / Qwen / Kimi / Z.AI / Minimax for region-constrained
+    requests (May 2026 routing audit).
+
+    Pending providers (Mistral / Cohere / Perplexity) are absent from
+    ``SEED_CANDIDATES`` and ``_PENDING_PROVIDERS`` is NOT consulted
+    here, so this method only ever returns provider names whose
+    adapters are live in ``provider_dispatcher.py``.
+    """
+    return frozenset(c.provider for c in _registry.get_all_candidates())
 
 
 def list_models() -> list[dict[str, str]]:
