@@ -1,0 +1,542 @@
+[
+  {
+    "id": "R01",
+    "prompt": "ช่วยสรุปข้อความแชทนี้ให้เป็นภาษาสุภาพและสั้นลง: ลูกค้าชื่อ Somchai Jaidee แจ้งว่าเข้าใช้งานระบบไม่ได้ตั้งแต่เมื่อวาน อีเมล somchai.j@example.com เบอร์ติดต่อ 081-234-5678 เคยยืนยันตัวตนด้วยเลขบัตรประชาชน 1101700203451 แต่ระบบขึ้นว่า verification failed และลูกค้าบอกว่าเคยชำระเงินผ่านบัตร 4111 1111 1111 1111 แล้ว ระบบยังไม่อัปเดตสถานะ ช่วยสรุปโดยไม่เปิดเผยข้อมูลสำคัญเกินจำเป็น",
+    "expected": [
+      "somchai.j@example.com",
+      "081-234-5678",
+      "1101700203451",
+      "4111 1111 1111 1111"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 6.23,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุปข้อความแชทนี้ให้เป็นภาษาสุภาพและสั้นลง: ลูกค้าชื่อ <r0> แจ้งว่าเข้าใช้งานระบบไม่ได้ตั้งแต่เมื่อวาน อีเมล <r1> เบอร์ติดต่อ <r2> เคยยืนยันตัวตนด้วยเลขบัตรประชาชน <r3> แต่ระบบขึ้นว่า verification failed และลูกค้าบอกว่าเคยชำระเงินผ่านบัตร <r4> แล้ว ระบบยังไม่อัปเดตสถานะ ช่วยสรุปโดยไม่เปิดเผยข้อมูลสำคัญเกินจำเป็น",
+    "output_raw": "ลูกค้าที่ชื่อ <r0> แจ้งว่าไม่สามารถเข้าใช้งานระบบได้ตั้งแต่เมื่อวาน โดยใช้ข้อมูลอีเมล <r1> และเบอร์ติดต่อ <r2> ซึ่งได้ยืนยันตัวตนด้วยเลขบัตรประชาชน <r3> แต่พบปัญหา verification failed นอกจากนี้ ลูกค้าเคยชำระเงินผ่านบัตร <r4> แต่สถานะยังไม่ได้รับการอัปเดต.",
+    "output_final": "ลูกค้าที่ชื่อ Somchai Jaidee แจ้งว่าไม่สามารถเข้าใช้งานระบบได้ตั้งแต่เมื่อวาน โดยใช้ข้อมูลอีเมล somchai.j@example.com และเบอร์ติดต่อ 081-234-5678 ซึ่งได้ยืนยันตัวตนด้วยเลขบัตรประชาชน 1101700203451 แต่พบปัญหา verification failed นอกจากนี้ ลูกค้าเคยชำระเงินผ่านบัตร 4111 1111 1111 1111 แต่สถานะยังไม่ได้รับการอัปเดต.",
+    "per_value": [
+      {
+        "value": "somchai.j@example.com",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "081-234-5678",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "1101700203451",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 4,
+    "restore_hits": 4,
+    "orphan_tokens": []
+  },
+  {
+    "id": "R02",
+    "prompt": "Please summarize this customer support chat professionally: John Doe contacted us using john.doe@company.com and +66 89 111 2222. He said his passport AA1234567 could not be verified during onboarding. He also pasted a password P@ssw0rd123! and said \"password is wrong\". The message also contains a sample text \"Authorization: Bearer <token>\" from API documentation. Please summarize what happened and mention what data should be removed before sharing internally.",
+    "expected": [
+      "john.doe@company.com",
+      "+66 89 111 2222",
+      "AA1234567",
+      "P@ssw0rd123!"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 2.47,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease summarize this customer support chat professionally: <r0> contacted us using <r1> and <r2>. He said his passport <r3> could not be verified during onboarding. He also pasted a password <r4> and said \"password is wrong\". The message also contains a sample text \"Authorization: Bearer <token>\" from API documentation. Please summarize what happened and mention what data should be removed before sharing internally.",
+    "output_raw": "In a customer support chat, <r0> reached out using <r1> and <r2> to report an issue with the verification of his passport <r3> during the onboarding process. He also mentioned that his password <r4> was incorrect and included a sample text \"Authorization: Bearer <token>\" from API documentation. \n\nBefore sharing this information internally, the following sensitive data should be removed: <r3>, <r4>, and <token>.",
+    "output_final": "In a customer support chat, John Doe reached out using john.doe@company.com and +66 89 111 2222 to report an issue with the verification of his passport AA1234567 during the onboarding process. He also mentioned that his password P@ssw0rd123! was incorrect and included a sample text \"Authorization: Bearer <token>\" from API documentation. \n\nBefore sharing this information internally, the following sensitive data should be removed: AA1234567, P@ssw0rd123!, and <token>.",
+    "per_value": [
+      {
+        "value": "john.doe@company.com",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "+66 89 111 2222",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "AA1234567",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "P@ssw0rd123!",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 4,
+    "restore_hits": 4,
+    "orphan_tokens": []
+  },
+  {
+    "id": "R03",
+    "prompt": "ช่วย rewrite ข้อความนี้ให้ปลอดภัยก่อนส่งต่อทีม support: ลูกค้า Wipa ส่งอีเมลมาจาก wipa.finance@abc.co.th แจ้งว่าขอคืนเงินเข้าบัญชี 123-4-56789-0 เพราะโอนผ่าน PromptPay 0899998888 แล้วระบบไม่ขึ้นยอด เธอยังแนบเลขผู้เสียภาษีบริษัท 0105558123456 และที่อยู่ 99/88 ถนนสุขุมวิท กรุงเทพ 10110 มาในแชทด้วย ช่วยทำให้ข้อความอ่านง่ายและไม่แสดงข้อมูลการเงินแบบเต็ม",
+    "expected": [
+      "wipa.finance@abc.co.th",
+      "123-4-56789-0",
+      "0899998888",
+      "0105558123456"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 2.36,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย rewrite ข้อความนี้ให้ปลอดภัยก่อนส่งต่อทีม support: ลูกค้า Wipa ส่งอีเมลมาจาก <r0> แจ้งว่าขอคืนเงินเข้าบัญชี <r1> เพราะโอนผ่าน PromptPay <r2> แล้วระบบไม่ขึ้นยอด เธอยังแนบเลขผู้เสียภาษีบริษัท <r3> และ<r4> มาในแชทด้วย ช่วยทำให้ข้อความอ่านง่ายและไม่แสดงข้อมูลการเงินแบบเต็ม",
+    "output_raw": "ลูกค้า Wipa ได้ส่งอีเมลมาจาก <r0> แจ้งความประสงค์ขอคืนเงินเข้าบัญชี <r1> เนื่องจากการโอนผ่าน PromptPay <r2> ไม่แสดงยอดในระบบ นอกจากนี้ เธอได้แนบเลขผู้เสียภาษีของบริษัท <r3> และ <r4> มาในแชทด้วย รบกวนทีม support ช่วยดำเนินการตามคำขอดังกล่าว ขอบคุณค่ะ ",
+    "output_final": "ลูกค้า Wipa ได้ส่งอีเมลมาจาก wipa.finance@abc.co.th แจ้งความประสงค์ขอคืนเงินเข้าบัญชี 123-4-56789-0 เนื่องจากการโอนผ่าน PromptPay 0899998888 ไม่แสดงยอดในระบบ นอกจากนี้ เธอได้แนบเลขผู้เสียภาษีของบริษัท 0105558123456 และ ที่อยู่ 99/88 ถนนสุขุมวิท กรุงเทพ 10110 มาในแชทด้วย รบกวนทีม support ช่วยดำเนินการตามคำขอดังกล่าว ขอบคุณค่ะ ",
+    "per_value": [
+      {
+        "value": "wipa.finance@abc.co.th",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "123-4-56789-0",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "0899998888",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "0105558123456",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 4,
+    "restore_hits": 4,
+    "orphan_tokens": []
+  },
+  {
+    "id": "R04",
+    "prompt": "ช่วยแปลเป็นอังกฤษและสรุปความเสี่ยงของข้อความนี้: ทีม dev เผลอส่ง DB connection string postgres://admin:pass123@localhost:5432/app พร้อม API key sk-test-1234567890abcdef และ GitHub token ghp_1234567890abcdef1234567890abcdef มาในแชทเดียวกับข้อมูลลูกค้า Somchai email somchai@test.com phone 0812345678 ตอนท้ายยังมีคำว่า skincare product code is sk-test-cream-001 ซึ่งไม่ใช่ secret ช่วยตอบให้เหมาะกับ chat service",
+    "expected": [
+      "postgres://admin:pass123@localhost:5432/app",
+      "sk-test-1234567890abcdef",
+      "ghp_1234567890abcdef1234567890abcdef",
+      "somchai@test.com",
+      "0812345678"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 3.66,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยแปลเป็นอังกฤษและสรุปความเสี่ยงของข้อความนี้: ทีม dev เผลอส่ง DB connection string <r0> พร้อม API key <r1> และ GitHub token <r2> มาในแชทเดียวกับข้อมูลลูกค้า <r3> email <r4> phone <r5> ตอนท้ายยังมีคำว่า skincare product code is sk-test-cream-001 ซึ่งไม่ใช่ secret ช่วยตอบให้เหมาะกับ chat service",
+    "output_raw": "Translation: \n\"The dev team accidentally sent the DB connection string <r0>, along with the API key <r1> and GitHub token <r2>, in the same chat as customer information <r3>, email <r4>, and phone <r5>. At the end, there was also a mention of the skincare product code, which is sk-test-cream-001, which is not a secret.\"\n\nRisk Summary:\nThis message indicates a significant security risk due to the accidental exposure of sensitive information, including the database connection string, API key, and GitHub token. Sharing such credentials in a chat could lead to unauthorized access to the database and associated services. Additionally, customer information (e.g., email and phone) being disclosed further compromises privacy and may result in compliance issues. Immediate action should be taken to secure the exposed credentials and assess any potential breaches.",
+    "output_final": "Translation: \n\"The dev team accidentally sent the DB connection string postgres://admin:pass123@localhost:5432/app, along with the API key sk-test-1234567890abcdef and GitHub token ghp_1234567890abcdef1234567890abcdef, in the same chat as customer information Somchai, email somchai@test.com, and phone 0812345678. At the end, there was also a mention of the skincare product code, which is sk-test-cream-001, which is not a secret.\"\n\nRisk Summary:\nThis message indicates a significant security risk due to the accidental exposure of sensitive information, including the database connection string, API key, and GitHub token. Sharing such credentials in a chat could lead to unauthorized access to the database and associated services. Additionally, customer information (e.g., email and phone) being disclosed further compromises privacy and may result in compliance issues. Immediate action should be taken to secure the exposed credentials and assess any potential breaches.",
+    "per_value": [
+      {
+        "value": "postgres://admin:pass123@localhost:5432/app",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "sk-test-1234567890abcdef",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "ghp_1234567890abcdef1234567890abcdef",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "somchai@test.com",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "0812345678",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 5,
+    "restore_hits": 5,
+    "orphan_tokens": []
+  },
+  {
+    "id": "R05",
+    "prompt": "ช่วยสรุป case นี้แบบไม่เปิดเผยข้อมูลส่วนตัว: ลูกค้าแจ้งว่าเกิดวันที่ 12/05/1998 มีโรคเบาหวานและความดันสูง ต้องการเลื่อนนัด และให้เบอร์ติดต่อ 088-888-8888 พร้อมอีเมล patient.test@example.com ในข้อความเดียวกันมีเลข passport TH1234567 และเลขบัตรประชาชน 1101700203451 ด้วย ช่วยสรุปเฉพาะประเด็นที่ทีมบริการลูกค้าต้องรู้",
+    "expected": [
+      "12/05/1998",
+      "088-888-8888",
+      "patient.test@example.com",
+      "TH1234567",
+      "1101700203451"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 2.59,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุป case นี้แบบไม่เปิดเผยข้อมูลส่วนตัว: ลูกค้าแจ้งว่าเกิดวันที่ 12/05/1998 มีโรค<r0>และ<r1> ต้องการเลื่อนนัด และให้เบอร์ติดต่อ <r2> พร้อมอีเมล <r3> ในข้อความเดียวกันมีเลข passport <r4> และเลขบัตรประชาชน <r5> ด้วย ช่วยสรุปเฉพาะประเด็นที่ทีมบริการลูกค้าต้องรู้",
+    "output_raw": "ลูกค้าเกิดวันที่ <r6> มีโรค<r0>และ<r1> และต้องการเลื่อนนัด สามารถติดต่อได้ที่เบอร์ <r2> และอีเมล <r3> ข้อมูลเพิ่มเติมได้แก่เลข passport <r4> และเลขบัตรประชาชน <r5>",
+    "output_final": "ลูกค้าเกิดวันที่ <r6> มีโรคเบาหวานและความดันสูง และต้องการเลื่อนนัด สามารถติดต่อได้ที่เบอร์ 088-888-8888 และอีเมล patient.test@example.com ข้อมูลเพิ่มเติมได้แก่เลข passport TH1234567 และเลขบัตรประชาชน 1101700203451",
+    "per_value": [
+      {
+        "value": "12/05/1998",
+        "masked": false,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "088-888-8888",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "patient.test@example.com",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "TH1234567",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "1101700203451",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 4,
+    "restore_hits": 4,
+    "orphan_tokens": [
+      "<r6>"
+    ]
+  },
+  {
+    "id": "R06",
+    "prompt": "ช่วยทำข้อความนี้ให้เป็น customer note แบบ professional: ลูกค้า Michael Brown แจ้งว่า checkout failed โดยใช้ credit card 5555 5555 5555 4444 และ IBAN DE89370400440532013000 สำหรับการโอนเงินระหว่างประเทศ เขาติดต่อมาที่ michael.brown@example.com และบอกว่าเงินเดือน 85,000 บาทต่อเดือนใช้ประกอบการสมัครสินเชื่อ ช่วยสรุปโดยไม่แสดงเลขการเงินเต็ม",
+    "expected": [
+      "5555 5555 5555 4444",
+      "DE89370400440532013000",
+      "michael.brown@example.com"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 3.0,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยทำข้อความนี้ให้เป็น customer note แบบ professional: ลูกค้า <r0> แจ้งว่า checkout failed โดยใช้ credit card <r1> และ IBAN <r2> สำหรับการโอนเงินระหว่างประเทศ เขาติดต่อมาที่ <r3> และบอกว่าเงินเดือน <r4>ใช้ประกอบการสมัครสินเชื่อ ช่วยสรุปโดยไม่แสดงเลขการเงินเต็ม",
+    "output_raw": "เรียนทีมงาน,\n\nลูกค้า <r0> ได้แจ้งปัญหาเกี่ยวกับการทำรายการ checkout ที่ล้มเหลว โดยใช้ข้อมูลการชำระเงินด้วยบัตรเครดิต <r1> และ IBAN <r2> สำหรับการโอนเงินระหว่างประเทศ นอกจากนี้ ลูกค้าได้ติดต่อมาที่ <r3> และแจ้งว่าเงินเดือน <r4> ถูกใช้ประกอบการสมัครสินเชื่อ\n\nกรุณาช่วยตรวจสอบและให้ความช่วยเหลือลูกค้าต่อไป\n\nขอแสดงความ<r5>,  \n[ชื่อของคุณ]  \n[ตำแหน่งของคุณ]  ",
+    "output_final": "เรียนทีมงาน,\n\nลูกค้า Michael Brown ได้แจ้งปัญหาเกี่ยวกับการทำรายการ checkout ที่ล้มเหลว โดยใช้ข้อมูลการชำระเงินด้วยบัตรเครดิต 5555 5555 5555 4444 และ IBAN DE89370400440532013000 สำหรับการโอนเงินระหว่างประเทศ นอกจากนี้ ลูกค้าได้ติดต่อมาที่ michael.brown@example.com และแจ้งว่าเงินเดือน 85,000 บาทต่อเดือน ถูกใช้ประกอบการสมัครสินเชื่อ\n\nกรุณาช่วยตรวจสอบและให้ความช่วยเหลือลูกค้าต่อไป\n\nขอแสดงความ<r5>,  \n[ชื่อของคุณ]  \n[ตำแหน่งของคุณ]  ",
+    "per_value": [
+      {
+        "value": "5555 5555 5555 4444",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "DE89370400440532013000",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "michael.brown@example.com",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 3,
+    "restore_hits": 3,
+    "orphan_tokens": [
+      "<r5>"
+    ]
+  },
+  {
+    "id": "R07",
+    "prompt": "ช่วยตรวจว่าข้อความนี้ควรถูก mask อะไรบ้าง: \"ติดต่อคุณสมชายที่ 0812345678 หรือ somchai@test.com ได้เลย ส่วนรหัสสินค้า ABC-1234-TH ไม่ใช่เลขบัญชี และคำว่า password is wrong เป็นแค่ error message ไม่มีรหัสผ่านจริง แต่มี token จริงคือ Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx\"",
+    "expected": [
+      "0812345678",
+      "somchai@test.com",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 9.02,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยตรวจว่าข้อความนี้ควรถูก mask อะไรบ้าง: \"ติดต่อคุณสมชายที่ <r0> หรือ <r1> ได้เลย ส่วนรหัสสินค้า ABC-1234-TH ไม่ใช่เลขบัญชี และคำว่า password is wrong เป็นแค่ error message ไม่มีรหัสผ่านจริง แต่มี token จริงคือ <r2>\"",
+    "output_raw": "ข้อความนี้ควรถูก mask ดังนี้:\n\n1. <r0> - ควรถูก mask เพราะเป็นข้อมูลที่อาจเป็นหมายเลขโทรศัพท์หรือข้อมูลติดต่อที่ไม่ควรเปิดเผย\n2. <r1> - เช่นเดียวกับ <r0> ควรถูก mask ด้วยเหตุผลเดียวกัน\n3. ABC-1234-TH - ควรถูก mask เพราะเป็นรหัสสินค้าที่อาจเชื่อมโยงกับข้อมูลที่เฉพาะเจาะจง\n4. <r2> - ควรถูก mask เพราะเป็น token ที่อาจเป็นข้อมูลที่สำคัญและไม่ควรเปิดเผย\n\nดังนั้น ข้อความหลังการ mask จะมีลักษณะดังนี้:\n\n\"ติดต่อคุณสมชายที่ <MASKED> หรือ <MASKED> ได้เลย ส่วนรหัสสินค้า <MASKED> ไม่ใช่เลขบัญชี และคำว่า password is wrong เป็นแค่ error message ไม่มีรหัสผ่านจริง แต่มี token จริงคือ <MASKED>\"",
+    "output_final": "ข้อความนี้ควรถูก mask ดังนี้:\n\n1. 0812345678 - ควรถูก mask เพราะเป็นข้อมูลที่อาจเป็นหมายเลขโทรศัพท์หรือข้อมูลติดต่อที่ไม่ควรเปิดเผย\n2. somchai@test.com - เช่นเดียวกับ 0812345678 ควรถูก mask ด้วยเหตุผลเดียวกัน\n3. ABC-1234-TH - ควรถูก mask เพราะเป็นรหัสสินค้าที่อาจเชื่อมโยงกับข้อมูลที่เฉพาะเจาะจง\n4. Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx - ควรถูก mask เพราะเป็น token ที่อาจเป็นข้อมูลที่สำคัญและไม่ควรเปิดเผย\n\nดังนั้น ข้อความหลังการ mask จะมีลักษณะดังนี้:\n\n\"ติดต่อคุณสมชายที่ <MASKED> หรือ <MASKED> ได้เลย ส่วนรหัสสินค้า <MASKED> ไม่ใช่เลขบัญชี และคำว่า password is wrong เป็นแค่ error message ไม่มีรหัสผ่านจริง แต่มี token จริงคือ <MASKED>\"",
+    "per_value": [
+      {
+        "value": "0812345678",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "somchai@test.com",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 3,
+    "restore_hits": 3,
+    "orphan_tokens": []
+  },
+  {
+    "id": "R08",
+    "prompt": "Please rewrite this chat in a safer way: Sarah Lee said her email sarah.lee@company.com is not receiving OTP. She gave phone number +66 81 222 3333, Thai ID 1101700203451, and bank account 987-6-54321-0 for refund verification. Later she pasted \"private key -----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----\" by mistake. Keep the useful support context but remove sensitive values.",
+    "expected": [
+      "sarah.lee@company.com",
+      "+66 81 222 3333",
+      "1101700203451",
+      "987-6-54321-0",
+      "-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 2.03,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nPlease rewrite this chat in a safer way: <r0> said her email <r1> is not receiving OTP. She gave phone number <r2>, Thai ID <r3>, and bank account <r4> for refund verification. Later she pasted \"private key <r5> abcdef -----END PRIVATE KEY-----\" by mistake. Keep the useful support context but remove sensitive values.",
+    "output_raw": "Certainly! Here’s a safer version of the chat:\n\n<r0> mentioned that her email is not receiving the OTP. She provided her phone number and some identification details for refund verification. Later, she accidentally pasted a private key information. \n\nIf further assistance is needed regarding the OTP or refund process, please provide the necessary details without sharing sensitive information.",
+    "output_final": "Certainly! Here’s a safer version of the chat:\n\nSarah Lee mentioned that her email is not receiving the OTP. She provided her phone number and some identification details for refund verification. Later, she accidentally pasted a private key information. \n\nIf further assistance is needed regarding the OTP or refund process, please provide the necessary details without sharing sensitive information.",
+    "per_value": [
+      {
+        "value": "sarah.lee@company.com",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "+66 81 222 3333",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "1101700203451",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "987-6-54321-0",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 5,
+    "restore_hits": 0,
+    "orphan_tokens": []
+  },
+  {
+    "id": "R09",
+    "prompt": "ช่วยสรุปข้อความยาวนี้ให้ทีมดูแบบปลอดภัย: ลูกค้าชื่อวิภาใช้ email wipa@test.com โทร 089-111-2222 แจ้งว่าระบบหักเงินซ้ำ 25,000 บาท จากบัตร 4111 1111 1111 1111 และขอคืนเงินเข้าบัญชี 123-4-56789-0 ระหว่างคุยลูกค้าส่งเลขบัตรประชาชน 1101700203451 มาเพื่อยืนยันตัวตน และพนักงานตอบกลับว่า \"กรุณาส่ง password มาให้ตรวจสอบ\" ช่วยสรุปพร้อมบอกว่าข้อความไหนไม่ควรส่งต่อ",
+    "expected": [
+      "wipa@test.com",
+      "089-111-2222",
+      "4111 1111 1111 1111",
+      "123-4-56789-0",
+      "1101700203451"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 4.24,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วยสรุปข้อความยาวนี้ให้ทีมดูแบบปลอดภัย: ลูกค้าชื่อวิภาใช้ email <r0> โทร <r1> แจ้งว่าระบบหักเงินซ้ำ 25,000 บาท จากบัตร <r2> และขอคืนเงินเข้าบัญชี <r3> ระหว่างคุยลูกค้าส่งเลขบัตรประชาชน <r4> มาเพื่อยืนยันตัวตน และพนักงานตอบกลับว่า \"กรุณาส่ง password มาให้ตรวจสอบ\" ช่วยสรุปพร้อมบอกว่าข้อความไหนไม่ควรส่งต่อ",
+    "output_raw": "สรุปข้อความ:\n\nลูกค้าชื่อวิภา ติดต่อผ่านอีเมล <r0> และโทร <r1> แจ้งว่าระบบหักเงินซ้ำ 25,000 บาท จากบัตร <r2> และขอคืนเงินเข้าบัญชี <r3> ในระหว่างการสนทนา ลูกค้าได้ส่งเลขบัตรประชาชน <r4> เพื่อยืนยันตัวตน และพนักงานได้ขอให้ส่ง password เพื่อตรวจสอบ\n\nข้อความที่ไม่ควรส่งต่อ:\n- รายละเอียดเลขบัตรประชาชน <r4>\n- Password ที่ลูกค้าถูกขอให้ส่งมา",
+    "output_final": "สรุปข้อความ:\n\nลูกค้าชื่อวิภา ติดต่อผ่านอีเมล wipa@test.com และโทร 089-111-2222 แจ้งว่าระบบหักเงินซ้ำ 25,000 บาท จากบัตร 4111 1111 1111 1111 และขอคืนเงินเข้าบัญชี 123-4-56789-0 ในระหว่างการสนทนา ลูกค้าได้ส่งเลขบัตรประชาชน 1101700203451 เพื่อยืนยันตัวตน และพนักงานได้ขอให้ส่ง password เพื่อตรวจสอบ\n\nข้อความที่ไม่ควรส่งต่อ:\n- รายละเอียดเลขบัตรประชาชน 1101700203451\n- Password ที่ลูกค้าถูกขอให้ส่งมา",
+    "per_value": [
+      {
+        "value": "wipa@test.com",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "089-111-2222",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "123-4-56789-0",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      },
+      {
+        "value": "1101700203451",
+        "masked": true,
+        "restored": true,
+        "token": null,
+        "token_in_output_raw": true
+      }
+    ],
+    "mask_hits": 5,
+    "restore_hits": 5,
+    "orphan_tokens": []
+  },
+  {
+    "id": "R10",
+    "prompt": "ช่วย classify ข้อความนี้ว่าเสี่ยงระดับไหนและ rewrite ให้ปลอดภัย: user ส่งว่า API key คือ sk-live-abcdef1234567890, password คือ MyPass@123, email คือ user@example.com, phone คือ 080-123-4567, และมีประโยคว่า localhost:5432/app failed to connect ซึ่งเป็น error ธรรมดา ช่วยตอบแบบ chat service ไม่ต้องทำ action ใดๆ",
+    "expected": [
+      "sk-live-abcdef1234567890",
+      "MyPass@123",
+      "user@example.com",
+      "080-123-4567"
+    ],
+    "http": 200,
+    "policy": "mask",
+    "ai_refused": false,
+    "latency_s": 3.2,
+    "error": null,
+    "input_raw": "[MASKED_BY_DLP]",
+    "input_masked": "If the message contains angle-bracket placeholders, preserve them exactly in your reply. Do not invent new placeholders. Write [REDACTED] for any other sensitive data you notice. Help normally.\n---\nช่วย classify ข้อความนี้ว่าเสี่ยงระดับไหนและ rewrite ให้ปลอดภัย: user <r0> API key คือ <r1>, password คือ MyPass@123, email คือ <r2>, phone คือ <r3>, และมีประโยคว่า localhost:5432/app failed to connect ซึ่งเป็น error ธรรมดา ช่วยตอบแบบ chat service ไม่ต้องทำ action ใดๆ",
+    "output_raw": "ข้อความนี้มีความเสี่ยงในระดับสูง เนื่องจากมีข้อมูลที่เป็นความลับ เช่น API key, password, email และ phone number ที่อาจถูกนำไปใช้ในทางที่ไม่เหมาะสมได้ \n\nrewrite ข้อความให้ปลอดภัย:\n\"ในระบบมีข้อความแจ้งว่าไม่สามารถเชื่อมต่อกับ localhost:5432/app ได้ ซึ่งเป็น error ธรรมดา\" \n\nหากมีการสอบถามเกี่ยวกับข้อมูลส่วนตัว เช่น API key, password, email หรือ phone number ควรหลีกเลี่ยงการเปิดเผยข้อมูลเหล่านี้ในช่องทางสื่อสารที่ไม่ปลอดภัยค่ะ",
+    "output_final": "ข้อความนี้มีความเสี่ยงในระดับสูง เนื่องจากมีข้อมูลที่เป็นความลับ เช่น API key, password, email และ phone number ที่อาจถูกนำไปใช้ในทางที่ไม่เหมาะสมได้ \n\nrewrite ข้อความให้ปลอดภัย:\n\"ในระบบมีข้อความแจ้งว่าไม่สามารถเชื่อมต่อกับ localhost:5432/app ได้ ซึ่งเป็น error ธรรมดา\" \n\nหากมีการสอบถามเกี่ยวกับข้อมูลส่วนตัว เช่น API key, password, email หรือ phone number ควรหลีกเลี่ยงการเปิดเผยข้อมูลเหล่านี้ในช่องทางสื่อสารที่ไม่ปลอดภัยค่ะ",
+    "per_value": [
+      {
+        "value": "sk-live-abcdef1234567890",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": false
+      },
+      {
+        "value": "MyPass@123",
+        "masked": false,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": false
+      },
+      {
+        "value": "user@example.com",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": false
+      },
+      {
+        "value": "080-123-4567",
+        "masked": true,
+        "restored": false,
+        "token": null,
+        "token_in_output_raw": false
+      }
+    ],
+    "mask_hits": 3,
+    "restore_hits": 4,
+    "orphan_tokens": []
+  }
+]

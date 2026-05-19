@@ -1,0 +1,97 @@
+﻿docker : db_pool_configured pool_size=20 max_overflow=10 peak_per_worker=30 pg_max_connections=200 (defaults=10/20)
+At line:1 char:1
++ docker compose exec -T backend python /app/test_dlp_e2e_round2.py 2>& ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (db_pool_configu...defaults=10/20):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  -> R01
+  -> R02
+  -> R03
+  -> R04
+  -> R05
+  -> R06
+  -> R07
+  -> R08
+  -> R09
+  -> R10
+R01 | MASK: ✅ 4/4 | UNMASK: ✅ 4/4 | AI: ✅ | Orphan: 0 | 6.23s
+  somchai.j@example.com                    → <r?>     → ✅ mask, ✅ restore
+  081-234-5678                             → <r?>     → ✅ mask, ✅ restore
+  1101700203451                            → <r?>     → ✅ mask, ✅ restore
+  4111 1111 1111 1111                      → <r?>     → ✅ mask, ✅ restore
+R02 | MASK: ✅ 4/4 | UNMASK: ✅ 4/4 | AI: ✅ | Orphan: 0 | 2.47s
+  john.doe@company.com                     → <r?>     → ✅ mask, ✅ restore
+  +66 89 111 2222                          → <r?>     → ✅ mask, ✅ restore
+  AA1234567                                → <r?>     → ✅ mask, ✅ restore
+  P@ssw0rd123!                             → <r?>     → ✅ mask, ✅ restore
+R03 | MASK: ✅ 4/4 | UNMASK: ✅ 4/4 | AI: ✅ | Orphan: 0 | 2.36s
+  wipa.finance@abc.co.th                   → <r?>     → ✅ mask, ✅ restore
+  123-4-56789-0                            → <r?>     → ✅ mask, ✅ restore
+  0899998888                               → <r?>     → ✅ mask, ✅ restore
+  0105558123456                            → <r?>     → ✅ mask, ✅ restore
+R04 | MASK: ✅ 5/5 | UNMASK: ✅ 5/5 | AI: ✅ | Orphan: 0 | 3.66s
+  postgres://admin:pass123@localhost:...   → <r?>     → ✅ mask, ✅ restore
+  sk-test-1234567890abcdef                 → <r?>     → ✅ mask, ✅ restore
+  ghp_1234567890abcdef1234567890abcdef     → <r?>     → ✅ mask, ✅ restore
+  somchai@test.com                         → <r?>     → ✅ mask, ✅ restore
+  0812345678                               → <r?>     → ✅ mask, ✅ restore
+R05 | MASK: ❌ 4/5 | UNMASK: ❌ 4/5 | AI: ✅ | Orphan: 1 | 2.59s
+  12/05/1998                               → <r?>     → ❌ mask, ❌ restore
+  088-888-8888                             → <r?>     → ✅ mask, ✅ restore
+  patient.test@example.com                 → <r?>     → ✅ mask, ✅ restore
+  TH1234567                                → <r?>     → ✅ mask, ✅ restore
+  1101700203451                            → <r?>     → ✅ mask, ✅ restore
+R06 | MASK: ✅ 3/3 | UNMASK: ✅ 3/3 | AI: ✅ | Orphan: 1 | 3.0s
+  5555 5555 5555 4444                      → <r?>     → ✅ mask, ✅ restore
+  DE89370400440532013000                   → <r?>     → ✅ mask, ✅ restore
+  michael.brown@example.com                → <r?>     → ✅ mask, ✅ restore
+R07 | MASK: ✅ 3/3 | UNMASK: ✅ 3/3 | AI: ✅ | Orphan: 0 | 9.02s
+  0812345678                               → <r?>     → ✅ mask, ✅ restore
+  somchai@test.com                         → <r?>     → ✅ mask, ✅ restore
+  eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ...   → <r?>     → ✅ mask, ✅ restore
+R08 | MASK: ✅ 5/5 | UNMASK: ❌ 0/5 | AI: ✅ | Orphan: 0 | 2.03s
+  sarah.lee@company.com                    → <r?>     → ✅ mask, ❌ restore
+  +66 81 222 3333                          → <r?>     → ✅ mask, ❌ restore
+  1101700203451                            → <r?>     → ✅ mask, ❌ restore
+  987-6-54321-0                            → <r?>     → ✅ mask, ❌ restore
+  -----BEGIN PRIVATE KEY----- abcdef ...   → <r?>     → ✅ mask, ❌ restore
+R09 | MASK: ✅ 5/5 | UNMASK: ✅ 5/5 | AI: ✅ | Orphan: 0 | 4.24s
+  wipa@test.com                            → <r?>     → ✅ mask, ✅ restore
+  089-111-2222                             → <r?>     → ✅ mask, ✅ restore
+  4111 1111 1111 1111                      → <r?>     → ✅ mask, ✅ restore
+  123-4-56789-0                            → <r?>     → ✅ mask, ✅ restore
+  1101700203451                            → <r?>     → ✅ mask, ✅ restore
+R10 | MASK: ❌ 3/4 | UNMASK: ✅ 4/4 | AI: ✅ | Orphan: 0 | 3.2s
+  sk-live-abcdef1234567890                 → <r?>     → ✅ mask, · (no echo) restore
+  MyPass@123                               → <r?>     → ❌ mask, · (no echo) restore
+  user@example.com                         → <r?>     → ✅ mask, · (no echo) restore
+  080-123-4567                             → <r?>     → ✅ mask, · (no echo) restore
+
+════════════════════════════════════════════════════════════
+ROUND 2 SUMMARY (complex multi-PII cases)
+════════════════════════════════════════════════════════════
+Total cases:      10
+MASK correct:     8/10
+UNMASK correct:   8/10
+AI helpful:       10/10
+Orphan <rN>:      2
+Fully correct:    6/10
+
+FALSE NEGATIVES (per case, expected values still in input_masked):
+  - R05: missed ['12/05/1998']
+  - R10: missed ['MyPass@123']
+
+TRAP ITEMS (should NOT be masked unless marked otherwise):
+  - sk-test-cream-001 (product code)                        masked? NO  (expected: NO) ✅
+  - ABC-1234-TH (product code)                              masked? NO  (expected: NO) ✅
+  - 'password is wrong' (error text)                        masked? NO  (expected: NO) ✅
+  - 'Authorization: Bearer <token>' (doc example)           masked? NO  (expected: NO) ✅
+  - 'localhost:5432/app' (error msg)                        masked? NO  (expected: NO) ✅
+  - '85,000 บาท' (salary — known limitation)                masked? YES (expected: YES) ✅
+
+COMPARISON:
+  Round 1 (simple):  41/50  (82%)
+  Round 2 (complex): 6/10 (60%)
+
+Round 2: 6/10, DLP handles complex traffic: PARTIAL
