@@ -1,6 +1,8 @@
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import ForeignKey, Integer, String, Float, DateTime, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
@@ -33,4 +35,28 @@ class ProjectORM(Base):
     # don't need an auto-hard-delete yet).
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    # Routing config (migration 044). All nullable — None means "defer
+    # to global defaults / caller-supplied metadata". Injected into
+    # ``payload.metadata`` by the orchestrator BEFORE the router chain
+    # runs, where caller-supplied keys still take precedence. See
+    # ``services/orchestrator._inject_project_routing_config``.
+    default_model: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    preferred_provider: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
+    # Portable JSON columns: ``JSONB`` on Postgres (native binary,
+    # supports ``->`` operators) and generic ``JSON`` on SQLite so the
+    # test suite's in-memory engine can still create the table. Same
+    # ``with_variant`` pattern used by ``request_log.fallback_attempts``.
+    allowed_providers: Mapped[list[str] | None] = mapped_column(
+        sa.JSON().with_variant(JSONB(), "postgresql"),
+        nullable=True,
+    )
+    blocked_models: Mapped[list[str] | None] = mapped_column(
+        sa.JSON().with_variant(JSONB(), "postgresql"),
+        nullable=True,
     )

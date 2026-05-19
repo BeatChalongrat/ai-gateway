@@ -140,9 +140,35 @@ async def _stub_dispatch(self, route, payload, messages, api_key=None):
     )
 
 
+async def _stub_dispatch_with_fallback(
+    self,
+    route,
+    payload,
+    messages,
+    *,
+    api_key=None,
+    key_resolver=None,
+    max_hops=2,
+):
+    """Stub for ``dispatch_with_fallback`` matching the production
+    3-tuple return shape ``(response, used_provider, used_model)``.
+
+    Delegates to ``self.dispatch`` (rather than calling
+    ``_stub_dispatch`` directly) so that integration tests which
+    monkeypatch ``ProviderDispatcher.dispatch`` on top of this autouse
+    fixture still observe their spy / capture call. Fallback hops are
+    not exercised by the autouse path — tests that want to verify
+    fallback behaviour either drive the adapters directly or override
+    this fixture (e.g. ``test_fallback_routing.py``).
+    """
+    resp = await self.dispatch(route, payload, messages, api_key=api_key)
+    return resp, route.provider_name, route.model_name
+
+
 @pytest.fixture(autouse=True)
 def _mock_provider_dispatch(monkeypatch):
-    """Auto-stub ProviderDispatcher.dispatch for all tests.
+    """Auto-stub ProviderDispatcher.dispatch and dispatch_with_fallback
+    for all tests.
 
     Adapter tests that use @respx.mock should also mark themselves with
     ``@pytest.mark.real_adapter`` or simply call the adapter directly
@@ -150,6 +176,11 @@ def _mock_provider_dispatch(monkeypatch):
     """
     from app.services.provider_dispatcher import ProviderDispatcher
     monkeypatch.setattr(ProviderDispatcher, "dispatch", _stub_dispatch)
+    monkeypatch.setattr(
+        ProviderDispatcher,
+        "dispatch_with_fallback",
+        _stub_dispatch_with_fallback,
+    )
 
 
 @pytest.fixture(autouse=True)

@@ -178,6 +178,20 @@ class GatewayOrchestrator:
             tenant_id=ctx.tenant_id,
             project_id=ctx.project_id,
         )
+
+        # Inject project-level routing config (migration 044). Caller-
+        # supplied ``payload.metadata`` keys WIN — project config is the
+        # default, not a hard constraint. Runs BEFORE the request_start
+        # log so the logged ``model`` reflects the project default when
+        # it has overridden the request's ``"auto"``.
+        if session is not None:
+            self._inject_project_routing_config(
+                session=session,
+                project_id=ctx.project_id,
+                payload=payload,
+                log=log,
+            )
+
         log.info("request_start", model=payload.model, stream=payload.stream)
 
         # DLP trace snapshot 1/4: raw user input, captured once before any
@@ -710,16 +724,48 @@ class GatewayOrchestrator:
         original_model = route.model_name
         fallback_result = None
         t_provider = time.perf_counter()
+        # Layer-1 fallback key resolver. ``dispatch_with_fallback``
+        # calls this for each fallback hop's provider (the primary
+        # key was already resolved above). Returns None when no key is
+        # configured so the hop is skipped without burning a slot.
+        def _resolve_fallback_key(provider_name: str) -> str | None:
+            if session is None:
+                return None
+            return self.provider_key_service.get_api_key(
+                session, provider_name
+            )
+
         try:
             with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
                 provider=route.provider_name
             ).time():
-                provider_response = await self.provider_dispatcher.dispatch(
+                (
+                    provider_response,
+                    used_provider,
+                    used_model,
+                ) = await self.provider_dispatcher.dispatch_with_fallback(
                     route=route,
                     payload=payload,
                     messages=messages_to_send,
                     api_key=provider_api_key,
+                    key_resolver=_resolve_fallback_key,
                 )
+            # If Layer-1 fallback fired, rewrite the route so the rest
+            # of the pipeline (DLP scan, request_log row, response
+            # headers) reports the vendor that actually answered.
+            if (
+                used_provider != route.provider_name
+                or used_model != route.model_name
+            ):
+                log.info(
+                    "layer1_fallback_used",
+                    original_provider=route.provider_name,
+                    original_model=route.model_name,
+                    used_provider=used_provider,
+                    used_model=used_model,
+                )
+                route.provider_name = used_provider
+                route.model_name = used_model
             # Primary succeeded — clear any stale health marker so the
             # streaming pre-check stops skipping this provider.
             await clear_provider_health(original_provider)
@@ -1344,6 +1390,78 @@ class GatewayOrchestrator:
 
         return response
 
+    def _inject_project_routing_config(
+        self,
+        *,
+        session: Session,
+        project_id: str,
+        payload: ChatCompletionsRequest,
+        log,
+    ) -> None:
+        """Merge per-project routing config into ``payload.metadata``.
+
+        Reads ``default_model``, ``preferred_provider``,
+        ``allowed_providers``, ``blocked_models`` from the ``projects``
+        row (migration 044). Caller-supplied metadata keys are NOT
+        overwritten — project config is a per-tenant default, not a
+        hard constraint; the per-request body always wins so SDK
+        callers retain full control.
+
+        ``payload.model`` is rewritten to the project default ONLY when
+        the caller left it at the schema default ``"auto"``. Any
+        explicit model in the body (``"gpt-4o"``, ``"claude-..."`` …)
+        is preserved.
+
+        Safe to call when ``project_id`` is missing or the project
+        record has no routing fields set — fast path returns immediately
+        with no mutation. Logs at debug; never raises.
+        """
+        if not project_id:
+            return
+        try:
+            from app.models.project import ProjectORM
+
+            project = session.get(ProjectORM, project_id)
+        except Exception as exc:
+            log.warning("project_routing_config_load_failed", error=str(exc))
+            return
+        if project is None:
+            return
+
+        applied: list[str] = []
+
+        # default_model: only if caller left payload.model at "auto".
+        if project.default_model and payload.model == "auto":
+            payload.model = project.default_model
+            applied.append("default_model")
+
+        # The three metadata keys: caller value wins; project fills the
+        # gap. Empty arrays count as "set" and DO override the project
+        # value (caller deliberately cleared the constraint).
+        if (
+            project.preferred_provider
+            and "preferred_provider" not in payload.metadata
+        ):
+            payload.metadata["preferred_provider"] = project.preferred_provider
+            applied.append("preferred_provider")
+
+        if (
+            project.allowed_providers
+            and "allowed_providers" not in payload.metadata
+        ):
+            payload.metadata["allowed_providers"] = list(project.allowed_providers)
+            applied.append("allowed_providers")
+
+        if (
+            project.blocked_models
+            and "blocked_models" not in payload.metadata
+        ):
+            payload.metadata["blocked_models"] = list(project.blocked_models)
+            applied.append("blocked_models")
+
+        if applied:
+            log.info("project_routing_config_applied", fields=applied)
+
     def _apply_router_chain(
         self,
         ctx: RequestContext,
@@ -1464,14 +1582,31 @@ class GatewayOrchestrator:
         3. Calling ``routing_service.select_route`` to pick provider.
         4. Checking ``adapter.supports_streaming`` and falling back to
            the non-streaming path if the selected adapter can't stream.
+
+        Project-level routing config (migration 044) is injected here
+        so the streaming path picks up the same defaults the non-
+        streaming path does. Caller metadata still wins.
         """
         request_id = f"req_{uuid.uuid4().hex}"
-        return self.project_service.resolve_project_context(
+        ctx = self.project_service.resolve_project_context(
             session,
             auth,
             request_id=request_id,
             policy_profile_override=payload.policy_profile_id,
         )
+        if session is not None:
+            stream_log = logger.bind(
+                request_id=request_id,
+                tenant_id=ctx.tenant_id,
+                project_id=ctx.project_id,
+            )
+            self._inject_project_routing_config(
+                session=session,
+                project_id=ctx.project_id,
+                payload=payload,
+                log=stream_log,
+            )
+        return ctx
 
     # ------------------------------------------------------------------
     # Internal helpers

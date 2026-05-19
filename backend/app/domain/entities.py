@@ -60,5 +60,12 @@ class RouteDecision:
     model_name: str
     reasons: List[str] = field(default_factory=list)
     constrained_by_policy: bool = False
+    # Layer-1 same-tier fallbacks computed by ``RoutingService``. Each
+    # entry is ``(provider_name, model_name)``. Consumed by the
+    # dispatcher's ``dispatch_with_fallback`` when the primary call
+    # raises a fallback-eligible error. Empty list = no Layer-1
+    # alternatives available; orchestrator can still hand off to the
+    # Layer-2 ``FallbackOrchestrator`` (cross-provider tier chain).
+    fallbacks: List[tuple] = field(default_factory=list)
 
 
