@@ -222,9 +222,14 @@ class TestStreamingProviderPiiMaskedUnderDefault:
 
         events = _parse_sse(resp.content)
         full = _full_content(events)
-        # Provider-introduced PII is now masked before the user sees it.
+        # Provider-introduced PII is masked before the user sees it.
+        # The orphan-redact pass (May 2026) replaces non-inbound mask
+        # tokens with the literal ``[REDACTED]`` so the user never sees
+        # a bare ``<rN>`` placeholder. The masking guarantee — the PII
+        # value itself is absent from the user-facing text — is still
+        # the load-bearing assertion.
         assert "jane@example.com" not in full
-        assert "<r" in full
+        assert "[REDACTED]" in full
 
 
 class TestStreamingCleanMessagePassesThrough:

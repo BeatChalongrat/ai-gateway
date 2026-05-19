@@ -931,18 +931,17 @@ async def chat_completions(
                 )
             else:
                 final_emit = tail_masked
-            # Orphan-redact pass — same idea as the non-streaming
-            # path's ``redact_orphan_tokens`` call: any ``[CAT_N]``
-            # surviving in the tail that isn't in the combined
-            # inbound + outbound maps is something the model
-            # invented from the placeholder system prompt's example
-            # token. Streaming can only catch orphans on the tail
-            # (earlier chunks are already on the wire), but that's
-            # where they tend to cluster — the model writes its
-            # "Hope this helps, [YOUR_NAME]" template at the end.
+            # Orphan-redact pass — same rule as the non-streaming
+            # path: anything in the tail that isn't an inbound
+            # ``span_map`` token becomes ``[REDACTED]``. That covers
+            # both placeholders the model invented from the system
+            # prompt's grammar and outbound masks the gateway minted
+            # for LLM-generated PII — both of these read as a bare
+            # ``<rN>`` to the user otherwise. Streaming can only
+            # catch orphans on the tail (earlier chunks are already
+            # on the wire), but that's where they cluster.
             from app.services.dlp.transformer import redact_orphan_tokens
-            _stream_all_tokens = {**span_map, **_stream_outbound_span_map}
-            final_emit = redact_orphan_tokens(final_emit, _stream_all_tokens)
+            final_emit = redact_orphan_tokens(final_emit, span_map)
             if final_emit:
                 emitted_parts.append(final_emit)
                 yield _emit_chunk(final_emit)
