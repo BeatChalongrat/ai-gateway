@@ -270,9 +270,15 @@ class Settings(BaseSettings):
     # MUST be replaced in production — generate with
     # ``python3 -c "import secrets; print(secrets.token_hex(32))"``.
     dlp_hmac_key: str = "dev-dlp-hmac-key-change-in-production"
-    # Redis-backed cross-turn token vault stores raw token->original mappings.
-    # Current-request restore does not need it, so keep it off by default.
-    dlp_conversation_vault_enabled: bool = False
+    # Redis-backed cross-turn token vault stores raw token->original
+    # mappings. Required for safe multi-turn DLP: when turn 2's history
+    # echoes a turn-1 ``<rN>`` token, the vault lets the transformer
+    # resolve it back to the original value instead of leaking the
+    # placeholder. Clients SHOULD send ``metadata.conversation_id`` for
+    # deterministic per-conversation tokenization. Without that header
+    # the gateway falls back to per-request counter mode — no PII
+    # leaks, but multi-turn history may receive newly minted tokens.
+    dlp_conversation_vault_enabled: bool = True
 
     # AES-256-GCM key for the admin Safe Trace audit channel
     # (``request_logs.input_raw_encrypted``). The orchestrator
