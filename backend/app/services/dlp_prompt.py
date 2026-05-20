@@ -29,8 +29,7 @@ _MASK_TOKEN_RE = re.compile(r"<r[A-Za-z0-9_\-]+>")
 
 DLP_PLACEHOLDER_PROMPT_V3 = (
     "If the message contains angle-bracket placeholders, preserve them "
-    "exactly in your reply. Do not invent new placeholders. Write "
-    "[REDACTED] for any other sensitive data you notice. Help normally."
+    "exactly in your reply. Do not invent new placeholders. Help normally."
 )
 
 # ``V1`` was the long-form variant carrying a ``[CATEGORY_NUMBER]``
