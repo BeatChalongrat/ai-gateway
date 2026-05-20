@@ -1,17 +1,16 @@
-"""Deterministic HMAC tokenization tests.
+"""Cross-turn tokenization tests.
 
-The DLP transformer supports two token modes, both emitting the
-neutral ``<rN>`` shape:
+The DLP transformer emits a single token shape — counter-form ``<rN>``
+— via ``_allocate_token``. Cross-turn determinism (same PII value in
+turn 2 keeps the same ``<rN>`` it got in turn 1) is now driven by the
+caller passing a ``vault_reverse_map`` (value → prior token) and a
+matching ``start_counters`` primer past the highest vault index. The
+legacy HMAC-based ``conversation_key`` mode is gone — its helper
+functions remain in :mod:`app.services.dlp.transformer` for backwards
+compat but no longer affect the emitted token shape.
 
-- **Counter** (legacy, ``conversation_key=None``) — sequential
-  ``<r0>``, ``<r1>``. Counter resets per request.
-- **Deterministic** (``conversation_key=bytes``) — HMAC-derived
-  opaque suffix (``<rAbCd1234>``). Same value + same conversation
-  always produce the same token; different conversations produce
-  different tokens.
-
-These tests pin the deterministic-mode contract and verify that the
-counter mode remains intact across the format flip.
+These tests pin the new contract: counter format, vault-driven
+cross-turn determinism, and outbound-vs-inbound non-collision.
 """
 
 from __future__ import annotations
@@ -26,11 +25,7 @@ from app.domain.dlp import (
     MatchAction,
     SensitivityLevel,
 )
-from app.services.dlp.transformer import (
-    DLPTransformer,
-    _make_conversation_key,
-    _make_deterministic_token,
-)
+from app.services.dlp.transformer import DLPTransformer
 
 
 # ---------------------------------------------------------------------------
@@ -55,112 +50,147 @@ def _email_action(text: str, start: int, end: int) -> MatchAction:
     )
 
 
-def _mask_one(transformer: DLPTransformer, text: str, key: bytes | None):
-    """Mask a single email in ``text`` and return (masked_text, span_map)."""
-    # Pull every "*@*.*" run out of the text as a MatchAction. Keeping
-    # the helper small — the real detector pipeline is exercised in
-    # the integration suite; this file pins transformer semantics.
+def _mask_one(
+    transformer: DLPTransformer,
+    text: str,
+    *,
+    vault_reverse_map: dict[str, str] | None = None,
+    start_counters: dict[str, int] | None = None,
+):
+    """Mask the first email in ``text`` and return (masked, span_map, counters)."""
     match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text)
     assert match, f"no email in test fixture: {text!r}"
     actions = [_email_action(text, match.start(), match.end())]
-    masked, span_map, _counters = transformer.mask_text(
-        text, actions, conversation_key=key
+    return transformer.mask_text(
+        text,
+        actions,
+        start_counters=start_counters,
+        vault_reverse_map=vault_reverse_map,
     )
-    return masked, span_map
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_same_value_same_token():
-    """Same value in the same conversation → identical token."""
-    key = _make_conversation_key("secret", "conv-123")
-    t1 = _make_deterministic_token("EMAIL", "john@acme.com", key)
-    t2 = _make_deterministic_token("EMAIL", "john@acme.com", key)
-    assert t1 == t2
-
-
-def test_different_values_different_tokens():
-    """Different PII values in one conversation → different tokens."""
-    key = _make_conversation_key("secret", "conv-123")
-    t1 = _make_deterministic_token("EMAIL", "a@b.com", key)
-    t2 = _make_deterministic_token("EMAIL", "c@d.com", key)
-    assert t1 != t2
-
-
-def test_different_conversations_different_tokens():
-    """Cross-conversation isolation — same value, different convs → different tokens."""
-    key_a = _make_conversation_key("secret", "conv-A")
-    key_b = _make_conversation_key("secret", "conv-B")
-    t_a = _make_deterministic_token("EMAIL", "john@acme.com", key_a)
-    t_b = _make_deterministic_token("EMAIL", "john@acme.com", key_b)
-    assert t_a != t_b
-
-
-def test_multiturn_same_token_restored():
-    """Turn 1 + turn 2 of the same conversation mint the same token
-    for the same value, and ``restore()`` swaps it back to the
-    original on both turns."""
+def test_counter_format_emitted():
+    """Default path mints ``<r0>``, ``<r1>``, … (counter form only)."""
     transformer = DLPTransformer()
-    key = _make_conversation_key("secret", "conv-mt")
-    turn1, map1 = _mask_one(transformer, "อีเมล john@acme.com", key)
-    turn2, map2 = _mask_one(transformer, "john@acme.com อีกครั้ง", key)
+    masked, span_map, _counters = _mask_one(transformer, "john@acme.com here")
+    assert "<r0>" in masked
+    assert span_map.get("<r0>") == "john@acme.com"
+    # No HMAC-style suffix should appear anywhere in the output.
+    assert not re.search(r"<r[A-Za-z][A-Za-z0-9_\-]+>", masked)
 
-    token1 = next(iter(map1))
-    token2 = next(iter(map2))
-    assert token1 == token2, (
-        f"Same value should produce same token across turns: "
-        f"got {token1!r} vs {token2!r}"
+
+def test_same_value_same_token_within_call():
+    """The same value masked twice in one call dedups to one token."""
+    transformer = DLPTransformer()
+    text = "ping alice@x.com then alice@x.com again"
+    actions = [
+        _email_action(text, text.index("alice@x.com"), text.index("alice@x.com") + 11),
+        _email_action(
+            text,
+            text.rindex("alice@x.com"),
+            text.rindex("alice@x.com") + 11,
+        ),
+    ]
+    masked, span_map, _ = transformer.mask_text(text, actions)
+    # Both occurrences collapse to ``<r0>`` — span_map has one binding.
+    assert span_map == {"<r0>": "alice@x.com"}
+    assert masked.count("<r0>") == 2
+
+
+def test_vault_reverse_map_reuses_prior_token():
+    """A vault hit reuses the prior turn's token instead of minting a new one."""
+    transformer = DLPTransformer()
+    # Vault has alice@x.com bound to ``<r0>`` from an earlier turn.
+    vault = {"alice@x.com": "<r0>"}
+    masked, span_map, _ = _mask_one(
+        transformer,
+        "อีเมล alice@x.com",
+        vault_reverse_map=vault,
+        start_counters={"__global__": 1},
     )
+    assert "<r0>" in masked
+    assert span_map.get("<r0>") == "alice@x.com"
 
-    assert transformer.restore(turn1, map1) == "อีเมล john@acme.com"
-    assert transformer.restore(turn2, map2) == "john@acme.com อีกครั้ง"
 
-
-def test_outbound_hallucinated_pii_gets_different_token():
-    """Inbound value and a different outbound value share the same
-    conversation_key but produce different tokens — so a hallucinated
-    PII is never accidentally restored to the user."""
+def test_new_value_gets_next_counter_after_vault():
+    """A value not in the vault gets the next free counter past the vault max."""
     transformer = DLPTransformer()
-    key = _make_conversation_key("secret", "conv-out")
-    _, inbound_map = _mask_one(transformer, "john@acme.com", key)
-    _, outbound_map = _mask_one(transformer, "fake@evil.com", key)
+    # Vault owns <r0>: alice, <r1>: bob; new value carol must get <r2>.
+    vault = {"alice@x.com": "<r0>", "bob@y.com": "<r1>"}
+    masked, span_map, _ = _mask_one(
+        transformer,
+        "ping carol@z.com",
+        vault_reverse_map=vault,
+        start_counters={"__global__": 2},
+    )
+    assert "<r2>" in masked
+    assert span_map.get("<r2>") == "carol@z.com"
+    # The vault entries are NOT in this turn's span_map — only tokens
+    # actually emitted from this call's text are bound.
+    assert "<r0>" not in span_map
+    assert "<r1>" not in span_map
+
+
+def test_outbound_value_gets_different_token():
+    """Inbound and outbound calls in one request must mint different tokens
+    for different values — start_counters threads the high-water mark so
+    the outbound pass can't collide with an inbound binding."""
+    transformer = DLPTransformer()
+    inbound_text = "ping john@acme.com"
+    inbound_masked, inbound_map, counters = _mask_one(transformer, inbound_text)
     inbound_token = next(iter(inbound_map))
+    assert inbound_token == "<r0>"
+
+    outbound_text = "contact fake@evil.com"
+    outbound_masked, outbound_map, _ = _mask_one(
+        transformer,
+        outbound_text,
+        start_counters=counters,
+    )
     outbound_token = next(iter(outbound_map))
     assert inbound_token != outbound_token
+    assert outbound_token == "<r1>"
 
-    # Crucially: restore() with only the inbound map leaves the
-    # outbound token literally in place — the user never sees the
-    # hallucinated value.
-    masked = f"contact {outbound_token} immediately"
-    restored = transformer.restore(masked, inbound_map)
+    # Restoring with only the inbound map leaves the outbound token in
+    # place — the user never sees the hallucinated value.
+    restored = transformer.restore(
+        f"contact {outbound_token} immediately", inbound_map
+    )
     assert outbound_token in restored
     assert "fake@evil.com" not in restored
 
 
-def test_counter_mode_when_no_key():
-    """conversation_key=None → counter-format ``<rN>`` tokens."""
+def test_multiturn_round_trip_via_vault():
+    """End-to-end: turn 1 mints ``<r0>``; turn 2 reuses ``<r0>`` for the
+    same value via ``vault_reverse_map`` and restores correctly."""
     transformer = DLPTransformer()
-    masked, span_map = _mask_one(transformer, "john@acme.com here", key=None)
-    assert "<r0>" in masked, (
-        f"counter mode must emit <rN> tokens, got: {masked!r}"
-    )
-    assert span_map.get("<r0>") == "john@acme.com"
 
+    turn1, map1, _ = _mask_one(transformer, "อีเมล john@acme.com")
+    token1 = next(iter(map1))
+    assert token1 == "<r0>"
 
-def test_token_format_is_opaque():
-    """The deterministic suffix is base64url and reveals nothing
-    about the input — none of the original characters, words, or
-    domain parts should appear. Under the neutral shape the category
-    name is also no longer in the token."""
-    key = _make_conversation_key("secret", "conv-opaque")
-    token = _make_deterministic_token("EMAIL", "john@acme.com", key)
-    assert "john" not in token
-    assert "acme" not in token
-    assert "@" not in token
-    assert "EMAIL" not in token  # neutral shape — no category leak
-    # ``<r`` + 8-char base64url body (no padding) + ``>``.
-    assert re.match(r"^<r[A-Za-z0-9_-]{8}>$", token), (
-        f"unexpected token shape: {token!r}"
+    # Build the vault state as the orchestrator would (token → value,
+    # then inverted to value → token for the next-turn mask call).
+    vault_state = dict(map1)
+    vault_reverse = {value: token for token, value in vault_state.items()}
+
+    turn2_text = "john@acme.com อีกครั้ง"
+    turn2, map2, _ = _mask_one(
+        transformer,
+        turn2_text,
+        vault_reverse_map=vault_reverse,
+        start_counters={"__global__": 1},
     )
+    token2 = next(iter(map2))
+    assert token2 == token1, (
+        f"Same value should reuse the prior token across turns: "
+        f"got {token2!r} vs {token1!r}"
+    )
+
+    # Restore round-trips both turns.
+    assert transformer.restore(turn1, map1) == "อีเมล john@acme.com"
+    assert transformer.restore(turn2, map2) == turn2_text

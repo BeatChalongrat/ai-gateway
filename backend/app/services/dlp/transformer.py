@@ -601,6 +601,8 @@ class DLPTransformer:
         match_actions: list[MatchAction],
         *,
         conversation_key: bytes | None = None,
+        start_counters: dict[str, int] | None = None,
+        vault_reverse_map: dict[str, str] | None = None,
     ) -> tuple[list[Message], dict[str, str], dict[str, int]]:
         """Mask messages using indexed tokens and return a span_map.
 
@@ -627,12 +629,16 @@ class DLPTransformer:
         user's own input PII into positions where the provider wrote
         something different.
 
-        When ``conversation_key`` is supplied the legacy counter is
-        replaced by deterministic per-value HMAC tokens
-        (``[EMAIL_xxxxxxxx]``). Same value → same token across calls
-        within the conversation; the counter return slot in that mode
-        is reused to carry the (unused) counter dict for caller
-        compatibility.
+        Cross-turn determinism: when ``vault_reverse_map`` is supplied
+        (value → token from a prior turn's vault read), any value
+        already present in the map reuses its prior token, so
+        ``alice@x.com`` keeps the same ``<r0>`` across turns of one
+        conversation. ``start_counters`` primes the counter so freshly
+        minted tokens skip over indices the vault already owns.
+        Together these replace the legacy ``conversation_key`` HMAC
+        scheme — the parameter is accepted for backwards compatibility
+        but no longer affects the emitted token shape, which is always
+        the counter form ``<rN>``.
 
         REDACT actions keep the static ``[REDACTED]`` replacement and
         are intentionally NOT added to the span_map — redaction is
@@ -641,20 +647,32 @@ class DLPTransformer:
         BLOCK and ALLOW actions are pass-through (no text change).
         """
         from app.schemas.common import Message as MessageModel
+        # ``conversation_key`` is accepted for backwards-compat but
+        # unused under the counter-only emission scheme.
+        del conversation_key
 
         new_messages: list[MessageModel] = []
         span_map: dict[str, str] = {}
-        # Counters are keyed on the *base* mask token name (see
-        # ``_mask_base_name``) so detectors that share a base — e.g.
-        # api_key_secret and db_connection_string both emit
-        # ``[CREDENTIAL]`` — still allocate disjoint indices within a
-        # single request. Per-message keying would let the base counter
-        # reset between messages and reintroduce the collision.
-        counters: dict[str, int] = {}
-        # Reverse map for the deterministic path — value → token so
-        # the same PII string masked twice in this call reuses its
-        # first token. No-op in counter mode.
-        reverse_map: dict[str, str] = {}
+        # Counters are seeded from ``start_counters`` so a caller can
+        # pre-prime ``__global__`` past whatever indices the vault
+        # already owns. Otherwise counters are per-call: a fresh
+        # request starts at 0.
+        counters: dict[str, int] = (
+            dict(start_counters) if start_counters else {}
+        )
+        # Reverse map for within-call dedup — value → token so the
+        # same PII string masked twice in this call reuses its first
+        # token. Pre-seeded with cross-turn bindings when the caller
+        # passes ``vault_reverse_map``: a value already minted in a
+        # prior turn keeps the same ``<rN>``. The caller is expected
+        # to also pass ``start_counters`` primed past the highest
+        # vault index so newly minted tokens don't collide with vault
+        # ones — keeping span_map free of unused vault bindings means
+        # ``restore`` and ``redact_orphan_tokens`` only see the
+        # tokens actually emitted in this turn's text.
+        reverse_map: dict[str, str] = (
+            dict(vault_reverse_map) if vault_reverse_map else {}
+        )
 
         for msg in messages:
             # Find match_actions whose spans fall within this message.
@@ -682,27 +700,26 @@ class DLPTransformer:
             # then apply replacements in REVERSE so offsets stay valid.
             resolved.sort(key=lambda ma: ma.match.start)
 
-            # First pass: assign tokens in reading order. The
-            # allocator differs by mode:
-            #   - counter mode (legacy, conversation_key is None)
-            #   - deterministic mode (HMAC, opt-in via the caller)
+            # First pass: assign tokens in reading order using the
+            # counter scheme. Per-value dedup (within-call AND
+            # cross-turn via vault_reverse_map) is handled by
+            # ``reverse_map`` — the lookup happens before
+            # ``_allocate_token`` so a vault hit reuses its prior
+            # ``<rN>`` and only fresh values consume a new counter.
             replacements: list[tuple[int, int, str, str]] = []
             # (start, end, replacement, original)
             for ma in resolved:
                 if ma.action == EnforcementAction.MASK:
                     original = msg.content[ma.match.start:ma.match.end]
-                    if conversation_key is not None:
-                        token = _allocate_deterministic_token(
-                            ma.match.detector_name,
-                            conversation_key,
-                            span_map,
-                            reverse_map,
-                            original,
-                        )
+                    existing_token = reverse_map.get(original)
+                    if existing_token is not None:
+                        span_map.setdefault(existing_token, original)
+                        token = existing_token
                     else:
                         token = _allocate_token(
                             ma.match.detector_name, counters, span_map, original
                         )
+                        reverse_map[original] = token
                     replacements.append(
                         (ma.match.start, ma.match.end, token, original)
                     )
@@ -731,6 +748,7 @@ class DLPTransformer:
         *,
         start_counters: dict[str, int] | None = None,
         conversation_key: bytes | None = None,
+        vault_reverse_map: dict[str, str] | None = None,
     ) -> tuple[str, dict[str, str], dict[str, int]]:
         """Mask a single text string using indexed tokens + span_map.
 
@@ -745,7 +763,16 @@ class DLPTransformer:
         would then replace the AI's newly-invented value with the
         user's original PII. See ``mask_messages`` docstring for the
         rationale.
+
+        ``vault_reverse_map`` carries cross-turn bindings (value →
+        prior token). Any value already in the map reuses its prior
+        ``<rN>`` so the same PII keeps the same token across turns of
+        one conversation. ``conversation_key`` is accepted for
+        backwards compatibility but unused — tokens are always the
+        counter form.
         """
+        del conversation_key  # backwards-compat shim, see docstring
+
         actionable = [
             ma for ma in match_actions
             if ma.action in (EnforcementAction.MASK, EnforcementAction.REDACT)
@@ -761,23 +788,22 @@ class DLPTransformer:
 
         replacements: list[tuple[int, int, str]] = []
         span_map: dict[str, str] = {}
-        reverse_map: dict[str, str] = {}
+        reverse_map: dict[str, str] = (
+            dict(vault_reverse_map) if vault_reverse_map else {}
+        )
 
         for ma in resolved:
             if ma.action == EnforcementAction.MASK:
                 original = text[ma.match.start:ma.match.end]
-                if conversation_key is not None:
-                    token = _allocate_deterministic_token(
-                        ma.match.detector_name,
-                        conversation_key,
-                        span_map,
-                        reverse_map,
-                        original,
-                    )
+                existing_token = reverse_map.get(original)
+                if existing_token is not None:
+                    span_map.setdefault(existing_token, original)
+                    token = existing_token
                 else:
                     token = _allocate_token(
                         ma.match.detector_name, counters, span_map, original
                     )
+                    reverse_map[original] = token
                 replacements.append((ma.match.start, ma.match.end, token))
             else:  # REDACT
                 replacements.append((ma.match.start, ma.match.end, "[REDACTED]"))
