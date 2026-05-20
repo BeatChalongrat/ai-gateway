@@ -657,6 +657,15 @@ class GatewayOrchestrator:
                     cached_text = msg.get("content", "") or ""
             except Exception:
                 cached_text = ""
+            # Capture the masked snapshot BEFORE restore so the
+            # ``output_raw`` (AI → Service) trace column reflects what
+            # the AI actually produced for the cached request — the
+            # same invariant the fresh-LLM path holds via
+            # ``ai_to_service_masked``. Without this, both
+            # ``output_raw`` and ``output_final`` would carry the
+            # restored text and the Admin UI's 4-stage trace would
+            # show identical PII in stages 3 and 4 on every cache hit.
+            cached_text_masked = cached_text
             if cached_text:
                 # Same restore + orphan-redact pipeline that runs on a
                 # fresh provider response (sections 8b + final orphan
@@ -720,18 +729,19 @@ class GatewayOrchestrator:
                                 input_masked, input_enforcement
                             ),
                             input_raw_encrypted=input_raw_encrypted,
-                            # Cache hits never invoke the AI again, so the
-                            # cached text *is* both the AI's last response
-                            # and what the user receives. We treat it as
-                            # the safe AI-side snapshot for stage 3 and as
-                            # PII-bearing for stage 4 (cached value may
-                            # have had input PII restored at original cache
-                            # time).
+                            # Stage 3 (AI → Service) uses the cached
+                            # value AS IT SAT IN REDIS — masked, with
+                            # ``<rN>`` tokens — so the admin trace
+                            # matches the fresh-LLM path's
+                            # ``ai_to_service_masked`` invariant.
+                            # Stage 4 (Service → User) is the
+                            # post-restore text the caller actually
+                            # received.
                             output_raw=safe_output_raw_snapshot(
-                                cached_text, input_enforcement
+                                cached_text_masked, input_enforcement
                             ),
                             output_final=safe_output_snapshot(
-                                cached_text, cached_text, input_enforcement
+                                cached_text_masked, cached_text, input_enforcement
                             ),
                             dlp_findings_json=build_dlp_findings_json(
                                 input_enforcement.match_actions,
