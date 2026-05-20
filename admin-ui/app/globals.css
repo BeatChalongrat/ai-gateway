@@ -1143,6 +1143,54 @@
 .dlp-select:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
 .dlp-select:disabled { background: var(--bg-elevated); color: var(--text-muted); cursor: not-allowed; }
 
+/* ─── Global scrollbar theming ───────────────────────────────────
+   The default browser scrollbar reads as bright white/gray on top
+   of the dark navy request-detail panel (and any other scrollable
+   region on a dark surface). These rules give every scrollable
+   element a subtle thumb that picks up the active theme via
+   data-theme; the sidebar's own .sran-sidebar-nav rules above
+   override these where they apply, so its tighter blue-tinted
+   look stays untouched. */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.30);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+[data-theme="dark"] * {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
 /* ─── Google Fonts import ────────────────────────────────────────── */
 
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
