@@ -171,18 +171,37 @@ async def chat_completions(
     inbound_counters: dict[str, int] = {}
     input_enforcement = EnforcementDecision(policy_profile_id=profile.profile_id)
 
-    # Deterministic-tokenization key — mirrors the non-streaming
-    # branch in ``orchestrator.handle_chat_completion``. Opt-in via
-    # ``payload.metadata.conversation_id``; without it the masking
-    # call falls back to legacy counter mode so existing streaming
-    # tests keep their fixed token expectations.
-    conversation_key_stream = None
+    # Cross-turn determinism — mirrors the non-streaming branch in
+    # ``orchestrator.handle_chat_completion``. Opt-in via
+    # ``payload.metadata.conversation_id`` + vault enabled. The vault
+    # snapshot becomes a value→token reverse map that the transformer
+    # consults during masking so the same PII keeps the same ``<rN>``
+    # across turns. Without ``conversation_id`` or with vault off, the
+    # masking call falls back to fresh per-request counters.
+    conversation_key_stream = None  # legacy parameter kept for signature compat
     _conv_id_for_key = payload.metadata.get("conversation_id")
-    if _conv_id_for_key and settings.dlp_enabled:
-        from app.services.dlp.transformer import _make_conversation_key
-        conversation_key_stream = _make_conversation_key(
-            settings.dlp_hmac_key, _conv_id_for_key
-        )
+    vault_reverse_map_stream: dict[str, str] = {}
+    stream_inbound_start_counters: dict[str, int] | None = None
+    if (
+        _conv_id_for_key
+        and settings.dlp_enabled
+        and settings.dlp_conversation_vault_enabled
+    ):
+        import re as _re_stream
+        from app.services.dlp.conversation_vault import conversation_vault as _cv_stream
+        _existing_vault = await _cv_stream.get_all_tokens_async(_conv_id_for_key)
+        if _existing_vault:
+            vault_reverse_map_stream = {
+                value: token for token, value in _existing_vault.items()
+            }
+            _counter_re = _re_stream.compile(r"^<r(\d+)>$")
+            _max_idx = -1
+            for _t in _existing_vault.keys():
+                _m = _counter_re.match(_t)
+                if _m:
+                    _max_idx = max(_max_idx, int(_m.group(1)))
+            if _max_idx >= 0:
+                stream_inbound_start_counters = {"__global__": _max_idx + 1}
 
     if settings.dlp_enabled:
         # Per-tenant NER gate — identical to orchestrator.handle_chat_completion.
@@ -256,6 +275,8 @@ async def chat_completions(
                 payload.messages,
                 input_enforcement.match_actions,
                 conversation_key=conversation_key_stream,
+                start_counters=stream_inbound_start_counters,
+                vault_reverse_map=vault_reverse_map_stream or None,
             )
 
     # Cross-turn DLP vault — mirrors the non-streaming branch in
@@ -268,7 +289,7 @@ async def chat_completions(
     conversation_id = payload.metadata.get("conversation_id")
     if conversation_id and span_map and settings.dlp_conversation_vault_enabled:
         from app.services.dlp.conversation_vault import conversation_vault
-        conversation_vault.extend(conversation_id, span_map)
+        await conversation_vault.extend_async(conversation_id, span_map)
 
     output_actions = (
         profile.category_actions_output
@@ -697,22 +718,22 @@ async def chat_completions(
                     enforcement.match_actions,
                     start_counters=counters_mut,
                     conversation_key=conversation_key_stream,
+                    vault_reverse_map=vault_reverse_map_stream or None,
                 )
-                # Mirror the non-streaming branch: outbound tokens
-                # go into the vault (for audit/cross-turn lookups)
-                # but are NEVER merged into ``span_map`` — restore
-                # must not unmask hallucinated values.
-                if (
-                    conversation_id
-                    and outbound_window_map
-                    and settings.dlp_conversation_vault_enabled
-                ):
-                    from app.services.dlp.conversation_vault import (
-                        conversation_vault as _outbound_vault,
-                    )
-                    _outbound_vault.extend(
-                        conversation_id, outbound_window_map
-                    )
+                # Outbound vault extend is intentionally skipped on the
+                # streaming path: this nested helper runs sync inside
+                # the asyncio generator loop, where the ``run_sync``
+                # bridge into the shared Redis async client triggers a
+                # cross-loop Future error and corrupts the cached
+                # transport — every subsequent vault op (including the
+                # legitimate inbound resolver) then fails with
+                # "TCPTransport closed". Outbound entries here are
+                # audit-only; the user-facing masking invariant is
+                # enforced by ``span_map`` + the per-chunk orphan-redact
+                # below regardless of whether the audit row is written.
+                # The non-streaming orchestrator still writes outbound
+                # tokens to the vault via ``await extend_async`` in
+                # section 8.
                 # Mutate via the enclosing variable binding.
                 counters_mut.clear()
                 counters_mut.update(new_counters)
@@ -804,6 +825,24 @@ async def chat_completions(
                         if len(masked_window) > MIN_TAIL_CHARS:
                             safe = masked_window[:-MIN_TAIL_CHARS]
                             tail_masked = masked_window[-MIN_TAIL_CHARS:]
+                            # Guard against splitting an already-masked
+                            # ``<rN>`` token at the safe/tail boundary.
+                            # The window-level DLP scan can't help here —
+                            # mask tokens are deliberately ignored by the
+                            # scanner — so a literal ``<r0>`` echoed by
+                            # the LLM and sitting at position
+                            # ``len(window) - 121`` would split as
+                            # ``<r`` (in safe) + ``0>`` (in tail) and
+                            # leak to the user. If ``safe`` ends with
+                            # an unterminated ``<`` (no matching ``>``
+                            # after it), push everything from that
+                            # ``<`` into ``tail_masked`` so the full
+                            # token gets restored on a later iteration
+                            # or at the end-of-stream flush.
+                            _last_lt = safe.rfind("<")
+                            if _last_lt != -1 and safe.rfind(">") < _last_lt:
+                                tail_masked = safe[_last_lt:] + tail_masked
+                                safe = safe[:_last_lt]
                             masked_provider_parts.append(safe)
                             # When a conversation_id is bound, every emit
                             # needs the vault resolver so a token echoed from
@@ -817,6 +856,20 @@ async def chat_completions(
                                 )
                             else:
                                 emit_text = safe
+                            # Strip any orphan ``<rN>`` the model invented
+                            # before the chunk hits the wire. Counter-mode
+                            # tokens (``<r5>``, ``<r12>``) are easy to
+                            # hallucinate, and the non-streaming path
+                            # already strips them at section P3 — without
+                            # this per-chunk pass the streaming user sees
+                            # bare ``<rN>`` placeholders the rest of the
+                            # pipeline would have removed. The 120-char
+                            # rolling tail upstream guarantees ``safe`` is
+                            # past the split-token risk window.
+                            from app.services.dlp.transformer import (
+                                redact_orphan_tokens as _stream_orphan_redact,
+                            )
+                            emit_text = _stream_orphan_redact(emit_text, span_map)
                             if emit_text:
                                 emitted_parts.append(emit_text)
                                 yield _emit_chunk(emit_text)
