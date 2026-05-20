@@ -86,17 +86,19 @@ class TestInjectDlpSystemPrompt:
 
 
 class TestRedactedRuleInPrompt:
-    """Verify the [REDACTED] rule is present in the system prompt.
+    """Verify the prompt does NOT instruct the model to write [REDACTED].
 
-    Locks in the post-diagnosis fix that tells the model to use [REDACTED]
-    (rather than invent new placeholder tokens) for sensitive-looking
-    content the gateway didn't already mask. A regression here would
-    re-open the orphan-token hallucination behavior observed in
-    sran-pii-test scenarios 2 + 5.
+    Earlier wording told the model to substitute ``[REDACTED]`` for any
+    sensitive content it noticed; the model dutifully obeyed and emitted
+    literal ``[REDACTED]`` strings throughout its replies. The outbound
+    DLP scan already catches any fresh PII the model produces, so the
+    instruction was redundant — and the literal ``[REDACTED]`` reaching
+    the user was confusing UX. The negation locks the prompt down so a
+    future tweak doesn't quietly re-introduce the sentinel.
     """
 
-    def test_redacted_substitute_present(self):
-        assert "[REDACTED]" in DLP_PLACEHOLDER_PROMPT
+    def test_redacted_substitute_absent(self):
+        assert "[REDACTED]" not in DLP_PLACEHOLDER_PROMPT
 
     def test_explicitly_forbids_new_tokens(self):
         # Must instruct the model NOT to invent placeholder tokens.
