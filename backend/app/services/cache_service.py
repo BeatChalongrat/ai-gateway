@@ -45,13 +45,29 @@ class CacheService:
             self._async_client = get_async_redis()
         return self._async_client
 
-    def _key(self, model: str, messages: list, project_id: str) -> str:
-        payload = json.dumps(
-            {"model": model, "messages": messages},
-            sort_keys=True,
-            ensure_ascii=False,
-        )
+    def _key(
+        self,
+        model: str,
+        messages: list,
+        project_id: str,
+        api_key_id: str | None = None,
+    ) -> str:
+        # When ``api_key_id`` is supplied (the orchestrator passes it for
+        # DLP RESTORE profiles), the key is scoped per-caller so a
+        # detector miss that leaks raw PII into the masked response can
+        # never be served to a *different* user hitting the same prompt
+        # template. Non-DLP requests continue to pass ``None`` and share
+        # the per-project cache so common queries stay deduped across
+        # users. ``api_key_id`` is mixed into BOTH the namespace and the
+        # hashed payload to defend against the digest colliding with a
+        # parallel-namespace entry built without an api_key_id.
+        payload_obj: dict[str, Any] = {"model": model, "messages": messages}
+        if api_key_id:
+            payload_obj["api_key_id"] = api_key_id
+        payload = json.dumps(payload_obj, sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+        if api_key_id:
+            return f"cache:{project_id}:{api_key_id}:{digest}"
         return f"cache:{project_id}:{digest}"
 
     # ------------------------------------------------------------------
@@ -63,10 +79,13 @@ class CacheService:
         model: str,
         messages: list,
         project_id: str,
+        api_key_id: str | None = None,
     ) -> dict | None:
         try:
             client = self._redis()
-            raw = await _maybe_await(client.get(self._key(model, messages, project_id)))
+            raw = await _maybe_await(
+                client.get(self._key(model, messages, project_id, api_key_id))
+            )
             if raw is None:
                 await _maybe_await(client.incr(f"cache_misses:{project_id}"))
                 return None
@@ -82,12 +101,13 @@ class CacheService:
         project_id: str,
         response: dict,
         ttl: int | None = None,
+        api_key_id: str | None = None,
     ) -> None:
         try:
             client = self._redis()
             await _maybe_await(
                 client.setex(
-                    self._key(model, messages, project_id),
+                    self._key(model, messages, project_id, api_key_id),
                     ttl or self.default_ttl,
                     json.dumps(response, ensure_ascii=False),
                 )
@@ -117,10 +137,16 @@ class CacheService:
     # ``await`` the matching ``_async`` method instead.
     # ------------------------------------------------------------------
 
-    def get(self, model: str, messages: list, project_id: str) -> dict | None:
+    def get(
+        self,
+        model: str,
+        messages: list,
+        project_id: str,
+        api_key_id: str | None = None,
+    ) -> dict | None:
         if self._fake_client is not None:
-            return self._get_via_fake(model, messages, project_id)
-        return run_sync(self.get_async(model, messages, project_id))
+            return self._get_via_fake(model, messages, project_id, api_key_id)
+        return run_sync(self.get_async(model, messages, project_id, api_key_id))
 
     def set(
         self,
@@ -129,11 +155,14 @@ class CacheService:
         project_id: str,
         response: dict,
         ttl: int | None = None,
+        api_key_id: str | None = None,
     ) -> None:
         if self._fake_client is not None:
-            self._set_via_fake(model, messages, project_id, response, ttl)
+            self._set_via_fake(model, messages, project_id, response, ttl, api_key_id)
             return
-        run_sync(self.set_async(model, messages, project_id, response, ttl))
+        run_sync(
+            self.set_async(model, messages, project_id, response, ttl, api_key_id)
+        )
 
     def get_stats(self, project_id: str) -> dict:
         if self._fake_client is not None:
@@ -147,10 +176,16 @@ class CacheService:
     # ------------------------------------------------------------------
 
     def _get_via_fake(
-        self, model: str, messages: list, project_id: str
+        self,
+        model: str,
+        messages: list,
+        project_id: str,
+        api_key_id: str | None = None,
     ) -> dict | None:
         try:
-            raw = self._fake_client.get(self._key(model, messages, project_id))
+            raw = self._fake_client.get(
+                self._key(model, messages, project_id, api_key_id)
+            )
             if raw is None:
                 self._incr_fake(f"cache_misses:{project_id}")
                 return None
@@ -166,10 +201,11 @@ class CacheService:
         project_id: str,
         response: dict,
         ttl: int | None,
+        api_key_id: str | None = None,
     ) -> None:
         try:
             self._fake_client.setex(
-                self._key(model, messages, project_id),
+                self._key(model, messages, project_id, api_key_id),
                 ttl or self.default_ttl,
                 json.dumps(response, ensure_ascii=False),
             )

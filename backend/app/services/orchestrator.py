@@ -662,6 +662,16 @@ class GatewayOrchestrator:
         # caller gets their own original PII back. Streaming still
         # bypasses the cache (no good way to replay an SSE stream).
         cache_messages = [m.model_dump() for m in messages_to_send]
+        # Defense-in-depth: when the profile uses RESTORE, scope the
+        # cache key per api_key_id so a detector miss (raw PII leaking
+        # into the "masked" response) cannot be replayed to a different
+        # user hitting the same prompt template. Non-RESTORE requests
+        # keep sharing the per-project cache across users.
+        cache_api_key_id = (
+            str(auth.key_id)
+            if (_profile_uses_restore(profile) and auth is not None)
+            else None
+        )
         cache_hit = None
         if not payload.stream:
             with record_phase("cache"), REDIS_COMMAND_DURATION.labels(
@@ -671,6 +681,7 @@ class GatewayOrchestrator:
                     model=route.model_name,
                     messages=cache_messages,
                     project_id=ctx.project_id,
+                    api_key_id=cache_api_key_id,
                 )
         if cache_hit is not None:
             total_ms = int((time.perf_counter() - t_start) * 1000)
@@ -1470,6 +1481,7 @@ class GatewayOrchestrator:
                 messages=cache_messages,
                 project_id=ctx.project_id,
                 response=cache_response,
+                api_key_id=cache_api_key_id,
             )
 
         # 13. Realtime AI review hook (fire-and-forget). Scans the raw
