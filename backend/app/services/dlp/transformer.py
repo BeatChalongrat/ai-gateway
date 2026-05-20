@@ -65,22 +65,22 @@ _DOUBLE_CLOSE_TOKEN_RE = re.compile(r"(?<!<)<(r[A-Za-z0-9_\-]+)>>")
 
 
 def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
-    """Replace ``<rN>`` tokens that survived ``restore`` and have no
-    entry in ``span_map`` with the literal string ``[REDACTED]``.
+    """Strip ``<rN>`` tokens that survived ``restore`` and have no
+    entry in ``span_map``.
 
     Runs in the orchestrator's success path AFTER ``restore`` so the
-    user-facing reply never carries an AI-hallucinated mask token.
-    The streaming path has its own equivalent inside
-    ``sanitize_hallucinated_brackets`` (which handles the
-    double-bracket variant); this helper is the single-bracket
-    counterpart for the non-streaming path.
+    user-facing reply never carries an AI-hallucinated mask token or
+    a leftover outbound-mask placeholder. Orphans are deleted (not
+    replaced with a literal like ``[REDACTED]``) because the value
+    is already gone from the text — surfacing a sentinel just
+    confuses the reader, while removing the token leaves natural
+    prose. The audit log (``dlp_orphan_redacted`` at the caller)
+    still records which tokens were dropped.
 
-    Why both: ``sanitize_hallucinated_brackets`` deliberately only
-    touches ``<<rN>>`` shapes because that pattern is the
-    model's way of escaping a real token. A bare ``<rN>`` in the
-    final response is something else entirely — the model invented
-    it from the placeholder grammar implied by the system prompt.
-    Those must be redacted, not unwrapped.
+    Whitespace cleanup runs only when at least one substitution
+    actually happened, so the common no-orphan path is a no-op and
+    pre-existing whitespace patterns in clean responses are
+    preserved verbatim.
 
     No-op when the text is empty or contains no ``<rN>`` tokens.
     """
@@ -91,9 +91,16 @@ def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
         token = m.group()
         if span_map and token in span_map:
             return token  # real binding — restore handled it
-        return "[REDACTED]"
+        return ""  # strip orphan silently
 
-    return _MASK_TOKEN_RE.sub(_replace, text)
+    result = _MASK_TOKEN_RE.sub(_replace, text)
+    if result != text:
+        # Collapse the double-spaces an interior strip leaves behind
+        # ("hello <r5> world" → "hello  world" → "hello world") and
+        # trim any leading/trailing whitespace from edge cases where
+        # the orphan was at the start or end of the text.
+        result = re.sub(r" {2,}", " ", result).strip()
+    return result
 
 
 def sanitize_hallucinated_brackets(text: str, span_map: dict[str, str]) -> str:
