@@ -93,6 +93,13 @@ from app.services.gateway.fallback_orchestrator import (
 
 logger = structlog.get_logger(__name__)
 
+# Counter-form ``<rN>`` token matcher. Used to recover the highest
+# numeric index from a vault snapshot so a fresh mask call starts at
+# ``max + 1`` instead of colliding with vault-owned slots. The token
+# emitter only uses digits in counter mode; legacy HMAC suffixes are
+# ignored here on purpose (they can't influence the next counter).
+_COUNTER_TOKEN_RE = re.compile(r"^<r(\d+)>$")
+
 
 def _profile_uses_restore(profile: PolicyProfile | None) -> bool:
     # Belt-and-suspenders cache gate. The match-level guards at the
@@ -392,26 +399,45 @@ class GatewayOrchestrator:
             )
 
         # 4. Transform messages if needed (mask/redact)
-        # mask_messages returns indexed tokens ([EMAIL_0], [EMAIL_1], …), a
-        # span_map so we can restore them in the provider's response, and the
-        # per-detector counters as they stand after this call. The counters
-        # are threaded into any subsequent mask_text() so outbound indices
-        # continue where inbound left off — preventing an outbound [EMAIL_0]
-        # from clashing with an inbound [EMAIL_0] (which would make restore
-        # splice the user's own PII over the AI-generated value).
-        # Deterministic-tokenization opt-in: when the caller threads
-        # ``conversation_id`` through metadata, derive a stable HMAC
-        # key so the same PII value produces the same token across
-        # turns (and across detector invocations within a turn).
-        # Without ``conversation_id`` we fall through to legacy
-        # counter mode — keeps every pre-2026-05 test contract working.
+        # mask_messages returns indexed tokens (``<r0>``, ``<r1>``, …),
+        # a span_map so we can restore them in the provider's response,
+        # and the counter dict as it stands after this call. The counter
+        # is threaded into any subsequent mask_text() so outbound indices
+        # continue where inbound left off — preventing an outbound
+        # ``<r0>`` from clashing with an inbound ``<r0>``.
+        # Cross-turn determinism: when the caller threads
+        # ``conversation_id`` through metadata AND the vault is
+        # enabled, load any tokens minted on prior turns and pass
+        # them down as ``vault_reverse_map`` (value → prior token).
+        # The transformer reuses the prior ``<rN>`` for any value
+        # already in the map so ``alice@x.com`` keeps the same
+        # placeholder across turns. ``start_counters`` is primed past
+        # the highest vault index so freshly minted tokens skip over
+        # slots the vault already owns.
         conversation_id = payload.metadata.get("conversation_id")
-        conversation_key = None
-        if conversation_id and settings.dlp_enabled:
-            from app.services.dlp.transformer import _make_conversation_key
-            conversation_key = _make_conversation_key(
-                settings.dlp_hmac_key, conversation_id
+        conversation_key = None  # legacy parameter, retained for signature compat
+        vault_reverse_map: dict[str, str] = {}
+        inbound_start_counters: dict[str, int] | None = None
+        if (
+            conversation_id
+            and settings.dlp_enabled
+            and settings.dlp_conversation_vault_enabled
+        ):
+            from app.services.dlp.conversation_vault import conversation_vault
+            existing_vault = await conversation_vault.get_all_tokens_async(
+                conversation_id
             )
+            if existing_vault:
+                vault_reverse_map = {
+                    value: token for token, value in existing_vault.items()
+                }
+                max_idx = -1
+                for token in existing_vault.keys():
+                    m = _COUNTER_TOKEN_RE.match(token)
+                    if m:
+                        max_idx = max(max_idx, int(m.group(1)))
+                if max_idx >= 0:
+                    inbound_start_counters = {"__global__": max_idx + 1}
 
         messages_to_send = list(payload.messages)
         span_map: dict[str, str] = {}
@@ -421,15 +447,20 @@ class GatewayOrchestrator:
                 payload.messages,
                 input_enforcement.match_actions,
                 conversation_key=conversation_key,
+                start_counters=inbound_start_counters,
+                vault_reverse_map=vault_reverse_map or None,
             )
 
         # Cross-turn DLP vault: persist this turn's span_map to Redis
         # so the next turn's ``restore`` can resolve orphaned echoes
         # of these tokens. Pure best-effort — Redis outage means no
-        # carry-over, never a failed request.
+        # carry-over, never a failed request. Uses the async variant
+        # because the orchestrator runs inside the FastAPI event loop;
+        # the sync ``run_sync`` bridge would fail with a different-loop
+        # error here.
         if conversation_id and span_map and settings.dlp_conversation_vault_enabled:
             from app.services.dlp.conversation_vault import conversation_vault
-            conversation_vault.extend(conversation_id, span_map)
+            await conversation_vault.extend_async(conversation_id, span_map)
 
         # 4a. Inject a system prompt explaining DLP placeholders so the
         # model doesn't refuse masked messages. Gated on the inbound
@@ -1068,6 +1099,7 @@ class GatewayOrchestrator:
                     response_enforcement.match_actions,
                     start_counters=inbound_counters,
                     conversation_key=conversation_key,
+                    vault_reverse_map=vault_reverse_map or None,
                 )
                 # Outbound tokens are intentionally NOT merged into
                 # the inbound ``span_map``: the restore step below
@@ -1084,7 +1116,7 @@ class GatewayOrchestrator:
                     from app.services.dlp.conversation_vault import (
                         conversation_vault,
                     )
-                    conversation_vault.extend(
+                    await conversation_vault.extend_async(
                         conversation_id, outbound_span_map
                     )
 
@@ -1144,6 +1176,7 @@ class GatewayOrchestrator:
                     response_enforcement.match_actions,
                     start_counters=inbound_counters,
                     conversation_key=conversation_key,
+                    vault_reverse_map=vault_reverse_map or None,
                 )
 
         # P3 — orphan-token sanitiser. After ALL legitimate masking
