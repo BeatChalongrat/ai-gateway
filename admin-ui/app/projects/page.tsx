@@ -46,7 +46,7 @@ const CSS = `
   animation:pjFadeUp 0.4s ease-out both;
   transition:transform 0.25s ease,box-shadow 0.25s ease,border-color 0.25s ease;
 }
-.pj-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,0.1);border-color:${T.bm}}
+.pj-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,0.1);border-color:var(--border-strong)}
 .pj-card .pj-card-acts{opacity:0;transform:translateY(4px);transition:opacity 0.2s ease,transform 0.2s ease}
 .pj-card:hover .pj-card-acts{opacity:1;transform:translateY(0)}
 .pj-table{width:100%;border-collapse:collapse}
@@ -184,7 +184,7 @@ export default function ProjectsPage() {
           {/* Donut */}
           <div style={{ position: "relative", width: 64, height: 64, flexShrink: 0 }}>
             <svg width="64" height="64" viewBox="0 0 64 64" style={{ transform: "rotate(-90deg)" }}>
-              <circle cx="32" cy="32" r={donutR} fill="none" stroke="#f0f2f5" strokeWidth="6" />
+              <circle cx="32" cy="32" r={donutR} fill="none" stroke="var(--bg-elevated)" strokeWidth="6" />
               <circle cx="32" cy="32" r={donutR} fill="none" stroke="#10b981" strokeWidth="6" strokeLinecap="round"
                 strokeDasharray={donutC} strokeDashoffset={donutOffset}
                 style={{ transition: "stroke-dashoffset 0.8s ease" } as any}
@@ -214,7 +214,7 @@ export default function ProjectsPage() {
             <div style={{ display: "flex", alignItems: "center" }}>
               {uniqueTenants.map(([tid, name], i) => (
                 <div key={tid} title={name} style={{
-                  width: 30, height: 30, borderRadius: "50%", border: "2px solid white",
+                  width: 30, height: 30, borderRadius: "50%", border: "2px solid var(--bg-surface)",
                   background: colorFor("", i), color: "white", fontSize: 11, fontWeight: 700,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   marginLeft: i === 0 ? 0 : -8, zIndex: uniqueTenants.length - i,
@@ -294,7 +294,7 @@ export default function ProjectsPage() {
               <button key={v} onClick={() => setView(v)} style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 28, height: 24, borderRadius: 4, border: "none", cursor: "pointer",
-                background: view === v ? "white" : "transparent",
+                background: view === v ? "var(--bg-surface)" : "transparent",
                 boxShadow: view === v ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
                 color: view === v ? T.tp : T.tt, transition: "all 100ms",
               }}>
@@ -385,10 +385,14 @@ export default function ProjectsPage() {
                   </div>
                 </div>
 
-                {/* Hover actions */}
+                {/* Hover actions — gradient uses the theme surface
+                    colour so the bottom fade stays readable on both
+                    light and dark themes (was hardcoded white before,
+                    which painted dark-theme cards white and hid the
+                    action button text). */}
                 <div className="pj-card-acts" style={{
                   position: "absolute", bottom: 0, left: 0, right: 0,
-                  background: "linear-gradient(transparent, rgba(255,255,255,0.95) 40%)",
+                  background: "linear-gradient(transparent, var(--bg-surface) 40%)",
                   padding: "32px 22px 16px", display: "flex", gap: 8, justifyContent: "center",
                 }} onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => setSelected(p)} style={{
