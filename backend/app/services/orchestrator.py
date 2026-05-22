@@ -1190,6 +1190,162 @@ class GatewayOrchestrator:
                     vault_reverse_map=vault_reverse_map or None,
                 )
 
+        # 8d. Tool-call argument DLP. Function-calling responses
+        # (commits cd7e8d8, 6cf7752) carry their payload in
+        # ``provider_response.tool_calls[*].function.arguments`` as a
+        # JSON string rather than in ``content``. The outbound text
+        # scan above (sections 8 / 8c) never sees those bytes, so
+        # without this pass an AI that puts a customer's email or
+        # credit card into a ``send_email`` / ``charge`` call would
+        # leak to the client.
+        #
+        # Each argument string is scanned with the same outbound
+        # detectors used for ``response_content`` (NER off — the same
+        # Thai-NER false-positive rationale applies). When sensitive
+        # data is found:
+        #   - block: raise DLPViolationError, same as section 8;
+        #     persist a BLOCKED row first so the dashboard shows the
+        #     tool-call attempt and what category fired.
+        #   - mask: rewrite the arguments string in place. Mask
+        #     tokens (``<rN>``) are valid inside a JSON string value,
+        #     so the resulting JSON stays parseable on the client.
+        #
+        # ``final_tool_calls`` is the post-mask payload threaded into
+        # the response builder + cache write below. None when the
+        # provider didn't return any tool_calls — backward-compatible
+        # with plain text responses.
+        final_tool_calls: list[dict] | None = None
+        if (
+            provider_response.tool_calls
+            and settings.dlp_enabled
+            and settings.dlp_scan_responses
+            and profile.scan_responses
+        ):
+            final_tool_calls = []
+            tool_call_block_reasons: list = []
+            for tc in provider_response.tool_calls:
+                # Shallow copy so we can rewrite ``function.arguments``
+                # without mutating the frozen provider_response dataclass.
+                new_tc = dict(tc) if isinstance(tc, dict) else {}
+                fn = dict(new_tc.get("function") or {})
+                args_str = fn.get("arguments", "") or ""
+                if not args_str:
+                    new_tc["function"] = fn
+                    final_tool_calls.append(new_tc)
+                    continue
+                arg_detection = self._scan_text_as_result(
+                    args_str, direction="output", ner_enabled=False,
+                )
+                arg_enforcement = self._scan_and_evaluate(
+                    arg_detection, pre_restore_profile
+                )
+                if arg_enforcement.is_blocked:
+                    # Collect all blocked tool_call enforcements so we
+                    # raise once with the full set of categories that
+                    # tripped, rather than failing on the first one
+                    # and hiding the rest from the audit row.
+                    tool_call_block_reasons.append(arg_enforcement)
+                    continue
+                if arg_enforcement.requires_transformation:
+                    masked_args, outbound_arg_span_map, _ = self.transformer.mask_text(
+                        args_str,
+                        arg_enforcement.match_actions,
+                        start_counters=inbound_counters,
+                        conversation_key=conversation_key,
+                        vault_reverse_map=vault_reverse_map or None,
+                    )
+                    fn["arguments"] = masked_args
+                    log.info(
+                        "dlp_tool_call_arguments_masked",
+                        tool_call_id=new_tc.get("id"),
+                        tool_name=fn.get("name"),
+                        findings=len(arg_enforcement.match_actions),
+                        categories=sorted(
+                            {ma.match.category for ma in arg_enforcement.match_actions}
+                        ),
+                    )
+                    # Outbound vault extend — mirrors section 8 so an
+                    # audit query can still resolve the masked values.
+                    if (
+                        conversation_id
+                        and outbound_arg_span_map
+                        and settings.dlp_conversation_vault_enabled
+                    ):
+                        from app.services.dlp.conversation_vault import (
+                            conversation_vault,
+                        )
+                        await conversation_vault.extend_async(
+                            conversation_id, outbound_arg_span_map
+                        )
+                new_tc["function"] = fn
+                final_tool_calls.append(new_tc)
+
+            if tool_call_block_reasons:
+                # Aggregate categories + findings across every blocked
+                # tool call so the single DLPViolationError carries the
+                # full picture (same shape as the section 8 block).
+                all_match_actions: list = []
+                for e in tool_call_block_reasons:
+                    all_match_actions.extend(e.match_actions)
+                aggregated = EnforcementDecision(
+                    match_actions=all_match_actions,
+                    policy_profile_id=profile.profile_id,
+                )
+                if session is not None:
+                    from app.domain.observability import RequestRecord, RequestStatus
+                    try:
+                        self.request_log_service.persist(
+                            session,
+                            RequestRecord(
+                                request_id=request_id,
+                                tenant_id=ctx.tenant_id,
+                                project_id=ctx.project_id,
+                                provider=route.provider_name,
+                                model=route.model_name,
+                                status=RequestStatus.BLOCKED,
+                                policy_action="block",
+                                policy_profile_id=profile.profile_id,
+                                latency_ms=int((time.perf_counter() - t_start) * 1000),
+                                prompt_tokens=usage.prompt_tokens if usage else 0,
+                                completion_tokens=usage.completion_tokens if usage else 0,
+                                total_tokens=usage.total_tokens if usage else 0,
+                                estimated_cost_usd=usage.estimated_cost_usd if usage else 0.0,
+                                error_code="dlp_violation",
+                                input_raw=safe_input_snapshot(
+                                    input_raw, input_masked, input_enforcement
+                                ),
+                                input_masked=safe_input_masked_snapshot(
+                                    input_masked, input_enforcement
+                                ),
+                                input_raw_encrypted=input_raw_encrypted,
+                                output_raw="[BLOCKED_BY_DLP_TOOL_ARGS]",
+                                dlp_findings_json=build_dlp_findings_json(
+                                    input_enforcement.match_actions,
+                                    all_match_actions,
+                                    span_map=span_map,
+                                ),
+                            ),
+                        )
+                        session.commit()
+                    except Exception as exc:
+                        log.warning("dlp_block_log_persist_failed", error=str(exc))
+                self.audit_service.record_blocked_request(
+                    ctx=ctx, enforcement=aggregated, direction="output",
+                )
+                raise DLPViolationError(
+                    "Response blocked by DLP policy — tool_call arguments contained sensitive data.",
+                    details={
+                        "action": "block",
+                        "policy_profile": aggregated.policy_profile_id,
+                        "categories": sorted(
+                            {ma.match.category.upper() for ma in all_match_actions}
+                        ),
+                        "findings_count": len(all_match_actions),
+                        "direction": "output",
+                        "location": "tool_calls.arguments",
+                    },
+                )
+
         # P3 — orphan-token sanitiser. After ALL legitimate masking
         # (sections 8 + 8c) and restore (8b), any ``<rN>`` left in
         # ``response_content`` that isn't in the inbound ``span_map``
@@ -1437,6 +1593,15 @@ class GatewayOrchestrator:
         # usually ~0.1ms but non-zero, which is the whole reason the
         # phase table needs its own bucket.
         with record_phase("response_assembly"):
+            # ``final_tool_calls`` comes from section 8d (the
+            # tool-arg DLP pass). It is None when DLP was disabled
+            # or the response carried no tool_calls — fall back to
+            # the raw provider value so a non-DLP path is unaffected.
+            response_tool_calls = (
+                final_tool_calls
+                if final_tool_calls is not None
+                else provider_response.tool_calls
+            )
             response = ChatCompletionsResponse(
                 id=request_id,
                 model=route.model_name,
@@ -1452,7 +1617,7 @@ class GatewayOrchestrator:
                             # is decorated with
                             # response_model_exclude_none=True so the
                             # field doesn't appear on the wire then.
-                            tool_calls=provider_response.tool_calls,
+                            tool_calls=response_tool_calls,
                         ),
                     )
                 ],
