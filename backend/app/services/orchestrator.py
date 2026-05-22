@@ -1447,6 +1447,12 @@ class GatewayOrchestrator:
                         message=Message(
                             role="assistant",
                             content=response_content,
+                            # Function-calling passthrough. None when
+                            # the model returned plain text; the route
+                            # is decorated with
+                            # response_model_exclude_none=True so the
+                            # field doesn't appear on the wire then.
+                            tool_calls=provider_response.tool_calls,
                         ),
                     )
                 ],

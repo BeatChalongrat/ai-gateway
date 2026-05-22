@@ -1,10 +1,34 @@
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Message(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str
+    # "tool" is required for function-calling round-trips: the client
+    # sends the result of a previously-requested tool_call back to the
+    # model as role="tool" with a matching tool_call_id.
+    role: Literal["system", "user", "assistant", "tool"]
+    # Optional because an assistant message that returns tool_calls
+    # may have content=null per the OpenAI spec. Downstream code that
+    # reads .content already isinstance-checks for str (DLP scanners,
+    # observability snapshots) so a None here doesn't crash.
+    content: Optional[str] = None
+    # OpenAI function-calling passthrough. Each entry mirrors the
+    # OpenAI tool_call shape:
+    #   {"id": str, "type": "function",
+    #    "function": {"name": str, "arguments": str}}
+    tool_calls: Optional[List[dict]] = None
+    # Set on role="tool" messages so the model can match the result
+    # back to the call it requested.
+    tool_call_id: Optional[str] = None
+    # Function/tool name for role="tool" messages.
+    name: Optional[str] = None
+
+    # Suppress None-valued tool fields in serialisation so a plain
+    # chat message doesn't gain `"tool_calls": null` noise. The route
+    # also sets response_model_exclude_none=True for belt-and-braces.
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Chat message"},
+    )
 
 
 class UsageInfo(BaseModel):
