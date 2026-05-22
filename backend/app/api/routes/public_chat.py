@@ -687,6 +687,17 @@ async def chat_completions(
         final_model: str = route.model_name
         provider_usage = None
 
+        # Per-request tool_call argument accumulator. Keyed by the
+        # tool_call index we forward to the client. Each entry tracks
+        # {id, name, args} so the post-stream DLP pass can scan the
+        # complete arguments string once the stream closes. We cannot
+        # mask retroactively (bytes already on the wire), so this is
+        # an audit-only pass — findings are logged for governance, the
+        # client still receives the unmasked stream. The non-streaming
+        # path in orchestrator.py section 8d DOES mask before
+        # returning; the asymmetry is documented there.
+        _streaming_tool_call_args: dict[int, dict] = {}
+
         def _dlp_scan_and_mask(
             text: str,
         ) -> tuple[str, list]:
@@ -931,6 +942,29 @@ async def chat_completions(
                     if chunk.tool_calls:
                         yield _emit_tool_calls_chunk(chunk.tool_calls)
                         first_chunk_yielded = True
+                        # Feed each fragment into the per-request
+                        # accumulator. First chunk for an index carries
+                        # id + function.name; later chunks may only
+                        # carry function.arguments fragments. The
+                        # buffered string is DLP-scanned once the
+                        # stream finishes (see post-loop block).
+                        for _tc in chunk.tool_calls:
+                            if not isinstance(_tc, dict):
+                                continue
+                            _idx = _tc.get("index")
+                            if _idx is None:
+                                continue
+                            _bucket = _streaming_tool_call_args.setdefault(
+                                _idx, {"id": "", "name": "", "args": ""}
+                            )
+                            if _tc.get("id"):
+                                _bucket["id"] = _tc["id"]
+                            _fn = _tc.get("function") or {}
+                            if _fn.get("name"):
+                                _bucket["name"] = _fn["name"]
+                            _arg_fragment = _fn.get("arguments")
+                            if isinstance(_arg_fragment, str) and _arg_fragment:
+                                _bucket["args"] += _arg_fragment
 
                     if chunk.model:
                         final_model = chunk.model
@@ -1053,6 +1087,56 @@ async def chat_completions(
             if final_emit:
                 emitted_parts.append(final_emit)
                 yield _emit_chunk(final_emit)
+
+        # Tool-call argument DLP — streaming, audit-only. The complete
+        # arguments string for each tool_call is scanned once the
+        # stream closes. Bytes are already on the wire so we cannot
+        # mask retroactively; findings are surfaced as a warning-level
+        # log line for SIEM / governance pipelines. Both the
+        # categories and the tool_call id/name are recorded so an
+        # operator can trace the leak back to the originating call.
+        # The non-streaming counterpart (orchestrator.py section 8d)
+        # masks instead of audit-logging — only because it has the
+        # full payload before any byte leaves the gateway.
+        if (
+            _streaming_tool_call_args
+            and settings.dlp_enabled
+            and settings.dlp_scan_responses
+            and profile.scan_responses
+        ):
+            for _idx, _bucket in _streaming_tool_call_args.items():
+                _args = _bucket.get("args") or ""
+                if not _args:
+                    continue
+                try:
+                    _arg_detection = orchestrator._scan_text_as_result(
+                        _args, direction="output", ner_enabled=False,
+                    )
+                    _arg_enforcement = orchestrator._scan_and_evaluate(
+                        _arg_detection, pre_restore_profile
+                    )
+                except Exception as _scan_exc:
+                    log.warning(
+                        "dlp_tool_call_streaming_scan_failed",
+                        error=str(_scan_exc)[:200],
+                        tool_call_id=_bucket.get("id"),
+                    )
+                    continue
+                if _arg_enforcement.match_actions:
+                    accumulated_outbound_actions.extend(
+                        _arg_enforcement.match_actions
+                    )
+                    log.warning(
+                        "dlp_tool_call_arguments_audit_streaming",
+                        tool_call_id=_bucket.get("id"),
+                        tool_name=_bucket.get("name"),
+                        action=_arg_enforcement.overall_action.name.lower(),
+                        findings=len(_arg_enforcement.match_actions),
+                        categories=sorted(
+                            {ma.match.category for ma in _arg_enforcement.match_actions}
+                        ),
+                        note="streaming — arguments already emitted; can't mask retroactively",
+                    )
 
         # Capture DLP trace + build the response-enforcement summary
         # from the per-chunk match actions we accumulated. overall_action
