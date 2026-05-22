@@ -23,6 +23,7 @@ Run with audit env overrides:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import uuid
 
@@ -254,19 +255,39 @@ def seed_token_packs(session):
 
 
 def seed_admin_user(session):
-    """Seed the default admin user so /auth/login is usable."""
+    """Seed the default admin user so /auth/login is usable.
+
+    Reads INITIAL_ADMIN_PASSWORD from env. Outside of APP_ENV=development
+    the env var is required — refusing to seed with the hardcoded
+    "admin1234" in any other environment is what closed the production
+    incident where the demo credential survived deploy.
+    """
     import bcrypt
     from app.models.admin_user import AdminUserORM
+
+    app_env = os.environ.get("APP_ENV", "development").lower()
+    admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
+    if not admin_password:
+        if app_env != "development":
+            raise RuntimeError(
+                "INITIAL_ADMIN_PASSWORD is required when APP_ENV != "
+                "'development'. Generate one with `openssl rand -base64 24` "
+                "and set it in .env before running the seed."
+            )
+        admin_password = "admin1234"
+    admin_username = os.environ.get("INITIAL_ADMIN_USERNAME", "admin")
+    admin_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@audit.test")
+
     existing = session.execute(
-        select(AdminUserORM).where(AdminUserORM.username == "admin")
+        select(AdminUserORM).where(AdminUserORM.username == admin_username)
     ).scalar_one_or_none()
     if existing is not None:
         return False
-    hashed = bcrypt.hashpw("admin1234".encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
+    hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
     session.add(AdminUserORM(
         id=str(uuid.uuid4()),
-        username="admin",
-        email="admin@audit.test",
+        username=admin_username,
+        email=admin_email,
         hashed_password=hashed,
         role="super_admin",
         is_active=True,
