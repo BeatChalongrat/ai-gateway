@@ -165,51 +165,130 @@ function IconGitMerge() {
   );
 }
 
+// Stat-tile glyphs (16px). Stroke uses currentColor so the icon picks
+// up the per-tile accent shade set on its container.
+function IconChartBar() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="20" x2="12" y2="10" />
+      <line x1="18" y1="20" x2="18" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="16" />
+    </svg>
+  );
+}
+
+function IconCpu() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+      <rect x="9" y="9" width="6" height="6" />
+      <line x1="9" y1="1" x2="9" y2="4" />
+      <line x1="15" y1="1" x2="15" y2="4" />
+      <line x1="9" y1="20" x2="9" y2="23" />
+      <line x1="15" y1="20" x2="15" y2="23" />
+      <line x1="20" y1="9" x2="23" y2="9" />
+      <line x1="20" y1="14" x2="23" y2="14" />
+      <line x1="1" y1="9" x2="4" y2="9" />
+      <line x1="1" y1="14" x2="4" y2="14" />
+    </svg>
+  );
+}
+
+function IconCircleCheck() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="9 12 12 15 16 10" />
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Stat sub-component — flat label / value, no icon. Surface-2 background,
-// no border, matches the rest of the dashboard's "secondary card" look.
+// Stat sub-component — icon + value + label, with a bottom accent line
+// in the tile's accent colour. Card surface + thin border for the
+// "premium" depth treatment (was flat secondary-surface before).
 // ---------------------------------------------------------------------------
 
 function StatTile({
+  icon,
   label,
   value,
+  accentColor,
+  iconBg,
+  iconColor,
   loading,
 }: {
+  icon: React.ReactNode;
   label: string;
   value: string;
+  accentColor: string;
+  iconBg: string;
+  iconColor: string;
   loading?: boolean;
 }) {
   return (
     <div
       style={{
-        padding: "0.875rem 1.125rem",
-        background: "var(--color-bg-surface-2)",
-        borderRadius: "var(--radius-md)",
+        position: "relative",
+        overflow: "hidden",
+        padding: "1rem 1.125rem",
+        background: "var(--color-bg-surface)",
+        border: "0.5px solid var(--color-border-default)",
+        borderRadius: "var(--radius-lg)",
       }}
     >
+      {/* Icon — accent-tinted square sitting above the number. */}
       <div
         style={{
-          fontSize: "13px",
-          color: "var(--color-text-muted)",
-          marginBottom: "0.25rem",
+          width: 32,
+          height: 32,
+          borderRadius: 8,
+          background: iconBg,
+          color: iconColor,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 12,
         }}
       >
-        {label}
+        {icon}
       </div>
       {loading ? (
-        <div className="sran-skeleton" style={{ width: "60%", height: "24px" }} />
+        <div className="sran-skeleton" style={{ width: "60%", height: "28px" }} />
       ) : (
         <div
           style={{
-            fontSize: "24px",
+            fontSize: "28px",
             fontWeight: 500,
             color: "var(--color-text-primary)",
             lineHeight: 1.1,
+            fontVariantNumeric: "tabular-nums",
           }}
         >
           {value}
         </div>
       )}
+      <div
+        style={{
+          fontSize: "12px",
+          color: "var(--color-text-muted)",
+          marginTop: 6,
+        }}
+      >
+        {label}
+      </div>
+      {/* 2px accent line at the bottom — fades to transparent so it
+          reads as a subtle highlight rather than a hard border. */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 2,
+          background: `linear-gradient(90deg, ${accentColor}, transparent)`,
+        }}
+      />
     </div>
   );
 }
@@ -221,15 +300,18 @@ function StatTile({
 function ModelRow({
   model,
   count,
+  totalRequests,
   index,
   isLast,
 }: {
   model: string;
   count: number;
+  totalRequests: number;
   index: number;
   isLast: boolean;
 }) {
   const dotColor = MODEL_DOT_COLORS[index % MODEL_DOT_COLORS.length];
+  const pct = totalRequests > 0 ? Math.round((count / totalRequests) * 100) : 0;
   return (
     <div
       style={{
@@ -263,9 +345,21 @@ function ModelRow({
       </code>
       <span
         style={{
-          fontSize: "var(--font-size-sm)",
-          color: "var(--color-text-secondary)",
+          fontSize: "11px",
+          color: "var(--color-text-muted)",
           fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {pct}%
+      </span>
+      <span
+        style={{
+          fontSize: "var(--font-size-sm)",
+          color: "var(--color-text-primary)",
+          fontWeight: 600,
+          fontVariantNumeric: "tabular-nums",
+          minWidth: "2.5ch",
+          textAlign: "right",
         }}
       >
         {count.toLocaleString()}
@@ -285,7 +379,7 @@ function RouterRow({
   maxCount: number;
   isLast: boolean;
 }) {
-  const barWidth = maxCount > 0 ? Math.max(2, Math.round((count / maxCount) * 60)) : 0;
+  const barWidth = maxCount > 0 ? Math.max(2, Math.round((count / maxCount) * 80)) : 0;
   return (
     <div
       style={{
@@ -308,10 +402,11 @@ function RouterRow({
       </span>
       <div
         style={{
-          width: 60,
-          height: 4,
+          width: 80,
+          height: 5,
           background: "var(--color-bg-surface-2)",
-          borderRadius: 2,
+          opacity: 0.6,
+          borderRadius: 3,
           overflow: "hidden",
           flexShrink: 0,
         }}
@@ -321,13 +416,15 @@ function RouterRow({
             width: `${barWidth}px`,
             height: "100%",
             background: "var(--color-sran-600)",
+            borderRadius: 3,
           }}
         />
       </div>
       <span
         style={{
           fontSize: "var(--font-size-sm)",
-          color: "var(--color-text-secondary)",
+          color: "var(--color-text-primary)",
+          fontWeight: 600,
           fontVariantNumeric: "tabular-nums",
           minWidth: "2.5ch",
           textAlign: "right",
@@ -415,11 +512,35 @@ function RoutingStatsSection() {
         </button>
       </div>
 
-      {/* Stat tiles — flat, no icons */}
+      {/* Stat tiles — accent icon + bottom gradient line per tile. */}
       <div className="routing-metrics-grid" style={{ marginBottom: "1.5rem" }}>
-        <StatTile label="Requests" value={loading ? "—" : totalRequests.toLocaleString()} loading={loading} />
-        <StatTile label="Active models" value={loading ? "—" : activeModels.toString()} loading={loading} />
-        <StatTile label="Success rate" value={loading ? "—" : successRate} loading={loading} />
+        <StatTile
+          icon={<IconChartBar />}
+          label="Requests"
+          value={loading ? "—" : totalRequests.toLocaleString()}
+          accentColor="#534AB7"
+          iconBg="rgba(83, 74, 183, 0.12)"
+          iconColor="#7F77DD"
+          loading={loading}
+        />
+        <StatTile
+          icon={<IconCpu />}
+          label="Active models"
+          value={loading ? "—" : activeModels.toString()}
+          accentColor="#1D9E75"
+          iconBg="rgba(29, 158, 117, 0.12)"
+          iconColor="#5DCAA5"
+          loading={loading}
+        />
+        <StatTile
+          icon={<IconCircleCheck />}
+          label="Success rate"
+          value={loading ? "—" : successRate}
+          accentColor="#378ADD"
+          iconBg="rgba(55, 138, 221, 0.12)"
+          iconColor="#85B7EB"
+          loading={loading}
+        />
       </div>
 
       {/* Breakdown rows */}
@@ -427,13 +548,27 @@ function RoutingStatsSection() {
         <div className="routing-charts-grid">
           <div>
             <SectionLabel>By model</SectionLabel>
-            <div className="sran-card" style={{ padding: "1.25rem" }}>
+            <div
+              style={{
+                padding: "1.25rem",
+                background: "var(--color-bg-surface)",
+                border: "0.5px solid var(--color-border-default)",
+                borderRadius: "var(--radius-lg)",
+              }}
+            >
               <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
             </div>
           </div>
           <div>
             <SectionLabel>By router</SectionLabel>
-            <div className="sran-card" style={{ padding: "1.25rem" }}>
+            <div
+              style={{
+                padding: "1.25rem",
+                background: "var(--color-bg-surface)",
+                border: "0.5px solid var(--color-border-default)",
+                borderRadius: "var(--radius-lg)",
+              }}
+            >
               <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
             </div>
           </div>
@@ -464,7 +599,14 @@ function RoutingStatsSection() {
         <div className="routing-charts-grid">
           <div>
             <SectionLabel>By model</SectionLabel>
-            <div className="sran-card" style={{ padding: "0.25rem 0" }}>
+            <div
+              style={{
+                padding: "0.25rem 0",
+                background: "var(--color-bg-surface)",
+                border: "0.5px solid var(--color-border-default)",
+                borderRadius: "var(--radius-lg)",
+              }}
+            >
               {(data?.models ?? []).length === 0 ? (
                 <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
                   No model data
@@ -475,6 +617,7 @@ function RoutingStatsSection() {
                     key={m.model || `unknown-${i}`}
                     model={m.model}
                     count={m.count}
+                    totalRequests={totalRequests}
                     index={i}
                     isLast={i === arr.length - 1}
                   />
@@ -484,7 +627,14 @@ function RoutingStatsSection() {
           </div>
           <div>
             <SectionLabel>By router</SectionLabel>
-            <div className="sran-card" style={{ padding: "0.25rem 0" }}>
+            <div
+              style={{
+                padding: "0.25rem 0",
+                background: "var(--color-bg-surface)",
+                border: "0.5px solid var(--color-border-default)",
+                borderRadius: "var(--radius-lg)",
+              }}
+            >
               {(data?.routers ?? []).length === 0 ? (
                 <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
                   No router data
