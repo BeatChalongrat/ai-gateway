@@ -162,9 +162,20 @@ def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
         return None
 
     delta = choices[0].get("delta", {})
+    # Tool-call deltas: OpenAI streams the first chunk with
+    # ``[{index, id, type:"function", function:{name, arguments:""}}]``
+    # and follow-up chunks with ``[{index, function:{arguments:"…"}}]``
+    # appending to the JSON args. We forward each fragment verbatim so
+    # the route layer can re-emit it as an SSE delta — the client is
+    # responsible for stitching ``function.arguments`` together (same
+    # contract as a direct OpenAI stream). ``None`` when absent so a
+    # plain text chunk stays a plain text chunk.
+    raw_tool_calls = delta.get("tool_calls")
+    tool_calls = raw_tool_calls if isinstance(raw_tool_calls, list) and raw_tool_calls else None
     return ProviderStreamChunk(
-        delta=delta.get("content", ""),
+        delta=delta.get("content") or "",
         finish_reason=choices[0].get("finish_reason"),
         model=data.get("model", ""),
         usage=usage,
+        tool_calls=tool_calls,
     )
