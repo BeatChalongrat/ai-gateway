@@ -24,15 +24,19 @@ services:
       -c checkpoint_completion_target=0.9
       -c effective_cache_size=512MB
     environment:
-      POSTGRES_DB: ai_gateway
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # Dev fallback is the legacy "postgres" so `make up` keeps working
+      # on a clean checkout. Production MUST set POSTGRES_PASSWORD in
+      # .env (and docker-compose.prod.yml's binding to 127.0.0.1 keeps
+      # the port off the public interface either way).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -179,7 +183,7 @@ services:
       context: ./log-worker
     image: ai-gateway-log-worker:latest
     environment:
-      POSTGRES_DSN: "host=postgres port=5432 dbname=ai_gateway user=postgres password=postgres sslmode=disable"
+      POSTGRES_DSN: "host=postgres port=5432 dbname=${POSTGRES_DB:-ai_gateway} user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-postgres} sslmode=disable"
       GRPC_PORT: "50052"
       METRICS_PORT: "9100"
       BATCH_SIZE: ${LOG_WORKER_BATCH_SIZE:-100}
@@ -217,12 +221,12 @@ services:
       PYTHONIOENCODING: utf-8
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ai_gateway
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       # Phase-1 explicit pool sizing. 4 backend workers × (20+10) = 120
       # peak connections, well under Postgres max_connections=200 set
       # on the postgres service. db.py reads these at import time;
@@ -231,6 +235,10 @@ services:
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # Empty in dev (redis runs unauthenticated on the compose
+      # network). docker-compose.prod.yml sets this AND adds
+      # --requirepass on the redis service so both ends stay in sync.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-dev-stable-key-change-in-prod}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-dev-stable-key-change-in-prod}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}

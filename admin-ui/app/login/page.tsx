@@ -189,10 +189,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p style={{ textAlign: "center", fontSize: "0.68rem", color: "rgba(100,130,180,0.5)", marginTop: "1.5rem", letterSpacing: "0.04em" }}>
-          Demo: admin / admin1234
-        </p>
-        <p style={{ textAlign: "center", fontSize: "0.65rem", color: "rgba(80,110,160,0.4)", marginTop: "0.5rem", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        <p style={{ textAlign: "center", fontSize: "0.65rem", color: "rgba(80,110,160,0.4)", marginTop: "1.5rem", letterSpacing: "0.06em", textTransform: "uppercase" }}>
           SRAN AI Gateway v0.1.0
         </p>
       </div>

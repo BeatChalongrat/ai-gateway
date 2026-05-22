@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = "localhost"
     redis_port: int = 6379
+    # Empty = unauthenticated (dev default; matches the redis service
+    # in docker-compose.yml). docker-compose.prod.yml sets a value and
+    # adds --requirepass on the redis service. Folded into redis_url
+    # below as the AUTH segment.
+    redis_password: str = ""
 
     # Security — jwt_secret MUST be stable across restarts (not random)
     jwt_secret: str = "change-me"
@@ -295,6 +300,9 @@ class Settings(BaseSettings):
 
     @property
     def redis_url(self) -> str:
+        if self.redis_password:
+            from urllib.parse import quote
+            return f"redis://:{quote(self.redis_password, safe='')}@{self.redis_host}:{self.redis_port}/0"
         return f"redis://{self.redis_host}:{self.redis_port}/0"
 
     @property
