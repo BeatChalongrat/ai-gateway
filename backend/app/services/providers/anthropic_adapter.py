@@ -299,17 +299,35 @@ class AnthropicAdapter(BaseProviderAdapter):
         - ``final_model`` — from ``message_start.message.model``
         - ``final_stop`` — from ``message_delta.delta.stop_reason``
           (translated via ``_STOP_REASON_MAP``)
+        - ``tool_use_indices`` — set of content-block indices that
+          were registered as ``tool_use`` by a prior
+          ``content_block_start``. Used to distinguish
+          ``input_json_delta`` events belonging to a tool_use from
+          stray ones, and to translate Anthropic's per-content-block
+          ``index`` into the OpenAI tool_calls delta shape.
 
-        Per-token text deltas are yielded as they arrive. The final
-        chunk carries finish_reason + usage and is emitted on
-        ``message_stop`` so downstream code can record token counts
-        even when Anthropic emits them split across events.
+        Text deltas and tool_use deltas are yielded as they arrive,
+        each in their own ProviderStreamChunk field (``delta`` /
+        ``tool_calls``). The downstream SSE emitter forwards each
+        independently — a single Anthropic response may interleave
+        text and tool_use content blocks, and the client merges them
+        by index per the OpenAI streaming contract.
+
+        The final chunk carries finish_reason + usage and is emitted
+        on ``message_stop`` so downstream code can record token
+        counts even when Anthropic emits them split across events.
         """
         current_event: str | None = None
         input_tokens = 0
         output_tokens = 0
         final_model = initial_model
         final_stop: str | None = None
+        # Per-response set of content-block indices we've seen
+        # registered as tool_use. Lets the input_json_delta branch
+        # safely distinguish "this fragment belongs to a tool call"
+        # from "stray delta we don't recognise" without re-checking
+        # the (possibly missing) content_block in the delta event.
+        tool_use_indices: set[int] = set()
 
         async for raw in lines:
             line = raw.rstrip("\r")
@@ -337,17 +355,72 @@ class AnthropicAdapter(BaseProviderAdapter):
                 output_tokens = int(usage.get("output_tokens", 0) or 0)
                 final_model = msg.get("model") or final_model
 
+            elif current_event == "content_block_start":
+                # First chunk for a tool_use block carries its id +
+                # name with an empty arguments string — mirrors the
+                # OpenAI streaming contract where the first
+                # tool_calls fragment introduces the call and later
+                # fragments append to function.arguments.
+                #
+                # The Anthropic "index" is the position of this
+                # content block inside the response (0 = first block,
+                # which is usually text; 1 = second; …). We pass it
+                # straight through as the OpenAI tool_calls index —
+                # the client merges fragments by index, so the actual
+                # numeric value doesn't have to start at zero.
+                block = data.get("content_block") or {}
+                if block.get("type") == "tool_use":
+                    idx = data.get("index", 0)
+                    tool_use_indices.add(idx)
+                    yield ProviderStreamChunk(
+                        model=final_model,
+                        tool_calls=[
+                            {
+                                "index": idx,
+                                "id": block.get("id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": block.get("name", ""),
+                                    "arguments": "",
+                                },
+                            }
+                        ],
+                    )
+
             elif current_event == "content_block_delta":
                 delta = data.get("delta") or {}
-                # v1 only supports text_delta. Tool-use and thinking
-                # blocks emit different delta shapes and are ignored
-                # here — a future revision can handle them.
-                if delta.get("type") == "text_delta":
+                delta_type = delta.get("type")
+                if delta_type == "text_delta":
                     text = delta.get("text") or ""
                     if text:
                         yield ProviderStreamChunk(
                             delta=text, model=final_model
                         )
+                elif delta_type == "input_json_delta":
+                    # Tool-use arguments stream as raw partial JSON
+                    # fragments. We forward each fragment under
+                    # function.arguments — the client is responsible
+                    # for stitching them into a complete JSON string
+                    # (same contract as an OpenAI tool_calls stream).
+                    idx = data.get("index", 0)
+                    if idx not in tool_use_indices:
+                        # No matching content_block_start for this
+                        # index — drop the fragment defensively
+                        # rather than emit an orphan tool_calls
+                        # entry without an id/name introducer.
+                        continue
+                    partial = delta.get("partial_json")
+                    if not partial:
+                        continue
+                    yield ProviderStreamChunk(
+                        model=final_model,
+                        tool_calls=[
+                            {
+                                "index": idx,
+                                "function": {"arguments": partial},
+                            }
+                        ],
+                    )
 
             elif current_event == "message_delta":
                 delta = data.get("delta") or {}
@@ -360,8 +433,8 @@ class AnthropicAdapter(BaseProviderAdapter):
 
             elif current_event == "message_stop":
                 # Final chunk: finish_reason + usage. Emitted even
-                # when text deltas already yielded so downstream can
-                # attach token counts to this request.
+                # when text / tool_use deltas already yielded so
+                # downstream can attach token counts to this request.
                 yield ProviderStreamChunk(
                     delta="",
                     finish_reason=final_stop or "stop",
@@ -373,11 +446,11 @@ class AnthropicAdapter(BaseProviderAdapter):
                     ),
                 )
 
-            # ping / content_block_start / content_block_stop / error /
-            # unknown → deliberate no-op. ping is a keepalive; the
-            # block start/stop events carry no text; unknown events
-            # are forward-compatibility fodder (new event types added
-            # by Anthropic must not crash the adapter).
+            # ping / content_block_stop / error / unknown → deliberate
+            # no-op. ping is a keepalive; content_block_stop carries
+            # no payload our state machine needs (the message_delta
+            # event's stop_reason is the authoritative finish signal);
+            # unknown events are forward-compatibility fodder.
 
     @staticmethod
     def _split_system(
