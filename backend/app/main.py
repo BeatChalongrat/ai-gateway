@@ -143,12 +143,38 @@ async def lifespan(app: FastAPI):
 
 
 def _seed_admin_user() -> None:
-    """Sync function — runs in a thread via asyncio.to_thread."""
+    """Sync function — runs in a thread via asyncio.to_thread.
+
+    Auto-seeds an admin row on first boot of an empty DB so a fresh
+    `docker compose up` is usable without a separate `make seed`.
+
+    Outside of APP_ENV=development this is gated on
+    INITIAL_ADMIN_PASSWORD being set in the environment. If it's not
+    set we skip seeding — the operator must run `make seed`
+    explicitly with the env populated, which raises a clearer error.
+    Refusing to silently plant a weak credential is what closed the
+    production incident where `admin/admin1234` survived deploy.
+    """
+    import os
     import uuid
     import bcrypt
     from sqlalchemy import select
     from app.core.db import SessionLocal
     from app.models.admin_user import AdminUserORM
+
+    app_env = os.environ.get("APP_ENV", "development").lower()
+    admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
+    if not admin_password:
+        if app_env != "development":
+            print(
+                "[startup] Admin auto-seed skipped: INITIAL_ADMIN_PASSWORD "
+                "not set and APP_ENV != 'development'. Run `make seed` "
+                "with INITIAL_ADMIN_PASSWORD in the environment."
+            )
+            return
+        admin_password = "admin1234"
+    admin_username = os.environ.get("INITIAL_ADMIN_USERNAME", "admin")
+    admin_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@example.com")
 
     session = SessionLocal()
     try:
@@ -158,18 +184,20 @@ def _seed_admin_user() -> None:
         if existing is not None:
             return
 
-        hashed = bcrypt.hashpw(b"admin1234", bcrypt.gensalt()).decode("utf-8")
+        hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         admin = AdminUserORM(
             id=str(uuid.uuid4()),
-            username="admin",
-            email="admin@example.com",
+            username=admin_username,
+            email=admin_email,
             hashed_password=hashed,
             role="admin",
             is_active=True,
         )
         session.add(admin)
         session.commit()
-        print("[startup] Seeded default admin user: admin / admin1234")
+        # Never log the password — print only that the seed happened so
+        # ops know a fresh DB was just populated.
+        print(f"[startup] Seeded default admin user: {admin_username}")
     except Exception as e:
         session.rollback()
         print(f"[startup] Admin seed skipped: {e}")
