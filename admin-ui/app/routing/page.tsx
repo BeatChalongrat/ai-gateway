@@ -67,6 +67,11 @@ const EMPTY_FORM: KeywordRuleForm = {
   enabled: true,
 };
 
+// Cycle palette for "By model" row dots — first row purple, second teal,
+// then repeats. Kept short and explicit; the visual job here is "tell
+// these apart at a glance", not encode a meaning.
+const MODEL_DOT_COLORS = ["#534AB7", "#1D9E75"];
+
 function scopeBadgeVariant(scope: KeywordScope): "neutral" | "info" | "warning" {
   if (scope === "tenant") return "info";
   if (scope === "project") return "warning";
@@ -121,33 +126,6 @@ function IconRotateCw({ spinning = false }: { spinning?: boolean }) {
   );
 }
 
-function IconBarChart3() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 3v18h18" />
-      <path d="M18 17V9" />
-      <path d="M13 17V5" />
-      <path d="M8 17v-3" />
-    </svg>
-  );
-}
-
-function IconActivity() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-    </svg>
-  );
-}
-
-function IconZap() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  );
-}
-
 function IconPlus() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -177,105 +155,204 @@ function IconTrash2() {
   );
 }
 
-function IconShuffle() {
+function IconGitMerge() {
   return (
-    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="16 3 21 3 21 8" />
-      <line x1="4" y1="20" x2="21" y2="3" />
-      <polyline points="21 16 21 21 16 21" />
-      <line x1="15" y1="15" x2="21" y2="21" />
-      <line x1="4" y1="4" x2="9" y2="9" />
-    </svg>
-  );
-}
-
-function IconTrendingUp() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-      <polyline points="17 6 23 6 23 12" />
-    </svg>
-  );
-}
-
-function IconTrendingDown() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
-      <polyline points="17 18 23 18 23 12" />
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M6 21V9a9 9 0 0 0 9 9" />
     </svg>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Metric Card sub-component
+// Stat sub-component — flat label / value, no icon. Surface-2 background,
+// no border, matches the rest of the dashboard's "secondary card" look.
 // ---------------------------------------------------------------------------
 
-function MetricCard({
-  icon,
-  iconBg,
+function StatTile({
   label,
   value,
-  trend,
   loading,
 }: {
-  icon: React.ReactNode;
-  iconBg: string;
   label: string;
   value: string;
-  trend?: { value: string; direction: "up" | "down" };
   loading?: boolean;
 }) {
-  if (loading) {
-    return (
-      <div className="sran-card" style={{ padding: "1.25rem", transition: "box-shadow 150ms ease" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <div className="sran-skeleton" style={{ width: 36, height: 36, borderRadius: "var(--radius-md)" }} />
-          <div style={{ flex: 1 }}>
-            <div className="sran-skeleton" style={{ width: "50%", height: "0.75rem", marginBottom: "0.5rem" }} />
-            <div className="sran-skeleton" style={{ width: "70%", height: "1.5rem" }} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="sran-card routing-metric-card" style={{ padding: "1.25rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: "var(--radius-md)",
-          background: iconBg, display: "flex", alignItems: "center", justifyContent: "center",
-          color: "#fff", flexShrink: 0,
-        }}>
-          {icon}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: "var(--font-size-xs)", fontWeight: 500, textTransform: "uppercase",
-            letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.125rem",
-          }}>
-            {label}
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
-            <span style={{ fontSize: "var(--font-size-2xl)", fontWeight: 700, color: "var(--color-text-primary)" }}>
-              {value}
-            </span>
-            {trend && (
-              <span style={{
-                display: "inline-flex", alignItems: "center", gap: "0.2rem",
-                fontSize: "var(--font-size-xs)", fontWeight: 500, padding: "0.125rem 0.375rem",
-                borderRadius: "var(--radius-sm)",
-                background: trend.direction === "up" ? "var(--color-status-success-bg)" : "var(--color-status-error-bg)",
-                color: trend.direction === "up" ? "var(--color-status-success)" : "var(--color-status-error)",
-              }}>
-                {trend.direction === "up" ? <IconTrendingUp /> : <IconTrendingDown />}
-                {trend.value}
-              </span>
-            )}
-          </div>
-        </div>
+    <div
+      style={{
+        padding: "0.875rem 1.125rem",
+        background: "var(--color-bg-surface-2)",
+        borderRadius: "var(--radius-md)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "13px",
+          color: "var(--color-text-muted)",
+          marginBottom: "0.25rem",
+        }}
+      >
+        {label}
       </div>
+      {loading ? (
+        <div className="sran-skeleton" style={{ width: "60%", height: "24px" }} />
+      ) : (
+        <div
+          style={{
+            fontSize: "24px",
+            fontWeight: 500,
+            color: "var(--color-text-primary)",
+            lineHeight: 1.1,
+          }}
+        >
+          {value}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Breakdown row sub-components
+// ---------------------------------------------------------------------------
+
+function ModelRow({
+  model,
+  count,
+  index,
+  isLast,
+}: {
+  model: string;
+  count: number;
+  index: number;
+  isLast: boolean;
+}) {
+  const dotColor = MODEL_DOT_COLORS[index % MODEL_DOT_COLORS.length];
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.75rem",
+        padding: "0.625rem 1.125rem",
+        borderBottom: isLast ? "none" : "1px solid var(--color-border-subtle, rgba(255,255,255,0.05))",
+      }}
+    >
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: dotColor,
+          flexShrink: 0,
+        }}
+      />
+      <code
+        style={{
+          flex: 1,
+          fontSize: "var(--font-size-sm)",
+          color: "var(--color-text-primary)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {model || "unknown"}
+      </code>
+      <span
+        style={{
+          fontSize: "var(--font-size-sm)",
+          color: "var(--color-text-secondary)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {count.toLocaleString()}
+      </span>
+    </div>
+  );
+}
+
+function RouterRow({
+  router,
+  count,
+  maxCount,
+  isLast,
+}: {
+  router: string | null;
+  count: number;
+  maxCount: number;
+  isLast: boolean;
+}) {
+  const barWidth = maxCount > 0 ? Math.max(2, Math.round((count / maxCount) * 60)) : 0;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.75rem",
+        padding: "0.625rem 1.125rem",
+        borderBottom: isLast ? "none" : "1px solid var(--color-border-subtle, rgba(255,255,255,0.05))",
+      }}
+    >
+      <span
+        style={{
+          flex: 1,
+          fontSize: "var(--font-size-sm)",
+          color: "var(--color-text-primary)",
+          textTransform: router ? "capitalize" : "none",
+        }}
+      >
+        {router ?? <Badge variant="neutral">—</Badge>}
+      </span>
+      <div
+        style={{
+          width: 60,
+          height: 4,
+          background: "var(--color-bg-surface-2)",
+          borderRadius: 2,
+          overflow: "hidden",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            width: `${barWidth}px`,
+            height: "100%",
+            background: "var(--color-sran-600)",
+          }}
+        />
+      </div>
+      <span
+        style={{
+          fontSize: "var(--font-size-sm)",
+          color: "var(--color-text-secondary)",
+          fontVariantNumeric: "tabular-nums",
+          minWidth: "2.5ch",
+          textAlign: "right",
+        }}
+      >
+        {count.toLocaleString()}
+      </span>
+    </div>
+  );
+}
+
+// Section label ABOVE the breakdown card — 11px uppercase tracking.
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: "11px",
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        color: "var(--color-text-muted)",
+        marginBottom: "0.5rem",
+      }}
+    >
+      {children}
     </div>
   );
 }
@@ -309,24 +386,10 @@ function RoutingStatsSection() {
     return "99.2%";
   }, [data, totalRequests]);
 
-  const modelColumns: Column<ModelStat>[] = [
-    { key: "model", header: "Model", render: (r) => <code style={{ fontSize: "var(--font-size-xs)" }}>{r.model || "unknown"}</code> },
-    { key: "count", header: "Count", render: (r) => r.count.toLocaleString() },
-  ];
-
-  const routerColumns: Column<RouterStat>[] = [
-    {
-      key: "router",
-      header: "Router",
-      render: (r) =>
-        r.router ? (
-          <span style={{ textTransform: "capitalize" }}>{r.router}</span>
-        ) : (
-          <Badge variant="neutral">—</Badge>
-        ),
-    },
-    { key: "count", header: "Count", render: (r) => r.count.toLocaleString() },
-  ];
+  const maxRouterCount = useMemo(() => {
+    if (!data || data.routers.length === 0) return 0;
+    return Math.max(...data.routers.map((r) => r.count));
+  }, [data]);
 
   const hasData = data && (data.models.length > 0 || data.routers.length > 0);
 
@@ -352,41 +415,27 @@ function RoutingStatsSection() {
         </button>
       </div>
 
-      {/* Metric cards */}
-      <div className="routing-metrics-grid" style={{ marginBottom: "1.25rem" }}>
-        <MetricCard
-          icon={<IconBarChart3 />}
-          iconBg="#3b82f6"
-          label="Total Requests 24h"
-          value={loading ? "—" : totalRequests.toLocaleString()}
-          loading={loading}
-        />
-        <MetricCard
-          icon={<IconZap />}
-          iconBg="#8b5cf6"
-          label="Active Models"
-          value={loading ? "—" : activeModels.toString()}
-          loading={loading}
-        />
-        <MetricCard
-          icon={<IconActivity />}
-          iconBg="#059669"
-          label="Success Rate"
-          value={loading ? "—" : successRate}
-          loading={loading}
-        />
+      {/* Stat tiles — flat, no icons */}
+      <div className="routing-metrics-grid" style={{ marginBottom: "1.5rem" }}>
+        <StatTile label="Requests" value={loading ? "—" : totalRequests.toLocaleString()} loading={loading} />
+        <StatTile label="Active models" value={loading ? "—" : activeModels.toString()} loading={loading} />
+        <StatTile label="Success rate" value={loading ? "—" : successRate} loading={loading} />
       </div>
 
-      {/* Chart cards */}
+      {/* Breakdown rows */}
       {loading ? (
         <div className="routing-charts-grid">
-          <div className="sran-card" style={{ padding: "1.25rem" }}>
-            <div className="sran-skeleton" style={{ width: "40%", height: "0.75rem", marginBottom: "1rem" }} />
-            <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+          <div>
+            <SectionLabel>By model</SectionLabel>
+            <div className="sran-card" style={{ padding: "1.25rem" }}>
+              <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+            </div>
           </div>
-          <div className="sran-card" style={{ padding: "1.25rem" }}>
-            <div className="sran-skeleton" style={{ width: "40%", height: "0.75rem", marginBottom: "1rem" }} />
-            <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+          <div>
+            <SectionLabel>By router</SectionLabel>
+            <div className="sran-card" style={{ padding: "1.25rem" }}>
+              <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+            </div>
           </div>
         </div>
       ) : error ? (
@@ -413,41 +462,45 @@ function RoutingStatsSection() {
         </div>
       ) : (
         <div className="routing-charts-grid">
-          <div className="sran-card routing-metric-card" style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{
-              padding: "1rem 1.25rem 0.5rem", fontSize: "var(--font-size-xs)", fontWeight: 500,
-              textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)",
-            }}>
-              Requests by Model
+          <div>
+            <SectionLabel>By model</SectionLabel>
+            <div className="sran-card" style={{ padding: "0.25rem 0" }}>
+              {(data?.models ?? []).length === 0 ? (
+                <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
+                  No model data
+                </div>
+              ) : (
+                (data?.models ?? []).map((m, i, arr) => (
+                  <ModelRow
+                    key={m.model || `unknown-${i}`}
+                    model={m.model}
+                    count={m.count}
+                    index={i}
+                    isLast={i === arr.length - 1}
+                  />
+                ))
+              )}
             </div>
-            <DataTable
-              columns={modelColumns}
-              data={data?.models ?? null}
-              loading={loading}
-              error={error}
-              emptyMessage="No model data"
-              emptyIcon="◇"
-              rowKey={(r) => r.model || "unknown"}
-              onRetry={handleRefresh}
-            />
           </div>
-          <div className="sran-card routing-metric-card" style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{
-              padding: "1rem 1.25rem 0.5rem", fontSize: "var(--font-size-xs)", fontWeight: 500,
-              textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)",
-            }}>
-              Requests by Router
+          <div>
+            <SectionLabel>By router</SectionLabel>
+            <div className="sran-card" style={{ padding: "0.25rem 0" }}>
+              {(data?.routers ?? []).length === 0 ? (
+                <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
+                  No router data
+                </div>
+              ) : (
+                (data?.routers ?? []).map((r, i, arr) => (
+                  <RouterRow
+                    key={r.router ?? `_null-${i}`}
+                    router={r.router}
+                    count={r.count}
+                    maxCount={maxRouterCount}
+                    isLast={i === arr.length - 1}
+                  />
+                ))
+              )}
             </div>
-            <DataTable
-              columns={routerColumns}
-              data={data?.routers ?? null}
-              loading={loading}
-              error={error}
-              emptyMessage="No router data"
-              emptyIcon="◇"
-              rowKey={(r) => r.router ?? "_null"}
-              onRetry={handleRefresh}
-            />
           </div>
         </div>
       )}
@@ -687,23 +740,20 @@ function KeywordRulesSection() {
         </div>
       ) : !hasRules ? (
         <div className="sran-card" style={{ padding: "3rem", textAlign: "center" }}>
-          <div style={{ color: "var(--color-text-muted)", marginBottom: "0.75rem" }}>
-            <IconShuffle />
+          <div style={{
+            color: "var(--color-text-muted)",
+            marginBottom: "0.75rem",
+            display: "flex",
+            justifyContent: "center",
+          }}>
+            <IconGitMerge />
           </div>
           <p style={{ fontSize: "var(--font-size-base)", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "0.375rem" }}>
             No keyword rules configured yet
           </p>
-          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginBottom: "1.25rem", maxWidth: "320px", marginLeft: "auto", marginRight: "auto" }}>
+          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: 0, maxWidth: "320px", marginLeft: "auto", marginRight: "auto" }}>
             Keyword rules route requests to specific models when the prompt contains matching keywords or patterns.
           </p>
-          <button
-            className="sran-btn sran-btn-primary"
-            onClick={openCreate}
-            style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
-          >
-            <IconPlus />
-            Create your first rule
-          </button>
         </div>
       ) : (
         <div className="sran-card routing-metric-card" style={{ padding: 0, overflow: "hidden" }}>
@@ -855,23 +905,17 @@ function KeywordRulesSection() {
 export default function RoutingPage() {
   return (
     <>
-      <PageHeader title="Routing" subtitle="Routing decisions and keyword-based model overrides" />
+      <PageHeader title="Routing" subtitle="Routing decisions and keyword overrides" />
       <style>{`
         .routing-metrics-grid {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
-          gap: 1rem;
+          gap: 0.75rem;
         }
         .routing-charts-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 1rem;
-        }
-        .routing-metric-card {
-          transition: box-shadow 150ms ease, transform 150ms ease;
-        }
-        .routing-metric-card:hover {
-          box-shadow: var(--shadow-md);
         }
         @keyframes spin {
           from { transform: rotate(0deg); }
