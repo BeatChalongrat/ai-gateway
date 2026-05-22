@@ -72,3 +72,11 @@ class ProviderStreamChunk:
     finish_reason: str | None = None
     model: str = ""
     usage: ProviderUsage | None = None
+    # Tool-call delta fragments streamed by OpenAI when the model is
+    # invoking a function. The first chunk carries
+    # ``[{index, id, type, function:{name, arguments:""}}]`` and
+    # subsequent chunks append to ``function.arguments``. ``None`` when
+    # the chunk is plain text. A single chunk MAY carry both ``delta``
+    # (text) and ``tool_calls``; the SSE emitter forwards each
+    # independently.
+    tool_calls: list[dict] | None = None
