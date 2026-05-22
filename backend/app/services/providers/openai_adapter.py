@@ -27,13 +27,33 @@ class OpenAIAdapter(BaseProviderAdapter):
     provider_name = "openai"
     supports_streaming = True
 
+    @staticmethod
+    def _serialize_message(msg) -> dict:
+        """Build the OpenAI wire-format dict for a single Message.
+
+        Includes content / tool_calls / tool_call_id / name only when
+        set — OpenAI rejects e.g. ``"name": null`` on a tool result,
+        and an assistant message with tool_calls is allowed to omit
+        content entirely.
+        """
+        out: dict = {"role": msg.role}
+        if msg.content is not None:
+            out["content"] = msg.content
+        if msg.tool_calls is not None:
+            out["tool_calls"] = msg.tool_calls
+        if msg.tool_call_id is not None:
+            out["tool_call_id"] = msg.tool_call_id
+        if msg.name is not None:
+            out["name"] = msg.name
+        return out
+
     def _build_body(
         self, payload, messages, *, stream: bool = False, resolved_model: str | None = None
     ) -> dict:
         model = resolved_model or payload.model
         body: dict = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [self._serialize_message(m) for m in messages],
         }
         if stream:
             body["stream"] = True
@@ -45,6 +65,15 @@ class OpenAIAdapter(BaseProviderAdapter):
             val = getattr(payload, param, None) or payload.metadata.get(param)
             if val is not None:
                 body[param] = val
+
+        # Function-calling passthrough. Forward only when set so a
+        # plain chat request doesn't gain empty tool fields.
+        tools = getattr(payload, "tools", None)
+        if tools is not None:
+            body["tools"] = tools
+        tool_choice = getattr(payload, "tool_choice", None)
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
 
         return body
 

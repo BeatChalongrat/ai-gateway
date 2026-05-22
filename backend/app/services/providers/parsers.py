@@ -32,6 +32,12 @@ def parse_openai_response(data: dict) -> ProviderResponse:
         finish_reason=choice.get("finish_reason", "stop"),
         usage=usage,
         raw=data,
+        # OpenAI returns tool_calls on the assistant message when the
+        # model invoked a function. ``None`` when absent so we stay
+        # backward-compat with plain-text responses; the downstream
+        # serialiser uses ``response_model_exclude_none`` to drop it
+        # from the wire when unset.
+        tool_calls=message.get("tool_calls"),
     )
 
 

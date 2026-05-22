@@ -62,6 +62,16 @@ class ChatCompletionsRequest(BaseModel):
     # the DB lookup, and raises 403 on a violation.
     policy_profile_id: Optional[str] = None
 
+    # Function-calling passthrough. Client sends the OpenAI tool /
+    # tool_choice schemas verbatim; the openai_adapter forwards them
+    # into the upstream request, parsers.py surfaces any tool_calls in
+    # the response, and the orchestrator threads them through to the
+    # client. Typed as plain dict/Any to stay forward-compatible with
+    # provider-specific extensions (Anthropic input_schema, JSON-mode
+    # constraints, etc.) without gateway-side validation drift.
+    tools: Optional[List[dict]] = None
+    tool_choice: Optional[Any] = None
+
     @field_validator("policy_profile_id")
     @classmethod
     def _validate_policy_profile_id(cls, v: Optional[str]) -> Optional[str]:

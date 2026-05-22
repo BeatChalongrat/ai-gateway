@@ -43,6 +43,11 @@ class ProviderResponse:
     finish_reason: str = "stop"
     usage: ProviderUsage | None = None
     raw: dict = field(default_factory=dict)
+    # Function-calling: populated by the provider parser when the model
+    # invoked a tool. Each entry mirrors the OpenAI schema
+    # ({"id", "type", "function": {"name", "arguments"}}). None when the
+    # response is plain text — keeps the dataclass backward-compatible.
+    tool_calls: list[dict] | None = None
 
 
 @dataclass(frozen=True)
