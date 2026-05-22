@@ -1,4 +1,4 @@
-.PHONY: up down logs seed clean clean-portal-users fresh test shell-backend shell-admin shell-portal build rebuild ps help
+.PHONY: up prod down logs seed clean clean-portal-users fresh test shell-backend shell-admin shell-portal build rebuild ps help
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -7,7 +7,7 @@
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-up: ## Start the full stack in dev mode (hot-reload on backend/admin-ui/portal)
+up: ## Start the full stack in DEV mode (hot-reload, ports bound to 0.0.0.0)
 	docker compose up -d
 	@echo ""
 	@echo "Backend:   http://localhost:8080/health"
@@ -19,7 +19,18 @@ up: ## Start the full stack in dev mode (hot-reload on backend/admin-ui/portal)
 	@echo ""
 	@echo "Run 'make seed' once to create admin + test portal users."
 
-down: ## Stop the stack (preserves volumes)
+prod: ## Start the stack in PROD mode (binds 127.0.0.1; requires REDIS_PASSWORD, CORS_ORIGINS, PORTAL_PUBLIC_URL, INITIAL_ADMIN_PASSWORD in .env)
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+	@echo ""
+	@echo "Stack running. All services bound to 127.0.0.1 only."
+	@echo "Front the public services with a reverse proxy on the host:"
+	@echo "  127.0.0.1:8080  -> backend  (e.g. https://gateway-api.sran.net)"
+	@echo "  127.0.0.1:3000  -> admin-ui (e.g. https://admin.sran.net)"
+	@echo "  127.0.0.1:3001  -> portal   (e.g. https://portal.sran.net)"
+	@echo ""
+	@echo "If this is a fresh DB, run 'make seed' (uses INITIAL_ADMIN_PASSWORD from .env)."
+
+down: ## Stop the stack (preserves volumes; works for both dev and prod stacks)
 	docker compose down
 
 logs: ## Tail logs from all services
