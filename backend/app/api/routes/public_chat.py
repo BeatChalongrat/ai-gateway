@@ -786,6 +786,41 @@ async def chat_completions(
                 )
             )
 
+        def _emit_tool_calls_chunk(tool_calls: list[dict]) -> str:
+            """Serialise a tool_calls-delta SSE frame.
+
+            OpenAI streams tool_calls as partial fragments: the first
+            chunk carries ``id`` + ``function.name`` + an empty
+            ``function.arguments``; later chunks append to ``arguments``
+            character-by-character. We forward each fragment verbatim
+            so the client can stitch the JSON itself (same contract a
+            direct OpenAI stream provides).
+
+            Tool-call fragments are NOT routed through the per-chunk
+            DLP scan. They're structured JSON the model generates from
+            already-masked inbound context; the per-chunk argument
+            slices are not self-contained text the DLP detectors can
+            reason about. Argument-level DLP is a follow-up.
+            """
+            return "data: {}\n\n".format(
+                json.dumps(
+                    {
+                        "id": ctx.request_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": final_model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"tool_calls": tool_calls},
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
         from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
         # Mutable state for the in-generator fallback retry. The outer
@@ -882,6 +917,20 @@ async def chat_completions(
                                 first_chunk_yielded = True
                         else:
                             tail_masked = masked_window
+
+                    # Tool-call deltas — independent of content text.
+                    # A chunk MAY carry both ``delta`` (text) and
+                    # ``tool_calls`` (e.g. a model that narrates "Let
+                    # me check the weather…" then invokes the function
+                    # in the same chunk), in which case both branches
+                    # fire and we emit two SSE frames for that chunk —
+                    # one content delta, one tool_calls delta. The
+                    # client merges them by ``choices[0].index`` /
+                    # ``delta.tool_calls[].index`` per the OpenAI
+                    # streaming contract.
+                    if chunk.tool_calls:
+                        yield _emit_tool_calls_chunk(chunk.tool_calls)
+                        first_chunk_yielded = True
 
                     if chunk.model:
                         final_model = chunk.model
