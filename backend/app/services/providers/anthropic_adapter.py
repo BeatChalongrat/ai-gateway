@@ -72,9 +72,7 @@ class AnthropicAdapter(BaseProviderAdapter):
         body: dict = {
             "model": model,
             "max_tokens": max_tokens,
-            "messages": [
-                {"role": m.role, "content": m.content} for m in user_messages
-            ],
+            "messages": [self._serialize_message(m) for m in user_messages],
         }
         if system_text:
             body["system"] = system_text
@@ -86,7 +84,136 @@ class AnthropicAdapter(BaseProviderAdapter):
             if val is not None:
                 body[param] = val
 
+        # Function-calling passthrough. Clients send the OpenAI
+        # tools/tool_choice shape; this adapter translates to Anthropic
+        # ``input_schema`` form and the ``{type: auto|any|tool|none}``
+        # tool_choice vocabulary. Only forwards when set so a plain
+        # text request stays unchanged.
+        tools = getattr(payload, "tools", None)
+        if tools:
+            translated = self._translate_tools(tools)
+            if translated:
+                body["tools"] = translated
+        tool_choice = getattr(payload, "tool_choice", None)
+        if tool_choice is not None:
+            translated_choice = self._translate_tool_choice(tool_choice)
+            if translated_choice is not None:
+                body["tool_choice"] = translated_choice
+
         return body
+
+    @staticmethod
+    def _serialize_message(msg) -> dict:
+        """Convert a canonical Message to Anthropic's wire format.
+
+        Three shapes:
+
+        - ``role="tool"`` → ``{"role": "user", "content": [{"type":
+          "tool_result", "tool_use_id": ..., "content": ...}]}``.
+          Anthropic carries tool results inside a user turn rather
+          than as a dedicated role.
+
+        - ``role="assistant"`` with ``tool_calls`` → assistant turn
+          whose content is a list of mixed text + ``tool_use`` blocks.
+          Text blocks come first (the model's narration, if any) then
+          one ``tool_use`` block per tool call. OpenAI keeps tool-call
+          arguments as a JSON *string*; Anthropic expects ``input`` as
+          a JSON *object* — we ``json.loads`` and fall back to ``{}``
+          on a malformed string rather than failing the whole request.
+
+        - Plain user / assistant / system text → ``{"role": ...,
+          "content": ...}`` (system is split out upstream by
+          ``_split_system`` so it doesn't actually reach this method).
+        """
+        if msg.role == "tool":
+            return {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": msg.tool_call_id or "",
+                        "content": msg.content or "",
+                    }
+                ],
+            }
+
+        if msg.role == "assistant" and msg.tool_calls:
+            blocks: list[dict] = []
+            if msg.content:
+                blocks.append({"type": "text", "text": msg.content})
+            for tc in msg.tool_calls:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                args_raw = fn.get("arguments", "{}")
+                if isinstance(args_raw, str):
+                    try:
+                        args_obj = json.loads(args_raw)
+                    except json.JSONDecodeError:
+                        args_obj = {}
+                else:
+                    args_obj = args_raw or {}
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.get("id", "") if isinstance(tc, dict) else "",
+                        "name": fn.get("name", ""),
+                        "input": args_obj,
+                    }
+                )
+            return {"role": "assistant", "content": blocks}
+
+        return {"role": msg.role, "content": msg.content or ""}
+
+    @staticmethod
+    def _translate_tools(openai_tools: list[dict]) -> list[dict]:
+        """OpenAI ``[{type: function, function: {name, description,
+        parameters}}, …]`` → Anthropic ``[{name, description,
+        input_schema}, …]``.
+
+        Non-``function`` entries are dropped — Anthropic only supports
+        function-type tools today. Missing ``parameters`` defaults to
+        ``{"type": "object"}`` (the empty-object schema Anthropic
+        accepts as "no arguments").
+        """
+        out: list[dict] = []
+        for t in openai_tools:
+            if not isinstance(t, dict) or t.get("type") != "function":
+                continue
+            fn = t.get("function") or {}
+            entry: dict = {
+                "name": fn.get("name", ""),
+                "input_schema": fn.get("parameters") or {"type": "object"},
+            }
+            description = fn.get("description")
+            if description:
+                entry["description"] = description
+            out.append(entry)
+        return out
+
+    @staticmethod
+    def _translate_tool_choice(openai_choice):
+        """Map OpenAI ``tool_choice`` → Anthropic ``tool_choice``.
+
+        - ``"auto"`` → ``{type: auto}``
+        - ``"none"`` → ``{type: none}``
+        - ``"required"`` → ``{type: any}``
+        - ``{type: function, function: {name: X}}`` → ``{type: tool,
+          name: X}``
+
+        Unknown shapes return ``None`` so the caller omits the field
+        and lets Anthropic apply its default (auto when tools are set).
+        """
+        if openai_choice == "auto":
+            return {"type": "auto"}
+        if openai_choice == "none":
+            return {"type": "none"}
+        if openai_choice == "required":
+            return {"type": "any"}
+        if isinstance(openai_choice, dict):
+            if openai_choice.get("type") == "function":
+                fn_name = (openai_choice.get("function") or {}).get("name")
+                if fn_name:
+                    return {"type": "tool", "name": fn_name}
+        return None
 
     async def chat(
         self, payload, messages: list[Message], *, resolved_model: str | None = None, api_key: str | None = None
@@ -264,7 +391,10 @@ class AnthropicAdapter(BaseProviderAdapter):
         user_messages: list[Message] = []
         for m in messages:
             if m.role == "system":
-                system_parts.append(m.content)
+                # content is Optional[str] on Message now; an empty
+                # system message has no useful text to thread in.
+                if m.content:
+                    system_parts.append(m.content)
             else:
                 user_messages.append(m)
         system_text = "\n\n".join(system_parts) if system_parts else None
