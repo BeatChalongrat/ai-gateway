@@ -58,6 +58,12 @@ router = APIRouter()
 @router.post(
     "/chat/completions",
     response_model=ChatCompletionsResponse,
+    # Drop None-valued optional fields from the serialised response
+    # body. Required so that plain (non-tool) responses don't gain a
+    # noisy `"tool_calls": null` on the wire, and so that an
+    # assistant-with-tool_calls reply serialises `content: null` only
+    # when the model actually returned null.
+    response_model_exclude_none=True,
     responses={
         401: {"model": ErrorResponse, "description": "Invalid or missing API key"},
         403: {"model": ErrorResponse, "description": "DLP policy blocked the request"},
