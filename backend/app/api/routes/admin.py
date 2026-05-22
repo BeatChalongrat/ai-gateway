@@ -1809,6 +1809,34 @@ def create_api_key(
     session: Session = Depends(get_db_session),
     auth: object = Depends(require_admin_session),
 ) -> ApiKeyCreateResponse:
+    # Parity with the portal create_key path (portal_projects.py:364):
+    # portal validates project existence + the caller's role on it
+    # before minting a key. Admin used to call the service blind, so a
+    # typo on the project_id would mint a key that 404s at every
+    # request (project_service.resolve_project_context raises
+    # NotFoundError when the project row is missing). Validate up-
+    # front so the failure surfaces on creation, not on first use.
+    from app.core.exceptions import ValidationError as _VE
+
+    project = session.get(ProjectORM, body.project_id)
+    if project is None:
+        raise NotFoundError(
+            f"Project '{body.project_id}' not found.",
+            details={"project_id": body.project_id},
+        )
+    # tenant_id is auto-derived by the UI from the selected project,
+    # but the schema accepts it independently — guard against a
+    # mismatched pair from a stale dropdown or direct API call.
+    if project.tenant_id != body.tenant_id:
+        raise _VE(
+            "tenant_id does not match the selected project's tenant.",
+            details={
+                "tenant_id": body.tenant_id,
+                "project_id": body.project_id,
+                "expected_tenant_id": project.tenant_id,
+            },
+        )
+
     raw_key, api_key = _api_key_service.create_key(
         session,
         tenant_id=body.tenant_id,

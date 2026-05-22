@@ -116,7 +116,6 @@ const iconGlobe = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" st
 export default function TenantsPage() {
   const { data, loading, error, refetch } = useApi<{ items: any[] }>("/admin/tenants");
   const [showCreate, setShowCreate] = useState(false);
-  const [selected, setSelected] = useState<any | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<any | null>(null);
@@ -124,6 +123,14 @@ export default function TenantsPage() {
   const [form, setForm] = useState({ name: "", slug: "", region: "global" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // Edit-flow state. Separate from the create form so an open Edit
+  // modal doesn't get clobbered by a "Create" click and vice versa.
+  // Tenant slug is intentionally NOT editable — it's the URL-stable
+  // identifier and changing it would break every cached resource.
+  const [editTarget, setEditTarget] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", region: "global", status: "active" });
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [updating, setUpdating] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const { toast } = useToast();
@@ -185,6 +192,49 @@ export default function TenantsPage() {
       toast(`Tenant "${restoreTarget.name}" restored`); setRestoreTarget(null); refetch();
     } catch (e: any) { toast(e.body?.error?.message || "Failed to restore tenant", "error"); }
     finally { setRestoring(false); }
+  }
+
+  function openEdit(t: any) {
+    setEditForm({
+      name: t.name || "",
+      region: t.region || "global",
+      status: t.status || "active",
+    });
+    setEditErrors({});
+    setEditTarget(t);
+  }
+
+  function validateEdit() {
+    const e: Record<string, string> = {};
+    if (!editForm.name.trim()) e.name = "Name is required";
+    setEditErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  async function handleUpdate() {
+    if (!editTarget || !validateEdit()) return;
+    setUpdating(true);
+    try {
+      // Only send fields that actually changed so the audit log
+      // records the real diff rather than a blanket overwrite.
+      const body: Record<string, any> = {};
+      if (editForm.name !== editTarget.name) body.name = editForm.name.trim();
+      if (editForm.region !== editTarget.region) body.region = editForm.region;
+      if (editForm.status !== editTarget.status) body.status = editForm.status;
+      if (Object.keys(body).length === 0) {
+        toast("No changes to save");
+        setEditTarget(null);
+        return;
+      }
+      await api.put(`/admin/tenants/${editTarget.tenant_id}`, body);
+      toast(`Tenant "${editForm.name}" updated`);
+      setEditTarget(null);
+      refetch();
+    } catch (e: any) {
+      toast(e.body?.error?.message || "Failed to update tenant", "error");
+    } finally {
+      setUpdating(false);
+    }
   }
 
   const activeCount = stats.active;
@@ -287,7 +337,7 @@ export default function TenantsPage() {
                     const rs = regionStyle(t.region || "global");
                     const isDeleted = t.status === "deleted";
                     return (
-                      <tr key={t.tenant_id} className="tn-row" style={{ animationDelay: `${0.3 + i * 0.03}s`, cursor: "pointer" }} onClick={() => setSelected(t)}>
+                      <tr key={t.tenant_id} className="tn-row" style={{ animationDelay: `${0.3 + i * 0.03}s`, cursor: "pointer" }} onClick={() => openEdit(t)}>
                         {/* Tenant: avatar + name + slug */}
                         <td style={{ paddingLeft: 20 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -349,7 +399,7 @@ export default function TenantsPage() {
                                 }}
                                   onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(59,108,246,0.06)"; e.currentTarget.style.color = T.accent; e.currentTarget.style.borderColor = "rgba(59,108,246,0.3)"; }}
                                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.ts; e.currentTarget.style.borderColor = T.bl; }}
-                                  onClick={() => setSelected(t)}
+                                  onClick={() => openEdit(t)}
                                 >
                                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                   Edit
@@ -384,16 +434,57 @@ export default function TenantsPage() {
       {/* Restore confirm */}
       <ConfirmModal open={!!restoreTarget} onClose={() => setRestoreTarget(null)} onConfirm={handleRestore} title="Restore Tenant" message={`Restore tenant "${restoreTarget?.name}"? This will reactivate the tenant and its resources.`} confirmLabel="Restore" loading={restoring} />
 
-      {/* Detail drawer */}
-      <Modal open={!!selected && !deleteTarget} onClose={() => setSelected(null)} title="Tenant Detail" footer={<button className="sran-btn sran-btn-secondary" onClick={() => setSelected(null)}>Close</button>}>
-        {selected && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-            <div className="sran-detail-field"><div className="sran-detail-label">Name</div><div className="sran-detail-value">{selected.name}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Slug</div><div className="sran-detail-value"><code>{selected.slug}</code></div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Region</div><div className="sran-detail-value">{selected.region}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Status</div><div className="sran-detail-value">{selected.status}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Tenant ID</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{selected.tenant_id}</code></div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Created</div><div className="sran-detail-value">{selected.created_at ? new Date(selected.created_at).toLocaleString() : "—"}</div></div>
+      {/* Edit modal — name + region + status editable. slug and
+          tenant_id are immutable (URL-stable identifiers) so they
+          render as read-only context fields. */}
+      <Modal
+        open={!!editTarget && !deleteTarget}
+        onClose={() => { setEditTarget(null); setEditErrors({}); }}
+        title="Edit Tenant"
+        footer={
+          <>
+            <button className="sran-btn sran-btn-secondary" onClick={() => { setEditTarget(null); setEditErrors({}); }} disabled={updating}>Cancel</button>
+            <button className="sran-btn sran-btn-primary" onClick={handleUpdate} disabled={updating}>{updating ? "Saving..." : "Save"}</button>
+          </>
+        }
+      >
+        {editTarget && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+              <div className="sran-detail-field"><div className="sran-detail-label">Slug (immutable)</div><div className="sran-detail-value"><code>{editTarget.slug}</code></div></div>
+              <div className="sran-detail-field"><div className="sran-detail-label">Tenant ID</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{editTarget.tenant_id}</code></div></div>
+            </div>
+            <div>
+              <label className="sran-label">Name *</label>
+              <input
+                className={`sran-input ${editErrors.name ? "sran-input-error" : ""}`}
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="Acme Corp"
+                maxLength={64}
+              />
+              {editErrors.name && <div className="sran-field-error">{editErrors.name}</div>}
+              <div className="sran-char-count">{editForm.name.length}/64</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+              <div>
+                <label className="sran-label">Region</label>
+                <select className="sran-input" value={editForm.region} onChange={(e) => setEditForm({ ...editForm, region: e.target.value })}>
+                  <option value="global">Global</option>
+                  <option value="us">US</option>
+                  <option value="eu">EU</option>
+                </select>
+              </div>
+              <div>
+                <label className="sran-label">Status</label>
+                <select className="sran-input" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
+                  <option value="active">active</option>
+                  <option value="suspended">suspended</option>
+                  <option value="deleted">deleted</option>
+                </select>
+              </div>
+            </div>
+            <div className="sran-detail-field"><div className="sran-detail-label">Created</div><div className="sran-detail-value">{editTarget.created_at ? new Date(editTarget.created_at).toLocaleString() : "—"}</div></div>
           </div>
         )}
       </Modal>
