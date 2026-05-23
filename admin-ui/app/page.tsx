@@ -77,6 +77,20 @@ interface RecentRequest {
   created_at: string | null;
 }
 
+interface DlpStats {
+  window: string;
+  total_requests: number;
+  requests_with_findings: number;
+  total_findings: number;
+  blocked: number;
+  masked: number;
+  by_action: Record<string, number>;
+  by_direction: { input: number; output: number };
+  by_category: { category: string; count: number }[];
+  by_project: { project_id: string; project_name: string; findings: number }[];
+  timeline: { bucket: string; findings: number; blocked: number }[];
+}
+
 /* ── Constants ───────────────────────────────────────────────────── */
 
 // Provider brand hex stays hardcoded — recharts fills don't resolve CSS vars.
@@ -489,6 +503,7 @@ export default function DashboardPage() {
   const [overviewState, setOverviewState] = useState<SectionState<Overview>>({ status: "loading" });
   const [volumeState, setVolumeState] = useState<SectionState<VolumeResp>>({ status: "loading" });
   const [topModelsState, setTopModelsState] = useState<SectionState<TopModelsResp>>({ status: "loading" });
+  const [dlpState, setDlpState] = useState<SectionState<DlpStats>>({ status: "loading" });
   const [recent, setRecent] = useState<RecentRequest[]>([]);
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
 
@@ -506,6 +521,7 @@ export default function DashboardPage() {
     setOverviewState({ status: "loading" });
     setVolumeState({ status: "loading" });
     setTopModelsState({ status: "loading" });
+    setDlpState({ status: "loading" });
 
     api
       .get(`/admin/dashboard/overview?period=${period}`)
@@ -534,6 +550,15 @@ export default function DashboardPage() {
       })
       .catch(() => {
         if (!cancelled) setTopModelsState({ status: "error" });
+      });
+
+    api
+      .get(`/admin/dlp/stats?window=${period}`)
+      .then((d: DlpStats) => {
+        if (!cancelled) setDlpState({ status: "ok", data: d });
+      })
+      .catch(() => {
+        if (!cancelled) setDlpState({ status: "error" });
       });
 
     return () => {
@@ -659,6 +684,9 @@ export default function DashboardPage() {
 
       {/* Row 3: Recent requests full width */}
       <RecentRequests items={recent} />
+
+      {/* Row 4: Data protection (DLP) — feeds off /admin/dlp/stats. */}
+      <DataProtectionSection state={dlpState} period={period} />
     </div>
   );
 }
@@ -1171,6 +1199,479 @@ function RecentRequests({ items }: { items: RecentRequest[] }) {
             </tbody>
           </table>
         </div>
+      )}
+    </section>
+  );
+}
+
+/* ── Data Protection (DLP) section ──────────────────────────────── */
+
+// Shared dot palette for the "By category" rows. First three are the
+// brand accents used elsewhere on this page; later rows wrap.
+const DLP_DOT_COLORS = ["#534AB7", "#1D9E75", "#E24B4A", "#378ADD", "#D9923B"];
+
+function IconShield({ color = "currentColor" }: { color?: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+function IconShieldCheck({ color = "currentColor" }: { color?: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <polyline points="9 12 11 14 15 10" />
+    </svg>
+  );
+}
+
+function IconShieldX({ color = "currentColor" }: { color?: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <line x1="9.5" y1="9.5" x2="14.5" y2="14.5" />
+      <line x1="14.5" y1="9.5" x2="9.5" y2="14.5" />
+    </svg>
+  );
+}
+
+function IconEyeOff({ color = "currentColor" }: { color?: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
+function DlpSectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        color: "var(--text-muted)",
+        marginBottom: 8,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DlpStatTile({
+  icon,
+  label,
+  value,
+  accentColor,
+  iconBg,
+  iconColor,
+  loading,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  accentColor: string;
+  iconBg: string;
+  iconColor: string;
+  loading?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        padding: "1rem 1.125rem",
+        background: "var(--bg-surface)",
+        border: "0.5px solid var(--border-default)",
+        borderRadius: 10,
+      }}
+    >
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 8,
+          background: iconBg,
+          color: iconColor,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 12,
+        }}
+      >
+        {icon}
+      </div>
+      {loading ? (
+        <div
+          style={{
+            width: "60%",
+            height: 28,
+            borderRadius: 4,
+            background: "var(--bg-elevated)",
+            opacity: 0.6,
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            fontSize: 28,
+            fontWeight: 500,
+            color: "var(--text-primary)",
+            lineHeight: 1.1,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {value}
+        </div>
+      )}
+      <div
+        style={{
+          fontSize: 12,
+          color: "var(--text-muted)",
+          marginTop: 6,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 2,
+          background: `linear-gradient(90deg, ${accentColor}, transparent)`,
+        }}
+      />
+    </div>
+  );
+}
+
+function DlpCategoryRow({
+  category,
+  count,
+  total,
+  index,
+  isLast,
+}: {
+  category: string;
+  count: number;
+  total: number;
+  index: number;
+  isLast: boolean;
+}) {
+  const dotColor = DLP_DOT_COLORS[index % DLP_DOT_COLORS.length];
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  const displayName = category.charAt(0).toUpperCase() + category.slice(1);
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "10px 18px",
+        borderBottom: isLast ? "none" : "1px solid var(--border-subtle, rgba(255,255,255,0.05))",
+      }}
+    >
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: dotColor,
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          flex: 1,
+          fontSize: 13,
+          color: "var(--text-primary)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {displayName}
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          color: "var(--text-muted)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {pct}%
+      </span>
+      <span
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          fontVariantNumeric: "tabular-nums",
+          minWidth: "2.5ch",
+          textAlign: "right",
+        }}
+      >
+        {count.toLocaleString()}
+      </span>
+    </div>
+  );
+}
+
+function DlpProjectRow({
+  name,
+  findings,
+  maxFindings,
+  isLast,
+}: {
+  name: string;
+  findings: number;
+  maxFindings: number;
+  isLast: boolean;
+}) {
+  const barWidth = maxFindings > 0 ? Math.max(2, Math.round((findings / maxFindings) * 80)) : 0;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "10px 18px",
+        borderBottom: isLast ? "none" : "1px solid var(--border-subtle, rgba(255,255,255,0.05))",
+      }}
+    >
+      <span
+        style={{
+          flex: 1,
+          fontSize: 13,
+          color: "var(--text-primary)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {name}
+      </span>
+      <div
+        style={{
+          width: 80,
+          height: 5,
+          background: "var(--bg-elevated)",
+          opacity: 0.6,
+          borderRadius: 3,
+          overflow: "hidden",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            width: `${barWidth}px`,
+            height: "100%",
+            background: "var(--accent-primary)",
+            borderRadius: 3,
+          }}
+        />
+      </div>
+      <span
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          fontVariantNumeric: "tabular-nums",
+          minWidth: "2.5ch",
+          textAlign: "right",
+        }}
+      >
+        {findings.toLocaleString()}
+      </span>
+    </div>
+  );
+}
+
+function DataProtectionSection({
+  state,
+  period,
+}: {
+  state: SectionState<DlpStats>;
+  period: Period;
+}) {
+  const data = state.status === "ok" ? state.data : null;
+  const loading = state.status === "loading";
+  const errored = state.status === "error";
+
+  const fmt = (n: number) => n.toLocaleString();
+  const totalFindings = data?.total_findings ?? 0;
+  const requestsProtected = data?.requests_with_findings ?? 0;
+  const blocked = data?.blocked ?? 0;
+  const masked = data?.masked ?? 0;
+  const categories = data?.by_category ?? [];
+  const projects = data?.by_project ?? [];
+  const categoriesTotal = categories.reduce((s, c) => s + c.count, 0);
+  const projectMax = projects.reduce((m, p) => Math.max(m, p.findings), 0);
+
+  const subtitleWindow = period === "24h"
+    ? "last 24 hours"
+    : period === "7d"
+      ? "last 7 days"
+      : "last 30 days";
+
+  return (
+    <section
+      style={{
+        marginTop: 18,
+        animation: "fadeInUp 0.5s ease-out 0.3s both",
+      }}
+    >
+      <DlpSectionLabel>Data protection</DlpSectionLabel>
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-muted)",
+          margin: "-4px 0 14px",
+        }}
+      >
+        DLP findings from the {subtitleWindow}
+      </p>
+
+      {errored ? (
+        <div
+          style={{
+            padding: "1.25rem",
+            background: "var(--bg-surface)",
+            border: "0.5px solid var(--border-default)",
+            borderRadius: 10,
+            color: "var(--accent-danger, #dc2626)",
+            fontSize: 13,
+          }}
+        >
+          Failed to load DLP stats.
+        </div>
+      ) : (
+        <>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 10,
+              marginBottom: 14,
+            }}
+          >
+            <DlpStatTile
+              icon={<IconShield />}
+              label="Total findings"
+              value={loading ? "—" : fmt(totalFindings)}
+              accentColor="#534AB7"
+              iconBg="rgba(83, 74, 183, 0.12)"
+              iconColor="#7F77DD"
+              loading={loading}
+            />
+            <DlpStatTile
+              icon={<IconShieldCheck />}
+              label="Requests protected"
+              value={loading ? "—" : fmt(requestsProtected)}
+              accentColor="#1D9E75"
+              iconBg="rgba(29, 158, 117, 0.12)"
+              iconColor="#5DCAA5"
+              loading={loading}
+            />
+            <DlpStatTile
+              icon={<IconShieldX />}
+              label="Blocked"
+              value={loading ? "—" : fmt(blocked)}
+              accentColor="#E24B4A"
+              iconBg="rgba(226, 75, 74, 0.12)"
+              iconColor="#EE7E7C"
+              loading={loading}
+            />
+            <DlpStatTile
+              icon={<IconEyeOff />}
+              label="Masked"
+              value={loading ? "—" : fmt(masked)}
+              accentColor="#378ADD"
+              iconBg="rgba(55, 138, 221, 0.12)"
+              iconColor="#85B7EB"
+              loading={loading}
+            />
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+            }}
+          >
+            <div>
+              <DlpSectionLabel>By category</DlpSectionLabel>
+              <div
+                style={{
+                  padding: "4px 0",
+                  background: "var(--bg-surface)",
+                  border: "0.5px solid var(--border-default)",
+                  borderRadius: 10,
+                }}
+              >
+                {loading ? (
+                  <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>
+                    Loading…
+                  </div>
+                ) : categories.length === 0 ? (
+                  <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
+                    No findings in this period
+                  </div>
+                ) : (
+                  categories.map((c, i) => (
+                    <DlpCategoryRow
+                      key={c.category}
+                      category={c.category}
+                      count={c.count}
+                      total={categoriesTotal}
+                      index={i}
+                      isLast={i === categories.length - 1}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+            <div>
+              <DlpSectionLabel>By project</DlpSectionLabel>
+              <div
+                style={{
+                  padding: "4px 0",
+                  background: "var(--bg-surface)",
+                  border: "0.5px solid var(--border-default)",
+                  borderRadius: 10,
+                }}
+              >
+                {loading ? (
+                  <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>
+                    Loading…
+                  </div>
+                ) : projects.length === 0 ? (
+                  <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
+                    No findings in this period
+                  </div>
+                ) : (
+                  projects.map((p, i) => (
+                    <DlpProjectRow
+                      key={p.project_id || `proj-${i}`}
+                      name={p.project_name}
+                      findings={p.findings}
+                      maxFindings={projectMax}
+                      isLast={i === projects.length - 1}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </section>
   );
