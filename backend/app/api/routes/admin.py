@@ -1,7 +1,7 @@
 import time
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -2251,3 +2251,225 @@ def routing_stats(
     ]
 
     return RoutingStatsResponse(models=models, routers=routers)
+
+
+# ---------------------------------------------------------------------------
+# DLP stats — dashboard widget feed
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dlp/stats")
+def dlp_stats(
+    window: str = "24h",
+    tenant_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Aggregated DLP activity for the dashboard's protection widget.
+
+    Reads only the summary columns persisted on every request
+    (``dlp_input_findings``, ``dlp_output_findings``, ``dlp_input_action``,
+    ``policy_action``, ``dlp_categories``, ``status``, ``error_code``).
+    No JSON-blob parsing — keeps the endpoint cheap and portable across
+    SQLite (tests) and Postgres (prod) without a column-type migration.
+
+    ``window`` is one of ``"24h"`` (default), ``"7d"``, ``"30d"``.
+    Optional ``tenant_id`` / ``project_id`` scope the aggregates.
+    """
+    # Window parsing — unknown values fall back to 24h so a stale UI
+    # query string can't 422 a dashboard widget.
+    if window == "7d":
+        delta = timedelta(days=7)
+        bucket_granularity = "day"
+    elif window == "30d":
+        delta = timedelta(days=30)
+        bucket_granularity = "day"
+    else:
+        window = "24h"
+        delta = timedelta(hours=24)
+        bucket_granularity = "hour"
+
+    window_start = datetime.utcnow() - delta
+
+    # Common WHERE clause — applied to every query below so a single
+    # tenant scope flows through every aggregate.
+    base_filters = [RequestLogORM.created_at >= window_start]
+    if tenant_id:
+        base_filters.append(RequestLogORM.tenant_id == tenant_id)
+    if project_id:
+        base_filters.append(RequestLogORM.project_id == project_id)
+
+    findings_expr = (
+        RequestLogORM.dlp_input_findings + RequestLogORM.dlp_output_findings
+    )
+
+    # Headline counts.
+    total_requests = int(
+        session.execute(
+            sa.select(sa.func.count())
+            .select_from(RequestLogORM)
+            .where(*base_filters)
+        ).scalar()
+        or 0
+    )
+    requests_with_findings = int(
+        session.execute(
+            sa.select(sa.func.count())
+            .select_from(RequestLogORM)
+            .where(*base_filters, findings_expr > 0)
+        ).scalar()
+        or 0
+    )
+    total_findings = int(
+        session.execute(
+            sa.select(sa.func.coalesce(sa.func.sum(findings_expr), 0))
+            .where(*base_filters)
+        ).scalar()
+        or 0
+    )
+    input_findings = int(
+        session.execute(
+            sa.select(
+                sa.func.coalesce(sa.func.sum(RequestLogORM.dlp_input_findings), 0)
+            ).where(*base_filters)
+        ).scalar()
+        or 0
+    )
+    output_findings = int(
+        session.execute(
+            sa.select(
+                sa.func.coalesce(sa.func.sum(RequestLogORM.dlp_output_findings), 0)
+            ).where(*base_filters)
+        ).scalar()
+        or 0
+    )
+    blocked = int(
+        session.execute(
+            sa.select(sa.func.count())
+            .select_from(RequestLogORM)
+            .where(
+                *base_filters,
+                RequestLogORM.status == "BLOCKED",
+                RequestLogORM.error_code == "dlp_violation",
+            )
+        ).scalar()
+        or 0
+    )
+
+    # by_action — group on the request-level policy_action so admin /
+    # mask / block / redact each get a bucket. Empty strings / NULLs
+    # fold into "allow" (the historical default before the field was
+    # mandatory).
+    action_rows = session.execute(
+        sa.select(RequestLogORM.policy_action, sa.func.count())
+        .where(*base_filters)
+        .group_by(RequestLogORM.policy_action)
+    ).all()
+    by_action: dict[str, int] = {}
+    for action_name, count in action_rows:
+        key = (action_name or "allow").lower()
+        by_action[key] = by_action.get(key, 0) + int(count)
+    masked = int(by_action.get("mask", 0))
+
+    # by_category — dlp_categories is a comma-separated string per
+    # request (legacy SQLite-friendly choice). Count "1 per request
+    # that mentions the category" rather than per-finding (per-finding
+    # would require the JSON column, out of scope for this commit).
+    cat_rows = session.execute(
+        sa.select(RequestLogORM.dlp_categories).where(
+            *base_filters,
+            RequestLogORM.dlp_categories.is_not(None),
+            RequestLogORM.dlp_categories != "",
+        )
+    ).all()
+    cat_counts: dict[str, int] = {}
+    for (cats_str,) in cat_rows:
+        if not cats_str:
+            continue
+        seen_in_row: set[str] = set()
+        for raw in cats_str.split(","):
+            name = raw.strip().lower()
+            if not name or name in seen_in_row:
+                continue
+            seen_in_row.add(name)
+            cat_counts[name] = cat_counts.get(name, 0) + 1
+    by_category = sorted(
+        ({"category": c, "count": n} for c, n in cat_counts.items()),
+        key=lambda r: (-r["count"], r["category"]),
+    )
+
+    # by_project — outer join on projects so a request_log row that
+    # references a deleted project still surfaces (project_name falls
+    # back to the project_id). Top 10 by total findings.
+    proj_rows = session.execute(
+        sa.select(
+            RequestLogORM.project_id,
+            ProjectORM.name,
+            sa.func.coalesce(sa.func.sum(findings_expr), 0).label("findings"),
+        )
+        .select_from(RequestLogORM)
+        .outerjoin(
+            ProjectORM, ProjectORM.project_id == RequestLogORM.project_id
+        )
+        .where(*base_filters, findings_expr > 0)
+        .group_by(RequestLogORM.project_id, ProjectORM.name)
+        .order_by(sa.desc("findings"))
+        .limit(10)
+    ).all()
+    by_project = [
+        {
+            "project_id": pid or "",
+            "project_name": name or pid or "(unknown)",
+            "findings": int(findings),
+        }
+        for pid, name, findings in proj_rows
+    ]
+
+    # Timeline — bucket in Python so we don't depend on date_trunc
+    # (Postgres-only) and stay safe on the SQLite test engine.
+    # Only requests that had findings are pulled into memory; the
+    # WHERE filter keeps the row set bounded even at high traffic.
+    timeline_rows = session.execute(
+        sa.select(
+            RequestLogORM.created_at,
+            RequestLogORM.dlp_input_findings,
+            RequestLogORM.dlp_output_findings,
+            RequestLogORM.status,
+            RequestLogORM.error_code,
+        ).where(*base_filters, findings_expr > 0)
+    ).all()
+    buckets: dict[str, dict[str, int]] = {}
+    for created, in_f, out_f, status, error in timeline_rows:
+        if created is None:
+            continue
+        if bucket_granularity == "hour":
+            bucket_key = created.replace(minute=0, second=0, microsecond=0)
+        else:
+            bucket_key = created.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        # ISO with trailing Z so the JS Date constructor parses it as
+        # UTC regardless of the client locale.
+        key_iso = bucket_key.strftime("%Y-%m-%dT%H:%M:%SZ")
+        slot = buckets.setdefault(key_iso, {"findings": 0, "blocked": 0})
+        slot["findings"] += int(in_f or 0) + int(out_f or 0)
+        if status == "BLOCKED" and error == "dlp_violation":
+            slot["blocked"] += 1
+    timeline = [
+        {"bucket": k, "findings": v["findings"], "blocked": v["blocked"]}
+        for k, v in sorted(buckets.items())
+    ]
+
+    return {
+        "window": window,
+        "total_requests": total_requests,
+        "requests_with_findings": requests_with_findings,
+        "total_findings": total_findings,
+        "blocked": blocked,
+        "masked": masked,
+        "by_action": by_action,
+        "by_direction": {"input": input_findings, "output": output_findings},
+        "by_category": by_category,
+        "by_project": by_project,
+        "timeline": timeline,
+    }
