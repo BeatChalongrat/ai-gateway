@@ -15,17 +15,18 @@ phone number that should round-trip through the gateway transparently.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
+
+# Import the shared regex from the transformer so there is exactly ONE
+# definition of the mask-token shape in the codebase. Adding a new
+# shape (or extending the pseudonym form) only needs an edit to
+# ``transformer.ANY_MASK_TOKEN_RE``. Previously this module carried a
+# duplicate definition that silently drifted apart from the
+# transformer's during the May 2026 token-shape change.
+from app.services.dlp.transformer import ANY_MASK_TOKEN_RE as _MASK_TOKEN_RE
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
-
-# Matches the neutral ``<rN>`` token shape emitted by
-# ``transformer.py`` — both the counter form (``<r0>``) and the
-# HMAC-suffixed form (``<rAbCd1234>``). Pattern is kept in lockstep
-# with ``transformer._MASK_TOKEN_RE``.
-_MASK_TOKEN_RE = re.compile(r"<r[A-Za-z0-9_\-]+>")
 
 DLP_PLACEHOLDER_PROMPT_V3 = (
     "If the message contains angle-bracket placeholders, preserve them "
