@@ -201,6 +201,67 @@ class TestPromptRules:
         assert not any(m.role == "system" for m in result)
 
 
+class TestPlaceholderAllowlist:
+    """``inject_dlp_system_prompt`` enumerates the request's pseudonym
+    tokens into the prompt as a closed allowlist.
+
+    Surfaced by the May-2026 real-LLM E2E Case 2 trace where the LLM
+    learnt the ``<<PERSON_A>>`` / ``<<EMAIL_1>>`` grammar from the
+    input and hallucinated ``<<ADDRESS_1>>`` in its reply for an
+    entity the user hadn't provided. Explicitly enumerating the
+    valid set + offering "plain text" as an escape hatch cuts the
+    hallucination rate sharply.
+    """
+
+    def test_prompt_lists_valid_placeholders(self):
+        span_map = {
+            "<<PERSON_A>>": "สมชาย",
+            "<<EMAIL_1>>": "test@test.com",
+            "<r0>": "sk-key-do-not-list",  # secret — must not appear
+        }
+        msgs = [Message(role="user", content="Help <<PERSON_A>> at <<EMAIL_1>>")]
+        result = inject_dlp_system_prompt(msgs, span_map=span_map)
+
+        # System prompt was injected (mask tokens present in input).
+        assert result[0].role == "system"
+        system_content = result[0].content
+
+        # Allow-list mentions both pseudonyms.
+        assert "<<PERSON_A>>" in system_content
+        assert "<<EMAIL_1>>" in system_content
+        # Secret token (``<rN>``) must NOT appear — listing it as a
+        # valid placeholder would teach the model to echo it back.
+        assert "<r0>" not in system_content
+        # Allow-list clause has the explicit "ONLY" framing.
+        assert "ONLY" in system_content or "only" in system_content
+
+    def test_prompt_no_allowlist_when_no_pseudonyms(self):
+        # Only a secret-class token in span_map; no pseudonyms to list.
+        span_map = {"<r0>": "sk-key"}
+        msgs = [Message(role="user", content="The key is <r0>")]
+        result = inject_dlp_system_prompt(msgs, span_map=span_map)
+
+        # System prompt still injected (because mask tokens are in the input).
+        assert result[0].role == "system"
+        system_content = result[0].content
+
+        # The base prompt text is present...
+        assert DLP_PLACEHOLDER_PROMPT in system_content
+        # ...but no allow-list clause (no pseudonyms to enumerate).
+        # The marker "ONLY pseudonym placeholders" is the lead-in for
+        # the dynamic allow-list. Its absence means the clause is gone.
+        assert "ONLY pseudonym placeholders" not in system_content
+
+    def test_prompt_allowlist_omitted_when_span_map_none(self):
+        # Backwards-compat — pre-existing callers that don't pass
+        # span_map still get the base prompt with no allow-list.
+        msgs = [Message(role="user", content="Help <<PERSON_A>>")]
+        result = inject_dlp_system_prompt(msgs)  # no span_map kwarg
+        assert result[0].role == "system"
+        assert DLP_PLACEHOLDER_PROMPT in result[0].content
+        assert "ONLY pseudonym placeholders" not in result[0].content
+
+
 class TestOrphanTokenPassthrough:
     """Document current behavior: hallucinated tokens reach user as literal.
 
