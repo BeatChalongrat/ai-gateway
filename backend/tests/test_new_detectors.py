@@ -725,13 +725,16 @@ class TestCoverageEndpoint:
         resp = client.get("/admin/dlp/coverage", headers=_HEADERS)
         assert resp.status_code == 200
         body = resp.json()
-        # 30 = previous 28 + labeled address + income.
-        assert body["summary"]["total"] == 30
+        # 31 = previous 28 + labeled address + income + the regex
+        # Thai-name fallback (now registered alongside Presidio; see
+        # registry.py for the gate-removal rationale).
+        assert body["summary"]["total"] == 31
 
         names = {d["name"] for d in body["detectors"]}
         assert "thai_national_id" in names
         assert "db_connection_string" in names
         assert "mac_address" in names
+        assert "thai_name_no_prefix" in names
 
     def test_coverage_endpoint_has_known_gaps(self):
         resp = client.get("/admin/dlp/coverage", headers=_HEADERS)

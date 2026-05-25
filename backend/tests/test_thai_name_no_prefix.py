@@ -61,29 +61,42 @@ class TestDetection:
 
 
 # ---------------------------------------------------------------------------
-# Registry gate — only registered when ner_enabled is False
+# Registry gate — registered REGARDLESS of ``ner_enabled`` since the
+# Thai-name fix. Original gate (``not ner_enabled``) was dropped
+# because the backend's English-only spaCy model misses bare Thai
+# names. The regex is context-gated and ``priority=-5`` so it never
+# beats Presidio on overlap — see ``registry.py`` for the rationale.
 # ---------------------------------------------------------------------------
 
 
 class TestRegistryGate:
-    def test_disabled_when_ner_enabled_default(self):
+    def test_enabled_when_ner_enabled_default(self):
         registry = get_default_registry()
-        assert "thai_name_no_prefix" not in registry
+        assert "thai_name_no_prefix" in registry
 
-    def test_disabled_when_ner_enabled_explicit(self):
+    def test_enabled_when_ner_enabled_explicit(self):
         registry = get_default_registry(ner_enabled=True)
-        assert "thai_name_no_prefix" not in registry
+        assert "thai_name_no_prefix" in registry
 
     def test_enabled_when_ner_disabled(self):
         registry = get_default_registry(ner_enabled=False)
         assert "thai_name_no_prefix" in registry
 
     def test_disabled_detectors_still_honoured_when_ner_off(self):
-        # The ner_enabled=False path adds thai_name_no_prefix on top
-        # of the standard set, but the disabled_detectors list must
-        # still be able to remove it (operator escape hatch).
+        # The operator escape hatch must still work — listing the
+        # detector in ``disabled_detectors`` removes it even though it
+        # is now always-on by default.
         registry = get_default_registry(
             disabled_detectors=["thai_name_no_prefix"],
             ner_enabled=False,
+        )
+        assert "thai_name_no_prefix" not in registry
+
+    def test_disabled_detectors_still_honoured_when_ner_on(self):
+        # Same escape hatch on the NER-on path — the new always-on
+        # registration is overridable via the same mechanism.
+        registry = get_default_registry(
+            disabled_detectors=["thai_name_no_prefix"],
+            ner_enabled=True,
         )
         assert "thai_name_no_prefix" not in registry

@@ -439,7 +439,7 @@ class TestReligionMerging:
 
 
 # ---------------------------------------------------------------------------
-# Coverage matrix: verify all 27 detectors are in the registry
+# Coverage matrix: verify all built-in detectors are in the registry
 # ---------------------------------------------------------------------------
 
 class TestCoverageMatrix:
@@ -449,17 +449,22 @@ class TestCoverageMatrix:
         "bearer_token", "api_key_secret", "private_key", "password_field",
         "thai_national_id", "thai_tax_id", "thai_bank_account",
         "thai_promptpay", "thai_address", "thai_name",
+        "address", "income",
         "db_connection_string", "medical_record", "mac_address",
         "religion_belief", "health_condition", "criminal_record",
-        "biometric_data", "presidio_ner",
+        "biometric_data",
+        # NER + regex Thai-name fallback. The regex fallback
+        # (thai_name_no_prefix) is now registered unconditionally
+        # alongside Presidio — see registry.py for the rationale.
+        "presidio_ner", "thai_name_no_prefix",
         "line_id",
     }
 
-    def test_all_28_registered(self):
+    def test_all_registered(self):
         registry = get_default_registry()
         names = {d.name for d in registry._detectors}
         assert names == self.EXPECTED_DETECTORS
-        assert len(registry) == 28
+        assert len(registry) == 31
 
     def test_all_have_mask_tokens(self):
         from app.services.dlp.transformer import MASK_TOKENS
