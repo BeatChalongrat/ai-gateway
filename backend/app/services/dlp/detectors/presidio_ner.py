@@ -159,6 +159,20 @@ _THAI_COMMON_WORDS = frozenset({
     "ช่วยแปล", "ช่วยอธิบาย", "ช่วยเขียน", "ช่วยตรวจ",
     "ช่วย rewrite", "ช่วยทำ", "ช่วยตอบ",
     "อธิบาย", "แปล", "rewrite",
+    # Business / financial verb phrases caught during the
+    # pseudonymization E2E run (May 2026). All are 3+ Thai chars (so
+    # they pass the short-token filter), have no internal whitespace
+    # (so the regex `thai_name_no_prefix` won't grab them either),
+    # and appear in common e-commerce / banking prose where the
+    # English NER reliably mis-tags them as PERSON. Cannot be a
+    # person's name in Thai — every entry is a verb phrase or
+    # verb+noun construction.
+    "สั่งของ", "สั่งของยอด", "สั่งซื้อ", "สั่งสินค้า",
+    "จ่ายเงิน", "จ่ายเงินยัง",
+    "ขอกู้", "ผ่อนได้",
+    "รับของ", "ส่งของ",
+    "เปิดบัญชี", "ปิดบัญชี",
+    "โอนเงิน", "ถอนเงิน", "ฝากเงิน",
 })
 
 
