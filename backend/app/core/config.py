@@ -285,6 +285,19 @@ class Settings(BaseSettings):
     # leaks, but multi-turn history may receive newly minted tokens.
     dlp_conversation_vault_enabled: bool = True
 
+    # Pseudonymization layer — **default-on for production**.
+    # When True (default), identity-class detectors (email, phone,
+    # names, IDs, addresses, DOB, etc.) emit readable per-category
+    # tokens like ``<<PERSON_A>>`` / ``<<EMAIL_1>>`` instead of opaque
+    # ``<rN>``, which lets the LLM reason about entity relationships
+    # ("the same person") without seeing raw values. Secret-class
+    # detectors keep the ``<rN>`` shape (and are never restored to the
+    # user). The ``income`` detector is bypassed entirely so the LLM
+    # can compute on the raw value.
+    # Set to False to revert to the legacy ``<rN>`` shape on every
+    # detector — kept as an escape hatch for downgrade scenarios.
+    dlp_pseudonym_mode: bool = True
+
     # AES-256-GCM key for the admin Safe Trace audit channel
     # (``request_logs.input_raw_encrypted``). The orchestrator
     # encrypts the user's raw prompt with this key before masking; the

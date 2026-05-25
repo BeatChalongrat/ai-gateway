@@ -49,10 +49,30 @@ logger = structlog.get_logger(__name__)
 #   - deterministic       ``<r{hmac_suffix}>``       (8-char base64url)
 #   - deterministic       ``<r{hmac_suffix}_{disambig}>`` (collision)
 #
+# Pseudonym mode (``DLP_PSEUDONYM_MODE=true``) adds a parallel shape
+# ``<<CATEGORY_N>>`` for identity-class detectors only — secret-class
+# detectors keep the ``<rN>`` form regardless of mode. The combined
+# regex below matches both so restore / orphan-detection / regex-sync
+# sites work in mixed-shape situations (e.g. a vault that has legacy
+# ``<r0>`` entries plus new ``<<EMAIL_1>>`` entries).
+#
 # Used by ``restore`` to detect surviving tokens (orphans) and by
 # ``orchestrator._scan_text_as_result`` to filter mask-token literals
 # out of outbound scan results.
-_MASK_TOKEN_RE = re.compile(r"<r[A-Za-z0-9_\-]+>")
+_MASK_TOKEN_RE = re.compile(
+    r"<r[A-Za-z0-9_\-]+>|<<[A-Z][A-Z0-9_]*>>"
+)
+
+# Re-exported alias — call sites in ``dlp_prompt`` / ``public_chat`` /
+# ``orchestrator`` import this name instead of defining their own copy
+# so the regex stays in lockstep with the token emitter. Adding a new
+# token shape only needs an edit here.
+ANY_MASK_TOKEN_RE = _MASK_TOKEN_RE
+
+# Pseudonym-only matcher (without the legacy ``<rN>`` alternative).
+# Used by the per-category counter-recovery helper to identify which
+# bucket a vault token belongs to.
+_PSEUDONYM_TOKEN_RE = re.compile(r"<<([A-Z][A-Z0-9_]*?)_([A-Z]|\d+)>>")
 
 # Doubled-bracket variants the LLM occasionally invents — same failure
 # mode as the legacy ``[[NAME_0]]`` shape but for the new ``<rN>``
@@ -65,8 +85,14 @@ _DOUBLE_CLOSE_TOKEN_RE = re.compile(r"(?<!<)<(r[A-Za-z0-9_\-]+)>>")
 
 
 def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
-    """Strip ``<rN>`` tokens that survived ``restore`` and have no
+    """Strip mask tokens that survived ``restore`` and have no
     entry in ``span_map``.
+
+    Recognises both shapes:
+      - legacy counter-form ``<rN>`` (always emitted by secret-class
+        detectors and by every detector when pseudonym mode is off)
+      - pseudonym ``<<CATEGORY_N>>`` (emitted by identity-class
+        detectors when ``DLP_PSEUDONYM_MODE=true``)
 
     Runs in the orchestrator's success path AFTER ``restore`` so the
     user-facing reply never carries an AI-hallucinated mask token or
@@ -82,9 +108,9 @@ def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
     pre-existing whitespace patterns in clean responses are
     preserved verbatim.
 
-    No-op when the text is empty or contains no ``<rN>`` tokens.
+    No-op when the text is empty or contains no mask-token shape.
     """
-    if not text or "<r" not in text:
+    if not text or ("<r" not in text and "<<" not in text):
         return text
 
     def _replace(m: "re.Match[str]") -> str:
@@ -164,29 +190,52 @@ _FUZZY_TOKEN_RE = re.compile(
     r'<\s*[Rr]\s*(\d+|[A-Za-z0-9_\-]+)\s*>'
 )
 
+# Pseudonym fuzzy variant — accepts uppercase / lowercase content and
+# whitespace inside the doubled angles. The capture groups are
+# ``prefix`` and ``suffix`` so the replacer can rebuild the canonical
+# ``<<PREFIX_SUFFIX>>`` form.
+_FUZZY_PSEUDONYM_RE = re.compile(
+    r'<<\s*([A-Za-z][A-Za-z0-9_]*?)\s*_\s*([A-Za-z]|\d+)\s*>>'
+)
+
 
 def _normalize_tokens(text: str, span_map: dict[str, str]) -> str:
-    """Rewrite near-miss token variants to their canonical ``<rN>`` form.
+    """Rewrite near-miss token variants to their canonical form.
 
     Restore relies on exact ``str.replace`` against the keys in
     ``span_map``. LLMs occasionally echo tokens back with cosmetic
     drift — uppercase (``<R0>``), padded angles (``< r0 >``), a single
     trailing space (``<r0 >``) — and every such variant misses the
     replace and leaks the literal token to the user. This pre-pass
-    canonicalises any token shape matching ``_FUZZY_TOKEN_RE`` to the
-    lowercase, whitespace-free form *iff* that canonical form is
-    present in ``span_map``; otherwise the original substring is
-    preserved untouched so we don't accidentally rewrite unrelated
-    angle-bracketed text the model produced.
+    canonicalises both shapes:
+
+      - ``<rN>``        — fuzzy on case + whitespace
+      - ``<<CAT_N>>``   — fuzzy on case + whitespace inside the angles
+
+    A rewrite happens *iff* the canonical form is present in
+    ``span_map``; otherwise the original substring is preserved
+    untouched so unrelated angle-bracketed text the model produced
+    is not accidentally rewritten.
     """
     if not span_map:
         return text
 
-    def replacer(m: re.Match) -> str:
+    def replacer_legacy(m: re.Match) -> str:
         canonical = f"<r{m.group(1)}>"
         return canonical if canonical in span_map else m.group(0)
 
-    return _FUZZY_TOKEN_RE.sub(replacer, text)
+    result = _FUZZY_TOKEN_RE.sub(replacer_legacy, text)
+
+    def replacer_pseudo(m: re.Match) -> str:
+        prefix = m.group(1).upper()
+        suffix = m.group(2)
+        # Letter suffix → uppercase; numeric suffix kept as-is.
+        if suffix.isalpha():
+            suffix = suffix.upper()
+        canonical = f"<<{prefix}_{suffix}>>"
+        return canonical if canonical in span_map else m.group(0)
+
+    return _FUZZY_PSEUDONYM_RE.sub(replacer_pseudo, result)
 
 
 # Descriptive placeholder tokens. Keyed on DetectionMatch.detector_name so
@@ -421,12 +470,195 @@ def _allocate_deterministic_token(
     return token
 
 
+# ---------------------------------------------------------------------------
+# Pseudonymization layer (opt-in via DLP_PSEUDONYM_MODE)
+# ---------------------------------------------------------------------------
+#
+# Goal: give the LLM readable per-category placeholders so it can
+# reason about entity relationships ("the same person", "their email",
+# "their phone") without ever seeing raw values. The provider sees
+# tokens like ``<<PERSON_A>>`` / ``<<EMAIL_1>>``; the user sees the
+# original value restored 100%.
+#
+# Layering:
+#   - identity-class detectors (PSEUDONYM_MAP)  → ``<<CAT_N>>``
+#   - secret-class detectors  (SECRET_DETECTORS)→ ``<rN>`` (legacy,
+#                                                  never restored)
+#   - bypass    (BYPASS_DETECTORS)              → None (don't mask)
+#   - everything else                           → ``<rN>`` (legacy fallback)
+#
+# Per-category counter ``counters[prefix]`` is used for pseudonym
+# tokens. The legacy ``__global__`` counter remains for ``<rN>``
+# tokens so outbound mask passes stay collision-free with inbound.
+
+# Detector name → readable category prefix used inside ``<<PREFIX_N>>``.
+# Only identity-class detectors appear here. Anything not in this map
+# (and not in SECRET_DETECTORS / BYPASS_DETECTORS) falls back to the
+# legacy ``<rN>`` shape — keeps the migration safe.
+PSEUDONYM_MAP: dict[str, str] = {
+    # People
+    "thai_name": "PERSON",
+    "thai_name_no_prefix": "PERSON",
+    "presidio_ner": "PERSON",
+    # Contact
+    "email": "EMAIL",
+    "phone": "PHONE",
+    "line_id": "LINE_ID",
+    # Government IDs
+    "thai_national_id": "NID",
+    "passport": "PASSPORT",
+    "thai_tax_id": "TAX_ID",
+    "ssn": "SSN",
+    # Financial
+    "thai_bank_account": "ACCOUNT",
+    "credit_card": "CARD",
+    "iban": "IBAN",
+    "thai_promptpay": "PROMPTPAY",
+    # Network
+    "ip_address": "IP",
+    "mac_address": "MAC",
+    # Location / demographic
+    "address": "ADDRESS",
+    "thai_address": "ADDRESS",
+    "date_of_birth": "DOB",
+    "vehicle_plate": "PLATE",
+    # PDPA Section 26 sensitive
+    "medical_record": "MEDICAL",
+    "health_condition": "HEALTH",
+    "religion_belief": "RELIGION",
+    "criminal_record": "CRIMINAL",
+    "biometric_data": "BIOMETRIC",
+}
+
+# Categories whose suffix is a letter (A, B, …, Z, then 27, 28, …
+# numeric for overflow). Only PERSON in v1 — keeps "Alice and Bob"
+# readable as ``<<PERSON_A>>`` / ``<<PERSON_B>>`` in the prompt.
+LETTER_SUFFIX_CATEGORIES: set[str] = {"PERSON"}
+
+# Detectors whose findings stay on the ``<rN>`` shape regardless of
+# pseudonym mode. The token is never added to the restore allow-list
+# (policy never RESTOREs ``secret`` / ``credential``) so the
+# placeholder reaches the user as an orphan-stripped silence.
+SECRET_DETECTORS: set[str] = {
+    "bearer_token",
+    "api_key_secret",
+    "private_key",
+    "password_field",
+    "db_connection_string",
+}
+
+# Detectors whose findings are NOT masked at all — the original value
+# survives untouched. Used so the LLM can do arithmetic on values like
+# income figures that are sensitive in aggregate but useless to the
+# assistant without the number.
+BYPASS_DETECTORS: set[str] = {"income"}
+
+
+def _is_pseudonym_mode_on() -> bool:
+    """Centralised flag check.
+
+    Lazy-imports settings so transformer.py stays usable in isolation
+    (test_transformer.py exercises it without spinning the full app
+    settings stack).
+    """
+    try:
+        from app.core.config import settings
+    except Exception:
+        return False
+    return bool(getattr(settings, "dlp_pseudonym_mode", False))
+
+
+def _letter_suffix(idx: int) -> str:
+    """Return ``A`` for idx=0, ``B`` for idx=1, … ``Z`` for idx=25.
+
+    Beyond 25 we wrap to a numeric suffix starting at ``27`` so the
+    token stays regex-clean (no ``[`` / ``\\``) and so a reader can
+    tell at a glance that the conversation has > 26 distinct people.
+    Two-letter suffixes would collide with multi-word abbreviations
+    and complicate vault recovery — numeric overflow is simpler.
+    """
+    if 0 <= idx < 26:
+        return chr(65 + idx)
+    return str(idx + 1)
+
+
+def _decode_letter_suffix(suffix: str) -> int:
+    """Inverse of ``_letter_suffix``. Returns -1 on parse failure."""
+    if len(suffix) == 1 and "A" <= suffix <= "Z":
+        return ord(suffix) - 65
+    try:
+        return int(suffix) - 1
+    except ValueError:
+        return -1
+
+
+def _pseudonym_token_for(prefix: str, counters: dict[str, int]) -> str:
+    """Mint the next pseudonym token for ``prefix`` and advance the counter.
+
+    PERSON-like categories use a letter suffix (A, B, …); others use
+    a 1-indexed numeric suffix so the prompt reads ``<<EMAIL_1>>``,
+    not ``<<EMAIL_0>>`` (1-indexed is easier for humans to follow).
+    """
+    if prefix in LETTER_SUFFIX_CATEGORIES:
+        idx = counters.get(prefix, 0)
+        suffix = _letter_suffix(idx)
+        counters[prefix] = idx + 1
+    else:
+        idx = counters.get(prefix, 0) + 1
+        suffix = str(idx)
+        counters[prefix] = idx
+    return f"<<{prefix}_{suffix}>>"
+
+
+def recover_counters_from_vault(
+    vault_tokens: list[str] | dict[str, str],
+) -> dict[str, int]:
+    """Build a fresh ``counters`` dict primed past the vault's
+    highest-used index in every bucket.
+
+    Recognises BOTH shapes:
+      - ``<rN>``  (legacy)        → ``counters['__global__']``
+      - ``<<CAT_N>>`` (pseudonym) → ``counters[CAT]``
+
+    The dict returned is suitable for passing to ``mask_messages`` /
+    ``mask_text`` as ``start_counters`` so newly minted tokens skip
+    over slots the vault already owns. Returned dict is empty when
+    the vault is empty — caller treats empty as "fresh start".
+    """
+    tokens = list(vault_tokens.keys() if isinstance(vault_tokens, dict) else vault_tokens)
+    if not tokens:
+        return {}
+    counters: dict[str, int] = {}
+    counter_re = re.compile(r"^<r(\d+)>$")
+    for token in tokens:
+        m_global = counter_re.match(token)
+        if m_global:
+            idx = int(m_global.group(1)) + 1
+            counters["__global__"] = max(counters.get("__global__", 0), idx)
+            continue
+        m_pseudo = _PSEUDONYM_TOKEN_RE.match(token)
+        if not m_pseudo:
+            continue
+        prefix, suffix = m_pseudo.group(1), m_pseudo.group(2)
+        if prefix in LETTER_SUFFIX_CATEGORIES:
+            recovered = _decode_letter_suffix(suffix)
+            if recovered < 0:
+                continue
+            counters[prefix] = max(counters.get(prefix, 0), recovered + 1)
+        else:
+            try:
+                counters[prefix] = max(counters.get(prefix, 0), int(suffix))
+            except ValueError:
+                continue
+    return counters
+
+
 def _allocate_token(
     detector_name: str,
     counters: dict[str, int],
     span_map: dict[str, str],
     original: str,
-) -> str:
+) -> str | None:
     """Pick the next ``[BASE_N]`` token for this detector and bind it.
 
     Counter keying: by *base* name. This is the fix for the collision
@@ -442,21 +674,76 @@ def _allocate_token(
     practice — keeping it means a future MASK_TOKENS edit that
     introduces a new collision pattern fails loud instead of
     corrupting data silently.
+
+    Routing under ``DLP_PSEUDONYM_MODE=true``:
+      - ``BYPASS_DETECTORS`` (income)        → returns ``None`` so the
+                                               caller leaves the value
+                                               untouched in the text.
+      - ``SECRET_DETECTORS``                 → ``<rN>`` + ``__global__``
+                                               counter (legacy shape;
+                                               the orphan-redact pass
+                                               strips it from the
+                                               user-facing reply).
+      - detector in ``PSEUDONYM_MAP``         → ``<<CAT_N>>`` + per-
+                                               category counter.
+      - unknown detector                     → ``<rN>`` (legacy fallback).
+
+    Under ``DLP_PSEUDONYM_MODE=false`` (default), all routing collapses
+    to the legacy ``<rN>`` + ``__global__`` path so existing callers
+    and tests keep identical behaviour.
     """
-    # Single shared counter under the neutral ``<rN>`` shape. The
-    # legacy per-base counter dict can't be used because the emitted
-    # token no longer carries the base — two detectors starting at 0
-    # would both mint ``<r0>`` for different values. ``__global__`` is
-    # the canonical key; legacy per-base entries written by
-    # ``start_counters`` callers are absorbed by taking the max across
-    # all values so an outbound pass still continues past the inbound
-    # high-water mark.
-    if "__global__" in counters:
-        idx = counters["__global__"]
-    elif counters:
-        idx = max(counters.values())
-    else:
-        idx = 0
+    pseudonym_mode = _is_pseudonym_mode_on()
+
+    # Bypass — only honoured in pseudonym mode. In legacy mode every
+    # finding still gets a placeholder; flipping the mode is the
+    # opt-in for letting income / similar fields through to the LLM.
+    if pseudonym_mode and detector_name in BYPASS_DETECTORS:
+        return None
+
+    # Identity-class pseudonym path (only in pseudonym mode + detector
+    # listed in PSEUDONYM_MAP + not in SECRET_DETECTORS).
+    if (
+        pseudonym_mode
+        and detector_name in PSEUDONYM_MAP
+        and detector_name not in SECRET_DETECTORS
+    ):
+        prefix = PSEUDONYM_MAP[detector_name]
+        token = _pseudonym_token_for(prefix, counters)
+        # Collision guard — same value mapped to the same token, even
+        # via the per-category counter, would be rare but possible if
+        # ``counters`` was pre-seeded past the actual binding. Fail
+        # loud rather than overwrite.
+        existing = span_map.get(token)
+        if existing is not None and existing != original:
+            logger.error(
+                "dlp_pseudonym_collision",
+                token=token,
+                existing_value_prefix=existing[:20],
+                new_value_prefix=original[:20],
+                detector=detector_name,
+            )
+            # Advance past this slot and try again — the per-category
+            # counter has already incremented, so the next call will
+            # land on a fresh suffix.
+            return _allocate_token(
+                detector_name, counters, span_map, original
+            )
+        span_map[token] = original
+        return token
+
+    # Legacy path: ``<rN>`` + ``__global__`` counter. Reached for:
+    #   - secret-class detectors  (regardless of mode)
+    #   - any detector            in legacy mode
+    #   - unknown detectors       (defensive fallback)
+    #
+    # Only the ``__global__`` key feeds the legacy index. Per-category
+    # pseudonym counters (``counters["PERSON"]=2``) MUST NOT bleed
+    # into the secret-class counter — a secret following an identity
+    # would otherwise mint ``<r2>`` on an empty global. Pre-pseudonym
+    # callers always wrote ``__global__`` (or left counters empty);
+    # vault recovery is the only producer of per-category keys and
+    # they're kept strictly separate from the legacy bucket.
+    idx = counters.get("__global__", 0)
     token = f"<r{idx}>"
     counters["__global__"] = idx + 1
 
@@ -705,7 +992,13 @@ class DLPTransformer:
             # cross-turn via vault_reverse_map) is handled by
             # ``reverse_map`` — the lookup happens before
             # ``_allocate_token`` so a vault hit reuses its prior
-            # ``<rN>`` and only fresh values consume a new counter.
+            # token (``<rN>`` or ``<<CAT_N>>``) and only fresh values
+            # consume a new counter.
+            #
+            # When ``_allocate_token`` returns ``None`` the detector
+            # is in ``BYPASS_DETECTORS`` (currently ``income``) — the
+            # span is dropped from ``replacements`` so the original
+            # value stays in the text unmodified.
             replacements: list[tuple[int, int, str, str]] = []
             # (start, end, replacement, original)
             for ma in resolved:
@@ -719,6 +1012,9 @@ class DLPTransformer:
                         token = _allocate_token(
                             ma.match.detector_name, counters, span_map, original
                         )
+                        if token is None:
+                            # Bypass — leave the value untouched.
+                            continue
                         reverse_map[original] = token
                     replacements.append(
                         (ma.match.start, ma.match.end, token, original)
@@ -803,6 +1099,9 @@ class DLPTransformer:
                     token = _allocate_token(
                         ma.match.detector_name, counters, span_map, original
                     )
+                    if token is None:
+                        # Bypass — leave the value untouched.
+                        continue
                     reverse_map[original] = token
                 replacements.append((ma.match.start, ma.match.end, token))
             else:  # REDACT

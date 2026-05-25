@@ -287,6 +287,10 @@ services:
       # example. ``v3`` = no-example variant audited to lower
       # hallucination rate. A/B by flipping per deployment.
       DLP_PROMPT_VARIANT: ${DLP_PROMPT_VARIANT:-v1}
+      # Pseudonymization mode — readable <<CATEGORY_N>> token shape
+      # on identity-class detectors. Default-on; set to ``false`` in
+      # .env to revert to the legacy <rN> shape on every detector.
+      DLP_PSEUDONYM_MODE: ${DLP_PSEUDONYM_MODE:-true}
     volumes:
       # Mount the DLP parity fixtures so the Python parity test can
       # read them from inside the backend container. Read-only and
