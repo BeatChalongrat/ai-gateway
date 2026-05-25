@@ -65,9 +65,12 @@ def _result(direction: str, *matches: DetectionMatch) -> DetectionResult:
         ("financial", "credit_card", EnforcementAction.RESTORE),
         ("financial", "iban",        EnforcementAction.RESTORE),
         ("identity",  "passport",    EnforcementAction.RESTORE),
-        # Network kept at ALLOW — AI legitimately answers about
-        # RFC-1918 ranges, example IPs, etc.
-        ("network",   "ip_address",  EnforcementAction.ALLOW),
+        # Network outbound is RESTORE under the post-May-2026 default:
+        # the round-trip case ("confirm these IPs back to me") needs
+        # the placeholders restored to the original value, not stripped.
+        # Profiles that want freeform IP discussion (NetSec assistants,
+        # docs that need example IPs) must opt into a custom profile.
+        ("network",   "ip_address",  EnforcementAction.RESTORE),
     ],
 )
 def test_default_profile_outbound_reference_categories(
@@ -98,15 +101,28 @@ def test_default_profile_outbound_reference_categories(
     ],
 )
 def test_default_profile_outbound_credentials_and_secrets_restore(category: str, detector: str) -> None:
-    """Outbound credential / secret → MASK under default. AI must never leak these."""
+    """Outbound credential / secret → MASK under default. AI must never leak these.
+
+    Security fix (post May-2026 real-LLM E2E round 2): under the
+    earlier policy these categories were RESTORE, which meant an LLM
+    that faithfully echoed the masked ``<r0>`` token in its reply
+    would have it restored back to the original API key / password
+    on the way out — a credential leak. MASK keeps the placeholder
+    in place; the orphan-redact pass in the orchestrator (paired
+    with the Layer 2 ``_NEVER_RESTORE_CATEGORIES`` hard-block in
+    ``_compute_restore_allowed_tokens``) then strips it from the
+    user-visible reply.
+    """
     evaluator = PolicyEvaluator()
     decision = evaluator.evaluate(
         _result("output", _match(category, detector)), DEFAULT_PROFILE
     )
-    assert decision.overall_action == EnforcementAction.RESTORE, (
-        f"outbound {category} ({detector}) must be RESTORE under DEFAULT_PROFILE"
+    assert decision.overall_action == EnforcementAction.MASK, (
+        f"outbound {category} ({detector}) must be MASK under DEFAULT_PROFILE — "
+        "RESTORE would round-trip the secret back to the user"
     )
-    assert decision.requires_transformation is False
+    # MASK requires text transformation (token replacement).
+    assert decision.requires_transformation is True
 
 
 @pytest.mark.parametrize(
