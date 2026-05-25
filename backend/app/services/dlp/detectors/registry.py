@@ -293,13 +293,23 @@ def get_default_registry(
         LineIdDetector(),
     ]
 
-    # Fallback Thai-name detector — included only when NER is disabled.
-    # When ``ner_enabled=True`` Presidio's PERSON recognizer handles
-    # bare Thai names; we keep this regex out of the registry to avoid
-    # duplicate findings + noise. When NER is off this detector is the
-    # only line of defence against un-prefixed Thai names.
-    if not ner_enabled:
-        all_detectors.append(ThaiNameNoPrefixDetector())
+    # Regex-based Thai-name fallback — now registered REGARDLESS of
+    # ``ner_enabled``. Original design (May 2026) gated this behind
+    # ``not ner_enabled`` on the assumption that Presidio's PERSON
+    # recognizer covered bare Thai names whenever NER was on. The
+    # assumption was wrong for our model setup: the backend image
+    # ships ``en_core_web_sm`` only (no Thai spaCy model), so the
+    # English-language NER produces non-deterministic / missed results
+    # on bare Thai names like ``สมชาย ใจดี`` / ``สมหญิง รักดี``.
+    #
+    # The regex is context-gated (requires ``ลูกค้า`` / ``พนักงาน`` /
+    # ``ชื่อ`` / … in the ±25-char window) and emits ``priority=-5``
+    # so the overlap resolver always prefers Presidio (priority 0) on
+    # shared spans. Net effect when both detectors run:
+    #   * Presidio hit → wins via priority; regex hit dropped.
+    #   * Presidio miss → regex becomes the fallback floor.
+    # No duplicate masks, no churn for the operator.
+    all_detectors.append(ThaiNameNoPrefixDetector())
 
     # Presidio NER is optional at runtime. Gate registration on the
     # underlying ``presidio_analyzer`` package being importable — the

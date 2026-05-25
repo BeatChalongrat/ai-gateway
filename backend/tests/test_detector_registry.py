@@ -354,6 +354,15 @@ class TestDefaultRegistry:
         assert r1 is not r2
 
     def test_has_built_in_detectors(self):
-        """Default registry contains all built-in detectors."""
+        """Default registry contains all built-in detectors.
+
+        Count breakdown (ner_enabled=True default):
+          29 always-on detectors
+          +1 PresidioDetector (when ``presidio_analyzer`` importable)
+          +1 ThaiNameNoPrefixDetector (regex fallback — registered
+             regardless of ner_enabled since the Thai-name fix; see
+             registry.py for the rationale)
+          = 31
+        """
         reg = get_default_registry()
-        assert len(reg) == 28
+        assert len(reg) == 31
