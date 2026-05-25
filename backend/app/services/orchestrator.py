@@ -98,6 +98,11 @@ logger = structlog.get_logger(__name__)
 # ``max + 1`` instead of colliding with vault-owned slots. The token
 # emitter only uses digits in counter mode; legacy HMAC suffixes are
 # ignored here on purpose (they can't influence the next counter).
+#
+# Under ``DLP_PSEUDONYM_MODE=true`` per-category counters also need
+# recovery — that's handled by ``transformer.recover_counters_from_vault``
+# which understands both shapes. The legacy regex stays here for
+# backwards-compat callers that only need ``__global__`` recovery.
 _COUNTER_TOKEN_RE = re.compile(r"^<r(\d+)>$")
 
 
@@ -424,6 +429,9 @@ class GatewayOrchestrator:
             and settings.dlp_conversation_vault_enabled
         ):
             from app.services.dlp.conversation_vault import conversation_vault
+            from app.services.dlp.transformer import (
+                recover_counters_from_vault,
+            )
             existing_vault = await conversation_vault.get_all_tokens_async(
                 conversation_id
             )
@@ -431,13 +439,14 @@ class GatewayOrchestrator:
                 vault_reverse_map = {
                     value: token for token, value in existing_vault.items()
                 }
-                max_idx = -1
-                for token in existing_vault.keys():
-                    m = _COUNTER_TOKEN_RE.match(token)
-                    if m:
-                        max_idx = max(max_idx, int(m.group(1)))
-                if max_idx >= 0:
-                    inbound_start_counters = {"__global__": max_idx + 1}
+                # Per-shape counter recovery — handles legacy ``<rN>``
+                # (``__global__`` bucket) and pseudonym ``<<CAT_N>>``
+                # (per-category buckets) in one pass. A pre-pseudonym
+                # vault yields exactly ``{__global__: N}`` so legacy
+                # callers see identical behaviour.
+                recovered = recover_counters_from_vault(existing_vault)
+                if recovered:
+                    inbound_start_counters = recovered
 
         messages_to_send = list(payload.messages)
         span_map: dict[str, str] = {}
@@ -1358,12 +1367,19 @@ class GatewayOrchestrator:
         # The same protection set is used on the cache-hit path so both
         # routes give identical output. Streaming uses the same rule in
         # public_chat.py via its own redact pass.
-        from app.services.dlp.transformer import redact_orphan_tokens
+        from app.services.dlp.transformer import (
+            ANY_MASK_TOKEN_RE as _ANY_MASK_TOKEN_RE,
+            redact_orphan_tokens,
+        )
         _before_redact = response_content
         response_content = redact_orphan_tokens(response_content, span_map)
         if _before_redact != response_content:
+            # Shared regex captures both ``<rN>`` and ``<<CAT_N>>`` so
+            # pseudonym-mode orphans show up in the log under the same
+            # event name. Stays in lockstep with the redact pass that
+            # also keys on ``ANY_MASK_TOKEN_RE``.
             redacted_tokens = sorted(
-                set(re.findall(r"<r[A-Za-z0-9_\-]+>", _before_redact))
+                set(_ANY_MASK_TOKEN_RE.findall(_before_redact))
                 - set(span_map.keys())
             )
             log.info(

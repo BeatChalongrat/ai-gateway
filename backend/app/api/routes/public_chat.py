@@ -193,21 +193,23 @@ async def chat_completions(
         and settings.dlp_enabled
         and settings.dlp_conversation_vault_enabled
     ):
-        import re as _re_stream
         from app.services.dlp.conversation_vault import conversation_vault as _cv_stream
+        from app.services.dlp.transformer import (
+            recover_counters_from_vault as _recover_counters,
+        )
         _existing_vault = await _cv_stream.get_all_tokens_async(_conv_id_for_key)
         if _existing_vault:
             vault_reverse_map_stream = {
                 value: token for token, value in _existing_vault.items()
             }
-            _counter_re = _re_stream.compile(r"^<r(\d+)>$")
-            _max_idx = -1
-            for _t in _existing_vault.keys():
-                _m = _counter_re.match(_t)
-                if _m:
-                    _max_idx = max(_max_idx, int(_m.group(1)))
-            if _max_idx >= 0:
-                stream_inbound_start_counters = {"__global__": _max_idx + 1}
+            # Recover BOTH the legacy ``__global__`` counter (for
+            # ``<rN>`` tokens) AND any per-category counters (for
+            # ``<<CAT_N>>`` pseudonym tokens). A vault that pre-dates
+            # pseudonym mode just yields ``{__global__: N}`` — exact
+            # legacy behaviour preserved.
+            _recovered = _recover_counters(_existing_vault)
+            if _recovered:
+                stream_inbound_start_counters = _recovered
 
     if settings.dlp_enabled:
         # Per-tenant NER gate — identical to orchestrator.handle_chat_completion.
@@ -878,19 +880,31 @@ async def chat_completions(
                             safe = masked_window[:-MIN_TAIL_CHARS]
                             tail_masked = masked_window[-MIN_TAIL_CHARS:]
                             # Guard against splitting an already-masked
-                            # ``<rN>`` token at the safe/tail boundary.
-                            # The window-level DLP scan can't help here —
-                            # mask tokens are deliberately ignored by the
-                            # scanner — so a literal ``<r0>`` echoed by
-                            # the LLM and sitting at position
-                            # ``len(window) - 121`` would split as
-                            # ``<r`` (in safe) + ``0>`` (in tail) and
-                            # leak to the user. If ``safe`` ends with
-                            # an unterminated ``<`` (no matching ``>``
-                            # after it), push everything from that
-                            # ``<`` into ``tail_masked`` so the full
-                            # token gets restored on a later iteration
-                            # or at the end-of-stream flush.
+                            # token at the safe/tail boundary. Two
+                            # shapes to protect:
+                            #
+                            #   1. ``<<CAT_N>>`` (pseudonym mode) —
+                            #      could split as ``<<EMAI`` + ``L_1>>``
+                            #      OR as ``<<EMAIL_1>`` + ``>`` (just
+                            #      the closing ``>>`` split). Check for
+                            #      a trailing ``<<…`` with no matching
+                            #      ``>>`` after it.
+                            #   2. ``<rN>`` (legacy) — could split as
+                            #      ``<r`` + ``0>``. Check for a
+                            #      trailing single ``<`` with no
+                            #      matching ``>`` after it.
+                            #
+                            # Pass 1 must run first because case 2's
+                            # logic would only push from the second
+                            # ``<`` of ``<<`` and leak the first one.
+                            _last_dbl_open = safe.rfind("<<")
+                            _last_dbl_close = safe.rfind(">>")
+                            if (
+                                _last_dbl_open != -1
+                                and _last_dbl_close < _last_dbl_open
+                            ):
+                                tail_masked = safe[_last_dbl_open:] + tail_masked
+                                safe = safe[:_last_dbl_open]
                             _last_lt = safe.rfind("<")
                             if _last_lt != -1 and safe.rfind(">") < _last_lt:
                                 tail_masked = safe[_last_lt:] + tail_masked
