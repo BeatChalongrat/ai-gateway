@@ -19,6 +19,35 @@ def pytest_configure(config):
         "presidio install gate.",
     )
 
+
+@pytest.fixture(autouse=True)
+def _pseudonym_mode_off_by_default(monkeypatch):
+    """Force ``DLP_PSEUDONYM_MODE=False`` for every test that doesn't
+    explicitly opt in.
+
+    Production default flipped to True in ``core/config.py`` so
+    deployed gateways get readable ``<<CATEGORY_N>>`` pseudonyms out
+    of the box. The pre-existing test suite, however, was written
+    against the legacy ``<rN>`` shape — assertions pin exact tokens
+    like ``<r0>``, counter sequences, span_map contents, and
+    mask-restore round-trips that all assume the global counter scheme.
+
+    Rather than rewrite ~50 tests (in ``test_dlp_counter_collision``,
+    ``test_deterministic_tokenization``, ``test_dlp_detectors/``,
+    etc.) each round the layer evolves, this autouse fixture pins the
+    legacy behaviour for the suite. Tests that exercise the pseudonym
+    path (``test_pseudonymization``, ``test_bare_name_masking``,
+    ``test_thai_name_detection``) override via their own
+    ``pseudonym_on`` fixture using the same monkeypatch mechanism.
+    """
+    try:
+        from app.core.config import settings
+    except Exception:
+        return
+    monkeypatch.setattr(settings, "dlp_pseudonym_mode", False, raising=False)
+    yield
+
+
 from fastapi import Header
 
 from app.api.deps import (
