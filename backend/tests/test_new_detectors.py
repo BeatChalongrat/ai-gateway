@@ -173,13 +173,25 @@ class TestThaiNationalIdDetector:
         assert matches[0].matched_text == "1234567890123"
 
     def test_thirteen_digits_invalid_checksum_with_dashes_still_rejected(self):
-        # Hyphenated form does NOT hit the keyword-context gate (which
-        # requires the bare 13-digit run to follow the keyword); the
-        # checksum gate still rejects the dashed shape, so this case
-        # remains a non-match.
+        # Pre-fix behaviour pinned by the original test: the keyword
+        # gate required a bare 13-digit run, so a hyphenated NID with
+        # an invalid checksum slipped past both gates. That created
+        # a coverage hole: the test placeholder ``บัตร ปชช.
+        # 1-1234-56789-01-0`` (invalid checksum, dashed) was the
+        # exact shape the May-2026 real-LLM E2E surfaced.
+        #
+        # Post-fix: the keyword path's digit pattern is now
+        # ``(?:\d[-\s]?){12}\d`` so the dashed form matches. The
+        # keyword-context gate explicitly bypasses the checksum
+        # because operator-labelled NID fields ("บัตรประชาชน:") are
+        # the strongest possible signal and may contain
+        # placeholder/test IDs that don't checksum but are still
+        # PDPA-sensitive.
         text = "เลขบัตรประชาชน 1-2345-67890-12-3"
         matches = self.det.detect(text)
-        assert matches == []
+        assert any(m.matched_text == "1-2345-67890-12-3" for m in matches), (
+            f"keyword + dashed NID must match post-fix; got {[m.matched_text for m in matches]}"
+        )
 
 
 # ---------------------------------------------------------------------------
