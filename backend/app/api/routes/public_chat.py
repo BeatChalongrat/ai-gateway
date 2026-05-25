@@ -348,7 +348,12 @@ async def chat_completions(
     # straight to the provider without the DLP-context preamble.
     if input_enforcement.match_actions:
         from app.services.dlp_prompt import inject_dlp_system_prompt
-        messages_to_send = inject_dlp_system_prompt(messages_to_send)
+        # Stream path mirrors the non-stream orchestrator — enumerate
+        # the request's ``<<...>>`` placeholders into the prompt so
+        # the LLM treats them as a closed set.
+        messages_to_send = inject_dlp_system_prompt(
+            messages_to_send, span_map=span_map,
+        )
         logger.info(
             "dlp_system_prompt_injected",
             findings=len(input_enforcement.match_actions),

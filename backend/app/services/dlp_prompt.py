@@ -74,11 +74,56 @@ def has_mask_tokens(messages: list[Message]) -> bool:
     return False
 
 
-def inject_dlp_system_prompt(messages: list[Message]) -> list[Message]:
+def _build_placeholder_allowlist(span_map: dict[str, str] | None) -> str:
+    """Render the ``<<CATEGORY_N>>`` tokens in *span_map* as an
+    explicit allowlist clause for the system prompt.
+
+    Empty string when *span_map* is None, empty, or contains no
+    pseudonym (``<<...>>``) tokens. Legacy ``<rN>`` secret-class
+    tokens are intentionally NOT listed — exposing them to the LLM
+    as "valid placeholders" encourages it to echo them faithfully,
+    which the orchestrator's outbound restore + orphan-redact
+    handles, but the cleaner UX is to keep them out of the model's
+    explicit allow-set.
+
+    Surfaced by the May-2026 real-LLM E2E Case 2 trace: GPT-4o-mini
+    learnt the pseudonym pattern from the input and minted new
+    tokens (``<<ADDRESS_1>>``) in its reply for entities the user
+    hadn't actually provided. The explicit enumeration tells the
+    model "this is a closed set" and gives it a clear escape hatch
+    ("describe in plain text instead").
+    """
+    if not span_map:
+        return ""
+    # Sort for deterministic prompt content (test stability).
+    pseudonyms = sorted(t for t in span_map if t.startswith("<<") and t.endswith(">>"))
+    if not pseudonyms:
+        return ""
+    listed = ", ".join(pseudonyms)
+    return (
+        "\n3. The ONLY pseudonym placeholders in this conversation are: "
+        f"{listed}. Do not use any pseudonym not in this list. "
+        "If you need to refer to other information (e.g. a delivery "
+        "address that was not provided), write it as plain text "
+        "(e.g. \"the customer's delivery address\")."
+    )
+
+
+def inject_dlp_system_prompt(
+    messages: list[Message],
+    span_map: dict[str, str] | None = None,
+) -> list[Message]:
     """Inject a system prompt explaining DLP placeholders if needed.
 
-    Returns a new list (never mutates the input).  If no mask tokens are
-    found the original list is returned unchanged.
+    When *span_map* is supplied and contains pseudonym tokens
+    (``<<CATEGORY_N>>``), an explicit allow-list is appended to the
+    prompt so the model knows the closed set of placeholders it may
+    use. This is the targeted mitigation for the LLM-hallucinated-
+    placeholder failure mode caught in the real-LLM E2E (Case 2,
+    May 2026).
+
+    Returns a new list (never mutates the input). If no mask tokens
+    are found the original list is returned unchanged.
     """
     if not has_mask_tokens(messages):
         return messages
@@ -87,7 +132,7 @@ def inject_dlp_system_prompt(messages: list[Message]) -> list[Message]:
 
     result = list(messages)
 
-    active_prompt = _select_prompt()
+    active_prompt = _select_prompt() + _build_placeholder_allowlist(span_map)
     if result and result[0].role == "system":
         result[0] = Msg(
             role="system",
