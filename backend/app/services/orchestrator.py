@@ -495,7 +495,13 @@ class GatewayOrchestrator:
         # prompt doesn't pay the DLP-context tokens.
         if input_enforcement.match_actions:
             from app.services.dlp_prompt import inject_dlp_system_prompt
-            messages_to_send = inject_dlp_system_prompt(messages_to_send)
+            # Pass span_map so the prompt can enumerate the exact
+            # ``<<CATEGORY_N>>`` placeholders the LLM is allowed to
+            # reference. Closes the hallucinated-placeholder failure
+            # mode caught in the real-LLM E2E Case 2 trace.
+            messages_to_send = inject_dlp_system_prompt(
+                messages_to_send, span_map=span_map,
+            )
             log.info(
                 "dlp_system_prompt_injected",
                 findings=len(input_enforcement.match_actions),
