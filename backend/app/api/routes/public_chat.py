@@ -321,17 +321,27 @@ async def chat_completions(
         moderation_enabled=profile.moderation_enabled,
         scan_system_messages=profile.scan_system_messages,
     )
-    restore_allowed_tokens: set[str] = set()
-    if span_map:
-        value_to_tokens: dict[str, set[str]] = {}
-        for token, original in span_map.items():
-            value_to_tokens.setdefault(original, set()).add(token)
-        for ma in input_enforcement.match_actions:
-            if output_actions.get(ma.match.category) != EnforcementAction.RESTORE:
-                continue
-            restore_allowed_tokens.update(
-                value_to_tokens.get(ma.match.matched_text, set())
-            )
+    # Restore allow-list — delegated to the orchestrator helper so
+    # streaming inherits the same Layer 2 secret-restore exclusion as
+    # the non-stream path. The previous inline loop did not honour
+    # ``_NEVER_RESTORE_CATEGORIES``, so a custom DB profile that
+    # restored credentials would have leaked secrets back to the user
+    # on streaming requests. See ``orchestrator._compute_restore_allowed_tokens``.
+    # Pass the ORIGINAL ``profile`` (not ``pre_restore_profile``) —
+    # ``pre_restore_profile`` swaps RESTORE→MASK and would yield an
+    # empty allow-list for every category.
+    restore_allowed_tokens = orchestrator._compute_restore_allowed_tokens(
+        profile, span_map, input_enforcement,
+    )
+    # Filtered span_map for the orphan-redact pass(es) below. Secret
+    # tokens are dropped from this map so the orphan pass treats them
+    # as unknown placeholders and strips them, instead of seeing them
+    # in span_map and concluding "restore handled it" (restore did NOT
+    # — Layer 2 hard-blocks credential/secret). Mirrors the section P3
+    # treatment in ``orchestrator.handle_chat_completion``.
+    _redact_span_map = orchestrator._strip_never_restore_tokens(
+        span_map, input_enforcement,
+    )
 
     # Inject system prompt explaining DLP placeholders to the model.
     # Gated on the inbound DLP findings count so clean prompts go
@@ -935,7 +945,13 @@ async def chat_completions(
                             from app.services.dlp.transformer import (
                                 redact_orphan_tokens as _stream_orphan_redact,
                             )
-                            emit_text = _stream_orphan_redact(emit_text, span_map)
+                            # Use the secret-stripped span_map so any
+                            # LLM-echoed credential token (``<r0>``)
+                            # falls into the orphan path and gets
+                            # deleted, matching the non-stream P3.
+                            emit_text = _stream_orphan_redact(
+                                emit_text, _redact_span_map,
+                            )
                             if emit_text:
                                 emitted_parts.append(emit_text)
                                 yield _emit_chunk(emit_text)
@@ -1097,7 +1113,9 @@ async def chat_completions(
             # catch orphans on the tail (earlier chunks are already
             # on the wire), but that's where they cluster.
             from app.services.dlp.transformer import redact_orphan_tokens
-            final_emit = redact_orphan_tokens(final_emit, span_map)
+            # Filtered span_map — see the per-chunk orphan-redact above
+            # for why the secret tokens are excluded here.
+            final_emit = redact_orphan_tokens(final_emit, _redact_span_map)
             if final_emit:
                 emitted_parts.append(final_emit)
                 yield _emit_chunk(final_emit)
