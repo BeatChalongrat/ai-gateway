@@ -29,8 +29,14 @@ if TYPE_CHECKING:
     from app.schemas.common import Message
 
 DLP_PLACEHOLDER_PROMPT_V3 = (
-    "If the message contains angle-bracket placeholders, preserve them "
-    "exactly in your reply. Do not invent new placeholders. Help normally."
+    "Two rules for handling placeholders in this conversation:\n"
+    "1. Preserve every existing angle-bracket placeholder (in the "
+    "shapes <<...>> or <r...>) exactly as written in the input. "
+    "Do not modify, abbreviate, translate, or rename them.\n"
+    "2. Do not invent new placeholder tokens of either shape. "
+    "If you need to refer to information that was not provided, use "
+    "plain descriptions (e.g. \"the customer's address\") instead of "
+    "creating new placeholders."
 )
 
 # ``V1`` was the long-form variant carrying a ``[CATEGORY_NUMBER]``
