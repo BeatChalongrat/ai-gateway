@@ -772,8 +772,170 @@ def _allocate_token(
     return token
 
 
+# ---------------------------------------------------------------------------
+# Bare-name substring masking (pseudonym mode only)
+# ---------------------------------------------------------------------------
+#
+# After the main detector-driven mask pass, multi-word PERSON entries
+# in ``span_map`` are split into individual words and the messages are
+# scanned for standalone occurrences. This catches multi-turn cases
+# where the user wrote the full name ("ลูกค้า สมชาย ใจดี") in turn 1
+# and only the first name ("สมชาย เคยสั่งซื้อ?") in turn 3 — the
+# ``thai_name_no_prefix`` regex demands two whitespace-separated Thai
+# words, so it misses the bare-name occurrence; this second pass picks
+# it up and binds it to the same pseudonym so the LLM sees one entity.
+#
+# Boundary policy:
+#   - Word boundary on both sides by default (no Thai consonant or
+#     ASCII alnum directly adjacent).
+#   - LEFT-side soft boundary: a known Thai honorific (``คุณ`` / ``นาย``
+#     / ``นาง`` / ``นางสาว`` / ``น.ส.``) directly preceding the word
+#     also counts as a valid boundary, so ``คุณใจดี`` matches ``ใจดี``
+#     as the bound surname. Right side is always hard-boundary.
+#
+# FP guards:
+#   - Only PERSON tokens are split (other categories don't have natural
+#     word decompositions that map to identity).
+#   - Words with < 3 non-combining Thai/ASCII letters are skipped
+#     (matches short tokens are high-FP).
+#   - A word that appears in two different PERSON entries is marked
+#     ambiguous and dropped from the substitution table.
+_BARE_NAME_HONORIFICS = (
+    "คุณ",
+    "นาย",
+    "นาง",
+    "นางสาว",
+    "น.ส.",
+)
+
+
+def _is_thai_codepoint(ch: str) -> bool:
+    return 0x0E00 <= ord(ch) <= 0x0E7F
+
+
+def _bare_name_letter_count(word: str) -> int:
+    """Count base letters in *word*, ignoring Thai combining marks.
+
+    A 'base letter' is any non-combining codepoint — Thai consonants
+    and standalone vowels count; Thai vowel-above / vowel-below / tone
+    marks do not. ``"กุล"`` therefore counts as 2 (ก, ล) and ``"สมชาย"``
+    counts as 5 (ส, ม, ช, า, ย). This matches the user-visible
+    "letter" count and is what the < 3 FP guard keys on.
+    """
+    import unicodedata as _ud
+    return sum(1 for c in word if not _ud.combining(c))
+
+
+def _replace_bare_word(
+    text: str, word: str, token: str
+) -> str:
+    """Replace standalone occurrences of *word* with *token*.
+
+    See module docstring above for the boundary policy. Manual
+    scanner instead of regex because the left-side honorific
+    soft-boundary requires variable-width lookbehind which Python's
+    stdlib ``re`` doesn't support.
+    """
+    if not word or word not in text:
+        return text
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    word_len = len(word)
+    while i < n:
+        idx = text.find(word, i)
+        if idx == -1:
+            out.append(text[i:])
+            break
+        # Left boundary.
+        left_ok = (idx == 0)
+        if not left_ok:
+            prev = text[idx - 1]
+            if not _is_thai_codepoint(prev) and not prev.isalnum():
+                left_ok = True
+            else:
+                for honorific in _BARE_NAME_HONORIFICS:
+                    h_len = len(honorific)
+                    if idx >= h_len and text[idx - h_len:idx] == honorific:
+                        left_ok = True
+                        break
+        # Right boundary (always hard).
+        end = idx + word_len
+        right_ok = (end == n)
+        if not right_ok:
+            nxt = text[end]
+            if not _is_thai_codepoint(nxt) and not nxt.isalnum():
+                right_ok = True
+        if left_ok and right_ok:
+            out.append(text[i:idx])
+            out.append(token)
+            i = end
+        else:
+            # Advance past this position by 1 to allow re-anchor on
+            # the next candidate (consistent with the same step-1-on-
+            # reject behaviour used in ``thai_name_no_prefix.detect``).
+            out.append(text[i:idx + 1])
+            i = idx + 1
+    return "".join(out)
+
+
 class DLPTransformer:
     """Applies enforcement actions to text by replacing sensitive spans."""
+
+    def _mask_bare_substrings(
+        self,
+        messages: "list[Message]",
+        span_map: dict[str, str],
+        reverse_map: dict[str, str],
+    ) -> "list[Message]":
+        """Second-pass bare-name expansion. See module-level docstring.
+
+        Only fires under ``DLP_PSEUDONYM_MODE=true`` — legacy ``<rN>``
+        mode keeps its existing behaviour so callers / tests pinned to
+        the old contract are unaffected.
+        """
+        if not _is_pseudonym_mode_on() or not span_map:
+            return messages
+
+        # Build word → token table from PERSON entries only.
+        word_to_token: dict[str, str] = {}
+        ambiguous: set[str] = set()
+        for token, value in span_map.items():
+            if not token.startswith("<<PERSON_"):
+                continue
+            parts = value.split()
+            if len(parts) < 2:
+                continue  # single-word value has no decomposition
+            for word in parts:
+                if _bare_name_letter_count(word) < 3:
+                    continue
+                existing = word_to_token.get(word)
+                if existing is None:
+                    word_to_token[word] = token
+                elif existing != token:
+                    ambiguous.add(word)
+        for w in ambiguous:
+            word_to_token.pop(w, None)
+
+        if not word_to_token:
+            return messages
+
+        from app.schemas.common import Message as _Msg
+        out: list = []
+        for msg in messages:
+            text = msg.content
+            for word, token in word_to_token.items():
+                text = _replace_bare_word(text, word, token)
+            out.append(_Msg(role=msg.role, content=text))
+
+        # Bookkeeping: tell the caller's reverse_map about the
+        # bare-word bindings so any subsequent within-call dedup
+        # (a value seen later identical to a bare word) reuses the
+        # same token. The vault carry-over (orchestrator.py writes
+        # ``span_map`` to Redis, not ``reverse_map``) is unaffected.
+        for word, token in word_to_token.items():
+            reverse_map.setdefault(word, token)
+        return out
 
     def transform_text(
         self,
@@ -1034,6 +1196,13 @@ class DLPTransformer:
             new_messages.append(
                 MessageModel(role=msg.role, content=result_text)
             )
+
+        # Second pass — bare-name substring expansion (pseudonym mode).
+        # No-op when the flag is off or when no PERSON multi-word
+        # entries landed in this turn's span_map.
+        new_messages = self._mask_bare_substrings(
+            new_messages, span_map, reverse_map
+        )
 
         return new_messages, span_map, counters
 

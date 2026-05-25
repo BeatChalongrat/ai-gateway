@@ -151,6 +151,56 @@ class TestRedactedRuleInPrompt:
         assert "placeholder" in lower or "angle-bracket" in lower
 
 
+class TestPromptRules:
+    """Pin the two contract rules of the v3+ DLP system prompt.
+
+    Wording can evolve, but the prompt MUST carry (a) a clear
+    instruction to preserve existing placeholders verbatim and (b) a
+    clear instruction not to invent new placeholder tokens. These
+    rules together fix the May 2026 real-LLM E2E regressions where
+    GPT-4o-mini hallucinated ``<<ADDRESS_1>>`` / ``<r2>`` tokens in
+    its replies and the orphan-redact pass left empty gaps in the
+    user-visible text.
+    """
+
+    def test_prompt_forbids_inventing_tokens(self):
+        lower = DLP_PLACEHOLDER_PROMPT.lower()
+        # Must include both the negation and the "new" keyword so the
+        # model treats both shapes (``<<...>>`` and ``<r...>``) as
+        # closed sets it must not extend.
+        assert "do not invent" in lower or "never invent" in lower
+        assert "new" in lower
+
+    def test_prompt_requires_preserving_placeholders(self):
+        lower = DLP_PLACEHOLDER_PROMPT.lower()
+        # Must instruct preservation. The verb can vary
+        # ("preserve" / "keep" / "leave"); the key requirement is
+        # presence of an instruction to NOT change the tokens.
+        assert any(
+            verb in lower
+            for verb in ("preserve", "keep them", "leave them", "do not modify")
+        )
+
+    def test_prompt_mentions_both_token_shapes(self):
+        # The new copy explicitly names both shapes so the model knows
+        # the closed set covers ``<<...>>`` (identity-class pseudonym)
+        # AND ``<r...>`` (legacy secret-class). Earlier wording only
+        # said "angle-bracket placeholders" generically, which let the
+        # model think it was free to mint new ones of either form.
+        assert "<<" in DLP_PLACEHOLDER_PROMPT
+        assert "<r" in DLP_PLACEHOLDER_PROMPT
+
+    def test_prompt_not_injected_when_no_masking(self):
+        # No mask tokens in the messages → no system prompt added.
+        # Belt-and-suspenders with TestInjectDlpSystemPrompt.test_not_injected_when_clean;
+        # this one also verifies the function is a no-op (no allocation
+        # of a new list when the input is clean).
+        msgs = [Message(role="user", content="Just a plain question")]
+        result = inject_dlp_system_prompt(msgs)
+        assert result is msgs
+        assert not any(m.role == "system" for m in result)
+
+
 class TestOrphanTokenPassthrough:
     """Document current behavior: hallucinated tokens reach user as literal.
 

@@ -57,8 +57,22 @@ DEFAULT_PROFILE = PolicyProfile(
     # that need to repeat a user-typed address) should opt into a
     # custom profile rather than relax the default for everyone.
     category_actions_output={
-        "credential": EnforcementAction.RESTORE,
-        "secret":     EnforcementAction.RESTORE,
+        # Credentials and secrets MUST NOT be RESTORED on outbound.
+        # A round-trip echo (user pastes an API key → LLM repeats the
+        # masked ``<r0>`` token → restore swaps back to the literal
+        # key) leaks the secret to the user's reply. MASK keeps the
+        # placeholder in place; orphan-redact strips it. Defense-in-
+        # depth in orchestrator._compute_restore_allowed_tokens also
+        # hard-blocks these two categories regardless of profile —
+        # this entry is the principled policy, that helper is the
+        # belt-and-braces.
+        "credential": EnforcementAction.MASK,
+        "secret":     EnforcementAction.MASK,
+        # Identity-class PII stays on RESTORE so the user gets their
+        # own values echoed back legibly ("confirm these emails back
+        # to me"). The orchestrator only restores tokens minted from
+        # THIS request's inbound span_map, so cross-user leaks are
+        # impossible — see _compute_restore_allowed_tokens.
         "pii":        EnforcementAction.RESTORE,
         "identity":   EnforcementAction.RESTORE,
         "financial":  EnforcementAction.RESTORE,

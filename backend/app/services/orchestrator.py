@@ -93,6 +93,23 @@ from app.services.gateway.fallback_orchestrator import (
 
 logger = structlog.get_logger(__name__)
 
+# Categories whose tokens MUST NEVER be restored on outbound — even
+# if a (mis)configured policy profile maps them to RESTORE. This is
+# the defense-in-depth layer paired with the
+# DEFAULT_PROFILE.category_actions_output = MASK for the same two
+# categories in policy/profiles.py. The two layers protect against
+# different failure modes:
+#   - Policy default fix → covers the steady-state production setup.
+#   - Hard-coded exclusion → covers (a) custom DB-edited profiles, (b)
+#     a future regression that re-introduces RESTORE on these
+#     categories, and (c) any STRICT-equivalent custom profile that
+#     inherits inbound→outbound and accidentally allows RESTORE.
+# Without this, a user pasting an API key + the LLM faithfully
+# preserving the masked ``<r0>`` would round-trip the secret back to
+# the user. Tests in test_secret_restore_block.py pin this.
+_NEVER_RESTORE_CATEGORIES = frozenset({"credential", "secret"})
+
+
 # Counter-form ``<rN>`` token matcher. Used to recover the highest
 # numeric index from a vault snapshot so a fresh mask call starts at
 # ``max + 1`` instead of colliding with vault-owned slots. The token
@@ -739,7 +756,16 @@ class GatewayOrchestrator:
                 from app.services.dlp.transformer import (
                     redact_orphan_tokens as _redact_orphan_tokens,
                 )
-                _sanitised = _redact_orphan_tokens(cached_text, span_map)
+                # Same secret-token strip on the cache-hit path so a
+                # replay can never leak a credential the original
+                # request bound to ``<r0>``. See
+                # ``_strip_never_restore_tokens`` for the contract.
+                _cache_redact_span_map = self._strip_never_restore_tokens(
+                    span_map, input_enforcement,
+                )
+                _sanitised = _redact_orphan_tokens(
+                    cached_text, _cache_redact_span_map,
+                )
                 if _sanitised != cached_text:
                     log.info(
                         "dlp_orphan_redacted_cached",
@@ -1372,7 +1398,13 @@ class GatewayOrchestrator:
             redact_orphan_tokens,
         )
         _before_redact = response_content
-        response_content = redact_orphan_tokens(response_content, span_map)
+        # Filter span_map so the orphan pass treats never-restorable
+        # secret tokens as orphans (and strips them) — see
+        # ``_strip_never_restore_tokens`` for the rationale.
+        _redact_span_map = self._strip_never_restore_tokens(
+            span_map, input_enforcement,
+        )
+        response_content = redact_orphan_tokens(response_content, _redact_span_map)
         if _before_redact != response_content:
             # Shared regex captures both ``<rN>`` and ``<<CAT_N>>`` so
             # pseudonym-mode orphans show up in the log under the same
@@ -2057,6 +2089,45 @@ class GatewayOrchestrator:
         )
 
     @staticmethod
+    def _strip_never_restore_tokens(
+        span_map: dict[str, str],
+        input_enforcement: EnforcementDecision,
+    ) -> dict[str, str]:
+        """Filter ``span_map`` for orphan-redact: drop tokens whose
+        inbound match category is in ``_NEVER_RESTORE_CATEGORIES``.
+
+        ``redact_orphan_tokens`` keeps tokens that are in the
+        ``span_map`` it receives (it assumes restore handled them).
+        For secret-class categories restore was BLOCKED by Layer 2,
+        so the tokens did NOT get swapped back to their originals —
+        they're still on the wire. If we passed the full ``span_map``
+        to the orphan pass it would conclude "restore handled it" and
+        leave the bare ``<r0>`` visible to the user.
+        Stripping these tokens from the filtered map flips them into
+        the orphan path, which deletes them silently.
+
+        Identity-class tokens (``pii`` / ``identity`` / …) stay in
+        the filtered map so the orphan pass keeps any that survive
+        restore (e.g. MASK-policy categories where the user is
+        expected to see the placeholder).
+        """
+        if not span_map:
+            return span_map
+        value_to_categories: dict[str, set[str]] = {}
+        for ma in input_enforcement.match_actions:
+            value_to_categories.setdefault(
+                ma.match.matched_text, set()
+            ).add(ma.match.category)
+        return {
+            token: original
+            for token, original in span_map.items()
+            if not (
+                value_to_categories.get(original, set())
+                & _NEVER_RESTORE_CATEGORIES
+            )
+        }
+
+    @staticmethod
     def _compute_restore_allowed_tokens(
         profile: PolicyProfile,
         span_map: dict[str, str],
@@ -2064,10 +2135,13 @@ class GatewayOrchestrator:
     ) -> set[str]:
         # Token allow-list for the outbound restore step. A mask token
         # may only be restored to its original value if (a) it was minted
-        # from this request's inbound span_map and (b) the active output
-        # policy maps its detector category to RESTORE. The same logic
-        # runs both at section-8b (fresh provider response) and on cache
-        # hit (replayed masked response).
+        # from this request's inbound span_map, (b) the active output
+        # policy maps its detector category to RESTORE, AND (c) the
+        # category is not in ``_NEVER_RESTORE_CATEGORIES`` (credential
+        # / secret are hard-blocked here regardless of profile config —
+        # see the module-level constant for the rationale). The same
+        # logic runs both at section-8b (fresh provider response) and
+        # on cache hit (replayed masked response).
         if not span_map:
             return set()
         output_actions = (
@@ -2080,6 +2154,11 @@ class GatewayOrchestrator:
             value_to_tokens.setdefault(original, set()).add(token)
         allowed: set[str] = set()
         for ma in input_enforcement.match_actions:
+            # Layer 2 defense-in-depth — secrets / credentials can
+            # never round-trip, even if a custom DB profile sets
+            # RESTORE for them by mistake.
+            if ma.match.category in _NEVER_RESTORE_CATEGORIES:
+                continue
             if output_actions.get(ma.match.category) != EnforcementAction.RESTORE:
                 continue
             allowed.update(value_to_tokens.get(ma.match.matched_text, set()))
@@ -2161,6 +2240,21 @@ class GatewayOrchestrator:
                 "presidio_ner",
                 "thai_name",
                 "thai_name_no_prefix",
+                # ``health_condition`` is context-gated for INBOUND
+                # text where the user is asking about medical issues
+                # ("ผู้ป่วยมีประวัติรักษาโรคเบาหวาน"). On OUTBOUND the
+                # LLM uses the same Thai verbs in completely unrelated
+                # contexts — "เพื่อให้การรักษาความปลอดภัย" ("to
+                # MAINTAIN security"), "รักษาระดับ" ("MAINTAIN level"),
+                # "รักษามาตรฐาน" ("UPHOLD standards"). The detector
+                # mis-tags these as ``health_condition`` findings, the
+                # outbound pass mints ``<<HEALTH_1>>``, and orphan-
+                # redact strips it — leaving holes in the user's reply
+                # ("เพื่อให้การ ความปลอดภัย"). Suppressing here keeps
+                # the inbound coverage intact while removing the
+                # outbound FP source. Surfaced by the May-2026 E2E
+                # Case 4 trace.
+                "health_condition",
             }
 
             matches = [

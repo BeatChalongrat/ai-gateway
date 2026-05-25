@@ -182,15 +182,15 @@ class TestResponseSideScanning:
         assert result.has_sensitive_content is False
 
     def test_response_with_email_is_masked_under_default(self):
-        """Outbound PII is MASK under the default profile (May 2026 tightening).
+        """Outbound PII is RESTORE under the default profile (May 2026 tightening).
 
-        The previous narrower outbound map (credentials/secrets only)
-        let LLM-hallucinated emails reach the user verbatim, which
-        was the entire failure mode RT-04 of the live audit caught.
-        The default profile's ``category_actions_output`` now mirrors
-        the inbound map for PII categories — an outbound email is
-        masked with an indexed token. Network stays ALLOW (see the
-        companion category test).
+        The default profile's ``category_actions_output`` now RESTOREs
+        the same categories outbound as it MASKs inbound — including
+        ``pii``. The round-trip case ("confirm these emails back to
+        me") needs the mask token swapped back to the original value
+        rather than re-masked, which keeps user-owned data legible in
+        the AI's reply while still preventing the masked tokens from
+        leaking unrelated PII the LLM hallucinated.
         """
         from app.domain.dlp import EnforcementAction
         from app.services.orchestrator import GatewayOrchestrator
@@ -202,16 +202,28 @@ class TestResponseSideScanning:
         detection = orch._scan_text_as_result(response_text)
         enforcement = orch._scan_and_evaluate(detection, DEFAULT_PROFILE)
 
-        # PII outbound under default now masks.
-        assert enforcement.requires_transformation is True
-        assert enforcement.overall_action == EnforcementAction.MASK
+        # PII outbound under default now restores.
+        assert enforcement.overall_action == EnforcementAction.RESTORE
         assert any(
             ma.match.detector_name == "email"
             for ma in enforcement.match_actions
         )
 
     def test_response_with_secret_is_blocked_in_default(self):
-        """Default profile blocks CRITICAL-severity secrets (severity_threshold_block=CRITICAL)."""
+        """Outbound secret category → MASK (not RESTORE, not BLOCK).
+
+        Security fix: under the previous policy these categories were
+        RESTORE on outbound, which let an LLM-echoed ``<r0>`` token
+        get swapped back to the original API key and reach the user.
+        The current default keeps the placeholder in place (MASK) and
+        the orchestrator's orphan-redact pass strips it from the
+        final reply via the ``_NEVER_RESTORE_CATEGORIES`` filter (see
+        ``test_secret_restore_block.py`` for the dedicated tests).
+
+        STRICT_PROFILE still ESCALATES to BLOCK — the next test pins
+        that distinction.
+        """
+        from app.domain.dlp import EnforcementAction
         from app.services.orchestrator import GatewayOrchestrator
         from app.services.policy.profiles import DEFAULT_PROFILE
 
@@ -221,7 +233,8 @@ class TestResponseSideScanning:
         detection = orch._scan_text_as_result(response_text)
         enforcement = orch._scan_and_evaluate(detection, DEFAULT_PROFILE)
 
-        assert enforcement.is_blocked is True
+        assert enforcement.overall_action == EnforcementAction.MASK
+        assert enforcement.is_blocked is False
 
     def test_response_with_secret_is_blocked_in_strict(self):
         from app.services.orchestrator import GatewayOrchestrator
