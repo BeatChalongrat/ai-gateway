@@ -35,17 +35,45 @@ _WEIGHTS = (13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2)
 # in fields the operator has labelled as ``บัตรประชาชน`` / ``ID:``.
 # Better to over-mask here than leak any number sitting in an
 # explicitly-labelled ID field.
+# Expanded keyword list and digit pattern (real-LLM E2E round 2):
+#
+# Coverage gaps fixed:
+#   1. ``บัตร ปชช`` / ``บัตรปชช`` / ``บัตร ปชช.`` — common Thai
+#      abbreviation for ``บัตรประชาชน``. The plain ``บัตรประชาชน``
+#      alternative didn't match because of the embedded space + dot.
+#   2. ``บัตร ประชาชน`` — same word but with a space between
+#      ``บัตร`` and ``ประชาชน``.
+#   3. ``เลข ปชช`` / ``เลขปชช`` — short form of ``เลขประจำตัวประชาชน``.
+#   4. ``หมายเลขบัตร`` / ``หมายเลข บัตร``.
+#   5. ``เลข 13 หลัก`` — informal reference to the NID's digit count.
+#   6. ``NID`` / ``N.I.D`` / ``N.I.D.`` — English abbreviation.
+#
+# Digit pattern (`(?:\d[-\s]?){12}\d`) now allows the canonical
+# dashed form (``1-1234-56789-01-0``) and the space-separated form
+# (``1 1234 56789 01 0``), not just bare 13-digit runs. The matched
+# text still includes any separators — that becomes the masked
+# token's source text; restore swaps it back verbatim.
+#
+# Ordering note: longer alternatives come before shorter prefixes
+# (``เลขประจำตัวประชาชน`` before ``เลขประจำตัว``), and the bare
+# ``ID`` is last so it doesn't shadow ``national id`` / ``citizen id``.
 _KEYWORD_CONTEXT_RE = re.compile(
     r"(?:เลขประจำตัวประชาชน"
     r"|เลขประจำตัว"
     r"|บัตรประจำตัว"
-    r"|บัตรประชาชน"
-    r"|เลขบัตร"
+    r"|บัตร\s*ประชาชน"
+    r"|บัตร\s*ปชช\.?"
+    r"|เลข\s*ปชช\.?"
+    r"|หมายเลข\s*บัตร"
+    r"|เลข\s*บัตร"
+    r"|เลข\s*13\s*หลัก"
     r"|national\s*id"
     r"|citizen\s*id"
+    r"|N\.?I\.?D\.?"
     r"|ID)"
-    r"\s*[:#]?\s*"
-    r"(\d{13})(?!\d)",
+    r"\s*[:#.]?\s*"
+    r"((?:\d[-\s]?){12}\d)"
+    r"(?!\d)",
     re.IGNORECASE,
 )
 
