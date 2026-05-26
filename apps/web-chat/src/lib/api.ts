@@ -118,9 +118,28 @@ class ApiClient {
   }
 
   // ----- Messages -------------------------------------------
-  listMessages(convId: string) {
+  listMessages(convId: string, opts?: { limit?: number; before?: string }) {
+    const params = new URLSearchParams();
+    params.set("limit", String(opts?.limit ?? 50));
+    if (opts?.before) params.set("before", opts.before);
     return this.json<MessageListResponse>(
-      `/conversations/${convId}/messages?limit=100`,
+      `/conversations/${convId}/messages?${params.toString()}`,
+    );
+  }
+  listConversationsSearch(q: string, limit = 50) {
+    const params = new URLSearchParams();
+    params.set("q", q);
+    params.set("limit", String(limit));
+    return this.json<ConversationListResponse>(
+      `/conversations?${params.toString()}`,
+    );
+  }
+  listConversationsPage(opts?: { limit?: number; cursor?: string }) {
+    const params = new URLSearchParams();
+    params.set("limit", String(opts?.limit ?? 50));
+    if (opts?.cursor) params.set("cursor", opts.cursor);
+    return this.json<ConversationListResponse>(
+      `/conversations?${params.toString()}`,
     );
   }
   sendMessageNonStream(convId: string, content: string) {

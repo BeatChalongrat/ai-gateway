@@ -1,6 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+// Chat thread.
+//
+// Two rendering modes — plain map for short threads, virtualized
+// list (via @tanstack/react-virtual) once the count crosses
+// VIRTUALIZE_THRESHOLD. Both modes share the same scroll container,
+// the same auto-scroll behaviour, and the same "↓ New messages" /
+// scroll-to-bottom pills.
+
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { Message } from "@/lib/types";
 import {
@@ -20,10 +30,18 @@ interface Props {
   onPromptPick?: (text: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onSwitchBranch?: (messageId: string, branchIndex: number) => void;
+  /** Older-page lazy-load. ChatThread renders a "Load earlier" pill
+   *  at the top of the scroll container; clicking calls the
+   *  parent's loader. After older messages are prepended the
+   *  scroll position is preserved automatically. */
+  hasMoreOlder?: boolean;
+  loadingOlder?: boolean;
+  onLoadEarlier?: () => Promise<void> | void;
 }
 
 const NEAR_BOTTOM_PX = 100;
 const SHOW_SCROLL_BUTTON_PX = 200;
+const VIRTUALIZE_THRESHOLD = 50;
 
 export function ChatThread({
   convId,
@@ -33,18 +51,41 @@ export function ChatThread({
   onPromptPick,
   onEditMessage,
   onSwitchBranch,
+  hasMoreOlder,
+  loadingOlder,
+  onLoadEarlier,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [autoStick, setAutoStick] = useState(true);
   const [farFromBottom, setFarFromBottom] = useState(false);
-  // Tracks whether new content arrived while user scrolled up.
   const [pendingNew, setPendingNew] = useState(false);
   const lastLen = useRef(0);
   const lastLastContent = useRef("");
-  // Distinguish auto-scroll from user scroll: any scroll the user
-  // does NOT initiate should be ignored when deciding to break
-  // auto-stick.
   const autoScrolling = useRef(false);
+
+  // Track the top message id + scroll offset BEFORE every render so
+  // a prepend (older-page load) can restore the user's viewport.
+  const prevFirstId = useRef<string | null>(null);
+  const preservedTopHeight = useRef<number | null>(null);
+
+  // useLayoutEffect runs synchronously after DOM mutations but
+  // BEFORE the browser paints — that's the only place where a
+  // scrollTop adjustment will be invisible to the user.
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const newFirstId = messages[0]?.id ?? null;
+    const isPrepend =
+      preservedTopHeight.current != null &&
+      newFirstId !== null &&
+      newFirstId !== prevFirstId.current;
+    if (isPrepend) {
+      const delta = el.scrollHeight - preservedTopHeight.current!;
+      el.scrollTop = el.scrollTop + delta;
+    }
+    prevFirstId.current = newFirstId;
+    preservedTopHeight.current = null;
+  });
 
   // Auto-scroll to bottom when:
   //   - a new message arrives (length changed)
@@ -64,9 +105,6 @@ export function ChatThread({
     if (autoStick) {
       autoScrolling.current = true;
       el.scrollTop = el.scrollHeight;
-      // Release the autoScrolling flag on next frame so the scroll
-      // event handler doesn't mistake the programmatic scroll for a
-      // user gesture.
       requestAnimationFrame(() => {
         autoScrolling.current = false;
       });
@@ -76,8 +114,7 @@ export function ChatThread({
   }, [messages, autoStick]);
 
   // After streaming completes: if user is still "near bottom" (within
-  // 100px) snap to bottom to show the full response. The streaming
-  // flag transitions to false on the last message; we re-evaluate.
+  // 100px) snap to bottom to show the full response.
   const anyStreaming = messages.some((m) => m.isStreaming);
   useEffect(() => {
     if (anyStreaming) return;
@@ -115,9 +152,25 @@ export function ChatThread({
     }, 400);
   }
 
-  const lastAsstIdx = lastAssistantIndex(messages);
-  const showModelBadges = hasMultipleModels(messages);
-  const switchPoints = new Set(getModelSwitchPoints(messages));
+  async function handleLoadEarlier() {
+    if (!onLoadEarlier || loadingOlder || !hasMoreOlder) return;
+    const el = scrollerRef.current;
+    if (el) preservedTopHeight.current = el.scrollHeight;
+    try {
+      await onLoadEarlier();
+    } catch {
+      preservedTopHeight.current = null;
+    }
+  }
+
+  const lastAsstIdx = useMemo(() => lastAssistantIndex(messages), [messages]);
+  const showModelBadges = useMemo(() => hasMultipleModels(messages), [messages]);
+  const switchPoints = useMemo(
+    () => new Set(getModelSwitchPoints(messages)),
+    [messages],
+  );
+
+  const shouldVirtualize = messages.length >= VIRTUALIZE_THRESHOLD;
 
   return (
     <div className="relative flex-1 overflow-hidden">
@@ -130,52 +183,45 @@ export function ChatThread({
           {messages.length === 0 ? (
             <EmptyState onPrompt={(t) => onPromptPick?.(t)} />
           ) : (
-            messages.map((m, i) => {
-              const prev = messages[i - 1];
-              // 24px between role groups, 16px within the same group.
-              const extraGap =
-                prev && prev.role !== m.role ? "mt-2" : "";
-              return (
-                <div key={m.id} className={extraGap}>
-                  {switchPoints.has(i) && m.model_id ? (
-                    <ModelSwitchDivider newModelId={m.model_id} />
-                  ) : null}
-                  <MessageBubble
-                    convId={convId}
-                    modelId={modelId}
-                    message={m}
-                    showModelBadge={showModelBadges}
-                    showFeedback={
-                      m.role === "assistant" &&
-                      !m.isStreaming &&
-                      m.status === "completed"
-                    }
-                    showRegenerate={
-                      m.role === "assistant" &&
-                      i === lastAsstIdx &&
-                      !anyStreaming &&
-                      m.status !== "regenerated"
-                    }
-                    onRegenerate={() => onRegenerate(m.id)}
-                    onEdit={
-                      m.role === "user" && onEditMessage && !anyStreaming
-                        ? (text) => onEditMessage(m.id, text)
-                        : undefined
-                    }
-                    onSwitchBranch={
-                      onSwitchBranch
-                        ? (idx) => onSwitchBranch(m.id, idx)
-                        : undefined
-                    }
-                  />
-                </div>
-              );
-            })
+            <>
+              <LoadEarlierBar
+                visible={!!hasMoreOlder}
+                loading={!!loadingOlder}
+                onClick={handleLoadEarlier}
+              />
+              {shouldVirtualize ? (
+                <VirtualMessageList
+                  scrollerRef={scrollerRef}
+                  convId={convId}
+                  modelId={modelId}
+                  messages={messages}
+                  showModelBadges={showModelBadges}
+                  switchPoints={switchPoints}
+                  lastAsstIdx={lastAsstIdx}
+                  anyStreaming={anyStreaming}
+                  onRegenerate={onRegenerate}
+                  onEditMessage={onEditMessage}
+                  onSwitchBranch={onSwitchBranch}
+                />
+              ) : (
+                <PlainMessageList
+                  convId={convId}
+                  modelId={modelId}
+                  messages={messages}
+                  showModelBadges={showModelBadges}
+                  switchPoints={switchPoints}
+                  lastAsstIdx={lastAsstIdx}
+                  anyStreaming={anyStreaming}
+                  onRegenerate={onRegenerate}
+                  onEditMessage={onEditMessage}
+                  onSwitchBranch={onSwitchBranch}
+                />
+              )}
+            </>
           )}
         </div>
       </div>
 
-      {/* "↓ New messages" pill when content arrives while scrolled up */}
       {pendingNew && !autoStick ? (
         <button
           type="button"
@@ -211,6 +257,166 @@ export function ChatThread({
           </svg>
         </button>
       ) : null}
+    </div>
+  );
+}
+
+// ─── Inner list renderers ──────────────────────────────────────
+
+interface InnerProps {
+  convId: string;
+  modelId?: string | null;
+  messages: Message[];
+  showModelBadges: boolean;
+  switchPoints: Set<number>;
+  lastAsstIdx: number;
+  anyStreaming: boolean;
+  onRegenerate: (messageId: string) => void;
+  onEditMessage?: (messageId: string, newContent: string) => void;
+  onSwitchBranch?: (messageId: string, branchIndex: number) => void;
+}
+
+function PlainMessageList(props: InnerProps) {
+  return (
+    <>
+      {props.messages.map((m, i) => renderRow(m, i, props))}
+    </>
+  );
+}
+
+function VirtualMessageList(
+  props: InnerProps & {
+    scrollerRef: React.RefObject<HTMLDivElement>;
+  },
+) {
+  const { scrollerRef, messages } = props;
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollerRef.current,
+    estimateSize: () => 200,
+    overscan: 5,
+    measureElement(element) {
+      // Some browsers report 0 during a transition; the virtualizer
+      // tolerates it but a measured pixel value is preferable.
+      return element?.getBoundingClientRect().height ?? 0;
+    },
+  });
+
+  const items = virtualizer.getVirtualItems();
+  return (
+    <div
+      style={{
+        position: "relative",
+        height: virtualizer.getTotalSize(),
+        width: "100%",
+      }}
+    >
+      {items.map((vi) => {
+        const m = messages[vi.index];
+        return (
+          <div
+            key={m.id}
+            data-index={vi.index}
+            ref={virtualizer.measureElement}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${vi.start}px)`,
+            }}
+          >
+            {renderRow(m, vi.index, props)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderRow(m: Message, i: number, props: InnerProps) {
+  const {
+    convId,
+    modelId,
+    messages,
+    showModelBadges,
+    switchPoints,
+    lastAsstIdx,
+    anyStreaming,
+    onRegenerate,
+    onEditMessage,
+    onSwitchBranch,
+  } = props;
+  const prev = messages[i - 1];
+  const extraGap = prev && prev.role !== m.role ? "mt-2" : "";
+  return (
+    <div className={extraGap}>
+      {switchPoints.has(i) && m.model_id ? (
+        <ModelSwitchDivider newModelId={m.model_id} />
+      ) : null}
+      <MessageBubble
+        convId={convId}
+        modelId={modelId}
+        message={m}
+        showModelBadge={showModelBadges}
+        showFeedback={
+          m.role === "assistant" &&
+          !m.isStreaming &&
+          m.status === "completed"
+        }
+        showRegenerate={
+          m.role === "assistant" &&
+          i === lastAsstIdx &&
+          !anyStreaming &&
+          m.status !== "regenerated"
+        }
+        onRegenerate={() => onRegenerate(m.id)}
+        onEdit={
+          m.role === "user" && onEditMessage && !anyStreaming
+            ? (text) => onEditMessage(m.id, text)
+            : undefined
+        }
+        onSwitchBranch={
+          onSwitchBranch ? (idx) => onSwitchBranch(m.id, idx) : undefined
+        }
+      />
+    </div>
+  );
+}
+
+function LoadEarlierBar({
+  visible,
+  loading,
+  onClick,
+}: {
+  visible: boolean;
+  loading: boolean;
+  onClick: () => void;
+}) {
+  if (!visible) return null;
+  return (
+    <div className="-mt-2 flex justify-center pb-2">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={loading}
+        className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-secondary/70 px-3 py-1 text-[11px] text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-wait disabled:opacity-60"
+      >
+        {loading ? (
+          <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
+        ) : (
+          <svg width={11} height={11} viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M6 15l6-6 6 6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
+        Load earlier messages
+      </button>
     </div>
   );
 }

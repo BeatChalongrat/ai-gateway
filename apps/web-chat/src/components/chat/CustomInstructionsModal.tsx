@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
@@ -19,6 +19,12 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Debounced auto-save handle. We still expose an explicit Save
+  // button for clarity, but typing also persists silently after a
+  // 1s idle so the user doesn't lose changes if they close via
+  // backdrop click.
+  const autoSaveHandle = useRef<number | null>(null);
+  const dirtyRef = useRef(false);
 
   // Lazy-load on open. We re-fetch every time so a save from
   // another tab / device flows through, but only once per open
@@ -52,6 +58,35 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) setLoaded(false);
   }, [open]);
+
+  // Debounced background save. Fires 1s after the last edit while
+  // the modal is open + dirty. The visible Save button is still
+  // available for users who want an explicit confirmation.
+  useEffect(() => {
+    if (!open || !loaded || !dirtyRef.current) return;
+    if (autoSaveHandle.current != null) {
+      window.clearTimeout(autoSaveHandle.current);
+    }
+    autoSaveHandle.current = window.setTimeout(() => {
+      autoSaveHandle.current = null;
+      if (!dirtyRef.current) return;
+      dirtyRef.current = false;
+      void api
+        .putPreferences({
+          custom_instructions_about: about,
+          custom_instructions_respond: respond,
+        })
+        .catch(() => {
+          /* surface only on explicit save */
+        });
+    }, 1000);
+    return () => {
+      if (autoSaveHandle.current != null) {
+        window.clearTimeout(autoSaveHandle.current);
+        autoSaveHandle.current = null;
+      }
+    };
+  }, [about, respond, open, loaded]);
 
   async function save() {
     if (about.length > MAX_CHARS || respond.length > MAX_CHARS) {
@@ -105,14 +140,20 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
           label="What would you like the AI to know about you?"
           placeholder="e.g. I'm a software developer working with Python and Go. I prefer concise answers with code examples."
           value={about}
-          onChange={setAbout}
+          onChange={(v) => {
+            dirtyRef.current = true;
+            setAbout(v);
+          }}
           loading={loading}
         />
         <Field
           label="How would you like the AI to respond?"
           placeholder="e.g. Be concise and technical. Use code blocks. Explain trade-offs."
           value={respond}
-          onChange={setRespond}
+          onChange={(v) => {
+            dirtyRef.current = true;
+            setRespond(v);
+          }}
           loading={loading}
         />
       </div>
@@ -140,6 +181,12 @@ function Field({
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onInput={(e) => {
+          // dirtyRef lives in the parent component; toggling it
+          // here lets the debounced auto-save effect know there's
+          // unsynced content.
+          void e;
+        }}
         placeholder={placeholder}
         rows={5}
         disabled={loading}
