@@ -65,12 +65,26 @@ class FakeAnalyzer:
     and inspects ``self.last_kwargs`` after invocation.
     """
 
+    # Mirror the real AnalyzerEngine attribute. PresidioDetector.detect
+    # only forwards the caller's language when the analyzer reports it
+    # as supported — without this attribute the detector falls back to
+    # "en" and the language-passthrough test can never see "th".
+    supported_languages = ["en", "th"]
+
     def __init__(self, results: list[FakeRecognizerResult] | None = None):
         self.results = results or []
         self.last_kwargs: dict[str, Any] | None = None
+        # Languages attempted, in order. PresidioDetector now tries the
+        # caller's language first and falls back to "en" if empty — so
+        # tests that pin the *first* attempted language inspect this list
+        # instead of last_kwargs.
+        self.languages_called: list[str] = []
 
     def analyze(self, **kwargs):
         self.last_kwargs = kwargs
+        lang = kwargs.get("language")
+        if lang is not None:
+            self.languages_called.append(lang)
         return list(self.results)
 
 
@@ -348,7 +362,9 @@ class TestThaiTextUsesThLanguage:
         det.detect(thai_text, language=detect_language(thai_text))
 
         assert fake.last_kwargs is not None
-        assert fake.last_kwargs.get("language") == "th"
+        # PresidioDetector tries the caller's language first, then falls
+        # back to "en" if empty — assert the first attempt was "th".
+        assert fake.languages_called[0] == "th"
         # And the registry's detect_language helper agrees.
         assert detect_language(thai_text) == "th"
         assert detect_language("hello world") == "en"

@@ -1,0 +1,269 @@
+{
+  "total": [
+    41,
+    41
+  ],
+  "groups": {
+    "auth": {
+      "title": "Group 1 \u2014 Auth",
+      "passed": 10,
+      "total": 10,
+      "results": [
+        {
+          "name": "1.1 Register returns 2xx + cookies + no refresh in body",
+          "passed": true,
+          "detail": "status=201, refresh_cookie=True, csrf_cookie=True, refresh_in_body=False"
+        },
+        {
+          "name": "1.2 Duplicate email \u2192 409",
+          "passed": true,
+          "detail": "status=409"
+        },
+        {
+          "name": "1.3 Login \u2192 200 + access_token in body",
+          "passed": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "1.4 Wrong password \u2192 401 + generic message",
+          "passed": true,
+          "detail": "status=401, msg='invalid email or password'"
+        },
+        {
+          "name": "1.5 No token \u2192 401",
+          "passed": true,
+          "detail": "status=401"
+        },
+        {
+          "name": "1.6 With token \u2192 200",
+          "passed": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "1.7 Refresh rotation \u2192 200 + refresh-cookie rotated",
+          "passed": true,
+          "detail": "status=200, access_present=True, refresh_rotated=True"
+        },
+        {
+          "name": "1.8 Refresh without CSRF \u2192 403",
+          "passed": true,
+          "detail": "status=403"
+        },
+        {
+          "name": "1.9 Logout 2xx + subsequent refresh \u2192 401",
+          "passed": true,
+          "detail": "logout=204, refresh_after=401"
+        },
+        {
+          "name": "1.10 Replay detection \u2014 token_a blocked + family revoked",
+          "passed": true,
+          "detail": "replay_a=401, b_after=401"
+        }
+      ]
+    },
+    "conv": {
+      "title": "Group 2 \u2014 Conversation CRUD",
+      "passed": 6,
+      "total": 6,
+      "results": [
+        {
+          "name": "2.1 Create \u2192 2xx with id + default title",
+          "passed": true,
+          "detail": "status=201, title='New conversation'"
+        },
+        {
+          "name": "2.2 Invalid model \u2192 422",
+          "passed": true,
+          "detail": "status=422"
+        },
+        {
+          "name": "2.3 List 3 sorted by updated_at desc",
+          "passed": true,
+          "detail": "count=3, sorted=True"
+        },
+        {
+          "name": "2.4 Rename \u2192 200 + title updated",
+          "passed": true,
+          "detail": "status=200, title='Renamed E2E'"
+        },
+        {
+          "name": "2.5 Delete 2xx + list no longer contains it",
+          "passed": true,
+          "detail": "delete=204, in_list=False"
+        },
+        {
+          "name": "2.6 Pagination \u2014 page1 limit=10 has_more + multi-page sums to \u226525",
+          "passed": true,
+          "detail": "page1=10, has_more=True, total_paginated=25"
+        }
+      ]
+    },
+    "tenant": {
+      "title": "Group 3 \u2014 Tenant Isolation",
+      "passed": 5,
+      "total": 5,
+      "results": [
+        {
+          "name": "3.1 Cross-tenant GET conv \u2192 404",
+          "passed": true,
+          "detail": "status=404"
+        },
+        {
+          "name": "3.2 Cross-tenant list messages \u2192 404",
+          "passed": true,
+          "detail": "status=404"
+        },
+        {
+          "name": "3.3 Cross-tenant send \u2192 404",
+          "passed": true,
+          "detail": "status=404"
+        },
+        {
+          "name": "3.4 Cross-tenant delete \u2192 404",
+          "passed": true,
+          "detail": "status=404"
+        },
+        {
+          "name": "3.5 Cross-tenant rename \u2192 404",
+          "passed": true,
+          "detail": "status=404"
+        }
+      ]
+    },
+    "msg": {
+      "title": "Group 4 \u2014 Messages",
+      "passed": 6,
+      "total": 6,
+      "results": [
+        {
+          "name": "4.1 Non-stream send \u2192 2xx + assistant msg",
+          "passed": true,
+          "detail": "status=200, has_content=True"
+        },
+        {
+          "name": "4.1b User + assistant rows persisted",
+          "passed": true,
+          "detail": "count=2"
+        },
+        {
+          "name": "4.2 Stream \u2192 message_start + deltas + message_complete",
+          "passed": true,
+          "detail": "events=['message_start', 'content_delta', 'message_complete']\u2026"
+        },
+        {
+          "name": "4.2b Assistant row saved with status=completed",
+          "passed": true,
+          "detail": "statuses=['completed']"
+        },
+        {
+          "name": "4.3 Multi-turn \u2014 model remembers earlier name",
+          "passed": true,
+          "detail": "reply_excerpt='phaethon'"
+        },
+        {
+          "name": "4.4 Auto-title derived from first user message",
+          "passed": true,
+          "detail": "title='What is quantum computing?'"
+        }
+      ]
+    },
+    "cancel_regen": {
+      "title": "Group 5 \u2014 Cancel + Regenerate",
+      "passed": 4,
+      "total": 4,
+      "results": [
+        {
+          "name": "5.1 Cancel active stream \u2192 200 cancelled=true",
+          "passed": true,
+          "detail": "status=200 body={\"cancelled\":true}\n"
+        },
+        {
+          "name": "5.1b Persisted assistant row status=cancelled",
+          "passed": true,
+          "detail": "statuses=['cancelled']"
+        },
+        {
+          "name": "5.2 Cancel quiet conv \u2192 200 cancelled=false",
+          "passed": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "5.3 Regenerate \u2192 SSE complete + old=regenerated, new=completed",
+          "passed": true,
+          "detail": "sse_complete=True, statuses=['regenerated', 'completed']"
+        }
+      ]
+    },
+    "feedback": {
+      "title": "Group 6 \u2014 Feedback",
+      "passed": 4,
+      "total": 4,
+      "results": [
+        {
+          "name": "6.1 Thumbs up on assistant \u2192 2xx",
+          "passed": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "6.2 Switch to thumbs_down \u2192 2xx upsert",
+          "passed": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "6.3 Invalid rating \u2192 422",
+          "passed": true,
+          "detail": "status=422"
+        },
+        {
+          "name": "6.4 Feedback on user message \u2192 4xx",
+          "passed": true,
+          "detail": "status=422"
+        }
+      ]
+    },
+    "rate": {
+      "title": "Group 7 \u2014 Rate Limiting",
+      "passed": 3,
+      "total": 3,
+      "results": [
+        {
+          "name": "7.1 5 sends under limit all succeed (or 502 if gateway down)",
+          "passed": true,
+          "detail": "statuses=[200, 200, 200, 200, 200]"
+        },
+        {
+          "name": "7.2 35 concurrent \u2192 429 fires",
+          "passed": true,
+          "detail": "histogram={200: 11, 429: 10, -1: 14}"
+        },
+        {
+          "name": "7.2b 429 includes Retry-After header",
+          "passed": true,
+          "detail": "status=200, retry_after=None"
+        }
+      ]
+    },
+    "models": {
+      "title": "Group 8 \u2014 Models",
+      "passed": 3,
+      "total": 3,
+      "results": [
+        {
+          "name": "8.1 GET /models \u2192 array all allowed",
+          "passed": true,
+          "detail": "count=3"
+        },
+        {
+          "name": "8.2 Send with conv model (covered by other groups)",
+          "passed": true,
+          "detail": "n/a \u2014 exercised by groups 4\u20137"
+        },
+        {
+          "name": "8.3 Create with unknown model \u2192 422",
+          "passed": true,
+          "detail": "status=422"
+        }
+      ]
+    }
+  }
+}

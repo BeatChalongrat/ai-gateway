@@ -11,6 +11,7 @@ import {
   FolderOpen,
   FolderPlus,
   Key,
+  MessageSquare,
   ScrollText,
   Sparkles,
   Zap,
@@ -178,6 +179,8 @@ export default function DashboardPage() {
       />
 
       <QuickstartGrid />
+
+      <ChatLaunchPanel />
 
       <StatsGrid
         used={used}
@@ -512,6 +515,116 @@ function QuickstartGrid() {
         href="/projects"
       />
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* Web Chat launch panel — opens the SRAN Chat surface on port 3002      */
+/* using the shared portal_access_token cookie. No second login.         */
+/* -------------------------------------------------------------------- */
+
+function ChatLaunchPanel() {
+  const baseChatUrl =
+    process.env.NEXT_PUBLIC_WEB_CHAT_URL || "http://localhost:3002/chat";
+
+  // Materialise the href to the localStorage token AFTER hydration.
+  // SSR can't read localStorage, so the initial render carries the
+  // bare URL — that's fine because we always preventDefault in the
+  // onClick handler anyway, AND the onClick re-reads localStorage
+  // at click-time (always fresh, never stale).
+  const [tokenHref, setTokenHref] = useState<string>(baseChatUrl);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const tok = window.localStorage.getItem("portal_access_token");
+    if (!tok) return;
+    const sep = baseChatUrl.includes("?") ? "&" : "?";
+    setTokenHref(`${baseChatUrl}${sep}token=${encodeURIComponent(tok)}`);
+  }, [baseChatUrl]);
+
+  // preventDefault + window.open is load-bearing — without it the
+  // anchor's default navigation can race the onClick or fire first
+  // in some browsers and the new tab opens with the bare URL
+  // instead of the token-bearing one.
+  const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (typeof window === "undefined") return;
+    // Re-read at click-time so a token refreshed after this
+    // component first mounted is still picked up.
+    const tok = window.localStorage.getItem("portal_access_token");
+    const sep = baseChatUrl.includes("?") ? "&" : "?";
+    const href = tok
+      ? `${baseChatUrl}${sep}token=${encodeURIComponent(tok)}`
+      : baseChatUrl;
+    // ``noopener,noreferrer`` because the new tab carries the JWT
+    // in its URL — we don't want a child window holding a reference
+    // back to ``opener`` for an XSS pivot.
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <a
+      href={tokenHref}
+      onClick={onClick}
+      // ``target="_blank"`` so the new tab is sandboxed; ``rel`` per
+      // OWASP guidance for off-origin new-tab links.
+      target="_blank"
+      rel="noopener noreferrer"
+      className="card-hover"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 16,
+        background:
+          "linear-gradient(135deg, rgba(99,102,241,0.16), rgba(6,182,212,0.10))",
+        border: "1px solid rgba(99,102,241,0.28)",
+        borderRadius: 12,
+        padding: "16px 20px",
+        textDecoration: "none",
+        color: "var(--text-primary)",
+      }}
+    >
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 11,
+          background: "rgba(99,102,241,0.22)",
+          color: "#A5B4FC",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <MessageSquare size={20} strokeWidth={1.8} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          className="font-heading"
+          style={{
+            fontSize: 14.5,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+          }}
+        >
+          Open SRAN Chat
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            marginTop: 2,
+          }}
+        >
+          Your private AI chat surface — uses your Portal sign-in,
+          no second login.
+        </div>
+      </div>
+      <ArrowUpRight
+        size={16}
+        style={{ color: "var(--accent-primary)", flexShrink: 0 }}
+      />
+    </a>
   );
 }
 
