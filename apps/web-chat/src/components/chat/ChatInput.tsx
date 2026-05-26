@@ -2,30 +2,39 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { api, ApiError } from "@/lib/api";
+import {
+  FILE_PICKER_ACCEPT,
+  MAX_FILES_PER_MESSAGE,
+  validateFile,
+} from "@/lib/fileUtil";
+import { toast } from "@/components/ui/Toast";
+import { useChatStore } from "@/stores/chatStore";
+
+import { FilePreviewCard } from "./FilePreviewCard";
 import { ModelSelector } from "./ModelSelector";
 
 interface Props {
+  /** Active conversation id. The input needs it for the pending-
+   *  files store + to call the upload endpoint. Pass null on the
+   *  landing page (no conv yet); the paperclip + drop zone are
+   *  hidden when null. */
+  conversationId: string | null;
   disabled: boolean;
   streaming: boolean;
-  /** Currently-active model. The conversation page passes the
-   *  conversation's model_id; the landing page passes the global
-   *  default (omit → ModelSelector falls back to its own store). */
   activeModelId?: string | null;
-  /** Called when the user picks a different model. Optional —
-   *  omitted on the landing page so the global default flows. */
   onModelPick?: (modelId: string) => void;
-  onSend: (text: string) => void;
+  onSend: (text: string, fileIds: string[]) => void;
   onStop: () => void;
-  // When set, the parent injected an outside value (e.g. from a
-  // prompt pill click). The input adopts it and the ref is cleared.
   injectedText?: string | null;
   onInjectedTextConsumed?: () => void;
 }
 
-// 6 lines × ~24px line-height + vertical padding.
 const MAX_TEXTAREA_HEIGHT = 180;
+const MAX_CONCURRENT_UPLOADS = 3;
 
 export function ChatInput({
+  conversationId,
   disabled,
   streaming,
   activeModelId,
@@ -37,6 +46,16 @@ export function ChatInput({
 }: Props) {
   const [text, setText] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingFiles = useChatStore((s) =>
+    conversationId ? s.pendingFiles[conversationId] ?? [] : [],
+  );
+  const addPendingFile = useChatStore((s) => s.addPendingFile);
+  const updateFileProgress = useChatStore((s) => s.updateFileProgress);
+  const markFileReady = useChatStore((s) => s.markFileReady);
+  const markFileError = useChatStore((s) => s.markFileError);
+  const removePendingFile = useChatStore((s) => s.removePendingFile);
+  const clearPendingFiles = useChatStore((s) => s.clearPendingFiles);
 
   // Auto-grow up to 6 lines.
   useEffect(() => {
@@ -46,7 +65,6 @@ export function ChatInput({
     ta.style.height = `${Math.min(ta.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
   }, [text]);
 
-  // Parent (empty-state prompt pill) injected text → adopt + focus.
   useEffect(() => {
     if (!injectedText) return;
     setText(injectedText);
@@ -61,12 +79,22 @@ export function ChatInput({
     });
   }, [injectedText, onInjectedTextConsumed]);
 
+  const isUploading = pendingFiles.some((p) => p.status === "uploading");
+  const readyFileIds = pendingFiles
+    .filter((p) => p.status === "ready" && p.serverId)
+    .map((p) => p.serverId!);
+  const canSend =
+    !disabled &&
+    !streaming &&
+    !isUploading &&
+    (text.trim().length > 0 || readyFileIds.length > 0);
+
   function submit() {
-    if (streaming || disabled) return;
+    if (!canSend) return;
     const t = text.trim();
-    if (!t) return;
-    onSend(t);
+    onSend(t, readyFileIds);
     setText("");
+    if (conversationId) clearPendingFiles(conversationId);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -76,18 +104,138 @@ export function ChatInput({
     }
   }
 
+  // ── File upload pipeline ─────────────────────────────────
+  async function uploadOne(convId: string, file: File) {
+    const pendingId = addPendingFile(convId, file);
+    try {
+      const row = await api.uploadFile(convId, file, {
+        onProgress: (p) => updateFileProgress(convId, pendingId, p),
+      });
+      markFileReady(convId, pendingId, row.id);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.message : "Upload failed. Try again.";
+      markFileError(convId, pendingId, msg);
+      toast(msg);
+    }
+  }
+
+  async function handleFiles(filesRaw: File[]) {
+    if (!conversationId) return;
+    // Per-message cap. Existing valid pending + new candidates.
+    const existing = pendingFiles.filter((p) => p.status !== "error").length;
+    const slots = Math.max(0, MAX_FILES_PER_MESSAGE - existing);
+    if (slots === 0) {
+      toast(`At most ${MAX_FILES_PER_MESSAGE} files per message.`);
+      return;
+    }
+
+    const accepted: File[] = [];
+    for (const f of filesRaw) {
+      if (accepted.length === slots) {
+        toast(`Only ${slots} more file(s) can attach to this message.`);
+        break;
+      }
+      const v = validateFile(f);
+      if (!v.ok) {
+        toast(`${f.name}: ${v.reason}`);
+        continue;
+      }
+      accepted.push(f);
+    }
+    if (accepted.length === 0) return;
+
+    // Parallel upload, max 3 concurrent. Roll our own little
+    // bounded executor — simpler than pulling p-limit.
+    let cursor = 0;
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(MAX_CONCURRENT_UPLOADS, accepted.length); i++) {
+      workers.push(
+        (async () => {
+          while (cursor < accepted.length) {
+            const idx = cursor++;
+            await uploadOne(conversationId, accepted[idx]);
+          }
+        })(),
+      );
+    }
+    await Promise.all(workers);
+  }
+
+  function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const list = e.target.files;
+    if (!list || list.length === 0) return;
+    const files = Array.from(list);
+    e.target.value = ""; // allow re-picking the same file later
+    void handleFiles(files);
+  }
+
   return (
     <div className="border-t border-border bg-bg-base/95 px-4 py-4 md:px-10">
       <div className="mx-auto flex max-w-3xl flex-col gap-2">
+        {/* Pending-file preview row */}
+        {pendingFiles.length > 0 ? (
+          <div className="scrollbar-thin flex gap-2 overflow-x-auto py-1">
+            {pendingFiles.map((p) => (
+              <FilePreviewCard
+                key={p.id}
+                pending={p}
+                onRemove={() => {
+                  if (conversationId) removePendingFile(conversationId, p.id);
+                }}
+                onRetry={
+                  p.status === "error" && conversationId
+                    ? () => {
+                        // Re-upload: remove old card and start fresh.
+                        removePendingFile(conversationId, p.id);
+                        void uploadOne(conversationId, p.file);
+                      }
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        ) : null}
+
         <div className="flex items-end gap-2 rounded-2xl border border-border bg-bg-secondary px-3 py-2 transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={FILE_PICKER_ACCEPT}
+            multiple
+            className="hidden"
+            onChange={onPickFiles}
+          />
+
+          {/* Paperclip — only shown inside an active conversation */}
+          {conversationId ? (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach files"
+              title="Attach files"
+              disabled={streaming || disabled}
+              className="focus-ring shrink-0 rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M21 12.5l-8.59 8.59a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.67 3.67 0 0 1 5.19 5.19L9.83 18.49a1.83 1.83 0 1 1-2.6-2.6l8.49-8.48"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+
           <div className="pb-0.5">
             <ModelSelector
               activeModelId={activeModelId}
               disabled={streaming}
               compact
-              onPick={
-                onModelPick ? (m) => onModelPick(m.id) : undefined
-              }
+              onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
             />
           </div>
           <textarea
@@ -96,7 +244,11 @@ export function ChatInput({
             value={text}
             disabled={disabled}
             placeholder={
-              streaming ? "Streaming response…" : "Message SRAN Chat…"
+              streaming
+                ? "Streaming response…"
+                : isUploading
+                  ? "Uploading…"
+                  : "Message SRAN Chat…"
             }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
@@ -125,7 +277,7 @@ export function ChatInput({
             <button
               type="button"
               onClick={submit}
-              disabled={disabled || !text.trim()}
+              disabled={!canSend}
               aria-label="Send"
               tabIndex={streaming ? -1 : 0}
               className={`focus-ring absolute inset-0 flex items-center justify-center rounded-lg bg-accent text-white transition-all duration-150 hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -154,4 +306,37 @@ export function ChatInput({
       </div>
     </div>
   );
+}
+
+// Imperative API for the drag-and-drop wrapper. The conversation
+// page's drop handler calls this directly rather than re-implementing
+// validation.
+export async function uploadFiles(
+  convId: string,
+  files: File[],
+  store: {
+    addPendingFile: (id: string, f: File) => string;
+    updateFileProgress: (id: string, pid: string, p: number) => void;
+    markFileReady: (id: string, pid: string, sid: string) => void;
+    markFileError: (id: string, pid: string, err: string) => void;
+  },
+): Promise<void> {
+  for (const f of files) {
+    const v = validateFile(f);
+    if (!v.ok) {
+      toast(`${f.name}: ${v.reason}`);
+      continue;
+    }
+    const pid = store.addPendingFile(convId, f);
+    try {
+      const row = await api.uploadFile(convId, f, {
+        onProgress: (p) => store.updateFileProgress(convId, pid, p),
+      });
+      store.markFileReady(convId, pid, row.id);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Upload failed.";
+      store.markFileError(convId, pid, msg);
+      toast(msg);
+    }
+  }
 }

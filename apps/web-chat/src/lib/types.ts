@@ -70,6 +70,26 @@ export interface TokenUsage {
   output: number;
 }
 
+export interface FileAttachment {
+  id: UUID;
+  conversation_id?: UUID;
+  message_id?: UUID;
+  filename: string;
+  content_type: string;
+  file_size_bytes: number;
+  extraction_status:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "unsupported";
+  created_at: string;
+}
+
+export interface FileListResponse {
+  files: FileAttachment[];
+}
+
 export interface Message {
   id: UUID;
   role: MessageRole;
@@ -78,6 +98,7 @@ export interface Message {
   model_id?: string | null;
   token_usage?: TokenUsage | null;
   created_at: string;
+  files?: FileAttachment[];
   /** local-only — true while content is being streamed in. */
   isStreaming?: boolean;
   /** local-only — current feedback rating for this message. */

@@ -13,6 +13,8 @@ import type {
   ConversationListResponse,
   ErrorEnvelope,
   FeedbackResponse,
+  FileAttachment,
+  FileListResponse,
   Message,
   MessageListResponse,
   ModelListResponse,
@@ -128,10 +130,13 @@ class ApiClient {
     convId: string,
     content: string,
     signal: AbortSignal,
+    fileIds?: string[],
   ): Promise<Response> {
+    const body: Record<string, unknown> = { content, stream: true };
+    if (fileIds && fileIds.length > 0) body.file_ids = fileIds;
     return this.raw(`/conversations/${convId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content, stream: true }),
+      body: JSON.stringify(body),
       signal,
     });
   }
@@ -151,6 +156,93 @@ class ApiClient {
     return this.json<FeedbackResponse>(`/messages/${messageId}/feedback`, {
       method: "POST",
       body: JSON.stringify({ rating }),
+    });
+  }
+
+  // ----- Files ----------------------------------------------
+  listFiles(convId: string) {
+    return this.json<FileListResponse>(`/conversations/${convId}/files`);
+  }
+  deleteFile(fileId: string) {
+    return this.raw(`/files/${fileId}`, { method: "DELETE" });
+  }
+  /** Absolute URL for the download endpoint. Auth rides on the
+   *  ``portal_access_token`` cookie — cookies aren't scoped by port
+   *  on localhost, so the cookie set by the Portal flows to the
+   *  chat-edge origin automatically. */
+  downloadUrl(fileId: string): string {
+    return `${API_BASE}/files/${fileId}/download`;
+  }
+  /** XHR-backed upload with progress callbacks. fetch+ReadableStream
+   *  upload progress isn't reliable in all browsers in 2026 so we
+   *  use XHR to keep the progress bar honest. */
+  uploadFile(
+    convId: string,
+    file: File,
+    opts?: {
+      signal?: AbortSignal;
+      onProgress?: (percent: number) => void;
+    },
+  ): Promise<FileAttachment> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}/conversations/${convId}/files`);
+      const token = getPortalToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && opts?.onProgress) {
+          opts.onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          // Same redirect-to-portal contract as the JSON path.
+          clearPortalToken();
+          redirectToPortalLogin();
+          reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
+          return;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as FileAttachment);
+          } catch (err) {
+            reject(
+              new ApiError(
+                "DECODE_ERROR",
+                "Bad response from server",
+                xhr.status,
+              ),
+            );
+          }
+          return;
+        }
+        let code = `HTTP_${xhr.status}`;
+        let message = xhr.statusText || "Upload failed";
+        try {
+          const env = JSON.parse(xhr.responseText) as ErrorEnvelope;
+          if (env.error?.code) code = env.error.code;
+          if (env.error?.message) message = env.error.message;
+        } catch {
+          /* non-json body */
+        }
+        reject(new ApiError(code, message, xhr.status));
+      };
+      xhr.onerror = () => {
+        reject(new ApiError("NETWORK_ERROR", "Network error", 0));
+      };
+      xhr.onabort = () => {
+        reject(new ApiError("ABORTED", "Upload cancelled", 0));
+      };
+      if (opts?.signal) {
+        if (opts.signal.aborted) {
+          xhr.abort();
+        } else {
+          opts.signal.addEventListener("abort", () => xhr.abort());
+        }
+      }
+      const form = new FormData();
+      form.append("file", file);
+      xhr.send(form);
     });
   }
 }

@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { ImageLightbox } from "@/components/ui/ImageLightbox";
 import { ToastViewport } from "@/components/ui/Toast";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
@@ -49,6 +50,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
       <ToastViewport />
+      <ImageLightbox />
     </QueryClientProvider>
   );
 }
