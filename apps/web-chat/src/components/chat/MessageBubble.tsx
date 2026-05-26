@@ -4,7 +4,7 @@
 // Skipped here to avoid pulling katex's 100kB+ stylesheet into the chat
 // bundle for a feature most prompts don't need.
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,6 +19,7 @@ import { BranchNavigator } from "./BranchNavigator";
 import { CodeBlock } from "./CodeBlock";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { MessageAttachments } from "./MessageAttachments";
+import { StreamingContent } from "./StreamingContent";
 
 interface Props {
   message: Message;
@@ -44,7 +45,7 @@ const markdownComponents = {
   pre: (props: { children?: React.ReactNode }) => <CodeBlock {...props} />,
 };
 
-export function MessageBubble({
+function MessageBubbleImpl({
   message,
   convId,
   modelId,
@@ -336,19 +337,57 @@ function AssistantContent({ message }: { message: Message }) {
     );
   }
 
+  // Streaming path uses the lightweight tokenizer; full
+  // react-markdown only runs on the completed message so the
+  // O(n) re-parse doesn't fire on every token.
+  if (isStreaming) {
+    return <StreamingContent content={message.content} />;
+  }
+
   return (
-    <>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={markdownComponents}
-      >
-        {message.content || ""}
-      </ReactMarkdown>
-      {isStreaming ? <span className="streaming-cursor" /> : null}
-    </>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeHighlight]}
+      components={markdownComponents}
+    >
+      {message.content || ""}
+    </ReactMarkdown>
   );
 }
+
+// ── Memoization ──────────────────────────────────────────────
+// Re-render only when the message's observable state changes. We
+// don't bother comparing convId / modelId — those change with the
+// whole conversation and a fresh tree mounts anyway.
+function areEqual(prev: Props, next: Props): boolean {
+  const a = prev.message;
+  const b = next.message;
+  if (a === b) {
+    // Same reference covers the no-op case after a sibling re-render.
+    return (
+      prev.showFeedback === next.showFeedback &&
+      prev.showRegenerate === next.showRegenerate &&
+      prev.showModelBadge === next.showModelBadge
+    );
+  }
+  return (
+    a.id === b.id &&
+    a.content === b.content &&
+    a.status === b.status &&
+    a.isStreaming === b.isStreaming &&
+    a.branch_index === b.branch_index &&
+    a.branch_count === b.branch_count &&
+    a.has_branches === b.has_branches &&
+    a.token_usage === b.token_usage &&
+    a.files === b.files &&
+    prev.showFeedback === next.showFeedback &&
+    prev.showRegenerate === next.showRegenerate &&
+    prev.showModelBadge === next.showModelBadge &&
+    prev.modelId === next.modelId
+  );
+}
+
+export const MessageBubble = memo(MessageBubbleImpl, areEqual);
 
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);

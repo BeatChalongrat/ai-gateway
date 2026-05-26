@@ -54,6 +54,8 @@ function ImageThumb({ file }: { file: FileAttachment }) {
       <img
         src={url}
         alt={file.filename}
+        loading="lazy"
+        decoding="async"
         className="block max-h-[200px] max-w-[300px] object-cover"
       />
     </button>
