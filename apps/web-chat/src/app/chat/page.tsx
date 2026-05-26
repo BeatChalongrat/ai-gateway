@@ -1,52 +1,82 @@
 "use client";
 
-import { useEffect } from "react";
+// /chat landing page — ChatGPT / Claude style.
+//
+// Renders the personalised greeting + category chips + the same
+// rounded-pill input you get inside a conversation. Typing here
+// reuses a recent empty conversation if one exists (the same
+// dedup heuristic the sidebar's "+ New chat" button uses);
+// otherwise it spawns a fresh conversation, navigates to it, and
+// immediately streams the user's first message into it.
+//
+// Note: we deliberately do NOT auto-redirect to the most recent
+// existing conversation. The redesigned UX wants a clean landing
+// surface (matches ChatGPT's "Where should we begin?" + Claude's
+// "Beat returns!"), not "open whatever you were working on last".
+
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { ChatInput } from "@/components/chat/ChatInput";
+import { EmptyState } from "@/components/chat/EmptyState";
 import { useChatStore } from "@/stores/chatStore";
 import { useModelStore } from "@/stores/modelStore";
 
 export default function ChatLanding() {
   const router = useRouter();
   const conversations = useChatStore((s) => s.conversations);
-  const loaded = useChatStore((s) => s.conversationsLoaded);
   const createConversation = useChatStore((s) => s.createConversation);
+  const sendMessage = useChatStore((s) => s.sendMessage);
   const selectedModelId = useModelStore((s) => s.selectedModelId);
-  const modelsLoaded = useModelStore((s) => s.loaded);
+  const selectGlobalModel = useModelStore((s) => s.selectModel);
+  // Landing text is buffered locally so the user sees what they
+  // typed survive the navigation into the new conversation.
+  const [injectedText, setInjectedText] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!loaded || !modelsLoaded) return;
-    if (conversations.length > 0) {
-      router.replace(`/chat/${conversations[0].id}`);
-    }
-  }, [loaded, modelsLoaded, conversations, router]);
+  // Find an existing empty conversation we can reuse instead of
+  // spawning yet another row. Same heuristic as useNewChatHandler:
+  // message_count === 0, matches the active model, was touched in
+  // the last 60s.
+  function findReusableConversation(modelId: string): string | null {
+    const cutoff = Date.now() - 60_000;
+    const candidate = conversations.find((c) => {
+      if (c.message_count !== 0) return false;
+      if (c.model_id !== modelId) return false;
+      const t = new Date(c.updated_at).getTime();
+      return !Number.isNaN(t) && t > cutoff;
+    });
+    return candidate ? candidate.id : null;
+  }
 
-  async function handleStartFirst() {
+  async function handleSend(text: string) {
     if (!selectedModelId) return;
-    const c = await createConversation(selectedModelId);
-    router.replace(`/chat/${c.id}`);
+    let convId = findReusableConversation(selectedModelId);
+    if (!convId) {
+      const fresh = await createConversation(selectedModelId);
+      convId = fresh.id;
+    }
+    // Kick off the stream BEFORE navigating so the assistant
+    // placeholder mounts inside chatStore by the time the
+    // conversation page renders. The page sees messages already
+    // streaming via the store; no extra hand-off needed.
+    void sendMessage(convId, text);
+    router.push(`/chat/${convId}`);
   }
 
   return (
-    <div className="flex flex-1 items-center justify-center px-4">
-      <div className="fade-in-up max-w-md text-center">
-        <div className="mx-auto mb-4 h-14 w-14 rounded-2xl bg-gradient-to-br from-accent to-accent-subtle shadow-2xl" />
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Welcome to SRAN Chat
-        </h1>
-        <p className="mt-2 text-sm text-text-secondary">
-          A private, secure AI chat surface. Start a new conversation to
-          ask anything.
-        </p>
-        <button
-          type="button"
-          onClick={handleStartFirst}
-          disabled={!selectedModelId}
-          className="mt-5 rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-md transition-colors hover:bg-accent-hover disabled:opacity-50"
-        >
-          Start a new chat
-        </button>
-      </div>
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <EmptyState onPrompt={(text) => setInjectedText(text)} />
+      <ChatInput
+        conversationId={null}
+        disabled={false}
+        streaming={false}
+        activeModelId={selectedModelId ?? null}
+        onModelPick={(modelId) => selectGlobalModel(modelId)}
+        onSend={(t) => void handleSend(t)}
+        onStop={() => undefined}
+        injectedText={injectedText}
+        onInjectedTextConsumed={() => setInjectedText(null)}
+      />
     </div>
   );
 }
