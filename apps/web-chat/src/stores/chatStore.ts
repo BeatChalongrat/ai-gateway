@@ -18,11 +18,28 @@ import { api, ApiError } from "@/lib/api";
 import { parseSSE } from "@/lib/stream";
 import type {
   Conversation,
+  FileAttachment,
   Message,
   SSEContentDelta,
   SSEMessageComplete,
   SSEMessageStart,
 } from "@/lib/types";
+
+// ─── Pending-file state ──────────────────────────────────────
+// Tracked client-side while uploads are in flight. After the user
+// presses send, ready file ids ride along on the message request
+// and the pending list is cleared.
+export interface PendingFile {
+  /** Client-only id used to address the card before the server
+   *  knows about it. */
+  id: string;
+  file: File;
+  /** Set once the upload completes. */
+  serverId?: string;
+  status: "uploading" | "ready" | "error";
+  progress: number; // 0..100
+  error?: string;
+}
 
 interface ChatState {
   conversations: Conversation[];
@@ -35,8 +52,18 @@ interface ChatState {
   streamingAssistantId: Record<string, string | undefined>;
   /** AbortController per active stream so cancel can interrupt. */
   abortControllers: Record<string, AbortController | undefined>;
+  /** Files staged for the next user message, keyed by conv id. */
+  pendingFiles: Record<string, PendingFile[]>;
   errorBanner: string | null;
   setError: (msg: string | null) => void;
+
+  // ── pending-file ops ─────────────────────────────────────
+  addPendingFile: (convId: string, file: File) => string;
+  removePendingFile: (convId: string, pendingId: string) => void;
+  updateFileProgress: (convId: string, pendingId: string, progress: number) => void;
+  markFileReady: (convId: string, pendingId: string, serverId: string) => void;
+  markFileError: (convId: string, pendingId: string, error: string) => void;
+  clearPendingFiles: (convId: string) => void;
 
   // ── conversation ops ─────────────────────────────────────
   loadConversations: () => Promise<void>;
@@ -48,7 +75,7 @@ interface ChatState {
 
   // ── message ops ──────────────────────────────────────────
   loadMessages: (convId: string) => Promise<void>;
-  sendMessage: (convId: string, content: string) => Promise<void>;
+  sendMessage: (convId: string, content: string, fileIds?: string[]) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   regenerate: (convId: string, messageId: string) => Promise<void>;
   setFeedback: (
@@ -65,7 +92,76 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   streamingAssistantId: {},
   abortControllers: {},
+  pendingFiles: {},
   errorBanner: null,
+
+  // ────────────────────────────────────────────────────────
+  // Pending-file actions. All purely client-side; the upload
+  // network call lives in the components so it can pass an
+  // AbortController + progress callback directly.
+  // ────────────────────────────────────────────────────────
+  addPendingFile(convId, file) {
+    const id = `pend-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    set((s) => ({
+      pendingFiles: {
+        ...s.pendingFiles,
+        [convId]: [
+          ...(s.pendingFiles[convId] ?? []),
+          { id, file, status: "uploading", progress: 0 },
+        ],
+      },
+    }));
+    return id;
+  },
+  removePendingFile(convId, pendingId) {
+    set((s) => ({
+      pendingFiles: {
+        ...s.pendingFiles,
+        [convId]: (s.pendingFiles[convId] ?? []).filter(
+          (p) => p.id !== pendingId,
+        ),
+      },
+    }));
+  },
+  updateFileProgress(convId, pendingId, progress) {
+    set((s) => ({
+      pendingFiles: {
+        ...s.pendingFiles,
+        [convId]: (s.pendingFiles[convId] ?? []).map((p) =>
+          p.id === pendingId ? { ...p, progress } : p,
+        ),
+      },
+    }));
+  },
+  markFileReady(convId, pendingId, serverId) {
+    set((s) => ({
+      pendingFiles: {
+        ...s.pendingFiles,
+        [convId]: (s.pendingFiles[convId] ?? []).map((p) =>
+          p.id === pendingId
+            ? { ...p, status: "ready", progress: 100, serverId }
+            : p,
+        ),
+      },
+    }));
+  },
+  markFileError(convId, pendingId, error) {
+    set((s) => ({
+      pendingFiles: {
+        ...s.pendingFiles,
+        [convId]: (s.pendingFiles[convId] ?? []).map((p) =>
+          p.id === pendingId ? { ...p, status: "error", error } : p,
+        ),
+      },
+    }));
+  },
+  clearPendingFiles(convId) {
+    set((s) => {
+      const next = { ...s.pendingFiles };
+      delete next[convId];
+      return { pendingFiles: next };
+    });
+  },
 
   setError(msg) {
     set({ errorBanner: msg });
@@ -168,9 +264,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // ────────────────────────────────────────────────────────
-  async sendMessage(convId, content) {
+  async sendMessage(convId, content, fileIds) {
     const trimmed = content.trim();
-    if (!trimmed) return;
+    if (!trimmed && (!fileIds || fileIds.length === 0)) return;
     const tempUserId = `tmp-user-${Date.now()}`;
     const tempAsstId = `tmp-asst-${Date.now()}`;
 
@@ -188,6 +284,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const convModelId =
       get().conversations.find((c) => c.id === convId)?.model_id ?? null;
 
+    // Build optimistic file shells from the current pendingFiles list
+    // so the user immediately sees badges/thumbnails under their
+    // message even before the server reloads message history.
+    const pending = get().pendingFiles[convId] ?? [];
+    const optimisticFiles: FileAttachment[] = pending
+      .filter((p) => p.status === "ready" && p.serverId)
+      .map((p) => ({
+        id: p.serverId!,
+        filename: p.file.name,
+        content_type: p.file.type || "application/octet-stream",
+        file_size_bytes: p.file.size,
+        extraction_status: "completed" as const,
+        created_at: new Date().toISOString(),
+      }));
+
     set((s) => ({
       messages: {
         ...s.messages,
@@ -199,6 +310,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             content: trimmed,
             status: "completed",
             created_at: new Date().toISOString(),
+            files: optimisticFiles.length > 0 ? optimisticFiles : undefined,
           },
           {
             id: tempAsstId,
@@ -220,7 +332,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await api.openMessageStream(convId, trimmed, ctrl.signal);
+      const res = await api.openMessageStream(
+        convId,
+        trimmed,
+        ctrl.signal,
+        fileIds,
+      );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;

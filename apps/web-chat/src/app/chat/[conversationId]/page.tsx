@@ -3,8 +3,10 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { ChatInput } from "@/components/chat/ChatInput";
+import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
+import { ChatInput, uploadFiles } from "@/components/chat/ChatInput";
 import { ChatThread } from "@/components/chat/ChatThread";
+import { ConversationFiles } from "@/components/chat/ConversationFiles";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useIsStreaming } from "@/hooks/useStream";
@@ -27,16 +29,16 @@ export default function ConversationPage() {
   const cancelGeneration = useChatStore((s) => s.cancelGeneration);
   const regenerate = useChatStore((s) => s.regenerate);
   const setConversationModel = useChatStore((s) => s.setConversationModel);
+  const addPendingFile = useChatStore((s) => s.addPendingFile);
+  const updateFileProgress = useChatStore((s) => s.updateFileProgress);
+  const markFileReady = useChatStore((s) => s.markFileReady);
+  const markFileError = useChatStore((s) => s.markFileError);
   const selectGlobalModel = useModelStore((s) => s.selectModel);
   const getModelById = useModelStore((s) => s.getModelById);
 
   const streaming = useIsStreaming(convId);
   const conv = conversations.find((c) => c.id === convId);
 
-  // Allow the empty-state prompt pills to either auto-send (default)
-  // or populate the input. Spec says auto-send; we honour that, but
-  // route through ChatInput's "injected text" hatch so the user
-  // briefly sees the prompt text before send.
   const [injectedText, setInjectedText] = useState<string | null>(null);
 
   useEffect(() => {
@@ -65,48 +67,61 @@ export default function ConversationPage() {
           <h2 className="truncate text-sm font-semibold tracking-tight">
             {conv?.title ?? "Conversation"}
           </h2>
-          {conv?.model_id ? (
-            <span className="text-[11px] uppercase tracking-wider text-text-muted">
-              {getModelById(conv.model_id)?.name ?? conv.model_id}
-            </span>
-          ) : null}
+          <div className="flex items-center gap-3">
+            <ConversationFiles conversationId={convId} />
+            {conv?.model_id ? (
+              <span className="text-[11px] uppercase tracking-wider text-text-muted">
+                {getModelById(conv.model_id)?.name ?? conv.model_id}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <ChatThread
-        convId={convId}
-        modelId={conv?.model_id ?? null}
-        messages={messages}
-        onRegenerate={(messageId) => void regenerate(convId, messageId)}
-        onPromptPick={(text) => {
-          // Auto-send immediately.
-          void sendMessage(convId, text);
+      <AttachmentDropZone
+        className="flex flex-1 flex-col overflow-hidden"
+        enabled={!streaming}
+        onFiles={(files) => {
+          void uploadFiles(convId, files, {
+            addPendingFile,
+            updateFileProgress,
+            markFileReady,
+            markFileError,
+          });
         }}
-      />
+      >
+        <ChatThread
+          convId={convId}
+          modelId={conv?.model_id ?? null}
+          messages={messages}
+          onRegenerate={(messageId) => void regenerate(convId, messageId)}
+          onPromptPick={(text) => {
+            void sendMessage(convId, text);
+          }}
+        />
 
-      <ChatInput
-        disabled={false}
-        streaming={streaming}
-        activeModelId={conv?.model_id ?? null}
-        onModelPick={async (modelId) => {
-          // Conversation pages: the picked model becomes the conv's
-          // new binding AND the user's global default + recents
-          // entry. PATCH first; toast on success; bail on failure.
-          if (!convId) return;
-          try {
-            await setConversationModel(convId, modelId);
-            selectGlobalModel(modelId);
-            const m = getModelById(modelId);
-            toast(`Switched to ${m?.name ?? modelId}`);
-          } catch {
-            toast("Couldn't change model.");
-          }
-        }}
-        onSend={(t) => void sendMessage(convId, t)}
-        onStop={() => void cancelGeneration(convId)}
-        injectedText={injectedText}
-        onInjectedTextConsumed={() => setInjectedText(null)}
-      />
+        <ChatInput
+          conversationId={convId}
+          disabled={false}
+          streaming={streaming}
+          activeModelId={conv?.model_id ?? null}
+          onModelPick={async (modelId) => {
+            if (!convId) return;
+            try {
+              await setConversationModel(convId, modelId);
+              selectGlobalModel(modelId);
+              const m = getModelById(modelId);
+              toast(`Switched to ${m?.name ?? modelId}`);
+            } catch {
+              toast("Couldn't change model.");
+            }
+          }}
+          onSend={(t, fileIds) => void sendMessage(convId, t, fileIds)}
+          onStop={() => void cancelGeneration(convId)}
+          injectedText={injectedText}
+          onInjectedTextConsumed={() => setInjectedText(null)}
+        />
+      </AttachmentDropZone>
     </>
   );
 }

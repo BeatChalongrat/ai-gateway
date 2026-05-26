@@ -15,6 +15,7 @@ import { useModelStore } from "@/stores/modelStore";
 import { AssistantAvatar } from "./AssistantAvatar";
 import { CodeBlock } from "./CodeBlock";
 import { FeedbackButtons } from "./FeedbackButtons";
+import { MessageAttachments } from "./MessageAttachments";
 
 interface Props {
   message: Message;
@@ -95,6 +96,10 @@ export function MessageBubble({
             <AssistantContent message={message} />
           )}
         </div>
+
+        {message.files && message.files.length > 0 ? (
+          <MessageAttachments files={message.files} />
+        ) : null}
 
         <MessageMeta
           message={message}

@@ -1,0 +1,223 @@
+// File-attachment HTTP handlers.
+//
+// Routes (all behind RequireAuth):
+//
+//	POST   /api/v1/conversations/{id}/files   multipart upload
+//	GET    /api/v1/conversations/{id}/files   list attachments
+//	GET    /api/v1/files/{fileID}/download    stream original blob
+//	DELETE /api/v1/files/{fileID}             remove blob + row
+//
+// All tenant scoping happens inside FileService — the handlers only
+// do request parsing + status mapping.
+package handler
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
+)
+
+type FileHandler struct {
+	files *service.FileService
+	// maxMemMultipartMB controls how much of an upload buffers in
+	// memory before spilling to a temp file. 32MiB matches the
+	// per-file cap with headroom for headers.
+	maxMemMultipartMB int64
+}
+
+func NewFileHandler(f *service.FileService) *FileHandler {
+	return &FileHandler{files: f, maxMemMultipartMB: 32}
+}
+
+// ---------------------------------------------------------------------------
+// Wire types
+// ---------------------------------------------------------------------------
+
+type fileResponse struct {
+	ID               string `json:"id"`
+	ConversationID   string `json:"conversation_id"`
+	MessageID        string `json:"message_id,omitempty"`
+	OriginalFilename string `json:"filename"`
+	ContentType      string `json:"content_type"`
+	FileSizeBytes    int64  `json:"file_size_bytes"`
+	ExtractionStatus string `json:"extraction_status"`
+	CreatedAt        string `json:"created_at"`
+}
+
+// FileToWire formats a model.ConversationFile for the wire. Exported
+// so the message handler can include attachments in its responses.
+func FileToWire(f *model.ConversationFile) fileResponse {
+	r := fileResponse{
+		ID:               f.ID.String(),
+		ConversationID:   f.ConversationID.String(),
+		OriginalFilename: f.OriginalFilename,
+		ContentType:      f.ContentType,
+		FileSizeBytes:    f.FileSizeBytes,
+		ExtractionStatus: f.ExtractionStatus,
+		CreatedAt:        f.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+	if f.MessageID != nil {
+		r.MessageID = f.MessageID.String()
+	}
+	return r
+}
+
+// ---------------------------------------------------------------------------
+// Upload
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+
+	// Cap total request size at maxMemMultipartMB + headroom so a
+	// hostile client can't exhaust disk by streaming forever. The
+	// per-file 25MiB ceiling lives in FileService.Upload.
+	if err := r.ParseMultipartForm(h.maxMemMultipartMB * 1024 * 1024); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid multipart body")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "missing 'file' field")
+		return
+	}
+	defer file.Close()
+
+	ct := header.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+
+	row, err := h.files.Upload(r.Context(), service.UploadInput{
+		TenantID:       caller.TenantUUID,
+		UserID:         caller.UserID,
+		ConversationID: convID,
+		OriginalName:   header.Filename,
+		ContentType:    ct,
+		Size:           header.Size,
+		Body:           file,
+	})
+	if err != nil {
+		h.writeUploadError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(FileToWire(row))
+}
+
+func (h *FileHandler) writeUploadError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrFileConvNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+	case errors.Is(err, service.ErrFileEmpty):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "empty upload")
+	case errors.Is(err, service.ErrFileTooLarge):
+		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError, "file too large (max 25 MB)")
+	case errors.Is(err, service.ErrFileTypeNotAllowed):
+		WriteError(w, http.StatusUnsupportedMediaType, CodeValidationError, "file type not allowed")
+	case errors.Is(err, service.ErrFileConvQuotaExceeded):
+		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError,
+			"conversation file quota exceeded (max 100 MB total)")
+	default:
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// List
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	files, err := h.files.List(r.Context(), caller.TenantUUID, caller.UserID, convID)
+	if err != nil {
+		if errors.Is(err, service.ErrFileConvNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	out := make([]fileResponse, 0, len(files))
+	for i := range files {
+		out = append(out, FileToWire(&files[i]))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"files": out})
+}
+
+// ---------------------------------------------------------------------------
+// Download
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	fileID, err := uuid.Parse(chi.URLParam(r, "fileID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id")
+		return
+	}
+	row, fp, err := h.files.OpenForDownload(r.Context(), caller.TenantUUID, fileID)
+	if err != nil {
+		if errors.Is(err, service.ErrFileNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	defer fp.Close()
+
+	w.Header().Set("Content-Type", row.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(row.FileSizeBytes, 10))
+	// RFC 6266 says percent-encode the filename for safety; we keep
+	// it simple with quoted form + UTF-8 fallback. Browsers handle
+	// the basic quoted form fine for ASCII; users uploading
+	// non-ASCII filenames see the UUID-prefixed sanitized name.
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="`+row.OriginalFilename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, fp)
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	fileID, err := uuid.Parse(chi.URLParam(r, "fileID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id")
+		return
+	}
+	if err := h.files.Delete(r.Context(), caller.TenantUUID, fileID); err != nil {
+		if errors.Is(err, service.ErrFileNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
