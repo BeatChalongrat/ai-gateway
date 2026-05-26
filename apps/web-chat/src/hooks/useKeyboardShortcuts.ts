@@ -87,28 +87,24 @@ export function useKeyboardShortcuts(opts: Options) {
 // Shared new-chat handler. Reused by the sidebar button + this
 // hook so both go through the same "open the existing empty
 // conversation instead of spawning a duplicate" guard.
+//
+// Dedup rule: if ANY conversation has zero messages, reuse it.
+// The previous version also required a model match + a 60s
+// freshness window, which let duplicates through when the user
+// switched models or paused for a minute. The flat rule matches
+// ChatGPT / Claude and is the bar Beat called out.
 async function newChat(
   router: ReturnType<typeof useRouter>,
   conversations: ReturnType<typeof useChatStore.getState>["conversations"],
   selectedModelId: string | null,
   createConversation: ReturnType<typeof useChatStore.getState>["createConversation"],
 ) {
-  if (!selectedModelId) return;
-  // Reuse a freshly-created empty conversation if one exists at the
-  // top of the list. Heuristic: message_count === 0 AND it was
-  // updated in the last 60 seconds AND uses the currently-selected
-  // model. Avoids the "spam New chat → 10 empty rows" bug.
-  const sixtySecondsAgo = Date.now() - 60_000;
-  const candidate = conversations.find((c) => {
-    if (c.message_count !== 0) return false;
-    if (c.model_id !== selectedModelId) return false;
-    const t = new Date(c.updated_at).getTime();
-    return !Number.isNaN(t) && t > sixtySecondsAgo;
-  });
+  const candidate = conversations.find((c) => c.message_count === 0);
   if (candidate) {
     router.push(`/chat/${candidate.id}`);
     return;
   }
+  if (!selectedModelId) return;
   const fresh = await createConversation(selectedModelId);
   router.push(`/chat/${fresh.id}`);
 }

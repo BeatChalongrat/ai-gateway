@@ -7,6 +7,7 @@ import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ChatInput, uploadFiles } from "@/components/chat/ChatInput";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { ConversationFiles } from "@/components/chat/ConversationFiles";
+import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
 import { ShareModal } from "@/components/chat/ShareModal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -87,6 +88,36 @@ export default function ConversationPage() {
     );
   }
 
+  // Shared input element — same props whether we render it
+  // centred inside EmptyState (empty conversation) or bottom-
+  // anchored under ChatThread (regular conversation). Factoring it
+  // out keeps both render branches honest about feature parity.
+  const composer = (
+    <ChatInput
+      conversationId={convId}
+      disabled={false}
+      streaming={streaming}
+      activeModelId={conv?.model_id ?? null}
+      onModelPick={async (modelId) => {
+        if (!convId) return;
+        try {
+          await setConversationModel(convId, modelId);
+          selectGlobalModel(modelId);
+          const m = getModelById(modelId);
+          toast(`Switched to ${m?.name ?? modelId}`);
+        } catch {
+          toast("Couldn't change model.");
+        }
+      }}
+      onSend={(t, fileIds) => void sendMessage(convId, t, fileIds)}
+      onStop={() => void cancelGeneration(convId)}
+      injectedText={injectedText}
+      onInjectedTextConsumed={() => setInjectedText(null)}
+    />
+  );
+
+  const isEmpty = messages.length === 0;
+
   return (
     <>
       {/* Slim desktop header — no centre label (the model name
@@ -113,50 +144,43 @@ export default function ConversationPage() {
           });
         }}
       >
-        <ErrorBoundary resetKey={convId}>
-          <ChatThread
-            convId={convId}
-            modelId={conv?.model_id ?? null}
-            messages={messages}
-            hasMoreOlder={hasMoreOlder ?? false}
-            loadingOlder={loadingOlder ?? false}
-            onLoadEarlier={() => loadOlderMessages(convId)}
-            onRegenerate={(messageId) => void regenerate(convId, messageId)}
-            onPromptPick={(text) => {
-              // Populate the textarea so the user can review /
-              // extend the chip-supplied prompt before sending.
-              setInjectedText(text);
-            }}
-            onEditMessage={(messageId, newContent) =>
-              void editMessage(convId, messageId, newContent)
-            }
-            onSwitchBranch={(messageId, branchIndex) =>
-              void switchBranch(convId, messageId, branchIndex)
-            }
-          />
-        </ErrorBoundary>
-
-        <ChatInput
-          conversationId={convId}
-          disabled={false}
-          streaming={streaming}
-          activeModelId={conv?.model_id ?? null}
-          onModelPick={async (modelId) => {
-            if (!convId) return;
-            try {
-              await setConversationModel(convId, modelId);
-              selectGlobalModel(modelId);
-              const m = getModelById(modelId);
-              toast(`Switched to ${m?.name ?? modelId}`);
-            } catch {
-              toast("Couldn't change model.");
-            }
-          }}
-          onSend={(t, fileIds) => void sendMessage(convId, t, fileIds)}
-          onStop={() => void cancelGeneration(convId)}
-          injectedText={injectedText}
-          onInjectedTextConsumed={() => setInjectedText(null)}
-        />
+        {isEmpty ? (
+          // Empty conversation → centred hero block matching the
+          // /chat landing layout: greeting + composer + chips,
+          // vertically centred. The instant the user sends, the
+          // assistant placeholder lands in chatStore.messages,
+          // messages.length flips to 2, and the layout swaps to
+          // the bottom-anchored thread view below.
+          <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto">
+            <EmptyState onPrompt={(text) => setInjectedText(text)}>
+              {composer}
+            </EmptyState>
+          </div>
+        ) : (
+          <>
+            <ErrorBoundary resetKey={convId}>
+              <ChatThread
+                convId={convId}
+                modelId={conv?.model_id ?? null}
+                messages={messages}
+                hasMoreOlder={hasMoreOlder ?? false}
+                loadingOlder={loadingOlder ?? false}
+                onLoadEarlier={() => loadOlderMessages(convId)}
+                onRegenerate={(messageId) => void regenerate(convId, messageId)}
+                onPromptPick={(text) => {
+                  setInjectedText(text);
+                }}
+                onEditMessage={(messageId, newContent) =>
+                  void editMessage(convId, messageId, newContent)
+                }
+                onSwitchBranch={(messageId, branchIndex) =>
+                  void switchBranch(convId, messageId, branchIndex)
+                }
+              />
+            </ErrorBoundary>
+            {composer}
+          </>
+        )}
       </AttachmentDropZone>
       <ShareModal
         open={shareOpen}
