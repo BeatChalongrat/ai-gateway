@@ -18,6 +18,8 @@ interface Props {
   messages: Message[];
   onRegenerate: (messageId: string) => void;
   onPromptPick?: (text: string) => void;
+  onEditMessage?: (messageId: string, newContent: string) => void;
+  onSwitchBranch?: (messageId: string, branchIndex: number) => void;
 }
 
 const NEAR_BOTTOM_PX = 100;
@@ -29,6 +31,8 @@ export function ChatThread({
   messages,
   onRegenerate,
   onPromptPick,
+  onEditMessage,
+  onSwitchBranch,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [autoStick, setAutoStick] = useState(true);
@@ -153,6 +157,16 @@ export function ChatThread({
                       m.status !== "regenerated"
                     }
                     onRegenerate={() => onRegenerate(m.id)}
+                    onEdit={
+                      m.role === "user" && onEditMessage && !anyStreaming
+                        ? (text) => onEditMessage(m.id, text)
+                        : undefined
+                    }
+                    onSwitchBranch={
+                      onSwitchBranch
+                        ? (idx) => onSwitchBranch(m.id, idx)
+                        : undefined
+                    }
                   />
                 </div>
               );

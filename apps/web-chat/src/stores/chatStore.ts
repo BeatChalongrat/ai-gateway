@@ -78,6 +78,8 @@ interface ChatState {
   sendMessage: (convId: string, content: string, fileIds?: string[]) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   regenerate: (convId: string, messageId: string) => Promise<void>;
+  editMessage: (convId: string, messageId: string, newContent: string) => Promise<void>;
+  switchBranch: (convId: string, messageId: string, branchIndex: number) => Promise<void>;
   setFeedback: (
     convId: string,
     messageId: string,
@@ -452,6 +454,94 @@ export const useChatStore = create<ChatState>((set, get) => ({
         delete sids[convId];
         return { abortControllers: aborts, streamingAssistantId: sids };
       });
+    }
+  },
+
+  async editMessage(convId, messageId, newContent) {
+    // Edit is a fork-and-stream operation. The server creates the
+    // new branch's user + assistant rows; we mirror the streaming
+    // optimistic-UI logic from sendMessage so the user sees their
+    // edit + the AI response immediately.
+    const trimmed = newContent.trim();
+    if (!trimmed) return;
+    const existing = get().messages[convId] ?? [];
+    const idx = existing.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+
+    const convModelId =
+      get().conversations.find((c) => c.id === convId)?.model_id ?? null;
+    const tempAsstId = `tmp-edit-asst-${Date.now()}`;
+
+    // Optimistic: replace the edited user message's content + clear
+    // everything after it. The server-side fork sends back the same
+    // shape via the SSE stream.
+    set((s) => {
+      const list = s.messages[convId] ?? [];
+      const truncated = list.slice(0, idx);
+      truncated.push({
+        ...list[idx],
+        content: trimmed,
+      });
+      truncated.push({
+        id: tempAsstId,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        model_id: convModelId,
+        created_at: new Date().toISOString(),
+        isStreaming: true,
+      });
+      return {
+        messages: { ...s.messages, [convId]: truncated },
+        streamingAssistantId: { ...s.streamingAssistantId, [convId]: tempAsstId },
+      };
+    });
+
+    const ctrl = new AbortController();
+    set((s) => ({
+      abortControllers: { ...s.abortControllers, [convId]: ctrl },
+    }));
+
+    try {
+      const res = await api.openEditStream(convId, messageId, trimmed, ctrl.signal);
+      if (!res.ok) {
+        await handleStreamPreError(res, set, get, convId, tempAsstId);
+        return;
+      }
+      await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
+      // Re-fetch messages so the new branch_index / branch_count
+      // info from the server replaces the optimistic shape.
+      try {
+        await get().loadMessages(convId);
+      } catch {
+        /* non-fatal */
+      }
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
+        finalizeMessage(set, get, convId, tempAsstId, "cancelled");
+        return;
+      }
+      get().setError("Network error during edit.");
+      finalizeMessage(set, get, convId, tempAsstId, "error");
+    } finally {
+      set((s) => {
+        const aborts = { ...s.abortControllers };
+        delete aborts[convId];
+        const sids = { ...s.streamingAssistantId };
+        delete sids[convId];
+        return { abortControllers: aborts, streamingAssistantId: sids };
+      });
+    }
+  },
+
+  async switchBranch(convId, messageId, branchIndex) {
+    try {
+      await api.switchBranch(convId, messageId, branchIndex);
+      // Toggling is_active server-side rewrote which messages are
+      // current — re-fetch to pick up the new chain.
+      await get().loadMessages(convId);
+    } catch {
+      get().setError("Couldn't switch branch.");
     }
   },
 

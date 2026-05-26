@@ -52,14 +52,17 @@ func (h *MessageHandler) SetFileRepo(fr *repository.FileRepo) {
 // ---------------------------------------------------------------------------
 
 type messageResponse struct {
-	ID         string         `json:"id"`
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	Status     string         `json:"status"`
-	ModelID    *string        `json:"model_id,omitempty"`
-	TokenUsage *tokenUsage    `json:"token_usage,omitempty"`
-	CreatedAt  string         `json:"created_at"`
-	Files      []fileResponse `json:"files,omitempty"`
+	ID           string         `json:"id"`
+	Role         string         `json:"role"`
+	Content      string         `json:"content"`
+	Status       string         `json:"status"`
+	ModelID      *string        `json:"model_id,omitempty"`
+	TokenUsage   *tokenUsage    `json:"token_usage,omitempty"`
+	CreatedAt    string         `json:"created_at"`
+	Files        []fileResponse `json:"files,omitempty"`
+	BranchIndex  int            `json:"branch_index"`
+	BranchCount  int            `json:"branch_count"`
+	HasBranches  bool           `json:"has_branches"`
 }
 
 type tokenUsage struct {
@@ -69,12 +72,14 @@ type tokenUsage struct {
 
 func messageToWire(m *model.Message) messageResponse {
 	r := messageResponse{
-		ID:        m.ID.String(),
-		Role:      m.Role,
-		Content:   m.ContentMasked,
-		Status:    m.Status,
-		ModelID:   m.ModelID,
-		CreatedAt: m.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		ID:          m.ID.String(),
+		Role:        m.Role,
+		Content:     m.ContentMasked,
+		Status:      m.Status,
+		ModelID:     m.ModelID,
+		CreatedAt:   m.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		BranchIndex: m.BranchIndex,
+		BranchCount: 1,
 	}
 	if m.TokenUsageInput != nil && m.TokenUsageOutput != nil {
 		r.TokenUsage = &tokenUsage{
@@ -113,6 +118,31 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	items := make([]messageResponse, 0, len(msgs))
 	for i := range msgs {
 		items = append(items, messageToWire(&msgs[i]))
+	}
+
+	// Branch counts. One batched query per parent_id; messages
+	// without parent_id stay at the default branch_count=1.
+	parentIDs := make([]uuid.UUID, 0)
+	seen := map[uuid.UUID]bool{}
+	for i := range msgs {
+		if msgs[i].ParentID != nil && !seen[*msgs[i].ParentID] {
+			seen[*msgs[i].ParentID] = true
+			parentIDs = append(parentIDs, *msgs[i].ParentID)
+		}
+	}
+	if len(parentIDs) > 0 {
+		counts, err := h.messages.BranchCountsByParents(r.Context(), caller.TenantUUID, parentIDs)
+		if err == nil {
+			for i := range msgs {
+				if msgs[i].ParentID == nil {
+					continue
+				}
+				if c, ok := counts[*msgs[i].ParentID]; ok && c > 1 {
+					items[i].BranchCount = c
+					items[i].HasBranches = true
+				}
+			}
+		}
 	}
 
 	// Join file attachments. Skipped silently if the file repo
@@ -499,6 +529,186 @@ Loop:
 		}
 	}
 	writeSSEEvent(w, flusher, "message_complete", completeData)
+}
+
+// ---------------------------------------------------------------------------
+// Edit — re-streams a user message with new content (branching fork)
+// ---------------------------------------------------------------------------
+
+type editRequest struct {
+	Content string `json:"content"`
+}
+
+func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	msgID, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message id")
+		return
+	}
+	var req editRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
+
+	stream, err := h.messages.EditMessage(r.Context(), service.EditInput{
+		TenantID:       caller.TenantUUID,
+		UserID:         caller.UserID,
+		ConversationID: convID,
+		MessageID:      msgID,
+		NewContent:     req.Content,
+		RequestID:      r.Header.Get("X-Request-Id"),
+	})
+	if err != nil {
+		h.writeEditError(w, err)
+		return
+	}
+
+	// SSE — identical event format to Send so the front-end shares
+	// its rendering pipeline.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeSSEEvent(w, flusher, "message_start", map[string]any{
+		"message_id":      stream.AssistantID.String(),
+		"conversation_id": stream.ConversationID.String(),
+		"user_message_id": stream.UserMessage.ID.String(),
+	})
+
+	var (
+		content      strings.Builder
+		finalUsage   *service.GatewayChatUsage
+		finishReason string
+		gotErr       error
+	)
+Loop:
+	for {
+		select {
+		case <-r.Context().Done():
+			stream.Cancel()
+		case ev, ok := <-stream.Events:
+			if !ok {
+				break Loop
+			}
+			if ev.Err != nil {
+				gotErr = ev.Err
+				writeSSEEvent(w, flusher, "error", map[string]any{
+					"code":    CodeInternalError,
+					"message": fmt.Sprintf("stream error: %v", ev.Err),
+				})
+				break Loop
+			}
+			if ev.Delta != "" {
+				content.WriteString(ev.Delta)
+				writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": ev.Delta})
+			}
+			if ev.FinishReason != "" {
+				finishReason = ev.FinishReason
+			}
+			if ev.Usage != nil {
+				finalUsage = ev.Usage
+			}
+			if ev.Done {
+				break Loop
+			}
+		}
+	}
+	persistFinishReason := finishReason
+	if gotErr != nil && persistFinishReason == "" {
+		persistFinishReason = "error"
+	}
+	stream.Finish(content.String(), persistFinishReason, finalUsage)
+
+	completeData := map[string]any{"message_id": stream.AssistantID.String()}
+	if finalUsage != nil {
+		completeData["token_usage"] = map[string]int{
+			"input":  finalUsage.PromptTokens,
+			"output": finalUsage.CompletionTokens,
+		}
+	}
+	writeSSEEvent(w, flusher, "message_complete", completeData)
+}
+
+func (h *MessageHandler) writeEditError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrMessageConversationNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+	case errors.Is(err, service.ErrMessageNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "message not found")
+	case errors.Is(err, service.ErrEditWrongRole):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
+			"only user messages can be edited")
+	case errors.Is(err, service.ErrMessageEmptyContent):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "content is required")
+	case errors.Is(err, service.ErrMessageGatewayUnavailable):
+		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
+	default:
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Switch branch
+// ---------------------------------------------------------------------------
+
+type switchBranchRequest struct {
+	BranchIndex int `json:"branch_index"`
+}
+
+// SwitchBranch toggles the active branch inside a fork group. The
+// front-end re-fetches the message list after a 200 to pick up the
+// new active chain.
+func (h *MessageHandler) SwitchBranch(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	msgID, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message id")
+		return
+	}
+	var req switchBranchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
+		return
+	}
+	if err := h.messages.SwitchBranch(
+		r.Context(), caller.TenantUUID, caller.UserID, convID, msgID, req.BranchIndex,
+	); err != nil {
+		switch {
+		case errors.Is(err, service.ErrMessageConversationNotFound),
+			errors.Is(err, service.ErrMessageNotFound):
+			WriteError(w, http.StatusNotFound, CodeNotFound, "message not found")
+		case errors.Is(err, service.ErrSwitchBranchNoFork):
+			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
+				"message is not part of a fork group")
+		case errors.Is(err, service.ErrSwitchBranchMissing):
+			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
+				"branch_index does not exist")
+		default:
+			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // writeRegenerateError maps service errors to HTTP responses for

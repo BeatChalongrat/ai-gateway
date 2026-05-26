@@ -7,6 +7,8 @@ import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ChatInput, uploadFiles } from "@/components/chat/ChatInput";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { ConversationFiles } from "@/components/chat/ConversationFiles";
+import { ExportMenu } from "@/components/chat/ExportMenu";
+import { ShareModal } from "@/components/chat/ShareModal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useIsStreaming } from "@/hooks/useStream";
@@ -29,6 +31,8 @@ export default function ConversationPage() {
   const cancelGeneration = useChatStore((s) => s.cancelGeneration);
   const regenerate = useChatStore((s) => s.regenerate);
   const setConversationModel = useChatStore((s) => s.setConversationModel);
+  const editMessage = useChatStore((s) => s.editMessage);
+  const switchBranch = useChatStore((s) => s.switchBranch);
   const addPendingFile = useChatStore((s) => s.addPendingFile);
   const updateFileProgress = useChatStore((s) => s.updateFileProgress);
   const markFileReady = useChatStore((s) => s.markFileReady);
@@ -40,6 +44,7 @@ export default function ConversationPage() {
   const conv = conversations.find((c) => c.id === convId);
 
   const [injectedText, setInjectedText] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     if (convId) {
@@ -74,6 +79,10 @@ export default function ConversationPage() {
                 {getModelById(conv.model_id)?.name ?? conv.model_id}
               </span>
             ) : null}
+            <ExportMenu
+              conversationId={convId}
+              onShare={() => setShareOpen(true)}
+            />
           </div>
         </div>
       </div>
@@ -98,6 +107,12 @@ export default function ConversationPage() {
           onPromptPick={(text) => {
             void sendMessage(convId, text);
           }}
+          onEditMessage={(messageId, newContent) =>
+            void editMessage(convId, messageId, newContent)
+          }
+          onSwitchBranch={(messageId, branchIndex) =>
+            void switchBranch(convId, messageId, branchIndex)
+          }
         />
 
         <ChatInput
@@ -122,6 +137,11 @@ export default function ConversationPage() {
           onInjectedTextConsumed={() => setInjectedText(null)}
         />
       </AttachmentDropZone>
+      <ShareModal
+        open={shareOpen}
+        conversationId={convId}
+        onClose={() => setShareOpen(false)}
+      />
     </>
   );
 }
