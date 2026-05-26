@@ -1,8 +1,10 @@
+/* CSS imports must come first per spec; PostCSS hoists @tailwind
+   internally so this ordering is the Tailwind-recommended one. */
+@import 'highlight.js/styles/github-dark.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import 'highlight.js/styles/github-dark.css';
 
 /* ─── Theme tokens ─────────────────────────────────────────────
    All visual color decisions live here. Tailwind tokens
