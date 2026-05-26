@@ -84,23 +84,22 @@ export default function ConversationPage() {
 
   return (
     <>
-      <div className="hidden border-b border-border bg-bg-base/60 px-10 py-3 md:block">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <h2 className="truncate text-sm font-semibold tracking-tight">
-            {conv?.title ?? "Conversation"}
-          </h2>
-          <div className="flex items-center gap-3">
-            <ConversationFiles conversationId={convId} />
-            {conv?.model_id ? (
-              <span className="text-[11px] uppercase tracking-wider text-text-muted">
-                {getModelById(conv.model_id)?.name ?? conv.model_id}
-              </span>
-            ) : null}
-            <ExportMenu
-              conversationId={convId}
-              onShare={() => setShareOpen(true)}
-            />
-          </div>
+      {/* Slim desktop header — model name in the centre, "..."
+          menu on the right, no conversation title (the sidebar is
+          the source of truth for which conversation is open). */}
+      <div className="hidden items-center justify-between px-4 pt-1 md:flex">
+        <div className="w-8" aria-hidden />
+        <span className="text-[13px] font-medium text-text-secondary">
+          {conv?.model_id
+            ? (getModelById(conv.model_id)?.name ?? conv.model_id)
+            : "SRAN Chat"}
+        </span>
+        <div className="flex items-center gap-1">
+          <ConversationFiles conversationId={convId} />
+          <ExportMenu
+            conversationId={convId}
+            onShare={() => setShareOpen(true)}
+          />
         </div>
       </div>
 
@@ -126,7 +125,9 @@ export default function ConversationPage() {
             onLoadEarlier={() => loadOlderMessages(convId)}
             onRegenerate={(messageId) => void regenerate(convId, messageId)}
             onPromptPick={(text) => {
-              void sendMessage(convId, text);
+              // Populate the textarea so the user can review /
+              // extend the chip-supplied prompt before sending.
+              setInjectedText(text);
             }}
             onEditMessage={(messageId, newContent) =>
               void editMessage(convId, messageId, newContent)

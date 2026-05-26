@@ -213,14 +213,14 @@ export function ChatInput({
 
   return (
     <div
-      className="safe-bottom border-t border-border bg-bg-base/95 px-4 py-3 md:px-10 md:py-4"
+      className="safe-bottom bg-bg-base px-3 py-3 md:px-6 md:py-4"
       style={
         keyboardInset > 0
           ? { transform: `translateY(-${keyboardInset}px)`, transition: "transform 150ms ease-out" }
           : undefined
       }
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-2">
+      <div className="mx-auto flex w-full max-w-chat flex-col gap-2">
         {/* Pending-file preview row */}
         {pendingFiles.length > 0 ? (
           <div className="scrollbar-thin flex gap-2 overflow-x-auto py-1">
@@ -234,7 +234,6 @@ export function ChatInput({
                 onRetry={
                   p.status === "error" && conversationId
                     ? () => {
-                        // Re-upload: remove old card and start fresh.
                         removePendingFile(conversationId, p.id);
                         void uploadOne(conversationId, p.file);
                       }
@@ -245,8 +244,14 @@ export function ChatInput({
           </div>
         ) : null}
 
-        <div className="flex items-end gap-2 rounded-2xl border border-border bg-bg-secondary px-3 py-2 transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30">
-          {/* Hidden file input */}
+        {/* Composer pill */}
+        <div
+          className="flex flex-col gap-1.5 border border-border bg-bg-surface px-2 pb-1.5 pt-2 transition-colors focus-within:border-border-strong"
+          style={{
+            borderRadius: 24,
+            boxShadow: "0 2px 12px rgba(0, 0, 0, 0.18)",
+          }}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -256,29 +261,90 @@ export function ChatInput({
             onChange={onPickFiles}
           />
 
-          {/* Paperclip — only shown inside an active conversation */}
-          {conversationId ? (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Attach files"
-              title="Attach files"
-              disabled={streaming || disabled}
-              className="focus-ring tap-44 shrink-0 rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M21 12.5l-8.59 8.59a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.67 3.67 0 0 1 5.19 5.19L9.83 18.49a1.83 1.83 0 1 1-2.6-2.6l8.49-8.48"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          ) : null}
+          {/* Top row: paperclip + textarea + send/stop */}
+          <div className="flex items-end gap-1">
+            {conversationId ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Attach files"
+                title="Attach files"
+                disabled={streaming || disabled}
+                className="focus-ring tap-44 shrink-0 rounded-full p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 5v14M5 12h14"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
+            <textarea
+              ref={taRef}
+              rows={1}
+              value={text}
+              disabled={disabled}
+              placeholder={
+                streaming
+                  ? "Streaming response…"
+                  : isUploading
+                    ? "Uploading…"
+                    : "Message SRAN Chat…"
+              }
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={onKeyDown}
+              className="flex-1 resize-none bg-transparent px-1 py-2 text-[15px] text-text-primary placeholder:text-text-placeholder focus:outline-none disabled:opacity-60"
+              style={{
+                maxHeight: maxTextareaHeight,
+                transition: "height 100ms ease-out",
+              }}
+            />
+            <div className="tap-44 relative flex h-9 w-9 shrink-0 items-center justify-center">
+              <button
+                type="button"
+                onClick={onStop}
+                aria-label="Stop generation"
+                tabIndex={streaming ? 0 : -1}
+                className={`focus-ring absolute inset-0 flex items-center justify-center rounded-full bg-status-danger/85 text-white transition-all duration-150 hover:bg-status-danger ${
+                  streaming ? "scale-100 opacity-100" : "pointer-events-none scale-90 opacity-0"
+                }`}
+              >
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!canSend}
+                aria-label="Send"
+                tabIndex={streaming ? -1 : 0}
+                className={`focus-ring absolute inset-0 flex items-center justify-center rounded-full text-white transition-all duration-150 disabled:cursor-not-allowed ${
+                  streaming ? "pointer-events-none scale-90 opacity-0" : "scale-100 opacity-100"
+                } ${
+                  canSend
+                    ? "bg-accent hover:bg-accent-hover"
+                    : "bg-bg-elevated text-text-muted"
+                }`}
+              >
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 19V5M5 12l7-7 7 7"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
 
-          <div className="pb-0.5">
+          {/* Bottom row: model selector pill */}
+          <div className="flex items-center gap-2 pl-1">
             <ModelSelector
               activeModelId={activeModelId}
               disabled={streaming}
@@ -286,71 +352,11 @@ export function ChatInput({
               onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
             />
           </div>
-          <textarea
-            ref={taRef}
-            rows={1}
-            value={text}
-            disabled={disabled}
-            placeholder={
-              streaming
-                ? "Streaming response…"
-                : isUploading
-                  ? "Uploading…"
-                  : "Message SRAN Chat…"
-            }
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKeyDown}
-            className="flex-1 resize-none bg-transparent px-1 py-1.5 text-base text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-60 md:text-sm"
-            style={{
-              maxHeight: maxTextareaHeight,
-              transition: "height 100ms ease-out",
-            }}
-          />
-          <div className="tap-44 relative flex h-9 w-9 shrink-0 items-center justify-center">
-            <button
-              type="button"
-              onClick={onStop}
-              aria-label="Stop generation"
-              tabIndex={streaming ? 0 : -1}
-              className={`focus-ring absolute inset-0 flex items-center justify-center rounded-lg bg-status-danger/85 text-white transition-all duration-150 hover:bg-status-danger ${
-                streaming
-                  ? "scale-100 opacity-100"
-                  : "pointer-events-none scale-90 opacity-0"
-              }`}
-            >
-              <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!canSend}
-              aria-label="Send"
-              tabIndex={streaming ? -1 : 0}
-              className={`focus-ring absolute inset-0 flex items-center justify-center rounded-lg bg-accent text-white transition-all duration-150 hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 ${
-                streaming
-                  ? "pointer-events-none scale-90 opacity-0"
-                  : "scale-100 opacity-100"
-              }`}
-            >
-              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M12 19V5M5 12l7-7 7 7"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          </div>
         </div>
-        <div className="text-center text-[10px] text-text-muted">
-          Press <kbd className="rounded bg-bg-elevated px-1">Enter</kbd> to send,{" "}
-          <kbd className="rounded bg-bg-elevated px-1">Shift</kbd>+
-          <kbd className="rounded bg-bg-elevated px-1">Enter</kbd> for new line.
-        </div>
+
+        <p className="text-center text-[11px] text-text-muted">
+          SRAN Chat can make mistakes. Check important info.
+        </p>
       </div>
     </div>
   );
