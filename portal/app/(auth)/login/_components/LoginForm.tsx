@@ -1,15 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { api, PortalApiError } from "@/lib/api";
 import { setTokens } from "@/lib/auth";
 import type { AuthResponse } from "@/lib/types";
 
+// Allowlist for ``?redirect=`` targets. Web Chat is the only
+// cross-origin destination today; everything else must be a
+// relative path on the Portal. An attacker who can phish a
+// crafted /login?redirect=https://evil.example.com URL would
+// otherwise harvest the user's just-typed credentials → cookie →
+// then bounce them off-site mid-login. Same-origin + the
+// configured web-chat origin only.
+function safeRedirectTarget(raw: string | null): string | null {
+  if (!raw) return null;
+  // Relative paths starting with "/" but not "//" or "/\\" are safe.
+  if (raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\")) {
+    return raw;
+  }
+  try {
+    const u = new URL(raw, window.location.origin);
+    const allowed = [
+      window.location.origin,
+      process.env.NEXT_PUBLIC_WEB_CHAT_URL || "http://localhost:3002",
+    ].map((o) => new URL(o).origin);
+    if (allowed.includes(u.origin)) {
+      return u.toString();
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
 export default function LoginForm() {
   const router = useRouter();
+  const params = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -27,6 +56,28 @@ export default function LoginForm() {
         { auth: false }
       );
       setTokens(data.access_token, data.refresh_token);
+
+      // Honor ?redirect=… for the Web Chat cross-port handoff.
+      // If the target is the web-chat origin we additionally append
+      // ?token= so the cookie-less browser path still works.
+      const target = safeRedirectTarget(params?.get("redirect") ?? null);
+      if (target) {
+        const webChatOrigin = new URL(
+          process.env.NEXT_PUBLIC_WEB_CHAT_URL || "http://localhost:3002",
+        ).origin;
+        let final = target;
+        try {
+          const tu = new URL(target, window.location.origin);
+          if (tu.origin === webChatOrigin) {
+            tu.searchParams.set("token", data.access_token);
+            final = tu.toString();
+          }
+        } catch {
+          /* leave ``target`` as-is */
+        }
+        window.location.href = final;
+        return;
+      }
       router.push("/dashboard");
     } catch (err) {
       if (err instanceof PortalApiError) {

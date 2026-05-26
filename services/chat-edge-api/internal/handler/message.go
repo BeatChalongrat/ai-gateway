@@ -1,0 +1,479 @@
+// Message handlers — list history + send (stream + non-stream).
+//
+// The send path is the privacy-sensitive code in the service. The
+// contract:
+//   - Persist the user's real text via MessageService.SendStream /
+//     SendNonStream BEFORE the gateway call.
+//   - Forward each gateway content delta to the browser as an SSE
+//     ``content_delta`` event. The handler never logs the deltas.
+//   - On completion, MessageService persists the accumulated text;
+//     this handler never writes content to the DB directly.
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
+)
+
+type MessageHandler struct {
+	messages *service.MessageService
+}
+
+func NewMessageHandler(m *service.MessageService) *MessageHandler {
+	return &MessageHandler{messages: m}
+}
+
+// ---------------------------------------------------------------------------
+// Wire types
+// ---------------------------------------------------------------------------
+
+type messageResponse struct {
+	ID         string       `json:"id"`
+	Role       string       `json:"role"`
+	Content    string       `json:"content"`
+	Status     string       `json:"status"`
+	ModelID    *string      `json:"model_id,omitempty"`
+	TokenUsage *tokenUsage  `json:"token_usage,omitempty"`
+	CreatedAt  string       `json:"created_at"`
+}
+
+type tokenUsage struct {
+	Input  int `json:"input"`
+	Output int `json:"output"`
+}
+
+func messageToWire(m *model.Message) messageResponse {
+	r := messageResponse{
+		ID:        m.ID.String(),
+		Role:      m.Role,
+		Content:   m.ContentMasked,
+		Status:    m.Status,
+		ModelID:   m.ModelID,
+		CreatedAt: m.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+	if m.TokenUsageInput != nil && m.TokenUsageOutput != nil {
+		r.TokenUsage = &tokenUsage{
+			Input:  *m.TokenUsageInput,
+			Output: *m.TokenUsageOutput,
+		}
+	}
+	return r
+}
+
+// ---------------------------------------------------------------------------
+// List messages
+// ---------------------------------------------------------------------------
+
+func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	cursor := parseUUID(r.URL.Query().Get("before"))
+
+	msgs, hasMore, err := h.messages.ListMessages(
+		r.Context(), caller.TenantUUID, caller.UserID, convID, limit, cursor,
+	)
+	if err != nil {
+		if errors.Is(err, service.ErrMessageConversationNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	items := make([]messageResponse, 0, len(msgs))
+	for i := range msgs {
+		items = append(items, messageToWire(&msgs[i]))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"messages": items,
+		"has_more": hasMore,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Send (stream OR non-stream depending on the request body's `stream` flag)
+// ---------------------------------------------------------------------------
+
+type sendRequest struct {
+	Content string `json:"content"`
+	Stream  bool   `json:"stream"`
+}
+
+func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	var req sendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
+		return
+	}
+	in := service.SendInput{
+		TenantID:       caller.TenantUUID,
+		UserID:         caller.UserID,
+		ConversationID: convID,
+		Content:        req.Content,
+		RequestID:      r.Header.Get("X-Request-Id"),
+	}
+	if req.Stream {
+		h.sendStream(w, r, in)
+		return
+	}
+	h.sendNonStream(w, r, in)
+}
+
+// ---------------------------------------------------------------------------
+// Non-stream path
+// ---------------------------------------------------------------------------
+
+func (h *MessageHandler) sendNonStream(w http.ResponseWriter, r *http.Request, in service.SendInput) {
+	res, err := h.messages.SendNonStream(r.Context(), in)
+	if err != nil {
+		h.writeSendError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"message": messageToWire(res.AssistantMessage),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Stream path (SSE)
+// ---------------------------------------------------------------------------
+
+// sendStream opens the gateway stream, forwards each delta to the
+// browser, and persists the accumulated text on completion.
+//
+// SSE event format (per Phase 1 contract):
+//
+//	event: message_start
+//	data: {"message_id":"uuid","conversation_id":"uuid"}
+//
+//	event: content_delta
+//	data: {"delta":"text"}
+//
+//	event: message_complete
+//	data: {"message_id":"uuid","token_usage":{"input":N,"output":N}}
+//
+//	event: error
+//	data: {"code":"PROVIDER_UNAVAILABLE","message":"..."}
+//
+// The handler MUST flush after every event so the browser sees
+// incremental output; chi's default ResponseWriter implements
+// http.Flusher.
+func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in service.SendInput) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
+
+	stream, err := h.messages.SendStream(r.Context(), in)
+	if err != nil {
+		h.writeSendError(w, err)
+		return
+	}
+
+	// SSE headers — must be set BEFORE any write, and BEFORE the
+	// first flush.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeSSEEvent(w, flusher, "message_start", map[string]any{
+		"message_id":      stream.AssistantID.String(),
+		"conversation_id": stream.ConversationID.String(),
+	})
+
+	var (
+		content      strings.Builder
+		finalUsage   *service.GatewayChatUsage
+		finishReason string
+		gotErr       error
+	)
+
+Loop:
+	for {
+		select {
+		case <-r.Context().Done():
+			// Client disconnected — tell the service to cancel the
+			// upstream call, drain any pending event, then persist
+			// what we have.
+			stream.Cancel()
+		case ev, ok := <-stream.Events:
+			if !ok {
+				break Loop
+			}
+			if ev.Err != nil {
+				gotErr = ev.Err
+				writeSSEEvent(w, flusher, "error", map[string]any{
+					"code":    CodeInternalError,
+					"message": fmt.Sprintf("stream error: %v", ev.Err),
+				})
+				break Loop
+			}
+			if ev.Delta != "" {
+				content.WriteString(ev.Delta)
+				writeSSEEvent(w, flusher, "content_delta", map[string]any{
+					"delta": ev.Delta,
+				})
+			}
+			if ev.FinishReason != "" {
+				finishReason = ev.FinishReason
+			}
+			if ev.Usage != nil {
+				finalUsage = ev.Usage
+			}
+			if ev.Done {
+				break Loop
+			}
+		}
+	}
+
+	// Persist via the handle's finish callback. Uses
+	// context.Background() internally so the write completes even
+	// after the request context is cancelled (client disconnected).
+	persistFinishReason := finishReason
+	if gotErr != nil && persistFinishReason == "" {
+		persistFinishReason = "error"
+	}
+	stream.Finish(content.String(), persistFinishReason, finalUsage)
+
+	// Emit final completion frame. Even on error we send a
+	// message_complete so the client always has a deterministic
+	// terminator to clean up its UI state.
+	completeData := map[string]any{
+		"message_id": stream.AssistantID.String(),
+	}
+	if finalUsage != nil {
+		completeData["token_usage"] = map[string]int{
+			"input":  finalUsage.PromptTokens,
+			"output": finalUsage.CompletionTokens,
+		}
+	}
+	writeSSEEvent(w, flusher, "message_complete", completeData)
+}
+
+// writeSSEEvent serialises one SSE frame and flushes. ``data`` is
+// JSON-marshalled inline; failures are silently dropped because at
+// this point in the request we've already committed to a 200
+// response — the client will see a missing frame, the SSE clean-up
+// loop on the browser handles the missing terminator.
+func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, data any) {
+	buf, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, buf)
+	flusher.Flush()
+}
+
+// writeSendError maps service errors to HTTP responses for the
+// non-stream path AND for the pre-stream error path (when
+// SendStream returns before any SSE frame goes out).
+func (h *MessageHandler) writeSendError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrMessageConversationNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+	case errors.Is(err, service.ErrMessageEmptyContent):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "content is required")
+	case errors.Is(err, service.ErrMessageGatewayUnavailable):
+		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
+	default:
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cancel
+// ---------------------------------------------------------------------------
+
+// Cancel interrupts the in-flight streaming generation, if any.
+// Idempotent: when no stream is active the response still returns
+// 200 with ``cancelled=false`` so the front-end can retry without
+// branching on 404 vs success.
+//
+//	POST /api/v1/conversations/{id}/cancel
+//	→ 200 {"cancelled": true|false}
+func (h *MessageHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	// Tenant-scope check: verify caller owns the conversation before
+	// invoking cancel. Without this an attacker with any valid JWT
+	// could DoS another tenant's streams by guessing conversation IDs.
+	if err := h.messages.AssertConversationAccess(
+		r.Context(), caller.TenantUUID, caller.UserID, convID,
+	); err != nil {
+		if errors.Is(err, service.ErrMessageConversationNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	cancelled := h.messages.CancelStream(convID)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": cancelled})
+}
+
+// ---------------------------------------------------------------------------
+// Regenerate
+// ---------------------------------------------------------------------------
+
+// Regenerate replays the assistant message identified by
+// ``messageID`` using the same conversation context the original
+// reply was built from. Streams the new content over SSE the same
+// way Send does, so the front-end can share its rendering code.
+//
+//	POST /api/v1/conversations/{id}/messages/{messageID}/regenerate
+//	→ SSE stream (same event format as Send with stream=true).
+func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	msgID, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message id")
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
+
+	stream, err := h.messages.Regenerate(r.Context(), service.RegenerateInput{
+		TenantID:       caller.TenantUUID,
+		UserID:         caller.UserID,
+		ConversationID: convID,
+		MessageID:      msgID,
+		RequestID:      r.Header.Get("X-Request-Id"),
+	})
+	if err != nil {
+		h.writeRegenerateError(w, err)
+		return
+	}
+
+	// SSE headers, then consume + forward the events.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeSSEEvent(w, flusher, "message_start", map[string]any{
+		"message_id":      stream.AssistantID.String(),
+		"conversation_id": stream.ConversationID.String(),
+	})
+
+	var (
+		content      strings.Builder
+		finalUsage   *service.GatewayChatUsage
+		finishReason string
+		gotErr       error
+	)
+Loop:
+	for {
+		select {
+		case <-r.Context().Done():
+			stream.Cancel()
+		case ev, ok := <-stream.Events:
+			if !ok {
+				break Loop
+			}
+			if ev.Err != nil {
+				gotErr = ev.Err
+				writeSSEEvent(w, flusher, "error", map[string]any{
+					"code":    CodeInternalError,
+					"message": fmt.Sprintf("stream error: %v", ev.Err),
+				})
+				break Loop
+			}
+			if ev.Delta != "" {
+				content.WriteString(ev.Delta)
+				writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": ev.Delta})
+			}
+			if ev.FinishReason != "" {
+				finishReason = ev.FinishReason
+			}
+			if ev.Usage != nil {
+				finalUsage = ev.Usage
+			}
+			if ev.Done {
+				break Loop
+			}
+		}
+	}
+
+	persistFinishReason := finishReason
+	if gotErr != nil && persistFinishReason == "" {
+		persistFinishReason = "error"
+	}
+	stream.Finish(content.String(), persistFinishReason, finalUsage)
+
+	completeData := map[string]any{"message_id": stream.AssistantID.String()}
+	if finalUsage != nil {
+		completeData["token_usage"] = map[string]int{
+			"input":  finalUsage.PromptTokens,
+			"output": finalUsage.CompletionTokens,
+		}
+	}
+	writeSSEEvent(w, flusher, "message_complete", completeData)
+}
+
+// writeRegenerateError maps service errors to HTTP responses for
+// the pre-stream phase. Once SSE headers are out we can't change
+// status, so only callers BEFORE the first frame use this.
+func (h *MessageHandler) writeRegenerateError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrMessageConversationNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+	case errors.Is(err, service.ErrMessageNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "message not found")
+	case errors.Is(err, service.ErrMessageNotAssistant):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
+			"can only regenerate assistant messages")
+	case errors.Is(err, service.ErrMessageModelNotAllowed):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
+			"conversation model is no longer allowed")
+	case errors.Is(err, service.ErrMessageGatewayUnavailable):
+		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
+	default:
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+	}
+}
+
+// Ensure imports compile when only a subset of variables are used.
+var _ = context.Background
