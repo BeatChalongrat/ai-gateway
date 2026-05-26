@@ -8,6 +8,7 @@ import { ToastViewport } from "@/components/ui/Toast";
 import { registerServiceWorker } from "@/lib/registerSW";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useHydrateTheme } from "@/stores/themeStore";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -22,6 +23,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   const checkAuth = useAuthStore((s) => s.checkAuth);
   const errorBanner = useChatStore((s) => s.errorBanner);
   const setError = useChatStore((s) => s.setError);
+  // Hydrate the theme on first paint so the data-theme attribute
+  // is set BEFORE any visible content mounts.
+  useHydrateTheme();
 
   useEffect(() => {
     if (booted.current) return;

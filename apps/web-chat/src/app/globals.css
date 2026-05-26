@@ -2,25 +2,119 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Code-block syntax highlighting (rehype-highlight ships theme
-        classes; we pull one of the dark themes that matches our
-        navy palette). ─────────────────────────────────────────── */
 @import 'highlight.js/styles/github-dark.css';
 
+/* ─── Theme tokens ─────────────────────────────────────────────
+   All visual color decisions live here. Tailwind tokens
+   (bg-base, text-primary, …) point at these via tailwind.config.js,
+   so the same className resolves to dark or light depending on the
+   data-theme attribute on <html>. */
 :root {
   color-scheme: dark;
-  /* iOS safe-area exposures. The env() lookups return 0 on
-     non-notched devices so the same rules work everywhere; pages
-     consume them via the .safe-* utility classes below. */
+  /* iOS safe-area exposures. */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
+
+  /* === Background layers (default = dark) === */
+  --bg-primary: #212121;
+  --bg-sidebar: #171717;
+  --bg-surface: #2F2F2F;
+  --bg-surface-hover: #3A3A3A;
+  --bg-overlay: rgba(0, 0, 0, 0.55);
+
+  /* === Text === */
+  --text-primary: #ECECEC;
+  --text-secondary: #A0A0A0;
+  --text-tertiary: #6B6B6B;
+  --text-placeholder: #8E8E8E;
+
+  /* === Borders === */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-hover: rgba(255, 255, 255, 0.20);
+
+  /* === Accent (SRAN brand teal — replaces the old navy blue) === */
+  --accent: #10A37F;
+  --accent-hover: #0D8A6A;
+  --accent-subtle: rgba(16, 163, 127, 0.12);
+
+  /* === User messages === */
+  --user-bubble-bg: #2F2F2F;
+  --user-bubble-text: #ECECEC;
+
+  /* === Sidebar === */
+  --sidebar-item-hover: #1F1F1F;
+  --sidebar-item-active: #2A2A2A;
+  --sidebar-section-text: #6B6B6B;
+
+  /* === Code blocks === */
+  --code-bg: #1E1E1E;
+  --code-header-bg: #2D2D2D;
+  --code-text: #D4D4D4;
+
+  /* === Status === */
+  --success: #10A37F;
+  --error:   #EF4444;
+  --warning: #F59E0B;
+
+  /* === Scrollbar === */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.20);
+
+  /* Font stacks — system font for body, Outfit reserved for the
+     SRAN Chat brand wordmark, JetBrains Mono for code. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans',
+               Helvetica, Arial, sans-serif, 'Apple Color Emoji',
+               'Segoe UI Emoji';
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', 'Fira Code',
+               'SF Mono', 'Cascadia Code', Consolas, monospace;
+  --font-brand: var(--font-outfit), var(--font-sans);
 }
 
-/* Safe-area utilities — used by the chat header, the input bar,
-   and any bottom sheet so notches + the iPhone home indicator
-   don't eat the UI. */
+/* Light theme overrides. Applied when <html data-theme="light"> is
+   set by the theme store. Same token names so no className churn. */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-primary: #FFFFFF;
+  --bg-sidebar: #F9F9F9;
+  --bg-surface: #F0F0F0;
+  --bg-surface-hover: #E5E5E5;
+  --bg-overlay: rgba(0, 0, 0, 0.30);
+
+  --text-primary: #0D0D0D;
+  --text-secondary: #5B5B5B;
+  --text-tertiary: #8A8A8A;
+  --text-placeholder: #9B9B9B;
+
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.10);
+  --border-hover:  rgba(0, 0, 0, 0.20);
+
+  --user-bubble-bg: #F0F0F0;
+  --user-bubble-text: #0D0D0D;
+
+  --sidebar-item-hover: #EEEEEE;
+  --sidebar-item-active: #E5E5E5;
+  --sidebar-section-text: #9B9B9B;
+
+  --code-bg: #F7F7F8;
+  --code-header-bg: #EEEEEE;
+  --code-text: #1F1F1F;
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.20);
+}
+
+/* Smooth theme transition. Limited to background + color so layout
+   animations don't get a 200ms delay tacked on. */
+*, *::before, *::after {
+  transition: background-color 180ms ease, color 180ms ease,
+              border-color 180ms ease;
+}
+
+/* ─── Safe-area helpers (unchanged from session 7) ─────────── */
 .safe-top    { padding-top: var(--sat); }
 .safe-bottom { padding-bottom: var(--sab); }
 .safe-left   { padding-left: var(--sal); }
@@ -28,14 +122,18 @@
 .safe-px     { padding-left: var(--sal); padding-right: var(--sar); }
 .safe-py     { padding-top: var(--sat); padding-bottom: var(--sab); }
 
-/* Mobile globals — disable pull-to-refresh in standalone PWA mode
-   so the user can't accidentally reload mid-stream, and add
-   momentum scrolling everywhere on iOS. user-select: none on
-   the body keeps button labels from highlighting on long-press;
-   message content opts back in via .selectable below. */
+/* ─── Mobile / touch globals ───────────────────────────────── */
 html, body {
   overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 button, a, [role="button"], .sran-sidebar-link {
   touch-action: manipulation;
@@ -58,289 +156,242 @@ input {
   -webkit-user-select: text;
   user-select: text;
 }
-
-/* Scroll containers — momentum on iOS + smooth scrolling on
-   desktop. -webkit-overflow-scrolling is a no-op outside iOS but
-   it's the documented opt-in for momentum so we leave it. */
 .scrollbar-thin,
 .h-full.overflow-y-auto,
 .overflow-y-auto {
   -webkit-overflow-scrolling: touch;
 }
 
-html, body {
-  height: 100%;
-  background: #060A1D;
-  color: #F1F5F9;
-  font-family: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* Brand wordmark — only used on the sidebar header so the
+   product keeps a recognisable identity even with system fonts
+   everywhere else. */
+.font-brand {
+  font-family: var(--font-brand);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-/* ─── Scrollbars ──────────────────────────────────────────────
-   Default thin scrollbar everywhere. Use `.scrollbar-thin` to
-   force the styled variant inside fixed-size containers (sidebar
-   list, code blocks). */
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-*::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.18);
-  border-radius: 8px;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.35);
-}
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.22);
-  border-radius: 6px;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.40);
-}
+/* ─── Scrollbars ───────────────────────────────────────────── */
+*::-webkit-scrollbar         { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track   { background: transparent; }
+*::-webkit-scrollbar-thumb   { background: var(--scrollbar-thumb); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+.scrollbar-thin::-webkit-scrollbar       { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.22) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
-/* ─── Override github-dark to match navy palette ─────────────
-   highlight.js's github-dark uses #0d1117; we recolour the
-   background + base text so blocks blend with our surfaces. */
+/* ─── Code-highlight token colors — recoloured to match the new
+   near-black palette + warm white text. ─────────────────── */
 .hljs {
   background: transparent !important;
-  color: #E2E8F0 !important;
+  color: var(--code-text) !important;
   padding: 0 !important;
 }
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-literal,
 .hljs-section,
-.hljs-link {
-  color: #8AB4F8 !important;
-}
+.hljs-link            { color: #C586C0 !important; }
 .hljs-string,
 .hljs-attr,
 .hljs-symbol,
 .hljs-template-tag,
 .hljs-template-variable,
-.hljs-addition {
-  color: #A5D6A7 !important;
-}
+.hljs-addition        { color: #B5CEA8 !important; }
 .hljs-number,
 .hljs-built_in,
 .hljs-builtin-name,
-.hljs-type {
-  color: #F8B57B !important;
-}
+.hljs-type            { color: #DCDCAA !important; }
 .hljs-comment,
-.hljs-quote {
-  color: #64748B !important;
-  font-style: italic;
-}
+.hljs-quote           { color: var(--text-tertiary) !important; font-style: italic; }
 .hljs-title,
 .hljs-name,
 .hljs-selector-id,
-.hljs-selector-class {
-  color: #F5C2E7 !important;
-}
+.hljs-selector-class  { color: #4EC9B0 !important; }
 .hljs-variable,
 .hljs-attribute,
 .hljs-tag,
-.hljs-meta {
-  color: #93C5FD !important;
-}
-.hljs-deletion {
-  color: #FCA5A5 !important;
-}
+.hljs-meta            { color: #9CDCFE !important; }
+.hljs-deletion        { color: #F48771 !important; }
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-literal,
+[data-theme="light"] .hljs-section,
+[data-theme="light"] .hljs-link            { color: #af00db !important; }
+[data-theme="light"] .hljs-string          { color: #a31515 !important; }
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-built_in        { color: #098658 !important; }
+[data-theme="light"] .hljs-title,
+[data-theme="light"] .hljs-name            { color: #267f99 !important; }
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-attribute,
+[data-theme="light"] .hljs-tag,
+[data-theme="light"] .hljs-meta            { color: #001080 !important; }
 
-/* ─── Markdown renderer styles (assistant message bodies) ────── */
+/* ─── Markdown body (assistant messages) ───────────────────── */
 .prose-chat {
-  line-height: 1.7;
+  line-height: 1.75;
   word-wrap: break-word;
+  font-size: 1rem;
 }
-.prose-chat p {
-  margin: 0.5rem 0;
-}
-.prose-chat p:first-child {
-  margin-top: 0;
-}
-.prose-chat p:last-child {
-  margin-bottom: 0;
-}
+.prose-chat p             { margin: 0 0 1.1em; }
+.prose-chat p:last-child  { margin-bottom: 0; }
 .prose-chat h1, .prose-chat h2, .prose-chat h3, .prose-chat h4 {
   font-weight: 600;
-  margin: 1rem 0 0.5rem;
-  color: #F1F5F9;
+  margin: 1.2em 0 0.5em;
+  color: var(--text-primary);
 }
-.prose-chat h1 { font-size: 1.4rem; }
-.prose-chat h2 { font-size: 1.2rem; }
-.prose-chat h3 { font-size: 1.05rem; }
+.prose-chat h1 { font-size: 1.5rem; }
+.prose-chat h2 { font-size: 1.25rem; }
+.prose-chat h3 { font-size: 1.1rem; }
 .prose-chat ul, .prose-chat ol {
-  padding-left: 1.25rem;
-  margin: 0.5rem 0;
+  padding-left: 1.4rem;
+  margin: 0.5rem 0 1rem;
 }
-.prose-chat ul ul, .prose-chat ol ol, .prose-chat ul ol, .prose-chat ol ul {
-  margin: 0.2rem 0;
-}
-.prose-chat li {
-  margin: 0.2rem 0;
-}
-.prose-chat li > p {
-  margin: 0.15rem 0;
-}
+.prose-chat li             { margin: 0.25rem 0; }
+.prose-chat li > p         { margin: 0.15rem 0; }
 .prose-chat li input[type="checkbox"] {
   margin-right: 0.5rem;
-  accent-color: #3B82F6;
+  accent-color: var(--accent);
   transform: translateY(1px);
 }
 .prose-chat ul.contains-task-list {
   list-style: none;
   padding-left: 0.25rem;
 }
-.prose-chat strong { color: #F8FAFC; font-weight: 600; }
-.prose-chat em { color: #CBD5E1; }
-.prose-chat del { color: #94A3B8; text-decoration: line-through; }
+.prose-chat strong { color: var(--text-primary); font-weight: 600; }
+.prose-chat em     { color: var(--text-secondary); }
+.prose-chat del    { color: var(--text-tertiary); text-decoration: line-through; }
 .prose-chat hr {
   border: 0;
-  border-top: 1px solid #1E293B;
-  margin: 1rem 0;
+  border-top: 1px solid var(--border-subtle);
+  margin: 1.25rem 0;
 }
 .prose-chat a {
-  color: #60A5FA;
+  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.prose-chat a:hover { color: #93C5FD; }
+.prose-chat a:hover { color: var(--accent-hover); }
 .prose-chat blockquote {
-  border-left: 3px solid #3B82F6;
-  padding: 0.4rem 0.85rem;
-  margin: 0.6rem 0;
-  color: #CBD5E1;
-  background: rgba(30, 58, 95, 0.22);
-  border-radius: 0 6px 6px 0;
+  border-left: 3px solid var(--accent);
+  padding: 0.4rem 0.9rem;
+  margin: 0.8rem 0;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border-radius: 0 8px 8px 0;
 }
 .prose-chat blockquote p { margin: 0.25rem 0; }
 .prose-chat code:not(pre code) {
-  background: rgba(148, 163, 184, 0.16);
-  padding: 0.12rem 0.36rem;
+  background: var(--bg-surface);
+  padding: 0.12rem 0.4rem;
   border-radius: 4px;
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
-  font-size: 0.85em;
-  color: #E2E8F0;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  color: var(--text-primary);
 }
-/* Code-block container is now rendered by <CodeBlock>; bare <pre>
-   (e.g. unfenced indented code) still gets a sane look. */
 .prose-chat pre {
-  background: #0A1024;
-  border: 1px solid #1E293B;
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-  margin: 0.6rem 0;
+  background: var(--code-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.75rem 0;
   overflow-x: auto;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
 }
 .prose-chat pre code {
   background: transparent;
   padding: 0;
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-family: var(--font-mono);
 }
 .prose-chat table {
   border-collapse: collapse;
-  margin: 0.6rem 0;
-  font-size: 0.875rem;
+  margin: 0.8rem 0;
+  font-size: 0.9rem;
   width: 100%;
   display: block;
   overflow-x: auto;
 }
 .prose-chat th, .prose-chat td {
-  border: 1px solid #1E293B;
-  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border-default);
+  padding: 0.5rem 0.75rem;
   text-align: left;
 }
 .prose-chat th {
-  background: rgba(30, 58, 95, 0.4);
-  color: #F1F5F9;
+  background: var(--bg-surface);
+  color: var(--text-primary);
   font-weight: 600;
 }
 .prose-chat tr:nth-child(even) td {
-  background: rgba(15, 24, 53, 0.4);
+  background: var(--bg-surface);
 }
 
-/* ─── Custom code-block container (rendered by CodeBlock.tsx) ── */
+/* ─── CodeBlock container (rendered by CodeBlock.tsx) ──────── */
 .code-block {
   position: relative;
-  margin: 0.7rem 0;
-  border-radius: 8px;
-  border: 1px solid #1E293B;
-  background: #0A1024;
+  margin: 0.75rem 0;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--code-bg);
   overflow: hidden;
 }
 .code-block-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.35rem 0.65rem 0.35rem 0.85rem;
-  background: rgba(15, 24, 53, 0.55);
-  border-bottom: 1px solid #1E293B;
-  font-size: 0.7rem;
+  padding: 0.45rem 0.75rem 0.45rem 1rem;
+  background: var(--code-header-bg);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
   text-transform: lowercase;
-  letter-spacing: 0.04em;
-  color: #94A3B8;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
 }
-.code-block-lang {
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
-}
+.code-block-lang  { font-family: var(--font-mono); }
 .code-block-copy {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 5px;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
   background: transparent;
-  color: #94A3B8;
-  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
   transition: background-color 120ms ease, color 120ms ease;
 }
 .code-block-copy:hover {
-  background: rgba(148, 163, 184, 0.12);
-  color: #E2E8F0;
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
-.code-block-copy.copied {
-  color: #34D399;
-}
+.code-block-copy.copied { color: var(--success); }
 .code-block-body {
   display: flex;
   overflow-x: auto;
-  font-size: 0.83rem;
+  font-size: 0.875rem;
 }
 .code-block-lines {
   user-select: none;
-  padding: 0.85rem 0.5rem 0.85rem 0.85rem;
+  padding: 0.9rem 0.5rem 0.9rem 0.9rem;
   text-align: right;
-  color: #475569;
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
-  border-right: 1px solid #1E293B;
-  background: rgba(15, 24, 53, 0.35);
-  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  font-size: 0.8rem;
   line-height: 1.55;
 }
-.code-block-lines span {
-  display: block;
-}
+.code-block-lines span { display: block; }
 .code-block-content {
   flex: 1;
-  padding: 0.85rem 1rem;
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  padding: 0.9rem 1.1rem;
+  font-family: var(--font-mono);
   line-height: 1.55;
   white-space: pre;
+  color: var(--code-text);
 }
 .code-block-content code {
   background: transparent;
@@ -350,12 +401,12 @@ html, body {
   color: inherit;
 }
 
-/* Streaming cursor — blinks at the tail of in-progress message text. */
+/* Streaming cursor + indicators. */
 .streaming-cursor {
   display: inline-block;
   width: 8px;
   height: 1.05em;
-  background: #60A5FA;
+  background: var(--accent);
   margin-left: 2px;
   vertical-align: text-bottom;
   border-radius: 1px;
@@ -367,78 +418,44 @@ html, body {
   height: 1.05em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: #94A3B8;
+  background: var(--text-secondary);
   border-radius: 2px;
   animation: cursor-blink 530ms steps(2, end) infinite;
 }
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-@keyframes cursor-blink {
-  0%, 49% { opacity: 0.85; }
-  50%, 100% { opacity: 0; }
-}
+@keyframes blink         { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes cursor-blink  { 0%,49% { opacity: 0.85; } 50%,100% { opacity: 0; } }
 
-/* Streaming body — lightweight code-block + prose containers used
-   during the SSE phase. After the message_complete event we swap to
-   the full react-markdown renderer; these classes only need to hold
-   the line until then. */
-.streaming-body {
-  line-height: 1.7;
-  word-wrap: break-word;
-}
+.streaming-body { line-height: 1.75; word-wrap: break-word; }
 .streaming-body .code-block-inline {
-  background: #0A1024;
-  border: 1px solid #1E293B;
-  border-radius: 8px;
-  padding: 0.8rem 1rem;
-  margin: 0.5rem 0;
+  background: var(--code-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
   overflow-x: auto;
-  font-size: 0.83rem;
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.875rem;
+  font-family: var(--font-mono);
   white-space: pre;
   position: relative;
+  color: var(--code-text);
 }
 .streaming-body .code-block-inline::before {
   content: attr(data-lang);
   position: absolute;
-  top: 0.35rem;
-  right: 0.65rem;
-  font-size: 0.65rem;
-  color: #64748B;
+  top: 0.45rem;
+  right: 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
   text-transform: lowercase;
-  letter-spacing: 0.04em;
 }
 .streaming-body .code-block-inline code {
   background: transparent;
   padding: 0;
   font-family: inherit;
-  color: #E2E8F0;
+  color: inherit;
 }
 
-/* Animated dots used while waiting for the first content_delta. */
-.thinking-dots {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
-.thinking-dots > span {
-  width: 6px;
-  height: 6px;
-  background: #60A5FA;
-  border-radius: 50%;
-  animation: pulseDot 1.2s infinite ease-in-out;
-}
-.thinking-dots > span:nth-child(2) { animation-delay: 0.15s; }
-.thinking-dots > span:nth-child(3) { animation-delay: 0.3s; }
-@keyframes pulseDot {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
-}
-
-/* Bouncing-dots typing indicator shown in place of the assistant
-   bubble before the first content_delta arrives. */
+/* Typing indicator (pre-first-token). */
 .typing-indicator {
   display: inline-flex;
   align-items: center;
@@ -448,73 +465,72 @@ html, body {
 .typing-indicator > span {
   width: 7px;
   height: 7px;
-  background: #64748B;
+  background: var(--text-tertiary);
   border-radius: 50%;
   animation: typingDot 1.1s infinite ease-in-out;
 }
 .typing-indicator > span:nth-child(2) { animation-delay: 0.15s; }
 .typing-indicator > span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes typingDot {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
-  30% { transform: translateY(-4px); opacity: 1; }
+  0%,60%,100% { transform: translateY(0); opacity: 0.45; }
+  30%         { transform: translateY(-4px); opacity: 1; }
+}
+.thinking-dots { display: inline-flex; gap: 4px; align-items: center; }
+.thinking-dots > span {
+  width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
+  animation: pulseDot 1.2s infinite ease-in-out;
+}
+.thinking-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots > span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes pulseDot { 0%,80%,100% { transform: scale(0.6); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
+
+/* Entrance + polish animations. */
+.fade-in-up      { animation: fadeInUp 240ms ease-out; }
+.message-appear  { animation: messageSlideIn 200ms ease-out; }
+.message-enter   { animation: messageSlideIn 200ms ease-out; }
+.popover-appear  { animation: popoverIn 150ms ease-out; transform-origin: top right; }
+.popover-enter   { animation: popoverIn 150ms ease-out; transform-origin: top right; }
+@keyframes fadeInUp        { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes messageSlideIn  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes popoverIn       { from { opacity: 0; transform: scale(0.96); }      to { opacity: 1; transform: scale(1); } }
+
+/* Hover-reveal action row for AI messages. */
+.message-actions {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.group:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
 }
 
-/* Entrance animations. */
-.fade-in-up { animation: fadeInUp 240ms ease-out; }
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.message-appear { animation: messageAppear 180ms ease-out; }
-@keyframes messageAppear {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.popover-appear { animation: popoverAppear 140ms ease-out; transform-origin: top right; }
-@keyframes popoverAppear {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-/* Skeleton pulse used by loading states. */
+/* Skeleton shimmer uses the live border colour so it tracks the
+   active theme without a separate light-mode override. */
 .skeleton {
   background: linear-gradient(
     90deg,
-    rgba(148, 163, 184, 0.06) 0%,
-    rgba(148, 163, 184, 0.18) 50%,
-    rgba(148, 163, 184, 0.06) 100%
+    var(--border-subtle) 0%,
+    var(--border-default) 50%,
+    var(--border-subtle) 100%
   );
   background-size: 200% 100%;
   animation: skeletonShimmer 1.4s ease-in-out infinite;
   border-radius: 6px;
 }
-@keyframes skeletonShimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
-}
+@keyframes skeletonShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-/* Accessible focus ring for icon buttons / form controls. */
+/* Accessible focus ring. */
 .focus-ring:focus-visible {
-  outline: 2px solid #3B82F6;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 6px;
 }
 
-/* Mobile tap-target helper — wraps tightly-padded icon buttons so
-   they still register as a 44px touch surface (Apple HIG minimum).
-   The visual size stays small; only the hit-test area inflates. */
+/* Mobile tap-target helper. */
 @media (pointer: coarse) {
-  .tap-44 {
-    min-width: 44px;
-    min-height: 44px;
-  }
+  .tap-44 { min-width: 44px; min-height: 44px; }
 }
 
-/* Bottom-sheet animation. Used by Modal in mobile mode + the
-   model selector. Slides up from the bottom of the viewport;
-   the wrapping element handles the safe-area bottom inset. */
-@keyframes sheetUp {
-  from { transform: translateY(100%); }
-  to   { transform: translateY(0); }
-}
+/* Bottom-sheet animation (modal + model selector). */
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .sheet-up { animation: sheetUp 220ms cubic-bezier(0.32, 0.72, 0, 1); }
