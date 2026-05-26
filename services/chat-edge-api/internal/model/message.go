@@ -29,4 +29,12 @@ type Message struct {
 	TokenUsageOutput  *int
 	SecureTraceID     *uuid.UUID
 	CreatedAt         time.Time
+	// Branching — see migration 009. ParentID is NULL for messages
+	// that haven't been edited and aren't part of an edit's
+	// downstream chain; when set, points at the fork-root user
+	// message id and is shared by all siblings + descendants in
+	// that fork group.
+	ParentID     *uuid.UUID
+	BranchIndex  int
+	IsActive     bool
 }

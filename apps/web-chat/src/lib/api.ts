@@ -18,6 +18,9 @@ import type {
   Message,
   MessageListResponse,
   ModelListResponse,
+  ShareExpiry,
+  ShareLink,
+  UserPreferences,
 } from "./types";
 import { clearPortalToken, getPortalToken, redirectToPortalLogin } from "./auth";
 
@@ -173,6 +176,66 @@ class ApiClient {
   downloadUrl(fileId: string): string {
     return `${API_BASE}/files/${fileId}/download`;
   }
+  // ----- Preferences ---------------------------------------
+  getPreferences() {
+    return this.json<UserPreferences>("/user/preferences");
+  }
+  putPreferences(prefs: Partial<UserPreferences>) {
+    return this.json<UserPreferences>("/user/preferences", {
+      method: "PUT",
+      body: JSON.stringify(prefs),
+    });
+  }
+
+  // ----- Export ---------------------------------------------
+  exportUrl(convId: string, format: "markdown" | "json"): string {
+    return `${API_BASE}/conversations/${convId}/export?format=${format}`;
+  }
+  async exportText(convId: string, format: "markdown" | "json"): Promise<string> {
+    const res = await this.raw(`/conversations/${convId}/export?format=${format}`);
+    if (!res.ok) {
+      throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+    }
+    return await res.text();
+  }
+
+  // ----- Sharing --------------------------------------------
+  createShare(convId: string, expiresIn: ShareExpiry) {
+    return this.json<ShareLink>(`/conversations/${convId}/share`, {
+      method: "POST",
+      body: JSON.stringify({ expires_in: expiresIn }),
+    });
+  }
+  getShare(convId: string) {
+    return this.json<ShareLink>(`/conversations/${convId}/share`);
+  }
+  revokeShare(convId: string) {
+    return this.raw(`/conversations/${convId}/share`, { method: "DELETE" });
+  }
+
+  // ----- Branching ------------------------------------------
+  async openEditStream(
+    convId: string,
+    messageId: string,
+    content: string,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    return this.raw(`/conversations/${convId}/messages/${messageId}/edit`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+      signal,
+    });
+  }
+  switchBranch(convId: string, messageId: string, branchIndex: number) {
+    return this.raw(
+      `/conversations/${convId}/messages/${messageId}/switch-branch`,
+      {
+        method: "POST",
+        body: JSON.stringify({ branch_index: branchIndex }),
+      },
+    );
+  }
+
   /** XHR-backed upload with progress callbacks. fetch+ReadableStream
    *  upload progress isn't reliable in all browsers in 2026 so we
    *  use XHR to keep the progress bar honest. */
@@ -266,3 +329,47 @@ function safeParse(text: string): unknown {
 }
 
 export const api = new ApiClient();
+
+// ── Public share-view fetcher ────────────────────────────────
+// Doesn't go through ApiClient because the /shared route must NOT
+// carry Authorization headers (the auth middleware is not in the
+// route's chain on the server side, but sending the header would
+// leak the user's token to a public surface).
+export interface PublicSharedFile {
+  id: string;
+  filename: string;
+  content_type: string;
+  file_size_bytes: number;
+}
+export interface PublicSharedMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  model_id?: string | null;
+  created_at: string;
+  files?: PublicSharedFile[];
+}
+export interface PublicSharedView {
+  conversation: {
+    title: string;
+    model_id: string;
+    created_at: string;
+    updated_at: string;
+  };
+  messages: PublicSharedMessage[];
+  expires_at?: string;
+}
+
+export async function fetchPublicShared(
+  token: string,
+): Promise<PublicSharedView | null> {
+  const res = await fetch(`${API_BASE}/shared/${encodeURIComponent(token)}`, {
+    // No credentials, no Authorization — pristine public request.
+    credentials: "omit",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+  }
+  return (await res.json()) as PublicSharedView;
+}
