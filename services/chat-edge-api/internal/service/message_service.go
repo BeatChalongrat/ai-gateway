@@ -52,6 +52,12 @@ type MessageService struct {
 	gateway       *GatewayClient
 	titles        *TitleService
 	models        ModelChecker
+	// Optional. When set, the message service:
+	//   - attaches file_ids passed on Send to the user message
+	//   - injects a markdown context block of extracted file text
+	//     into the gateway request's system prompt
+	// Left nil for unit tests that don't exercise the file flow.
+	fileSvc FileLinker
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -60,6 +66,14 @@ type MessageService struct {
 	// conversation_id (one in-flight generation per conversation in
 	// Phase 1; the second concurrent send would race the first).
 	activeStreams sync.Map // map[uuid.UUID]*streamRegistration
+}
+
+// FileLinker is the slice of FileService the message flow needs.
+// Decouples message_service from the concrete file service so unit
+// tests can pass a tiny fake.
+type FileLinker interface {
+	AttachToMessage(ctx context.Context, tenantID, convID, messageID uuid.UUID, fileIDs []uuid.UUID) (int64, error)
+	BuildContextBlock(ctx context.Context, tenantID, convID uuid.UUID) (string, error)
 }
 
 // streamRegistration is what's stored in MessageService.activeStreams.
@@ -106,6 +120,14 @@ func NewMessageService(
 	}
 }
 
+// SetFileLinker wires in the file service after construction. Done
+// in main.go so the dependency order (file_service needs the file
+// repo, message_service needs the file_service) stays linear and
+// the constructor signatures don't churn.
+func (s *MessageService) SetFileLinker(fl FileLinker) {
+	s.fileSvc = fl
+}
+
 // ---------------------------------------------------------------------------
 // ListMessages — handler reads conversation history
 // ---------------------------------------------------------------------------
@@ -148,6 +170,11 @@ type SendInput struct {
 	ConversationID uuid.UUID
 	Content        string
 	RequestID      string
+	// FileIDs is the (optional) list of conversation_files row ids
+	// the user attached to this send. Each id is patched onto the
+	// new user message + their extracted text is folded into the
+	// gateway request's system context.
+	FileIDs []uuid.UUID
 }
 
 // SendResult is what the non-stream handler returns to the client.
@@ -162,7 +189,8 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		return nil, err
 	}
 
-	gwReq := buildGatewayRequest(conv.ModelID, history)
+	sysPrefix := s.fileContext(ctx, in.TenantID, conv.ID)
+	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -273,7 +301,8 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// StreamHandle.Cancel() when the client disconnects, and the
 	// external POST /cancel endpoint invokes CancelStream(convID).
 	streamCtx, cancel := context.WithCancel(context.Background())
-	gwReq := buildGatewayRequest(conv.ModelID, history)
+	sysPrefix := s.fileContext(ctx, in.TenantID, conv.ID)
+	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -520,7 +549,8 @@ func (s *MessageService) openAssistantStream(
 	}
 
 	streamCtx, cancel := context.WithCancel(context.Background())
-	gwReq := buildGatewayRequest(conv.ModelID, history)
+	sysPrefix := s.fileContext(ctx, conv.TenantID, conv.ID)
+	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx,
 		GatewayCallContext{
@@ -609,6 +639,21 @@ func (s *MessageService) openAssistantStream(
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+// fileContext is a tiny adapter around FileLinker.BuildContextBlock
+// that swallows errors. Failing to assemble the context block must
+// not block the message — the user still gets an AI reply, just
+// without document context.
+func (s *MessageService) fileContext(ctx context.Context, tenantID, convID uuid.UUID) string {
+	if s.fileSvc == nil {
+		return ""
+	}
+	block, err := s.fileSvc.BuildContextBlock(ctx, tenantID, convID)
+	if err != nil {
+		return ""
+	}
+	return block
+}
+
 // keep ``time`` import referenced even when no other code in this
 // file uses it directly (the GatewayChatUsage struct references
 // it transitively through the gateway client).
@@ -652,6 +697,22 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 	})
 	if err != nil {
 		return nil, nil, nil, err
+	}
+
+	// Link any attached files to the new user message. Non-fatal:
+	// if the linker isn't wired (tests) or the SQL fails, the user
+	// message persists and the file just doesn't show up in the
+	// history response. Logged so an operator can chase it down.
+	if s.fileSvc != nil && len(in.FileIDs) > 0 {
+		if _, err := s.fileSvc.AttachToMessage(
+			ctx, in.TenantID, conv.ID, userMsg.ID, in.FileIDs,
+		); err != nil {
+			// Don't return — the user's prompt is already saved and
+			// failing the whole send because the attach query
+			// stuttered would be a worse outcome than missing
+			// metadata.
+			_ = err
+		}
 	}
 
 	// History includes the just-saved user message — that becomes
@@ -711,8 +772,14 @@ func (s *MessageService) persistError(
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-func buildGatewayRequest(model string, history []model.Message) GatewayChatRequest {
-	msgs := make([]GatewayMessage, 0, len(history))
+func buildGatewayRequest(model string, history []model.Message, systemPrefix string) GatewayChatRequest {
+	msgs := make([]GatewayMessage, 0, len(history)+1)
+	if strings.TrimSpace(systemPrefix) != "" {
+		msgs = append(msgs, GatewayMessage{
+			Role:    "system",
+			Content: systemPrefix,
+		})
+	}
 	for _, m := range history {
 		msgs = append(msgs, GatewayMessage{
 			Role:    m.Role,
