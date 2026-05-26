@@ -93,6 +93,13 @@ type Config struct {
 	RateLimitMessages int           `env:"RATE_LIMIT_MESSAGES" envDefault:"30"`
 	RateLimitWindow   time.Duration `env:"RATE_LIMIT_WINDOW"   envDefault:"1m"`
 
+	// Admin-only endpoints (Session 6: observability dashboards) live
+	// under ``/api/v1/admin/`` and require this bearer secret on the
+	// Authorization header. Empty value disables the routes entirely
+	// so a misconfigured deploy fails closed rather than exposing
+	// cross-tenant data.
+	AdminAPIKey string `env:"CHAT_EDGE_ADMIN_API_KEY" envDefault:""`
+
 	// File-upload knobs. Storage root is an absolute or repo-relative
 	// directory the service owns end-to-end; uploads land under
 	// ``{root}/{tenant_id}/{conversation_id}/{file_id}_{name}``.
