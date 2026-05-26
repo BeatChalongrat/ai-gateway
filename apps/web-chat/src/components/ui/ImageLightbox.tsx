@@ -67,6 +67,7 @@ export function ImageLightbox() {
         src={src}
         alt={alt ?? ""}
         onClick={(e) => e.stopPropagation()}
+        decoding="async"
         className="max-h-[90vh] max-w-[90vw] rounded-md object-contain shadow-2xl"
       />
       <button
