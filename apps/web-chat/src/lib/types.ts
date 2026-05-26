@@ -12,11 +12,28 @@ export interface AuthSuccess {
   access_token: string;
 }
 
+// Category buckets exposed by the chat-edge model metadata enricher.
+// Front-end groups the dropdown by these; unknown values land in
+// "other".
+export type ModelCategory =
+  | "flagship"
+  | "fast"
+  | "reasoning"
+  | "specialized"
+  | "other";
+
 export interface ModelEntry {
   id: string;
   name: string;
   provider: string;
+  description: string;
+  context_window: number;
   capabilities: string[];
+  icon: string;
+  category: ModelCategory;
+  max_output_tokens?: number;
+  input_price_per_1m?: number;
+  output_price_per_1m?: number;
   allowed: boolean;
 }
 

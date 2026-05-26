@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Spinner } from "@/components/ui/Spinner";
+import { toast } from "@/components/ui/Toast";
 import { useIsStreaming } from "@/hooks/useStream";
 import { useChatStore } from "@/stores/chatStore";
+import { useModelStore } from "@/stores/modelStore";
 
 export default function ConversationPage() {
   const params = useParams();
@@ -24,6 +26,9 @@ export default function ConversationPage() {
   const sendMessage = useChatStore((s) => s.sendMessage);
   const cancelGeneration = useChatStore((s) => s.cancelGeneration);
   const regenerate = useChatStore((s) => s.regenerate);
+  const setConversationModel = useChatStore((s) => s.setConversationModel);
+  const selectGlobalModel = useModelStore((s) => s.selectModel);
+  const getModelById = useModelStore((s) => s.getModelById);
 
   const streaming = useIsStreaming(convId);
   const conv = conversations.find((c) => c.id === convId);
@@ -60,9 +65,11 @@ export default function ConversationPage() {
           <h2 className="truncate text-sm font-semibold tracking-tight">
             {conv?.title ?? "Conversation"}
           </h2>
-          <span className="text-[11px] uppercase tracking-wider text-text-muted">
-            {conv?.model_id}
-          </span>
+          {conv?.model_id ? (
+            <span className="text-[11px] uppercase tracking-wider text-text-muted">
+              {getModelById(conv.model_id)?.name ?? conv.model_id}
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -80,7 +87,21 @@ export default function ConversationPage() {
       <ChatInput
         disabled={false}
         streaming={streaming}
-        pinnedModelId={conv?.model_id ?? null}
+        activeModelId={conv?.model_id ?? null}
+        onModelPick={async (modelId) => {
+          // Conversation pages: the picked model becomes the conv's
+          // new binding AND the user's global default + recents
+          // entry. PATCH first; toast on success; bail on failure.
+          if (!convId) return;
+          try {
+            await setConversationModel(convId, modelId);
+            selectGlobalModel(modelId);
+            const m = getModelById(modelId);
+            toast(`Switched to ${m?.name ?? modelId}`);
+          } catch {
+            toast("Couldn't change model.");
+          }
+        }}
         onSend={(t) => void sendMessage(convId, t)}
         onStop={() => void cancelGeneration(convId)}
         injectedText={injectedText}

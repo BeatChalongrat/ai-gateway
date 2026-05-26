@@ -3,9 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { Message } from "@/lib/types";
+import {
+  getModelSwitchPoints,
+  hasMultipleModels,
+} from "@/stores/chatStore";
 
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
+import { ModelSwitchDivider } from "./ModelSwitchDivider";
 
 interface Props {
   convId: string;
@@ -107,6 +112,8 @@ export function ChatThread({
   }
 
   const lastAsstIdx = lastAssistantIndex(messages);
+  const showModelBadges = hasMultipleModels(messages);
+  const switchPoints = new Set(getModelSwitchPoints(messages));
 
   return (
     <div className="relative flex-1 overflow-hidden">
@@ -126,10 +133,14 @@ export function ChatThread({
                 prev && prev.role !== m.role ? "mt-2" : "";
               return (
                 <div key={m.id} className={extraGap}>
+                  {switchPoints.has(i) && m.model_id ? (
+                    <ModelSwitchDivider newModelId={m.model_id} />
+                  ) : null}
                   <MessageBubble
                     convId={convId}
                     modelId={modelId}
                     message={m}
+                    showModelBadge={showModelBadges}
                     showFeedback={
                       m.role === "assistant" &&
                       !m.isStreaming &&

@@ -113,6 +113,27 @@ func (s *ConversationService) Rename(ctx context.Context, tenantID, convID uuid.
 	return nil
 }
 
+// SetModel reassigns the conversation's default model. Used by
+// PATCH /conversations/{id} when the user picks a different model
+// mid-conversation. Validates that the new id is in the allow-list
+// so an admin-removed model can't be re-pinned to a conversation.
+func (s *ConversationService) SetModel(ctx context.Context, tenantID, convID uuid.UUID, modelID string) error {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return errors.New("model_id is required")
+	}
+	if !s.models.ModelAllowed(modelID) {
+		return ErrConversationBadModel
+	}
+	if err := s.conversations.UpdateModel(ctx, tenantID, convID, modelID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // Delete soft-deletes the conversation. Messages remain in
 // chat.messages_masked for audit; only the sidebar listing hides.
 func (s *ConversationService) Delete(ctx context.Context, tenantID, convID uuid.UUID) error {
