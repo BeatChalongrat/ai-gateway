@@ -264,8 +264,13 @@ export function ChatInput({
             onChange={onPickFiles}
           />
 
-          {/* Top row: paperclip + textarea + send/stop */}
-          <div className="flex items-end gap-1">
+          {/* Top row: paperclip + textarea + send/stop. items-center
+              so the send button vertically centers with the first
+              line of the textarea — feels more anchored than the
+              items-end variant when the composer is empty. For a
+              multi-line draft the textarea grows upward and the
+              button stays vertically centred within its height. */}
+          <div className="flex items-center gap-1">
             {conversationId ? (
               <button
                 type="button"

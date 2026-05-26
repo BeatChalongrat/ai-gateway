@@ -79,27 +79,48 @@ function ProviderMark({ provider, size }: { provider: Provider; size: number }) 
         </svg>
       );
     case "google":
+      // The Gemini "spark" — four asymmetric petals around a centre.
+      // Closer to the official Gemini mark than the equal-arm star
+      // we shipped before.
       return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M12 2 9.6 9.6 2 12l7.6 2.4L12 22l2.4-7.6L22 12l-7.6-2.4Z" />
+          <path d="M12 2c.4 3.2 1.5 5.7 3.3 7.5C17.1 11.3 19.6 12.4 22.8 12.8c-3.2.4-5.7 1.5-7.5 3.3-1.8 1.8-2.9 4.3-3.3 7.5-.4-3.2-1.5-5.7-3.3-7.5C6.9 14.3 4.4 13.2 1.2 12.8c3.2-.4 5.7-1.5 7.5-3.3C10.5 7.7 11.6 5.2 12 2Z" />
         </svg>
       );
     case "meta":
+      // Lemniscate / infinity mark — Meta's brand uses the same
+      // ribbon shape; one continuous Bezier path replaces the
+      // hand-drawn wavy fill we had before.
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M2 12c0-4 2-7 5-7 2.6 0 4.4 2.4 5.3 5 0.9-2.6 2.7-5 5.3-5 3 0 5 3 5 7 0 1.5-.3 3-1 4-.6 1-1.5 1.6-2.7 1.6-2.2 0-3.3-2-4.6-5-1.3-3-2-4-3.3-4s-2 1-3.3 4c-1.3 3-2.4 5-4.6 5C2.7 17.6 2 14.5 2 12Z" />
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M3 12c0-3.3 2-6 4.5-6 2.2 0 3.7 2 4.5 4 .8-2 2.3-4 4.5-4 2.5 0 4.5 2.7 4.5 6s-2 6-4.5 6c-2.2 0-3.7-2-4.5-4-.8 2-2.3 4-4.5 4-2.5 0-4.5-2.7-4.5-6Z"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     case "mistral":
+      // Stylised "M" with two strokes — replaces the
+      // placeholder-looking grid-of-blocks we had before.
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M3 4h4v4H3V4Zm14 0h4v4h-4V4ZM3 10h4v4H3v-4Zm7 0h4v4h-4v-4Zm7 0h4v4h-4v-4ZM3 16h4v4H3v-4Zm14 0h4v4h-4v-4Z" />
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M4 19V5l8 8 8-8v14"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     default:
+      // Single clean six-point sparkle for unknown / generic
+      // providers. Was a double-star before — too busy at 16px.
       return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Zm6 9 .9 2.5 2.5.9-2.5.9-.9 2.5-.9-2.5-2.5-.9 2.5-.9.9-2.5Z" />
+          <path d="M12 3c.3 3 1.2 5.2 2.6 6.6C16 11 18.2 11.9 21.2 12.2c-3 .3-5.2 1.2-6.6 2.6C13.2 16.2 12.3 18.4 12 21.4c-.3-3-1.2-5.2-2.6-6.6C8 13.4 5.8 12.5 2.8 12.2c3-.3 5.2-1.2 6.6-2.6C10.8 8.2 11.7 6 12 3Z" />
         </svg>
       );
   }
