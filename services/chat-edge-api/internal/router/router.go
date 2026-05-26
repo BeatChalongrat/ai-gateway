@@ -41,6 +41,10 @@ type Handlers struct {
 	Preferences  *handler.PreferencesHandler
 	Share        *handler.ShareHandler
 	Admin        *handler.AdminHandler
+	// Knowledge is optional — left nil when RAG isn't compiled in
+	// (it always is in the current build but the handler keeps a
+	// guard so omitting it doesn't crash the router setup).
+	Knowledge *handler.KnowledgeHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -150,6 +154,21 @@ func New(
 			// Branching: edit a user message + switch active branch.
 			r.Post("/conversations/{id}/messages/{messageID}/edit", h.Message.Edit)
 			r.Post("/conversations/{id}/messages/{messageID}/switch-branch", h.Message.SwitchBranch)
+
+			// Knowledge bases (RAG). All tenant-scoped via the
+			// service layer.
+			if h.Knowledge != nil {
+				r.Get("/knowledge-bases", h.Knowledge.List)
+				r.Post("/knowledge-bases", h.Knowledge.Create)
+				r.Get("/knowledge-bases/{id}", h.Knowledge.Get)
+				r.Patch("/knowledge-bases/{id}", h.Knowledge.Update)
+				r.Delete("/knowledge-bases/{id}", h.Knowledge.Delete)
+				r.Get("/knowledge-bases/{id}/documents", h.Knowledge.ListDocuments)
+				r.Post("/knowledge-bases/{id}/documents", h.Knowledge.UploadDocument)
+				r.Delete("/knowledge-bases/{id}/documents/{docId}", h.Knowledge.DeleteDocument)
+				r.Post("/knowledge-bases/{id}/documents/{docId}/reindex", h.Knowledge.ReindexDocument)
+				r.Post("/knowledge-bases/{id}/search", h.Knowledge.Search)
+			}
 		})
 
 		// Public — no auth. Anyone with the share token can read.

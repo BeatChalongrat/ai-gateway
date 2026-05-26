@@ -39,12 +39,68 @@ interface Props {
   onSwitchBranch?: (branchIndex: number) => void;
 }
 
+// Citation marker — RAG context tells the model to cite sources using
+// the literal pattern ``[Source: <filename>]``. We post-process the
+// assistant text to convert that pattern into a markdown link with a
+// special internal href scheme; the custom anchor renderer below
+// detects that scheme and renders a pill instead of a regular link.
+//
+// Why a hidden link scheme? It survives every place ReactMarkdown
+// passes children through (paragraphs, list items, table cells)
+// without us re-implementing the renderer for each node type.
+const CITATION_PREFIX = "#__rag_citation:";
+const CITATION_PATTERN = /\[Source:\s*([^\]]+?)\]/g;
+
+function renderCitations(text: string): string {
+  // Escape any existing parentheses inside the filename so the markdown
+  // link grammar parses cleanly. We don't try to be clever — citations
+  // come from the indexer which already sanitizes filenames, so the
+  // edge cases here are vanishingly rare.
+  return text.replace(CITATION_PATTERN, (_, raw: string) => {
+    const filename = raw.trim();
+    const safe = filename
+      .replace(/\(/g, "%28")
+      .replace(/\)/g, "%29");
+    return `[__RAG_CITATION__${filename}](${CITATION_PREFIX}${safe})`;
+  });
+}
+
 const markdownComponents = {
-  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a {...props} target="_blank" rel="noopener noreferrer" />
-  ),
+  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+    const href = props.href ?? "";
+    if (href.startsWith(CITATION_PREFIX)) {
+      const filename = decodeURIComponent(href.slice(CITATION_PREFIX.length));
+      return <CitationPill filename={filename} />;
+    }
+    return <a {...props} target="_blank" rel="noopener noreferrer" />;
+  },
   pre: (props: { children?: React.ReactNode }) => <CodeBlock {...props} />,
 };
+
+function CitationPill({ filename }: { filename: string }) {
+  return (
+    <span
+      title={`From knowledge base: ${filename}`}
+      className="mx-0.5 inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 align-baseline text-[11px] font-medium text-accent"
+    >
+      <svg
+        width={10}
+        height={10}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+        <path d="M14 3v6h6" />
+      </svg>
+      {filename}
+    </span>
+  );
+}
 
 function MessageBubbleImpl({
   message,
@@ -370,7 +426,7 @@ function AssistantContent({ message }: { message: Message }) {
       rehypePlugins={[rehypeHighlight]}
       components={markdownComponents}
     >
-      {message.content || ""}
+      {renderCitations(message.content || "")}
     </ReactMarkdown>
   );
 }

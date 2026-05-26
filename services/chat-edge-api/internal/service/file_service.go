@@ -425,6 +425,26 @@ func (s *FileService) BuildContextBlock(
 // Extraction
 // ---------------------------------------------------------------------------
 
+// ExtractTextForPath is a content-type-driven text extractor shared
+// with the knowledge-base (RAG) indexer. Returns the extracted text +
+// a soft "is extraction supported" boolean. Unlike the in-process
+// ``extract`` method this one only deals with paths (no DB row), so
+// the RAG flow doesn't need to fabricate a ConversationFile to reuse
+// the extractor logic.
+func (s *FileService) ExtractTextForPath(path, contentType string) (string, bool) {
+	ct := strings.ToLower(contentType)
+	switch {
+	case ct == "text/plain", ct == "text/csv":
+		return readTextFile(path)
+	case ct == "application/pdf",
+		ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return s.runPythonExtractor(path, ct)
+	default:
+		return "", false
+	}
+}
+
 const maxExtractedChars = 50_000
 
 // extract dispatches on content type. Returns (status, text) where

@@ -32,11 +32,11 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 	const q = `
 		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
 		VALUES ($1, $2, $3)
-		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at
+		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id
 	`
 	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
-		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
+		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -51,7 +51,7 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UUID) (*model.Conversation, error) {
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
-		       is_deleted, deleted_at, created_at, updated_at
+		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id
 		FROM chat.conversations
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
@@ -59,7 +59,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 	err := r.db.QueryRow(ctx, q, convID, tenantID).Scan(
 		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
-		&c.CreatedAt, &c.UpdatedAt,
+		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -117,7 +117,7 @@ func (r *ConversationRepo) ListByUser(
 	// without a second query. The (limit+1)th row becomes next_cursor.
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
-		       is_deleted, deleted_at, created_at, updated_at
+		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -141,7 +141,7 @@ func (r *ConversationRepo) ListByUser(
 		if err := rows.Scan(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
-			&c.CreatedAt, &c.UpdatedAt,
+			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID,
 		); err != nil {
 			return nil, uuid.Nil, fmt.Errorf("list scan: %w", err)
 		}
@@ -179,7 +179,7 @@ func (r *ConversationRepo) SearchByUser(
 ) ([]model.Conversation, error) {
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
-		       is_deleted, deleted_at, created_at, updated_at
+		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -199,7 +199,7 @@ func (r *ConversationRepo) SearchByUser(
 		if err := rows.Scan(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
-			&c.CreatedAt, &c.UpdatedAt,
+			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID,
 		); err != nil {
 			return nil, fmt.Errorf("search scan: %w", err)
 		}
@@ -239,6 +239,36 @@ func (r *ConversationRepo) UpdateModel(ctx context.Context, tenantID, convID uui
 	tag, err := r.db.Exec(ctx, q, convID, tenantID, modelID)
 	if err != nil {
 		return fmt.Errorf("update model: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateKnowledgeBase binds (or unbinds, with kbID = uuid.Nil) the
+// conversation to a knowledge base. The FK on conversations enforces
+// tenant-cross-pollination isolation at the service layer — the
+// handler is expected to verify the KB belongs to the caller's
+// tenant before invoking this method.
+func (r *ConversationRepo) UpdateKnowledgeBase(
+	ctx context.Context, tenantID, convID uuid.UUID, kbID uuid.UUID,
+) error {
+	const q = `
+		UPDATE chat.conversations
+		SET knowledge_base_id = $3, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
+	`
+	// uuid.Nil → NULL so callers can unbind via the same entry point.
+	var arg any
+	if kbID == uuid.Nil {
+		arg = nil
+	} else {
+		arg = kbID
+	}
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, arg)
+	if err != nil {
+		return fmt.Errorf("update knowledge_base_id: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound

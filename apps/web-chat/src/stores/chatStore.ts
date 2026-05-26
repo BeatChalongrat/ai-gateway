@@ -87,6 +87,7 @@ interface ChatState {
   createConversation: (modelId: string) => Promise<Conversation>;
   renameConversation: (id: string, title: string) => Promise<void>;
   setConversationModel: (id: string, modelId: string) => Promise<void>;
+  setConversationKB: (id: string, kbId: string | null) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
 
   // ── message ops ──────────────────────────────────────────
@@ -317,6 +318,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ),
         }));
       }
+      throw err;
+    }
+  },
+
+  async setConversationKB(id, kbId) {
+    // Optimistic update: flip the binding immediately so the KB chip
+    // by the input updates without a network round-trip; rollback
+    // on failure.
+    const prev = get().conversations.find((c) => c.id === id)?.knowledge_base_id;
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, knowledge_base_id: kbId } : c,
+      ),
+    }));
+    try {
+      const updated = await api.setConversationKB(id, kbId);
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, ...updated } : c,
+        ),
+      }));
+    } catch (err) {
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, knowledge_base_id: prev ?? null } : c,
+        ),
+      }));
       throw err;
     }
   },
