@@ -1,0 +1,25 @@
+{
+  "name": "SRAN Chat",
+  "short_name": "SRAN Chat",
+  "description": "Secure AI Chat powered by SRAN AI Gateway",
+  "start_url": "/chat",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060A1D",
+  "theme_color": "#0F1835",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -228,10 +228,29 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
       </button>
 
       {open ? (
-        <div
-          role="dialog"
-          className="popover-appear absolute bottom-full left-0 z-30 mb-2 flex w-[min(320px,90vw)] max-h-[400px] flex-col overflow-hidden rounded-xl border border-border bg-bg-surface text-xs shadow-2xl"
-        >
+        <>
+          {/* Mobile-only backdrop — the dropdown reflows into a
+              bottom sheet at <640px, so we want a dim layer +
+              outside-tap dismissal in that mode. */}
+          <div
+            aria-hidden
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 bg-black/55 backdrop-blur-sm sm:hidden"
+          />
+          <div
+            role="dialog"
+            className="
+              popover-appear sheet-up z-40 flex flex-col overflow-hidden
+              border border-border bg-bg-surface text-xs shadow-2xl
+              fixed inset-x-0 bottom-0 max-h-[80vh] rounded-t-2xl safe-bottom
+              sm:absolute sm:bottom-full sm:left-0 sm:inset-x-auto sm:mb-2
+              sm:w-[min(320px,90vw)] sm:max-h-[400px] sm:rounded-xl
+              sm:sheet-up:animate-none
+            "
+          >
+            <div className="flex justify-center pt-2 sm:hidden" aria-hidden>
+              <span className="h-1 w-10 rounded-full bg-border" />
+            </div>
           {/* Search */}
           <div className="border-b border-border/60 px-2.5 py-2">
             <div className="relative">
@@ -339,6 +358,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
             <kbd className="rounded bg-bg-elevated px-1">Esc</kbd> close
           </div>
         </div>
+        </>
       ) : null}
     </div>
   );
