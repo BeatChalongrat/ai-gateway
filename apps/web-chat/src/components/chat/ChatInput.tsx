@@ -264,13 +264,16 @@ export function ChatInput({
             onChange={onPickFiles}
           />
 
-          {/* Top row: paperclip + textarea + send/stop. items-center
-              so the send button vertically centers with the first
-              line of the textarea — feels more anchored than the
-              items-end variant when the composer is empty. For a
-              multi-line draft the textarea grows upward and the
-              button stays vertically centred within its height. */}
-          <div className="flex items-center gap-1">
+          {/* Top row: paperclip + textarea + send/stop.
+              items-start anchors the buttons to the top of the row,
+              so they line up with the FIRST line of the textarea —
+              matches ChatGPT-style composers where the send button
+              stays put as the textarea grows downward.
+              Vertical math: textarea has py-2 (8px) + 15px font ×
+              1.5 lh ≈ 22.5px line, so line-1 centre is ~19.25px
+              from the top. The 36px button wrapper centres at
+              ~18px when items-start, off by ~1px — invisible. */}
+          <div className="flex items-start gap-1">
             {conversationId ? (
               <button
                 type="button"

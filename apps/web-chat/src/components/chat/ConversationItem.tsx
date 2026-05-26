@@ -121,9 +121,22 @@ export function ConversationItem({
                 setMenuOpen(false);
                 setRenaming(true);
               }}
-              className="block w-full px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
             >
-              ✏️ Rename
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z" />
+              </svg>
+              Rename
             </button>
             <button
               type="button"
@@ -131,9 +144,23 @@ export function ConversationItem({
                 setMenuOpen(false);
                 setConfirmingDelete(true);
               }}
-              className="block w-full px-3 py-2 text-left text-status-danger hover:bg-status-danger/15"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-status-danger hover:bg-status-danger/15"
             >
-              🗑️ Delete
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 011.334-1.334h2.666a1.333 1.333 0 011.334 1.334V4M6.667 7.333v4M9.333 7.333v4" />
+                <path d="M3.333 4l.667 9.333a1.333 1.333 0 001.333 1.334h5.334a1.333 1.333 0 001.333-1.334L12.667 4" />
+              </svg>
+              Delete
             </button>
           </div>
         ) : null}
