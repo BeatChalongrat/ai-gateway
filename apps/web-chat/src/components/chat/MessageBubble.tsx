@@ -1,0 +1,226 @@
+"use client";
+
+// TODO(phase2.session2): add LaTeX support via remark-math + rehype-katex.
+// Skipped here to avoid pulling katex's 100kB+ stylesheet into the chat
+// bundle for a feature most prompts don't need.
+
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+
+import { useAuth } from "@/hooks/useAuth";
+import type { Message } from "@/lib/types";
+
+import { AssistantAvatar } from "./AssistantAvatar";
+import { CodeBlock } from "./CodeBlock";
+import { FeedbackButtons } from "./FeedbackButtons";
+
+interface Props {
+  message: Message;
+  convId: string;
+  modelId?: string | null;
+  showFeedback?: boolean;
+  showRegenerate?: boolean;
+  onRegenerate?: () => void;
+}
+
+const markdownComponents = {
+  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a {...props} target="_blank" rel="noopener noreferrer" />
+  ),
+  pre: (props: { children?: React.ReactNode }) => <CodeBlock {...props} />,
+};
+
+export function MessageBubble({
+  message,
+  convId,
+  modelId,
+  showFeedback,
+  showRegenerate,
+  onRegenerate,
+}: Props) {
+  const isUser = message.role === "user";
+  const { user } = useAuth();
+
+  return (
+    <div
+      className={`group flex w-full gap-3 message-appear ${
+        isUser ? "justify-end" : "justify-start"
+      }`}
+    >
+      {!isUser ? (
+        <div className="pt-1">
+          <AssistantAvatar modelId={message.model_id ?? modelId} size={26} />
+        </div>
+      ) : null}
+
+      <div
+        className={`flex max-w-[80%] flex-col gap-1 ${
+          isUser ? "items-end" : "items-start"
+        }`}
+      >
+        <div
+          className={
+            isUser
+              ? "rounded-2xl rounded-br-sm bg-bubble-user px-4 py-2.5 text-sm leading-relaxed text-text-primary shadow-sm"
+              : "prose-chat w-full text-sm text-text-primary"
+          }
+        >
+          {isUser ? (
+            <span className="whitespace-pre-wrap break-words">
+              {message.content}
+            </span>
+          ) : (
+            <AssistantContent message={message} />
+          )}
+        </div>
+
+        <MessageMeta
+          message={message}
+          isUser={isUser}
+          convId={convId}
+          showFeedback={showFeedback}
+          showRegenerate={showRegenerate}
+          onRegenerate={onRegenerate}
+        />
+      </div>
+
+      {isUser ? (
+        <UserAvatar name={user?.email || user?.user_id || "?"} />
+      ) : null}
+    </div>
+  );
+}
+
+function UserAvatar({ name }: { name: string }) {
+  const initial = name.trim().charAt(0).toUpperCase() || "?";
+  return (
+    <span
+      className="mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-700 to-indigo-800 text-[11px] font-semibold text-white"
+      aria-hidden
+    >
+      {initial}
+    </span>
+  );
+}
+
+function MessageMeta({
+  message,
+  isUser,
+  convId,
+  showFeedback,
+  showRegenerate,
+  onRegenerate,
+}: {
+  message: Message;
+  isUser: boolean;
+  convId: string;
+  showFeedback?: boolean;
+  showRegenerate?: boolean;
+  onRegenerate?: () => void;
+}) {
+  const time = formatTimestamp(message.created_at);
+
+  if (isUser) {
+    return (
+      <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="text-[10px] text-text-muted">{time}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className={`flex items-center gap-1 transition-opacity ${
+          message.isStreaming
+            ? "opacity-0"
+            : "opacity-0 group-hover:opacity-100"
+        }`}
+      >
+        {showRegenerate && onRegenerate ? (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            className="focus-ring flex items-center gap-1 rounded p-1.5 text-xs text-text-muted hover:bg-bg-elevated hover:text-text-secondary"
+            aria-label="Regenerate"
+            title="Regenerate"
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
+        {showFeedback ? (
+          <FeedbackButtons
+            convId={convId}
+            messageId={message.id}
+            current={message.feedback ?? null}
+          />
+        ) : null}
+        <span className="text-[10px] text-text-muted" title={message.created_at}>
+          {time}
+        </span>
+        {message.token_usage ? (
+          <span className="text-[10px] text-text-muted">
+            · {message.token_usage.input + message.token_usage.output} tokens
+          </span>
+        ) : null}
+      </div>
+      {message.status === "error" ? (
+        <span className="text-[11px] text-status-danger">AI service error</span>
+      ) : null}
+      {message.status === "cancelled" ? (
+        <span className="text-[11px] text-text-muted">stopped</span>
+      ) : null}
+    </div>
+  );
+}
+
+function AssistantContent({ message }: { message: Message }) {
+  const hasContent = message.content.length > 0;
+  const isStreaming = message.isStreaming;
+
+  if (!hasContent && isStreaming) {
+    return (
+      <span className="typing-indicator" aria-label="Thinking">
+        <span />
+        <span />
+        <span />
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={markdownComponents}
+      >
+        {message.content || ""}
+      </ReactMarkdown>
+      {isStreaming ? <span className="streaming-cursor" /> : null}
+    </>
+  );
+}
+
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return time;
+  const date = d.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${date}, ${time}`;
+}
