@@ -73,6 +73,8 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
   const selectedId = useModelStore((s) => s.selectedModelId);
   const recentIds = useModelStore((s) => s.recentModelIds);
   const selectModel = useModelStore((s) => s.selectModel);
+  const modelsLoaded = useModelStore((s) => s.loaded);
+  const modelsLoading = useModelStore((s) => s.loading);
 
   const activeId = activeModelId ?? selectedId;
   const activeModel = models.find((m) => m.id === activeId);
@@ -155,13 +157,20 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
   }, [flat.length]);
 
   // Focus the search box on open so the keyboard-flow user can just
-  // start typing.
+  // start typing. Also kick off loadModels as a defensive
+  // fallback — the chat layout already triggers it on mount, but
+  // if a caller renders this selector outside that layout (or the
+  // first load failed silently) opening the dropdown gives the
+  // store one more chance to populate.
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setHighlight(0);
-      setInfoFor(null);
-      requestAnimationFrame(() => searchRef.current?.focus());
+    if (!open) return;
+    setQuery("");
+    setHighlight(0);
+    setInfoFor(null);
+    requestAnimationFrame(() => searchRef.current?.focus());
+    const s = useModelStore.getState();
+    if (!s.loaded && !s.loading) {
+      void s.loadModels();
     }
   }, [open]);
 
@@ -288,7 +297,16 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
           >
             {flat.length === 0 ? (
               <div className="px-3 py-6 text-center text-text-muted">
-                No models match “{query}”.
+                {modelsLoading || !modelsLoaded ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
+                    Loading models…
+                  </span>
+                ) : query.trim() ? (
+                  <>No models match &ldquo;{query}&rdquo;.</>
+                ) : (
+                  <>No models available.</>
+                )}
               </div>
             ) : null}
 
