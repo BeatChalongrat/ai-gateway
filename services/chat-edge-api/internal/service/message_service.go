@@ -58,6 +58,9 @@ type MessageService struct {
 	//     into the gateway request's system prompt
 	// Left nil for unit tests that don't exercise the file flow.
 	fileSvc FileLinker
+	// Optional. Pulls the caller's custom instructions and prepends
+	// them to the system prompt.
+	prefsSvc PreferencesReader
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -74,6 +77,13 @@ type MessageService struct {
 type FileLinker interface {
 	AttachToMessage(ctx context.Context, tenantID, convID, messageID uuid.UUID, fileIDs []uuid.UUID) (int64, error)
 	BuildContextBlock(ctx context.Context, tenantID, convID uuid.UUID) (string, error)
+}
+
+// PreferencesReader pulls the user's custom instructions for system-
+// prompt injection. Same decoupling trick as FileLinker — interface
+// in this package, concrete impl wired in main.go.
+type PreferencesReader interface {
+	BuildInstructionsBlock(ctx context.Context, tenantID, userID uuid.UUID) string
 }
 
 // streamRegistration is what's stored in MessageService.activeStreams.
@@ -127,6 +137,13 @@ func NewMessageService(
 func (s *MessageService) SetFileLinker(fl FileLinker) {
 	s.fileSvc = fl
 }
+
+// SetPreferencesReader hooks up the custom-instructions injector.
+// Same lazy-wire pattern as SetFileLinker.
+func (s *MessageService) SetPreferencesReader(p PreferencesReader) {
+	s.prefsSvc = p
+}
+
 
 // ---------------------------------------------------------------------------
 // ListMessages — handler reads conversation history
@@ -189,7 +206,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		return nil, err
 	}
 
-	sysPrefix := s.fileContext(ctx, in.TenantID, conv.ID)
+	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv.ID)
 	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
@@ -278,7 +295,9 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	if err != nil {
 		return nil, err
 	}
-	// Create the assistant placeholder row.
+	// Create the assistant placeholder row. Inherit branch info
+	// from the just-saved user message so the placeholder lives
+	// inside the same fork group.
 	asstStatus := "streaming"
 	asstMsg, err := s.messages.Create(ctx, &model.Message{
 		ConversationID: conv.ID,
@@ -288,6 +307,9 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		ContentMasked:  "",
 		Status:         asstStatus,
 		ModelID:        &conv.ModelID,
+		ParentID:       userMsg.ParentID,
+		BranchIndex:    userMsg.BranchIndex,
+		IsActive:       true,
 	})
 	if err != nil {
 		return nil, err
@@ -301,7 +323,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// StreamHandle.Cancel() when the client disconnects, and the
 	// external POST /cancel endpoint invokes CancelStream(convID).
 	streamCtx, cancel := context.WithCancel(context.Background())
-	sysPrefix := s.fileContext(ctx, in.TenantID, conv.ID)
+	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv.ID)
 	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
@@ -535,6 +557,14 @@ func (s *MessageService) openAssistantStream(
 	requestID string,
 	userID uuid.UUID,
 ) (*StreamHandle, error) {
+	// Regenerate inherits the predecessor user message's branch
+	// metadata so the new assistant turn lives in the same group.
+	var parentID *uuid.UUID
+	branchIndex := 0
+	if userMsg != nil {
+		parentID = userMsg.ParentID
+		branchIndex = userMsg.BranchIndex
+	}
 	asstMsg, err := s.messages.Create(ctx, &model.Message{
 		ConversationID: conv.ID,
 		TenantID:       conv.TenantID,
@@ -543,13 +573,16 @@ func (s *MessageService) openAssistantStream(
 		ContentMasked:  "",
 		Status:         "streaming",
 		ModelID:        &conv.ModelID,
+		ParentID:       parentID,
+		BranchIndex:    branchIndex,
+		IsActive:       true,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	streamCtx, cancel := context.WithCancel(context.Background())
-	sysPrefix := s.fileContext(ctx, conv.TenantID, conv.ID)
+	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv.ID)
 	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx,
@@ -636,6 +669,303 @@ func (s *MessageService) openAssistantStream(
 }
 
 // ---------------------------------------------------------------------------
+// Edit + switch-branch
+// ---------------------------------------------------------------------------
+
+var (
+	ErrEditWrongRole     = errors.New("edit: only user messages can be edited")
+	ErrSwitchBranchNoFork = errors.New("switch-branch: message is not part of a fork group")
+	ErrSwitchBranchMissing = errors.New("switch-branch: target branch_index does not exist")
+)
+
+// EditInput is the typed payload for an edit.
+type EditInput struct {
+	TenantID       uuid.UUID
+	UserID         uuid.UUID
+	ConversationID uuid.UUID
+	MessageID      uuid.UUID
+	NewContent     string
+	RequestID      string
+}
+
+// EditMessage replaces a user message with a new edit, recording
+// the old branch via parent_id + branch_index. The new user
+// message + its streamed assistant response together form a new
+// branch; the old branch's messages stay in the DB with
+// is_active=false so the user can switch back.
+//
+// Returns a StreamHandle the HTTP handler consumes identically to
+// SendStream (same SSE event format).
+func (s *MessageService) EditMessage(ctx context.Context, in EditInput) (*StreamHandle, error) {
+	if strings.TrimSpace(in.NewContent) == "" {
+		return nil, ErrMessageEmptyContent
+	}
+
+	conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMessageConversationNotFound
+		}
+		return nil, err
+	}
+	if conv.UserID != in.UserID {
+		return nil, ErrMessageConversationNotFound
+	}
+	if !s.models.ModelAllowed(conv.ModelID) {
+		return nil, ErrMessageModelNotAllowed
+	}
+
+	target, err := s.messages.GetByID(ctx, in.TenantID, in.MessageID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMessageNotFound
+		}
+		return nil, err
+	}
+	if target.ConversationID != conv.ID {
+		return nil, ErrMessageNotFound
+	}
+	if target.Role != "user" {
+		return nil, ErrEditWrongRole
+	}
+
+	// fork_root: the marker id every sibling + descendant shares.
+	// If this is the first edit at this point, the target becomes
+	// the fork root (self-pointed). Otherwise, the target already
+	// has parent_id set and we reuse that.
+	forkRoot := target.ID
+	if target.ParentID != nil {
+		forkRoot = *target.ParentID
+	} else {
+		// First-time edit: stamp parent_id on the original AND on
+		// every message that came after it so they all belong to
+		// "branch 0" of the new fork group.
+		if err := s.messages.SetParent(ctx, target.ID, forkRoot); err != nil {
+			return nil, err
+		}
+		if err := s.messages.StampForkLineage(
+			ctx, in.TenantID, conv.ID, forkRoot, target.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	// Compute the next branch index inside this group.
+	maxIdx, err := s.messages.MaxBranchIndex(ctx, in.TenantID, forkRoot)
+	if err != nil {
+		return nil, err
+	}
+	newBranchIndex := maxIdx + 1
+
+	// Kill the tail of the currently-active branch starting at the
+	// target message. Both target and every downstream active
+	// message go is_active=false; the new branch becomes the live
+	// one once the next inserts land.
+	if err := s.messages.DeactivateChain(
+		ctx, in.TenantID, conv.ID, target.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	// Insert the new user message into the new branch.
+	newUser, err := s.messages.Create(ctx, &model.Message{
+		ConversationID: conv.ID,
+		TenantID:       in.TenantID,
+		UserID:         in.UserID,
+		Role:           "user",
+		ContentMasked:  in.NewContent,
+		Status:         "completed",
+		ModelID:        &conv.ModelID,
+		ParentID:       &forkRoot,
+		BranchIndex:    newBranchIndex,
+		IsActive:       true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Rebuild the context for the gateway from the *active* branch
+	// up through the new user message.
+	history, err := s.messages.ListContextByConversation(
+		ctx, in.TenantID, conv.ID, s.maxContext,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.openAssistantStreamWithBranch(
+		ctx, conv, newUser, history, in.RequestID, in.UserID,
+		&forkRoot, newBranchIndex,
+	)
+}
+
+// openAssistantStreamWithBranch is openAssistantStream's branched
+// twin — same plumbing, but the assistant placeholder gets the
+// new branch's parent_id + branch_index so the active flag stays
+// consistent across the whole branch.
+func (s *MessageService) openAssistantStreamWithBranch(
+	ctx context.Context,
+	conv *model.Conversation,
+	userMsg *model.Message,
+	history []model.Message,
+	requestID string,
+	userID uuid.UUID,
+	parentID *uuid.UUID,
+	branchIndex int,
+) (*StreamHandle, error) {
+	asstMsg, err := s.messages.Create(ctx, &model.Message{
+		ConversationID: conv.ID,
+		TenantID:       conv.TenantID,
+		UserID:         userID,
+		Role:           "assistant",
+		ContentMasked:  "",
+		Status:         "streaming",
+		ModelID:        &conv.ModelID,
+		ParentID:       parentID,
+		BranchIndex:    branchIndex,
+		IsActive:       true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	streamCtx, cancel := context.WithCancel(context.Background())
+	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv.ID)
+	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
+	stream, err := s.gateway.SendChatCompletionStream(
+		streamCtx,
+		GatewayCallContext{
+			TenantID:       conv.TenantID,
+			UserID:         userID,
+			ConversationID: conv.ID,
+			RequestID:      requestID,
+		},
+		gwReq,
+	)
+	if err != nil {
+		cancel()
+		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
+		var ue *GatewayUnavailableError
+		if errors.As(err, &ue) {
+			return nil, fmt.Errorf("%w: %s", ErrMessageGatewayUnavailable, ue.Error())
+		}
+		return nil, err
+	}
+
+	reg := &streamRegistration{cancel: cancel}
+	s.activeStreams.Store(conv.ID, reg)
+
+	ch := make(chan StreamUpdate, 16)
+	go func() {
+		defer close(ch)
+		defer stream.Close()
+		for {
+			ev, err := stream.Next()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				ch <- StreamUpdate{Err: err}
+				return
+			}
+			if ev.Done {
+				ch <- StreamUpdate{Done: true, Usage: ev.Usage}
+				return
+			}
+			ch <- StreamUpdate{Delta: ev.Delta, Usage: ev.Usage, FinishReason: ev.FinishReason}
+		}
+	}()
+
+	finish := func(content, finishReason string, usage *GatewayChatUsage) {
+		s.activeStreams.Delete(conv.ID)
+		persistCtx := context.Background()
+		status := "completed"
+		switch {
+		case reg.isUserCancelled():
+			status = "cancelled"
+		case finishReason == "cancelled":
+			status = "cancelled"
+		case finishReason == "error":
+			status = "error"
+		}
+		var tokInput, tokOutput *int
+		if usage != nil {
+			ti, to := usage.PromptTokens, usage.CompletionTokens
+			tokInput, tokOutput = &ti, &to
+		}
+		_ = s.messages.UpdateContent(persistCtx, asstMsg.ID, content, status, tokInput, tokOutput)
+		// Bump message_count + updated_at so the sidebar refreshes.
+		_ = s.conversations.IncrementMessageCount(persistCtx, conv.ID, 2)
+	}
+
+	return &StreamHandle{
+		UserMessage:    userMsg,
+		AssistantID:    asstMsg.ID,
+		ConversationID: conv.ID,
+		Events:         ch,
+		finish:         finish,
+		cancel:         cancel,
+	}, nil
+}
+
+// BranchCountsByParents is a thin pass-through used by the list
+// handler to populate branch_count per message.
+func (s *MessageService) BranchCountsByParents(
+	ctx context.Context, tenantID uuid.UUID, parentIDs []uuid.UUID,
+) (map[uuid.UUID]int, error) {
+	return s.messages.BranchCountByParent(ctx, tenantID, parentIDs)
+}
+
+// SwitchBranch flips the active branch within a fork group. The
+// caller addresses the fork by ANY message id inside it; the
+// service resolves the fork-root by reading its parent_id.
+func (s *MessageService) SwitchBranch(
+	ctx context.Context,
+	tenantID, userID, convID, messageID uuid.UUID,
+	branchIndex int,
+) error {
+	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrMessageConversationNotFound
+		}
+		return err
+	}
+	if conv.UserID != userID {
+		return ErrMessageConversationNotFound
+	}
+
+	m, err := s.messages.GetByID(ctx, tenantID, messageID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrMessageNotFound
+		}
+		return err
+	}
+	if m.ConversationID != conv.ID {
+		return ErrMessageNotFound
+	}
+	if m.ParentID == nil {
+		return ErrSwitchBranchNoFork
+	}
+
+	// Validate the target branch actually exists for this group.
+	maxIdx, err := s.messages.MaxBranchIndex(ctx, tenantID, *m.ParentID)
+	if err != nil {
+		return err
+	}
+	if branchIndex < 0 || branchIndex > maxIdx {
+		return ErrSwitchBranchMissing
+	}
+
+	if err := s.messages.SetActiveBranch(ctx, tenantID, *m.ParentID, branchIndex); err != nil {
+		return err
+	}
+	_ = s.conversations.UpdateTimestamp(ctx, conv.ID)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
@@ -652,6 +982,24 @@ func (s *MessageService) fileContext(ctx context.Context, tenantID, convID uuid.
 		return ""
 	}
 	return block
+}
+
+// buildSystemPrefix concatenates the user's custom instructions and
+// the file-context block into a single system-prompt prefix. The
+// order is deliberate: persona ("about / respond") comes first so it
+// shapes tone; file context comes after because it's content, not
+// behaviour. Either or both may be empty.
+func (s *MessageService) buildSystemPrefix(ctx context.Context, tenantID, userID, convID uuid.UUID) string {
+	parts := make([]string, 0, 2)
+	if s.prefsSvc != nil {
+		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if f := s.fileContext(ctx, tenantID, convID); f != "" {
+		parts = append(parts, f)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // keep ``time`` import referenced even when no other code in this
@@ -686,6 +1034,19 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 		return nil, nil, nil, ErrMessageModelNotAllowed
 	}
 
+	// If the conversation already has a fork group, new messages
+	// inherit the currently-active branch so they stay on the same
+	// side of the tree.
+	var parentID *uuid.UUID
+	branchIndex := 0
+	if recent, err := s.messages.ListContextByConversation(ctx, in.TenantID, conv.ID, 1); err == nil && len(recent) > 0 {
+		latest := recent[len(recent)-1]
+		if latest.ParentID != nil {
+			parentID = latest.ParentID
+			branchIndex = latest.BranchIndex
+		}
+	}
+
 	userMsg, err := s.messages.Create(ctx, &model.Message{
 		ConversationID: conv.ID,
 		TenantID:       in.TenantID,
@@ -694,6 +1055,9 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 		ContentMasked:  in.Content,
 		Status:         "completed",
 		ModelID:        &conv.ModelID,
+		ParentID:       parentID,
+		BranchIndex:    branchIndex,
+		IsActive:       true,
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -764,6 +1128,7 @@ func (s *MessageService) persistError(
 		ContentMasked:  content,
 		Status:         "error",
 		ModelID:        &conv.ModelID,
+		IsActive:       true,
 	})
 	return err
 }
