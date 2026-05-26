@@ -183,6 +183,25 @@ func (r *ConversationRepo) UpdateTitle(ctx context.Context, tenantID, convID uui
 	return nil
 }
 
+// UpdateModel changes the conversation's default model_id and
+// bumps ``updated_at``. Tenant-scoped via the WHERE clause so a
+// wrong tenant_id can't reassign someone else's conversation.
+func (r *ConversationRepo) UpdateModel(ctx context.Context, tenantID, convID uuid.UUID, modelID string) error {
+	const q = `
+		UPDATE chat.conversations
+		SET model_id = $3, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
+	`
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, modelID)
+	if err != nil {
+		return fmt.Errorf("update model: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SoftDelete sets ``is_deleted = true`` + ``deleted_at = NOW()``.
 // Idempotent: re-deleting a soft-deleted row returns ErrNotFound
 // (we treat the row as no-longer-present at this layer).

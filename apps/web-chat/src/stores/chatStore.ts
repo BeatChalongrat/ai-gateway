@@ -43,6 +43,7 @@ interface ChatState {
   setActive: (id: string | null) => void;
   createConversation: (modelId: string) => Promise<Conversation>;
   renameConversation: (id: string, title: string) => Promise<void>;
+  setConversationModel: (id: string, modelId: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
 
   // ── message ops ──────────────────────────────────────────
@@ -106,6 +107,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
 
+  async setConversationModel(id, modelId) {
+    // Optimistic: flip the sidebar entry immediately so the model
+    // pill in the chat header / input updates without waiting on
+    // the network. On failure the catch path rolls back.
+    const prev = get().conversations.find((c) => c.id === id)?.model_id;
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, model_id: modelId } : c,
+      ),
+    }));
+    try {
+      const updated = await api.setConversationModel(id, modelId);
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, ...updated } : c,
+        ),
+      }));
+    } catch (err) {
+      if (prev !== undefined) {
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === id ? { ...c, model_id: prev } : c,
+          ),
+        }));
+      }
+      throw err;
+    }
+  },
+
   async deleteConversation(id) {
     await api.deleteConversation(id);
     set((s) => {
@@ -149,6 +179,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // completes successfully (handled below in the try block).
     const isFirstMessage = (get().messages[convId] ?? []).length === 0;
 
+    // Capture the conversation's currently bound model at send time
+    // and stamp it on the assistant placeholder. The server-side
+    // message_id arrives via message_start, but its model_id only
+    // surfaces on the next /messages reload — stamping locally keeps
+    // the per-message model badge + switch divider consistent during
+    // streaming.
+    const convModelId =
+      get().conversations.find((c) => c.id === convId)?.model_id ?? null;
+
     set((s) => ({
       messages: {
         ...s.messages,
@@ -166,6 +205,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             role: "assistant",
             content: "",
             status: "streaming",
+            model_id: convModelId,
             created_at: new Date().toISOString(),
             isStreaming: true,
           },
@@ -243,6 +283,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const idx = existing.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
 
+    const convModelId =
+      get().conversations.find((c) => c.id === convId)?.model_id ?? null;
+
     // Mark the old one regenerated, insert a fresh placeholder.
     const tempAsstId = `tmp-regen-${Date.now()}`;
     set((s) => {
@@ -255,6 +298,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: "assistant",
         content: "",
         status: "streaming",
+        model_id: convModelId,
         created_at: new Date().toISOString(),
         isStreaming: true,
       });
@@ -420,6 +464,42 @@ async function handleStreamPreError(
     get().setError(msg);
   }
   finalizeMessage(set, get, convId, tempAsstId, "error");
+}
+
+// ─── Pure helpers used by selectors ───────────────────────────
+
+// hasMultipleModels reports whether the assistant messages in a
+// conversation use more than one distinct model_id. Used by the
+// MessageBubble to decide whether to clutter the timeline with
+// per-message model badges (skipped when every reply is the same
+// model).
+export function hasMultipleModels(messages: Message[]): boolean {
+  const seen = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== "assistant") continue;
+    if (!m.model_id) continue;
+    seen.add(m.model_id);
+    if (seen.size > 1) return true;
+  }
+  return false;
+}
+
+// getModelSwitchPoints returns the indices of messages where the
+// assistant's model_id flips relative to the previous assistant
+// message. Used by ChatThread to inject the model-switch divider
+// just BEFORE those indices.
+export function getModelSwitchPoints(messages: Message[]): number[] {
+  const out: number[] = [];
+  let prevModel: string | undefined;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== "assistant" || !m.model_id) continue;
+    if (prevModel !== undefined && m.model_id !== prevModel) {
+      out.push(i);
+    }
+    prevModel = m.model_id;
+  }
+  return out;
 }
 
 // Derive a sidebar-friendly title from the user's first prompt:

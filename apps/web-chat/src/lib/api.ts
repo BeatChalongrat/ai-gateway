@@ -96,6 +96,12 @@ class ApiClient {
       body: JSON.stringify({ title }),
     });
   }
+  setConversationModel(id: string, model_id: string) {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ model_id }),
+    });
+  }
   deleteConversation(id: string) {
     return this.raw(`/conversations/${id}`, { method: "DELETE" });
   }
