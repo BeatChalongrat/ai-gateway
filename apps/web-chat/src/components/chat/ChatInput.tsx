@@ -30,7 +30,10 @@ interface Props {
   onInjectedTextConsumed?: () => void;
 }
 
-const MAX_TEXTAREA_HEIGHT = 180;
+// 6 lines × ~24px on desktop; trimmed to 4 lines on phones so the
+// keyboard + bubble never crowd the viewport at the same time.
+const MAX_TEXTAREA_HEIGHT_DESKTOP = 180;
+const MAX_TEXTAREA_HEIGHT_MOBILE = 120;
 const MAX_CONCURRENT_UPLOADS = 3;
 
 export function ChatInput({
@@ -45,8 +48,46 @@ export function ChatInput({
   onInjectedTextConsumed,
 }: Props) {
   const [text, setText] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+  // Distance (px) the on-screen keyboard is occluding the bottom of
+  // the layout viewport. Updated from visualViewport.resize so the
+  // composer floats just above the keyboard on iOS / Android.
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const maxTextareaHeight = isMobile
+    ? MAX_TEXTAREA_HEIGHT_MOBILE
+    : MAX_TEXTAREA_HEIGHT_DESKTOP;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia("(max-width: 639px)");
+    const sync = () => setIsMobile(mql.matches);
+    sync();
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, []);
+
+  // visualViewport tracks the layout-viewport overlap with the
+  // soft keyboard on mobile. When it shrinks, the difference vs
+  // window.innerHeight is the keyboard overlay height — push the
+  // composer up by that amount so the textarea stays visible.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const sync = () => {
+      const overlap = window.innerHeight - vv.height - vv.offsetTop;
+      setKeyboardInset(Math.max(0, overlap));
+    };
+    sync();
+    vv.addEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    return () => {
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+    };
+  }, []);
   const pendingFiles = useChatStore((s) =>
     conversationId ? s.pendingFiles[conversationId] ?? [] : [],
   );
@@ -57,13 +98,13 @@ export function ChatInput({
   const removePendingFile = useChatStore((s) => s.removePendingFile);
   const clearPendingFiles = useChatStore((s) => s.clearPendingFiles);
 
-  // Auto-grow up to 6 lines.
+  // Auto-grow up to the device's max line count.
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
-  }, [text]);
+    ta.style.height = `${Math.min(ta.scrollHeight, maxTextareaHeight)}px`;
+  }, [text, maxTextareaHeight]);
 
   useEffect(() => {
     if (!injectedText) return;
@@ -171,7 +212,14 @@ export function ChatInput({
   }
 
   return (
-    <div className="border-t border-border bg-bg-base/95 px-4 py-4 md:px-10">
+    <div
+      className="safe-bottom border-t border-border bg-bg-base/95 px-4 py-3 md:px-10 md:py-4"
+      style={
+        keyboardInset > 0
+          ? { transform: `translateY(-${keyboardInset}px)`, transition: "transform 150ms ease-out" }
+          : undefined
+      }
+    >
       <div className="mx-auto flex max-w-3xl flex-col gap-2">
         {/* Pending-file preview row */}
         {pendingFiles.length > 0 ? (
@@ -216,7 +264,7 @@ export function ChatInput({
               aria-label="Attach files"
               title="Attach files"
               disabled={streaming || disabled}
-              className="focus-ring shrink-0 rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              className="focus-ring tap-44 shrink-0 rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
               <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
@@ -252,13 +300,13 @@ export function ChatInput({
             }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
-            className="flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-60"
+            className="flex-1 resize-none bg-transparent px-1 py-1.5 text-base text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-60 md:text-sm"
             style={{
-              maxHeight: MAX_TEXTAREA_HEIGHT,
+              maxHeight: maxTextareaHeight,
               transition: "height 100ms ease-out",
             }}
           />
-          <div className="relative flex h-9 w-9 items-center justify-center">
+          <div className="tap-44 relative flex h-9 w-9 shrink-0 items-center justify-center">
             <button
               type="button"
               onClick={onStop}

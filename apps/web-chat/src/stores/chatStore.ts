@@ -390,6 +390,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   async sendMessage(convId, content, fileIds) {
     const trimmed = content.trim();
     if (!trimmed && (!fileIds || fileIds.length === 0)) return;
+    // Offline guard. SSE streams need a live socket — bail early
+    // with a user-visible toast rather than letting fetch hang.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      get().setError(
+        "You're offline. Messages will send when you reconnect.",
+      );
+      return;
+    }
     const tempUserId = `tmp-user-${Date.now()}`;
     const tempAsstId = `tmp-asst-${Date.now()}`;
 
