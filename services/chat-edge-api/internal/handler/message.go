@@ -24,15 +24,27 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 )
 
 type MessageHandler struct {
 	messages *service.MessageService
+	// Optional. When set, the list endpoint joins file metadata
+	// into each message's response. Construction in main.go wires
+	// this immediately after the file repo is built.
+	files *repository.FileRepo
 }
 
 func NewMessageHandler(m *service.MessageService) *MessageHandler {
 	return &MessageHandler{messages: m}
+}
+
+// SetFileRepo wires in the file repo after construction so list
+// responses can embed attachments. Optional — when nil, the
+// "files" field is simply omitted from the wire response.
+func (h *MessageHandler) SetFileRepo(fr *repository.FileRepo) {
+	h.files = fr
 }
 
 // ---------------------------------------------------------------------------
@@ -40,13 +52,14 @@ func NewMessageHandler(m *service.MessageService) *MessageHandler {
 // ---------------------------------------------------------------------------
 
 type messageResponse struct {
-	ID         string       `json:"id"`
-	Role       string       `json:"role"`
-	Content    string       `json:"content"`
-	Status     string       `json:"status"`
-	ModelID    *string      `json:"model_id,omitempty"`
-	TokenUsage *tokenUsage  `json:"token_usage,omitempty"`
-	CreatedAt  string       `json:"created_at"`
+	ID         string         `json:"id"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	Status     string         `json:"status"`
+	ModelID    *string        `json:"model_id,omitempty"`
+	TokenUsage *tokenUsage    `json:"token_usage,omitempty"`
+	CreatedAt  string         `json:"created_at"`
+	Files      []fileResponse `json:"files,omitempty"`
 }
 
 type tokenUsage struct {
@@ -101,6 +114,29 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for i := range msgs {
 		items = append(items, messageToWire(&msgs[i]))
 	}
+
+	// Join file attachments. Skipped silently if the file repo
+	// isn't wired (unit tests / older deployments) — the wire
+	// response just omits ``files`` per message.
+	if h.files != nil && len(msgs) > 0 {
+		ids := make([]uuid.UUID, 0, len(msgs))
+		for i := range msgs {
+			ids = append(ids, msgs[i].ID)
+		}
+		byMsg, err := h.files.ListByMessageIDs(r.Context(), caller.TenantUUID, ids)
+		if err == nil {
+			for i := range items {
+				if attached, ok := byMsg[msgs[i].ID]; ok {
+					out := make([]fileResponse, 0, len(attached))
+					for j := range attached {
+						out = append(out, FileToWire(&attached[j]))
+					}
+					items[i].Files = out
+				}
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"messages": items,
@@ -113,8 +149,9 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type sendRequest struct {
-	Content string `json:"content"`
-	Stream  bool   `json:"stream"`
+	Content string   `json:"content"`
+	Stream  bool     `json:"stream"`
+	FileIDs []string `json:"file_ids,omitempty"`
 }
 
 func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +172,17 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		ConversationID: convID,
 		Content:        req.Content,
 		RequestID:      r.Header.Get("X-Request-Id"),
+	}
+	if len(req.FileIDs) > 0 {
+		in.FileIDs = make([]uuid.UUID, 0, len(req.FileIDs))
+		for _, s := range req.FileIDs {
+			id, err := uuid.Parse(s)
+			if err != nil {
+				WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id")
+				return
+			}
+			in.FileIDs = append(in.FileIDs, id)
+		}
 	}
 	if req.Stream {
 		h.sendStream(w, r, in)

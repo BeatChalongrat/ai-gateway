@@ -37,6 +37,7 @@ type Handlers struct {
 	Message      *handler.MessageHandler
 	Model        *handler.ModelHandler
 	Feedback     *handler.FeedbackHandler
+	File         *handler.FileHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -120,6 +121,14 @@ func New(
 
 			// Models.
 			r.Get("/models", h.Model.List)
+
+			// File attachments. Upload + list scoped to a
+			// conversation; download + delete go through the file
+			// id so the URL doesn't leak conversation membership.
+			r.Post("/conversations/{id}/files", h.File.Upload)
+			r.Get("/conversations/{id}/files", h.File.List)
+			r.Get("/files/{fileID}/download", h.File.Download)
+			r.Delete("/files/{fileID}", h.File.Delete)
 		})
 	})
 

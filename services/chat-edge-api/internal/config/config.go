@@ -92,6 +92,15 @@ type Config struct {
 	// floor of now/RateLimitWindow so the bucket rotates naturally.
 	RateLimitMessages int           `env:"RATE_LIMIT_MESSAGES" envDefault:"30"`
 	RateLimitWindow   time.Duration `env:"RATE_LIMIT_WINDOW"   envDefault:"1m"`
+
+	// File-upload knobs. Storage root is an absolute or repo-relative
+	// directory the service owns end-to-end; uploads land under
+	// ``{root}/{tenant_id}/{conversation_id}/{file_id}_{name}``.
+	FileStorageRoot     string `env:"FILE_STORAGE_ROOT" envDefault:"./data/uploads"`
+	MaxFileSizeBytes    int64  `env:"MAX_FILE_SIZE_BYTES" envDefault:"26214400"`     // 25 MiB
+	MaxConvFileTotal    int64  `env:"MAX_CONV_FILE_TOTAL_BYTES" envDefault:"104857600"` // 100 MiB
+	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
+	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`
 }
 
 // ModelEntry is one entry in the model list surfaced by GET /models.

@@ -97,6 +97,7 @@ func main() {
 	conversations := repository.NewConversationRepo(pool)
 	messages := repository.NewMessageRepo(pool)
 	feedbackRepo := repository.NewFeedbackRepo(pool)
+	filesRepo := repository.NewFileRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -115,13 +116,28 @@ func main() {
 	)
 	feedbackSvc := service.NewFeedbackService(feedbackRepo, messages)
 	provisionSvc := service.NewProvisionService(pool)
+	fileSvc := service.NewFileService(filesRepo, conversations, service.Knobs{
+		StorageRoot:         cfg.FileStorageRoot,
+		MaxFileSizeBytes:    cfg.MaxFileSizeBytes,
+		MaxConvFileTotal:    cfg.MaxConvFileTotal,
+		MaxFilesPerMessage:  cfg.MaxFilesPerMessage,
+		ExtractPythonBinary: cfg.ExtractPythonBinary,
+	})
+	// Wire the file linkage into the message service so /messages
+	// can persist file_ids → user message AND inject file content
+	// into the gateway request's system prompt.
+	messageSvc.SetFileLinker(fileSvc)
+
+	messageHandler := handler.NewMessageHandler(messageSvc)
+	messageHandler.SetFileRepo(filesRepo)
 
 	handlers := router.Handlers{
 		Auth:         handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Conversation: handler.NewConversationHandler(conversationSvc),
-		Message:      handler.NewMessageHandler(messageSvc),
+		Message:      messageHandler,
 		Model:        handler.NewModelHandler(cfg),
 		Feedback:     handler.NewFeedbackHandler(feedbackSvc),
+		File:         handler.NewFileHandler(fileSvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
