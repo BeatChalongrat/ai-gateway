@@ -4,6 +4,14 @@
 // Mirrors Claude's "Beat returns!" pattern + ChatGPT's category
 // chips below the input. Greeting picks a localised time-of-day
 // label, with the user's display name from authStore.
+//
+// The greeting is computed inside useEffect so the SSR/CSR markup
+// matches exactly on first paint — server has no local timezone, so
+// rendering `new Date()` during the render phase causes a hydration
+// mismatch warning. We render the greeting as a generic placeholder
+// during SSR and swap it in on the client.
+
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/hooks/useAuth";
 
@@ -107,7 +115,13 @@ function firstName(input: string | null | undefined): string {
 export function EmptyState({ onPrompt }: Props) {
   const { user } = useAuth();
   const name = firstName(user?.email ?? user?.user_id ?? null);
-  const greeting = `${timeOfDayGreeting(new Date())}, ${name}`;
+  // Time-of-day greeting is computed AFTER mount so SSR renders a
+  // stable placeholder and the client swaps in the localised
+  // version without a hydration mismatch warning.
+  const [greeting, setGreeting] = useState(`Hello, ${name}`);
+  useEffect(() => {
+    setGreeting(`${timeOfDayGreeting(new Date())}, ${name}`);
+  }, [name]);
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
