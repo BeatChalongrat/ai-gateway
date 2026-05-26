@@ -99,11 +99,30 @@ export interface Message {
   token_usage?: TokenUsage | null;
   created_at: string;
   files?: FileAttachment[];
+  /** Branching — server-computed; absent for legacy messages. */
+  branch_index?: number;
+  branch_count?: number;
+  has_branches?: boolean;
   /** local-only — true while content is being streamed in. */
   isStreaming?: boolean;
   /** local-only — current feedback rating for this message. */
   feedback?: "thumbs_up" | "thumbs_down" | null;
 }
+
+export interface UserPreferences {
+  custom_instructions_about: string;
+  custom_instructions_respond: string;
+  updated_at?: string;
+}
+
+export interface ShareLink {
+  share_token: string;
+  share_url: string;
+  expires_at?: string;
+  created_at: string;
+}
+
+export type ShareExpiry = "1h" | "24h" | "7d" | "never";
 
 export interface MessageListResponse {
   messages: Message[];

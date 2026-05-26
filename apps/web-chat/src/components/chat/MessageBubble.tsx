@@ -4,6 +4,8 @@
 // Skipped here to avoid pulling katex's 100kB+ stylesheet into the chat
 // bundle for a feature most prompts don't need.
 
+import { useEffect, useRef, useState } from "react";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -13,6 +15,7 @@ import type { Message } from "@/lib/types";
 import { useModelStore } from "@/stores/modelStore";
 
 import { AssistantAvatar } from "./AssistantAvatar";
+import { BranchNavigator } from "./BranchNavigator";
 import { CodeBlock } from "./CodeBlock";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { MessageAttachments } from "./MessageAttachments";
@@ -28,6 +31,10 @@ interface Props {
   showFeedback?: boolean;
   showRegenerate?: boolean;
   onRegenerate?: () => void;
+  /** Callbacks for branching — when omitted, the edit pencil +
+   *  branch navigator aren't rendered. */
+  onEdit?: (newContent: string) => void;
+  onSwitchBranch?: (branchIndex: number) => void;
 }
 
 const markdownComponents = {
@@ -45,6 +52,8 @@ export function MessageBubble({
   showFeedback,
   showRegenerate,
   onRegenerate,
+  onEdit,
+  onSwitchBranch,
 }: Props) {
   const isUser = message.role === "user";
   const { user } = useAuth();
@@ -52,6 +61,38 @@ export function MessageBubble({
   const modelEntry = useModelStore((s) =>
     effectiveModelId ? s.getModelById(effectiveModelId) : undefined,
   );
+
+  // Inline-edit state. Only relevant for user messages with an
+  // onEdit callback (passed in from ChatThread when branching is
+  // available — i.e. inside a regular conversation page, not in
+  // the read-only shared view).
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const editRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    setDraft(message.content);
+    requestAnimationFrame(() => {
+      const ta = editRef.current;
+      if (!ta) return;
+      ta.focus();
+      const end = ta.value.length;
+      ta.setSelectionRange(end, end);
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`;
+    });
+  }, [editing, message.content]);
+
+  function submitEdit() {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === message.content.trim()) {
+      setEditing(false);
+      return;
+    }
+    onEdit?.(trimmed);
+    setEditing(false);
+  }
 
   return (
     <div
@@ -89,9 +130,50 @@ export function MessageBubble({
           }
         >
           {isUser ? (
-            <span className="whitespace-pre-wrap break-words">
-              {message.content}
-            </span>
+            editing ? (
+              <div className="flex w-full flex-col gap-2 text-text-primary">
+                <textarea
+                  ref={editRef}
+                  value={draft}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    const ta = e.currentTarget;
+                    ta.style.height = "auto";
+                    ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      submitEdit();
+                    } else if (e.key === "Escape") {
+                      setEditing(false);
+                    }
+                  }}
+                  rows={2}
+                  className="scrollbar-thin w-full min-w-[260px] resize-none rounded-lg border border-accent bg-bg-base/80 px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(false)}
+                    className="focus-ring rounded-md border border-border px-2.5 py-1 text-[11px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitEdit}
+                    className="focus-ring rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover"
+                  >
+                    Save & Submit
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <span className="whitespace-pre-wrap break-words">
+                {message.content}
+              </span>
+            )
           ) : (
             <AssistantContent message={message} />
           )}
@@ -99,6 +181,37 @@ export function MessageBubble({
 
         {message.files && message.files.length > 0 ? (
           <MessageAttachments files={message.files} />
+        ) : null}
+
+        {isUser && onEdit && !editing && !message.isStreaming ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            aria-label="Edit message"
+            title="Edit message"
+            className="focus-ring rounded p-1 text-text-muted opacity-0 transition-opacity hover:bg-bg-elevated hover:text-text-primary group-hover:opacity-100"
+          >
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M12 20h9M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
+
+        {message.has_branches &&
+        message.branch_count &&
+        message.branch_count > 1 &&
+        onSwitchBranch ? (
+          <BranchNavigator
+            branchIndex={message.branch_index ?? 0}
+            branchCount={message.branch_count}
+            onSwitch={onSwitchBranch}
+          />
         ) : null}
 
         <MessageMeta

@@ -98,6 +98,8 @@ func main() {
 	messages := repository.NewMessageRepo(pool)
 	feedbackRepo := repository.NewFeedbackRepo(pool)
 	filesRepo := repository.NewFileRepo(pool)
+	prefsRepo := repository.NewPreferencesRepo(pool)
+	shareRepo := repository.NewShareRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -123,21 +125,29 @@ func main() {
 		MaxFilesPerMessage:  cfg.MaxFilesPerMessage,
 		ExtractPythonBinary: cfg.ExtractPythonBinary,
 	})
+	prefsSvc := service.NewPreferencesService(prefsRepo)
+	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
 	// Wire the file linkage into the message service so /messages
 	// can persist file_ids → user message AND inject file content
 	// into the gateway request's system prompt.
 	messageSvc.SetFileLinker(fileSvc)
+	messageSvc.SetPreferencesReader(prefsSvc)
+
+	conversationHandler := handler.NewConversationHandler(conversationSvc)
+	conversationHandler.SetExportSources(conversations, messages, filesRepo, cfg)
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)
 
 	handlers := router.Handlers{
 		Auth:         handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
-		Conversation: handler.NewConversationHandler(conversationSvc),
+		Conversation: conversationHandler,
 		Message:      messageHandler,
 		Model:        handler.NewModelHandler(cfg),
 		Feedback:     handler.NewFeedbackHandler(feedbackSvc),
 		File:         handler.NewFileHandler(fileSvc),
+		Preferences:  handler.NewPreferencesHandler(prefsRepo),
+		Share:        handler.NewShareHandler(shareSvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a

@@ -12,6 +12,7 @@ import { useModelStore } from "@/stores/modelStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
 
 import { ConversationItem } from "./ConversationItem";
+import { CustomInstructionsModal } from "./CustomInstructionsModal";
 
 const PORTAL_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PORTAL_URL) ||
@@ -45,6 +46,7 @@ export function Sidebar({
   const modelsLoaded = useModelStore((s) => s.loaded);
 
   const [search, setSearch] = useState("");
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const debouncedSearch = useDebounce(search, 200);
 
   useEffect(() => {
@@ -287,6 +289,24 @@ export function Sidebar({
           </div>
           <button
             type="button"
+            onClick={() => setInstructionsOpen(true)}
+            aria-label="Custom instructions"
+            title="Custom instructions"
+            className="focus-ring rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 0 1 4.21 16.97l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06A2 2 0 1 1 7.03 4.29l.06.06A1.65 1.65 0 0 0 8.91 4.6 1.65 1.65 0 0 0 9.91 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
             onClick={handleLogout}
             aria-label="Logout"
             className="focus-ring rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
@@ -304,6 +324,10 @@ export function Sidebar({
           </button>
         </div>
       </aside>
+      <CustomInstructionsModal
+        open={instructionsOpen}
+        onClose={() => setInstructionsOpen(false)}
+      />
     </>
   );
 }

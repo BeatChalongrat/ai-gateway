@@ -39,13 +39,20 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 	const q = `
 		INSERT INTO chat.messages_masked
 			(conversation_id, tenant_id, user_id, role, content_masked,
-			 status, model_id, token_usage_input, token_usage_output, secure_trace_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			 status, model_id, token_usage_input, token_usage_output, secure_trace_id,
+			 parent_id, branch_index, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at
 	`
+	// Defaults so callers don't have to set them for the common
+	// (non-branched) path: branch_index=0, is_active=true.
+	if !m.IsActive && m.BranchIndex == 0 && m.ParentID == nil {
+		m.IsActive = true
+	}
 	err := r.db.QueryRow(ctx, q,
 		m.ConversationID, m.TenantID, m.UserID, m.Role, m.ContentMasked,
 		m.Status, m.ModelID, m.TokenUsageInput, m.TokenUsageOutput, m.SecureTraceID,
+		m.ParentID, m.BranchIndex, m.IsActive,
 	).Scan(&m.ID, &m.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
@@ -89,14 +96,16 @@ func (r *MessageRepo) ListByConversation(
 
 	// limit+1 lets us tell ``has_more``. The cursor for the next
 	// page is the LAST served row (see conversation_repo for the
-	// rationale) — never the probe row.
+	// rationale) — never the probe row. Filters to is_active=true
+	// so inactive branches don't pollute the default view.
 	const q = `
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
-		       secure_trace_id, created_at
+		       secure_trace_id, created_at, parent_id, branch_index, is_active
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
+		  AND is_active = true
 		  AND (
 		    $3::timestamptz IS NULL
 		    OR (created_at, id) < ($3::timestamptz, $4::uuid)
@@ -117,7 +126,7 @@ func (r *MessageRepo) ListByConversation(
 			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
 			&m.ContentMasked, &m.Status, &m.ModelID,
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
-			&m.CreatedAt,
+			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 		); err != nil {
 			return nil, false, fmt.Errorf("list scan: %w", err)
 		}
@@ -155,9 +164,9 @@ func (r *MessageRepo) ListContextByConversation(
 	const q = `
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
-		       secure_trace_id, created_at
+		       secure_trace_id, created_at, parent_id, branch_index, is_active
 		FROM chat.messages_masked
-		WHERE conversation_id = $1 AND tenant_id = $2
+		WHERE conversation_id = $1 AND tenant_id = $2 AND is_active = true
 		ORDER BY created_at DESC
 		LIMIT $3
 	`
@@ -174,7 +183,7 @@ func (r *MessageRepo) ListContextByConversation(
 			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
 			&m.ContentMasked, &m.Status, &m.ModelID,
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
-			&m.CreatedAt,
+			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 		); err != nil {
 			return nil, fmt.Errorf("context scan: %w", err)
 		}
@@ -195,7 +204,7 @@ func (r *MessageRepo) GetByID(ctx context.Context, tenantID, msgID uuid.UUID) (*
 	const q = `
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
-		       secure_trace_id, created_at
+		       secure_trace_id, created_at, parent_id, branch_index, is_active
 		FROM chat.messages_masked
 		WHERE id = $1 AND tenant_id = $2
 	`
@@ -204,7 +213,7 @@ func (r *MessageRepo) GetByID(ctx context.Context, tenantID, msgID uuid.UUID) (*
 		&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
 		&m.ContentMasked, &m.Status, &m.ModelID,
 		&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
-		&m.CreatedAt,
+		&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -246,9 +255,10 @@ func (r *MessageRepo) ListContextBeforeMessage(
 	const q = `
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
-		       secure_trace_id, created_at
+		       secure_trace_id, created_at, parent_id, branch_index, is_active
 		FROM chat.messages_masked
 		WHERE conversation_id = $1 AND tenant_id = $2 AND created_at < $3
+		  AND is_active = true
 		ORDER BY created_at DESC
 		LIMIT $4
 	`
@@ -265,7 +275,7 @@ func (r *MessageRepo) ListContextBeforeMessage(
 			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
 			&m.ContentMasked, &m.Status, &m.ModelID,
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
-			&m.CreatedAt,
+			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 		); err != nil {
 			return nil, fmt.Errorf("context before scan: %w", err)
 		}
@@ -278,6 +288,132 @@ func (r *MessageRepo) ListContextBeforeMessage(
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
+}
+
+// ─── Branching helpers ───────────────────────────────────────
+
+// SetParent stamps parent_id on a message. Used during edit to
+// promote a never-edited original message to a fork-root.
+func (r *MessageRepo) SetParent(ctx context.Context, msgID, parentID uuid.UUID) error {
+	const q = `UPDATE chat.messages_masked SET parent_id = $2 WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, parentID); err != nil {
+		return fmt.Errorf("set parent: %w", err)
+	}
+	return nil
+}
+
+// DeactivateChain marks every message in a conversation that lies
+// at-or-after ``from`` (by created_at) inactive. Used by the edit
+// flow to kill the tail of the current branch before splicing in
+// the new one.
+func (r *MessageRepo) DeactivateChain(
+	ctx context.Context, tenantID, convID uuid.UUID, from time.Time,
+) error {
+	const q = `
+		UPDATE chat.messages_masked
+		SET is_active = false
+		WHERE tenant_id = $1
+		  AND conversation_id = $2
+		  AND created_at >= $3
+		  AND is_active = true
+	`
+	if _, err := r.db.Exec(ctx, q, tenantID, convID, from); err != nil {
+		return fmt.Errorf("deactivate chain: %w", err)
+	}
+	return nil
+}
+
+// StampForkLineage backfills parent_id / branch_index on every
+// message in the conversation at-or-after the fork-root's
+// timestamp. Called once per fork-group (the first time a message
+// is edited) so subsequent messages can be identified as belonging
+// to "branch 0" of the new fork group.
+func (r *MessageRepo) StampForkLineage(
+	ctx context.Context,
+	tenantID, convID, forkRoot uuid.UUID,
+	rootTs time.Time,
+) error {
+	const q = `
+		UPDATE chat.messages_masked
+		SET parent_id = $1
+		WHERE tenant_id = $2
+		  AND conversation_id = $3
+		  AND created_at >= $4
+		  AND parent_id IS NULL
+	`
+	if _, err := r.db.Exec(ctx, q, forkRoot, tenantID, convID, rootTs); err != nil {
+		return fmt.Errorf("stamp fork lineage: %w", err)
+	}
+	return nil
+}
+
+// MaxBranchIndex returns the highest branch_index currently in use
+// for a given fork-root id. Used by the edit handler to compute the
+// next available index.
+func (r *MessageRepo) MaxBranchIndex(
+	ctx context.Context, tenantID, parentID uuid.UUID,
+) (int, error) {
+	const q = `
+		SELECT COALESCE(MAX(branch_index), 0)
+		FROM chat.messages_masked
+		WHERE tenant_id = $1 AND parent_id = $2
+	`
+	var n int
+	if err := r.db.QueryRow(ctx, q, tenantID, parentID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("max branch index: %w", err)
+	}
+	return n, nil
+}
+
+// SetActiveBranch flips the active branch flags for a fork group.
+// Messages on the target branch become active; every other branch
+// in the group becomes inactive. One UPDATE so the toggle is
+// atomic from a reader's point of view.
+func (r *MessageRepo) SetActiveBranch(
+	ctx context.Context, tenantID, parentID uuid.UUID, branchIndex int,
+) error {
+	const q = `
+		UPDATE chat.messages_masked
+		SET is_active = (branch_index = $3)
+		WHERE tenant_id = $1 AND parent_id = $2
+	`
+	if _, err := r.db.Exec(ctx, q, tenantID, parentID, branchIndex); err != nil {
+		return fmt.Errorf("set active branch: %w", err)
+	}
+	return nil
+}
+
+// BranchCountByParent returns the count of distinct branch_index
+// values per parent_id. Used by the list endpoint to populate the
+// per-message branch_count field cheaply (one query for N
+// messages).
+func (r *MessageRepo) BranchCountByParent(
+	ctx context.Context, tenantID uuid.UUID, parentIDs []uuid.UUID,
+) (map[uuid.UUID]int, error) {
+	out := make(map[uuid.UUID]int)
+	if len(parentIDs) == 0 {
+		return out, nil
+	}
+	const q = `
+		SELECT parent_id, COUNT(DISTINCT branch_index)
+		FROM chat.messages_masked
+		WHERE tenant_id = $1 AND parent_id = ANY($2)
+		GROUP BY parent_id
+	`
+	rows, err := r.db.Query(ctx, q, tenantID, parentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("branch counts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid uuid.UUID
+		var n int
+		if err := rows.Scan(&pid, &n); err != nil {
+			return nil, err
+		}
+		out[pid] = n
+	}
+	return out, rows.Err()
 }
 
 // UpdateContent overwrites the content + status + token usage of

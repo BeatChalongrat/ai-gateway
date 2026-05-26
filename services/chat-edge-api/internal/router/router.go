@@ -38,6 +38,8 @@ type Handlers struct {
 	Model        *handler.ModelHandler
 	Feedback     *handler.FeedbackHandler
 	File         *handler.FileHandler
+	Preferences  *handler.PreferencesHandler
+	Share        *handler.ShareHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -129,7 +131,28 @@ func New(
 			r.Get("/conversations/{id}/files", h.File.List)
 			r.Get("/files/{fileID}/download", h.File.Download)
 			r.Delete("/files/{fileID}", h.File.Delete)
+
+			// User preferences (custom instructions).
+			r.Get("/user/preferences", h.Preferences.Get)
+			r.Put("/user/preferences", h.Preferences.Put)
+
+			// Conversation export.
+			r.Get("/conversations/{id}/export", h.Conversation.Export)
+
+			// Conversation sharing (authenticated half — the
+			// public share-view endpoint is registered outside the
+			// RequireAuth subgroup below).
+			r.Post("/conversations/{id}/share", h.Share.Create)
+			r.Get("/conversations/{id}/share", h.Share.GetForOwner)
+			r.Delete("/conversations/{id}/share", h.Share.Revoke)
+
+			// Branching: edit a user message + switch active branch.
+			r.Post("/conversations/{id}/messages/{messageID}/edit", h.Message.Edit)
+			r.Post("/conversations/{id}/messages/{messageID}/switch-branch", h.Message.SwitchBranch)
 		})
+
+		// Public — no auth. Anyone with the share token can read.
+		r.Get("/shared/{token}", h.Share.PublicGet)
 	})
 
 	return r
