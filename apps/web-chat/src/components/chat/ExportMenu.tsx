@@ -78,13 +78,13 @@ export function ExportMenu({ conversationId, onShare }: Props) {
       </button>
       {open ? (
         <div className="popover-appear absolute right-0 top-9 z-30 w-56 overflow-hidden rounded-lg border border-border bg-bg-surface text-xs shadow-2xl">
-          <MenuButton onClick={() => exportFile("markdown")} icon="📝">
+          <MenuButton onClick={() => exportFile("markdown")} icon={<DocIcon />}>
             Export as Markdown
           </MenuButton>
-          <MenuButton onClick={() => exportFile("json")} icon="📋">
+          <MenuButton onClick={() => exportFile("json")} icon={<BracketsIcon />}>
             Export as JSON
           </MenuButton>
-          <MenuButton onClick={copyMarkdown} icon="📎">
+          <MenuButton onClick={copyMarkdown} icon={<ClipboardIcon />}>
             Copy to clipboard
           </MenuButton>
           {onShare ? (
@@ -95,7 +95,7 @@ export function ExportMenu({ conversationId, onShare }: Props) {
                   setOpen(false);
                   onShare();
                 }}
-                icon="🔗"
+                icon={<LinkIcon />}
               >
                 Share…
               </MenuButton>
@@ -113,20 +113,62 @@ function MenuButton({
   children,
 }: {
   onClick: () => void;
-  icon: string;
+  icon: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
     >
-      <span aria-hidden className="text-sm">
+      <span aria-hidden className="shrink-0 text-text-tertiary">
         {icon}
       </span>
       <span>{children}</span>
     </button>
+  );
+}
+
+// ─── Menu icons ──────────────────────────────────────────────
+// All 16px stroke SVGs, currentColor, consistent 1.5 stroke
+// weight — replaces the 📝📋📎🔗 emoji which read as placeholder
+// next to the rest of the line-style UI.
+
+function DocIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <path d="M14 3v6h6" />
+      <path d="M8 13h8M8 17h6" />
+    </svg>
+  );
+}
+
+function BracketsIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M8 4H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2" />
+    </svg>
+  );
+}
+
+function ClipboardIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="8" y="3" width="8" height="4" rx="1" />
+      <path d="M16 5h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71" />
+    </svg>
   );
 }
 

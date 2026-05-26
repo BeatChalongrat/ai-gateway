@@ -17,6 +17,13 @@ import { useAuth } from "@/hooks/useAuth";
 
 interface Props {
   onPrompt: (text: string) => void;
+  /** Optional slot rendered between the greeting and the chip row.
+   *  The landing page passes its centered ChatInput here so the
+   *  "empty" view becomes a single hero block (greeting → input →
+   *  chips) vertically centred in the viewport. Conversation pages
+   *  with zero messages can omit this and just show greeting +
+   *  chips — their own input lives at the bottom of the page. */
+  children?: React.ReactNode;
 }
 
 interface ChipDef {
@@ -112,7 +119,7 @@ function firstName(input: string | null | undefined): string {
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
-export function EmptyState({ onPrompt }: Props) {
+export function EmptyState({ onPrompt, children }: Props) {
   const { user } = useAuth();
   const name = firstName(user?.email ?? user?.user_id ?? null);
   // Time-of-day greeting is computed AFTER mount so SSR renders a
@@ -138,6 +145,8 @@ export function EmptyState({ onPrompt }: Props) {
         <p className="mt-2 text-base text-text-secondary md:text-lg">
           How can I help you today?
         </p>
+
+        {children ? <div className="mt-6 text-left">{children}</div> : null}
 
         <div className="scrollbar-thin mt-6 flex flex-wrap items-center justify-center gap-2 overflow-x-auto pb-1">
           {CHIPS.map((c) => (
