@@ -7,15 +7,14 @@
 //   Cmd/Ctrl + Shift + S  → toggle sidebar
 //   Cmd/Ctrl + Shift + N  → new chat
 //   Cmd/Ctrl + K          → focus sidebar search
-//   Escape                → close open popovers/menus (handled by
-//                           individual components — we only emit a
-//                           DOM event the layout listens for)
 //
 // Each shortcut is opt-in via a handler in the options bag so a
 // caller that doesn't supply ``onToggleSidebar`` simply doesn't
-// bind Cmd+Shift+S.
+// bind Cmd+Shift+S. The handler is read through a ref so the
+// caller can pass an inline arrow function without re-attaching
+// the window listener every render.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { useRouter } from "next/navigation";
 
@@ -28,21 +27,21 @@ interface Options {
 
 const TEXT_INPUT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
-export function useKeyboardShortcuts(opts: Options = {}) {
+export function useKeyboardShortcuts(opts: Options) {
   const router = useRouter();
-  const createConversation = useChatStore((s) => s.createConversation);
-  const conversations = useChatStore((s) => s.conversations);
-  const selectedModelId = useModelStore((s) => s.selectedModelId);
+  // Stash the handlers in a ref so the listener-attaching effect
+  // only fires once on mount. Without this the `opts` default-
+  // object literal recreates every render and turns the listener
+  // into a leak machine.
+  const toggleRef = useRef(opts.onToggleSidebar);
+  toggleRef.current = opts.onToggleSidebar;
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey;
       if (!meta) return;
 
-      // Cmd/Ctrl + K focuses the sidebar search even when the user
-      // is typing in another input — that's the conventional global
-      // command-palette binding. The sidebar tags its search field
-      // with data-shortcut="conv-search" so this stays decoupled.
       if (!e.shiftKey && (e.key === "k" || e.key === "K")) {
         const el = document.querySelector<HTMLInputElement>(
           'input[data-shortcut="conv-search"]',
@@ -57,40 +56,37 @@ export function useKeyboardShortcuts(opts: Options = {}) {
 
       if (!e.shiftKey) return;
 
-      // Toggle sidebar — Cmd/Ctrl + Shift + S.
-      if ((e.key === "s" || e.key === "S") && opts.onToggleSidebar) {
+      if ((e.key === "s" || e.key === "S") && toggleRef.current) {
         e.preventDefault();
-        opts.onToggleSidebar();
+        toggleRef.current();
         return;
       }
 
-      // New chat — Cmd/Ctrl + Shift + N. Skipped when the cursor is
-      // in a text field so the user's text doesn't get hijacked.
       if (e.key === "n" || e.key === "N") {
         const target = e.target as HTMLElement | null;
         if (target && TEXT_INPUT_TAGS.has(target.tagName)) return;
         e.preventDefault();
+        // Pull live state at fire-time so we don't capture a stale
+        // snapshot from when the listener was first installed.
+        const chatState = useChatStore.getState();
+        const modelState = useModelStore.getState();
         void newChat(
           router,
-          conversations,
-          selectedModelId,
-          createConversation,
+          chatState.conversations,
+          modelState.selectedModelId,
+          chatState.createConversation,
         );
         return;
       }
     }
-
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [opts, router, createConversation, conversations, selectedModelId]);
+  }, [router]);
 }
 
 // Shared new-chat handler. Reused by the sidebar button + this
 // hook so both go through the same "open the existing empty
-// conversation instead of spawning a duplicate" guard. The
-// chatStore exposes the conversations list as a ChatGPT-style
-// pinned-to-the-top sorted view; the first item is the most
-// recently updated, which is the natural reuse candidate.
+// conversation instead of spawning a duplicate" guard.
 async function newChat(
   router: ReturnType<typeof useRouter>,
   conversations: ReturnType<typeof useChatStore.getState>["conversations"],
@@ -121,10 +117,14 @@ async function newChat(
 // dedup heuristic. Pulling it here keeps the rule in one place.
 export function useNewChatHandler() {
   const router = useRouter();
-  const createConversation = useChatStore((s) => s.createConversation);
-  const conversations = useChatStore((s) => s.conversations);
-  const selectedModelId = useModelStore((s) => s.selectedModelId);
   return async () => {
-    await newChat(router, conversations, selectedModelId, createConversation);
+    const chatState = useChatStore.getState();
+    const modelState = useModelStore.getState();
+    await newChat(
+      router,
+      chatState.conversations,
+      modelState.selectedModelId,
+      chatState.createConversation,
+    );
   };
 }
