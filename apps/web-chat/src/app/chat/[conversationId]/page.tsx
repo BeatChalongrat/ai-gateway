@@ -89,23 +89,16 @@ export default function ConversationPage() {
 
   return (
     <>
-      {/* Slim desktop header — model name in the centre, "..."
-          menu on the right, no conversation title (the sidebar is
-          the source of truth for which conversation is open). */}
-      <div className="hidden items-center justify-between px-4 pt-1 md:flex">
-        <div className="w-8" aria-hidden />
-        <span className="text-[13px] font-medium text-text-secondary">
-          {conv?.model_id
-            ? (getModelById(conv.model_id)?.name ?? conv.model_id)
-            : "SRAN Chat"}
-        </span>
-        <div className="flex items-center gap-1">
-          <ConversationFiles conversationId={convId} />
-          <ExportMenu
-            conversationId={convId}
-            onShare={() => setShareOpen(true)}
-          />
-        </div>
+      {/* Slim desktop header — no centre label (the model name
+          already lives in the composer pill below, so showing it
+          here was redundant). Just the file-attachments indicator
+          + the "..." menu on the right. */}
+      <div className="hidden items-center justify-end gap-1 px-4 pt-1 md:flex">
+        <ConversationFiles conversationId={convId} />
+        <ExportMenu
+          conversationId={convId}
+          onShare={() => setShareOpen(true)}
+        />
       </div>
 
       <AttachmentDropZone
