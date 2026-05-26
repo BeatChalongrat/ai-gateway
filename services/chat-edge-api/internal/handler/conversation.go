@@ -33,10 +33,21 @@ type ConversationHandler struct {
 	msgRepo  *repository.MessageRepo
 	fileRepo *repository.FileRepo
 	cfg      *config.Config
+	// Optional. Used by Update to verify the KB belongs to the
+	// tenant before binding it to a conversation.
+	knowledge *service.KnowledgeService
 }
 
 func NewConversationHandler(c *service.ConversationService) *ConversationHandler {
 	return &ConversationHandler{conversations: c}
+}
+
+// SetKnowledgeService wires the KB service so PATCH /conversations/{id}
+// can validate knowledge_base_id bindings before persisting. Kept
+// out of the constructor so the conversation handler stays usable
+// in tests that don't exercise the KB path.
+func (h *ConversationHandler) SetKnowledgeService(k *service.KnowledgeService) {
+	h.knowledge = k
 }
 
 // SetExportSources wires the dependencies the /export endpoint
@@ -63,16 +74,19 @@ type createConversationRequest struct {
 }
 
 type conversationResponse struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	ModelID      string    `json:"model_id"`
-	MessageCount int       `json:"message_count"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Title           string    `json:"title"`
+	ModelID         string    `json:"model_id"`
+	MessageCount    int       `json:"message_count"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	// KnowledgeBaseID is null when the conversation has no RAG
+	// source bound — most conversations.
+	KnowledgeBaseID *string `json:"knowledge_base_id"`
 }
 
 func toResponse(c *model.Conversation) conversationResponse {
-	return conversationResponse{
+	r := conversationResponse{
 		ID:           c.ID.String(),
 		Title:        c.Title,
 		ModelID:      c.ModelID,
@@ -80,6 +94,11 @@ func toResponse(c *model.Conversation) conversationResponse {
 		CreatedAt:    c.CreatedAt,
 		UpdatedAt:    c.UpdatedAt,
 	}
+	if c.KnowledgeBaseID != nil {
+		s := c.KnowledgeBaseID.String()
+		r.KnowledgeBaseID = &s
+	}
+	return r
 }
 
 // ---------------------------------------------------------------------------
@@ -196,10 +215,16 @@ func (h *ConversationHandler) Get(w http.ResponseWriter, r *http.Request) {
 // updateRequest covers every mutable field on chat.conversations.
 // All fields are optional; the handler applies whichever ones are
 // present. The route is still PATCH so the same endpoint serves
-// title renames and model reassignment without a verb-explosion.
+// title renames, model reassignment, and KB binding without a
+// verb-explosion.
+//
+// KnowledgeBaseID uses json.RawMessage so the handler can distinguish
+// three states: "field omitted" (no change), "field set to null"
+// (unbind), and "field set to UUID string" (bind to that KB).
 type updateRequest struct {
-	Title   *string `json:"title,omitempty"`
-	ModelID *string `json:"model_id,omitempty"`
+	Title           *string         `json:"title,omitempty"`
+	ModelID         *string         `json:"model_id,omitempty"`
+	KnowledgeBaseID json.RawMessage `json:"knowledge_base_id,omitempty"`
 }
 
 func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +239,7 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
 		return
 	}
-	if req.Title == nil && req.ModelID == nil {
+	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
 	}
@@ -227,6 +252,30 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ModelID != nil {
 		if err := h.conversations.SetModel(r.Context(), caller.TenantUUID, convID, *req.ModelID); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if len(req.KnowledgeBaseID) > 0 {
+		kbID, perr := parseKBRef(req.KnowledgeBaseID)
+		if perr != nil {
+			WriteError(w, http.StatusBadRequest, CodeValidationError, perr.Error())
+			return
+		}
+		// Verify the KB exists for this tenant before binding (so we
+		// don't store a dangling FK and so the user gets a clean 404
+		// when they tap an unknown KB id).
+		if kbID != uuid.Nil && h.knowledge != nil {
+			if _, err := h.knowledge.GetKB(r.Context(), caller.TenantUUID, kbID); err != nil {
+				if errors.Is(err, service.ErrKBNotFound) {
+					WriteError(w, http.StatusNotFound, CodeNotFound, "knowledge base not found")
+					return
+				}
+				WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+				return
+			}
+		}
+		if err := h.conversations.SetKnowledgeBase(r.Context(), caller.TenantUUID, convID, kbID); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
@@ -500,4 +549,32 @@ func parseUUID(s string) uuid.UUID {
 		return uuid.Nil
 	}
 	return u
+}
+
+// parseKBRef interprets the ``knowledge_base_id`` field from a PATCH
+// body. Three cases:
+//
+//   raw == "null"        → unbind (returns uuid.Nil, nil)
+//   raw == "\"...\""     → bind to the parsed UUID
+//   anything else        → returns an error so the handler responds
+//                          with a clean 400 instead of corrupting state
+func parseKBRef(raw json.RawMessage) (uuid.UUID, error) {
+	if len(raw) == 0 {
+		return uuid.Nil, fmt.Errorf("knowledge_base_id missing")
+	}
+	if string(raw) == "null" {
+		return uuid.Nil, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return uuid.Nil, fmt.Errorf("knowledge_base_id must be a uuid string or null")
+	}
+	if s == "" {
+		return uuid.Nil, nil
+	}
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("knowledge_base_id is not a valid uuid")
+	}
+	return id, nil
 }

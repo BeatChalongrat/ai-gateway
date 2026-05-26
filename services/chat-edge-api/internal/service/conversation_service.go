@@ -167,6 +167,22 @@ func (s *ConversationService) SetModel(ctx context.Context, tenantID, convID uui
 	return nil
 }
 
+// SetKnowledgeBase binds or unbinds the conversation's RAG source.
+// kbID == uuid.Nil clears the binding. Caller is expected to have
+// already verified the KB belongs to the same tenant (the handler
+// does this via a GetKB lookup before invoking the service).
+func (s *ConversationService) SetKnowledgeBase(
+	ctx context.Context, tenantID, convID uuid.UUID, kbID uuid.UUID,
+) error {
+	if err := s.conversations.UpdateKnowledgeBase(ctx, tenantID, convID, kbID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // Delete soft-deletes the conversation. Messages remain in
 // chat.messages_masked for audit; only the sidebar listing hides.
 func (s *ConversationService) Delete(ctx context.Context, tenantID, convID uuid.UUID) error {

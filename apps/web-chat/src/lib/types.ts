@@ -48,6 +48,9 @@ export interface Conversation {
   message_count: number;
   created_at: string;
   updated_at: string;
+  /** When set, the message flow retrieves context from this KB and
+   *  injects it into the system prompt with [Source: ...] citations. */
+  knowledge_base_id?: UUID | null;
 }
 
 export interface ConversationListResponse {
@@ -143,6 +146,67 @@ export interface FeedbackResponse {
     rating: "thumbs_up" | "thumbs_down";
     created_at: string;
   };
+}
+
+// ── Knowledge base (RAG) ────────────────────────────────────────
+
+export type KnowledgeDocumentStatus =
+  | "pending"
+  | "processing"
+  | "indexed"
+  | "failed";
+
+export interface KnowledgeBase {
+  id: UUID;
+  name: string;
+  description: string;
+  embedding_model: string;
+  chunk_size: number;
+  chunk_overlap: number;
+  is_active: boolean;
+  document_count: number;
+  total_chunks: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeDocument {
+  id: UUID;
+  knowledge_base_id: UUID;
+  filename: string;
+  content_type: string;
+  file_size_bytes: number;
+  status: KnowledgeDocumentStatus;
+  chunk_count: number;
+  char_count: number;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeBaseListResponse {
+  knowledge_bases: KnowledgeBase[];
+}
+
+export interface KnowledgeBaseDetailResponse {
+  knowledge_base: KnowledgeBase;
+  documents: KnowledgeDocument[];
+}
+
+export interface KnowledgeDocumentListResponse {
+  documents: KnowledgeDocument[];
+}
+
+export interface KnowledgeSearchHit {
+  content: string;
+  score: number;
+  document_id: UUID;
+  filename: string;
+  chunk_index: number;
+}
+
+export interface KnowledgeSearchResponse {
+  results: KnowledgeSearchHit[];
 }
 
 // ── SSE event shapes ────────────────────────────────────────────

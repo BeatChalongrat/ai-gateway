@@ -12,6 +12,7 @@ import { toast } from "@/components/ui/Toast";
 import { useChatStore } from "@/stores/chatStore";
 
 import { FilePreviewCard } from "./FilePreviewCard";
+import { KBSelector } from "./KBSelector";
 import { ModelSelector } from "./ModelSelector";
 
 interface Props {
@@ -24,6 +25,11 @@ interface Props {
   streaming: boolean;
   activeModelId?: string | null;
   onModelPick?: (modelId: string) => void;
+  /** Currently-bound KB id (null when no KB is selected). When the
+   *  conversation has one bound, the composer renders the KB pill
+   *  next to the model picker. */
+  activeKBId?: string | null;
+  onKBPick?: (kbId: string | null) => Promise<void>;
   onSend: (text: string, fileIds: string[]) => void;
   onStop: () => void;
   injectedText?: string | null;
@@ -43,6 +49,8 @@ export function ChatInput({
   streaming,
   activeModelId,
   onModelPick,
+  activeKBId,
+  onKBPick,
   onSend,
   onStop,
   injectedText,
@@ -322,8 +330,16 @@ export function ChatInput({
               ) : null}
             </div>
 
-            {/* Right — model selector pill + send/stop. */}
+            {/* Right — KB selector + model selector pill + send/stop. */}
             <div className="flex items-center gap-1.5">
+              {onKBPick ? (
+                <KBSelector
+                  conversationId={conversationId}
+                  activeKBId={activeKBId ?? null}
+                  onPick={onKBPick}
+                  disabled={streaming}
+                />
+              ) : null}
               <ModelSelector
                 activeModelId={activeModelId}
                 disabled={streaming}
