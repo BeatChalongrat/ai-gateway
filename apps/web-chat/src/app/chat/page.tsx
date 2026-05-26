@@ -64,19 +64,20 @@ export default function ChatLanding() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <EmptyState onPrompt={(text) => setInjectedText(text)} />
-      <ChatInput
-        conversationId={null}
-        disabled={false}
-        streaming={false}
-        activeModelId={selectedModelId ?? null}
-        onModelPick={(modelId) => selectGlobalModel(modelId)}
-        onSend={(t) => void handleSend(t)}
-        onStop={() => undefined}
-        injectedText={injectedText}
-        onInjectedTextConsumed={() => setInjectedText(null)}
-      />
+    <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto">
+      <EmptyState onPrompt={(text) => setInjectedText(text)}>
+        <ChatInput
+          conversationId={null}
+          disabled={false}
+          streaming={false}
+          activeModelId={selectedModelId ?? null}
+          onModelPick={(modelId) => selectGlobalModel(modelId)}
+          onSend={(t) => void handleSend(t)}
+          onStop={() => undefined}
+          injectedText={injectedText}
+          onInjectedTextConsumed={() => setInjectedText(null)}
+        />
+      </EmptyState>
     </div>
   );
 }
