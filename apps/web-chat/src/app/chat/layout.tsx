@@ -20,7 +20,6 @@ export default function ChatLayout({
   const activeId = segments?.[0] ?? null;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const checkAuth = useAuthStore((s) => s.checkAuth);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -45,9 +44,9 @@ export default function ChatLayout({
       redirectToPortalLogin();
       return;
     }
-    checkAuth();
+    useAuthStore.getState().checkAuth();
     setIsReady(true);
-  }, [checkAuth]);
+  }, []);
 
   // Lock body scroll while the mobile slide-over is open.
   useEffect(() => {

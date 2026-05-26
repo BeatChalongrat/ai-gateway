@@ -28,8 +28,8 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
   },
   icons: {
-    icon: "/icons/icon.svg",
-    apple: "/icons/icon.svg",
+    icon: "/sran-logo.png",
+    apple: "/sran-logo.png",
   },
 };
 
@@ -41,7 +41,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#0F1835",
+  themeColor: "#171717",
 };
 
 export default function RootLayout({
