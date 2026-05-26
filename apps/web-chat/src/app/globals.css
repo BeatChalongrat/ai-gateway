@@ -173,6 +173,18 @@ input {
   letter-spacing: -0.01em;
 }
 
+/* SRAN brand logo. The PNG ships as black-on-transparent (which
+   suits the white admin-ui background). On the chat surface's dark
+   theme we invert to render the artwork white; the light-theme
+   override removes the filter so the original black returns. */
+.sran-logo {
+  filter: invert(1);
+  transition: filter 180ms ease;
+}
+[data-theme="light"] .sran-logo {
+  filter: none;
+}
+
 /* ─── Scrollbars ───────────────────────────────────────────── */
 *::-webkit-scrollbar         { width: 8px; height: 8px; }
 *::-webkit-scrollbar-track   { background: transparent; }

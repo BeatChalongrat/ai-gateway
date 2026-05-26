@@ -53,26 +53,31 @@ export default function ConversationPage() {
 
   const [injectedText, setInjectedText] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
-  // 150ms minimum skeleton hold so fast loads don't strobe.
-  const [skeletonHeld, setSkeletonHeld] = useState(false);
 
+  // setActive + lazy loadMessages on convId change. We read the
+  // current messages slot via getState() rather than subscribing
+  // here so the effect doesn't re-run during streaming (every
+  // content_delta would otherwise re-trigger it).
+  //
+  // The previous version used a 150ms ``skeletonHeld`` latch with a
+  // setTimeout cleanup — when messages arrived (deps changed) the
+  // effect re-ran with messages defined, the cleanup cancelled the
+  // pending timeout, and skeletonHeld stayed true forever, leaving
+  // the page stuck on the skeleton. The fix is to make the skeleton
+  // a pure function of "messages still undefined".
   useEffect(() => {
-    if (convId) {
-      setActive(convId);
-      if (messages === undefined) {
-        setSkeletonHeld(true);
-        const t = window.setTimeout(() => setSkeletonHeld(false), 150);
-        void loadMessages(convId);
-        return () => window.clearTimeout(t);
-      }
+    if (!convId) return;
+    setActive(convId);
+    if (useChatStore.getState().messages[convId] === undefined) {
+      void loadMessages(convId);
     }
-  }, [convId, setActive, messages, loadMessages]);
+  }, [convId, setActive, loadMessages]);
 
   if (!convId) {
     router.replace("/chat");
     return null;
   }
-  if (messages === undefined || skeletonHeld) {
+  if (messages === undefined) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6 md:px-10">
