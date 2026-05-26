@@ -100,6 +100,7 @@ func main() {
 	filesRepo := repository.NewFileRepo(pool)
 	prefsRepo := repository.NewPreferencesRepo(pool)
 	shareRepo := repository.NewShareRepo(pool)
+	knowledgeRepo := repository.NewKnowledgeRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -133,8 +134,31 @@ func main() {
 	messageSvc.SetFileLinker(fileSvc)
 	messageSvc.SetPreferencesReader(prefsSvc)
 
+	// Knowledge base (RAG) pipeline.
+	//
+	// EmbeddingService reads OPENAI_API_KEY at construction time —
+	// when unset, the upload/index endpoints still respond but the
+	// indexer marks each document "failed" with a clear "configure
+	// OpenAI" error_message. We wire RAGService into messageSvc
+	// unconditionally so a future env-var flip enables retrieval
+	// without a service restart.
+	embeddingSvc := service.NewEmbeddingService()
+	knowledgeSvc := service.NewKnowledgeService(
+		knowledgeRepo, embeddingSvc, fileSvc,
+		service.KnowledgeServiceKnobs{
+			// Reuse the file storage env knob's directory as a parent
+			// — KB blobs land under a sibling ``knowledge/`` tree.
+			StorageRoot:      cfg.FileStorageRoot + "/knowledge",
+			MaxFileSizeBytes: 50 * 1024 * 1024,
+			EmbedBatchSize:   20,
+		},
+	)
+	ragSvc := service.NewRAGService(knowledgeRepo, embeddingSvc)
+	messageSvc.SetRAGReader(ragSvc)
+
 	conversationHandler := handler.NewConversationHandler(conversationSvc)
 	conversationHandler.SetExportSources(conversations, messages, filesRepo, cfg)
+	conversationHandler.SetKnowledgeService(knowledgeSvc)
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)
@@ -149,6 +173,7 @@ func main() {
 		Preferences:  handler.NewPreferencesHandler(prefsRepo),
 		Share:        handler.NewShareHandler(shareSvc),
 		Admin:        handler.NewAdminHandler(pool),
+		Knowledge:    handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a

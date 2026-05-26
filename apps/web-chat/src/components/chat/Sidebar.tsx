@@ -308,6 +308,23 @@ export function Sidebar({
           <ThemeToggleButton />
           <button
             type="button"
+            onClick={() => router.push("/chat/knowledge")}
+            aria-label="Knowledge base"
+            title="Knowledge base"
+            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
             onClick={() => setInstructionsOpen(true)}
             aria-label="Custom instructions"
             title="Custom instructions"

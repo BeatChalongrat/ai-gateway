@@ -61,6 +61,9 @@ type MessageService struct {
 	// Optional. Pulls the caller's custom instructions and prepends
 	// them to the system prompt.
 	prefsSvc PreferencesReader
+	// Optional. Queries the knowledge base bound to the conversation
+	// and returns a retrieved-context block for the system prompt.
+	ragSvc RAGReader
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -84,6 +87,14 @@ type FileLinker interface {
 // in this package, concrete impl wired in main.go.
 type PreferencesReader interface {
 	BuildInstructionsBlock(ctx context.Context, tenantID, userID uuid.UUID) string
+}
+
+// RAGReader queries the bound knowledge base for context relevant
+// to the user's prompt. The message service hands it the most-recent
+// user content; the returned string (possibly empty) is folded into
+// the system prompt prefix.
+type RAGReader interface {
+	BuildContext(ctx context.Context, tenantID uuid.UUID, kbID uuid.UUID, query string) string
 }
 
 // streamRegistration is what's stored in MessageService.activeStreams.
@@ -142,6 +153,13 @@ func (s *MessageService) SetFileLinker(fl FileLinker) {
 // Same lazy-wire pattern as SetFileLinker.
 func (s *MessageService) SetPreferencesReader(p PreferencesReader) {
 	s.prefsSvc = p
+}
+
+// SetRAGReader wires the knowledge-base retrieval service. Same
+// lazy-wire pattern — kept out of the constructor so the service
+// boots fine when RAG isn't configured.
+func (s *MessageService) SetRAGReader(r RAGReader) {
+	s.ragSvc = r
 }
 
 
@@ -206,7 +224,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		return nil, err
 	}
 
-	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv.ID)
+	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
 	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
@@ -323,7 +341,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// StreamHandle.Cancel() when the client disconnects, and the
 	// external POST /cancel endpoint invokes CancelStream(convID).
 	streamCtx, cancel := context.WithCancel(context.Background())
-	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv.ID)
+	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
 	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
@@ -582,7 +600,10 @@ func (s *MessageService) openAssistantStream(
 	}
 
 	streamCtx, cancel := context.WithCancel(context.Background())
-	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv.ID)
+	// Regenerate: the query for RAG is the last user message in the
+	// history (the prompt the original assistant turn was answering).
+	ragQuery := lastUserContent(history)
+	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
 	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx,
@@ -830,7 +851,17 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	}
 
 	streamCtx, cancel := context.WithCancel(context.Background())
-	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv.ID)
+	// Edit-branch RAG query: prefer the new user message's content
+	// (which is the prompt that produced this branch); fall back to
+	// the tail of the history if the caller didn't pass one.
+	ragQuery := ""
+	if userMsg != nil {
+		ragQuery = userMsg.ContentMasked
+	}
+	if ragQuery == "" {
+		ragQuery = lastUserContent(history)
+	}
+	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
 	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx,
@@ -984,20 +1015,52 @@ func (s *MessageService) fileContext(ctx context.Context, tenantID, convID uuid.
 	return block
 }
 
-// buildSystemPrefix concatenates the user's custom instructions and
-// the file-context block into a single system-prompt prefix. The
-// order is deliberate: persona ("about / respond") comes first so it
-// shapes tone; file context comes after because it's content, not
-// behaviour. Either or both may be empty.
-func (s *MessageService) buildSystemPrefix(ctx context.Context, tenantID, userID, convID uuid.UUID) string {
-	parts := make([]string, 0, 2)
+// ragContext queries the conversation's bound KB (if any) for the
+// most-recent user content. Returns "" when no KB is bound, RAG
+// isn't configured, or retrieval came back empty. Errors are
+// swallowed for the same reason file_context does — never block the
+// reply because retrieval stuttered.
+func (s *MessageService) ragContext(ctx context.Context, conv *model.Conversation, query string) string {
+	if s.ragSvc == nil || conv == nil || conv.KnowledgeBaseID == nil {
+		return ""
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return ""
+	}
+	return s.ragSvc.BuildContext(ctx, conv.TenantID, *conv.KnowledgeBaseID, q)
+}
+
+// buildSystemPrefix concatenates the user's custom instructions, the
+// RAG-retrieved KB context, and the file-context block into a single
+// system-prompt prefix. The order is deliberate:
+//
+//   persona  — shapes tone (must come first so RAG / file content
+//              doesn't accidentally override the "respond as X" rule)
+//   RAG      — authoritative facts the model should cite
+//   files    — supplementary attached documents
+//
+// Any subset may be empty. ``ragQuery`` is the most-recent user
+// message content used as the retrieval query; pass "" to skip RAG.
+func (s *MessageService) buildSystemPrefix(
+	ctx context.Context,
+	tenantID, userID uuid.UUID,
+	conv *model.Conversation,
+	ragQuery string,
+) string {
+	parts := make([]string, 0, 3)
 	if s.prefsSvc != nil {
 		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
 			parts = append(parts, p)
 		}
 	}
-	if f := s.fileContext(ctx, tenantID, convID); f != "" {
-		parts = append(parts, f)
+	if conv != nil {
+		if rag := s.ragContext(ctx, conv, ragQuery); rag != "" {
+			parts = append(parts, rag)
+		}
+		if f := s.fileContext(ctx, tenantID, conv.ID); f != "" {
+			parts = append(parts, f)
+		}
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -1164,6 +1227,18 @@ func gatewayCallContext(in SendInput, conv *model.Conversation) GatewayCallConte
 		ConversationID: conv.ID,
 		RequestID:      in.RequestID,
 	}
+}
+
+// lastUserContent walks the history slice tail-first looking for the
+// last "user" turn. Used as the RAG query for regenerate / edit
+// flows where the in-flight prompt isn't on a SendInput.
+func lastUserContent(history []model.Message) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			return history[i].ContentMasked
+		}
+	}
+	return ""
 }
 
 // extractContent pulls the assistant text from the non-stream

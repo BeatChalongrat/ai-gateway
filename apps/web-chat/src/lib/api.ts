@@ -15,6 +15,11 @@ import type {
   FeedbackResponse,
   FileAttachment,
   FileListResponse,
+  KnowledgeBase,
+  KnowledgeBaseDetailResponse,
+  KnowledgeBaseListResponse,
+  KnowledgeDocument,
+  KnowledgeSearchResponse,
   Message,
   MessageListResponse,
   ModelListResponse,
@@ -105,6 +110,15 @@ class ApiClient {
     return this.json<Conversation>(`/conversations/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ model_id }),
+    });
+  }
+  /** Bind a knowledge base to a conversation, or unbind by passing
+   *  null. The server validates that the KB belongs to the caller's
+   *  tenant before persisting. */
+  setConversationKB(id: string, knowledge_base_id: string | null) {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ knowledge_base_id }),
     });
   }
   deleteConversation(id: string) {
@@ -253,6 +267,124 @@ class ApiClient {
         body: JSON.stringify({ branch_index: branchIndex }),
       },
     );
+  }
+
+  // ----- Knowledge bases (RAG) ------------------------------
+  listKnowledgeBases() {
+    return this.json<KnowledgeBaseListResponse>("/knowledge-bases");
+  }
+  createKnowledgeBase(data: {
+    name: string;
+    description?: string;
+    chunk_size?: number;
+    chunk_overlap?: number;
+  }) {
+    return this.json<KnowledgeBase>("/knowledge-bases", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+  getKnowledgeBase(id: string) {
+    return this.json<KnowledgeBaseDetailResponse>(`/knowledge-bases/${id}`);
+  }
+  updateKnowledgeBase(
+    id: string,
+    patch: { name?: string; description?: string; is_active?: boolean },
+  ) {
+    return this.json<KnowledgeBase>(`/knowledge-bases/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+  deleteKnowledgeBase(id: string) {
+    return this.raw(`/knowledge-bases/${id}`, { method: "DELETE" });
+  }
+  deleteKBDocument(kbId: string, docId: string) {
+    return this.raw(`/knowledge-bases/${kbId}/documents/${docId}`, {
+      method: "DELETE",
+    });
+  }
+  reindexKBDocument(kbId: string, docId: string) {
+    return this.json<KnowledgeDocument>(
+      `/knowledge-bases/${kbId}/documents/${docId}/reindex`,
+      { method: "POST" },
+    );
+  }
+  searchKnowledgeBase(kbId: string, query: string, top_k = 5) {
+    return this.json<KnowledgeSearchResponse>(
+      `/knowledge-bases/${kbId}/search`,
+      { method: "POST", body: JSON.stringify({ query, top_k }) },
+    );
+  }
+  /** XHR-backed KB document upload with progress callbacks. Same
+   *  ergonomics as uploadFile() — used by the KB management UI. */
+  uploadKBDocument(
+    kbId: string,
+    file: File,
+    opts?: {
+      signal?: AbortSignal;
+      onProgress?: (percent: number) => void;
+    },
+  ): Promise<KnowledgeDocument> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}/knowledge-bases/${kbId}/documents`);
+      const token = getPortalToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && opts?.onProgress) {
+          opts.onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          clearPortalToken();
+          redirectToPortalLogin();
+          reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
+          return;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as KnowledgeDocument);
+          } catch {
+            reject(
+              new ApiError(
+                "DECODE_ERROR",
+                "Bad response from server",
+                xhr.status,
+              ),
+            );
+          }
+          return;
+        }
+        let code = `HTTP_${xhr.status}`;
+        let message = xhr.statusText || "Upload failed";
+        try {
+          const env = JSON.parse(xhr.responseText) as ErrorEnvelope;
+          if (env.error?.code) code = env.error.code;
+          if (env.error?.message) message = env.error.message;
+        } catch {
+          /* non-json */
+        }
+        reject(new ApiError(code, message, xhr.status));
+      };
+      xhr.onerror = () => {
+        reject(new ApiError("NETWORK_ERROR", "Network error", 0));
+      };
+      xhr.onabort = () => {
+        reject(new ApiError("ABORTED", "Upload cancelled", 0));
+      };
+      if (opts?.signal) {
+        if (opts.signal.aborted) {
+          xhr.abort();
+        } else {
+          opts.signal.addEventListener("abort", () => xhr.abort());
+        }
+      }
+      const form = new FormData();
+      form.append("file", file);
+      xhr.send(form);
+    });
   }
 
   /** XHR-backed upload with progress callbacks. fetch+ReadableStream

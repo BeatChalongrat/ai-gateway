@@ -40,6 +40,7 @@ export default function ConversationPage() {
   const cancelGeneration = useChatStore((s) => s.cancelGeneration);
   const regenerate = useChatStore((s) => s.regenerate);
   const setConversationModel = useChatStore((s) => s.setConversationModel);
+  const setConversationKB = useChatStore((s) => s.setConversationKB);
   const editMessage = useChatStore((s) => s.editMessage);
   const switchBranch = useChatStore((s) => s.switchBranch);
   const addPendingFile = useChatStore((s) => s.addPendingFile);
@@ -107,6 +108,16 @@ export default function ConversationPage() {
           toast(`Switched to ${m?.name ?? modelId}`);
         } catch {
           toast("Couldn't change model.");
+        }
+      }}
+      activeKBId={conv?.knowledge_base_id ?? null}
+      onKBPick={async (kbId) => {
+        if (!convId) return;
+        try {
+          await setConversationKB(convId, kbId);
+          toast(kbId ? "Knowledge base bound" : "Knowledge base unbound");
+        } catch {
+          toast("Couldn't change knowledge base.");
         }
       }}
       onSend={(t, fileIds) => void sendMessage(convId, t, fileIds)}
