@@ -93,7 +93,14 @@ def _swap_admin_role(monkeypatch, role: str) -> None:
 
 
 def test_build_findings_includes_matched_text_len() -> None:
-    """build_dlp_findings_json now records matched_text_len alongside matched_text."""
+    """build_dlp_findings_json records matched_text_len but never the raw value.
+
+    The privacy contract pinned across test_dlp_policy_runtime_privacy,
+    test_dlp_trace, and test_streaming_dlp is: the persisted findings
+    JSON must NOT contain ``matched_text``. ``matched_text_len`` is the
+    privacy-safe replacement — non-admin viewers see the length, never
+    the value.
+    """
     from dataclasses import dataclass
 
     from app.domain.dlp import (
@@ -125,7 +132,7 @@ def test_build_findings_includes_matched_text_len() -> None:
     findings = json.loads(payload)
     assert len(findings) == 1
     f = findings[0]
-    assert f["matched_text"] == "a@example.io"
+    assert "matched_text" not in f
     assert f["matched_text_len"] == len("a@example.io")
 
 

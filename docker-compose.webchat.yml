@@ -1,0 +1,102 @@
+# Web Chat dev stack — runs alongside the existing gateway-api
+# compose without colliding on ports or volumes.
+#
+# Port plan:
+#   chat-edge-api  → host 4000 → container 4000
+#   postgres       → host 5433 → container 5432   (gateway pg owns 5432)
+#   redis          → host 6380 → container 6379   (gateway redis owns 6379)
+#
+# The existing ``docker-compose.yml`` provides ``gateway-api`` on
+# host port 8080 (in-network DNS: ``backend:8080``). When the two
+# stacks need to talk, run them on the same network OR set
+# ``GATEWAY_API_URL=http://host.docker.internal:8080/api/v1`` for
+# cross-stack calls during dev. Production uses a shared network.
+
+version: "3.9"
+
+services:
+  chat-edge-api:
+    build:
+      context: ./services/chat-edge-api
+      dockerfile: Dockerfile
+    container_name: ai-gateway-chat-edge-api
+    ports:
+      - "4000:4000"
+    environment:
+      - DATABASE_URL=postgres://chatedge:chatedge_pass@postgres-webchat:5432/sran_ai?sslmode=disable
+      - REDIS_URL=redis://redis-webchat:6379/1
+      # Existing gateway-api runs on host port 8080; route via
+      # host.docker.internal so chat-edge can reach it across the
+      # two compose stacks. ``extra_hosts`` below makes the alias
+      # work on Linux too.
+      - GATEWAY_API_URL=http://host.docker.internal:8080/v1
+      - GATEWAY_API_KEY=${GATEWAY_API_KEY:-}
+      - SERVICE_JWT_SECRET=dev-service-jwt-secret-change-in-prod
+      - USER_JWT_SECRET=dev-user-jwt-secret-change-in-prod
+      - CSRF_SECRET=dev-csrf-secret-change-in-prod
+      # Portal-JWT secret — MUST match the FastAPI backend's
+      # ``portal_jwt_secret``. Tokens minted by the Portal verify here.
+      - PORTAL_JWT_SECRET=${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      - PORT=4000
+      - CHAT_EDGE_DEV=1
+      - CORS_ALLOW_ORIGINS=http://localhost:3002
+      - MAX_CONTEXT_MESSAGES=50
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres-webchat:
+        condition: service_healthy
+      redis-webchat:
+        condition: service_healthy
+
+  postgres-webchat:
+    image: postgres:16-alpine
+    container_name: ai-gateway-postgres-webchat
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: sran_ai
+      POSTGRES_USER: chatedge
+      POSTGRES_PASSWORD: chatedge_pass
+    volumes:
+      - pgdata-webchat:/var/lib/postgresql/data
+      # Mount migrations into the postgres initdb hook directory so
+      # they run automatically the first time the volume is created.
+      # Re-creating the schema requires ``docker compose -f
+      # docker-compose.webchat.yml down -v`` to wipe the volume.
+      - ./services/chat-edge-api/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatedge -d sran_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis-webchat:
+    image: redis:7-alpine
+    container_name: ai-gateway-redis-webchat
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Web Chat front-end — Next.js standalone build. The browser talks
+  # to chat-edge-api on the host (port 4000) so CORS + cookies work
+  # the same dev vs prod; build-time env var bakes in the API base.
+  web-chat:
+    build:
+      context: ./apps/web-chat
+      dockerfile: Dockerfile
+    container_name: ai-gateway-web-chat
+    ports:
+      - "3002:3002"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1
+      - PORT=3002
+    depends_on:
+      - chat-edge-api
+
+volumes:
+  pgdata-webchat:

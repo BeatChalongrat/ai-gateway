@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import "./login.css";
 import AuthSplitLayout from "./_components/AuthSplitLayout";
@@ -68,10 +69,29 @@ const loginSlides: Slide[] = [
 ];
 
 export default function LoginPage() {
+  // ``useSearchParams`` inside LoginForm requires a Suspense
+  // boundary so Next.js can prerender the static shell without
+  // bailing on the whole route. The fallback re-uses the form
+  // markup with the action disabled — visually indistinguishable
+  // from the live form for the brief paint before search params
+  // resolve.
   return (
     <AuthSplitLayout
       visual={<VisualPanel slides={loginSlides} />}
-      form={<LoginForm />}
+      form={
+        <Suspense fallback={<LoginFormSkeleton />}>
+          <LoginForm />
+        </Suspense>
+      }
     />
+  );
+}
+
+function LoginFormSkeleton() {
+  return (
+    <div className="auth-form-card" aria-hidden="true">
+      <div className="af-eyebrow">Sign in</div>
+      <h1 className="af-title">Welcome back</h1>
+    </div>
   );
 }
