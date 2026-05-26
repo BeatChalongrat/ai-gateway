@@ -1,5 +1,8 @@
 node_modules/
 .next/
+# next.config.js sets distDir = ".next-fresh" to dodge a Windows
+# file-lock pathology — ignore that build dir too.
+.next-fresh/
 out/
 .env.local
 .env*.local
