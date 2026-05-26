@@ -44,6 +44,15 @@ export interface PendingFile {
 interface ChatState {
   conversations: Conversation[];
   conversationsLoaded: boolean;
+  /** True once the first /conversations page has been fetched. */
+  conversationsCursor: string | null;
+  hasMoreConversations: boolean;
+  loadingMoreConversations: boolean;
+  /** Server-side search results. Populated by searchConversations;
+   *  empty array when no search is active. */
+  conversationsSearchResults: Conversation[];
+  conversationsSearchActive: boolean;
+  conversationsSearchLoading: boolean;
   activeConversationId: string | null;
   /** message lists keyed by conversation id. */
   messages: Record<string, Message[]>;
@@ -52,6 +61,10 @@ interface ChatState {
   streamingAssistantId: Record<string, string | undefined>;
   /** AbortController per active stream so cancel can interrupt. */
   abortControllers: Record<string, AbortController | undefined>;
+  /** has_more=true for older-page-available conversations. */
+  hasMoreMessages: Record<string, boolean>;
+  /** True while a paginate-older request is in flight. */
+  loadingOlder: Record<string, boolean>;
   /** Files staged for the next user message, keyed by conv id. */
   pendingFiles: Record<string, PendingFile[]>;
   errorBanner: string | null;
@@ -67,6 +80,9 @@ interface ChatState {
 
   // ── conversation ops ─────────────────────────────────────
   loadConversations: () => Promise<void>;
+  loadMoreConversations: () => Promise<void>;
+  searchConversations: (query: string) => Promise<void>;
+  clearConversationsSearch: () => void;
   setActive: (id: string | null) => void;
   createConversation: (modelId: string) => Promise<Conversation>;
   renameConversation: (id: string, title: string) => Promise<void>;
@@ -75,6 +91,7 @@ interface ChatState {
 
   // ── message ops ──────────────────────────────────────────
   loadMessages: (convId: string) => Promise<void>;
+  loadOlderMessages: (convId: string) => Promise<void>;
   sendMessage: (convId: string, content: string, fileIds?: string[]) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   regenerate: (convId: string, messageId: string) => Promise<void>;
@@ -90,10 +107,18 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   conversationsLoaded: false,
+  conversationsCursor: null,
+  hasMoreConversations: false,
+  loadingMoreConversations: false,
+  conversationsSearchResults: [],
+  conversationsSearchActive: false,
+  conversationsSearchLoading: false,
   activeConversationId: null,
   messages: {},
   streamingAssistantId: {},
   abortControllers: {},
+  hasMoreMessages: {},
+  loadingOlder: {},
   pendingFiles: {},
   errorBanner: null,
 
@@ -172,14 +197,76 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ────────────────────────────────────────────────────────
   async loadConversations() {
     try {
-      const res = await api.listConversations();
-      set({ conversations: res.conversations, conversationsLoaded: true });
+      const res = await api.listConversationsPage({ limit: 50 });
+      set({
+        conversations: res.conversations,
+        conversationsLoaded: true,
+        conversationsCursor: res.next_cursor,
+        hasMoreConversations: res.has_more,
+      });
     } catch (err) {
       set({ conversationsLoaded: true });
       if (err instanceof ApiError && err.status !== 401) {
         set({ errorBanner: "Couldn't load conversations." });
       }
     }
+  },
+
+  async loadMoreConversations() {
+    const state = get();
+    if (state.loadingMoreConversations) return;
+    if (!state.hasMoreConversations || !state.conversationsCursor) return;
+    set({ loadingMoreConversations: true });
+    try {
+      const res = await api.listConversationsPage({
+        limit: 50,
+        cursor: state.conversationsCursor,
+      });
+      set((s) => {
+        // Dedup by id — defensive against double-clicks fetching
+        // the same page twice.
+        const have = new Set(s.conversations.map((c) => c.id));
+        const next = res.conversations.filter((c) => !have.has(c.id));
+        return {
+          conversations: [...s.conversations, ...next],
+          conversationsCursor: res.next_cursor,
+          hasMoreConversations: res.has_more,
+          loadingMoreConversations: false,
+        };
+      });
+    } catch {
+      set({ loadingMoreConversations: false });
+    }
+  },
+
+  async searchConversations(query) {
+    const q = query.trim();
+    if (!q) {
+      set({
+        conversationsSearchActive: false,
+        conversationsSearchResults: [],
+        conversationsSearchLoading: false,
+      });
+      return;
+    }
+    set({ conversationsSearchActive: true, conversationsSearchLoading: true });
+    try {
+      const res = await api.listConversationsSearch(q, 50);
+      set({
+        conversationsSearchResults: res.conversations,
+        conversationsSearchLoading: false,
+      });
+    } catch {
+      set({ conversationsSearchLoading: false });
+    }
+  },
+
+  clearConversationsSearch() {
+    set({
+      conversationsSearchActive: false,
+      conversationsSearchResults: [],
+      conversationsSearchLoading: false,
+    });
   },
 
   setActive(id) {
@@ -251,17 +338,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ────────────────────────────────────────────────────────
   async loadMessages(convId) {
     try {
-      const res = await api.listMessages(convId);
-      // Server sometimes carries content as content; map to local
-      // Message shape (already matches because handler renames the
-      // column to ``content`` on the wire).
+      const res = await api.listMessages(convId, { limit: 50 });
       set((s) => ({
         messages: { ...s.messages, [convId]: res.messages },
+        hasMoreMessages: { ...s.hasMoreMessages, [convId]: res.has_more },
       }));
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         set({ errorBanner: "Conversation not found." });
       }
+    }
+  },
+
+  async loadOlderMessages(convId) {
+    const current = get().messages[convId] ?? [];
+    if (current.length === 0) return;
+    if (get().loadingOlder[convId]) return;
+    if (get().hasMoreMessages[convId] === false) return;
+    const cursor = current[0].id;
+    set((s) => ({
+      loadingOlder: { ...s.loadingOlder, [convId]: true },
+    }));
+    try {
+      const res = await api.listMessages(convId, { limit: 50, before: cursor });
+      set((s) => {
+        // Skip ids already present (defensive — pagination can
+        // return the cursor row itself depending on the server's
+        // strict-vs-loose < semantics).
+        const have = new Set((s.messages[convId] ?? []).map((m) => m.id));
+        const prepend = res.messages.filter((m) => !have.has(m.id));
+        return {
+          messages: {
+            ...s.messages,
+            [convId]: [...prepend, ...(s.messages[convId] ?? [])],
+          },
+          hasMoreMessages: {
+            ...s.hasMoreMessages,
+            [convId]: res.has_more,
+          },
+          loadingOlder: { ...s.loadingOlder, [convId]: false },
+        };
+      });
+    } catch {
+      set((s) => ({
+        loadingOlder: { ...s.loadingOlder, [convId]: false },
+      }));
     }
   },
 
@@ -584,67 +705,124 @@ async function consumeStream(
   tempAsstId: string,
 ) {
   let realAssistantId: string | null = null;
-  for await (const evt of parseSSE(res, signal)) {
-    if (evt.event === "message_start") {
-      const data = evt.data as SSEMessageStart;
-      realAssistantId = data.message_id;
-      // Swap the temp id with the real one so feedback / regenerate
-      // can act on the persisted row.
-      set((s) => {
-        const list = s.messages[convId] ?? [];
-        return {
-          messages: {
-            ...s.messages,
-            [convId]: list.map((m) =>
-              m.id === tempAsstId ? { ...m, id: data.message_id } : m,
-            ),
-          },
-          streamingAssistantId: {
-            ...s.streamingAssistantId,
-            [convId]: data.message_id,
-          },
-        };
-      });
-    } else if (evt.event === "content_delta") {
-      const data = evt.data as SSEContentDelta;
-      set((s) => {
-        const list = s.messages[convId] ?? [];
+  // RAF-batched delta buffer. content_delta events from fast models
+  // can fire 50+ times/sec; flushing every token to React state
+  // collapses the main thread. We buffer deltas in a plain string
+  // and commit once per animation frame (~60Hz) so React renders
+  // the streaming message at most once per frame.
+  let pendingDelta = "";
+  let rafHandle: number | null = null;
+  // ``runRaf`` lets tests / non-browser environments fall back to
+  // setTimeout when requestAnimationFrame isn't available.
+  const runRaf =
+    typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : (cb: () => void) => window.setTimeout(cb, 16) as unknown as number;
+  const cancelRaf =
+    typeof cancelAnimationFrame === "function"
+      ? cancelAnimationFrame
+      : (h: number) => window.clearTimeout(h);
+
+  const flush = () => {
+    if (!pendingDelta) return;
+    const chunk = pendingDelta;
+    pendingDelta = "";
+    set((s) => {
+      const list = s.messages[convId] ?? [];
+      const id = realAssistantId ?? tempAsstId;
+      return {
+        messages: {
+          ...s.messages,
+          [convId]: list.map((m) =>
+            m.id === id ? { ...m, content: m.content + chunk } : m,
+          ),
+        },
+      };
+    });
+  };
+
+  const scheduleFlush = () => {
+    if (rafHandle != null) return;
+    rafHandle = runRaf(() => {
+      rafHandle = null;
+      flush();
+    });
+  };
+
+  try {
+    for await (const evt of parseSSE(res, signal)) {
+      if (evt.event === "message_start") {
+        const data = evt.data as SSEMessageStart;
+        realAssistantId = data.message_id;
+        // Swap the temp id with the real one so feedback / regenerate
+        // can act on the persisted row.
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === tempAsstId ? { ...m, id: data.message_id } : m,
+              ),
+            },
+            streamingAssistantId: {
+              ...s.streamingAssistantId,
+              [convId]: data.message_id,
+            },
+          };
+        });
+      } else if (evt.event === "content_delta") {
+        const data = evt.data as SSEContentDelta;
+        pendingDelta += data.delta;
+        scheduleFlush();
+      } else if (evt.event === "message_complete") {
+        // Flush any buffered tail BEFORE writing the terminal state
+        // so the final content paint includes every token.
+        if (rafHandle != null) {
+          cancelRaf(rafHandle);
+          rafHandle = null;
+        }
+        flush();
+        const data = evt.data as SSEMessageComplete;
         const id = realAssistantId ?? tempAsstId;
-        return {
-          messages: {
-            ...s.messages,
-            [convId]: list.map((m) =>
-              m.id === id ? { ...m, content: m.content + data.delta } : m,
-            ),
-          },
-        };
-      });
-    } else if (evt.event === "message_complete") {
-      const data = evt.data as SSEMessageComplete;
-      const id = realAssistantId ?? tempAsstId;
-      set((s) => {
-        const list = s.messages[convId] ?? [];
-        return {
-          messages: {
-            ...s.messages,
-            [convId]: list.map((m) =>
-              m.id === id
-                ? {
-                    ...m,
-                    status: m.status === "cancelled" ? "cancelled" : "completed",
-                    isStreaming: false,
-                    token_usage: data.token_usage ?? null,
-                  }
-                : m,
-            ),
-          },
-        };
-      });
-    } else if (evt.event === "error") {
-      const id = realAssistantId ?? tempAsstId;
-      finalizeMessage(set, get, convId, id, "error");
-      get().setError("AI service error during streaming.");
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      status: m.status === "cancelled" ? "cancelled" : "completed",
+                      isStreaming: false,
+                      token_usage: data.token_usage ?? null,
+                    }
+                  : m,
+              ),
+            },
+          };
+        });
+      } else if (evt.event === "error") {
+        if (rafHandle != null) {
+          cancelRaf(rafHandle);
+          rafHandle = null;
+        }
+        flush();
+        const id = realAssistantId ?? tempAsstId;
+        finalizeMessage(set, get, convId, id, "error");
+        get().setError("AI service error during streaming.");
+      }
     }
+  } finally {
+    // Any deltas left in the buffer at this point belong to an
+    // abort / error path. Flushing them here keeps the persisted UI
+    // consistent with what the server already wrote to the DB.
+    if (rafHandle != null) {
+      cancelRaf(rafHandle);
+      rafHandle = null;
+    }
+    flush();
   }
 }
 

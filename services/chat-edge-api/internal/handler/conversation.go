@@ -118,6 +118,32 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	cursor := parseUUID(r.URL.Query().Get("cursor"))
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	// Search and cursor pagination are mutually exclusive: ?q=
+	// returns the top N matches in one shot (no cursor) so the
+	// front-end can swap between paginated browsing and search
+	// without a complex merge.
+	if query != "" {
+		convs, err := h.conversations.Search(
+			r.Context(), caller.TenantUUID, caller.UserID, query, limit,
+		)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+			return
+		}
+		items := make([]conversationResponse, 0, len(convs))
+		for i := range convs {
+			items = append(items, toResponse(&convs[i]))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"conversations": items,
+			"has_more":      false,
+			"next_cursor":   nil,
+		})
+		return
+	}
 
 	convs, next, err := h.conversations.List(r.Context(), caller.TenantUUID, caller.UserID, limit, cursor)
 	if err != nil {

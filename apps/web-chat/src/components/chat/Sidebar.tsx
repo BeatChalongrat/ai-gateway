@@ -1,7 +1,26 @@
 "use client";
 
+// Sidebar — paginated conversation list with optional server-side
+// search and a virtualized scroller. Renders:
+//
+//   • a header w/ logo + collapse toggle (desktop only)
+//   • a "New chat" button
+//   • a debounced search input
+//   • the conversation list:
+//        - search-active path: flat list of search results
+//        - normal path: time-grouped headers + paginated rows,
+//          with infinite scroll loading the next page near the
+//          bottom of the scroll container.
+//
+// Below ~80 items we skip the virtualizer (the overhead is wasted
+// for short lists). Above that, @tanstack/react-virtual measures
+// each row so variable-height items (inline rename / delete
+// confirm) don't break the layout.
+
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -18,6 +37,9 @@ const PORTAL_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PORTAL_URL) ||
   "http://localhost:3001";
 
+const VIRTUALIZE_THRESHOLD = 80;
+const LOAD_MORE_THRESHOLD_PX = 200;
+
 interface Props {
   activeId: string | null;
   open: boolean;
@@ -25,6 +47,10 @@ interface Props {
   onClose: () => void;
   onToggleCollapsed: () => void;
 }
+
+type Row =
+  | { kind: "header"; label: string; key: string }
+  | { kind: "conv"; conv: Conversation; key: string };
 
 export function Sidebar({
   activeId,
@@ -37,7 +63,15 @@ export function Sidebar({
   const { user } = useAuth();
   const conversations = useChatStore((s) => s.conversations);
   const loadConversations = useChatStore((s) => s.loadConversations);
+  const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
   const conversationsLoaded = useChatStore((s) => s.conversationsLoaded);
+  const hasMoreConversations = useChatStore((s) => s.hasMoreConversations);
+  const loadingMoreConversations = useChatStore((s) => s.loadingMoreConversations);
+  const searchResults = useChatStore((s) => s.conversationsSearchResults);
+  const searchActive = useChatStore((s) => s.conversationsSearchActive);
+  const searchLoading = useChatStore((s) => s.conversationsSearchLoading);
+  const runSearch = useChatStore((s) => s.searchConversations);
+  const clearSearch = useChatStore((s) => s.clearConversationsSearch);
   const createConversation = useChatStore((s) => s.createConversation);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
@@ -47,29 +81,50 @@ export function Sidebar({
 
   const [search, setSearch] = useState("");
   const [instructionsOpen, setInstructionsOpen] = useState(false);
-  const debouncedSearch = useDebounce(search, 200);
+  // 300ms per spec (debounced server-search round-trip).
+  const debouncedSearch = useDebounce(search, 300);
 
   useEffect(() => {
     if (!conversationsLoaded) void loadConversations();
     if (!modelsLoaded) void loadModels();
   }, [conversationsLoaded, loadConversations, modelsLoaded, loadModels]);
 
-  const sorted = useMemo(
-    () =>
-      [...conversations].sort(
-        (a, b) =>
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-      ),
-    [conversations],
-  );
+  // Server-search trigger. Fires whenever the debounced value
+  // changes; the store no-ops on an empty input.
+  useEffect(() => {
+    const q = debouncedSearch.trim();
+    if (q) {
+      void runSearch(q);
+    } else {
+      clearSearch();
+    }
+  }, [debouncedSearch, runSearch, clearSearch]);
 
-  const filtered = useMemo(() => {
-    const q = debouncedSearch.trim().toLowerCase();
-    if (!q) return sorted;
-    return sorted.filter((c) => (c.title || "").toLowerCase().includes(q));
-  }, [sorted, debouncedSearch]);
-
-  const grouped = useMemo(() => groupByTime(filtered), [filtered]);
+  // Build the flat rows array. Time-grouped when not searching;
+  // a flat list when searching.
+  const rows = useMemo<Row[]>(() => {
+    if (searchActive) {
+      return searchResults.map((c) => ({
+        kind: "conv" as const,
+        conv: c,
+        key: c.id,
+      }));
+    }
+    const sorted = [...conversations].sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    );
+    const groups = groupByTime(sorted);
+    const out: Row[] = [];
+    for (const g of groups) {
+      if (g.items.length === 0) continue;
+      out.push({ kind: "header", label: g.label, key: `h-${g.label}` });
+      for (const c of g.items) {
+        out.push({ kind: "conv", conv: c, key: c.id });
+      }
+    }
+    return out;
+  }, [searchActive, searchResults, conversations]);
 
   async function handleNew() {
     if (!selectedModelId) return;
@@ -83,14 +138,13 @@ export function Sidebar({
     window.location.href = `${PORTAL_URL}/login`;
   }
 
-  const isHidden = collapsed; // desktop collapsed state
+  const isHidden = collapsed;
   const userDisplay =
     user?.email || (user?.user_id ? user.user_id.slice(0, 8) : "Guest");
   const userInitial = (userDisplay || "?").charAt(0).toUpperCase();
 
   return (
     <>
-      {/* Mobile overlay */}
       <div
         className={`fixed inset-0 z-30 bg-black/50 backdrop-blur-sm transition-opacity duration-200 md:hidden ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
@@ -106,7 +160,6 @@ export function Sidebar({
             : ""
         }`}
       >
-        {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-4">
           <div className="flex items-center gap-2">
             <div className="h-7 w-7 rounded-md bg-gradient-to-br from-accent to-accent-subtle" />
@@ -131,7 +184,6 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* New chat */}
         <div className="px-3 pt-3">
           <button
             type="button"
@@ -151,7 +203,6 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* Search */}
         <div className="px-3 pt-2">
           <div className="relative">
             <svg
@@ -162,13 +213,7 @@ export function Sidebar({
               aria-hidden
               className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted"
             >
-              <circle
-                cx="11"
-                cy="11"
-                r="7"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
               <path
                 d="M21 21l-4.3-4.3"
                 stroke="currentColor"
@@ -203,71 +248,26 @@ export function Sidebar({
           </div>
         </div>
 
-        {/* Conversation list */}
-        <nav className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-2">
-          {!conversationsLoaded ? (
-            <ConversationListSkeleton rows={4} />
-          ) : conversations.length === 0 ? (
-            <div className="px-2 py-4 text-xs text-text-muted">
-              No conversations yet
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="px-2 py-4 text-xs text-text-muted">
-              No conversations found
-            </div>
-          ) : debouncedSearch.trim() ? (
-            <div className="flex flex-col gap-0.5">
-              {filtered.map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conv={c}
-                  active={c.id === activeId}
-                  onSelect={() => {
-                    router.push(`/chat/${c.id}`);
-                    onClose();
-                  }}
-                  onRename={(t) => renameConversation(c.id, t)}
-                  onDelete={async () => {
-                    await deleteConversation(c.id);
-                    if (c.id === activeId) router.replace("/chat");
-                  }}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {grouped.map(({ label, items }) =>
-                items.length === 0 ? null : (
-                  <div key={label}>
-                    <div className="px-3 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-                      {label}
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      {items.map((c) => (
-                        <ConversationItem
-                          key={c.id}
-                          conv={c}
-                          active={c.id === activeId}
-                          onSelect={() => {
-                            router.push(`/chat/${c.id}`);
-                            onClose();
-                          }}
-                          onRename={(t) => renameConversation(c.id, t)}
-                          onDelete={async () => {
-                            await deleteConversation(c.id);
-                            if (c.id === activeId) router.replace("/chat");
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ),
-              )}
-            </div>
-          )}
-        </nav>
+        <ConversationsArea
+          rows={rows}
+          conversationsLoaded={conversationsLoaded}
+          searchActive={searchActive}
+          searchLoading={searchLoading}
+          hasMore={hasMoreConversations && !searchActive}
+          loadingMore={loadingMoreConversations}
+          onLoadMore={() => void loadMoreConversations()}
+          activeId={activeId}
+          onSelect={(id) => {
+            router.push(`/chat/${id}`);
+            onClose();
+          }}
+          onRename={(id, t) => renameConversation(id, t)}
+          onDelete={async (id) => {
+            await deleteConversation(id);
+            if (id === activeId) router.replace("/chat");
+          }}
+        />
 
-        {/* Footer — user + logout */}
         <div className="flex items-center gap-3 border-t border-border px-4 py-3">
           <span
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-700 to-indigo-800 text-xs font-semibold text-white"
@@ -329,6 +329,194 @@ export function Sidebar({
         onClose={() => setInstructionsOpen(false)}
       />
     </>
+  );
+}
+
+// ─── Conversations area (virtualized + lazy-load) ─────────────
+
+interface AreaProps {
+  rows: Row[];
+  conversationsLoaded: boolean;
+  searchActive: boolean;
+  searchLoading: boolean;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  onRename: (id: string, title: string) => Promise<void> | void;
+  onDelete: (id: string) => Promise<void> | void;
+}
+
+function ConversationsArea({
+  rows,
+  conversationsLoaded,
+  searchActive,
+  searchLoading,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+  activeId,
+  onSelect,
+  onRename,
+  onDelete,
+}: AreaProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Below the virtualization threshold, render plain divs — the
+  // virtualizer's overhead isn't worth it for short lists.
+  const useVirtual = rows.length >= VIRTUALIZE_THRESHOLD;
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => (useVirtual ? ref.current : null),
+    estimateSize: (i) => (rows[i]?.kind === "header" ? 28 : 64),
+    overscan: 8,
+    measureElement(el) {
+      return el?.getBoundingClientRect().height ?? 0;
+    },
+  });
+
+  // Infinite scroll: bump the next page when the user lands within
+  // ~200px of the bottom of the scroll container.
+  function onScroll(e: React.UIEvent<HTMLDivElement>) {
+    if (!hasMore || loadingMore) return;
+    const el = e.currentTarget;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distance < LOAD_MORE_THRESHOLD_PX) {
+      onLoadMore();
+    }
+  }
+
+  // Loading skeleton: only on the FIRST load. Subsequent
+  // pagination + search use inline spinners.
+  if (!conversationsLoaded) {
+    return (
+      <nav className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-2">
+        <ConversationListSkeleton rows={4} />
+      </nav>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <nav className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-2">
+        <div className="px-2 py-4 text-xs text-text-muted">
+          {searchActive
+            ? searchLoading
+              ? "Searching…"
+              : "No conversations found"
+            : "No conversations yet"}
+        </div>
+      </nav>
+    );
+  }
+
+  return (
+    <nav
+      ref={ref}
+      onScroll={onScroll}
+      className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-2"
+    >
+      {useVirtual ? (
+        <div
+          style={{
+            position: "relative",
+            height: virtualizer.getTotalSize(),
+            width: "100%",
+          }}
+        >
+          {virtualizer.getVirtualItems().map((vi) => {
+            const row = rows[vi.index];
+            return (
+              <div
+                key={row.key}
+                data-index={vi.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              >
+                <SidebarRow
+                  row={row}
+                  active={
+                    row.kind === "conv" ? row.conv.id === activeId : false
+                  }
+                  onSelect={onSelect}
+                  onRename={onRename}
+                  onDelete={onDelete}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {rows.map((row) => (
+            <SidebarRow
+              key={row.key}
+              row={row}
+              active={row.kind === "conv" ? row.conv.id === activeId : false}
+              onSelect={onSelect}
+              onRename={onRename}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      )}
+      {hasMore ? (
+        <div className="flex justify-center py-2 text-[10px] text-text-muted">
+          {loadingMore ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
+              Loading more…
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={onLoadMore}
+              className="focus-ring rounded px-2 py-1 hover:text-text-primary"
+            >
+              Load more
+            </button>
+          )}
+        </div>
+      ) : null}
+    </nav>
+  );
+}
+
+function SidebarRow({
+  row,
+  active,
+  onSelect,
+  onRename,
+  onDelete,
+}: {
+  row: Row;
+  active: boolean;
+  onSelect: (id: string) => void;
+  onRename: (id: string, title: string) => Promise<void> | void;
+  onDelete: (id: string) => Promise<void> | void;
+}) {
+  if (row.kind === "header") {
+    return (
+      <div className="px-3 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-text-muted">
+        {row.label}
+      </div>
+    );
+  }
+  return (
+    <ConversationItem
+      conv={row.conv}
+      active={active}
+      onSelect={() => onSelect(row.conv.id)}
+      onRename={(t) => onRename(row.conv.id, t)}
+      onDelete={() => onDelete(row.conv.id)}
+    />
   );
 }
 

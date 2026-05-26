@@ -164,6 +164,50 @@ func (r *ConversationRepo) ListByUser(
 	return out, next, nil
 }
 
+// SearchByUser runs a server-side ILIKE on conversation titles. We
+// don't bother with full-text indexes yet — for SaaS scale (<100k
+// per tenant) ILIKE on the BTREE-indexed (tenant_id, user_id)
+// partition is fast enough; a GIN trigram index is a future
+// migration.
+//
+// Returns conversations sorted updated_at DESC, capped at ``limit``.
+func (r *ConversationRepo) SearchByUser(
+	ctx context.Context,
+	tenantID, userID uuid.UUID,
+	query string,
+	limit int,
+) ([]model.Conversation, error) {
+	const q = `
+		SELECT id, tenant_id, user_id, title, model_id, message_count,
+		       is_deleted, deleted_at, created_at, updated_at
+		FROM chat.conversations
+		WHERE tenant_id = $1
+		  AND user_id = $2
+		  AND is_deleted = false
+		  AND title ILIKE $3
+		ORDER BY updated_at DESC, id DESC
+		LIMIT $4
+	`
+	rows, err := r.db.Query(ctx, q, tenantID, userID, "%"+query+"%", limit)
+	if err != nil {
+		return nil, fmt.Errorf("search conversations: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.Conversation, 0)
+	for rows.Next() {
+		var c model.Conversation
+		if err := rows.Scan(
+			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
+			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
+			&c.CreatedAt, &c.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("search scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // UpdateTitle changes ``title`` and bumps ``updated_at``. The
 // WHERE clause also enforces the tenant scope so a wrong tenant_id
 // can't accidentally rename someone else's conversation.
