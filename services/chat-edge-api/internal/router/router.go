@@ -40,6 +40,7 @@ type Handlers struct {
 	File         *handler.FileHandler
 	Preferences  *handler.PreferencesHandler
 	Share        *handler.ShareHandler
+	Admin        *handler.AdminHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -153,6 +154,19 @@ func New(
 
 		// Public — no auth. Anyone with the share token can read.
 		r.Get("/shared/{token}", h.Share.PublicGet)
+
+		// ── Admin observability ─────────────────────────────────
+		// Behind a shared bearer secret; intended for the admin-ui
+		// proxied via its server-side route handler so the secret
+		// never reaches the browser.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireAdmin(cfg.AdminAPIKey))
+			r.Get("/admin/analytics/usage", h.Admin.Usage)
+			r.Get("/admin/conversations", h.Admin.Conversations)
+			r.Get("/admin/conversations/{id}", h.Admin.ConversationDetail)
+			r.Get("/admin/users", h.Admin.Users)
+			r.Patch("/admin/users/{id}", h.Admin.UpdateUser)
+		})
 	})
 
 	return r

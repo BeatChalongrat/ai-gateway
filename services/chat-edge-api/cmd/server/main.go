@@ -148,6 +148,7 @@ func main() {
 		File:         handler.NewFileHandler(fileSvc),
 		Preferences:  handler.NewPreferencesHandler(prefsRepo),
 		Share:        handler.NewShareHandler(shareSvc),
+		Admin:        handler.NewAdminHandler(pool),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
