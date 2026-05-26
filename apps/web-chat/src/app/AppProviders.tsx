@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { ToastViewport } from "@/components/ui/Toast";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
 
@@ -47,6 +48,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
           {errorBanner}
         </div>
       ) : null}
+      <ToastViewport />
     </QueryClientProvider>
   );
 }

@@ -94,7 +94,7 @@ func New(
 			r.Get("/conversations", h.Conversation.List)
 			r.Post("/conversations", h.Conversation.Create)
 			r.Get("/conversations/{id}", h.Conversation.Get)
-			r.Patch("/conversations/{id}", h.Conversation.Rename)
+			r.Patch("/conversations/{id}", h.Conversation.Update)
 			r.Delete("/conversations/{id}", h.Conversation.Delete)
 
 			// Cancel — interrupts the in-flight stream for a

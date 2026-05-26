@@ -141,30 +141,45 @@ func (h *ConversationHandler) Get(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(toResponse(c))
 }
 
-type renameRequest struct {
-	Title string `json:"title"`
+// updateRequest covers every mutable field on chat.conversations.
+// All fields are optional; the handler applies whichever ones are
+// present. The route is still PATCH so the same endpoint serves
+// title renames and model reassignment without a verb-explosion.
+type updateRequest struct {
+	Title   *string `json:"title,omitempty"`
+	ModelID *string `json:"model_id,omitempty"`
 }
 
-func (h *ConversationHandler) Rename(w http.ResponseWriter, r *http.Request) {
+func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
 	convID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
 		return
 	}
-	var req renameRequest
+	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
 		return
 	}
-	if err := h.conversations.Rename(r.Context(), caller.TenantUUID, convID, req.Title); err != nil {
-		if errors.Is(err, service.ErrConversationNotFound) {
-			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
-			return
-		}
-		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
+	if req.Title == nil && req.ModelID == nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
 	}
+
+	if req.Title != nil {
+		if err := h.conversations.Rename(r.Context(), caller.TenantUUID, convID, *req.Title); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if req.ModelID != nil {
+		if err := h.conversations.SetModel(r.Context(), caller.TenantUUID, convID, *req.ModelID); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+
 	// Re-fetch + return so the client gets the updated timestamp.
 	c, err := h.conversations.Get(r.Context(), caller.TenantUUID, convID)
 	if err != nil {
@@ -173,6 +188,17 @@ func (h *ConversationHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(toResponse(c))
+}
+
+func (h *ConversationHandler) writeUpdateError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrConversationNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+	case errors.Is(err, service.ErrConversationBadModel):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "model not allowed")
+	default:
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
+	}
 }
 
 func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {

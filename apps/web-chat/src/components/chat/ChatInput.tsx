@@ -7,7 +7,13 @@ import { ModelSelector } from "./ModelSelector";
 interface Props {
   disabled: boolean;
   streaming: boolean;
-  pinnedModelId?: string | null;
+  /** Currently-active model. The conversation page passes the
+   *  conversation's model_id; the landing page passes the global
+   *  default (omit → ModelSelector falls back to its own store). */
+  activeModelId?: string | null;
+  /** Called when the user picks a different model. Optional —
+   *  omitted on the landing page so the global default flows. */
+  onModelPick?: (modelId: string) => void;
   onSend: (text: string) => void;
   onStop: () => void;
   // When set, the parent injected an outside value (e.g. from a
@@ -22,7 +28,8 @@ const MAX_TEXTAREA_HEIGHT = 180;
 export function ChatInput({
   disabled,
   streaming,
-  pinnedModelId,
+  activeModelId,
+  onModelPick,
   onSend,
   onStop,
   injectedText,
@@ -74,7 +81,14 @@ export function ChatInput({
       <div className="mx-auto flex max-w-3xl flex-col gap-2">
         <div className="flex items-end gap-2 rounded-2xl border border-border bg-bg-secondary px-3 py-2 transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30">
           <div className="pb-0.5">
-            <ModelSelector pinnedTo={pinnedModelId} disabled={streaming} compact />
+            <ModelSelector
+              activeModelId={activeModelId}
+              disabled={streaming}
+              compact
+              onPick={
+                onModelPick ? (m) => onModelPick(m.id) : undefined
+              }
+            />
           </div>
           <textarea
             ref={taRef}
