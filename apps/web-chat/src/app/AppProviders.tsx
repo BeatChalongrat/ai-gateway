@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 import { ToastViewport } from "@/components/ui/Toast";
+import { registerServiceWorker } from "@/lib/registerSW";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
 
@@ -29,6 +30,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     // store. No network call — chat-edge verifies the token on the
     // first protected API hit.
     checkAuth();
+    // Best-effort service-worker install for PWA support. Skipped in
+    // dev to avoid breaking HMR.
+    registerServiceWorker();
   }, [checkAuth]);
 
   // Auto-dismiss toast after 4s.

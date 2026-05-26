@@ -9,6 +9,63 @@
 
 :root {
   color-scheme: dark;
+  /* iOS safe-area exposures. The env() lookups return 0 on
+     non-notched devices so the same rules work everywhere; pages
+     consume them via the .safe-* utility classes below. */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+/* Safe-area utilities — used by the chat header, the input bar,
+   and any bottom sheet so notches + the iPhone home indicator
+   don't eat the UI. */
+.safe-top    { padding-top: var(--sat); }
+.safe-bottom { padding-bottom: var(--sab); }
+.safe-left   { padding-left: var(--sal); }
+.safe-right  { padding-right: var(--sar); }
+.safe-px     { padding-left: var(--sal); padding-right: var(--sar); }
+.safe-py     { padding-top: var(--sat); padding-bottom: var(--sab); }
+
+/* Mobile globals — disable pull-to-refresh in standalone PWA mode
+   so the user can't accidentally reload mid-stream, and add
+   momentum scrolling everywhere on iOS. user-select: none on
+   the body keeps button labels from highlighting on long-press;
+   message content opts back in via .selectable below. */
+html, body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+button, a, [role="button"], .sran-sidebar-link {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.selectable,
+.prose-chat,
+.prose-chat p,
+.prose-chat li,
+.prose-chat pre,
+.prose-chat code,
+.prose-chat table,
+.streaming-body,
+.streaming-body pre,
+.streaming-body code,
+.bubble-user-text,
+textarea,
+input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Scroll containers — momentum on iOS + smooth scrolling on
+   desktop. -webkit-overflow-scrolling is a no-op outside iOS but
+   it's the documented opt-in for momentum so we leave it. */
+.scrollbar-thin,
+.h-full.overflow-y-auto,
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
 }
 
 html, body {
@@ -442,3 +499,22 @@ html, body {
   outline-offset: 2px;
   border-radius: 6px;
 }
+
+/* Mobile tap-target helper — wraps tightly-padded icon buttons so
+   they still register as a 44px touch surface (Apple HIG minimum).
+   The visual size stays small; only the hit-test area inflates. */
+@media (pointer: coarse) {
+  .tap-44 {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Bottom-sheet animation. Used by Modal in mobile mode + the
+   model selector. Slides up from the bottom of the viewport;
+   the wrapping element handles the safe-area bottom inset. */
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.sheet-up { animation: sheetUp 220ms cubic-bezier(0.32, 0.72, 0, 1); }

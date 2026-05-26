@@ -152,7 +152,7 @@ export function Sidebar({
         onClick={onClose}
       />
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-full w-[280px] flex-col border-r border-border bg-bg-sidebar transition-all duration-200 ease-out md:static ${
+        className={`safe-top safe-bottom fixed left-0 top-0 z-40 flex h-full w-[85vw] max-w-[320px] flex-col border-r border-border bg-bg-sidebar transition-all duration-200 ease-out md:static md:w-[280px] md:max-w-none ${
           open ? "translate-x-0" : "-translate-x-full"
         } md:translate-x-0 ${
           isHidden
