@@ -313,29 +313,30 @@ export function ChatInput({
                 transition: "height 100ms ease-out",
               }}
             />
-            <div className="tap-44 relative flex h-9 w-9 shrink-0 items-center justify-center">
+            {/* Send / stop — one button at a time, rendered as a
+                regular flex child (no absolute positioning) so the
+                composer row's items-start lines it up with the
+                first line of the textarea. mt-0.5 nudges the 36px
+                button's center to ~y19, matching the textarea's
+                line-1 centre (py-2 + 15px × 1.5 / 2 ≈ 19.25). */}
+            {streaming ? (
               <button
                 type="button"
                 onClick={onStop}
                 aria-label="Stop generation"
-                tabIndex={streaming ? 0 : -1}
-                className={`focus-ring absolute inset-0 flex items-center justify-center rounded-full bg-status-danger/85 text-white transition-all duration-150 hover:bg-status-danger ${
-                  streaming ? "scale-100 opacity-100" : "pointer-events-none scale-90 opacity-0"
-                }`}
+                className="focus-ring tap-44 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-status-danger/85 text-white transition-colors duration-150 hover:bg-status-danger"
               >
                 <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                   <rect x="6" y="6" width="12" height="12" rx="2" />
                 </svg>
               </button>
+            ) : (
               <button
                 type="button"
                 onClick={submit}
                 disabled={!canSend}
                 aria-label="Send"
-                tabIndex={streaming ? -1 : 0}
-                className={`focus-ring absolute inset-0 flex items-center justify-center rounded-full text-white transition-all duration-150 disabled:cursor-not-allowed ${
-                  streaming ? "pointer-events-none scale-90 opacity-0" : "scale-100 opacity-100"
-                } ${
+                className={`focus-ring tap-44 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-colors duration-150 disabled:cursor-not-allowed ${
                   canSend
                     ? "bg-accent hover:bg-accent-hover"
                     : "bg-bg-elevated text-text-muted"
@@ -351,7 +352,7 @@ export function ChatInput({
                   />
                 </svg>
               </button>
-            </div>
+            )}
           </div>
 
           {/* Bottom row: model selector pill */}
