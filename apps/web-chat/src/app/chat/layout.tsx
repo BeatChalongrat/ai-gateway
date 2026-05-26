@@ -1,7 +1,7 @@
 "use client";
 
 import { useSelectedLayoutSegments } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Sidebar } from "@/components/chat/Sidebar";
 import { Spinner } from "@/components/ui/Spinner";
@@ -37,24 +37,17 @@ export default function ChatLayout({
     });
   }
 
-  const initialToken = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    return getPortalToken();
-  }, []);
-  const [isReady, setIsReady] = useState(!!initialToken);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    if (initialToken) checkAuth();
-  }, [initialToken, checkAuth]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!initialToken) {
+    const token = getPortalToken();
+    if (!token) {
       redirectToPortalLogin();
       return;
     }
+    checkAuth();
     setIsReady(true);
-  }, [initialToken]);
+  }, [checkAuth]);
 
   // Lock body scroll while the mobile slide-over is open.
   useEffect(() => {
