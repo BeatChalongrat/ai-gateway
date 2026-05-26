@@ -247,9 +247,17 @@ export function ChatInput({
           </div>
         ) : null}
 
-        {/* Composer pill */}
+        {/* Composer pill — Claude-style two-row layout.
+            Row 1: full-width textarea (auto-grows).
+            Row 2: [+ attach] on the left, [model pill] [send/stop]
+                   on the right.
+            Decoupling the buttons from the textarea row sidesteps
+            every "send is misaligned with first line" problem — the
+            send button now sits in its own row with its own padding
+            and only competes with the model pill for vertical
+            alignment. */}
         <div
-          className="flex flex-col gap-1.5 border border-border bg-bg-surface px-2 pb-1.5 pt-2 transition-colors focus-within:border-border-strong"
+          className="flex flex-col border border-border bg-bg-surface transition-colors focus-within:border-border-strong"
           style={{
             borderRadius: 24,
             boxShadow: "0 2px 12px rgba(0, 0, 0, 0.18)",
@@ -264,35 +272,8 @@ export function ChatInput({
             onChange={onPickFiles}
           />
 
-          {/* Top row: paperclip + textarea + send/stop.
-              items-start anchors the buttons to the top of the row,
-              so they line up with the FIRST line of the textarea —
-              matches ChatGPT-style composers where the send button
-              stays put as the textarea grows downward.
-              Vertical math: textarea has py-2 (8px) + 15px font ×
-              1.5 lh ≈ 22.5px line, so line-1 centre is ~19.25px
-              from the top. The 36px button wrapper centres at
-              ~18px when items-start, off by ~1px — invisible. */}
-          <div className="flex items-start gap-1">
-            {conversationId ? (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                aria-label="Attach files"
-                title="Attach files"
-                disabled={streaming || disabled}
-                className="focus-ring tap-44 shrink-0 rounded-full p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M12 5v14M5 12h14"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            ) : null}
+          {/* Row 1: textarea, full width */}
+          <div className="px-4 pt-3">
             <textarea
               ref={taRef}
               rows={1}
@@ -307,62 +288,83 @@ export function ChatInput({
               }
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKeyDown}
-              className="flex-1 resize-none bg-transparent px-1 py-2 text-[15px] text-text-primary placeholder:text-text-placeholder focus:outline-none disabled:opacity-60"
+              className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-text-primary placeholder:text-text-placeholder focus:outline-none disabled:opacity-60"
               style={{
                 maxHeight: maxTextareaHeight,
                 transition: "height 100ms ease-out",
               }}
             />
-            {/* Send / stop — one button at a time, rendered as a
-                regular flex child (no absolute positioning) so the
-                composer row's items-start lines it up with the
-                first line of the textarea. mt-0.5 nudges the 36px
-                button's center to ~y19, matching the textarea's
-                line-1 centre (py-2 + 15px × 1.5 / 2 ≈ 19.25). */}
-            {streaming ? (
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label="Stop generation"
-                className="focus-ring tap-44 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-status-danger/85 text-white transition-colors duration-150 hover:bg-status-danger"
-              >
-                <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={submit}
-                disabled={!canSend}
-                aria-label="Send"
-                className={`focus-ring tap-44 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-colors duration-150 disabled:cursor-not-allowed ${
-                  canSend
-                    ? "bg-accent hover:bg-accent-hover"
-                    : "bg-bg-elevated text-text-muted"
-                }`}
-              >
-                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M12 19V5M5 12l7-7 7 7"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            )}
           </div>
 
-          {/* Bottom row: model selector pill */}
-          <div className="flex items-center gap-2 pl-1">
-            <ModelSelector
-              activeModelId={activeModelId}
-              disabled={streaming}
-              compact
-              onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
-            />
+          {/* Row 2: attach (left) · model + send (right) */}
+          <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
+            {/* Left — attach button. The plus mark replaces the
+                paperclip per the Claude reference; same behaviour. */}
+            <div className="flex items-center">
+              {conversationId ? (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Attach files"
+                  title="Attach files"
+                  disabled={streaming || disabled}
+                  className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M12 5v14M5 12h14"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+
+            {/* Right — model selector pill + send/stop. */}
+            <div className="flex items-center gap-1.5">
+              <ModelSelector
+                activeModelId={activeModelId}
+                disabled={streaming}
+                compact
+                onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
+              />
+              {streaming ? (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  aria-label="Stop generation"
+                  className="focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-status-danger/85 text-white transition-colors duration-150 hover:bg-status-danger"
+                >
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={!canSend}
+                  aria-label="Send"
+                  className={`focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white transition-colors duration-150 disabled:cursor-not-allowed ${
+                    canSend
+                      ? "bg-accent hover:bg-accent-hover"
+                      : "bg-bg-elevated text-text-muted"
+                  }`}
+                >
+                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M12 19V5M5 12l7-7 7 7"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
