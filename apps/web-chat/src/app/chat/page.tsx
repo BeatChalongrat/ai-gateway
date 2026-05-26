@@ -33,24 +33,16 @@ export default function ChatLanding() {
   // typed survive the navigation into the new conversation.
   const [injectedText, setInjectedText] = useState<string | null>(null);
 
-  // Find an existing empty conversation we can reuse instead of
-  // spawning yet another row. Same heuristic as useNewChatHandler:
-  // message_count === 0, matches the active model, was touched in
-  // the last 60s.
-  function findReusableConversation(modelId: string): string | null {
-    const cutoff = Date.now() - 60_000;
-    const candidate = conversations.find((c) => {
-      if (c.message_count !== 0) return false;
-      if (c.model_id !== modelId) return false;
-      const t = new Date(c.updated_at).getTime();
-      return !Number.isNaN(t) && t > cutoff;
-    });
+  // Reuse any empty conversation regardless of model / age. Same
+  // rule as useNewChatHandler — see that file for the rationale.
+  function findReusableConversation(): string | null {
+    const candidate = conversations.find((c) => c.message_count === 0);
     return candidate ? candidate.id : null;
   }
 
   async function handleSend(text: string) {
     if (!selectedModelId) return;
-    let convId = findReusableConversation(selectedModelId);
+    let convId = findReusableConversation();
     if (!convId) {
       const fresh = await createConversation(selectedModelId);
       convId = fresh.id;
