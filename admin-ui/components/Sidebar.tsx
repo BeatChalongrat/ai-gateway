@@ -50,6 +50,14 @@ const NAV_SECTIONS: { title: string; items: { label: string; href: string; icon:
       { label: "AI review", href: "/ai-review", icon: <svg {...S}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> },
     ],
   },
+  {
+    title: "Web Chat",
+    items: [
+      { label: "Chat Analytics", href: "/chat-analytics", icon: <svg {...S}><path d="M3 3v18h18"/><path d="M7 14l3-3 4 4 5-6"/></svg> },
+      { label: "Conversation Logs", href: "/chat-conversations", icon: <svg {...S}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> },
+      { label: "Chat Users", href: "/chat-users", icon: <svg {...S}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11l-3-3-3 3"/><path d="M19 8v9"/></svg> },
+    ],
+  },
 ];
 
 const Divider = () => <div style={{ height: "1px", background: "rgba(80,130,220,0.06)", margin: "0.125rem 0.875rem" }} />;
