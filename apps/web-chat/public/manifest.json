@@ -6,13 +6,13 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#060A1D",
-  "theme_color": "#0F1835",
+  "background_color": "#212121",
+  "theme_color": "#171717",
   "icons": [
     {
-      "src": "/icons/icon.svg",
+      "src": "/sran-logo.png",
       "sizes": "any",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {

@@ -34,7 +34,7 @@ const CHIPS: ChipDef[] = [
   {
     label: "Write",
     icon: (
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
           d="M12 20h9M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
           stroke="currentColor"
@@ -49,7 +49,7 @@ const CHIPS: ChipDef[] = [
   {
     label: "Learn",
     icon: (
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
           d="M22 12c0 5-4 9-10 9S2 17 2 12 6 3 12 3s10 4 10 9zM9 9h6M9 13h6M9 17h4"
           stroke="currentColor"
@@ -64,7 +64,7 @@ const CHIPS: ChipDef[] = [
   {
     label: "Code",
     icon: (
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
           d="M8 6l-6 6 6 6M16 6l6 6-6 6"
           stroke="currentColor"
@@ -79,7 +79,7 @@ const CHIPS: ChipDef[] = [
   {
     label: "Analyze",
     icon: (
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
           d="M3 3v18h18M7 14l3-3 4 4 5-6"
           stroke="currentColor"
@@ -126,11 +126,12 @@ export function EmptyState({ onPrompt }: Props) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
       <div className="fade-in-up w-full max-w-chat text-center">
-        <div className="mb-3 inline-flex items-center justify-center gap-2 text-accent">
-          <svg width={22} height={22} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-            <path d="M12 2 9.6 9.6 2 12l7.6 2.4L12 22l2.4-7.6L22 12l-7.6-2.4Z" />
-          </svg>
-        </div>
+        <img
+          src="/sran-logo.png"
+          alt="SRAN Chat"
+          className="sran-logo mx-auto mb-4 h-20 w-auto select-none md:h-24"
+          draggable={false}
+        />
         <h1 className="text-2xl font-semibold tracking-tight text-text-primary md:text-3xl">
           {greeting}
         </h1>
@@ -144,9 +145,9 @@ export function EmptyState({ onPrompt }: Props) {
               key={c.label}
               type="button"
               onClick={() => onPrompt(c.prompt)}
-              className="focus-ring tap-44 inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-transparent px-3.5 py-1.5 text-[13px] text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-surface hover:text-text-primary"
+              className="focus-ring tap-44 inline-flex items-center gap-2 rounded-full border border-border-subtle bg-transparent px-4 py-2 text-[13px] text-text-secondary transition-all hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-surface hover:text-text-primary"
             >
-              <span className="text-text-secondary">{c.icon}</span>
+              <span className="text-accent">{c.icon}</span>
               <span>{c.label}</span>
             </button>
           ))}

@@ -145,11 +145,19 @@ export function Sidebar({
             : ""
         }`}
       >
-        {/* Header — wordmark + collapse toggle */}
+        {/* Header — SRAN logo + collapse toggle. The logo PNG bakes
+            in both the cat-bubble mark and the "SRAN" wordmark, so
+            we drop the separate text label and just render the
+            image. CSS filter:invert(1) flips the black artwork to
+            white in dark mode; the light-theme override below
+            removes the filter. */}
         <div className="flex items-center justify-between gap-2 px-3 py-3">
-          <span className="font-brand text-base text-text-primary">
-            SRAN Chat
-          </span>
+          <img
+            src="/sran-logo.png"
+            alt="SRAN Chat"
+            className="sran-logo h-8 w-auto select-none"
+            draggable={false}
+          />
           <button
             type="button"
             onClick={onToggleCollapsed}

@@ -35,6 +35,7 @@ interface Props {
 const MAX_TEXTAREA_HEIGHT_DESKTOP = 180;
 const MAX_TEXTAREA_HEIGHT_MOBILE = 120;
 const MAX_CONCURRENT_UPLOADS = 3;
+const EMPTY_PENDING_FILES = [] as const;
 
 export function ChatInput({
   conversationId,
@@ -89,7 +90,9 @@ export function ChatInput({
     };
   }, []);
   const pendingFiles = useChatStore((s) =>
-    conversationId ? s.pendingFiles[conversationId] ?? [] : [],
+    conversationId
+      ? s.pendingFiles[conversationId] ?? EMPTY_PENDING_FILES
+      : EMPTY_PENDING_FILES,
   );
   const addPendingFile = useChatStore((s) => s.addPendingFile);
   const updateFileProgress = useChatStore((s) => s.updateFileProgress);
