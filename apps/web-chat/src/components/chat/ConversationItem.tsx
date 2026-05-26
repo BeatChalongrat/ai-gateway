@@ -44,10 +44,10 @@ export function ConversationItem({
 
   return (
     <div
-      className={`group relative flex flex-col rounded-lg text-sm transition-colors ${
+      className={`group relative flex flex-col rounded-lg text-[13px] transition-colors ${
         active
           ? "bg-bg-elevated text-text-primary"
-          : "text-text-secondary hover:bg-bg-elevated/60 hover:text-text-primary"
+          : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
       }`}
     >
       <div
@@ -64,7 +64,7 @@ export function ConversationItem({
             onSelect();
           }
         }}
-        className="flex items-center gap-2 px-3 py-2"
+        className="flex items-center gap-2 px-3 py-1.5"
       >
         {renaming ? (
           <input

@@ -1,21 +1,14 @@
 "use client";
 
-// Sidebar — paginated conversation list with optional server-side
-// search and a virtualized scroller. Renders:
+// Sidebar — ChatGPT/Claude-style minimal:
 //
-//   • a header w/ logo + collapse toggle (desktop only)
-//   • a "New chat" button
-//   • a debounced search input
-//   • the conversation list:
-//        - search-active path: flat list of search results
-//        - normal path: time-grouped headers + paginated rows,
-//          with infinite scroll loading the next page near the
-//          bottom of the scroll container.
+//   • Header: "SRAN Chat" wordmark + collapse button (desktop)
+//   • Top actions: + New chat, Search chats (both subtle outlined)
+//   • Conversation list grouped by time, plain-text items
+//   • Footer: user avatar + name + theme toggle + settings + logout
 //
-// Below ~80 items we skip the virtualizer (the overhead is wasted
-// for short lists). Above that, @tanstack/react-virtual measures
-// each row so variable-height items (inline rename / delete
-// confirm) don't break the layout.
+// Below 80 rows we render plain divs; above that we virtualize via
+// @tanstack/react-virtual. Server-side search is debounced 300ms.
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -24,10 +17,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { clearPortalToken } from "@/lib/auth";
 import type { Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
-import { useModelStore } from "@/stores/modelStore";
+import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
 
 import { ConversationItem } from "./ConversationItem";
@@ -72,25 +66,19 @@ export function Sidebar({
   const searchLoading = useChatStore((s) => s.conversationsSearchLoading);
   const runSearch = useChatStore((s) => s.searchConversations);
   const clearSearch = useChatStore((s) => s.clearConversationsSearch);
-  const createConversation = useChatStore((s) => s.createConversation);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
-  const selectedModelId = useModelStore((s) => s.selectedModelId);
-  const loadModels = useModelStore((s) => s.loadModels);
-  const modelsLoaded = useModelStore((s) => s.loaded);
+  const newChat = useNewChatHandler();
 
   const [search, setSearch] = useState("");
+  const [searchExpanded, setSearchExpanded] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
-  // 300ms per spec (debounced server-search round-trip).
   const debouncedSearch = useDebounce(search, 300);
 
   useEffect(() => {
     if (!conversationsLoaded) void loadConversations();
-    if (!modelsLoaded) void loadModels();
-  }, [conversationsLoaded, loadConversations, modelsLoaded, loadModels]);
+  }, [conversationsLoaded, loadConversations]);
 
-  // Server-search trigger. Fires whenever the debounced value
-  // changes; the store no-ops on an empty input.
   useEffect(() => {
     const q = debouncedSearch.trim();
     if (q) {
@@ -100,8 +88,6 @@ export function Sidebar({
     }
   }, [debouncedSearch, runSearch, clearSearch]);
 
-  // Build the flat rows array. Time-grouped when not searching;
-  // a flat list when searching.
   const rows = useMemo<Row[]>(() => {
     if (searchActive) {
       return searchResults.map((c) => ({
@@ -127,9 +113,7 @@ export function Sidebar({
   }, [searchActive, searchResults, conversations]);
 
   async function handleNew() {
-    if (!selectedModelId) return;
-    const c = await createConversation(selectedModelId);
-    router.push(`/chat/${c.id}`);
+    await newChat();
     onClose();
   }
 
@@ -145,6 +129,7 @@ export function Sidebar({
 
   return (
     <>
+      {/* Mobile backdrop */}
       <div
         className={`fixed inset-0 z-30 bg-black/50 backdrop-blur-sm transition-opacity duration-200 md:hidden ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
@@ -152,7 +137,7 @@ export function Sidebar({
         onClick={onClose}
       />
       <aside
-        className={`safe-top safe-bottom fixed left-0 top-0 z-40 flex h-full w-[85vw] max-w-[320px] flex-col border-r border-border bg-bg-sidebar transition-all duration-200 ease-out md:static md:w-[280px] md:max-w-none ${
+        className={`safe-top safe-bottom fixed left-0 top-0 z-40 flex h-full w-[85vw] max-w-[320px] flex-col border-r border-border-subtle bg-bg-sidebar transition-all duration-200 ease-out md:static md:w-[260px] md:max-w-none ${
           open ? "translate-x-0" : "-translate-x-full"
         } md:translate-x-0 ${
           isHidden
@@ -160,19 +145,19 @@ export function Sidebar({
             : ""
         }`}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-4">
-          <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-md bg-gradient-to-br from-accent to-accent-subtle" />
-            <span className="font-semibold tracking-tight">SRAN Chat</span>
-          </div>
+        {/* Header — wordmark + collapse toggle */}
+        <div className="flex items-center justify-between gap-2 px-3 py-3">
+          <span className="font-brand text-base text-text-primary">
+            SRAN Chat
+          </span>
           <button
             type="button"
             onClick={onToggleCollapsed}
-            aria-label="Collapse sidebar"
-            title="Collapse sidebar"
-            className="focus-ring hidden rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary md:inline-flex"
+            aria-label="Collapse sidebar (⌘⇧S)"
+            title="Collapse sidebar (⌘⇧S)"
+            className="focus-ring tap-44 hidden rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary md:inline-flex"
           >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
                 d="M15 6l-6 6 6 6"
                 stroke="currentColor"
@@ -184,12 +169,12 @@ export function Sidebar({
           </button>
         </div>
 
-        <div className="px-3 pt-3">
+        {/* New chat + search row */}
+        <div className="flex flex-col gap-1 px-2 pt-1">
           <button
             type="button"
             onClick={handleNew}
-            disabled={!selectedModelId}
-            className="focus-ring flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg-secondary px-3 py-2.5 text-sm font-medium text-text-primary transition-all hover:bg-bg-elevated hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+            className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg border border-border-subtle bg-transparent px-3 py-2 text-sm text-text-primary transition-colors hover:bg-bg-elevated"
           >
             <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
@@ -199,55 +184,82 @@ export function Sidebar({
                 strokeLinecap="round"
               />
             </svg>
-            New chat
+            <span>New chat</span>
+            <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
+              ⌘⇧N
+            </span>
           </button>
-        </div>
 
-        <div className="px-3 pt-2">
-          <div className="relative">
-            <svg
-              width={14}
-              height={14}
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted"
-            >
-              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-              <path
-                d="M21 21l-4.3-4.3"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search conversations"
-              className="w-full rounded-md border border-border bg-bg-base/50 py-1.5 pl-8 pr-7 text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-            />
-            {search ? (
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => setSearch("")}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-text-muted hover:bg-bg-elevated hover:text-text-primary"
+          {searchExpanded || search ? (
+            <div className="relative">
+              <svg
+                width={14}
+                height={14}
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted"
               >
-                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M6 6l12 12M18 6l-12 12"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            ) : null}
-          </div>
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <path
+                  d="M21 21l-4.3-4.3"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <input
+                type="text"
+                value={search}
+                data-shortcut="conv-search"
+                autoFocus
+                onChange={(e) => setSearch(e.target.value)}
+                onBlur={() => {
+                  if (!search) setSearchExpanded(false);
+                }}
+                placeholder="Search chats…"
+                className="w-full rounded-lg border border-border-subtle bg-transparent py-1.5 pl-8 pr-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none"
+              />
+              {search ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setSearch("");
+                    setSearchExpanded(false);
+                  }}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-text-muted hover:bg-bg-elevated hover:text-text-primary"
+                >
+                  <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M6 6l12 12M18 6l-12 12"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSearchExpanded(true)}
+              className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+            >
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <path d="M21 21l-4.3-4.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <span>Search chats</span>
+              <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
+                ⌘K
+              </span>
+            </button>
+          )}
         </div>
 
+        {/* Conversation list */}
         <ConversationsArea
           rows={rows}
           conversationsLoaded={conversationsLoaded}
@@ -268,31 +280,30 @@ export function Sidebar({
           }}
         />
 
-        <div className="flex items-center gap-3 border-t border-border px-4 py-3">
+        {/* Footer — user profile + actions */}
+        <div className="flex items-center gap-2 border-t border-border-subtle px-3 py-2.5">
           <span
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-700 to-indigo-800 text-xs font-semibold text-white"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+            style={{ background: "var(--accent)" }}
             aria-hidden
           >
             {userInitial}
           </span>
           <div className="min-w-0 flex-1">
             <div
-              className="truncate text-xs font-medium text-text-primary"
-              style={{ maxWidth: 120 }}
+              className="truncate text-[13px] font-medium text-text-primary"
               title={userDisplay}
             >
               {userDisplay}
             </div>
-            <div className="truncate text-[11px] text-text-muted">
-              {user?.role ?? "user"}
-            </div>
           </div>
+          <ThemeToggleButton />
           <button
             type="button"
             onClick={() => setInstructionsOpen(true)}
             aria-label="Custom instructions"
             title="Custom instructions"
-            className="focus-ring rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
             <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
               <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
@@ -309,8 +320,8 @@ export function Sidebar({
             type="button"
             onClick={handleLogout}
             aria-label="Logout"
-            className="focus-ring rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
             title="Logout"
+            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
             <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
@@ -329,6 +340,43 @@ export function Sidebar({
         onClose={() => setInstructionsOpen(false)}
       />
     </>
+  );
+}
+
+function ThemeToggleButton() {
+  const theme = useThemeStore((s) => s.theme);
+  const toggle = useThemeStore((s) => s.toggle);
+  const isDark = theme === "dark";
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+    >
+      {isDark ? (
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.7" />
+          <path
+            d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+          />
+        </svg>
+      ) : (
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -362,22 +410,18 @@ function ConversationsArea({
   onDelete,
 }: AreaProps) {
   const ref = useRef<HTMLDivElement>(null);
-  // Below the virtualization threshold, render plain divs — the
-  // virtualizer's overhead isn't worth it for short lists.
   const useVirtual = rows.length >= VIRTUALIZE_THRESHOLD;
 
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => (useVirtual ? ref.current : null),
-    estimateSize: (i) => (rows[i]?.kind === "header" ? 28 : 64),
+    estimateSize: (i) => (rows[i]?.kind === "header" ? 24 : 36),
     overscan: 8,
     measureElement(el) {
       return el?.getBoundingClientRect().height ?? 0;
     },
   });
 
-  // Infinite scroll: bump the next page when the user lands within
-  // ~200px of the bottom of the scroll container.
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     if (!hasMore || loadingMore) return;
     const el = e.currentTarget;
@@ -387,20 +431,18 @@ function ConversationsArea({
     }
   }
 
-  // Loading skeleton: only on the FIRST load. Subsequent
-  // pagination + search use inline spinners.
   if (!conversationsLoaded) {
     return (
-      <nav className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-2">
-        <ConversationListSkeleton rows={4} />
+      <nav className="scrollbar-thin mt-3 flex-1 overflow-y-auto px-2 pb-2">
+        <ConversationListSkeleton rows={5} />
       </nav>
     );
   }
 
   if (rows.length === 0) {
     return (
-      <nav className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-2">
-        <div className="px-2 py-4 text-xs text-text-muted">
+      <nav className="scrollbar-thin mt-3 flex-1 overflow-y-auto px-2 pb-2">
+        <div className="px-3 py-4 text-xs text-text-muted">
           {searchActive
             ? searchLoading
               ? "Searching…"
@@ -415,7 +457,7 @@ function ConversationsArea({
     <nav
       ref={ref}
       onScroll={onScroll}
-      className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-2"
+      className="scrollbar-thin mt-3 flex-1 overflow-y-auto px-2 pb-2"
     >
       {useVirtual ? (
         <div
@@ -442,9 +484,7 @@ function ConversationsArea({
               >
                 <SidebarRow
                   row={row}
-                  active={
-                    row.kind === "conv" ? row.conv.id === activeId : false
-                  }
+                  active={row.kind === "conv" ? row.conv.id === activeId : false}
                   onSelect={onSelect}
                   onRename={onRename}
                   onDelete={onDelete}
@@ -454,7 +494,7 @@ function ConversationsArea({
           })}
         </div>
       ) : (
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col">
           {rows.map((row) => (
             <SidebarRow
               key={row.key}
@@ -504,7 +544,7 @@ function SidebarRow({
 }) {
   if (row.kind === "header") {
     return (
-      <div className="px-3 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-text-muted">
+      <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-text-muted">
         {row.label}
       </div>
     );
@@ -520,7 +560,6 @@ function SidebarRow({
   );
 }
 
-// ─── Time grouping ───────────────────────────────────────────
 interface Group {
   label: string;
   items: Conversation[];
