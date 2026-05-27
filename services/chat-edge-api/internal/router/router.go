@@ -55,6 +55,9 @@ type Handlers struct {
 	// type-dispatching /files/{id}/inspect route and the docx/pdf
 	// execute route.
 	Document *handler.DocumentHandler
+	// Phase 4 Session 5 — Artifact Workspace. Owns the
+	// generated-files list, rollback, and file-compare routes.
+	Workspace *handler.WorkspaceHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -202,6 +205,19 @@ func New(
 			if h.Excel != nil {
 				r.Post("/conversations/{convID}/excel/execute", h.Excel.Execute)
 				r.Get("/conversations/{convID}/files/{fileID}/versions", h.Excel.Versions)
+			}
+
+			// Phase 4 Session 5 — Artifact Workspace.
+			//   GET  /conversations/{convID}/generated-files
+			//   POST /conversations/{convID}/files/{fileID}/rollback
+			//   GET  /conversations/{convID}/file-compare?v1=X&v2=Y
+			// file-compare lives at the conversation root (not under
+			// /files/) so chi's segment matcher doesn't fight the
+			// existing /files/{fileID}/{action} patterns.
+			if h.Workspace != nil {
+				r.Get("/conversations/{convID}/generated-files", h.Workspace.ListGenerated)
+				r.Post("/conversations/{convID}/files/{fileID}/rollback", h.Workspace.Rollback)
+				r.Get("/conversations/{convID}/file-compare", h.Workspace.Compare)
 			}
 
 			// Knowledge bases (RAG). All tenant-scoped via the
