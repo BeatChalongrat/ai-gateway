@@ -10,6 +10,8 @@ import { ConversationFiles } from "@/components/chat/ConversationFiles";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
 import { ShareModal } from "@/components/chat/ShareModal";
+import { WorkspaceButton } from "@/components/workspace/WorkspaceButton";
+import { WorkspacePanel } from "@/components/workspace/WorkspacePanel";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageThreadSkeleton } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
@@ -63,6 +65,7 @@ export default function ConversationPage() {
 
   const [injectedText, setInjectedText] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
   // setActive + lazy loadMessages on convId change. We read the
   // current messages slot via getState() rather than subscribing
@@ -151,12 +154,21 @@ export default function ConversationPage() {
           here was redundant). Just the file-attachments indicator
           + the "..." menu on the right. */}
       <div className="hidden items-center justify-end gap-1 px-4 pt-1 md:flex">
+        <WorkspaceButton
+          conversationId={convId}
+          onOpen={() => setWorkspaceOpen(true)}
+        />
         <ConversationFiles conversationId={convId} />
         <ExportMenu
           conversationId={convId}
           onShare={() => setShareOpen(true)}
         />
       </div>
+      <WorkspacePanel
+        convId={convId}
+        open={workspaceOpen}
+        onClose={() => setWorkspaceOpen(false)}
+      />
 
       <AttachmentDropZone
         className="flex flex-1 flex-col overflow-hidden"

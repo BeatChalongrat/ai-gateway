@@ -268,6 +268,110 @@ func (r *FileRepo) ListVersions(
 	return out, rows.Err()
 }
 
+// GeneratedLeaf is one row from ListGeneratedLeaves: the latest
+// version of a generated-file chain plus a denormalized count
+// of versions in that chain and the immediate parent's display
+// name. Used to populate the workspace panel's file list.
+type GeneratedLeaf struct {
+	File           model.ConversationFile
+	VersionCount   int
+	ParentFilename string
+}
+
+// ListGeneratedLeaves returns the latest generated file from
+// every lineage in the conversation. "Latest" = a generated file
+// that has no generated child pointing at it (no descendant
+// version exists). VersionCount is sized by walking
+// parent_file_id back up while the rows stay is_generated=true.
+// Used by GET /conversations/{convID}/generated-files.
+func (r *FileRepo) ListGeneratedLeaves(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) ([]GeneratedLeaf, error) {
+	// Recursive CTE per leaf: walk parent_file_id while the
+	// ancestor is also is_generated=true. The chain count is
+	// the size of that walk; the user-uploaded source (if any)
+	// is the first ancestor where is_generated=false.
+	q := `
+		WITH RECURSIVE leaves AS (
+			SELECT cf.*
+			FROM chat.conversation_files cf
+			WHERE cf.conversation_id = $1
+			  AND cf.tenant_id = $2
+			  AND cf.is_generated = true
+			  AND NOT EXISTS (
+			    SELECT 1 FROM chat.conversation_files c2
+			    WHERE c2.parent_file_id = cf.id
+			      AND c2.tenant_id = $2
+			  )
+		),
+		chain AS (
+			SELECT l.id AS leaf_id, l.id, l.parent_file_id, l.is_generated, 1 AS depth
+			FROM leaves l
+			UNION ALL
+			SELECT c.leaf_id, p.id, p.parent_file_id, p.is_generated, c.depth + 1
+			FROM chain c
+			JOIN chat.conversation_files p
+			  ON p.id = c.parent_file_id
+			 AND p.tenant_id = $2
+			WHERE c.is_generated = true
+		),
+		counts AS (
+			-- Cast to int: COUNT() returns bigint which pgx won't
+			-- auto-coerce into Go's int. ::int is safe — chain
+			-- depth is bounded by realistic version counts.
+			-- Counts ALL rows in the chain (including the
+			-- non-generated source upload) so the workspace's
+			-- "N versions" badge matches the version timeline's
+			-- row count exactly. ListVersions returns the same
+			-- full chain.
+			SELECT leaf_id, COUNT(*)::int AS version_count
+			FROM chain
+			GROUP BY leaf_id
+		)
+		SELECT
+		  cf.id, cf.conversation_id, cf.message_id, cf.tenant_id, cf.filename,
+		  cf.original_filename, cf.content_type, cf.file_size_bytes,
+		  cf.storage_path, cf.extracted_text, cf.extraction_status,
+		  cf.created_at, cf.updated_at,
+		  cf.inspection_json, cf.is_generated, cf.parent_file_id, cf.version, cf.change_log,
+		  counts.version_count,
+		  parent.original_filename AS parent_filename
+		FROM leaves cf
+		JOIN counts ON counts.leaf_id = cf.id
+		LEFT JOIN chat.conversation_files parent
+		  ON parent.id = cf.parent_file_id
+		 AND parent.tenant_id = $2
+		ORDER BY cf.created_at DESC
+	`
+	rows, err := r.db.Query(ctx, q, convID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list generated leaves: %w", err)
+	}
+	defer rows.Close()
+	out := make([]GeneratedLeaf, 0)
+	for rows.Next() {
+		var leaf GeneratedLeaf
+		var parentName *string
+		if err := rows.Scan(
+			&leaf.File.ID, &leaf.File.ConversationID, &leaf.File.MessageID,
+			&leaf.File.TenantID, &leaf.File.Filename, &leaf.File.OriginalFilename,
+			&leaf.File.ContentType, &leaf.File.FileSizeBytes, &leaf.File.StoragePath,
+			&leaf.File.ExtractedText, &leaf.File.ExtractionStatus,
+			&leaf.File.CreatedAt, &leaf.File.UpdatedAt,
+			&leaf.File.InspectionJSON, &leaf.File.IsGenerated, &leaf.File.ParentFileID,
+			&leaf.File.Version, &leaf.File.ChangeLog,
+			&leaf.VersionCount, &parentName,
+		); err != nil {
+			return nil, fmt.Errorf("list generated leaves scan: %w", err)
+		}
+		if parentName != nil {
+			leaf.ParentFilename = *parentName
+		}
+		out = append(out, leaf)
+	}
+	return out, rows.Err()
+}
+
 // AttachToMessage links a batch of files to the newly-created
 // message row. Tenant + conversation scoped so a caller can't
 // re-attach another conversation's files. Returns the number of

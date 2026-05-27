@@ -187,13 +187,35 @@ func (h *ExcelHandler) Versions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Filter to the requested conversation so a leaked version id
-	// from another thread can't cross-link.
-	out := make([]fileResponse, 0, len(versions))
+	// from another thread can't cross-link. Then compute is_current
+	// = the highest-versioned generated row in the surviving slice
+	// (Session 5: lets the timeline UI mark the leaf without
+	// requiring the client to sort + pick).
+	filtered := versions[:0]
+	var currentID uuid.UUID
+	currentVersion := -1
 	for i := range versions {
 		if versions[i].ConversationID != convID {
 			continue
 		}
-		out = append(out, FileToWire(&versions[i]))
+		filtered = append(filtered, versions[i])
+		if versions[i].IsGenerated && versions[i].Version >= currentVersion {
+			currentVersion = versions[i].Version
+			currentID = versions[i].ID
+		}
+	}
+
+	type versionResponse struct {
+		fileResponse
+		IsCurrent bool `json:"is_current"`
+	}
+	out := make([]versionResponse, 0, len(filtered))
+	for i := range filtered {
+		f := &filtered[i]
+		out = append(out, versionResponse{
+			fileResponse: FileToWire(f),
+			IsCurrent:    f.ID == currentID,
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"versions": out})
