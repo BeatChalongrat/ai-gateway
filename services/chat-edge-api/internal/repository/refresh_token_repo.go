@@ -13,7 +13,7 @@ import (
 )
 
 // RefreshTokenRepo handles refresh-token rotation and revocation.
-// Kept separate from ``UserRepo`` so the rotation + replay-detection
+// Kept separate from “UserRepo“ so the rotation + replay-detection
 // SQL lives in one place where security audits can reason about it.
 type RefreshTokenRepo struct {
 	db DB
@@ -47,9 +47,9 @@ func (r *RefreshTokenRepo) CreateRefreshToken(ctx context.Context, t *model.Refr
 }
 
 // GetRefreshTokenByHash returns the row matching the SHA-256 hex
-// of the raw token. Returns ``ErrNotFound`` when no row exists.
+// of the raw token. Returns “ErrNotFound“ when no row exists.
 //
-// Note: this method does NOT check ``revoked_at`` or ``expires_at``
+// Note: this method does NOT check “revoked_at“ or “expires_at“
 // — that gating lives in the AuthService.Refresh flow so the same
 // row can be inspected for replay detection (a revoked token being
 // re-presented is the trigger that revokes the whole family).
@@ -73,7 +73,7 @@ func (r *RefreshTokenRepo) GetRefreshTokenByHash(ctx context.Context, hash strin
 	return t, nil
 }
 
-// RevokeRefreshToken sets ``revoked_at = NOW()`` on a single row.
+// RevokeRefreshToken sets “revoked_at = NOW()“ on a single row.
 // Idempotent — re-revoking an already-revoked token is a no-op.
 func (r *RefreshTokenRepo) RevokeRefreshToken(ctx context.Context, id uuid.UUID) error {
 	const q = `

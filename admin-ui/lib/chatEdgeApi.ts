@@ -213,3 +213,95 @@ export function patchAdminUser(
 ) {
   return chatEdge.patch(`users/${encodeURIComponent(id)}`, body);
 }
+
+// ── Knowledge bases (admin) ──────────────────────────────────
+//
+// Cross-tenant visibility. The admin proxy at /api/chat-edge/* injects
+// the bearer secret; these helpers just speak the wire contract.
+
+export interface AdminKBRow {
+  id: string;
+  tenant_id: string;
+  tenant_name?: string;
+  name: string;
+  description: string;
+  embedding_model: string;
+  chunk_size: number;
+  chunk_overlap: number;
+  is_active: boolean;
+  document_count: number;
+  total_chunks: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminKBListResponse {
+  knowledge_bases: AdminKBRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AdminKBDocRow {
+  id: string;
+  knowledge_base_id: string;
+  filename: string;
+  content_type: string;
+  file_size_bytes: number;
+  status: "pending" | "processing" | "indexed" | "failed";
+  chunk_count: number;
+  char_count: number;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminKBSampleChunk {
+  id: string;
+  document_id: string;
+  filename: string;
+  chunk_index: number;
+  content: string;
+}
+
+export interface AdminKBDetailResponse {
+  knowledge_base: AdminKBRow;
+  documents: AdminKBDocRow[];
+  sample_chunks: AdminKBSampleChunk[];
+}
+
+export interface AdminKBQuery {
+  q?: string;
+  tenant_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function fetchAdminKnowledgeBases(q: AdminKBQuery = {}) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) {
+    if (v == null || v === "") continue;
+    params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return chatEdge.get(
+    `admin/knowledge-bases${qs ? `?${qs}` : ""}`,
+  ) as Promise<AdminKBListResponse>;
+}
+
+export function fetchAdminKnowledgeBase(id: string) {
+  return chatEdge.get(
+    `admin/knowledge-bases/${encodeURIComponent(id)}`,
+  ) as Promise<AdminKBDetailResponse>;
+}
+
+export function deleteAdminKnowledgeBase(id: string) {
+  return chatEdge.delete(`admin/knowledge-bases/${encodeURIComponent(id)}`);
+}
+
+export function reindexAdminKnowledgeBase(id: string) {
+  return chatEdge.post(
+    `admin/knowledge-bases/${encodeURIComponent(id)}/reindex`,
+    {},
+  ) as Promise<{ reindexed: number; failed: number; total: number }>;
+}

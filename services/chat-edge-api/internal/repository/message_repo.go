@@ -15,11 +15,11 @@ import (
 
 // MessageRepo persists conversation messages.
 //
-// The table is named ``chat.messages_masked`` for schema lineage —
+// The table is named “chat.messages_masked“ for schema lineage —
 // the original gateway design stored masked-only content. Web Chat
 // mode stores REAL content in the same column; the rename to
-// ``content`` is a Phase 2 migration. The column name on disk is
-// ``content_masked`` to keep migrations forward-compatible.
+// “content“ is a Phase 2 migration. The column name on disk is
+// “content_masked“ to keep migrations forward-compatible.
 type MessageRepo struct {
 	db DB
 }
@@ -32,7 +32,7 @@ func (r *MessageRepo) WithTx(tx pgx.Tx) *MessageRepo {
 	return &MessageRepo{db: tx}
 }
 
-// Create inserts a new message row. ``ContentMasked`` carries the
+// Create inserts a new message row. “ContentMasked“ carries the
 // real text in Web Chat mode; the column rename is deferred to keep
 // schemas backward-compatible with the gateway-only build.
 func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Message, error) {
@@ -61,8 +61,8 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 }
 
 // ListByConversation returns the message history for one
-// conversation, ordered ASCENDING by ``created_at`` so the chat UI
-// renders oldest-first. ``cursor`` is used for backwards-paging
+// conversation, ordered ASCENDING by “created_at“ so the chat UI
+// renders oldest-first. “cursor“ is used for backwards-paging
 // (load older messages); empty cursor → latest page.
 //
 // Returns (rows, hasMore, error).
@@ -149,7 +149,7 @@ func (r *MessageRepo) ListByConversation(
 
 // ListContextByConversation is a tighter variant used by the
 // MessageService to build the conversation context that ships to
-// the Gateway. Returns the most recent ``limit`` messages in
+// the Gateway. Returns the most recent “limit“ messages in
 // CHRONOLOGICAL order (oldest → newest) and includes all statuses
 // so a paused / cancelled mid-stream still gets accounted for in
 // future turns. Limit is hard-capped at 200.
@@ -237,7 +237,7 @@ func (r *MessageRepo) UpdateStatus(ctx context.Context, msgID uuid.UUID, status 
 }
 
 // ListContextBeforeMessage returns every message created strictly
-// BEFORE ``before``, in chronological order, capped at ``limit``.
+// BEFORE “before“, in chronological order, capped at “limit“.
 // Used by regenerate to rebuild the gateway context up to (but
 // excluding) the assistant message being replaced.
 func (r *MessageRepo) ListContextBeforeMessage(
@@ -303,7 +303,7 @@ func (r *MessageRepo) SetParent(ctx context.Context, msgID, parentID uuid.UUID) 
 }
 
 // DeactivateChain marks every message in a conversation that lies
-// at-or-after ``from`` (by created_at) inactive. Used by the edit
+// at-or-after “from“ (by created_at) inactive. Used by the edit
 // flow to kill the tail of the current branch before splicing in
 // the new one.
 func (r *MessageRepo) DeactivateChain(

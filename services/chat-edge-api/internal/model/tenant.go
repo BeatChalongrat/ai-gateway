@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Tenant maps to ``identity.tenants``.
+// Tenant maps to “identity.tenants“.
 //
-// ``IsPersonal`` distinguishes auto-created single-user tenants
+// “IsPersonal“ distinguishes auto-created single-user tenants
 // from real org tenants (multi-user, invite-flow). The auth flow
 // creates a personal tenant on first registration; an admin can
 // promote it later.

@@ -34,7 +34,7 @@ const (
 	argon2KeyLen      = 32
 )
 
-// HashPassword returns a PHC-encoded argon2id hash of ``password``.
+// HashPassword returns a PHC-encoded argon2id hash of “password“.
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, argon2SaltLen)
 	if _, err := rand.Read(salt); err != nil {
@@ -60,7 +60,7 @@ func HashPassword(password string) (string, error) {
 	return encoded, nil
 }
 
-// VerifyPassword returns nil iff ``password`` matches ``encoded``.
+// VerifyPassword returns nil iff “password“ matches “encoded“.
 // Returns a non-nil error on bad-format encoded strings or mismatch
 // — caller should treat any error as "wrong password" and respond
 // with 401, never leaking the specific failure mode to the client.

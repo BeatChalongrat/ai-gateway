@@ -11,7 +11,7 @@
 // The Web Chat product stores REAL content, NOT pseudonymized text
 // — that's a deliberate Phase 1 choice (DLP-on-save is an opt-in
 // tenant policy, off by default). The column name in
-// ``chat.messages_masked`` keeps the schema forward-compatible.
+// “chat.messages_masked“ keeps the schema forward-compatible.
 package service
 
 import (
@@ -99,7 +99,7 @@ type RAGReader interface {
 
 // streamRegistration is what's stored in MessageService.activeStreams.
 // Holds the cancel func + a flag the cancel path flips so the
-// stream's ``finish`` callback knows whether the termination was
+// stream's “finish“ callback knows whether the termination was
 // user-initiated (status="cancelled") vs upstream error
 // (status="error") vs natural completion (status="completed").
 type streamRegistration struct {
@@ -161,7 +161,6 @@ func (s *MessageService) SetPreferencesReader(p PreferencesReader) {
 func (s *MessageService) SetRAGReader(r RAGReader) {
 	s.ragSvc = r
 }
-
 
 // ---------------------------------------------------------------------------
 // ListMessages — handler reads conversation history
@@ -285,8 +284,8 @@ type StreamHandle struct {
 }
 
 // StreamUpdate is the per-event surface — one delta plus optional
-// terminal metadata. The handler emits a ``content_delta`` SSE
-// event for every non-empty Delta and a ``message_complete`` SSE
+// terminal metadata. The handler emits a “content_delta“ SSE
+// event for every non-empty Delta and a “message_complete“ SSE
 // event when Done is true.
 type StreamUpdate struct {
 	Delta        string
@@ -446,7 +445,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 
 // AssertConversationAccess verifies the caller owns the named
 // conversation. Used by the Cancel handler before invoking
-// ``CancelStream`` so an attacker can't terminate streams for
+// “CancelStream“ so an attacker can't terminate streams for
 // conversations they don't own by guessing IDs.
 func (s *MessageService) AssertConversationAccess(
 	ctx context.Context, tenantID, userID, convID uuid.UUID,
@@ -470,7 +469,7 @@ func (s *MessageService) AssertConversationAccess(
 // false; calling twice is harmless.
 //
 // The actual partial-content persist happens inside the stream's
-// ``finish`` callback — by the time CancelStream returns the
+// “finish“ callback — by the time CancelStream returns the
 // stream goroutine has been notified but may not have flushed yet.
 // Callers that need the partial-row guarantee should re-read via
 // the message repo after a short delay (the handler does this).
@@ -490,7 +489,7 @@ func (s *MessageService) CancelStream(convID uuid.UUID) bool {
 // ---------------------------------------------------------------------------
 
 // RegenerateInput is the typed payload for the regenerate flow.
-// ``MessageID`` is the assistant message the user wants redone.
+// “MessageID“ is the assistant message the user wants redone.
 type RegenerateInput struct {
 	TenantID       uuid.UUID
 	UserID         uuid.UUID
@@ -499,7 +498,7 @@ type RegenerateInput struct {
 	RequestID      string
 }
 
-// Regenerate marks the named assistant message as ``regenerated``
+// Regenerate marks the named assistant message as “regenerated“
 // and opens a fresh streaming generation off the same context that
 // produced it (i.e. all messages BEFORE the target). Returns a
 // StreamHandle that the handler consumes identically to SendStream.
@@ -694,8 +693,8 @@ func (s *MessageService) openAssistantStream(
 // ---------------------------------------------------------------------------
 
 var (
-	ErrEditWrongRole     = errors.New("edit: only user messages can be edited")
-	ErrSwitchBranchNoFork = errors.New("switch-branch: message is not part of a fork group")
+	ErrEditWrongRole       = errors.New("edit: only user messages can be edited")
+	ErrSwitchBranchNoFork  = errors.New("switch-branch: message is not part of a fork group")
 	ErrSwitchBranchMissing = errors.New("switch-branch: target branch_index does not exist")
 )
 
@@ -1035,12 +1034,12 @@ func (s *MessageService) ragContext(ctx context.Context, conv *model.Conversatio
 // RAG-retrieved KB context, and the file-context block into a single
 // system-prompt prefix. The order is deliberate:
 //
-//   persona  — shapes tone (must come first so RAG / file content
-//              doesn't accidentally override the "respond as X" rule)
-//   RAG      — authoritative facts the model should cite
-//   files    — supplementary attached documents
+//	persona  — shapes tone (must come first so RAG / file content
+//	           doesn't accidentally override the "respond as X" rule)
+//	RAG      — authoritative facts the model should cite
+//	files    — supplementary attached documents
 //
-// Any subset may be empty. ``ragQuery`` is the most-recent user
+// Any subset may be empty. “ragQuery“ is the most-recent user
 // message content used as the retrieval query; pass "" to skip RAG.
 func (s *MessageService) buildSystemPrefix(
 	ctx context.Context,
@@ -1065,7 +1064,7 @@ func (s *MessageService) buildSystemPrefix(
 	return strings.Join(parts, "\n\n")
 }
 
-// keep ``time`` import referenced even when no other code in this
+// keep “time“ import referenced even when no other code in this
 // file uses it directly (the GatewayChatUsage struct references
 // it transitively through the gateway client).
 var _ time.Duration

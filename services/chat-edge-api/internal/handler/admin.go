@@ -34,10 +34,28 @@ import (
 // custom GROUP BYs without growing the per-resource repos.
 type AdminHandler struct {
 	pool *pgxpool.Pool
+	kb   AdminKBSink
+}
+
+// AdminKBSink is the function-bag the admin KB endpoints call when
+// they need to mutate state. Function pointers (rather than an
+// interface tied to KnowledgeService) keep admin.go free of any
+// service-package imports — main.go wires the actual closures.
+type AdminKBSink struct {
+	ReindexDocument func(ctx context.Context, tenantID, kbID, docID uuid.UUID) error
+	DeleteKB        func(ctx context.Context, tenantID, id uuid.UUID) error
 }
 
 func NewAdminHandler(pool *pgxpool.Pool) *AdminHandler {
 	return &AdminHandler{pool: pool}
+}
+
+// SetKBSink wires the KB mutators. Called from main.go after the
+// KnowledgeService is constructed. Kept out of the constructor so the
+// AdminHandler still boots cleanly in tests that don't exercise
+// knowledge-base admin.
+func (h *AdminHandler) SetKBSink(s AdminKBSink) {
+	h.kb = s
 }
 
 // ---------------------------------------------------------------------------
@@ -45,12 +63,12 @@ func NewAdminHandler(pool *pgxpool.Pool) *AdminHandler {
 // ---------------------------------------------------------------------------
 
 type analyticsTotals struct {
-	Conversations  int     `json:"conversations"`
-	Messages       int     `json:"messages"`
-	TokensUsed     int64   `json:"tokens_used"`
-	EstimatedCost  float64 `json:"estimated_cost_usd"`
-	ActiveUsers    int     `json:"active_users"`
-	FilesUploaded  int     `json:"files_uploaded"`
+	Conversations int     `json:"conversations"`
+	Messages      int     `json:"messages"`
+	TokensUsed    int64   `json:"tokens_used"`
+	EstimatedCost float64 `json:"estimated_cost_usd"`
+	ActiveUsers   int     `json:"active_users"`
+	FilesUploaded int     `json:"files_uploaded"`
 }
 
 type analyticsDailyRow struct {
@@ -238,17 +256,17 @@ func (h *AdminHandler) fetchByModel(ctx context.Context, since time.Time) ([]ana
 // ---------------------------------------------------------------------------
 
 type adminConvRow struct {
-	ID           string  `json:"id"`
-	Title        string  `json:"title"`
-	UserID       string  `json:"user_id"`
-	UserEmail    string  `json:"user_email"`
-	ModelID      string  `json:"model_id"`
-	MessageCount int     `json:"message_count"`
-	TokenCount   int64   `json:"token_count"`
-	HasFiles     bool    `json:"has_files"`
-	IsShared     bool    `json:"is_shared"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	UserID       string `json:"user_id"`
+	UserEmail    string `json:"user_email"`
+	ModelID      string `json:"model_id"`
+	MessageCount int    `json:"message_count"`
+	TokenCount   int64  `json:"token_count"`
+	HasFiles     bool   `json:"has_files"`
+	IsShared     bool   `json:"is_shared"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // Conversations returns a filterable + paginated list. Query params:
@@ -369,23 +387,23 @@ func (h *AdminHandler) Conversations(w http.ResponseWriter, r *http.Request) {
 // ConversationDetail returns the masked conversation + messages for
 // the admin viewer.
 type adminMessageRow struct {
-	ID         string  `json:"id"`
-	Role       string  `json:"role"`
-	Content    string  `json:"content"`
-	ModelID    *string `json:"model_id,omitempty"`
-	CreatedAt  string  `json:"created_at"`
-	TokenInput *int    `json:"token_input,omitempty"`
-	TokenOutput *int   `json:"token_output,omitempty"`
-	HasFiles   bool    `json:"has_files"`
+	ID          string  `json:"id"`
+	Role        string  `json:"role"`
+	Content     string  `json:"content"`
+	ModelID     *string `json:"model_id,omitempty"`
+	CreatedAt   string  `json:"created_at"`
+	TokenInput  *int    `json:"token_input,omitempty"`
+	TokenOutput *int    `json:"token_output,omitempty"`
+	HasFiles    bool    `json:"has_files"`
 }
 
 type adminFileRow struct {
-	ID           string `json:"id"`
-	MessageID    string `json:"message_id,omitempty"`
-	Filename     string `json:"filename"`
-	ContentType  string `json:"content_type"`
-	FileSize     int64  `json:"file_size_bytes"`
-	CreatedAt    string `json:"created_at"`
+	ID          string `json:"id"`
+	MessageID   string `json:"message_id,omitempty"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	FileSize    int64  `json:"file_size_bytes"`
+	CreatedAt   string `json:"created_at"`
 }
 
 func (h *AdminHandler) ConversationDetail(w http.ResponseWriter, r *http.Request) {
@@ -438,12 +456,12 @@ func (h *AdminHandler) ConversationDetail(w http.ResponseWriter, r *http.Request
 	msgs := make([]adminMessageRow, 0)
 	for rows.Next() {
 		var (
-			m         adminMessageRow
-			created   time.Time
-			modelPtr  *string
-			tokenIn   *int
-			tokenOut  *int
-			hasFiles  bool
+			m        adminMessageRow
+			created  time.Time
+			modelPtr *string
+			tokenIn  *int
+			tokenOut *int
+			hasFiles bool
 		)
 		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &modelPtr, &tokenIn, &tokenOut, &created, &hasFiles); err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")

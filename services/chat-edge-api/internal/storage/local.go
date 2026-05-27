@@ -175,7 +175,7 @@ func (l *LocalBackend) OpenLocalCopy(
 
 // resolve normalises the key into an absolute filesystem path under
 // basePath. Rejects anything that resolves outside basePath — the
-// classic ``../../etc/passwd`` defence.
+// classic “../../etc/passwd“ defence.
 func (l *LocalBackend) resolve(key string) (string, error) {
 	// Convert forward-slash keys to the platform separator.
 	clean := filepath.FromSlash(strings.TrimLeft(key, "/"))

@@ -34,12 +34,12 @@ const knowledgeKeyPrefix = "knowledge"
 // ---------------------------------------------------------------------------
 
 var (
-	ErrKBNotFound          = errors.New("kb: not found")
-	ErrKBDocumentNotFound  = errors.New("kb: document not found")
-	ErrKBDocumentTooLarge  = errors.New("kb: document too large")
-	ErrKBDocumentEmpty     = errors.New("kb: document empty")
-	ErrKBDocumentBadType   = errors.New("kb: document type not allowed")
-	ErrKBNameRequired      = errors.New("kb: name required")
+	ErrKBNotFound         = errors.New("kb: not found")
+	ErrKBDocumentNotFound = errors.New("kb: document not found")
+	ErrKBDocumentTooLarge = errors.New("kb: document too large")
+	ErrKBDocumentEmpty    = errors.New("kb: document empty")
+	ErrKBDocumentBadType  = errors.New("kb: document type not allowed")
+	ErrKBNameRequired     = errors.New("kb: name required")
 )
 
 // ---------------------------------------------------------------------------
@@ -394,4 +394,3 @@ func (s *KnowledgeService) indexDocument(
 	_ = s.repo.RecomputeKBStats(ctx, kb.ID)
 	return nil
 }
-

@@ -1,8 +1,8 @@
 // Share-link HTTP handlers.
 //
-//   POST   /api/v1/conversations/{id}/share   create / rotate link
-//   DELETE /api/v1/conversations/{id}/share   revoke link
-//   GET    /api/v1/shared/{token}             PUBLIC read-only view
+//	POST   /api/v1/conversations/{id}/share   create / rotate link
+//	DELETE /api/v1/conversations/{id}/share   revoke link
+//	GET    /api/v1/shared/{token}             PUBLIC read-only view
 //
 // The first two routes live behind RequireAuth; the third must NOT
 // — sharing's whole point is sending a link to people without an

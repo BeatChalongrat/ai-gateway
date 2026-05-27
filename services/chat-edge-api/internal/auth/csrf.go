@@ -4,8 +4,8 @@
 // auto-attaches cookies on cross-origin form posts. The accepted
 // pattern is:
 //
-//  1. Server sets ``X-CSRF-Token: <random>`` cookie (SameSite=Strict).
-//  2. Client copies cookie value into ``X-CSRF-Token`` request header.
+//  1. Server sets “X-CSRF-Token: <random>“ cookie (SameSite=Strict).
+//  2. Client copies cookie value into “X-CSRF-Token“ request header.
 //  3. Server compares header to cookie. Match → proceed.
 //
 // The token is an HMAC of (session-id, random nonce) so a leaked
@@ -21,8 +21,8 @@ import (
 	"strings"
 )
 
-// IssueCSRFToken returns a fresh ``nonce.signature`` pair bound to
-// ``sessionID`` (typically the access-token jti or user id).
+// IssueCSRFToken returns a fresh “nonce.signature“ pair bound to
+// “sessionID“ (typically the access-token jti or user id).
 func IssueCSRFToken(secret, sessionID string) (string, error) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
@@ -37,8 +37,8 @@ func IssueCSRFToken(secret, sessionID string) (string, error) {
 	return nonceHex + "." + sig, nil
 }
 
-// VerifyCSRFToken returns nil iff ``token`` is a valid HMAC for
-// ``sessionID`` under ``secret``. Constant-time comparison.
+// VerifyCSRFToken returns nil iff “token“ is a valid HMAC for
+// “sessionID“ under “secret“. Constant-time comparison.
 func VerifyCSRFToken(secret, sessionID, token string) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 2 {

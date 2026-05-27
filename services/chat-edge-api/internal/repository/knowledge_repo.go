@@ -4,8 +4,8 @@
 //	chat.knowledge_documents one row per uploaded file
 //	chat.knowledge_chunks    embedded slices with vector(1536)
 //
-// pgvector wire format note: the ``vector`` column round-trips as a
-// textual ``[f1,f2,...]`` form on both insert and read. We format /
+// pgvector wire format note: the “vector“ column round-trips as a
+// textual “[f1,f2,...]“ form on both insert and read. We format /
 // parse manually so we don't pull in the pgvector-go adapter just
 // to push float32 slices through pgx. Float32 is the native pgvector
 // type; using float64 here would force a precision-losing convert
@@ -367,11 +367,11 @@ func (r *KnowledgeRepo) InsertChunkBatch(ctx context.Context, chunks []model.Kno
 
 // SearchSimilarChunks does a vector similarity search inside a KB.
 // Returns (chunk, score, filename) tuples ordered by similarity
-// descending. ``threshold`` is the minimum cosine similarity to
+// descending. “threshold“ is the minimum cosine similarity to
 // include in the result (1.0 == identical; 0.0 == orthogonal).
 //
-// pgvector exposes the cosine-distance operator ``<=>`` so the
-// equivalent similarity is ``1 - distance``. The query computes
+// pgvector exposes the cosine-distance operator “<=>“ so the
+// equivalent similarity is “1 - distance“. The query computes
 // both, filters by similarity, and orders by distance ascending
 // (== similarity descending).
 type RetrievedChunkRow struct {
@@ -432,8 +432,8 @@ func (r *KnowledgeRepo) SearchSimilarChunks(
 // Vector helpers
 // ---------------------------------------------------------------------------
 
-// encodeVector turns ``[]float32`` into the textual pgvector input
-// form: ``[0.1,0.2,...]``. Empty / nil → empty literal (still valid
+// encodeVector turns “[]float32“ into the textual pgvector input
+// form: “[0.1,0.2,...]“. Empty / nil → empty literal (still valid
 // for a vector(1536) column when the column is nullable).
 func encodeVector(v []float32) string {
 	if len(v) == 0 {

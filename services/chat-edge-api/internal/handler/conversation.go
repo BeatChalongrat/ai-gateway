@@ -1,8 +1,8 @@
 // Conversation handlers — CRUD over chat.conversations.
 //
-// All routes are behind ``RequireAuth`` (see router.go) so every
+// All routes are behind “RequireAuth“ (see router.go) so every
 // handler can pull the caller from the request context via
-// ``middleware.CallerFrom`` without re-validating the JWT.
+// “middleware.CallerFrom“ without re-validating the JWT.
 package handler
 
 import (
@@ -74,12 +74,12 @@ type createConversationRequest struct {
 }
 
 type conversationResponse struct {
-	ID              string    `json:"id"`
-	Title           string    `json:"title"`
-	ModelID         string    `json:"model_id"`
-	MessageCount    int       `json:"message_count"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	ModelID      string    `json:"model_id"`
+	MessageCount int       `json:"message_count"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 	// KnowledgeBaseID is null when the conversation has no RAG
 	// source bound — most conversations.
 	KnowledgeBaseID *string `json:"knowledge_base_id"`
@@ -130,8 +130,8 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(toResponse(c))
 }
 
-// List supports query params ``limit`` (default 20, max 50) and
-// ``cursor`` (UUID of the last-seen conversation from the previous
+// List supports query params “limit“ (default 20, max 50) and
+// “cursor“ (UUID of the last-seen conversation from the previous
 // page).
 func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
@@ -551,13 +551,13 @@ func parseUUID(s string) uuid.UUID {
 	return u
 }
 
-// parseKBRef interprets the ``knowledge_base_id`` field from a PATCH
+// parseKBRef interprets the “knowledge_base_id“ field from a PATCH
 // body. Three cases:
 //
-//   raw == "null"        → unbind (returns uuid.Nil, nil)
-//   raw == "\"...\""     → bind to the parsed UUID
-//   anything else        → returns an error so the handler responds
-//                          with a clean 400 instead of corrupting state
+//	raw == "null"        → unbind (returns uuid.Nil, nil)
+//	raw == "\"...\""     → bind to the parsed UUID
+//	anything else        → returns an error so the handler responds
+//	                       with a clean 400 instead of corrupting state
 func parseKBRef(raw json.RawMessage) (uuid.UUID, error) {
 	if len(raw) == 0 {
 		return uuid.Nil, fmt.Errorf("knowledge_base_id missing")

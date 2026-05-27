@@ -2,15 +2,15 @@
 //
 // Boot sequence:
 //
-//	1. Load config from env (Config.Load).
-//	2. Connect to PostgreSQL (pgxpool).
-//	3. Connect to Redis (go-redis v9).
-//	4. Construct repositories, services, handlers, and the
-//	   Gateway HTTP client.
-//	5. Build the Chi router with middleware + routes.
-//	6. Start the HTTP server on the configured port.
-//	7. Wait for SIGINT/SIGTERM, then shutdown gracefully so the
-//	   in-flight streams terminate cleanly before the process exits.
+//  1. Load config from env (Config.Load).
+//  2. Connect to PostgreSQL (pgxpool).
+//  3. Connect to Redis (go-redis v9).
+//  4. Construct repositories, services, handlers, and the
+//     Gateway HTTP client.
+//  5. Build the Chi router with middleware + routes.
+//  6. Start the HTTP server on the configured port.
+//  7. Wait for SIGINT/SIGTERM, then shutdown gracefully so the
+//     in-flight streams terminate cleanly before the process exits.
 //
 // Privacy contract reminders (also documented per-package):
 //   - The logging middleware never reads request/response bodies.
@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -188,6 +189,20 @@ func main() {
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)
 
+	adminHandler := handler.NewAdminHandler(pool)
+	// Wire the KB mutators so the admin endpoints can reindex / delete
+	// without duplicating the cascade + blob-cleanup logic the
+	// tenant-facing service already implements. Closures swallow the
+	// concrete return type from KnowledgeService — the admin handler
+	// only cares about error.
+	adminHandler.SetKBSink(handler.AdminKBSink{
+		ReindexDocument: func(ctx context.Context, tenantID, kbID, docID uuid.UUID) error {
+			_, err := knowledgeSvc.ReindexDocument(ctx, tenantID, kbID, docID)
+			return err
+		},
+		DeleteKB: knowledgeSvc.DeleteKB,
+	})
+
 	handlers := router.Handlers{
 		Auth:         handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Conversation: conversationHandler,
@@ -197,7 +212,7 @@ func main() {
 		File:         handler.NewFileHandler(fileSvc),
 		Preferences:  handler.NewPreferencesHandler(prefsRepo),
 		Share:        handler.NewShareHandler(shareSvc),
-		Admin:        handler.NewAdminHandler(pool),
+		Admin:        adminHandler,
 		Knowledge:    handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
 		Voice:        handler.NewVoiceHandler(),
 	}

@@ -36,13 +36,13 @@ func NewUserRepo(db *pgxpool.Pool) *UserRepo {
 
 // WithTx returns a repo bound to the given transaction. The
 // transactional repo shares no state with the pool-bound one, so
-// the caller is responsible for committing / rolling back ``tx``.
+// the caller is responsible for committing / rolling back “tx“.
 func (r *UserRepo) WithTx(tx pgx.Tx) *UserRepo {
 	return &UserRepo{db: tx}
 }
 
-// CreateUser inserts a new row into ``identity.users`` and returns
-// the persisted struct with ``id`` / timestamps populated by the DB.
+// CreateUser inserts a new row into “identity.users“ and returns
+// the persisted struct with “id“ / timestamps populated by the DB.
 func (r *UserRepo) CreateUser(ctx context.Context, u *model.User) (*model.User, error) {
 	const q = `
 		INSERT INTO identity.users

@@ -104,7 +104,7 @@ type Config struct {
 	// directory the service owns end-to-end; uploads land under
 	// ``{root}/{tenant_id}/{conversation_id}/{file_id}_{name}``.
 	FileStorageRoot     string `env:"FILE_STORAGE_ROOT" envDefault:"./data/uploads"`
-	MaxFileSizeBytes    int64  `env:"MAX_FILE_SIZE_BYTES" envDefault:"26214400"`     // 25 MiB
+	MaxFileSizeBytes    int64  `env:"MAX_FILE_SIZE_BYTES" envDefault:"26214400"`        // 25 MiB
 	MaxConvFileTotal    int64  `env:"MAX_CONV_FILE_TOTAL_BYTES" envDefault:"104857600"` // 100 MiB
 	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
 	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`
@@ -118,13 +118,13 @@ type Config struct {
 	//
 	// Defaults to local so a fresh checkout boots without any S3
 	// credentials configured.
-	StorageBackend     string `env:"STORAGE_BACKEND" envDefault:"local"`
-	S3Bucket           string `env:"S3_BUCKET" envDefault:""`
-	S3Region           string `env:"S3_REGION" envDefault:"us-east-1"`
-	S3Endpoint         string `env:"S3_ENDPOINT" envDefault:""`
-	S3AccessKey        string `env:"S3_ACCESS_KEY" envDefault:""`
-	S3SecretKey        string `env:"S3_SECRET_KEY" envDefault:""`
-	S3ForcePathStyle   bool   `env:"S3_FORCE_PATH_STYLE" envDefault:"false"`
+	StorageBackend   string `env:"STORAGE_BACKEND" envDefault:"local"`
+	S3Bucket         string `env:"S3_BUCKET" envDefault:""`
+	S3Region         string `env:"S3_REGION" envDefault:"us-east-1"`
+	S3Endpoint       string `env:"S3_ENDPOINT" envDefault:""`
+	S3AccessKey      string `env:"S3_ACCESS_KEY" envDefault:""`
+	S3SecretKey      string `env:"S3_SECRET_KEY" envDefault:""`
+	S3ForcePathStyle bool   `env:"S3_FORCE_PATH_STYLE" envDefault:"false"`
 	// How long presigned GET URLs stay valid. Short enough to limit
 	// link-sharing damage, long enough that a slow client can finish
 	// the download.
@@ -134,7 +134,7 @@ type Config struct {
 // ModelEntry is one entry in the model list surfaced by GET /models.
 //
 // Field tags double as the wire format — the handler marshals
-// ``[]ModelEntry`` straight to JSON so the env-supplied list shape
+// “[]ModelEntry“ straight to JSON so the env-supplied list shape
 // has to match the response shape.
 type ModelEntry struct {
 	ID           string   `json:"id"`
@@ -143,7 +143,7 @@ type ModelEntry struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-// DefaultModels is the fallback list when ``AVAILABLE_MODELS`` is
+// DefaultModels is the fallback list when “AVAILABLE_MODELS“ is
 // unset. Picked to match the providers the Gateway is already
 // configured for in this repo.
 var DefaultModels = []ModelEntry{
@@ -163,7 +163,7 @@ func Load() (*Config, error) {
 }
 
 // Models returns the configured model list, falling back to
-// ``DefaultModels`` when ``AVAILABLE_MODELS`` is unset or
+// “DefaultModels“ when “AVAILABLE_MODELS“ is unset or
 // unparseable. Parseable JSON wins; malformed JSON falls back
 // silently rather than refusing startup so an operator who fat-
 // fingers the env var still gets a working service (the deploy log
@@ -179,7 +179,7 @@ func (c *Config) Models() []ModelEntry {
 	return out
 }
 
-// ModelAllowed returns true iff ``id`` matches an entry in the
+// ModelAllowed returns true iff “id“ matches an entry in the
 // configured model list. Used by handlers to gate
 // conversation/message creation.
 func (c *Config) ModelAllowed(id string) bool {

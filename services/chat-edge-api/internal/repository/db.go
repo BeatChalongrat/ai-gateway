@@ -1,6 +1,6 @@
 // Common DB-querier interface used by every repo.
 //
-// Both ``*pgxpool.Pool`` and ``pgx.Tx`` satisfy this interface, so
+// Both “*pgxpool.Pool“ and “pgx.Tx“ satisfy this interface, so
 // repos can be reused inside a transaction by swapping the backing
 // executor without changing query code. The pattern is:
 //

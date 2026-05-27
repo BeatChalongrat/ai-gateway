@@ -8,8 +8,8 @@
 //   - Aggressively short TTL (60s by default) so a captured token
 //     has a near-zero replay window. Each Gateway request re-mints.
 //
-// The Gateway side validates ``iss == chat-edge-api`` and
-// ``aud == gateway-api`` — see gateway-api docs for the consumer.
+// The Gateway side validates “iss == chat-edge-api“ and
+// “aud == gateway-api“ — see gateway-api docs for the consumer.
 package auth
 
 import (
