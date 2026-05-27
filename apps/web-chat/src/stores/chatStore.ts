@@ -367,14 +367,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
   async loadMessages(convId) {
     try {
       const res = await api.listMessages(convId, { limit: 50 });
+      // Coerce on success too — a malformed response body (no
+      // ``messages`` field) would otherwise stamp ``undefined`` into
+      // the slot and leave the skeleton spinning forever.
       set((s) => ({
-        messages: { ...s.messages, [convId]: res.messages },
-        hasMoreMessages: { ...s.hasMoreMessages, [convId]: res.has_more },
+        messages: { ...s.messages, [convId]: res?.messages ?? [] },
+        hasMoreMessages: {
+          ...s.hasMoreMessages,
+          [convId]: res?.has_more ?? false,
+        },
       }));
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        set({ errorBanner: "Conversation not found." });
-      }
+      // Critical: every error path MUST resolve the slot (even with
+      // an empty array) so the conversation page's
+      // ``messages === undefined`` skeleton check flips to false.
+      // The previous version left the slot undefined on non-404
+      // errors — network failures / 500s — and the skeleton stuck.
+      // 401s are already short-circuited by ApiClient (which bounces
+      // the user to /portal/login before this catch even runs).
+      set((s) => ({
+        messages: { ...s.messages, [convId]: s.messages[convId] ?? [] },
+        hasMoreMessages: {
+          ...s.hasMoreMessages,
+          [convId]: s.hasMoreMessages[convId] ?? false,
+        },
+        errorBanner:
+          err instanceof ApiError && err.status === 404
+            ? "Conversation not found."
+            : err instanceof ApiError
+              ? `Couldn't load messages (${err.code}).`
+              : "Couldn't load messages.",
+      }));
     }
   },
 
