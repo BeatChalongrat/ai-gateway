@@ -177,7 +177,7 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id")
 		return
 	}
-	row, fp, err := h.files.OpenForDownload(r.Context(), caller.TenantUUID, fileID)
+	handle, err := h.files.OpenForDownload(r.Context(), caller.TenantUUID, fileID)
 	if err != nil {
 		if errors.Is(err, service.ErrFileNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
@@ -186,18 +186,25 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	defer fp.Close()
+	// Presigned URL path: send the browser straight to the object
+	// store. Saves a service-side proxy hop and removes us from the
+	// hot byte path on large downloads. 307 keeps the method as GET.
+	if handle.PresignedURL != "" {
+		http.Redirect(w, r, handle.PresignedURL, http.StatusTemporaryRedirect)
+		return
+	}
+	defer handle.Body.Close()
 
-	w.Header().Set("Content-Type", row.ContentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(row.FileSizeBytes, 10))
+	w.Header().Set("Content-Type", handle.File.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(handle.File.FileSizeBytes, 10))
 	// RFC 6266 says percent-encode the filename for safety; we keep
 	// it simple with quoted form + UTF-8 fallback. Browsers handle
 	// the basic quoted form fine for ASCII; users uploading
 	// non-ASCII filenames see the UUID-prefixed sanitized name.
 	w.Header().Set("Content-Disposition",
-		`attachment; filename="`+row.OriginalFilename+`"`)
+		`attachment; filename="`+handle.File.OriginalFilename+`"`)
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, fp)
+	_, _ = io.Copy(w, handle.Body)
 }
 
 // ---------------------------------------------------------------------------
