@@ -504,24 +504,37 @@ export function ChatInput({
                   // pops without using the accent green. The disabled
                   // state stays muted on the same neutral surface as
                   // the rest of the composer chrome.
+                  //
+                  // Inline styles reference the RAW CSS variables that
+                  // ``globals.css`` defines under [data-theme="dark"]
+                  // and the light-mode root. ``--bg-base`` /
+                  // ``--bg-elevated`` only exist as Tailwind aliases
+                  // (see tailwind.config.js), so we use ``--bg-primary``
+                  // and ``--bg-surface-hover`` here.
                   className="focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 disabled:cursor-not-allowed"
                   style={
                     canSend
                       ? {
                           background: "var(--text-primary)",
-                          color: "var(--bg-base)",
+                          color: "var(--bg-primary)",
                         }
                       : {
-                          background: "var(--bg-elevated)",
-                          color: "var(--text-muted)",
+                          background: "var(--bg-surface-hover)",
+                          color: "var(--text-tertiary)",
                         }
                   }
                 >
-                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <svg
+                    width={16}
+                    height={16}
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden
+                  >
                     <path
-                      d="M12 19V5M5 12l7-7 7 7"
+                      d="M8 14V2M8 2L3 7M8 2L13 7"
                       stroke="currentColor"
-                      strokeWidth="2.2"
+                      strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
