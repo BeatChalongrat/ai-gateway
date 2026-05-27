@@ -17,6 +17,7 @@ import {
   Target,
 } from "lucide-react";
 
+import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
 import type {
   DocExecuteResponse,
@@ -66,25 +67,26 @@ export interface PptxPlan {
   [k: string]: unknown;
 }
 
-// Per-slide-type icons. Colour coded by intent so a long deck
-// reads as a glance — blue for structural slides, emerald for
-// data, amber for KPIs, purple for two-column, slate for content,
-// rose for the closing.
+// Monochrome slide-type icons — colour was removed in Session 5.1
+// so the deck outline reads as structural metadata rather than
+// a coloured status alarm. Icon SHAPE alone carries the slide-
+// type hint.
+const SLIDE_ICON_CLASS = "h-4 w-4 text-text-tertiary";
 const SLIDE_ICONS: Record<string, ReactNode> = {
-  title:              <Presentation className="h-4 w-4 text-blue-500" />,
-  section_divider:    <LayoutTemplate className="h-4 w-4 text-indigo-500" />,
-  content:            <FileText className="h-4 w-4 text-slate-500" />,
-  content_with_image: <ImageIcon className="h-4 w-4 text-cyan-500" />,
-  two_column:         <Columns2 className="h-4 w-4 text-purple-500" />,
-  stats:              <Hash className="h-4 w-4 text-amber-500" />,
-  table:              <Table2 className="h-4 w-4 text-slate-500" />,
-  chart:              <BarChart3 className="h-4 w-4 text-emerald-500" />,
-  closing:            <Target className="h-4 w-4 text-rose-500" />,
+  title:              <Presentation className={SLIDE_ICON_CLASS} />,
+  section_divider:    <LayoutTemplate className={SLIDE_ICON_CLASS} />,
+  content:            <FileText className={SLIDE_ICON_CLASS} />,
+  content_with_image: <ImageIcon className={SLIDE_ICON_CLASS} />,
+  two_column:         <Columns2 className={SLIDE_ICON_CLASS} />,
+  stats:              <Hash className={SLIDE_ICON_CLASS} />,
+  table:              <Table2 className={SLIDE_ICON_CLASS} />,
+  chart:              <BarChart3 className={SLIDE_ICON_CLASS} />,
+  closing:            <Target className={SLIDE_ICON_CLASS} />,
 };
 
 function slideIcon(type?: string): ReactNode {
   if (type && SLIDE_ICONS[type]) return SLIDE_ICONS[type];
-  return <FileText className="h-4 w-4 text-text-tertiary" />;
+  return <FileText className={SLIDE_ICON_CLASS} />;
 }
 
 interface Props {
@@ -130,7 +132,7 @@ export function PptxPlanCard({ convId, plan }: Props) {
 
   return (
     <CardShell
-      headerIcon={<Presentation className="h-5 w-5 text-amber-500" />}
+      headerIcon={<FileTypeBadge extension=".pptx" size="sm" />}
       headerTitle="Presentation Plan"
       metadata={`${layout} · ${language} · ${slides.length} slide${slides.length === 1 ? "" : "s"}`}
       footer={
@@ -169,7 +171,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
 
   return (
     <CardShell
-      headerIcon={<Presentation className="h-5 w-5 text-amber-500" />}
+      headerIcon={<FileTypeBadge extension=".pptx" size="sm" />}
       headerTitle={file.filename}
       metadata={file.version ? `v${file.version}` : undefined}
       footer={<DownloadButton fileId={file.id} filename={file.filename} />}
@@ -196,7 +198,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
                   className={`mt-0.5 flex-shrink-0 ${
                     entry.status === "error"
                       ? "text-status-danger"
-                      : "text-emerald-500"
+                      : "text-text-tertiary"
                   }`}
                 >
                   {entry.status === "error" ? "✗" : "✓"}
@@ -221,7 +223,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
                 <li key={i} className="flex items-start gap-2">
                   <span
                     className={`mt-0.5 flex-shrink-0 ${
-                      broken ? "text-status-danger" : "text-emerald-500"
+                      broken ? "text-status-danger" : "text-text-tertiary"
                     }`}
                   >
                     {broken ? "✗" : "✓"}

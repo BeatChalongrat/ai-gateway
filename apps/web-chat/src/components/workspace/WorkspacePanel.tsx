@@ -94,7 +94,7 @@ export function WorkspacePanel({ convId, open, onClose }: Props) {
         aria-label="Workspace"
       >
         <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
-          <FolderOpen className="h-5 w-5 text-blue-500" />
+          <FolderOpen className="h-5 w-5 text-text-tertiary" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-text-primary">Workspace</div>
             <div className="text-xs text-text-tertiary">
@@ -192,7 +192,7 @@ function FileList({
                   {f.filename}
                 </div>
                 {f.version ? (
-                  <span className="flex-shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-500">
+                  <span className="flex-shrink-0 rounded-full border border-border-default px-2 py-0.5 text-[10px] font-semibold text-text-tertiary">
                     v{f.version}
                   </span>
                 ) : null}

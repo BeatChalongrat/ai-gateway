@@ -19,13 +19,13 @@ import type { ReactNode } from "react";
 
 import {
   AlertTriangle,
-  CheckCircle2,
   Download,
   Loader2,
   Play,
   XCircle,
 } from "lucide-react";
 
+import { StatusBadge } from "@/components/ui/FileTypeBadge";
 import { api } from "@/lib/api";
 
 interface CardShellProps {
@@ -248,8 +248,8 @@ export function ValidationBadge({
     );
   }
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-base px-3 py-2 text-xs text-status-success">
-      <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+    <div className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-base px-3 py-2 text-xs text-text-secondary">
+      <StatusBadge status="success" size="sm" />
       <span>{okMessage}</span>
     </div>
   );
