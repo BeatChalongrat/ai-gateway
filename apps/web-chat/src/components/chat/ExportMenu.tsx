@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 // "Share" hand-off (the parent owns the share modal so the menu
 // can also drive the same modal from outside the header).
 export function ExportMenu({ conversationId, onShare }: Props) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -79,13 +81,13 @@ export function ExportMenu({ conversationId, onShare }: Props) {
       {open ? (
         <div className="popover-appear absolute right-0 top-9 z-30 w-56 overflow-hidden rounded-lg border border-border bg-bg-surface text-xs shadow-2xl">
           <MenuButton onClick={() => exportFile("markdown")} icon={<DocIcon />}>
-            Export as Markdown
+            {t("export.markdown")}
           </MenuButton>
           <MenuButton onClick={() => exportFile("json")} icon={<BracketsIcon />}>
-            Export as JSON
+            {t("export.json")}
           </MenuButton>
           <MenuButton onClick={copyMarkdown} icon={<ClipboardIcon />}>
-            Copy to clipboard
+            {t("export.copy")}
           </MenuButton>
           {onShare ? (
             <>
@@ -97,7 +99,7 @@ export function ExportMenu({ conversationId, onShare }: Props) {
                 }}
                 icon={<LinkIcon />}
               >
-                Share…
+                {t("export.share")}
               </MenuButton>
             </>
           ) : null}

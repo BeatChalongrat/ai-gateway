@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 import { ToastViewport } from "@/components/ui/Toast";
+import { useHydrateI18n } from "@/lib/i18n";
 import { registerServiceWorker } from "@/lib/registerSW";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
@@ -26,6 +27,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   // Hydrate the theme on first paint so the data-theme attribute
   // is set BEFORE any visible content mounts.
   useHydrateTheme();
+  // Same pattern for the active locale — first paint stays in EN to
+  // match SSR, then post-hydration swaps in the user's choice and
+  // updates ``<html lang>`` for assistive tech + browser translators.
+  useHydrateI18n();
 
   useEffect(() => {
     if (booted.current) return;
