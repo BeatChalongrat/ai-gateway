@@ -24,6 +24,8 @@ import { useVoiceStore } from "@/stores/voiceStore";
 
 import { BranchNavigator } from "./BranchNavigator";
 import { CodeBlock } from "./CodeBlock";
+import { ExcelPlanCard } from "./ExcelPlanCard";
+import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { MessageAttachments } from "./MessageAttachments";
 import { StreamingContent } from "./StreamingContent";
@@ -314,7 +316,7 @@ function MessageBubbleImpl({
 
       {/* Body */}
       <div className="prose-chat w-full text-text-primary">
-        <AssistantContent message={message} />
+        <AssistantContent message={message} convId={convId} />
       </div>
 
       {message.files && message.files.length > 0 ? (
@@ -464,7 +466,7 @@ function RegenerateIcon() {
     </svg>
   );
 }
-function AssistantContent({ message }: { message: Message }) {
+function AssistantContent({ message, convId }: { message: Message; convId: string }) {
   const hasContent = message.content.length > 0;
   const isStreaming = message.isStreaming;
 
@@ -479,18 +481,79 @@ function AssistantContent({ message }: { message: Message }) {
   }
 
   if (isStreaming) {
+    // During streaming we render plain text + simple code-fence
+    // splitting. The :::excel-plan card only mounts once the
+    // assistant's terminal "complete" event arrives so the user
+    // doesn't see a half-parsed plan flicker into a card.
     return <StreamingContent content={message.content} />;
   }
 
+  // Split the completed content into prose / excel-plan segments.
+  // Each segment renders independently so the card mounts inline
+  // wherever the AI placed the fenced block.
+  const segments = parseExcelPlanSegments(message.content || "");
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
-      components={markdownComponents}
-    >
-      {renderCitations(message.content || "")}
-    </ReactMarkdown>
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === "plan" ? (
+          <ExcelPlanCard key={i} convId={convId} plan={seg.plan} />
+        ) : (
+          <ReactMarkdown
+            key={i}
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
+            components={markdownComponents}
+          >
+            {renderCitations(seg.text)}
+          </ReactMarkdown>
+        ),
+      )}
+    </>
   );
+}
+
+// :::excel-plan ... ::: detection. The fence is the standard
+// Pandoc-style triple-colon container — react-markdown doesn't
+// parse it natively, so we strip it out before rendering and
+// substitute the ExcelPlanCard at the right position. Malformed
+// JSON inside the fence falls back to rendering the raw block as
+// text so the user can see what the AI produced.
+type ExcelPlanSegment =
+  | { kind: "text"; text: string }
+  | { kind: "plan"; plan: ExcelPlan };
+
+const EXCEL_PLAN_FENCE = /:::excel-plan\s*\n([\s\S]*?)\n:::/g;
+
+function parseExcelPlanSegments(content: string): ExcelPlanSegment[] {
+  const out: ExcelPlanSegment[] = [];
+  let last = 0;
+  EXCEL_PLAN_FENCE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = EXCEL_PLAN_FENCE.exec(content)) !== null) {
+    const before = content.slice(last, match.index);
+    if (before.trim()) out.push({ kind: "text", text: before });
+    const raw = match[1].trim();
+    const parsed = tryParseJson(raw);
+    if (parsed && typeof parsed === "object") {
+      out.push({ kind: "plan", plan: parsed as ExcelPlan });
+    } else {
+      // Fall back to showing the raw block as a fenced code block
+      // so the user at least sees what the AI emitted.
+      out.push({ kind: "text", text: "```json\n" + raw + "\n```" });
+    }
+    last = match.index + match[0].length;
+  }
+  const tail = content.slice(last);
+  if (tail.trim() || out.length === 0) out.push({ kind: "text", text: tail });
+  return out;
+}
+
+function tryParseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function areEqual(prev: Props, next: Props): boolean {
