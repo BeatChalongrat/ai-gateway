@@ -31,6 +31,8 @@ from app.services.portal.oauth_flow_service import (
     generate_pkce,
     get_oauth_state_store,
     validate_return_to,
+    verify_github_access_token,
+    verify_google_id_token,
 )
 
 
@@ -227,6 +229,68 @@ def oauth_callback_legacy():
             ),
             "replacement": "/portal/auth/oauth/start",
         },
+    )
+
+
+class OAuthVerifyRequest(BaseModel):
+    """Body for ``POST /portal/auth/oauth/verify``.
+
+    Exactly one of ``id_token`` or ``access_token`` should be set:
+    Google issues an OIDC id_token (verified against JWKS), GitHub
+    only an access_token (verified by calling /user). Whatever the
+    caller sends will be verified by the provider, not trusted as-is.
+    """
+
+    provider: str = Field(..., pattern="^(google|github)$")
+    id_token: str | None = Field(default=None, max_length=8192)
+    access_token: str | None = Field(default=None, max_length=8192)
+
+
+@router.post("/oauth/verify")
+@public_portal_route
+def oauth_verify(
+    payload: OAuthVerifyRequest,
+    session: Session = Depends(get_db_session),
+):
+    """Verify a provider-issued token server-side and mint portal tokens.
+
+    Used by the portal's NextAuth ``signIn`` callback. NextAuth performs
+    the user-facing OAuth dance, then forwards the verified provider
+    token here. The backend re-verifies the token (the entire point of
+    this endpoint — never trust the caller's claim about who the user
+    is) and only then calls ``oauth_service.login_or_create``.
+
+    Closes the security hole from the legacy POST callback (P0-8) by
+    requiring proof-of-identity from the provider, not from the caller.
+    """
+    try:
+        if payload.provider == "google":
+            if not payload.id_token:
+                raise ValidationError(
+                    "id_token is required for Google verify.",
+                    code="missing_id_token",
+                )
+            claims = verify_google_id_token(payload.id_token)
+        else:  # github
+            if not payload.access_token:
+                raise ValidationError(
+                    "access_token is required for GitHub verify.",
+                    code="missing_access_token",
+                )
+            claims = verify_github_access_token(payload.access_token)
+    except IdTokenVerificationFailed as exc:
+        raise ValidationError(
+            f"OAuth verification failed: {exc}",
+            code="oauth_verification_failed",
+        )
+
+    return oauth_service.login_or_create(
+        session,
+        provider=payload.provider,
+        oauth_id=claims["sub"],
+        email=claims.get("email") or "",
+        display_name=claims.get("name"),
+        avatar_url=claims.get("picture"),
     )
 
 
