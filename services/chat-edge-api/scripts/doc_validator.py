@@ -89,6 +89,43 @@ def validate_pdf(path: str) -> dict[str, Any]:
     return result
 
 
+def validate_pptx(path: str) -> dict[str, Any]:
+    from pptx import Presentation
+
+    result: dict[str, Any] = {
+        "valid": True,
+        "file_type": "pptx",
+        "file_size_bytes": os.path.getsize(path),
+        "errors": [],
+        "warnings": [],
+        "stats": {},
+    }
+    try:
+        prs = Presentation(path)
+        result["stats"]["slide_count"] = len(prs.slides)
+        if not prs.slides:
+            result["warnings"].append("Presentation has 0 slides")
+
+        total_text = ""
+        for i, slide in enumerate(prs.slides):
+            try:
+                shapes = list(slide.shapes)
+            except Exception as exc:  # noqa: BLE001
+                result["warnings"].append(f"Slide {i + 1} read error: {exc}")
+                continue
+            for shape in shapes:
+                if shape.has_text_frame:
+                    total_text += (shape.text_frame.text or "") + " "
+        word_count = len(total_text.split())
+        result["stats"]["word_count"] = word_count
+        if word_count == 0 and prs.slides:
+            result["warnings"].append("No text content found in any slide")
+    except Exception as exc:  # noqa: BLE001
+        result["valid"] = False
+        result["errors"].append(f"Failed to open: {exc}")
+    return result
+
+
 def validate(path: str) -> dict[str, Any]:
     if not os.path.exists(path):
         return {
@@ -102,6 +139,8 @@ def validate(path: str) -> dict[str, Any]:
         return validate_docx(path)
     if ext == ".pdf":
         return validate_pdf(path)
+    if ext == ".pptx":
+        return validate_pptx(path)
     return {
         "valid": False,
         "errors": [f"Unsupported file type: {ext}"],
