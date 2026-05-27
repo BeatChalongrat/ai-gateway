@@ -20,6 +20,11 @@ coverage/
 logs/
 tmp/
 storage/
+# Track the Go ``internal/storage/`` package — the generic
+# ``storage/`` rule above was meant for data dirs (./data/storage,
+# etc.), not Go source. Exception must come AFTER the broader rule.
+!services/chat-edge-api/internal/storage/
+!services/chat-edge-api/internal/storage/**
 uploads/
 *.sqlite3
 admin-ui/tsconfig.tsbuildinfo

@@ -14,18 +14,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"mime/multipart"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
+
+// Storage-key prefix for KB documents. Sibling of the
+// conversation-files prefix so the bucket / fs root stays organised.
+const knowledgeKeyPrefix = "knowledge"
 
 // ---------------------------------------------------------------------------
 // Typed errors
@@ -56,15 +58,17 @@ var allowedKBContentTypes = map[string]bool{
 }
 
 // TextExtractor is the slice of FileService the KB service needs.
-// Tiny interface keeps the dependency direction clean.
+// Tiny interface keeps the dependency direction clean. The
+// implementation reads the object via the shared storage.Backend and
+// materialises a local copy when the extractor needs one — callers
+// here only deal in storage keys.
 type TextExtractor interface {
-	ExtractTextForPath(path, contentType string) (string, bool)
+	ExtractTextForStorageKey(ctx context.Context, key, contentType string) (string, bool)
 }
 
 // KnowledgeServiceKnobs is the runtime config bag for the KB
-// pipeline. Storage root is separate from the conversation-files
-// root so KB uploads live in their own tree (different lifecycle —
-// KB documents stick around as long as the KB does).
+// pipeline. StorageRoot is retained for backwards-compat only — the
+// active path now goes through the storage.Backend instance.
 type KnowledgeServiceKnobs struct {
 	StorageRoot      string
 	MaxFileSizeBytes int64
@@ -75,6 +79,7 @@ type KnowledgeService struct {
 	repo      *repository.KnowledgeRepo
 	embedder  *EmbeddingService
 	extractor TextExtractor
+	storage   storage.Backend
 	knobs     KnowledgeServiceKnobs
 }
 
@@ -82,6 +87,7 @@ func NewKnowledgeService(
 	repo *repository.KnowledgeRepo,
 	embedder *EmbeddingService,
 	extractor TextExtractor,
+	store storage.Backend,
 	knobs KnowledgeServiceKnobs,
 ) *KnowledgeService {
 	if knobs.StorageRoot == "" {
@@ -97,6 +103,7 @@ func NewKnowledgeService(
 		repo:      repo,
 		embedder:  embedder,
 		extractor: extractor,
+		storage:   store,
 		knobs:     knobs,
 	}
 }
@@ -173,7 +180,7 @@ func (s *KnowledgeService) DeleteKB(ctx context.Context, tenantID, id uuid.UUID)
 	}
 	for _, d := range docs {
 		if d.StoragePath != "" {
-			_ = os.Remove(d.StoragePath)
+			_ = s.storage.Delete(ctx, d.StoragePath)
 		}
 	}
 	return nil
@@ -221,30 +228,17 @@ func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocument
 	clean := sanitizeFilename(in.OriginalName)
 	docID := uuid.New()
 	storageName := fmt.Sprintf("%s_%s", docID.String(), clean)
-	dir, err := s.kbDir(in.TenantID, kb.ID)
-	if err != nil {
-		return nil, err
-	}
-	dst := filepath.Join(dir, storageName)
+	key := storage.JoinKey(
+		knowledgeKeyPrefix,
+		in.TenantID.String(),
+		kb.ID.String(),
+		storageName,
+	)
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return nil, fmt.Errorf("kb create file: %w", err)
+	if err := s.storage.Upload(ctx, key, in.Body, in.ContentType, in.Size); err != nil {
+		return nil, fmt.Errorf("kb storage upload: %w", err)
 	}
-	written, err := io.Copy(out, in.Body)
-	closeErr := out.Close()
-	if err != nil {
-		_ = os.Remove(dst)
-		return nil, fmt.Errorf("kb write file: %w", err)
-	}
-	if closeErr != nil {
-		_ = os.Remove(dst)
-		return nil, fmt.Errorf("kb close file: %w", closeErr)
-	}
-	if written > s.knobs.MaxFileSizeBytes {
-		_ = os.Remove(dst)
-		return nil, fmt.Errorf("%w: %d > %d", ErrKBDocumentTooLarge, written, s.knobs.MaxFileSizeBytes)
-	}
+	written := in.Size
 
 	doc, err := s.repo.CreateDocument(ctx, &model.KnowledgeDocument{
 		KnowledgeBaseID:  kb.ID,
@@ -253,11 +247,11 @@ func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocument
 		OriginalFilename: clean,
 		ContentType:      in.ContentType,
 		FileSizeBytes:    written,
-		StoragePath:      dst,
+		StoragePath:      key,
 		Status:           "processing",
 	})
 	if err != nil {
-		_ = os.Remove(dst)
+		_ = s.storage.Delete(ctx, key)
 		return nil, err
 	}
 	// Run the indexer synchronously per Phase 3 contract. Errors are
@@ -294,7 +288,7 @@ func (s *KnowledgeService) DeleteDocument(ctx context.Context, tenantID, kbID, d
 		return err
 	}
 	if doc.StoragePath != "" {
-		_ = os.Remove(doc.StoragePath)
+		_ = s.storage.Delete(ctx, doc.StoragePath)
 	}
 	_ = s.repo.RecomputeKBStats(ctx, kbID)
 	return nil
@@ -350,7 +344,7 @@ func (s *KnowledgeService) indexDocument(
 		return fail("embedding provider not configured (set OPENAI_API_KEY)")
 	}
 
-	text, ok := s.extractor.ExtractTextForPath(doc.StoragePath, doc.ContentType)
+	text, ok := s.extractor.ExtractTextForStorageKey(ctx, doc.StoragePath, doc.ContentType)
 	if !ok || strings.TrimSpace(text) == "" {
 		return fail("text extraction failed for this file type")
 	}
@@ -401,18 +395,3 @@ func (s *KnowledgeService) indexDocument(
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Storage helpers
-// ---------------------------------------------------------------------------
-
-func (s *KnowledgeService) kbDir(tenantID, kbID uuid.UUID) (string, error) {
-	root, err := filepath.Abs(s.knobs.StorageRoot)
-	if err != nil {
-		return "", fmt.Errorf("resolve kb storage root: %w", err)
-	}
-	dir := filepath.Join(root, tenantID.String(), kbID.String())
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("mkdir kb dir: %w", err)
-	}
-	return dir, nil
-}

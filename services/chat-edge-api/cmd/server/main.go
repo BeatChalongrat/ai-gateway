@@ -37,6 +37,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/router"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
 
 func main() {
@@ -119,12 +120,34 @@ func main() {
 	)
 	feedbackSvc := service.NewFeedbackService(feedbackRepo, messages)
 	provisionSvc := service.NewProvisionService(pool)
-	fileSvc := service.NewFileService(filesRepo, conversations, service.Knobs{
+
+	// Blob storage — backed by either the local filesystem (default)
+	// or any S3-compatible service. Both file uploads + KB documents
+	// reuse the same backend instance so a single deploy switch flips
+	// the whole product to S3.
+	storageBackend, err := storage.NewBackend(storage.Config{
+		Backend:          cfg.StorageBackend,
+		LocalBasePath:    cfg.FileStorageRoot,
+		S3Bucket:         cfg.S3Bucket,
+		S3Region:         cfg.S3Region,
+		S3Endpoint:       cfg.S3Endpoint,
+		S3AccessKey:      cfg.S3AccessKey,
+		S3SecretKey:      cfg.S3SecretKey,
+		S3ForcePathStyle: cfg.S3ForcePathStyle,
+	})
+	if err != nil {
+		slog.Error("storage init failed", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("storage backend ready", "backend", cfg.StorageBackend)
+
+	fileSvc := service.NewFileService(filesRepo, conversations, storageBackend, service.Knobs{
 		StorageRoot:         cfg.FileStorageRoot,
 		MaxFileSizeBytes:    cfg.MaxFileSizeBytes,
 		MaxConvFileTotal:    cfg.MaxConvFileTotal,
 		MaxFilesPerMessage:  cfg.MaxFilesPerMessage,
 		ExtractPythonBinary: cfg.ExtractPythonBinary,
+		PresignedURLExpiry:  cfg.PresignedURLExpiry,
 	})
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
@@ -144,10 +167,12 @@ func main() {
 	// without a service restart.
 	embeddingSvc := service.NewEmbeddingService()
 	knowledgeSvc := service.NewKnowledgeService(
-		knowledgeRepo, embeddingSvc, fileSvc,
+		knowledgeRepo, embeddingSvc, fileSvc, storageBackend,
 		service.KnowledgeServiceKnobs{
 			// Reuse the file storage env knob's directory as a parent
-			// — KB blobs land under a sibling ``knowledge/`` tree.
+			// — KB blobs land under a sibling ``knowledge/`` tree
+			// (only meaningful for the local backend; the S3 backend
+			// ignores StorageRoot in favour of the key prefix).
 			StorageRoot:      cfg.FileStorageRoot + "/knowledge",
 			MaxFileSizeBytes: 50 * 1024 * 1024,
 			EmbedBatchSize:   20,
