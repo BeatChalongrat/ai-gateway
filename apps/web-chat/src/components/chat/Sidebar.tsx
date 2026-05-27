@@ -149,19 +149,22 @@ export function Sidebar({
             : ""
         }`}
       >
-        {/* Header — SRAN logo + collapse toggle. The logo PNG bakes
-            in both the cat-bubble mark and the "SRAN" wordmark, so
-            we drop the separate text label and just render the
-            image. CSS filter:invert(1) flips the black artwork to
-            white in dark mode; the light-theme override below
-            removes the filter. */}
-        <div className="flex items-center justify-between gap-2 px-3 py-3">
-          <img
-            src="/sran-logo.png"
-            alt="SRAN Chat"
-            className="sran-logo h-8 w-auto select-none"
-            draggable={false}
-          />
+        {/* Header — SRAN wordmark + collapse toggle. We replaced the
+            cat-bubble PNG with text because the bitmap mark read as
+            chrome rather than a brand at the sidebar's 260px width.
+            ``.font-brand`` is the Outfit-family alias defined in
+            globals.css; falls back to the system sans-serif so a
+            font-load failure still ships a readable label. */}
+        <div
+          className="flex items-center justify-between gap-2 px-3"
+          style={{ height: 48 }}
+        >
+          <span
+            aria-label="SRAN Chat"
+            className="font-brand text-lg font-semibold tracking-tight text-text-primary"
+          >
+            SRAN
+          </span>
           <button
             type="button"
             onClick={onToggleCollapsed}
@@ -410,8 +413,15 @@ function UserMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="safe-bottom flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-bg-elevated"
-        style={{ minHeight: 48 }}
+        className="flex w-full items-center gap-2.5 px-3 pt-2 text-left transition-colors hover:bg-bg-elevated"
+        // ``safe-bottom`` alone resolves to 0 on desktop, leaving the
+        // user row flush against the viewport edge. Stack a real
+        // 0.75rem gap on top of the safe-area inset so the row
+        // breathes on every device.
+        style={{
+          minHeight: 48,
+          paddingBottom: "calc(0.75rem + var(--sab, 0px))",
+        }}
       >
         <span
           aria-hidden
