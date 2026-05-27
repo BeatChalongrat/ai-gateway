@@ -6,16 +6,21 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o chat-edge-api ./cmd/server
 
 FROM alpine:3.20
-# python3 + the Office/Excel libs invoked from scripts/. The
-# extractor, inspector, executor, and validator all shell out from
-# Go via exec.CommandContext, so the runtime image needs the same
-# stack the dev box uses. Pinned via apk so we get the alpine-built
-# wheel for openpyxl (avoids a slow pip compile on every layer
-# rebuild). build-base lingers only inside the install layer so
-# pdfplumber's transitive Cython deps can compile, then drops out.
+# python3 + the Office/Excel/Doc libs invoked from scripts/. The
+# extractor, inspector, executor, generator, and validator all
+# shell out from Go via exec.CommandContext, so the runtime image
+# needs the same stack the dev box uses. Pinned via apk so we get
+# the alpine-built wheel for openpyxl (avoids a slow pip compile
+# on every layer rebuild). build-base lingers only inside the
+# install layer so transitive Cython deps can compile, then drops
+# out.
+#
+# Phase 4 Session 2 adds: reportlab (PDF generation) + pypdf
+# (cleaner PDF metadata API than pypdfium2 for the inspector).
 RUN apk add --no-cache ca-certificates python3 py3-pip py3-openpyxl py3-lxml \
     && apk add --no-cache --virtual .build-deps build-base python3-dev \
-    && pip install --no-cache-dir --break-system-packages pdfplumber python-docx \
+    && pip install --no-cache-dir --break-system-packages \
+        pdfplumber python-docx reportlab pypdf \
     && apk del .build-deps
 
 WORKDIR /app
