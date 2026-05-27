@@ -25,6 +25,7 @@ import {
   Table2,
 } from "lucide-react";
 
+import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
 import type { ExcelExecuteResponse } from "@/lib/types";
 
@@ -55,27 +56,30 @@ export interface ExcelPlan {
   [k: string]: unknown;
 }
 
-// Icon palette — colour-coded by intent so the user can skim a
-// plan list and tell mutating ops apart from formatting ops:
-// emerald = creating structure, blue = writing data, purple =
-// formatting, indigo = layout, slate = neutral, cyan = freeze.
+// All action icons render in text-text-tertiary so the plan list
+// reads as structural metadata. The icon SHAPE alone carries the
+// "what kind of mutation" hint; colour was removed in Session 5.1
+// because the cards were starting to look like an AI template
+// brochure and the visual hierarchy was lost (blue CTA needs to
+// be the only thing that pops).
+const ACTION_ICON_CLASS = "h-4 w-4 text-text-tertiary";
 const ACTION_ICONS: Record<string, ReactNode> = {
-  create_sheet:     <Plus className="h-4 w-4 text-emerald-500" />,
-  delete_sheet:     <Plus className="h-4 w-4 -rotate-45 text-rose-500" />,
-  rename_sheet:     <PenLine className="h-4 w-4 text-indigo-500" />,
-  write_cells:      <PenLine className="h-4 w-4 text-blue-500" />,
-  write_table:      <Table2 className="h-4 w-4 text-slate-500" />,
-  create_chart:     <BarChart3 className="h-4 w-4 text-emerald-500" />,
-  format_range:     <Paintbrush className="h-4 w-4 text-purple-500" />,
-  set_column_width: <Sheet className="h-4 w-4 text-slate-500" />,
-  merge_cells:      <Merge className="h-4 w-4 text-indigo-500" />,
-  auto_filter:      <Filter className="h-4 w-4 text-slate-500" />,
-  freeze_panes:     <Snowflake className="h-4 w-4 text-cyan-500" />,
+  create_sheet:     <Plus className={ACTION_ICON_CLASS} />,
+  delete_sheet:     <Plus className={`${ACTION_ICON_CLASS} -rotate-45`} />,
+  rename_sheet:     <PenLine className={ACTION_ICON_CLASS} />,
+  write_cells:      <PenLine className={ACTION_ICON_CLASS} />,
+  write_table:      <Table2 className={ACTION_ICON_CLASS} />,
+  create_chart:     <BarChart3 className={ACTION_ICON_CLASS} />,
+  format_range:     <Paintbrush className={ACTION_ICON_CLASS} />,
+  set_column_width: <Sheet className={ACTION_ICON_CLASS} />,
+  merge_cells:      <Merge className={ACTION_ICON_CLASS} />,
+  auto_filter:      <Filter className={ACTION_ICON_CLASS} />,
+  freeze_panes:     <Snowflake className={ACTION_ICON_CLASS} />,
 };
 
 function actionIcon(type?: string): ReactNode {
   if (type && ACTION_ICONS[type]) return ACTION_ICONS[type];
-  return <Sheet className="h-4 w-4 text-text-tertiary" />;
+  return <Sheet className={ACTION_ICON_CLASS} />;
 }
 
 interface Props {
@@ -117,7 +121,7 @@ export function ExcelPlanCard({ convId, plan }: Props) {
 
   return (
     <CardShell
-      headerIcon={<Sheet className="h-5 w-5 text-emerald-500" />}
+      headerIcon={<FileTypeBadge extension=".xlsx" size="sm" />}
       headerTitle="Excel Edit Plan"
       metadata={`${actions.length} action${actions.length === 1 ? "" : "s"}`}
       footer={
@@ -155,7 +159,7 @@ export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
 
   return (
     <CardShell
-      headerIcon={<Sheet className="h-5 w-5 text-emerald-500" />}
+      headerIcon={<FileTypeBadge extension=".xlsx" size="sm" />}
       headerTitle={file.filename}
       metadata={file.version ? `v${file.version}` : undefined}
       footer={
@@ -180,7 +184,7 @@ export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
               icon={
                 <Plus
                   className={`h-4 w-4 ${
-                    line.startsWith("ERROR") ? "text-status-danger" : "text-emerald-500"
+                    line.startsWith("ERROR") ? "text-status-danger" : "text-text-tertiary"
                   }`}
                 />
               }

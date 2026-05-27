@@ -8,7 +8,6 @@ import { useState, type ReactNode } from "react";
 
 import {
   AlignLeft,
-  FileText,
   Heading,
   Image as ImageIcon,
   List,
@@ -24,6 +23,7 @@ import {
   Type,
 } from "lucide-react";
 
+import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
 import type { DocExecuteResponse } from "@/lib/types";
 
@@ -65,26 +65,30 @@ export interface DocPlan {
   [k: string]: unknown;
 }
 
+// Monochrome icon set — colour was removed in Session 5.1 so the
+// plan list reads as structural metadata rather than a coloured
+// status alarm. Icon SHAPE alone carries the action-type hint.
+const ACTION_ICON_CLASS = "h-4 w-4 text-text-tertiary";
 const ACTION_ICONS: Record<string, ReactNode> = {
-  add_title_page:      <Presentation className="h-4 w-4 text-blue-500" />,
-  add_heading:         <Heading className="h-4 w-4 text-blue-500" />,
-  add_paragraph:       <AlignLeft className="h-4 w-4 text-slate-500" />,
-  add_bullet_list:     <List className="h-4 w-4 text-slate-500" />,
-  add_numbered_list:   <ListOrdered className="h-4 w-4 text-slate-500" />,
-  add_table:           <Table2 className="h-4 w-4 text-emerald-500" />,
-  add_page_break:      <SeparatorHorizontal className="h-4 w-4 text-text-tertiary" />,
-  add_spacer:          <SeparatorHorizontal className="h-4 w-4 text-text-tertiary" />,
-  add_horizontal_rule: <Minus className="h-4 w-4 text-text-tertiary" />,
-  add_blockquote:      <Quote className="h-4 w-4 text-purple-500" />,
-  add_code_block:      <Type className="h-4 w-4 text-amber-500" />,
-  replace_text:        <Replace className="h-4 w-4 text-amber-500" />,
-  set_header:          <PanelTop className="h-4 w-4 text-indigo-500" />,
-  set_footer:          <PanelBottom className="h-4 w-4 text-indigo-500" />,
+  add_title_page:      <Presentation className={ACTION_ICON_CLASS} />,
+  add_heading:         <Heading className={ACTION_ICON_CLASS} />,
+  add_paragraph:       <AlignLeft className={ACTION_ICON_CLASS} />,
+  add_bullet_list:     <List className={ACTION_ICON_CLASS} />,
+  add_numbered_list:   <ListOrdered className={ACTION_ICON_CLASS} />,
+  add_table:           <Table2 className={ACTION_ICON_CLASS} />,
+  add_page_break:      <SeparatorHorizontal className={ACTION_ICON_CLASS} />,
+  add_spacer:          <SeparatorHorizontal className={ACTION_ICON_CLASS} />,
+  add_horizontal_rule: <Minus className={ACTION_ICON_CLASS} />,
+  add_blockquote:      <Quote className={ACTION_ICON_CLASS} />,
+  add_code_block:      <Type className={ACTION_ICON_CLASS} />,
+  replace_text:        <Replace className={ACTION_ICON_CLASS} />,
+  set_header:          <PanelTop className={ACTION_ICON_CLASS} />,
+  set_footer:          <PanelBottom className={ACTION_ICON_CLASS} />,
 };
 
 function actionIcon(type?: string): ReactNode {
   if (type && ACTION_ICONS[type]) return ACTION_ICONS[type];
-  return <ImageIcon className="h-4 w-4 text-text-tertiary" />;
+  return <ImageIcon className={ACTION_ICON_CLASS} />;
 }
 
 interface Props {
@@ -135,7 +139,7 @@ export function DocPlanCard({ convId, plan }: Props) {
 
   return (
     <CardShell
-      headerIcon={<FileText className="h-5 w-5 text-blue-500" />}
+      headerIcon={<FileTypeBadge extension={format === "PDF" ? ".pdf" : ".docx"} size="sm" />}
       headerTitle={`${formatLabel} Plan`}
       metadata={`${pageSize} ${orientation} · ${language} · ${actions.length} action${actions.length === 1 ? "" : "s"}`}
       footer={
@@ -168,10 +172,9 @@ export function DocPlanCard({ convId, plan }: Props) {
 export function DocResultCard({ result }: { result: DocExecuteResponse }) {
   const { file, validation, changes } = result;
   const fileTypeLabel = (file.content_type || "").includes("pdf") ? "PDF" : "DOCX";
-  const headerIcon =
-    fileTypeLabel === "PDF"
-      ? <FileText className="h-5 w-5 text-rose-500" />
-      : <FileText className="h-5 w-5 text-blue-500" />;
+  const headerIcon = (
+    <FileTypeBadge extension={fileTypeLabel === "PDF" ? ".pdf" : ".docx"} size="sm" />
+  );
   const pages = file.version != null
     ? validation?.stats?.page_count
     : validation?.stats?.page_count;
@@ -208,7 +211,7 @@ export function DocResultCard({ result }: { result: DocExecuteResponse }) {
                 <li key={i} className="flex items-start gap-2">
                   <span
                     className={`mt-0.5 flex-shrink-0 ${
-                      broken ? "text-status-danger" : "text-emerald-500"
+                      broken ? "text-status-danger" : "text-text-tertiary"
                     }`}
                   >
                     {broken ? "✗" : "✓"}
