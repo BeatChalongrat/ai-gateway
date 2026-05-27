@@ -87,6 +87,29 @@ export interface FileAttachment {
     | "failed"
     | "unsupported";
   created_at: string;
+  /** Phase 4 — Excel Smart Workspace. True for files produced by an
+   *  AI edit plan (via POST /excel/execute) so the UI can flip them
+   *  into the result-card treatment with version + change-log. */
+  is_generated?: boolean;
+  parent_file_id?: UUID;
+  version?: number;
+  change_log?: string[];
+}
+
+/** Validation report shape returned by the chat-edge Excel
+ *  validator. Mirrors excel_validator.py output. */
+export interface ExcelValidationReport {
+  valid: boolean;
+  issues: string[];
+  warnings: string[];
+  stats: { sheets?: number; charts?: number; broken_formulas?: number };
+}
+
+/** Response from POST /conversations/{id}/excel/execute. */
+export interface ExcelExecuteResponse {
+  file: FileAttachment;
+  validation: ExcelValidationReport;
+  changes: string[];
 }
 
 export interface FileListResponse {

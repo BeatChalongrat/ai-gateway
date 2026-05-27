@@ -64,6 +64,11 @@ type MessageService struct {
 	// Optional. Queries the knowledge base bound to the conversation
 	// and returns a retrieved-context block for the system prompt.
 	ragSvc RAGReader
+	// Optional. Reads conversation files (with their cached
+	// inspection_json) so the Phase 4 Excel context block can
+	// inject the workbook structure + action catalog into the
+	// system prompt. Wired via SetExcelLookup.
+	excelLookup ExcelLookup
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -95,6 +100,13 @@ type PreferencesReader interface {
 // the system prompt prefix.
 type RAGReader interface {
 	BuildContext(ctx context.Context, tenantID uuid.UUID, kbID uuid.UUID, query string) string
+}
+
+// ExcelLookup is the slice of the file repo the Phase 4 Excel
+// system-prompt injector needs. Interface so unit tests don't have
+// to wire the full pgx pool.
+type ExcelLookup interface {
+	ListByConversation(ctx context.Context, tenantID, convID uuid.UUID) ([]model.ConversationFile, error)
 }
 
 // streamRegistration is what's stored in MessageService.activeStreams.
@@ -153,6 +165,14 @@ func (s *MessageService) SetFileLinker(fl FileLinker) {
 // Same lazy-wire pattern as SetFileLinker.
 func (s *MessageService) SetPreferencesReader(p PreferencesReader) {
 	s.prefsSvc = p
+}
+
+// SetExcelLookup wires the file lookup the Excel system-prompt
+// injector needs. Optional — without it the Excel block simply
+// never renders and the AI gets the legacy CSV body via
+// FileLinker.BuildContextBlock.
+func (s *MessageService) SetExcelLookup(e ExcelLookup) {
+	s.excelLookup = e
 }
 
 // SetRAGReader wires the knowledge-base retrieval service. Same
@@ -1038,6 +1058,8 @@ func (s *MessageService) ragContext(ctx context.Context, conv *model.Conversatio
 //	           doesn't accidentally override the "respond as X" rule)
 //	RAG      — authoritative facts the model should cite
 //	files    — supplementary attached documents
+//	excel    — Phase 4 workbook structure + action catalog so the
+//	           model knows how to emit :::excel-plan blocks
 //
 // Any subset may be empty. “ragQuery“ is the most-recent user
 // message content used as the retrieval query; pass "" to skip RAG.
@@ -1047,7 +1069,7 @@ func (s *MessageService) buildSystemPrefix(
 	conv *model.Conversation,
 	ragQuery string,
 ) string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if s.prefsSvc != nil {
 		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
 			parts = append(parts, p)
@@ -1060,9 +1082,137 @@ func (s *MessageService) buildSystemPrefix(
 		if f := s.fileContext(ctx, tenantID, conv.ID); f != "" {
 			parts = append(parts, f)
 		}
+		if x := s.excelContext(ctx, tenantID, conv.ID); x != "" {
+			parts = append(parts, x)
+		}
 	}
 	return strings.Join(parts, "\n\n")
 }
+
+// excelContext renders the Phase-4 Excel system block when the
+// conversation has at least one xlsx file with a cached inspection.
+// The block teaches the model the workbook structure + the
+// :::excel-plan output contract; the frontend intercepts those
+// fenced blocks and renders the plan card.
+//
+// To keep the system prompt bounded we only embed the MOST RECENT
+// xlsx's inspection_json. When users iterate on a workbook the
+// generated versions land as new files (is_generated=true) and the
+// newest version is what the model needs to plan further edits
+// against.
+func (s *MessageService) excelContext(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) string {
+	if s.excelLookup == nil {
+		return ""
+	}
+	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	// Newest-first — pick the first xlsx with a cached inspection.
+	var latest *model.ConversationFile
+	for i := len(files) - 1; i >= 0; i-- {
+		f := &files[i]
+		if !IsExcelContentType(f.ContentType) {
+			continue
+		}
+		if f.InspectionJSON == nil || *f.InspectionJSON == "" {
+			continue
+		}
+		latest = f
+		break
+	}
+	if latest == nil {
+		return ""
+	}
+	return renderExcelSystemBlock(latest)
+}
+
+// renderExcelSystemBlock builds the literal text injected at the
+// end of the system prompt. Kept as a free function so unit tests
+// can assert on the snapshot without booting a full MessageService.
+func renderExcelSystemBlock(f *model.ConversationFile) string {
+	var b strings.Builder
+	b.WriteString("## Excel File Context\n\n")
+	b.WriteString("You have access to an Excel workbook. Here is its complete structure:\n\n")
+	b.WriteString("file_id: ")
+	b.WriteString(f.ID.String())
+	b.WriteString("\nfilename: ")
+	b.WriteString(f.OriginalFilename)
+	b.WriteString("\n\n```json\n")
+	b.WriteString(*f.InspectionJSON)
+	b.WriteString("\n```\n\n")
+	b.WriteString(excelCapabilitiesPrompt)
+	return b.String()
+}
+
+// excelCapabilitiesPrompt is the static portion of the Excel system
+// block — the contract the model must follow when the user asks to
+// edit or generate a workbook. Kept as a package-level constant so
+// adjusting the prompt doesn't require a rebuild of the message
+// service tests' fixtures.
+const excelCapabilitiesPrompt = `## Your Capabilities
+
+You can perform three types of operations:
+
+### 1. ANALYZE — Answer questions about the data
+Just respond in chat with your analysis. Reference specific sheets, cells, and formulas.
+
+### 2. EDIT — Modify the existing workbook
+When the user asks you to edit, add, modify, generate, summarize, format, sort, filter, or otherwise change the Excel file, you MUST output an edit plan in this EXACT format (the triple-colon fences are required). Output the plan immediately — do NOT ask for confirmation, do NOT say "let me know if this is okay", do NOT say "let's proceed". A plan block is your action; the user runs it by clicking Execute on the rendered card.
+
+:::excel-plan
+{
+  "operation": "modify_workbook",
+  "source_file_id": "<file_id from above>",
+  "output_filename": "<original>_edited.xlsx",
+  "description": "Brief description of what will change",
+  "actions": [
+    {"type": "create_sheet", "sheet_name": "Summary", "position": 0},
+    {"type": "write_cells", "sheet_name": "Summary", "cells": [
+      {"cell": "A1", "value": "Total Revenue", "bold": true, "font_size": 14},
+      {"cell": "B1", "value_formula": "=SUM(Sales_2025!D2:D13)", "number_format": "#,##0"}
+    ]},
+    {"type": "format_range", "sheet_name": "Summary", "range": "A1:B1",
+     "fill_color": "1F4E79", "font_color": "FFFFFF", "bold": true}
+  ],
+  "preserve": {
+    "existing_formulas": true,
+    "existing_styles": true,
+    "existing_charts": true,
+    "hidden_sheets": true
+  }
+}
+:::
+
+CRITICAL: every action MUST be a flat object with a "type" field — NEVER nest the body under the type name. Use {"type": "create_sheet", "sheet_name": "X"}, NOT {"create_sheet": {"sheet_name": "X"}}.
+
+### 3. GENERATE — Create a new Excel file from scratch
+Same format as EDIT but with "operation": "create_workbook".
+
+## Rules — MUST follow
+- For ANY edit / generate / modify / format request: output exactly one :::excel-plan ... ::: block. No exceptions, no hedging, no asking permission first.
+- BEFORE the plan, write 1-2 short sentences in the user's language describing what you'll change (this is the explanation rendered above the plan card).
+- AFTER the closing ::: fence, write nothing further. The plan IS the deliverable.
+- NEVER output raw CSV or text tables when the user wants an Excel file.
+- ALWAYS preserve existing formulas, styles, and charts unless explicitly asked to remove them.
+- Use ` + "`value_formula`" + ` instead of hardcoded values when the data should be dynamic.
+- Use source_file_id = the file_id printed above the workbook structure.
+
+## Action Types Available
+- create_sheet { sheet_name, position }
+- delete_sheet { sheet_name }
+- rename_sheet { sheet_name, new_name }
+- write_cells { sheet_name, cells: [ { cell, value | value_formula, bold, font_size, number_format } ] }
+- write_table { sheet_name, start_cell, headers: [...], data: [[...]] }
+- create_chart { sheet_name, chart_type (bar|line|pie|column|area|scatter), title, anchor_cell, data_range, category_range, width, height }
+- format_range { sheet_name, range, fill_color, font_color, bold, font_size }
+- set_column_width { sheet_name, columns: { "A": 20, "B": 16 } }
+- merge_cells { sheet_name, range }
+- auto_filter { sheet_name, range }
+- freeze_panes { sheet_name, cell }
+`
 
 // keep “time“ import referenced even when no other code in this
 // file uses it directly (the GatewayChatUsage struct references

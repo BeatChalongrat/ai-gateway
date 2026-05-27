@@ -153,6 +153,14 @@ func main() {
 	})
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
+
+	// Phase 4 — Excel Smart Workspace. Wired before the file
+	// service's auto-inspect hook so an upload that lands the
+	// instant the server starts up still gets inspected.
+	excelSvc := service.NewExcelService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
+	fileSvc.SetExcelService(excelSvc)
+	messageSvc.SetExcelLookup(filesRepo)
+
 	// Wire the file linkage into the message service so /messages
 	// can persist file_ids → user message AND inject file content
 	// into the gateway request's system prompt.
@@ -217,6 +225,7 @@ func main() {
 		Admin:        adminHandler,
 		Knowledge:    handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
 		Voice:        handler.NewVoiceHandler(),
+		Excel:        handler.NewExcelHandler(excelSvc, filesRepo),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
