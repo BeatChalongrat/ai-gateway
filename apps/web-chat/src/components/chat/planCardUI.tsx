@@ -46,8 +46,12 @@ export function CardShell({
   children,
   footer,
 }: CardShellProps) {
+  // Outer border bumped from border-subtle (8%) to border-default
+  // (12%) so the card frame stays visible on the darker chat
+  // canvas; the inner header/footer dividers stay subtle for
+  // visual hierarchy.
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-border-subtle bg-bg-surface shadow-sm">
+    <div className="my-3 overflow-hidden rounded-xl border border-border-default bg-bg-surface shadow-sm">
       <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
         <span className="flex-shrink-0">{headerIcon}</span>
         <span className="text-sm font-semibold text-text-primary">{headerTitle}</span>
@@ -121,12 +125,18 @@ export function PrimaryButton({
   children,
   type = "button",
 }: ButtonProps) {
+  // Hardcoded blue (not bg-accent) because the project's --accent
+  // is a foreground hint colour — near-white in dark theme, near-
+  // black in light — so a bg-accent + text-white button rendered
+  // white-on-white on dark and disappeared. blue-600 is a solid
+  // contrast colour against BOTH bg-base (white) and bg-base-dark
+  // so the CTA pops regardless of theme.
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled || loading}
-      className="focus-ring inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+      className="focus-ring inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:shadow-md active:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
     >
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -139,12 +149,16 @@ export function PrimaryButton({
 }
 
 export function SecondaryButton({ onClick, disabled, icon, children }: ButtonProps) {
+  // Uses the existing CSS-variable theme tokens — bg-bg-elevated,
+  // text-text-primary, border-border-default — so it tracks light/
+  // dark automatically via the project's data-theme switch. No
+  // dark: Tailwind classes (this project doesn't enable them).
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-subtle bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-60"
+      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface disabled:cursor-not-allowed disabled:opacity-60"
     >
       {icon}
       <span>{children}</span>
@@ -167,7 +181,7 @@ export function DownloadButton({
     <a
       href={api.downloadUrl(fileId)}
       download={filename}
-      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-subtle bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface"
     >
       <Download className="h-4 w-4" />
       <span>{label}</span>
