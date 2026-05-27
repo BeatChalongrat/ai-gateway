@@ -244,8 +244,48 @@ class ApiClient {
     );
   }
   listExcelVersions(convId: string, fileId: string) {
-    return this.json<{ versions: import("./types").FileAttachment[] }>(
+    return this.json<{ versions: import("./types").FileVersion[] }>(
       `/conversations/${convId}/files/${fileId}/versions`,
+    );
+  }
+
+  /** Phase 4 Session 5 — Artifact Workspace API.
+   *  All endpoints are conversation-scoped + tenant-checked
+   *  server-side; the frontend just passes ids. */
+  listGeneratedFiles(convId: string) {
+    return this.json<{ files: import("./types").GeneratedFileEntry[] }>(
+      `/conversations/${convId}/generated-files`,
+    );
+  }
+
+  /** Generic file version timeline — same shape as listExcelVersions
+   *  but works for docx / pdf / pptx as well. The backend route is
+   *  format-agnostic; the helper name reflects the new use case. */
+  listFileVersions(convId: string, fileId: string) {
+    return this.json<{ versions: import("./types").FileVersion[] }>(
+      `/conversations/${convId}/files/${fileId}/versions`,
+    );
+  }
+
+  /** Rollback creates a new version (additive) carrying the
+   *  target version's content forward. Returns the new file row. */
+  rollbackFile(convId: string, lineageFileId: string, targetVersionId: string) {
+    return this.json<{
+      file: import("./types").FileAttachment;
+      message: string;
+    }>(
+      `/conversations/${convId}/files/${lineageFileId}/rollback`,
+      {
+        method: "POST",
+        body: JSON.stringify({ target_version_id: targetVersionId }),
+      },
+    );
+  }
+
+  compareVersions(convId: string, v1: string, v2: string) {
+    const params = new URLSearchParams({ v1, v2 });
+    return this.json<import("./types").ComparisonResponse>(
+      `/conversations/${convId}/file-compare?${params.toString()}`,
     );
   }
 
