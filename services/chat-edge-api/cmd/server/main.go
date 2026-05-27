@@ -109,6 +109,7 @@ func main() {
 		cfg.ServiceJWTSecret, cfg.ServiceJWTTTL,
 	)
 	titles := service.NewTitleService(gateway)
+	titles.SetRepos(conversations, messages)
 
 	authSvc := service.NewAuthService(
 		pool, tenants, users, refreshTokens, invitations,
@@ -185,6 +186,7 @@ func main() {
 	conversationHandler := handler.NewConversationHandler(conversationSvc)
 	conversationHandler.SetExportSources(conversations, messages, filesRepo, cfg)
 	conversationHandler.SetKnowledgeService(knowledgeSvc)
+	conversationHandler.SetTitleService(titles)
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)

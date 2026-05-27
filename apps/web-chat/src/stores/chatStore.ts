@@ -545,17 +545,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
       // Stream completed cleanly. If this was the conversation's
-      // first turn, generate a title from the user's prompt and
-      // persist it. Fire-and-forget — failure here is non-fatal.
+      // first turn, ask the backend to AI-generate a title from the
+      // user/assistant pair. Fire-and-forget — failure here falls
+      // back to the local truncation heuristic so the sidebar
+      // doesn't stay "New conversation" if the gateway round-trip
+      // stutters (offline, 5xx, etc.).
       if (isFirstMessage) {
-        const title = makeAutoTitle(trimmed);
-        if (title) {
-          void get()
-            .renameConversation(convId, title)
-            .catch(() => {
-              /* non-fatal */
-            });
-        }
+        void api
+          .generateTitle(convId)
+          .then((res) => {
+            if (!res?.title) return;
+            set((s) => ({
+              conversations: s.conversations.map((c) =>
+                c.id === convId ? { ...c, title: res.title } : c,
+              ),
+            }));
+          })
+          .catch(() => {
+            const fallback = makeAutoTitle(trimmed);
+            if (!fallback) return;
+            void get()
+              .renameConversation(convId, fallback)
+              .catch(() => {
+                /* non-fatal */
+              });
+          });
       }
     } catch (err) {
       if ((err as Error).name === "AbortError") {
