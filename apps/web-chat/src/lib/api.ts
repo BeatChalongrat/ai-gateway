@@ -218,6 +218,36 @@ class ApiClient {
   downloadUrl(fileId: string): string {
     return `${API_BASE}/files/${fileId}/download`;
   }
+
+  // ----- Excel Smart Workspace (Phase 4) --------------------
+  /** Run the deep inspector against an xlsx upload. The structure
+   *  is also cached server-side in inspection_json so a subsequent
+   *  message turn picks it up via the system prompt. */
+  inspectExcel(fileId: string) {
+    return this.json<Record<string, unknown>>(
+      `/files/${fileId}/inspect`,
+      { method: "POST" },
+    );
+  }
+  /** Execute an AI-generated :::excel-plan against the source
+   *  workbook. The server runs the executor on a fresh copy of the
+   *  source, validates the output, and persists a new generated
+   *  conversation_files row. Returns the new file metadata plus the
+   *  validator report so the result card can render both. */
+  executeExcelPlan(
+    convId: string,
+    body: { source_file_id: string; output_filename?: string; plan: unknown },
+  ) {
+    return this.json<import("./types").ExcelExecuteResponse>(
+      `/conversations/${convId}/excel/execute`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  }
+  listExcelVersions(convId: string, fileId: string) {
+    return this.json<{ versions: import("./types").FileAttachment[] }>(
+      `/conversations/${convId}/files/${fileId}/versions`,
+    );
+  }
   // ----- Preferences ---------------------------------------
   getPreferences() {
     return this.json<UserPreferences>("/user/preferences");

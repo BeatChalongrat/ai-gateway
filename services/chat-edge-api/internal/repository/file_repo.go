@@ -26,23 +26,56 @@ func (r *FileRepo) WithTx(tx pgx.Tx) *FileRepo {
 	return &FileRepo{db: tx}
 }
 
+// fileColumns is the single source of truth for SELECT projections.
+// Every read path uses it so the Excel-workspace fields added in
+// migration 012 are always populated and we don't have stale-row
+// pitfalls where the model has fields the SQL never filled in.
+const fileColumns = `
+	id, conversation_id, message_id, tenant_id, filename,
+	original_filename, content_type, file_size_bytes,
+	storage_path, extracted_text, extraction_status,
+	created_at, updated_at,
+	inspection_json, is_generated, parent_file_id, version, change_log
+`
+
+func scanFile(row pgx.Row, f *model.ConversationFile) error {
+	return row.Scan(
+		&f.ID, &f.ConversationID, &f.MessageID, &f.TenantID, &f.Filename,
+		&f.OriginalFilename, &f.ContentType, &f.FileSizeBytes,
+		&f.StoragePath, &f.ExtractedText, &f.ExtractionStatus,
+		&f.CreatedAt, &f.UpdatedAt,
+		&f.InspectionJSON, &f.IsGenerated, &f.ParentFileID, &f.Version, &f.ChangeLog,
+	)
+}
+
 // Create inserts a new file row. Caller pre-populates filename,
 // original_filename, content_type, file_size_bytes, storage_path.
 // extraction_status defaults to "pending" via the DB.
+//
+// Phase-4 fields (is_generated, parent_file_id, version, change_log)
+// are honoured when set so the executor result path can write a
+// "generated" row in a single insert; legacy direct-upload callers
+// can leave them zero-valued and the DB defaults pick up
+// (is_generated=false, version=1, parent_file_id NULL).
 func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*model.ConversationFile, error) {
 	const q = `
 		INSERT INTO chat.conversation_files
 			(conversation_id, tenant_id, filename, original_filename,
-			 content_type, file_size_bytes, storage_path, extraction_status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			 content_type, file_size_bytes, storage_path, extraction_status,
+			 is_generated, parent_file_id, version, change_log, inspection_json)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at, updated_at
 	`
 	if f.ExtractionStatus == "" {
 		f.ExtractionStatus = "pending"
 	}
+	if f.Version == 0 {
+		f.Version = 1
+	}
 	err := r.db.QueryRow(ctx, q,
 		f.ConversationID, f.TenantID, f.Filename, f.OriginalFilename,
 		f.ContentType, f.FileSizeBytes, f.StoragePath, f.ExtractionStatus,
+		f.IsGenerated, f.ParentFileID, f.Version, f.ChangeLog, f.InspectionJSON,
 	).Scan(&f.ID, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create file: %w", err)
@@ -53,22 +86,9 @@ func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*mode
 // GetByID returns a single file row, tenant-scoped so an attacker
 // can't read another tenant's upload metadata by guessing IDs.
 func (r *FileRepo) GetByID(ctx context.Context, tenantID, fileID uuid.UUID) (*model.ConversationFile, error) {
-	const q = `
-		SELECT id, conversation_id, message_id, tenant_id, filename,
-		       original_filename, content_type, file_size_bytes,
-		       storage_path, extracted_text, extraction_status,
-		       created_at, updated_at
-		FROM chat.conversation_files
-		WHERE id = $1 AND tenant_id = $2
-	`
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files WHERE id = $1 AND tenant_id = $2`
 	f := &model.ConversationFile{}
-	err := r.db.QueryRow(ctx, q, fileID, tenantID).Scan(
-		&f.ID, &f.ConversationID, &f.MessageID, &f.TenantID, &f.Filename,
-		&f.OriginalFilename, &f.ContentType, &f.FileSizeBytes,
-		&f.StoragePath, &f.ExtractedText, &f.ExtractionStatus,
-		&f.CreatedAt, &f.UpdatedAt,
-	)
-	if err != nil {
+	if err := scanFile(r.db.QueryRow(ctx, q, fileID, tenantID), f); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -83,15 +103,9 @@ func (r *FileRepo) GetByID(ctx context.Context, tenantID, fileID uuid.UUID) (*mo
 func (r *FileRepo) ListByConversation(
 	ctx context.Context, tenantID, convID uuid.UUID,
 ) ([]model.ConversationFile, error) {
-	const q = `
-		SELECT id, conversation_id, message_id, tenant_id, filename,
-		       original_filename, content_type, file_size_bytes,
-		       storage_path, extracted_text, extraction_status,
-		       created_at, updated_at
-		FROM chat.conversation_files
-		WHERE conversation_id = $1 AND tenant_id = $2
-		ORDER BY created_at ASC
-	`
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files
+	      WHERE conversation_id = $1 AND tenant_id = $2
+	      ORDER BY created_at ASC`
 	rows, err := r.db.Query(ctx, q, convID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list files: %w", err)
@@ -100,12 +114,7 @@ func (r *FileRepo) ListByConversation(
 	out := make([]model.ConversationFile, 0)
 	for rows.Next() {
 		var f model.ConversationFile
-		if err := rows.Scan(
-			&f.ID, &f.ConversationID, &f.MessageID, &f.TenantID, &f.Filename,
-			&f.OriginalFilename, &f.ContentType, &f.FileSizeBytes,
-			&f.StoragePath, &f.ExtractedText, &f.ExtractionStatus,
-			&f.CreatedAt, &f.UpdatedAt,
-		); err != nil {
+		if err := scanFile(rows, &f); err != nil {
 			return nil, fmt.Errorf("list files scan: %w", err)
 		}
 		out = append(out, f)
@@ -118,15 +127,9 @@ func (r *FileRepo) ListByConversation(
 func (r *FileRepo) ListByMessage(
 	ctx context.Context, tenantID, messageID uuid.UUID,
 ) ([]model.ConversationFile, error) {
-	const q = `
-		SELECT id, conversation_id, message_id, tenant_id, filename,
-		       original_filename, content_type, file_size_bytes,
-		       storage_path, extracted_text, extraction_status,
-		       created_at, updated_at
-		FROM chat.conversation_files
-		WHERE message_id = $1 AND tenant_id = $2
-		ORDER BY created_at ASC
-	`
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files
+	      WHERE message_id = $1 AND tenant_id = $2
+	      ORDER BY created_at ASC`
 	rows, err := r.db.Query(ctx, q, messageID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list files by message: %w", err)
@@ -135,12 +138,7 @@ func (r *FileRepo) ListByMessage(
 	out := make([]model.ConversationFile, 0)
 	for rows.Next() {
 		var f model.ConversationFile
-		if err := rows.Scan(
-			&f.ID, &f.ConversationID, &f.MessageID, &f.TenantID, &f.Filename,
-			&f.OriginalFilename, &f.ContentType, &f.FileSizeBytes,
-			&f.StoragePath, &f.ExtractedText, &f.ExtractionStatus,
-			&f.CreatedAt, &f.UpdatedAt,
-		); err != nil {
+		if err := scanFile(rows, &f); err != nil {
 			return nil, fmt.Errorf("list files by msg scan: %w", err)
 		}
 		out = append(out, f)
@@ -158,15 +156,9 @@ func (r *FileRepo) ListByMessageIDs(
 	if len(messageIDs) == 0 {
 		return out, nil
 	}
-	const q = `
-		SELECT id, conversation_id, message_id, tenant_id, filename,
-		       original_filename, content_type, file_size_bytes,
-		       storage_path, extracted_text, extraction_status,
-		       created_at, updated_at
-		FROM chat.conversation_files
-		WHERE message_id = ANY($1) AND tenant_id = $2
-		ORDER BY created_at ASC
-	`
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files
+	      WHERE message_id = ANY($1) AND tenant_id = $2
+	      ORDER BY created_at ASC`
 	rows, err := r.db.Query(ctx, q, messageIDs, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list files by message ids: %w", err)
@@ -174,12 +166,7 @@ func (r *FileRepo) ListByMessageIDs(
 	defer rows.Close()
 	for rows.Next() {
 		var f model.ConversationFile
-		if err := rows.Scan(
-			&f.ID, &f.ConversationID, &f.MessageID, &f.TenantID, &f.Filename,
-			&f.OriginalFilename, &f.ContentType, &f.FileSizeBytes,
-			&f.StoragePath, &f.ExtractedText, &f.ExtractionStatus,
-			&f.CreatedAt, &f.UpdatedAt,
-		); err != nil {
+		if err := scanFile(rows, &f); err != nil {
 			return nil, fmt.Errorf("list files by msg ids scan: %w", err)
 		}
 		if f.MessageID != nil {
@@ -203,6 +190,82 @@ func (r *FileRepo) UpdateExtraction(
 		return fmt.Errorf("update extraction: %w", err)
 	}
 	return nil
+}
+
+// UpdateInspectionJSON caches the inspection_json payload produced
+// by excel_inspector.py. Idempotent: re-running the inspector on
+// the same file overwrites the previous JSON.
+func (r *FileRepo) UpdateInspectionJSON(
+	ctx context.Context, fileID uuid.UUID, inspectionJSON string,
+) error {
+	const q = `
+		UPDATE chat.conversation_files
+		SET inspection_json = $2, updated_at = NOW()
+		WHERE id = $1
+	`
+	if _, err := r.db.Exec(ctx, q, fileID, inspectionJSON); err != nil {
+		return fmt.Errorf("update inspection json: %w", err)
+	}
+	return nil
+}
+
+// ListVersions walks the parent_file_id chain rooted at fileID and
+// returns every version (the root + all descendants) in version
+// order. Used by the version-history endpoint so the user can see
+// every iteration the AI has produced.
+func (r *FileRepo) ListVersions(
+	ctx context.Context, tenantID, fileID uuid.UUID,
+) ([]model.ConversationFile, error) {
+	// Recursive CTE: start with the requested id, walk up to the
+	// root, then walk back down through every child so we surface
+	// every sibling version regardless of which one the caller
+	// passed in.
+	q := `
+		WITH RECURSIVE root AS (
+			SELECT id, parent_file_id
+			FROM chat.conversation_files
+			WHERE id = $1 AND tenant_id = $2
+		),
+		chain_up AS (
+			SELECT cf.id, cf.parent_file_id
+			FROM chat.conversation_files cf
+			JOIN root r ON r.id = cf.id
+			UNION ALL
+			SELECT cf.id, cf.parent_file_id
+			FROM chat.conversation_files cf
+			JOIN chain_up c ON cf.id = c.parent_file_id
+		),
+		ancestor_root AS (
+			SELECT id FROM chain_up WHERE parent_file_id IS NULL LIMIT 1
+		),
+		descendants AS (
+			SELECT cf.*
+			FROM chat.conversation_files cf
+			JOIN ancestor_root ar ON cf.id = ar.id
+			UNION ALL
+			SELECT cf.*
+			FROM chat.conversation_files cf
+			JOIN descendants d ON cf.parent_file_id = d.id
+		)
+		SELECT ` + fileColumns + `
+		FROM descendants
+		WHERE tenant_id = $2
+		ORDER BY version ASC, created_at ASC
+	`
+	rows, err := r.db.Query(ctx, q, fileID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list versions: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.ConversationFile, 0)
+	for rows.Next() {
+		var f model.ConversationFile
+		if err := scanFile(rows, &f); err != nil {
+			return nil, fmt.Errorf("list versions scan: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // AttachToMessage links a batch of files to the newly-created

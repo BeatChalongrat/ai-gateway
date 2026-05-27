@@ -48,6 +48,9 @@ type Handlers struct {
 	// Voice proxies to OpenAI Whisper / TTS. Always wired (the
 	// handler itself fails 503 when the API key isn't configured).
 	Voice *handler.VoiceHandler
+	// Phase 4 — Excel Smart Workspace. Optional in tests; routes
+	// only register when wired so legacy stacks stay green.
+	Excel *handler.ExcelHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -169,6 +172,16 @@ func New(
 			if h.Voice != nil {
 				r.Post("/voice/transcribe", h.Voice.Transcribe)
 				r.Post("/voice/synthesize", h.Voice.Synthesize)
+			}
+
+			// Phase 4 — Excel Smart Workspace.
+			//   POST /files/{fileID}/inspect        — re-run inspector
+			//   POST /conversations/{convID}/excel/execute — apply plan
+			//   GET  /conversations/{convID}/files/{fileID}/versions
+			if h.Excel != nil {
+				r.Post("/files/{fileID}/inspect", h.Excel.Inspect)
+				r.Post("/conversations/{convID}/excel/execute", h.Excel.Execute)
+				r.Get("/conversations/{convID}/files/{fileID}/versions", h.Excel.Versions)
 			}
 
 			// Knowledge bases (RAG). All tenant-scoped via the

@@ -94,6 +94,18 @@ type FileService struct {
 	conversations *repository.ConversationRepo
 	storage       storage.Backend
 	knobs         Knobs
+	// Phase 4 — set via SetExcelService so the upload path can run
+	// the deep inspector on every xlsx upload and cache the
+	// structure JSON for system-prompt injection. Optional: nil
+	// means "don't auto-inspect" (tests, builds without the
+	// scripts).
+	excel *ExcelService
+}
+
+// SetExcelService wires the Phase-4 Excel inspector into the upload
+// pipeline. Called once at boot in main.go after both services exist.
+func (s *FileService) SetExcelService(e *ExcelService) {
+	s.excel = e
 }
 
 func NewFileService(
@@ -253,6 +265,26 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	}
 	row.ExtractionStatus = status
 	row.ExtractedText = text
+
+	// Phase 4 hook — when this is an xlsx upload and the Excel
+	// service is wired, run the deep inspector now so the structure
+	// is cached for the very next message turn. Non-fatal: a
+	// failed inspection just leaves inspection_json NULL and the
+	// system prompt falls back to the extracted CSV body.
+	if s.excel != nil && IsExcelContentType(row.ContentType) {
+		if _, raw, err := s.excel.InspectWorkbook(ctx, row.StoragePath); err == nil && len(raw) > 0 {
+			if uerr := s.files.UpdateInspectionJSON(ctx, row.ID, string(raw)); uerr != nil {
+				slog.Warn("excel inspection cache write failed",
+					"file_id", row.ID.String(), "err", uerr)
+			} else {
+				s := string(raw)
+				row.InspectionJSON = &s
+			}
+		} else if err != nil {
+			slog.Warn("excel auto-inspect failed",
+				"file_id", row.ID.String(), "err", err)
+		}
+	}
 	return row, nil
 }
 
