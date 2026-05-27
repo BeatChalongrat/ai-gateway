@@ -158,6 +158,7 @@ var allowedContentTypes = map[string]bool{
 	"application/pdf": true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
 	"text/csv":   true,
 	"text/plain": true,
 	"image/png":  true,

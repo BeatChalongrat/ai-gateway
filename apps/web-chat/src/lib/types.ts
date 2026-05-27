@@ -157,6 +157,26 @@ export interface DocExecuteResponse {
   changes: string[];
 }
 
+/** Phase 4 Session 3 — PowerPoint generation.
+ *  Per-slide entry in pptx_generator.py's change_log. */
+export interface PptxChangeLogEntry {
+  slide: number;
+  type: string;
+  status: "ok" | "error" | "skipped";
+  detail?: string;
+}
+
+/** Output envelope from pptx_generator.py. The Go DocService
+ *  marshals into DocGenerationReport, but the change_log entries
+ *  use slide+type rather than action+type — so we typedef a
+ *  pptx-specific subtype the result card renders against. */
+export interface PptxGenerationReport extends Omit<DocGenerationReport, "change_log"> {
+  slide_count?: number;
+  slides_created?: number;
+  slides_failed?: number;
+  change_log: PptxChangeLogEntry[];
+}
+
 export interface FileListResponse {
   files: FileAttachment[];
 }
