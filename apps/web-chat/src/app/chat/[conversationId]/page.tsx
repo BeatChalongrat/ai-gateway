@@ -27,6 +27,14 @@ export default function ConversationPage() {
   const messages = useChatStore((s) =>
     convId ? s.messages[convId] : undefined,
   );
+  // Discriminator — flips to true the moment loadMessages settles
+  // (success OR failure) so the page can tell "fetch not done yet"
+  // from "fetch done, conversation is empty". Without this the
+  // EmptyState branch would render during the in-flight window,
+  // flickering the centred greeting before the messages arrive.
+  const messagesLoaded = useChatStore((s) =>
+    convId ? s.messagesLoaded[convId] === true : false,
+  );
   const setActive = useChatStore((s) => s.setActive);
   const loadMessages = useChatStore((s) => s.loadMessages);
   const loadOlderMessages = useChatStore((s) => s.loadOlderMessages);
@@ -70,7 +78,10 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!convId) return;
     setActive(convId);
-    if (useChatStore.getState().messages[convId] === undefined) {
+    // Gate the load on the discriminator, not on the messages slot.
+    // The slot is now seeded with ``[]`` on error so a follow-up
+    // visit would skip the retry if we only checked ``undefined``.
+    if (!useChatStore.getState().messagesLoaded[convId]) {
       void loadMessages(convId);
     }
   }, [convId, setActive, loadMessages]);
@@ -79,7 +90,11 @@ export default function ConversationPage() {
     router.replace("/chat");
     return null;
   }
-  if (messages === undefined) {
+  // Skeleton renders ONLY when the fetch has not yet completed.
+  // Once messagesLoaded[convId] flips to true the page falls through
+  // to the empty-vs-thread branch below — even if the load failed,
+  // because the errorBanner already surfaces the failure.
+  if (!messagesLoaded || messages === undefined) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6 md:px-10">

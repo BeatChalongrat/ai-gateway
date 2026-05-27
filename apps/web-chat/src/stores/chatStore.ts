@@ -56,6 +56,17 @@ interface ChatState {
   activeConversationId: string | null;
   /** message lists keyed by conversation id. */
   messages: Record<string, Message[]>;
+  /** True once loadMessages has completed for a conversation —
+   *  success or failure. Lets the page distinguish three states
+   *  cleanly:
+   *    - not in map           → fetch hasn't completed → skeleton
+   *    - true + messages []   → loaded, conversation is empty → EmptyState
+   *    - true + messages [..] → loaded with content → ChatThread
+   *  Without this flag a load-failure would either spin the skeleton
+   *  forever (if we left messages undefined) OR fall through to
+   *  EmptyState (if we wrote ``[]`` on error). Neither is correct;
+   *  this discriminator fixes both. */
+  messagesLoaded: Record<string, boolean>;
   /** local conv→message-id pointer for whichever assistant message
    *  is currently being streamed in. Used by cancel + error paths. */
   streamingAssistantId: Record<string, string | undefined>;
@@ -116,6 +127,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversationsSearchLoading: false,
   activeConversationId: null,
   messages: {},
+  messagesLoaded: {},
   streamingAssistantId: {},
   abortControllers: {},
   hasMoreMessages: {},
@@ -276,9 +288,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   async createConversation(modelId) {
     const c = await api.createConversation(modelId);
+    // Brand-new conversation is, by definition, fully loaded with
+    // zero messages — flip the discriminator so the page skips the
+    // skeleton and renders EmptyState immediately.
     set((s) => ({
       conversations: [c, ...s.conversations],
       messages: { ...s.messages, [c.id]: [] },
+      messagesLoaded: { ...s.messagesLoaded, [c.id]: true },
       activeConversationId: c.id,
     }));
     return c;
@@ -354,9 +370,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => {
       const next = { ...s.messages };
       delete next[id];
+      const nextLoaded = { ...s.messagesLoaded };
+      delete nextLoaded[id];
       return {
         conversations: s.conversations.filter((c) => c.id !== id),
         messages: next,
+        messagesLoaded: nextLoaded,
         activeConversationId:
           s.activeConversationId === id ? null : s.activeConversationId,
       };
@@ -367,26 +386,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
   async loadMessages(convId) {
     try {
       const res = await api.listMessages(convId, { limit: 50 });
-      // Coerce on success too — a malformed response body (no
-      // ``messages`` field) would otherwise stamp ``undefined`` into
-      // the slot and leave the skeleton spinning forever.
       set((s) => ({
         messages: { ...s.messages, [convId]: res?.messages ?? [] },
+        messagesLoaded: { ...s.messagesLoaded, [convId]: true },
         hasMoreMessages: {
           ...s.hasMoreMessages,
           [convId]: res?.has_more ?? false,
         },
       }));
     } catch (err) {
-      // Critical: every error path MUST resolve the slot (even with
-      // an empty array) so the conversation page's
-      // ``messages === undefined`` skeleton check flips to false.
-      // The previous version left the slot undefined on non-404
-      // errors — network failures / 500s — and the skeleton stuck.
-      // 401s are already short-circuited by ApiClient (which bounces
-      // the user to /portal/login before this catch even runs).
+      // Mark the slot loaded so the skeleton clears, but populate
+      // the array based on the failure shape so the page UI
+      // distinguishes the three states cleanly:
+      //   - 404 → conversation truly gone, show empty + banner
+      //   - other error → leave any previously-loaded array intact,
+      //                   surface a retry-able banner
+      // 401s never reach this catch — ApiClient bounces to portal-
+      // login first.
       set((s) => ({
         messages: { ...s.messages, [convId]: s.messages[convId] ?? [] },
+        messagesLoaded: { ...s.messagesLoaded, [convId]: true },
         hasMoreMessages: {
           ...s.hasMoreMessages,
           [convId]: s.hasMoreMessages[convId] ?? false,
