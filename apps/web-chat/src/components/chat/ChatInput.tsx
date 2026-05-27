@@ -498,11 +498,24 @@ export function ChatInput({
                   onClick={submit}
                   disabled={!canSend}
                   aria-label="Send"
-                  className={`focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white transition-colors duration-150 disabled:cursor-not-allowed ${
+                  // ChatGPT-style send button: when something is typed,
+                  // the circle inverts to the foreground colour (white
+                  // in dark mode, near-black in light mode) so the icon
+                  // pops without using the accent green. The disabled
+                  // state stays muted on the same neutral surface as
+                  // the rest of the composer chrome.
+                  className="focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 disabled:cursor-not-allowed"
+                  style={
                     canSend
-                      ? "bg-accent hover:bg-accent-hover"
-                      : "bg-bg-elevated text-text-muted"
-                  }`}
+                      ? {
+                          background: "var(--text-primary)",
+                          color: "var(--bg-base)",
+                        }
+                      : {
+                          background: "var(--bg-elevated)",
+                          color: "var(--text-muted)",
+                        }
+                  }
                 >
                   <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
                     <path
