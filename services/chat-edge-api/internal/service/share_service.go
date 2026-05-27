@@ -21,10 +21,10 @@ import (
 )
 
 var (
-	ErrShareNotFound        = errors.New("share: not found")
-	ErrShareExpired         = errors.New("share: expired")
-	ErrShareConvNotFound    = errors.New("share: conversation not found")
-	ErrShareBadExpiry       = errors.New("share: unsupported expires_in value")
+	ErrShareNotFound     = errors.New("share: not found")
+	ErrShareExpired      = errors.New("share: expired")
+	ErrShareConvNotFound = errors.New("share: conversation not found")
+	ErrShareBadExpiry    = errors.New("share: unsupported expires_in value")
 )
 
 // ShareService owns share-link lifecycle.

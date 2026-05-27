@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// SharedConversation maps to ``chat.shared_conversations`` — a
+// SharedConversation maps to “chat.shared_conversations“ — a
 // public-read share link to a conversation.
 type SharedConversation struct {
 	ID             uuid.UUID

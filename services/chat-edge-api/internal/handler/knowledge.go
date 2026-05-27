@@ -78,17 +78,17 @@ func toKBResponse(kb *model.KnowledgeBase) kbResponse {
 }
 
 type kbDocResponse struct {
-	ID               string  `json:"id"`
-	KnowledgeBaseID  string  `json:"knowledge_base_id"`
-	Filename         string  `json:"filename"`
-	ContentType      string  `json:"content_type"`
-	FileSizeBytes    int64   `json:"file_size_bytes"`
-	Status           string  `json:"status"`
-	ChunkCount       int     `json:"chunk_count"`
-	CharCount        int     `json:"char_count"`
-	ErrorMessage     *string `json:"error_message,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
+	ID              string  `json:"id"`
+	KnowledgeBaseID string  `json:"knowledge_base_id"`
+	Filename        string  `json:"filename"`
+	ContentType     string  `json:"content_type"`
+	FileSizeBytes   int64   `json:"file_size_bytes"`
+	Status          string  `json:"status"`
+	ChunkCount      int     `json:"chunk_count"`
+	CharCount       int     `json:"char_count"`
+	ErrorMessage    *string `json:"error_message,omitempty"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func toKBDocResponse(d *model.KnowledgeDocument) kbDocResponse {

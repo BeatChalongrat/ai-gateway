@@ -6,13 +6,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// RefreshToken maps to ``identity.refresh_tokens``.
+// RefreshToken maps to “identity.refresh_tokens“.
 //
-// ``TokenHash`` is the SHA-256 hex digest of the raw token the
+// “TokenHash“ is the SHA-256 hex digest of the raw token the
 // client carries in their HttpOnly cookie. Storing the hash means
 // a database dump alone cannot replay any session.
 //
-// ``FamilyID`` is the rotation anchor: a single login mints a
+// “FamilyID“ is the rotation anchor: a single login mints a
 // family with seed token T1; refresh revokes T1 and issues T2 under
 // the same family; "logout everywhere" revokes the whole family.
 // Stolen-token reuse detection = "any token in the family is used

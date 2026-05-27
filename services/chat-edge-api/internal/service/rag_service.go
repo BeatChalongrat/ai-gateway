@@ -73,7 +73,7 @@ func NewRAGService(repo *repository.KnowledgeRepo, embedder *EmbeddingService) *
 // this to short-circuit the retrieval branch.
 func (s *RAGService) Enabled() bool { return s.embedder.Enabled() }
 
-// QueryKnowledgeBase embeds ``query`` and returns the top matching
+// QueryKnowledgeBase embeds “query“ and returns the top matching
 // chunks from the named KB. topK == 0 → service default.
 func (s *RAGService) QueryKnowledgeBase(
 	ctx context.Context, tenantID, kbID uuid.UUID, query string, topK int,
@@ -121,7 +121,7 @@ func (s *RAGService) BuildContext(
 
 // BuildRAGContext formats retrieved chunks into a markdown block
 // suitable for prepending to a system prompt. Citation format is
-// fixed at ``[Source: filename]`` so the message bubble's parser
+// fixed at “[Source: filename]“ so the message bubble's parser
 // can pick it up reliably.
 //
 // Empty input → empty string so the message service can safely

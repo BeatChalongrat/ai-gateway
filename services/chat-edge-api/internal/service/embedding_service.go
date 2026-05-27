@@ -1,7 +1,7 @@
 // EmbeddingService — turns text into 1536-d embedding vectors.
 //
-// Calls OpenAI's ``/v1/embeddings`` directly with the
-// ``text-embedding-3-small`` model (1536 dims to match the
+// Calls OpenAI's “/v1/embeddings“ directly with the
+// “text-embedding-3-small“ model (1536 dims to match the
 // pgvector(1536) column). Direct rather than via the upstream
 // Gateway because:
 //
@@ -31,12 +31,12 @@ import (
 
 // EmbeddingDimensions is the column size for chat.knowledge_chunks.
 // Pinned to the text-embedding-3-small default; if we ever swap to a
-// model with a different default we'll need to either pass ``dimensions``
+// model with a different default we'll need to either pass “dimensions“
 // in the OpenAI request or run a column-resize migration.
 const EmbeddingDimensions = 1536
 
 // ErrEmbeddingDisabled is returned when no provider key is configured.
-// The indexer surfaces this as the document's ``error_message``.
+// The indexer surfaces this as the document's “error_message“.
 var ErrEmbeddingDisabled = errors.New("embedding: provider not configured (OPENAI_API_KEY)")
 
 // EmbeddingService wraps the upstream embeddings endpoint.

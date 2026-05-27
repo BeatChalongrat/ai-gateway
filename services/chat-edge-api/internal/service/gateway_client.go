@@ -1,11 +1,11 @@
 // HTTP client for the upstream Gateway API.
 //
 // Authentication preference (highest → lowest):
-//   1. ``GATEWAY_API_KEY`` env var — sent as Bearer. Used by dev
-//      builds (seeded gateway key) and prod deployments alike.
-//   2. Service JWT (auth.IssueServiceJWT) — minted fresh per
-//      request, 60s TTL. The current gateway-api doesn't recognise
-//      this token format; it's the migration target.
+//  1. “GATEWAY_API_KEY“ env var — sent as Bearer. Used by dev
+//     builds (seeded gateway key) and prod deployments alike.
+//  2. Service JWT (auth.IssueServiceJWT) — minted fresh per
+//     request, 60s TTL. The current gateway-api doesn't recognise
+//     this token format; it's the migration target.
 //
 // Every outbound request carries the per-user / per-request context
 // headers so the gateway can attribute costs + audit traces back to
@@ -124,7 +124,7 @@ type GatewayChatResponse struct {
 // ---------------------------------------------------------------------------
 
 // SendChatCompletion issues a non-streaming chat completion call.
-// Returns the parsed response on 2xx; ``GatewayUnavailableError``
+// Returns the parsed response on 2xx; “GatewayUnavailableError“
 // on any non-2xx so the handler can map cleanly to 502.
 func (g *GatewayClient) SendChatCompletion(
 	ctx context.Context,
@@ -156,7 +156,7 @@ func (g *GatewayClient) SendChatCompletion(
 // ---------------------------------------------------------------------------
 
 // StreamEvent is one parsed SSE event from the gateway. Only the
-// fields the chat-edge layer consumes are exposed; ``finish_reason``
+// fields the chat-edge layer consumes are exposed; “finish_reason“
 // helps the message-service decide between status=completed and
 // status=cancelled.
 type StreamEvent struct {
@@ -168,9 +168,9 @@ type StreamEvent struct {
 }
 
 // SendChatCompletionStream opens a streaming completion. The
-// returned ``StreamReader`` yields one ``StreamEvent`` per line of
+// returned “StreamReader“ yields one “StreamEvent“ per line of
 // the gateway's SSE body until the channel closes. Caller MUST
-// call ``Close`` to release the HTTP connection even on early exit.
+// call “Close“ to release the HTTP connection even on early exit.
 func (g *GatewayClient) SendChatCompletionStream(
 	ctx context.Context,
 	callCtx GatewayCallContext,
@@ -195,8 +195,8 @@ func (g *GatewayClient) SendChatCompletionStream(
 	return &StreamReader{body: resp.Body, scanner: bufio.NewScanner(resp.Body)}, nil
 }
 
-// StreamReader wraps the gateway's SSE body. ``Next`` blocks until
-// the next event, returns ``io.EOF`` when the stream finishes.
+// StreamReader wraps the gateway's SSE body. “Next“ blocks until
+// the next event, returns “io.EOF“ when the stream finishes.
 type StreamReader struct {
 	body    io.ReadCloser
 	scanner *bufio.Scanner
@@ -204,7 +204,7 @@ type StreamReader struct {
 
 func (s *StreamReader) Close() error { return s.body.Close() }
 
-// Next parses the next SSE event. Returns ``io.EOF`` on stream
+// Next parses the next SSE event. Returns “io.EOF“ on stream
 // end. Skips empty / comment lines per the SSE spec.
 //
 // SSE events from the gateway look like:
@@ -212,9 +212,9 @@ func (s *StreamReader) Close() error { return s.body.Close() }
 //	data: {"id":"req_...","object":"chat.completion.chunk",...}
 //	data: [DONE]
 //
-// We only care about the JSON-payload lines and the ``[DONE]``
-// sentinel. Multi-line ``data:`` continuations don't occur for the
-// gateway's payload format so we treat each ``data: …`` as a
+// We only care about the JSON-payload lines and the “[DONE]“
+// sentinel. Multi-line “data:“ continuations don't occur for the
+// gateway's payload format so we treat each “data: …“ as a
 // complete event.
 func (s *StreamReader) Next() (*StreamEvent, error) {
 	for s.scanner.Scan() {
@@ -275,7 +275,7 @@ func parseStreamChunk(raw string) (*StreamEvent, error) {
 // ---------------------------------------------------------------------------
 
 // do builds + executes the HTTP request, returning the open
-// ``*http.Response`` so the caller can stream or fully read the body.
+// “*http.Response“ so the caller can stream or fully read the body.
 // Status code dispatch happens in the caller (different code paths
 // for stream vs non-stream).
 func (g *GatewayClient) do(

@@ -34,7 +34,7 @@ type UserClaims struct {
 
 // IssueAccessToken signs a user JWT with HS256.
 //
-// ``secret`` is read from Config.UserJWTSecret. Callers never read
+// “secret“ is read from Config.UserJWTSecret. Callers never read
 // the secret directly — this keeps the signing key behind one
 // audit-visible function.
 func IssueAccessToken(

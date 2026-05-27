@@ -53,13 +53,13 @@ var (
 // meaningful (a successful login response should not echo the
 // long-lived credential anywhere XSS can scrape).
 type AuthResult struct {
-	UserID           uuid.UUID
-	TenantID         uuid.UUID
-	Role             string
-	AccessToken      string
-	RawRefreshToken  string
-	CSRFToken        string
-	RefreshTokenTTL  time.Duration
+	UserID          uuid.UUID
+	TenantID        uuid.UUID
+	Role            string
+	AccessToken     string
+	RawRefreshToken string
+	CSRFToken       string
+	RefreshTokenTTL time.Duration
 }
 
 // AuthService is the auth domain service.
@@ -78,7 +78,7 @@ type AuthService struct {
 
 // NewAuthService wires the dependencies.
 //
-// ``pool`` is held directly so the register flow can run tenant +
+// “pool“ is held directly so the register flow can run tenant +
 // user creation inside a single transaction — the Session 2
 // orphan-tenant bug. All repos still use the pool for non-tx
 // queries via their default constructors.
@@ -498,7 +498,7 @@ func emailLocalPart(email string) string {
 // slugify lowercases + keeps only [a-z0-9-]. Non-Latin scripts (the
 // product is bilingual Thai/English) are stripped entirely; the
 // random suffix carries the uniqueness so a Thai-only email like
-// ``ลูกค้า@example.com`` becomes ``user-a3f2``.
+// “ลูกค้า@example.com“ becomes “user-a3f2“.
 func slugify(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder
