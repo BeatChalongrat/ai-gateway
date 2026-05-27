@@ -1,36 +1,22 @@
-// Shared utilities + icon mapping for the Phase-4 Session-5
-// Artifact Workspace.
+// Shared utilities for the Phase-4 Session-5 Artifact Workspace.
+//
+// Session 5 originally shipped colour-coded Lucide icons here
+// (emerald sheet, blue doc, rose pdf, amber pptx, +emerald/-rose
+// change icons). Session 5.1 retints everything to the
+// monochrome FileTypeBadge / muted-Lucide system so the workspace
+// reads as a single visual language with the blue primary CTA as
+// the only accent.
 
 import type { ReactNode } from "react";
-import {
-  ArrowUpDown,
-  FileText,
-  Hash,
-  Minus,
-  Plus,
-  Presentation,
-  Sheet,
-} from "lucide-react";
+import { ArrowUpDown, Minus, Plus } from "lucide-react";
 
-// File-type icon picker — covers everything the generators emit
-// (xlsx, docx, pdf, pptx) plus a generic fallback. Colour-coded
-// by format for a quick visual scan in the panel list.
+import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+
+// fileTypeIcon — the workspace + timeline call this for per-file
+// glyphs. Returns a FileTypeBadge so every format gets the same
+// monochrome document outline + type label treatment.
 export function fileTypeIcon(filename: string, contentType?: string): ReactNode {
-  const ct = (contentType || "").toLowerCase();
-  const lower = filename.toLowerCase();
-  if (ct.includes("spreadsheet") || lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
-    return <Sheet className="h-5 w-5 text-emerald-500" />;
-  }
-  if (ct.includes("wordprocessing") || lower.endsWith(".docx")) {
-    return <FileText className="h-5 w-5 text-blue-500" />;
-  }
-  if (ct.includes("pdf") || lower.endsWith(".pdf")) {
-    return <FileText className="h-5 w-5 text-rose-500" />;
-  }
-  if (ct.includes("presentation") || lower.endsWith(".pptx")) {
-    return <Presentation className="h-5 w-5 text-amber-500" />;
-  }
-  return <FileText className="h-5 w-5 text-text-tertiary" />;
+  return <FileTypeBadge filename={filename} contentType={contentType} size="md" />;
 }
 
 // Compact byte formatter — keeps file cards readable at panel
@@ -60,18 +46,16 @@ export function timeAgo(iso: string): string {
   return new Date(t).toLocaleDateString();
 }
 
-// changeIcon — per-change-type icon for the comparison card.
-// Same colour convention as the plan cards (emerald=added,
-// rose=removed, blue=structural, slate=neutral).
+// changeIcon — per-change-type glyph for the comparison card.
+// All in text-text-tertiary so the diff reads as structural
+// metadata, not as a coloured alarm. The Plus / Minus / arrow
+// shapes alone carry the "added / removed / changed" signal.
 export function changeIcon(type: string): ReactNode {
   if (type.endsWith("_added")) {
-    return <Plus className="h-3.5 w-3.5 text-emerald-500" />;
+    return <Plus className="h-3.5 w-3.5 text-text-tertiary" />;
   }
   if (type.endsWith("_removed")) {
-    return <Minus className="h-3.5 w-3.5 text-rose-500" />;
+    return <Minus className="h-3.5 w-3.5 text-text-tertiary" />;
   }
-  if (type === "word_count_changed") {
-    return <Hash className="h-3.5 w-3.5 text-text-tertiary" />;
-  }
-  return <ArrowUpDown className="h-3.5 w-3.5 text-blue-500" />;
+  return <ArrowUpDown className="h-3.5 w-3.5 text-text-tertiary" />;
 }
