@@ -106,6 +106,15 @@ class ApiClient {
       body: JSON.stringify({ title }),
     });
   }
+  /** Asks the backend to summarize the conversation's first turn
+   *  into a sidebar-friendly title and persist it. Frontend fires
+   *  this once after the first assistant stream completes. */
+  generateTitle(id: string) {
+    return this.json<{ title: string }>(
+      `/conversations/${id}/generate-title`,
+      { method: "POST" },
+    );
+  }
   setConversationModel(id: string, model_id: string) {
     return this.json<Conversation>(`/conversations/${id}`, {
       method: "PATCH",

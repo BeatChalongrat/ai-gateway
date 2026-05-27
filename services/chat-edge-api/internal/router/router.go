@@ -147,6 +147,11 @@ func New(
 			// Conversation export.
 			r.Get("/conversations/{id}/export", h.Conversation.Export)
 
+			// AI-generated title — frontend fires this once after the
+			// first assistant turn completes so the sidebar gets a
+			// human-readable name instead of a truncated user prompt.
+			r.Post("/conversations/{id}/generate-title", h.Conversation.GenerateTitle)
+
 			// Conversation sharing (authenticated half — the
 			// public share-view endpoint is registered outside the
 			// RequireAuth subgroup below).
