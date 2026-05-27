@@ -6,6 +6,11 @@
 interface Props {
   modelId?: string | null;
   size?: number;
+  /** When true, render the provider mark with a neutral surface
+   *  instead of the per-provider tinted ring. Used by the chat-input
+   *  model pill, where a saturated coloured chip reads as noise. The
+   *  full colour scheme stays on message-bubble avatars. */
+  neutral?: boolean;
 }
 
 type Provider = "openai" | "anthropic" | "google" | "meta" | "mistral" | "generic";
@@ -31,9 +36,11 @@ function providerOf(modelId?: string | null): Provider {
   return "generic";
 }
 
-export function AssistantAvatar({ modelId, size = 26 }: Props) {
+export function AssistantAvatar({ modelId, size = 26, neutral = false }: Props) {
   const provider = providerOf(modelId);
-  const ringClass = providerRing(provider);
+  const ringClass = neutral
+    ? "bg-transparent text-text-secondary"
+    : providerRing(provider);
 
   return (
     <span
