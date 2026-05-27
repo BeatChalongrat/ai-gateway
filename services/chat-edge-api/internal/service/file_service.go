@@ -48,7 +48,7 @@ import (
 )
 
 // Storage key prefix for conversation-file blobs. Lives at the top
-// of the bucket / filesystem root, peer with ``knowledge/``.
+// of the bucket / filesystem root, peer with “knowledge/“.
 const conversationFilesKeyPrefix = "conversation-files"
 
 // ---------------------------------------------------------------------------
@@ -137,12 +137,12 @@ var allowedContentTypes = map[string]bool{
 	"application/pdf": true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
-	"text/csv":         true,
-	"text/plain":       true,
-	"image/png":        true,
-	"image/jpeg":       true,
-	"image/gif":        true,
-	"image/webp":       true,
+	"text/csv":   true,
+	"text/plain": true,
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
 }
 
 // ---------------------------------------------------------------------------
@@ -299,9 +299,9 @@ func (s *FileService) Get(
 // the object — avoids streaming GB-sized files through the service.
 // For backends that don't issue URLs (local fs) PresignedURL is "".
 type DownloadHandle struct {
-	File          *model.ConversationFile
-	Body          io.ReadCloser
-	PresignedURL  string
+	File         *model.ConversationFile
+	Body         io.ReadCloser
+	PresignedURL string
 }
 
 func (s *FileService) OpenForDownload(
@@ -541,7 +541,7 @@ func (s *FileService) imageMetadataFromStorage(
 	return fmt.Sprintf("[Image: %s%s, %s, %s]", original, dims, humanSize(size), ct)
 }
 
-// runPythonExtractorOnKey materialises the object at ``key`` to a
+// runPythonExtractorOnKey materialises the object at “key“ to a
 // local temp file (no-op for the local backend, download for S3) and
 // hands the path to the Python extractor. The temp file is cleaned
 // up regardless of how the extractor finishes.

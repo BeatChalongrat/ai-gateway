@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// User maps to ``identity.users``.
+// User maps to “identity.users“.
 //
-// ``PasswordHash`` is the argon2id PHC string from auth.HashPassword
+// “PasswordHash“ is the argon2id PHC string from auth.HashPassword
 // — never stored or transmitted plaintext. Repositories scan into
 // this struct; handlers do NOT serialise PasswordHash to the wire.
 type User struct {

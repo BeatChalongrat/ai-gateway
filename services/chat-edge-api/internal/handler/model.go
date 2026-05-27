@@ -1,7 +1,7 @@
 // Model handler — GET /api/v1/models.
 //
 // Phase 1 lists the config-driven model catalog with everything
-// flagged ``allowed: true``. Phase 2 session 2 enriches each
+// flagged “allowed: true“. Phase 2 session 2 enriches each
 // entry with display metadata (description, context window,
 // category, pricing) so the front-end can render a rich model
 // picker without baking the metadata into the React bundle.
@@ -34,18 +34,18 @@ func NewModelHandler(cfg *config.Config) *ModelHandler {
 // modelResponse is the wire shape returned by GET /api/v1/models.
 // Mirrors the front-end Model type in apps/web-chat/src/stores/modelStore.ts.
 type modelResponse struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	Provider         string   `json:"provider"`
-	Description      string   `json:"description"`
-	ContextWindow    int      `json:"context_window"`
-	Capabilities     []string `json:"capabilities"`
-	Icon             string   `json:"icon"`
-	Category         string   `json:"category"`
-	MaxOutputTokens  int      `json:"max_output_tokens,omitempty"`
-	InputPricePerM   float64  `json:"input_price_per_1m,omitempty"`
-	OutputPricePerM  float64  `json:"output_price_per_1m,omitempty"`
-	Allowed          bool     `json:"allowed"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Provider        string   `json:"provider"`
+	Description     string   `json:"description"`
+	ContextWindow   int      `json:"context_window"`
+	Capabilities    []string `json:"capabilities"`
+	Icon            string   `json:"icon"`
+	Category        string   `json:"category"`
+	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	InputPricePerM  float64  `json:"input_price_per_1m,omitempty"`
+	OutputPricePerM float64  `json:"output_price_per_1m,omitempty"`
+	Allowed         bool     `json:"allowed"`
 }
 
 // modelMeta is the static display-metadata shape. The map below is
@@ -218,7 +218,7 @@ func (h *ModelHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // lookupMeta returns rich display metadata for a configured model.
 // Exact id wins; provider default backs off; generic "other" is the
-// last resort. Always returns a non-zero ``Category`` so the front-
+// last resort. Always returns a non-zero “Category“ so the front-
 // end's category bucketing never sees an empty string.
 func lookupMeta(m config.ModelEntry) modelMeta {
 	if meta, ok := modelMetadata[m.ID]; ok {
@@ -237,7 +237,7 @@ func lookupMeta(m config.ModelEntry) modelMeta {
 	}
 }
 
-// iconFor maps the wire ``provider`` string to a stable icon slug the
+// iconFor maps the wire “provider“ string to a stable icon slug the
 // front-end's AssistantAvatar component recognises. Falls through to
 // "generic" for unknown providers.
 func iconFor(provider string) string {

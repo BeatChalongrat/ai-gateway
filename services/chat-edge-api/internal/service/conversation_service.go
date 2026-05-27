@@ -75,7 +75,7 @@ func (s *ConversationService) Get(ctx context.Context, tenantID, convID uuid.UUI
 }
 
 // List returns the user's conversations with cursor pagination.
-// ``limit`` is clamped to [1, 100]; default 50. Up from the
+// “limit“ is clamped to [1, 100]; default 50. Up from the
 // previous 20-default because the new sidebar's infinite-scroll
 // experience benefits from larger first pages.
 func (s *ConversationService) List(

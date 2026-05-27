@@ -29,11 +29,11 @@ func WriteError(w http.ResponseWriter, status int, code, message string) {
 // Common error codes — pinned as constants so misspellings show up
 // at compile time, not at runtime when an alert rule fails to match.
 const (
-	CodeUnauthorized     = "UNAUTHORIZED"
-	CodeForbidden        = "FORBIDDEN"
-	CodeConflict         = "CONFLICT"
-	CodeValidationError  = "VALIDATION_ERROR"
-	CodeNotFound         = "NOT_FOUND"
-	CodeInternalError    = "INTERNAL_ERROR"
-	CodeBadRequest       = "BAD_REQUEST"
+	CodeUnauthorized    = "UNAUTHORIZED"
+	CodeForbidden       = "FORBIDDEN"
+	CodeConflict        = "CONFLICT"
+	CodeValidationError = "VALIDATION_ERROR"
+	CodeNotFound        = "NOT_FOUND"
+	CodeInternalError   = "INTERNAL_ERROR"
+	CodeBadRequest      = "BAD_REQUEST"
 )

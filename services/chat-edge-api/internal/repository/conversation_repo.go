@@ -24,10 +24,10 @@ func (r *ConversationRepo) WithTx(tx pgx.Tx) *ConversationRepo {
 	return &ConversationRepo{db: tx}
 }
 
-// Create inserts a new conversation. ``message_count`` defaults to
+// Create inserts a new conversation. “message_count“ defaults to
 // 0 via the column default; the title defaults to "New conversation"
-// likewise. Callers should populate ``tenant_id``, ``user_id``,
-// ``model_id`` only; everything else is server-side.
+// likewise. Callers should populate “tenant_id“, “user_id“,
+// “model_id“ only; everything else is server-side.
 func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*model.Conversation, error) {
 	const q = `
 		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
@@ -71,15 +71,15 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 }
 
 // ListByUser returns the user's conversations sorted by
-// ``updated_at DESC``. Cursor-based pagination: the caller supplies
+// “updated_at DESC“. Cursor-based pagination: the caller supplies
 // the cursor row's ID; the query looks up that row's updated_at and
-// returns the next ``limit`` rows after it.
+// returns the next “limit“ rows after it.
 //
-// Returns (rows, nextCursor, error). ``nextCursor == uuid.Nil`` ⇒
+// Returns (rows, nextCursor, error). “nextCursor == uuid.Nil“ ⇒
 // no more rows.
 //
-// Pagination predicate is a COMPOSITE ``(updated_at, id)`` so rapid
-// inserts that tie on microsecond-precision ``updated_at`` don't get
+// Pagination predicate is a COMPOSITE “(updated_at, id)“ so rapid
+// inserts that tie on microsecond-precision “updated_at“ don't get
 // silently dropped. The ORDER BY mirrors the predicate to keep the
 // scan deterministic and index-friendly.
 func (r *ConversationRepo) ListByUser(
@@ -170,7 +170,7 @@ func (r *ConversationRepo) ListByUser(
 // partition is fast enough; a GIN trigram index is a future
 // migration.
 //
-// Returns conversations sorted updated_at DESC, capped at ``limit``.
+// Returns conversations sorted updated_at DESC, capped at “limit“.
 func (r *ConversationRepo) SearchByUser(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
@@ -208,7 +208,7 @@ func (r *ConversationRepo) SearchByUser(
 	return out, rows.Err()
 }
 
-// UpdateTitle changes ``title`` and bumps ``updated_at``. The
+// UpdateTitle changes “title“ and bumps “updated_at“. The
 // WHERE clause also enforces the tenant scope so a wrong tenant_id
 // can't accidentally rename someone else's conversation.
 func (r *ConversationRepo) UpdateTitle(ctx context.Context, tenantID, convID uuid.UUID, title string) error {
@@ -228,7 +228,7 @@ func (r *ConversationRepo) UpdateTitle(ctx context.Context, tenantID, convID uui
 }
 
 // UpdateModel changes the conversation's default model_id and
-// bumps ``updated_at``. Tenant-scoped via the WHERE clause so a
+// bumps “updated_at“. Tenant-scoped via the WHERE clause so a
 // wrong tenant_id can't reassign someone else's conversation.
 func (r *ConversationRepo) UpdateModel(ctx context.Context, tenantID, convID uuid.UUID, modelID string) error {
 	const q = `
@@ -276,7 +276,7 @@ func (r *ConversationRepo) UpdateKnowledgeBase(
 	return nil
 }
 
-// SoftDelete sets ``is_deleted = true`` + ``deleted_at = NOW()``.
+// SoftDelete sets “is_deleted = true“ + “deleted_at = NOW()“.
 // Idempotent: re-deleting a soft-deleted row returns ErrNotFound
 // (we treat the row as no-longer-present at this layer).
 func (r *ConversationRepo) SoftDelete(ctx context.Context, tenantID, convID uuid.UUID) error {
@@ -295,9 +295,9 @@ func (r *ConversationRepo) SoftDelete(ctx context.Context, tenantID, convID uuid
 	return nil
 }
 
-// IncrementMessageCount bumps ``message_count`` by ``delta`` (can
+// IncrementMessageCount bumps “message_count“ by “delta“ (can
 // be negative if a regenerate flow needs to retract). Also touches
-// ``updated_at`` so the sidebar sort surfaces the active
+// “updated_at“ so the sidebar sort surfaces the active
 // conversation. Best-effort logical update — does NOT verify
 // ownership (the caller has already done so via GetByID).
 func (r *ConversationRepo) IncrementMessageCount(ctx context.Context, convID uuid.UUID, delta int) error {
@@ -312,7 +312,7 @@ func (r *ConversationRepo) IncrementMessageCount(ctx context.Context, convID uui
 	return nil
 }
 
-// UpdateTimestamp touches ``updated_at`` without changing anything
+// UpdateTimestamp touches “updated_at“ without changing anything
 // else. Used by the streaming path between user-message persist and
 // assistant-message persist so the sidebar shows fresh activity even
 // while the assistant reply is still generating.

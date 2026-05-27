@@ -14,8 +14,8 @@ import (
 
 // CORS returns a middleware enforcing the allow-list.
 //
-// ``allowOrigins`` is a comma-separated env value (e.g.
-// ``http://localhost:3002,https://chat.example.com``). An empty
+// “allowOrigins“ is a comma-separated env value (e.g.
+// “http://localhost:3002,https://chat.example.com“). An empty
 // list yields a "deny all cross-origin" policy that still permits
 // same-origin requests.
 func CORS(allowOrigins string) func(http.Handler) http.Handler {

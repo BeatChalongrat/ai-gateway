@@ -2,13 +2,13 @@
 //
 // The chat product (apps/web-chat) authenticates via Portal JWT —
 // per-user identity flows from the Portal into the request context
-// via ``RequireAuth`` in auth.go. The admin observability surface
+// via “RequireAuth“ in auth.go. The admin observability surface
 // (apps/admin-ui) is a different audience: a small number of
 // operators reading aggregate / cross-tenant data.
 //
 // For Phase 2 (internal-tool launch mode) we gate admin endpoints
 // with a SHARED BEARER SECRET configured via
-// ``CHAT_EDGE_ADMIN_API_KEY``. The admin UI never sees the secret
+// “CHAT_EDGE_ADMIN_API_KEY“. The admin UI never sees the secret
 // directly — it goes through a Next.js server-side proxy that
 // injects the header from its own server env. The cost of that
 // indirection is one extra network hop per admin call; the benefit
@@ -26,7 +26,7 @@ import (
 )
 
 // RequireAdmin returns middleware that gates the wrapped handler on
-// an exact-match ``Authorization: Bearer <ADMIN_API_KEY>`` header.
+// an exact-match “Authorization: Bearer <ADMIN_API_KEY>“ header.
 // The constant-time compare avoids leaking the key via response-
 // time side channels (paranoid but cheap).
 func RequireAdmin(adminKey string) func(http.Handler) http.Handler {

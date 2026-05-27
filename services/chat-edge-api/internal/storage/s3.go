@@ -218,8 +218,8 @@ func (b *S3Backend) OpenLocalCopy(
 // ---------------------------------------------------------------------------
 
 // isS3NotFound checks the typed S3 errors AND the generic smithy
-// API error code. HeadObject returns the typed ``NotFound``;
-// GetObject returns ``NoSuchKey``.
+// API error code. HeadObject returns the typed “NotFound“;
+// GetObject returns “NoSuchKey“.
 func isS3NotFound(err error) bool {
 	var notFound *s3types.NotFound
 	if errors.As(err, &notFound) {
@@ -264,4 +264,3 @@ func keyExtension(key string) string {
 	}
 	return ext
 }
-

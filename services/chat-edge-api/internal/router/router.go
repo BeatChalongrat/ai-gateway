@@ -2,7 +2,7 @@
 //
 // Public routes (no auth) — health + auth/register + auth/login.
 // Protected routes — everything else, gated by middleware.RequireAuth.
-// All protected routes live under ``/api/v1`` so the path prefix
+// All protected routes live under “/api/v1“ so the path prefix
 // also acts as a deployment versioning anchor.
 //
 // Order of middleware is load-bearing:
@@ -52,7 +52,7 @@ type Handlers struct {
 
 // New builds the full Chi router with all routes + middleware.
 //
-// ``provision`` is the user-shadow service the Portal-JWT auth
+// “provision“ is the user-shadow service the Portal-JWT auth
 // middleware uses to lazily insert identity rows the first time a
 // Portal user hits chat-edge. Threaded through here rather than via
 // Handlers because it's middleware-only.
@@ -196,6 +196,14 @@ func New(
 			r.Get("/admin/conversations/{id}", h.Admin.ConversationDetail)
 			r.Get("/admin/users", h.Admin.Users)
 			r.Patch("/admin/users/{id}", h.Admin.UpdateUser)
+
+			// Knowledge-base admin (cross-tenant). Read endpoints
+			// query the pool directly; mutations route through the
+			// KnowledgeService via the AdminKBSink injected from main.go.
+			r.Get("/admin/knowledge-bases", h.Admin.ListKnowledgeBases)
+			r.Get("/admin/knowledge-bases/{id}", h.Admin.KnowledgeBaseDetail)
+			r.Delete("/admin/knowledge-bases/{id}", h.Admin.DeleteKnowledgeBase)
+			r.Post("/admin/knowledge-bases/{id}/reindex", h.Admin.ReindexKnowledgeBase)
 		})
 	})
 
