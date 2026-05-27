@@ -285,7 +285,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
                   setHighlight(0);
                 }}
                 placeholder="Search models…"
-                className="w-full rounded-md border border-border bg-bg-base/50 py-1.5 pl-8 pr-2 text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                className="w-full rounded-md border border-border bg-bg-base/50 py-1.5 pl-8 pr-2 text-xs text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
               />
             </div>
           </div>
@@ -453,7 +453,7 @@ function ModelRow({
             height={14}
             viewBox="0 0 24 24"
             fill="none"
-            className="mt-1 shrink-0 text-accent"
+            className="mt-1 shrink-0 text-text-primary"
             aria-hidden
           >
             <path

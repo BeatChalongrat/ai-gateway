@@ -134,7 +134,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
               <button
                 type="button"
                 onClick={() => void copy(absoluteUrl)}
-                className="focus-ring rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+                className="focus-ring rounded-md bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base hover:opacity-90"
               >
                 Copy
               </button>
@@ -192,7 +192,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
                   key={o.value}
                   className={`focus-ring flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-xs ${
                     expiry === o.value
-                      ? "border-accent bg-bg-elevated text-text-primary"
+                      ? "border-border-strong bg-bg-elevated text-text-primary"
                       : "border-border text-text-secondary hover:bg-bg-elevated/60"
                   }`}
                 >
@@ -202,7 +202,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
                     value={o.value}
                     checked={expiry === o.value}
                     onChange={() => setExpiry(o.value)}
-                    className="accent-accent"
+                    className="accent-[var(--text-primary)]"
                   />
                   {o.label}
                 </label>
@@ -213,7 +213,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
             type="button"
             onClick={create}
             disabled={busy}
-            className="focus-ring self-end rounded-md bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            className="focus-ring self-end rounded-md bg-text-primary px-4 py-1.5 text-xs font-medium text-bg-base hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "Creating…" : "Create link"}
           </button>

@@ -161,7 +161,7 @@ export function Sidebar({
         >
           <span
             aria-label="SRAN Chat"
-            className="font-brand text-lg font-semibold tracking-tight text-text-primary"
+            className="font-brand text-xl font-bold tracking-tight text-text-primary"
           >
             SRAN
           </span>
@@ -416,11 +416,11 @@ function UserMenu({
         className="flex w-full items-center gap-2.5 px-3 pt-2 text-left transition-colors hover:bg-bg-elevated"
         // ``safe-bottom`` alone resolves to 0 on desktop, leaving the
         // user row flush against the viewport edge. Stack a real
-        // 0.75rem gap on top of the safe-area inset so the row
-        // breathes on every device.
+        // 1rem gap on top of the safe-area inset so the row breathes
+        // on every device — desktop AND iOS home-indicator.
         style={{
           minHeight: 48,
-          paddingBottom: "calc(0.75rem + var(--sab, 0px))",
+          paddingBottom: "calc(1rem + var(--sab, 0px))",
         }}
       >
         <span

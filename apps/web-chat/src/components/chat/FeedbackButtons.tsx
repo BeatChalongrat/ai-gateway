@@ -32,7 +32,7 @@ export function FeedbackButtons({ convId, messageId, current }: Props) {
         onClick={() => send("thumbs_up")}
         className={`rounded p-1.5 transition-colors ${
           current === "thumbs_up"
-            ? "bg-accent/20 text-accent"
+            ? "bg-bg-elevated text-text-primary"
             : "text-text-muted hover:bg-bg-elevated hover:text-text-secondary"
         }`}
       >

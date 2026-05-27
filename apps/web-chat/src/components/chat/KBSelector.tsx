@@ -82,7 +82,7 @@ export function KBSelector({
         }
         className={`focus-ring inline-flex h-8 max-w-[140px] items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors disabled:opacity-50 ${
           isActive
-            ? "border-accent/40 bg-accent/10 text-accent"
+            ? "border-border-strong bg-bg-elevated text-text-primary"
             : "border-border bg-transparent text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
         }`}
       >
@@ -113,7 +113,7 @@ export function KBSelector({
                 No knowledge bases yet.{" "}
                 <a
                   href="/chat/knowledge"
-                  className="text-accent hover:underline"
+                  className="text-text-primary underline-offset-2 hover:underline"
                 >
                   Create one
                 </a>
@@ -165,7 +165,7 @@ function KBRow({
       onClick={() => void onClick()}
       className="flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-bg-elevated"
     >
-      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-accent">
+      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-text-primary">
         {checked ? <CheckIcon /> : null}
       </span>
       <span className="min-w-0 flex-1">
