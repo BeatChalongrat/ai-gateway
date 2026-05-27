@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
+import { useT } from "@/lib/i18n";
 import { useKnowledgeStore } from "@/stores/knowledgeStore";
 import type {
   KnowledgeBase,
@@ -36,6 +37,7 @@ const ALLOWED_MIME = [
 ].join(",");
 
 export default function KnowledgeBasePage() {
+  const t = useT();
   const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
   const loaded = useKnowledgeStore((s) => s.loaded);
   const loading = useKnowledgeStore((s) => s.loading);
@@ -90,17 +92,16 @@ export default function KnowledgeBasePage() {
           >
             <path d="M15 6l-6 6 6 6" />
           </svg>
-          Back to chat
+          {t("kb.back")}
         </Link>
 
         <div className="mt-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
-              Knowledge bases
+              {t("kb.title")}
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              Upload documents that the AI can retrieve from when answering
-              questions.
+              {t("kb.subtitle")}
             </p>
           </div>
           {/* + Create only renders when there's at least one KB. The
@@ -113,7 +114,7 @@ export default function KnowledgeBasePage() {
               className="focus-ring inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
             >
               <PlusIcon />
-              Create
+              {t("kb.create")}
             </button>
           ) : null}
         </div>
@@ -170,6 +171,7 @@ export default function KnowledgeBasePage() {
 // ---------------------------------------------------------------------------
 
 function EmptyKBState({ onCreate }: { onCreate: () => void }) {
+  const t = useT();
   return (
     <div className="rounded-xl border border-dashed border-border bg-transparent px-8 py-16 text-center">
       <svg
@@ -189,11 +191,10 @@ function EmptyKBState({ onCreate }: { onCreate: () => void }) {
         <path d="M8 13h8M8 17h6" />
       </svg>
       <h2 className="text-base font-semibold tracking-tight text-text-primary">
-        No knowledge bases yet
+        {t("kb.empty.title")}
       </h2>
       <p className="mx-auto mt-2 max-w-sm text-sm text-text-secondary">
-        Create a knowledge base to give the AI context from your own
-        documents.
+        {t("kb.empty.body")}
       </p>
       <button
         type="button"
@@ -201,7 +202,7 @@ function EmptyKBState({ onCreate }: { onCreate: () => void }) {
         className="focus-ring mt-6 inline-flex items-center gap-1.5 rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
       >
         <PlusIcon />
-        Create knowledge base
+        {t("kb.create.full")}
       </button>
     </div>
   );
@@ -241,14 +242,15 @@ function KBCard({
   onToggle: () => void;
   onDelete: () => void;
 }) {
+  const t = useT();
   // Status label — only one of indexed/processing/failed/inactive
   // shows, chosen by the most-relevant signal. Active + all docs
   // indexed → "Indexed" (positive). Anything else falls through.
   const statusLabel = !kb.is_active
-    ? "Inactive"
+    ? t("kb.status.inactive")
     : kb.document_count === 0
-      ? "Empty"
-      : "Indexed";
+      ? t("kb.status.empty")
+      : t("kb.status.indexed");
 
   return (
     <section
@@ -272,15 +274,19 @@ function KBCard({
             </p>
           ) : null}
           <p className="mt-3 text-xs text-text-muted">
-            {kb.document_count} {kb.document_count === 1 ? "document" : "documents"}
+            {kb.document_count}{" "}
+            {kb.document_count === 1
+              ? t("kb.unit.document")
+              : t("kb.unit.documents")}
             {" · "}
-            {kb.total_chunks} {kb.total_chunks === 1 ? "chunk" : "chunks"}
+            {kb.total_chunks}{" "}
+            {kb.total_chunks === 1 ? t("kb.unit.chunk") : t("kb.unit.chunks")}
             {" · "}
             {statusLabel}
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1 text-sm text-text-secondary transition-colors group-hover:text-text-primary">
-          <span>{expanded ? "Close" : "Manage"}</span>
+          <span>{expanded ? t("kb.card.close") : t("kb.card.manage")}</span>
           {expanded ? <ChevronIcon up /> : <ArrowRightIcon />}
         </span>
       </button>
