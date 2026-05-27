@@ -30,6 +30,8 @@ import { ExcelPlanCard } from "./ExcelPlanCard";
 import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { MessageAttachments } from "./MessageAttachments";
+import { PptxPlanCard } from "./PptxPlanCard";
+import type { PptxPlan } from "./PptxPlanCard";
 import { StreamingContent } from "./StreamingContent";
 
 interface Props {
@@ -492,9 +494,9 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
 
   // Split the completed content into prose / plan segments. Each
   // segment renders independently so the card mounts inline wherever
-  // the AI placed the fenced block. Both :::excel-plan and
-  // :::doc-plan are recognised; everything else passes through to
-  // ReactMarkdown.
+  // the AI placed the fenced block. :::excel-plan, :::doc-plan, and
+  // :::pptx-plan are all recognised; everything else passes through
+  // to ReactMarkdown.
   const segments = parsePlanSegments(message.content || "");
   return (
     <>
@@ -504,6 +506,9 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
         }
         if (seg.kind === "doc-plan") {
           return <DocPlanCard key={i} convId={convId} plan={seg.plan} />;
+        }
+        if (seg.kind === "pptx-plan") {
+          return <PptxPlanCard key={i} convId={convId} plan={seg.plan} />;
         }
         return (
           <ReactMarkdown
@@ -520,22 +525,23 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
   );
 }
 
-// :::excel-plan / :::doc-plan detection. Both fences use the
-// Pandoc-style triple-colon container — react-markdown doesn't
-// parse them natively, so we strip them out before rendering and
-// substitute the matching card at the right position. Malformed
-// JSON inside a fence falls back to rendering the raw block as
-// text so the user can see what the AI produced.
+// :::excel-plan / :::doc-plan / :::pptx-plan detection. The fences
+// all use the Pandoc-style triple-colon container — react-markdown
+// doesn't parse them natively, so we strip them out before
+// rendering and substitute the matching card at the right
+// position. Malformed JSON inside a fence falls back to rendering
+// the raw block as text so the user can see what the AI produced.
 type PlanSegment =
   | { kind: "text"; text: string }
   | { kind: "excel-plan"; plan: ExcelPlan }
-  | { kind: "doc-plan"; plan: DocPlan };
+  | { kind: "doc-plan"; plan: DocPlan }
+  | { kind: "pptx-plan"; plan: PptxPlan };
 
 // Single combined regex with a capture group on the plan type so
-// one pass handles both fence flavours in document order. Using a
-// single pass also stops us from double-processing content when
-// the AI emits one of each in the same message.
-const PLAN_FENCE = /:::(excel-plan|doc-plan)\s*\n([\s\S]*?)\n:::/g;
+// one pass handles all three fence flavours in document order.
+// Using a single pass also stops us from double-processing content
+// when the AI emits more than one of these in the same message.
+const PLAN_FENCE = /:::(excel-plan|doc-plan|pptx-plan)\s*\n([\s\S]*?)\n:::/g;
 
 function parsePlanSegments(content: string): PlanSegment[] {
   const out: PlanSegment[] = [];
@@ -545,14 +551,16 @@ function parsePlanSegments(content: string): PlanSegment[] {
   while ((match = PLAN_FENCE.exec(content)) !== null) {
     const before = content.slice(last, match.index);
     if (before.trim()) out.push({ kind: "text", text: before });
-    const kind = match[1] as "excel-plan" | "doc-plan";
+    const kind = match[1] as "excel-plan" | "doc-plan" | "pptx-plan";
     const raw = match[2].trim();
     const parsed = tryParseJson(raw);
     if (parsed && typeof parsed === "object") {
       if (kind === "excel-plan") {
         out.push({ kind: "excel-plan", plan: parsed as ExcelPlan });
-      } else {
+      } else if (kind === "doc-plan") {
         out.push({ kind: "doc-plan", plan: parsed as DocPlan });
+      } else {
+        out.push({ kind: "pptx-plan", plan: parsed as PptxPlan });
       }
     } else {
       out.push({ kind: "text", text: "```json\n" + raw + "\n```" });

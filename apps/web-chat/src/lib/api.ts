@@ -258,7 +258,7 @@ class ApiClient {
     body: {
       source_file_id?: string;
       output_filename?: string;
-      format: "docx" | "pdf";
+      format: "docx" | "pdf" | "pptx";
       plan: unknown;
     },
   ) {

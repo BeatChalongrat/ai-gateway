@@ -1088,6 +1088,9 @@ func (s *MessageService) buildSystemPrefix(
 		if d := s.docContext(ctx, tenantID, conv.ID); d != "" {
 			parts = append(parts, d)
 		}
+		if p := s.pptxContext(ctx, tenantID, conv.ID); p != "" {
+			parts = append(parts, p)
+		}
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -1232,10 +1235,13 @@ func (s *MessageService) docContext(
 	if err != nil || len(files) == 0 {
 		return ""
 	}
+	// docx + pdf only — pptx is owned by pptxContext below so the
+	// two capabilities prompts stay orthogonal (the AI gets a
+	// separate :::doc-plan and :::pptx-plan contract).
 	var latest *model.ConversationFile
 	for i := len(files) - 1; i >= 0; i-- {
 		f := &files[i]
-		if !IsDocContentType(f.ContentType) {
+		if !(IsDocxContentType(f.ContentType) || IsPdfContentType(f.ContentType)) {
 			continue
 		}
 		if f.InspectionJSON == nil || *f.InspectionJSON == "" {
@@ -1329,6 +1335,118 @@ EDIT (docx only): replace_text {find, replace}, set_header {text}, set_footer {t
 // since there's nothing to describe, but still gives the model the
 // :::doc-plan contract so create-from-scratch works.
 const docCapabilitiesPromptHeaderless = "## Document Report Capabilities\n\nNo document is currently uploaded, but if the user asks you to create a Word or PDF report you should still emit a :::doc-plan block (omit source_file_id; the generator runs in create mode).\n\n" + docCapabilitiesPrompt
+
+// pptxContext is the Phase-4 Session-3 sibling of docContext.
+// Picks the most-recent pptx with cached inspection, or injects the
+// headerless capabilities prompt when no pptx is uploaded but the
+// user might still ask for one.
+func (s *MessageService) pptxContext(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) string {
+	if s.excelLookup == nil {
+		return ""
+	}
+	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	var latest *model.ConversationFile
+	for i := len(files) - 1; i >= 0; i-- {
+		f := &files[i]
+		if !IsPptxContentType(f.ContentType) {
+			continue
+		}
+		if f.InspectionJSON == nil || *f.InspectionJSON == "" {
+			continue
+		}
+		latest = f
+		break
+	}
+	if latest == nil {
+		return pptxCapabilitiesPromptHeaderless
+	}
+	return renderPptxSystemBlock(latest)
+}
+
+func renderPptxSystemBlock(f *model.ConversationFile) string {
+	var b strings.Builder
+	b.WriteString("## Presentation Context\n\n")
+	b.WriteString("You have access to a PowerPoint file. Here is its structure:\n\n")
+	b.WriteString("file_id: ")
+	b.WriteString(f.ID.String())
+	b.WriteString("\nfilename: ")
+	b.WriteString(f.OriginalFilename)
+	b.WriteString("\ncontent_type: ")
+	b.WriteString(f.ContentType)
+	b.WriteString("\n\n```json\n")
+	b.WriteString(*f.InspectionJSON)
+	b.WriteString("\n```\n\n")
+	b.WriteString(pptxCapabilitiesPrompt)
+	return b.String()
+}
+
+// pptxCapabilitiesPrompt teaches the AI to emit :::pptx-plan blocks
+// against the 9-slide-type generator catalog. Same MUST/structure
+// rules as the doc prompt so the LLM's behaviour stays consistent
+// across the three formats.
+const pptxCapabilitiesPrompt = `## Presentation Generation Capabilities
+
+When the user asks you to create, edit, or summarize a PowerPoint presentation / slide deck, output a JSON plan in this EXACT format. The frontend renders the plan as a card; the user clicks Generate to execute.
+
+:::pptx-plan
+{
+  "format": "pptx",
+  "source_file_id": "<file_id from above; omit for create-from-scratch>",
+  "output_filename": "presentation.pptx",
+  "presentation_settings": {
+    "title": "Monthly Report",
+    "author": "SRAN AI",
+    "layout": "16:9",
+    "language": "th",
+    "color_scheme": {
+      "primary": "0A1230", "secondary": "0F1835", "accent": "2E75B6",
+      "light_bg": "F6F7F9", "text_dark": "1A1A2E", "text_light": "FFFFFF"
+    },
+    "font": {"heading": "Sarabun", "body": "Sarabun"}
+  },
+  "slides": [
+    {"type": "title", "title": "รายงานสรุปผลประจำเดือน", "subtitle": "พฤษภาคม 2569", "author": "SRAN AI"},
+    {"type": "section_divider", "title": "บทสรุปผู้บริหาร"},
+    {"type": "content", "title": "ภาพรวม", "body": "...", "bullets": ["...","..."], "speaker_notes": "..."},
+    {"type": "two_column", "title": "เปรียบเทียบ", "left": {"heading": "Q1", "bullets": ["..."]}, "right": {"heading": "Q2", "bullets": ["..."]}},
+    {"type": "stats", "title": "ตัวเลขสำคัญ", "stats": [{"value": "5,200", "label": "รายการ", "color": "2E75B6"}, {"value": "98.5%", "label": "พึงพอใจ", "color": "10B981"}]},
+    {"type": "table", "title": "ตารางสรุป", "headers": ["เดือน","ยอดขาย"], "rows": [["ม.ค.","1,200"]]},
+    {"type": "chart", "title": "แนวโน้ม", "chart_type": "bar", "data": {"categories": ["ม.ค.","ก.พ."], "series": [{"name": "ยอดขาย", "values": [1200, 1350]}]}},
+    {"type": "closing", "title": "ขอบคุณครับ", "subtitle": "team@sran.ai"}
+  ]
+}
+:::
+
+## Rules — MUST follow
+- For ANY presentation request: output exactly one :::pptx-plan ... ::: block. No hedging.
+- Output the explanation in 1-2 short sentences BEFORE the fence; nothing after it.
+- Mix slide types — never just a stack of content/bullet slides. Use stats for KPIs, chart for trends, table for data, two_column for comparisons, section_divider between major topics.
+- Always start with a "title" slide and end with a "closing" slide.
+- Detect language from the prompt:
+  * Thai input → language: "th", font Sarabun.
+  * English input → language: "en", font Calibri.
+- Keep bullets short (under 10 words each); 6 bullets max per slide.
+- 8-12 slides is the sweet spot for most topics.
+- "chart_type" is one of: bar, column, line, pie, doughnut, area.
+
+## Slide Types
+- title { title, subtitle, author }          — dark cover slide
+- section_divider { title }                  — dark section header
+- content { title, body, bullets, speaker_notes } — standard content slide
+- two_column { title, left:{heading,bullets}, right:{heading,bullets} }
+- stats { title, stats:[{value,label,color}] } — 2-4 KPI cards
+- table { title, headers, rows }             — professional data table
+- chart { title, chart_type, data:{categories, series:[{name,values}]} }
+- content_with_image { title, body, bullets, image_placeholder } — content + image note
+- closing { title, subtitle }                — dark thank-you slide
+`
+
+const pptxCapabilitiesPromptHeaderless = "## Presentation Generation Capabilities\n\nNo presentation is currently uploaded, but if the user asks you to create a slide deck you should still emit a :::pptx-plan block (omit source_file_id; the generator runs in create mode).\n\n" + pptxCapabilitiesPrompt
 
 // keep “time“ import referenced even when no other code in this
 // file uses it directly (the GatewayChatUsage struct references
