@@ -92,7 +92,7 @@ export function FilePreviewCard({ pending, onRemove, onRetry }: Props) {
         {isUploading ? (
           <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
             <div
-              className="h-full rounded-full bg-accent transition-all"
+              className="h-full rounded-full bg-text-primary transition-all"
               style={{ width: `${pending.progress}%` }}
             />
           </div>

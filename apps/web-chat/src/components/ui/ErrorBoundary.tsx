@@ -49,7 +49,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <button
             type="button"
             onClick={this.reset}
-            className="focus-ring mt-3 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+            className="focus-ring mt-3 rounded-md bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base hover:opacity-90"
           >
             Reload conversation
           </button>
