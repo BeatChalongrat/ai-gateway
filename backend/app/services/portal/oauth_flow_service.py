@@ -316,3 +316,134 @@ def generate_pkce() -> tuple[str, str]:
         .decode("ascii")
     )
     return verifier, challenge
+
+
+# ---------------------------------------------------------------------------
+# Token-only verifiers
+# ---------------------------------------------------------------------------
+#
+# Used by ``POST /portal/auth/oauth/verify`` (Session 5 — NextAuth
+# integration). NextAuth performs the OAuth dance with the provider
+# itself, so the backend never sees a code; instead the portal forwards
+# the provider-issued id_token (Google) or the access_token (GitHub)
+# and the backend verifies it server-side.
+#
+# Security note: NEVER trust caller-supplied claims like ``sub`` or
+# ``email`` directly. Both functions below derive the claims from the
+# token itself — for Google by validating the JWT signature against the
+# JWKS endpoint, for GitHub by calling the provider's userinfo endpoint
+# with the access token. Anything outside the verified-claims path is
+# treated as forged.
+
+
+def verify_google_id_token(id_token: str) -> dict[str, Any]:
+    """Verify a Google OpenID Connect id_token and return safe claims.
+
+    Raises ``IdTokenVerificationFailed`` if the signature, issuer, or
+    audience don't check out. The caller MUST treat this as "no other
+    fields are trustable" — that's the entire point of the verifier.
+    """
+    if not id_token or not isinstance(id_token, str):
+        raise IdTokenVerificationFailed("id_token is required")
+    try:
+        from authlib.jose import JsonWebKey, JsonWebToken
+        from authlib.oidc.core import CodeIDToken
+        import httpx
+    except ImportError as exc:  # pragma: no cover
+        raise IdTokenVerificationFailed(
+            "authlib + httpx are required for OAuth verification"
+        ) from exc
+
+    cfg = _provider_config("google")
+    if not cfg["client_id"]:
+        raise IdTokenVerificationFailed("Google OAuth not configured")
+    try:
+        # JWKS round-trip is a fresh HTTP call each verify. Acceptable
+        # for the login latency budget (~150ms); a future improvement
+        # is an in-process cache keyed by ``kid`` with a 1-hour TTL.
+        jwks_bytes = httpx.get(cfg["jwks_url"], timeout=10.0).content
+        jwks = JsonWebKey.import_key_set(jwks_bytes)
+        claims = JsonWebToken(["RS256"]).decode(
+            id_token,
+            jwks,
+            claims_cls=CodeIDToken,
+            claims_options={
+                "iss": {"values": cfg["issuer"]},
+                "aud": {"value": cfg["client_id"]},
+            },
+        )
+        claims.validate()
+    except Exception as exc:
+        raise IdTokenVerificationFailed(
+            f"Google id_token verification failed: {exc}"
+        ) from exc
+    return {
+        "email": claims.get("email"),
+        "sub": claims.get("sub"),
+        "name": claims.get("name") or claims.get("given_name"),
+        "picture": claims.get("picture"),
+    }
+
+
+def verify_github_access_token(access_token: str) -> dict[str, Any]:
+    """Verify a GitHub access_token by fetching userinfo.
+
+    GitHub doesn't issue id_tokens (no OIDC) so the verification path
+    is "ask the provider who this token belongs to". A forged token
+    fails the call. Email may be private on /user; we fall back to
+    /user/emails and take the primary verified address.
+    """
+    if not access_token or not isinstance(access_token, str):
+        raise IdTokenVerificationFailed("access_token is required")
+    try:
+        import httpx
+    except ImportError as exc:  # pragma: no cover
+        raise IdTokenVerificationFailed("httpx is required for OAuth verification") from exc
+
+    cfg = _provider_config("github")
+    if not cfg["client_id"]:
+        raise IdTokenVerificationFailed("GitHub OAuth not configured")
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "sran-portal-oauth",
+    }
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(cfg["userinfo_url"], headers=headers)
+            if resp.status_code != 200:
+                raise IdTokenVerificationFailed(
+                    f"GitHub /user returned {resp.status_code}"
+                )
+            user = resp.json()
+            email = user.get("email")
+            if not email:
+                emails_resp = client.get(cfg["emails_url"], headers=headers)
+                if emails_resp.status_code != 200:
+                    raise IdTokenVerificationFailed(
+                        f"GitHub /user/emails returned {emails_resp.status_code}"
+                    )
+                emails = emails_resp.json() or []
+                email = next(
+                    (
+                        e["email"]
+                        for e in emails
+                        if e.get("primary") and e.get("verified")
+                    ),
+                    None,
+                )
+            if not email:
+                raise IdTokenVerificationFailed("GitHub returned no verified email")
+    except IdTokenVerificationFailed:
+        raise
+    except Exception as exc:
+        raise IdTokenVerificationFailed(
+            f"GitHub userinfo fetch failed: {exc}"
+        ) from exc
+    return {
+        "email": email,
+        "sub": str(user.get("id")),
+        "name": user.get("name") or user.get("login"),
+        "picture": user.get("avatar_url"),
+    }

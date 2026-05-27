@@ -38,26 +38,29 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
 async function exchangeWithBackend(args: {
   provider: string;
-  oauth_id: string;
-  email: string;
-  display_name?: string | null;
-  avatar_url?: string | null;
+  // Exactly one of these must be set. ``id_token`` for Google
+  // (OpenID Connect), ``access_token`` for GitHub (no OIDC).
+  id_token?: string | null;
+  access_token?: string | null;
 }): Promise<PortalTokens | null> {
   try {
-    const res = await fetch(`${BACKEND}/portal/auth/oauth/callback`, {
+    // The legacy POST /oauth/callback (which trusted caller-supplied
+    // oauth_id/email) was removed for security. We now POST a
+    // provider-issued token to /oauth/verify; the backend verifies it
+    // server-side against the provider's JWKS (Google) or userinfo
+    // endpoint (GitHub) before minting portal tokens.
+    const res = await fetch(`${BACKEND}/portal/auth/oauth/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: args.provider,
-        oauth_id: args.oauth_id,
-        email: args.email,
-        display_name: args.display_name ?? null,
-        avatar_url: args.avatar_url ?? null,
+        id_token: args.id_token ?? null,
+        access_token: args.access_token ?? null,
       }),
       cache: "no-store",
     });
     if (!res.ok) {
-      console.error("oauth/callback failed:", res.status, await res.text());
+      console.error("oauth/verify failed:", res.status, await res.text());
       return null;
     }
     const data = (await res.json()) as {
@@ -71,7 +74,7 @@ async function exchangeWithBackend(args: {
       portal_user: data.user,
     };
   } catch (err) {
-    console.error("oauth/callback error:", err);
+    console.error("oauth/verify error:", err);
     return null;
   }
 }
@@ -84,13 +87,32 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async signIn({ user, account }) {
-      if (!account || !user?.email) return false;
+      if (!account) return false;
+      // Forward whichever provider-issued token the backend needs to
+      // verify the identity. Google gives us an OIDC id_token here;
+      // GitHub doesn't issue id_tokens, so we forward the access_token
+      // which the backend exchanges against the GitHub userinfo API.
+      let id_token: string | null = null;
+      let access_token: string | null = null;
+      if (account.provider === "google") {
+        id_token = (account.id_token as string | undefined) ?? null;
+        if (!id_token) {
+          console.error("Google sign-in: missing id_token on account");
+          return false;
+        }
+      } else if (account.provider === "github") {
+        access_token = (account.access_token as string | undefined) ?? null;
+        if (!access_token) {
+          console.error("GitHub sign-in: missing access_token on account");
+          return false;
+        }
+      } else {
+        return false;
+      }
       const tokens = await exchangeWithBackend({
         provider: account.provider,
-        oauth_id: account.providerAccountId,
-        email: user.email,
-        display_name: user.name ?? null,
-        avatar_url: user.image ?? null,
+        id_token,
+        access_token,
       });
       if (!tokens) return false;
       // Smuggle the portal tokens forward via the ``user`` object so

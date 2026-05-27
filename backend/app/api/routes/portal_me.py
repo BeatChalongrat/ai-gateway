@@ -97,6 +97,10 @@ def get_me(
         # on /me lets the Settings page preselect the correct radio
         # without a separate round-trip.
         "preferred_language": user.preferred_language or "en",
+        # Linked-account info — null when the user signed up with
+        # email/password, "google" / "github" when SSO is active. Used
+        # by the Settings "Linked accounts" section to show status.
+        "oauth_provider": user.oauth_provider,
         "created_at": user.created_at,
     }
 

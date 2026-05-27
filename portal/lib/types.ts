@@ -23,6 +23,9 @@ export interface PortalUser {
   // rendering on the backend and by the Preferences toggle in the
   // portal Settings page. Unknown values fall back to 'en' at render.
   preferred_language?: string;
+  // Set to "google" / "github" when the user signed in via SSO; null
+  // for email/password accounts. Used by Settings → Linked accounts.
+  oauth_provider?: string | null;
   created_at: string;
 }
 
