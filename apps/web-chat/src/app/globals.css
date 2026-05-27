@@ -319,7 +319,13 @@ input {
   font-size: 0.875em;
   color: var(--text-primary);
 }
-.prose-chat pre {
+/* Direct-child only — the elevated .code-block panel renders its
+   own pre wrapped two levels deep, so the descendant selector used
+   to bleed border + padding + margin into the inner pre and fight
+   the panel layout. Scoping to `> pre` keeps a sane fallback for
+   any orphan <pre> that bypasses the CodeBlock override without
+   double-styling the panel's inner code. */
+.prose-chat > pre {
   background: var(--code-bg);
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
@@ -328,7 +334,7 @@ input {
   overflow-x: auto;
   font-size: 0.875rem;
 }
-.prose-chat pre code {
+.prose-chat > pre code {
   background: transparent;
   padding: 0;
   font-family: var(--font-mono);
@@ -355,66 +361,84 @@ input {
   background: var(--bg-surface);
 }
 
-/* ─── CodeBlock container (rendered by CodeBlock.tsx) ──────── */
+/* ─── CodeBlock panel (rendered by CodeBlock.tsx) ────────────
+   Elevated card that visually breaks out of the message prose.
+   Inspired by Claude artefacts: separate header strip + code surface
+   on its own background; subtle shadow + hover border for "elevated"
+   feel without competing with the message text. */
 .code-block {
   position: relative;
-  margin: 0.75rem 0;
+  margin: 12px 0;
   border-radius: 12px;
   border: 1px solid var(--border-subtle);
   background: var(--code-bg);
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: border-color 150ms ease;
+}
+.code-block:hover {
+  border-color: var(--border-default);
 }
 .code-block-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.45rem 0.75rem 0.45rem 1rem;
+  height: 40px;
+  padding: 0 12px 0 16px;
   background: var(--code-header-bg);
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 0.75rem;
-  text-transform: lowercase;
-  letter-spacing: 0.02em;
-  color: var(--text-secondary);
 }
-.code-block-lang  { font-family: var(--font-mono); }
+.code-block-lang {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  /* When the label is a filename it may be long; keep it on one
+     line so the header height stays predictable. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
 .code-block-copy {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.55rem;
+  gap: 0.35rem;
+  padding: 4px 8px;
   border-radius: 6px;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   font-size: 0.75rem;
+  line-height: 1;
   transition: background-color 120ms ease, color 120ms ease;
+  flex-shrink: 0;
 }
 .code-block-copy:hover {
   background: var(--bg-surface-hover);
-  color: var(--text-primary);
+  color: var(--text-secondary);
 }
-.code-block-copy.copied { color: var(--success); }
+.code-block-copy.is-copied {
+  color: var(--success);
+}
 .code-block-body {
-  display: flex;
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 500px;
   font-size: 0.875rem;
 }
-.code-block-lines {
-  user-select: none;
-  padding: 0.9rem 0.5rem 0.9rem 0.9rem;
-  text-align: right;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  border-right: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
-  font-size: 0.8rem;
-  line-height: 1.55;
+/* Collapsed view: cap the body to 20 lines × 1.6 line-height + the
+   16px padding pair, then let the Show-more toggle handle expansion.
+   line-height 1.6 × 0.875rem ≈ 1.4rem per line, so 20 lines ≈ 28rem.
+   The 32px term covers the two 16px paddings. */
+.code-block.is-collapsed .code-block-body {
+  max-height: calc(20 * 1.6 * 0.875rem + 32px);
 }
-.code-block-lines span { display: block; }
 .code-block-content {
-  flex: 1;
-  padding: 0.9rem 1.1rem;
+  padding: 16px;
   font-family: var(--font-mono);
-  line-height: 1.55;
+  font-size: 0.875rem;
+  line-height: 1.6;
   white-space: pre;
   color: var(--code-text);
 }
@@ -424,6 +448,20 @@ input {
   font-size: inherit;
   font-family: inherit;
   color: inherit;
+}
+.code-block-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--code-header-bg);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  text-align: center;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.code-block-toggle:hover {
+  color: var(--text-secondary);
+  background: var(--bg-surface-hover);
 }
 
 /* Streaming cursor + indicators. */

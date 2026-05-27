@@ -1,14 +1,17 @@
 "use client";
 
-// Code block container rendered by react-markdown's `pre` override.
-// Adds:
-//   - language label (top-right of the header bar)
-//   - copy button with "Copied!" affordance (2s tooltip)
-//   - line numbers when the block has > 5 lines
+// Elevated code-block panel rendered by react-markdown's `pre`
+// override. Styled like Claude / ChatGPT artefacts: distinct header
+// strip with language (or filename) + copy button, code surface on
+// its own background, subtle shadow + hover border so the panel
+// reads as a card breaking out of the prose. Long blocks
+// (> COLLAPSE_THRESHOLD_LINES) start collapsed; the user expands
+// with a "Show more" toggle pinned to the bottom.
 //
-// rehype-highlight has already wrapped the inner <code> with hljs
-// language classes, so the highlighting tokens still apply. We just
-// give it a styled container.
+// Filename syntax: the language tag may carry an optional filename
+// after a colon — e.g. ```javascript:app.js → "app.js" in the
+// header instead of "JavaScript". This is a Claude convention the
+// LLM picks up from prompt context and we surface it verbatim.
 
 import { Children, isValidElement, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
@@ -22,36 +25,54 @@ interface PreProps {
   children?: ReactNode;
 }
 
-const LANG_RE = /language-([a-zA-Z0-9_+-]+)/;
+const LANG_RE = /language-([a-zA-Z0-9_+-]+(?::[^\s]+)?)/;
+
+// Collapse heuristic: anything past this height starts collapsed
+// so a 400-line dump doesn't push the user's reply offscreen. The
+// collapsed view shows the first COLLAPSE_VISIBLE_LINES rows; the
+// user expands with the toggle at the bottom.
+const COLLAPSE_THRESHOLD_LINES = 30;
+const COLLAPSE_VISIBLE_LINES = 20;
 
 export function CodeBlock({ children }: PreProps) {
   const codeChild = findCodeChild(children);
   const className = codeChild?.props.className ?? "";
   const langMatch = LANG_RE.exec(className);
-  const lang = langMatch?.[1] ?? "";
+  const rawTag = langMatch?.[1] ?? "";
+  const { label, lang } = parseLanguageTag(rawTag);
 
   const codeText = extractText(codeChild?.props.children);
-  const lines = codeText.replace(/\n$/, "").split("\n");
-  const showLineNumbers = lines.length > 5;
+  const lineCount = codeText.replace(/\n$/, "").split("\n").length;
+  const canCollapse = lineCount > COLLAPSE_THRESHOLD_LINES;
+
+  const [expanded, setExpanded] = useState(false);
+  const collapsed = canCollapse && !expanded;
 
   return (
-    <div className="code-block not-prose">
+    <div className={`code-block not-prose${collapsed ? " is-collapsed" : ""}`}>
       <div className="code-block-header">
-        <span className="code-block-lang">{lang || "text"}</span>
+        <span className="code-block-lang" title={lang || undefined}>
+          {label}
+        </span>
         <CopyButton text={codeText} />
       </div>
       <div className="code-block-body scrollbar-thin">
-        {showLineNumbers ? (
-          <div className="code-block-lines" aria-hidden>
-            {lines.map((_, i) => (
-              <span key={i}>{i + 1}</span>
-            ))}
-          </div>
-        ) : null}
         <pre className="code-block-content">
           {codeChild ?? <code>{codeText}</code>}
         </pre>
       </div>
+      {canCollapse ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="code-block-toggle focus-ring"
+          aria-expanded={expanded}
+        >
+          {expanded
+            ? "Show less"
+            : `Show more (${lineCount - COLLAPSE_VISIBLE_LINES} more lines)`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -84,40 +105,41 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={copy}
-      className={`code-block-copy focus-ring ${copied ? "copied" : ""}`}
+      className={`code-block-copy focus-ring ${copied ? "is-copied" : ""}`}
       aria-label={copied ? "Copied" : "Copy code"}
     >
       {copied ? (
         <>
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M5 13l4 4L19 7"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M5 13l4 4L19 7" />
           </svg>
-          Copied
+          Copied!
         </>
       ) : (
         <>
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
-            <rect
-              x="9"
-              y="9"
-              width="11"
-              height="11"
-              rx="2"
-              stroke="currentColor"
-              strokeWidth="1.7"
-            />
-            <path
-              d="M5 15V6a2 2 0 0 1 2-2h9"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-            />
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15V6a2 2 0 0 1 2-2h9" />
           </svg>
           Copy
         </>
@@ -126,10 +148,45 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+// parseLanguageTag turns a raw markdown language token into a
+// display label + a hint for the title attribute. Three shapes:
+//
+//   ""                 → { label: "Code", lang: "" }
+//   "python"           → { label: "Python", lang: "python" }
+//   "javascript:app.js" → { label: "app.js", lang: "javascript" }
+//
+// When the tag carries a filename we trust it as-is (filenames are
+// case-sensitive and may contain dots/extensions); when only a
+// language is present we capitalize the first letter so the header
+// reads as a noun ("JavaScript", "Python") instead of a switch
+// keyword.
+function parseLanguageTag(raw: string): { label: string; lang: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { label: "Code", lang: "" };
+  const colon = trimmed.indexOf(":");
+  if (colon !== -1) {
+    const lang = trimmed.slice(0, colon);
+    const filename = trimmed.slice(colon + 1).trim();
+    if (filename) {
+      return { label: filename, lang };
+    }
+  }
+  return { label: capitalize(trimmed), lang: trimmed };
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function findCodeChild(children: ReactNode): ReactElement<CodeChildProps> | null {
   const arr = Children.toArray(children);
   for (const c of arr) {
-    if (isValidElement(c) && (c.type === "code" || (c.props as CodeChildProps)?.className?.includes("language-"))) {
+    if (
+      isValidElement(c) &&
+      (c.type === "code" ||
+        (c.props as CodeChildProps)?.className?.includes("language-"))
+    ) {
       return c as ReactElement<CodeChildProps>;
     }
   }
