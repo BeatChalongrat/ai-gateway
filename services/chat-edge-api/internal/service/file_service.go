@@ -100,12 +100,21 @@ type FileService struct {
 	// means "don't auto-inspect" (tests, builds without the
 	// scripts).
 	excel *ExcelService
+	// Phase 4 Session 2 — same hook for docx + pdf uploads.
+	docs *DocService
 }
 
 // SetExcelService wires the Phase-4 Excel inspector into the upload
 // pipeline. Called once at boot in main.go after both services exist.
 func (s *FileService) SetExcelService(e *ExcelService) {
 	s.excel = e
+}
+
+// SetDocService wires the Phase-4 Session 2 doc inspector (docx +
+// pdf) into the upload pipeline. Same lazy-wire pattern as
+// SetExcelService — nil-safe.
+func (s *FileService) SetDocService(d *DocService) {
+	s.docs = d
 }
 
 func NewFileService(
@@ -266,23 +275,37 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	row.ExtractionStatus = status
 	row.ExtractedText = text
 
-	// Phase 4 hook — when this is an xlsx upload and the Excel
-	// service is wired, run the deep inspector now so the structure
-	// is cached for the very next message turn. Non-fatal: a
-	// failed inspection just leaves inspection_json NULL and the
-	// system prompt falls back to the extracted CSV body.
-	if s.excel != nil && IsExcelContentType(row.ContentType) {
+	// Phase 4 hook — auto-run the deep inspector on every Office /
+	// PDF upload so the structure is cached for the very next
+	// message turn. Non-fatal: a failed inspection just leaves
+	// inspection_json NULL and the system prompt falls back to the
+	// extracted text body.
+	switch {
+	case s.excel != nil && IsExcelContentType(row.ContentType):
 		if _, raw, err := s.excel.InspectWorkbook(ctx, row.StoragePath); err == nil && len(raw) > 0 {
 			if uerr := s.files.UpdateInspectionJSON(ctx, row.ID, string(raw)); uerr != nil {
 				slog.Warn("excel inspection cache write failed",
 					"file_id", row.ID.String(), "err", uerr)
 			} else {
-				s := string(raw)
-				row.InspectionJSON = &s
+				sj := string(raw)
+				row.InspectionJSON = &sj
 			}
 		} else if err != nil {
 			slog.Warn("excel auto-inspect failed",
 				"file_id", row.ID.String(), "err", err)
+		}
+	case s.docs != nil && IsDocContentType(row.ContentType):
+		if _, raw, err := s.docs.InspectDocument(ctx, row.StoragePath, row.ContentType); err == nil && len(raw) > 0 {
+			if uerr := s.files.UpdateInspectionJSON(ctx, row.ID, string(raw)); uerr != nil {
+				slog.Warn("doc inspection cache write failed",
+					"file_id", row.ID.String(), "err", uerr)
+			} else {
+				sj := string(raw)
+				row.InspectionJSON = &sj
+			}
+		} else if err != nil {
+			slog.Warn("doc auto-inspect failed",
+				"file_id", row.ID.String(), "ct", row.ContentType, "err", err)
 		}
 	}
 	return row, nil

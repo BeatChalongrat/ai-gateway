@@ -112,6 +112,51 @@ export interface ExcelExecuteResponse {
   changes: string[];
 }
 
+/** Phase 4 Session 2 — Word/PDF report generation.
+ *  Mirrors doc_validator.py output (docx + pdf use the same envelope). */
+export interface DocValidationReport {
+  valid: boolean;
+  file_type: "docx" | "pdf" | string;
+  file_size_bytes: number;
+  errors: string[];
+  warnings: string[];
+  stats: {
+    page_count?: number;
+    paragraph_count?: number;
+    table_count?: number;
+    section_count?: number;
+    word_count?: number;
+  };
+}
+
+/** Per-action change_log row from docx_generator.py / pdf_generator.py. */
+export interface DocChangeLogEntry {
+  action: number;
+  type: string;
+  status: "ok" | "error" | "skipped";
+  detail?: string;
+}
+
+export interface DocGenerationReport {
+  success: boolean;
+  mode?: "create" | "edit";
+  output_path: string;
+  file_size_bytes: number;
+  page_count?: number;
+  font_used?: string;
+  actions_executed: number;
+  actions_failed: number;
+  change_log: DocChangeLogEntry[];
+}
+
+/** Response from POST /conversations/{id}/document/execute. */
+export interface DocExecuteResponse {
+  file: FileAttachment;
+  validation: DocValidationReport;
+  generation: DocGenerationReport;
+  changes: string[];
+}
+
 export interface FileListResponse {
   files: FileAttachment[];
 }
