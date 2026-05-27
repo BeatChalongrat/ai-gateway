@@ -21,6 +21,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { clearPortalToken } from "@/lib/auth";
+import { useI18nStore, useT } from "@/lib/i18n";
 import type { Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -78,6 +79,7 @@ export function Sidebar({
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const debouncedSearch = useDebounce(search, 300);
+  const t = useT();
 
   useEffect(() => {
     if (!conversationsLoaded) void loadConversations();
@@ -203,7 +205,7 @@ export function Sidebar({
                 strokeLinecap="round"
               />
             </svg>
-            <span>New chat</span>
+            <span>{t("sidebar.newChat")}</span>
             <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
               ⌘⇧N
             </span>
@@ -236,7 +238,7 @@ export function Sidebar({
                 onBlur={() => {
                   if (!search) setSearchExpanded(false);
                 }}
-                placeholder="Search chats…"
+                placeholder={`${t("sidebar.searchChats")}…`}
                 className="w-full rounded-lg border border-border-subtle bg-transparent py-1.5 pl-8 pr-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none"
               />
               {search ? (
@@ -270,7 +272,7 @@ export function Sidebar({
                 <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
                 <path d="M21 21l-4.3-4.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
-              <span>Search chats</span>
+              <span>{t("sidebar.searchChats")}</span>
               <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
                 ⌘K
               </span>
@@ -347,6 +349,9 @@ function UserMenu({
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
   const isDark = theme === "dark";
+  const locale = useI18nStore((s) => s.locale);
+  const toggleLocale = useI18nStore((s) => s.toggle);
+  const t = useT();
 
   useEffect(() => {
     if (!open) return;
@@ -375,29 +380,37 @@ function UserMenu({
           <MenuItem
             onClick={toggleTheme}
             icon={<ThemeIcon isDark={isDark} />}
-            label={isDark ? "Dark mode" : "Light mode"}
+            label={isDark ? t("menu.theme.dark") : t("menu.theme.light")}
             trailing={<ThemePill isDark={isDark} />}
+            closeOnClick={false}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={toggleLocale}
+            icon={<GlobeIcon />}
+            label={t("menu.language")}
+            trailing={<LocalePill locale={locale} />}
             closeOnClick={false}
             setOpen={setOpen}
           />
           <MenuItem
             onClick={onKnowledgeBase}
             icon={<BookIcon />}
-            label="Knowledge base"
+            label={t("menu.knowledgeBase")}
             trailing={<ArrowIcon />}
             setOpen={setOpen}
           />
           <MenuItem
             onClick={onVoiceSettings}
             icon={<MicIcon />}
-            label="Voice settings"
+            label={t("menu.voiceSettings")}
             trailing={<ArrowIcon />}
             setOpen={setOpen}
           />
           <MenuItem
             onClick={onCustomInstructions}
             icon={<GearIcon />}
-            label="Custom instructions"
+            label={t("menu.customInstructions")}
             trailing={<ArrowIcon />}
             setOpen={setOpen}
           />
@@ -405,7 +418,7 @@ function UserMenu({
           <MenuItem
             onClick={onLogout}
             icon={<LogoutIcon />}
-            label="Log out"
+            label={t("menu.logout")}
             danger
             setOpen={setOpen}
           />
@@ -561,6 +574,40 @@ function ThemePill({ isDark }: { isDark: boolean }) {
         className="inline-block h-3 w-3 transform rounded-full bg-text-secondary transition-transform"
         style={{ transform: isDark ? "translateX(14px)" : "translateX(2px)" }}
       />
+    </span>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M3 12h18M12 3a13 13 0 0 1 0 18M12 3a13 13 0 0 0 0 18"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+// LocalePill — read-only chip showing the active locale code so the
+// user sees their state in the menu row at a glance. Clicking the
+// row toggles via the store; this is just the display.
+function LocalePill({ locale }: { locale: "en" | "th" }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-flex h-5 items-center rounded-full border border-border bg-bg-base px-2 text-[10px] font-semibold uppercase tracking-wider text-text-secondary"
+    >
+      {locale}
     </span>
   );
 }
@@ -784,10 +831,13 @@ function SidebarRow({
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
 }) {
+  const t = useT();
   if (row.kind === "header") {
     return (
       <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-        {row.label}
+        {/* ``row.label`` is a translation key like ``sidebar.group.today``;
+            t() looks it up against the active locale dictionary. */}
+        {t(row.label as Parameters<typeof t>[0])}
       </div>
     );
   }
@@ -816,12 +866,16 @@ function groupByTime(items: Conversation[]): Group[] {
   const sevenDays = today - 7 * 24 * 60 * 60 * 1000;
   const thirtyDays = today - 30 * 24 * 60 * 60 * 1000;
 
+  // ``label`` holds a translation-key, not literal copy. The
+  // sidebar's row renderer calls ``t()`` on it just before painting
+  // so the same Row objects render in either locale without
+  // re-grouping when the user flips languages.
   const groups: Group[] = [
-    { label: "Today", items: [] },
-    { label: "Yesterday", items: [] },
-    { label: "Previous 7 Days", items: [] },
-    { label: "Previous 30 Days", items: [] },
-    { label: "Older", items: [] },
+    { label: "sidebar.group.today", items: [] },
+    { label: "sidebar.group.yesterday", items: [] },
+    { label: "sidebar.group.last7", items: [] },
+    { label: "sidebar.group.last30", items: [] },
+    { label: "sidebar.group.older", items: [] },
   ];
 
   for (const c of items) {
