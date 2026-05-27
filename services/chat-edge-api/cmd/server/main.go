@@ -174,6 +174,7 @@ func main() {
 		Share:        handler.NewShareHandler(shareSvc),
 		Admin:        handler.NewAdminHandler(pool),
 		Knowledge:    handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
+		Voice:        handler.NewVoiceHandler(),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
