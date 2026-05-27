@@ -19,7 +19,6 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { useChatStore } from "@/stores/chatStore";
-import { useModelStore } from "@/stores/modelStore";
 
 interface Options {
   onToggleSidebar?: () => void;
@@ -66,16 +65,7 @@ export function useKeyboardShortcuts(opts: Options) {
         const target = e.target as HTMLElement | null;
         if (target && TEXT_INPUT_TAGS.has(target.tagName)) return;
         e.preventDefault();
-        // Pull live state at fire-time so we don't capture a stale
-        // snapshot from when the listener was first installed.
-        const chatState = useChatStore.getState();
-        const modelState = useModelStore.getState();
-        void newChat(
-          router,
-          chatState.conversations,
-          modelState.selectedModelId,
-          chatState.createConversation,
-        );
+        newChat(router);
         return;
       }
     }
@@ -85,42 +75,24 @@ export function useKeyboardShortcuts(opts: Options) {
 }
 
 // Shared new-chat handler. Reused by the sidebar button + this
-// hook so both go through the same "open the existing empty
-// conversation instead of spawning a duplicate" guard.
+// hook so the shortcut and the button stay in lockstep.
 //
-// Dedup rule: if ANY conversation has zero messages, reuse it.
-// The previous version also required a model match + a 60s
-// freshness window, which let duplicates through when the user
-// switched models or paused for a minute. The flat rule matches
-// ChatGPT / Claude and is the bar Beat called out.
-async function newChat(
-  router: ReturnType<typeof useRouter>,
-  conversations: ReturnType<typeof useChatStore.getState>["conversations"],
-  selectedModelId: string | null,
-  createConversation: ReturnType<typeof useChatStore.getState>["createConversation"],
-) {
-  const candidate = conversations.find((c) => c.message_count === 0);
-  if (candidate) {
-    router.push(`/chat/${candidate.id}`);
-    return;
-  }
-  if (!selectedModelId) return;
-  const fresh = await createConversation(selectedModelId);
-  router.push(`/chat/${fresh.id}`);
+// ChatGPT-style lazy create: navigate to the landing page and clear
+// the active selection. NO conversation is created until the user
+// actually sends their first message (handled in /chat/page.tsx).
+// This keeps the sidebar free of empty "New conversation" rows from
+// users who click "+ New chat" and then change their mind.
+function newChat(router: ReturnType<typeof useRouter>) {
+  useChatStore.getState().setActive(null);
+  router.push("/chat");
 }
 
 // Exported because the Sidebar's "+ New chat" button uses the same
-// dedup heuristic. Pulling it here keeps the rule in one place.
+// handler. Kept here so the keyboard shortcut and the button can
+// never drift out of sync.
 export function useNewChatHandler() {
   const router = useRouter();
-  return async () => {
-    const chatState = useChatStore.getState();
-    const modelState = useModelStore.getState();
-    await newChat(
-      router,
-      chatState.conversations,
-      modelState.selectedModelId,
-      chatState.createConversation,
-    );
+  return () => {
+    newChat(router);
   };
 }
