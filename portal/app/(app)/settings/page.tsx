@@ -595,6 +595,46 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      {/* Linked accounts — Phase 3 Session 5. Read-only for now: the
+          /portal/me payload carries the user's oauth_provider field;
+          if set, we show the provider as "Connected" with the same
+          email. "Connect" / "Disconnect" actions are deferred — the
+          underlying multi-provider link model isn't built yet (Phase 4),
+          and shipping the action buttons without a backing endpoint
+          would be a worse experience than no buttons at all. */}
+      <Card padding="md">
+        <div className="flex items-center justify-between mb-5">
+          <h2
+            className="font-heading"
+            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+          >
+            Linked accounts
+          </h2>
+        </div>
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--text-secondary)",
+            marginBottom: 16,
+          }}
+        >
+          Single-sign-on providers connected to this account. You can sign in
+          using any connected method.
+        </p>
+        <LinkedAccountRow
+          provider="google"
+          label="Google"
+          connectedProvider={user?.oauth_provider ?? null}
+          email={user?.email ?? null}
+        />
+        <LinkedAccountRow
+          provider="github"
+          label="GitHub"
+          connectedProvider={user?.oauth_provider ?? null}
+          email={user?.email ?? null}
+        />
+      </Card>
+
       {/* Danger zone */}
       <section
         className="p-6"
@@ -722,6 +762,96 @@ function ComingSoonPill() {
       <Clock className="w-3 h-3" />
       Coming soon
     </span>
+  );
+}
+
+function LinkedAccountRow({
+  provider,
+  label,
+  connectedProvider,
+  email,
+}: {
+  provider: "google" | "github";
+  label: string;
+  connectedProvider: string | null;
+  email: string | null;
+}) {
+  const isConnected = connectedProvider === provider;
+  return (
+    <div
+      className="flex items-center justify-between gap-4 py-3"
+      style={{ borderTop: "1px solid var(--border-subtle)" }}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <span
+          aria-hidden
+          className="inline-flex items-center justify-center"
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 6,
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-default)",
+            flexShrink: 0,
+          }}
+        >
+          {provider === "google" ? <GoogleGlyph /> : <GitHubGlyph />}
+        </span>
+        <div className="min-w-0">
+          <div
+            style={{
+              fontWeight: 500,
+              color: "var(--text-primary)",
+              fontSize: 13.5,
+            }}
+          >
+            {label}
+          </div>
+          <div
+            className="truncate"
+            style={{ fontSize: 12.5, color: "var(--text-tertiary)" }}
+          >
+            {isConnected ? email ?? "Linked" : "Not connected"}
+          </div>
+        </div>
+      </div>
+      {isConnected ? (
+        <span
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full flex-shrink-0"
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            background: "rgba(34,197,94,0.12)",
+            color: "var(--accent-success, #16a34a)",
+            border: "1px solid rgba(34,197,94,0.25)",
+          }}
+        >
+          <Check className="w-3 h-3" />
+          Connected
+        </span>
+      ) : (
+        <ComingSoonPill />
+      )}
+    </div>
+  );
+}
+
+function GoogleGlyph() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M21.6 12.227c0-.7-.063-1.376-.18-2.027H12v3.836h5.4a4.62 4.62 0 01-2.005 3.03v2.515h3.246c1.9-1.748 2.96-4.325 2.96-7.354z" />
+      <path fill="#34A853" d="M12 22c2.7 0 4.965-.895 6.62-2.42l-3.246-2.515c-.9.6-2.05.96-3.374.96-2.594 0-4.79-1.752-5.575-4.107H3.07v2.582A9.997 9.997 0 0012 22z" />
+      <path fill="#FBBC05" d="M6.425 13.918A6.01 6.01 0 016.105 12c0-.665.115-1.31.32-1.918V7.5H3.07A9.997 9.997 0 002 12c0 1.614.387 3.14 1.07 4.5l3.355-2.582z" />
+      <path fill="#EA4335" d="M12 5.975c1.466 0 2.78.504 3.815 1.493l2.86-2.86C16.96 2.99 14.695 2 12 2 8.07 2 4.673 4.255 3.07 7.5l3.355 2.582C7.21 7.727 9.406 5.975 12 5.975z" />
+    </svg>
+  );
+}
+
+function GitHubGlyph() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ color: "var(--text-primary)" }}>
+      <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-1.97c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.27-1.69-1.27-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.34.95.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.16 1.18a10.95 10.95 0 015.75 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.59.23 2.76.11 3.05.74.8 1.18 1.82 1.18 3.08 0 4.42-2.7 5.39-5.27 5.68.41.36.78 1.07.78 2.16v3.2c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z" />
+    </svg>
   );
 }
 
