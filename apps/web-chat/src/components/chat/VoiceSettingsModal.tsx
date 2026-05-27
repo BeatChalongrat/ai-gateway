@@ -105,7 +105,7 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
             <select
               value={inputLang}
               onChange={(e) => setInputLang(e.target.value)}
-              className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+              className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
             >
               {INPUT_LANGS.map((l) => (
                 <option key={l.value} value={l.value}>
@@ -142,7 +142,7 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
                 onChange={(e) =>
                   setBrowserVoice(e.target.value || null)
                 }
-                className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
               >
                 <option value="">System default (English)</option>
                 {voices.map((v) => (
@@ -157,7 +157,7 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
               <select
                 value={openaiVoice}
                 onChange={(e) => setOpenAIVoice(e.target.value as OpenAIVoice)}
-                className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
               >
                 {OPENAI_VOICES.map((v) => (
                   <option key={v} value={v}>
@@ -175,7 +175,7 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
               step={0.1}
               value={rate}
               onChange={(e) => setRate(Number(e.target.value))}
-              className="w-full accent-[var(--accent)]"
+              className="w-full accent-[var(--text-primary)]"
             />
           </Field>
           <div className="pt-1">
@@ -256,7 +256,7 @@ function SegmentedToggle<T extends string>({
             onClick={() => onChange(o.value)}
             className={`rounded-md border px-3 py-2 text-left transition-colors ${
               active
-                ? "border-accent bg-accent/10 text-text-primary"
+                ? "border-border-strong bg-bg-elevated text-text-primary"
                 : "border-border bg-bg-secondary text-text-secondary hover:border-border-strong hover:text-text-primary"
             }`}
           >
@@ -295,12 +295,17 @@ function ToggleRow({
       <span
         aria-hidden
         className={`mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-          checked ? "bg-accent" : "bg-border"
+          checked ? "bg-text-primary" : "bg-border"
         }`}
       >
         <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-            checked ? "translate-x-4" : "translate-x-0.5"
+          // Knob colour inverts with the track so it stays visible
+          // in both states: when checked the track is text-primary
+          // (white in dark theme) so the knob switches to bg-base;
+          // when unchecked the track is border (gray) so the knob
+          // stays white-ish via text-primary.
+          className={`inline-block h-4 w-4 transform rounded-full shadow-sm transition-transform ${
+            checked ? "translate-x-4 bg-bg-base" : "translate-x-0.5 bg-text-primary"
           }`}
         />
       </span>

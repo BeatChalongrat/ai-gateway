@@ -72,14 +72,28 @@ export default function KnowledgeBasePage() {
       <header className="border-b border-border/60 px-6 py-5">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-wider text-text-muted">
-              <Link href="/chat" className="hover:text-text-primary">
-                Chat
-              </Link>
-              <span className="px-1.5">/</span>
-              <span>Knowledge Base</span>
-            </div>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-text-primary">
+            {/* Back affordance — explicit arrow + label is clearer
+                than a passive breadcrumb. Tap target hits min 32px. */}
+            <Link
+              href="/chat"
+              className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-text-muted transition-colors hover:text-text-primary"
+            >
+              <svg
+                width={12}
+                height={12}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M15 6l-6 6 6 6" />
+              </svg>
+              Back to chat
+            </Link>
+            <h1 className="mt-2 text-xl font-semibold tracking-tight text-text-primary">
               Knowledge bases
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
@@ -156,7 +170,7 @@ function EmptyKBState({ onCreate }: { onCreate: () => void }) {
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden
-          className="text-text-secondary"
+          className="text-text-muted"
         >
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />

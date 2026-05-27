@@ -128,7 +128,10 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
             type="button"
             onClick={save}
             disabled={saving || loading}
-            className="focus-ring rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            // Inverted ChatGPT-style primary — matches the global
+            // Button primary variant after the neutralisation pass.
+            // White-on-dark in dark theme; dark-on-white in light.
+            className="focus-ring rounded-md bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save"}
           </button>
@@ -191,7 +194,7 @@ function Field({
         rows={5}
         disabled={loading}
         maxLength={MAX_CHARS}
-        className="scrollbar-thin resize-y rounded-md border border-border bg-bg-base/60 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50"
+        className="scrollbar-thin resize-y rounded-md border border-border bg-bg-base/60 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40 disabled:opacity-50"
       />
       <span
         className={`text-right text-[10px] ${

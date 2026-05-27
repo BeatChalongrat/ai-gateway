@@ -37,10 +37,15 @@
   --border-default: rgba(255, 255, 255, 0.12);
   --border-hover: rgba(255, 255, 255, 0.20);
 
-  /* === Accent (SRAN brand teal — replaces the old navy blue) === */
-  --accent: #10A37F;
-  --accent-hover: #0D8A6A;
-  --accent-subtle: rgba(16, 163, 127, 0.12);
+  /* === Accent — neutralised to text-primary so any straggler usage
+     (anchor links inside .prose-chat, focus outlines, blockquote
+     borders, etc.) reads as the neutral foreground. The only
+     remaining intentionally-coloured element in the app is the
+     OpenAI provider mark on assistant-message avatars, which uses
+     hard-coded emerald hex values, not these tokens. === */
+  --accent: #ECECEC;
+  --accent-hover: #FFFFFF;
+  --accent-subtle: rgba(236, 236, 236, 0.12);
 
   /* === User messages === */
   --user-bubble-bg: #2F2F2F;
@@ -93,6 +98,12 @@
   --border-subtle: rgba(0, 0, 0, 0.06);
   --border-default: rgba(0, 0, 0, 0.10);
   --border-hover:  rgba(0, 0, 0, 0.20);
+
+  /* Match the dark-theme neutralisation — accent maps to the
+     foreground so straggler usages look neutral, not teal. */
+  --accent: #0D0D0D;
+  --accent-hover: #000000;
+  --accent-subtle: rgba(13, 13, 13, 0.08);
 
   --user-bubble-bg: #F0F0F0;
   --user-bubble-text: #0D0D0D;

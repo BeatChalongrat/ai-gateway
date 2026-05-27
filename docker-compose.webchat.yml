@@ -61,7 +61,11 @@ services:
         condition: service_healthy
 
   postgres-webchat:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 ships Postgres 16 with the pgvector
+    # extension preinstalled — required by migration 010. Drop-in
+    # replacement for postgres:16-alpine; the existing data volume
+    # works unchanged (same Postgres 16 binary underneath).
+    image: pgvector/pgvector:pg16
     container_name: ai-gateway-postgres-webchat
     ports:
       - "5433:5432"

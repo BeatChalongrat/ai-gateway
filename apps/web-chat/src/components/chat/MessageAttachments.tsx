@@ -68,7 +68,7 @@ function FileBadge({ file }: { file: FileAttachment }) {
     <a
       href={api.downloadUrl(file.id)}
       download={file.filename}
-      className="focus-ring inline-flex max-w-[260px] items-center gap-2 rounded-md border border-border bg-bg-secondary px-2 py-1.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:bg-bg-elevated hover:text-text-primary"
+      className="focus-ring inline-flex max-w-[260px] items-center gap-2 rounded-md border border-border bg-bg-secondary px-2 py-1.5 text-[11px] text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-elevated hover:text-text-primary"
       title={`Download ${file.filename}`}
     >
       <span aria-hidden className="text-base leading-none">

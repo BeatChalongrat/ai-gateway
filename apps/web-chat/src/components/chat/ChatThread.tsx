@@ -226,7 +226,7 @@ export function ChatThread({
         <button
           type="button"
           onClick={jumpToBottom}
-          className="focus-ring popover-appear absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-xl hover:bg-accent-hover"
+          className="focus-ring popover-appear absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base shadow-xl hover:opacity-90"
         >
           <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden>
             <path

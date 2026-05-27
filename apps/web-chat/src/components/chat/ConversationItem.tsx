@@ -84,7 +84,7 @@ export function ConversationItem({
                 setRenaming(false);
               }
             }}
-            className="w-full rounded bg-bg-base px-1.5 py-0.5 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
+            className="w-full rounded bg-bg-base px-1.5 py-0.5 text-sm text-text-primary outline-none focus:ring-1 focus:ring-border-strong"
             onClick={(e) => e.stopPropagation()}
           />
         ) : (

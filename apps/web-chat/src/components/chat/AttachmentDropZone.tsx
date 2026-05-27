@@ -84,7 +84,7 @@ export function AttachmentDropZone({
       {children}
       {over ? (
         <div
-          className="pointer-events-none absolute inset-2 z-20 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-accent bg-bg-surface/85 text-text-primary backdrop-blur-sm"
+          className="pointer-events-none absolute inset-2 z-20 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border-strong bg-bg-surface/85 text-text-primary backdrop-blur-sm"
           aria-hidden
         >
           <svg width={36} height={36} viewBox="0 0 24 24" fill="none">
