@@ -82,9 +82,17 @@ type MessageService struct {
 // FileLinker is the slice of FileService the message flow needs.
 // Decouples message_service from the concrete file service so unit
 // tests can pass a tiny fake.
+//
+// ImageDataURLsForMessage resolves the image attachments on a single
+// message to a list of "data:image/...;base64,..." strings, ready
+// to drop into a vision request. Returns an empty slice when the
+// message has no image attachments, or when image processing is
+// unavailable — the caller treats nil as "no images" and ships a
+// plain text turn.
 type FileLinker interface {
 	AttachToMessage(ctx context.Context, tenantID, convID, messageID uuid.UUID, fileIDs []uuid.UUID) (int64, error)
 	BuildContextBlock(ctx context.Context, tenantID, convID uuid.UUID) (string, error)
+	ImageDataURLsForMessage(ctx context.Context, tenantID, messageID uuid.UUID) []string
 }
 
 // PreferencesReader pulls the user's custom instructions for system-
@@ -244,7 +252,8 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	}
 
 	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
-	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
+	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
+	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -361,7 +370,8 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// external POST /cancel endpoint invokes CancelStream(convID).
 	streamCtx, cancel := context.WithCancel(context.Background())
 	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
-	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
+	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
+	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -623,7 +633,8 @@ func (s *MessageService) openAssistantStream(
 	// history (the prompt the original assistant turn was answering).
 	ragQuery := lastUserContent(history)
 	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
-	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
+	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
+	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx,
 		GatewayCallContext{
@@ -881,7 +892,8 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		ragQuery = lastUserContent(history)
 	}
 	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
-	gwReq := buildGatewayRequest(conv.ModelID, history, sysPrefix)
+	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
+	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx,
 		GatewayCallContext{
@@ -1584,6 +1596,24 @@ func (s *MessageService) persistError(
 // ---------------------------------------------------------------------------
 
 func buildGatewayRequest(model string, history []model.Message, systemPrefix string) GatewayChatRequest {
+	return buildGatewayRequestWithImages(model, history, systemPrefix, nil)
+}
+
+// buildGatewayRequestWithImages is the vision-aware variant.
+// When `lastUserImageURLs` is non-empty, the LAST user-role
+// message in the history is rendered as a multimodal content
+// array: one image_url block per data URL followed by a single
+// text block carrying the user's prompt. All other messages
+// (system, prior turns, assistant replies) ship as plain strings.
+//
+// Only the last user turn gets vision blocks because:
+//   1. Vision tokens cost per image. Re-sending every historical
+//      image on every turn would balloon the bill.
+//   2. The user is asking about the CURRENT turn's images. The
+//      model only needs to "see" what's in front of it.
+func buildGatewayRequestWithImages(
+	model string, history []model.Message, systemPrefix string, lastUserImageURLs []string,
+) GatewayChatRequest {
 	msgs := make([]GatewayMessage, 0, len(history)+1)
 	if strings.TrimSpace(systemPrefix) != "" {
 		msgs = append(msgs, GatewayMessage{
@@ -1591,16 +1621,45 @@ func buildGatewayRequest(model string, history []model.Message, systemPrefix str
 			Content: systemPrefix,
 		})
 	}
-	for _, m := range history {
-		msgs = append(msgs, GatewayMessage{
-			Role:    m.Role,
-			Content: m.ContentMasked,
-		})
+
+	// Pre-compute the index of the last user-role entry — that's
+	// the slot we decorate with image blocks (if any).
+	lastUserIdx := -1
+	if len(lastUserImageURLs) > 0 {
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].Role == "user" {
+				lastUserIdx = i
+				break
+			}
+		}
 	}
-	return GatewayChatRequest{
-		Model:    model,
-		Messages: msgs,
+
+	for i, m := range history {
+		var content any = m.ContentMasked
+		if i == lastUserIdx {
+			blocks := make([]GatewayContentBlock, 0, len(lastUserImageURLs)+1)
+			for _, url := range lastUserImageURLs {
+				blocks = append(blocks, GatewayContentBlock{
+					Type: "image_url",
+					ImageURL: &GatewayImageURL{
+						URL:    url,
+						Detail: "auto",
+					},
+				})
+			}
+			text := m.ContentMasked
+			if strings.TrimSpace(text) == "" {
+				text = "What's in this image?"
+			}
+			blocks = append(blocks, GatewayContentBlock{
+				Type: "text",
+				Text: text,
+			})
+			content = blocks
+		}
+		msgs = append(msgs, GatewayMessage{Role: m.Role, Content: content})
 	}
+	return GatewayChatRequest{Model: model, Messages: msgs}
 }
 
 func gatewayCallContext(in SendInput, conv *model.Conversation) GatewayCallContext {
@@ -1624,13 +1683,43 @@ func lastUserContent(history []model.Message) string {
 	return ""
 }
 
+// lastUserImageURLs resolves the image attachments on the latest
+// user-role message in `history` to a slice of base64 data URLs.
+// Returns nil (not an empty slice) when there are no images or
+// the file linker isn't wired — callers treat nil as "ship text
+// only" and skip the vision-format content array entirely.
+func (s *MessageService) lastUserImageURLs(
+	ctx context.Context, tenantID uuid.UUID, history []model.Message,
+) []string {
+	if s.fileSvc == nil {
+		return nil
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role != "user" {
+			continue
+		}
+		urls := s.fileSvc.ImageDataURLsForMessage(ctx, tenantID, history[i].ID)
+		if len(urls) == 0 {
+			return nil
+		}
+		return urls
+	}
+	return nil
+}
+
 // extractContent pulls the assistant text from the non-stream
 // gateway response. Defensive against empty / missing fields.
+// Content is `any` to accommodate vision-format user messages,
+// but assistant replies are always strings — assert and fall
+// back to empty when the gateway ever surprises us.
 func extractContent(r *GatewayChatResponse) string {
 	if r == nil || len(r.Choices) == 0 {
 		return ""
 	}
-	return r.Choices[0].Message.Content
+	if s, ok := r.Choices[0].Message.Content.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // makeTitleFrom condenses the first user message into a 100-char

@@ -328,6 +328,35 @@ export function ChatInput({
     void handleFiles(files);
   }
 
+  // Clipboard paste → upload (Phase 4 Session 4 vision flow).
+  // Captures any image item in a paste event and runs it through
+  // the same handleFiles pipeline pickers use. preventDefault only
+  // fires when an image is present so plain-text paste into the
+  // textarea still works. Listens at the textarea so paste only
+  // fires when the composer is focused.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const el = taRef.current;
+    if (!el || !conversationId) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+      const images: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const f = item.getAsFile();
+          if (f) images.push(f);
+        }
+      }
+      if (images.length === 0) return;
+      e.preventDefault();
+      void handleFiles(images);
+    };
+    el.addEventListener("paste", onPaste);
+    return () => el.removeEventListener("paste", onPaste);
+  }, [conversationId]);
+
   return (
     <div
       className="safe-bottom bg-bg-base px-3 py-3 md:px-6 md:py-4"

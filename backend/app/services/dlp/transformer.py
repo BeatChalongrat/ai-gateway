@@ -1028,6 +1028,18 @@ class DLPTransformer:
         results: list[TransformationResult] = []
 
         for msg in messages:
+            # Vision-format messages (content is a list of content
+            # blocks for image+text turns) carry no scannable
+            # spans — the rust_dlp_client scanner flattens to text
+            # blocks only, and image bytes have no PII surface here.
+            # Skip transformation and pass the message through
+            # unchanged so the downstream provider still sees the
+            # image_url + text array intact.
+            if not isinstance(msg.content, str):
+                new_messages.append(msg)
+                results.append(self.transform_text("", []))
+                continue
+
             # Find match_actions whose spans fall within this message
             msg_actions = [
                 ma for ma in match_actions
@@ -1124,6 +1136,13 @@ class DLPTransformer:
         )
 
         for msg in messages:
+            # Vision-format pass-through — same rationale as the
+            # transform_messages branch above: list-typed content
+            # has no scannable spans here.
+            if not isinstance(msg.content, str):
+                new_messages.append(msg)
+                continue
+
             # Find match_actions whose spans fall within this message.
             msg_actions = [
                 ma for ma in match_actions
