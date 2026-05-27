@@ -15,7 +15,9 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 
 import type { Message } from "@/lib/types";
+import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
+import { useVoiceStore } from "@/stores/voiceStore";
 
 import { AssistantAvatar } from "./AssistantAvatar";
 import { BranchNavigator } from "./BranchNavigator";
@@ -124,6 +126,39 @@ function MessageBubbleImpl({
   const [draft, setDraft] = useState("");
   const editRef = useRef<HTMLTextAreaElement>(null);
   const [copied, setCopied] = useState(false);
+
+  // Voice output — used by both the manual speaker button and the
+  // auto-read effect below. Reads speakingMessageId straight from the
+  // store so the icon flips between play / stop without extra wiring.
+  const { speak, stop: stopSpeaking, isSupported: voiceOutSupported } =
+    useVoiceOutput();
+  const speakingMessageId = useVoiceStore((s) => s.speakingMessageId);
+  const autoRead = useVoiceStore((s) => s.autoRead);
+  const isPlayingThis = speakingMessageId === message.id;
+
+  // Auto-read assistant replies once streaming finishes. Guarded by
+  // role + status + the autoRead setting so the effect is a no-op
+  // for every other message in the thread. The ref keeps us from
+  // re-speaking the same message when an unrelated prop changes.
+  const autoReadFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoReadFiredRef.current) return;
+    if (!autoRead) return;
+    if (isUser) return;
+    if (message.isStreaming) return;
+    if (message.status !== "completed") return;
+    if (!message.content.trim()) return;
+    autoReadFiredRef.current = true;
+    void speak(message.content, message.id);
+  }, [
+    autoRead,
+    isUser,
+    message.isStreaming,
+    message.status,
+    message.content,
+    message.id,
+    speak,
+  ]);
 
   useEffect(() => {
     if (!editing) return;
@@ -319,6 +354,22 @@ function MessageBubbleImpl({
               current={message.feedback ?? null}
             />
           ) : null}
+          {voiceOutSupported ? (
+            <ActionButton
+              ariaLabel={isPlayingThis ? "Stop reading" : "Read aloud"}
+              onClick={() => {
+                if (isPlayingThis) stopSpeaking();
+                else void speak(message.content, message.id);
+              }}
+              tone={isPlayingThis ? "danger" : "muted"}
+            >
+              {isPlayingThis ? (
+                <SpeakerStopIcon />
+              ) : (
+                <SpeakerIcon playing={false} />
+              )}
+            </ActionButton>
+          ) : null}
         </div>
         {message.token_usage ? (
           <span className="ml-2 text-[10px] text-text-muted">
@@ -347,12 +398,14 @@ function ActionButton({
   ariaLabel: string;
   onClick: () => void;
   children: React.ReactNode;
-  tone?: "muted" | "success";
+  tone?: "muted" | "success" | "danger";
 }) {
   const colorClass =
     tone === "success"
       ? "text-status-success"
-      : "text-text-muted hover:text-text-primary";
+      : tone === "danger"
+        ? "text-status-danger speaker-playing"
+        : "text-text-muted hover:text-text-primary";
   return (
     <button
       type="button"
@@ -398,6 +451,41 @@ function RegenerateIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+function SpeakerIcon({ playing }: { playing: boolean }) {
+  // Speaker outline + 1 or 2 sound waves depending on play state.
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M11 5L6 9H3v6h3l5 4V5z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15.5 8.5a4 4 0 0 1 0 7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      {playing ? (
+        <path
+          d="M18.5 5.5a8 8 0 0 1 0 13"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+      ) : null}
+    </svg>
+  );
+}
+function SpeakerStopIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <rect x="6" y="6" width="12" height="12" rx="2" />
     </svg>
   );
 }

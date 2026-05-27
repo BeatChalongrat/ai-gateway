@@ -269,6 +269,55 @@ class ApiClient {
     );
   }
 
+  // ----- Voice -----------------------------------------------
+  /** Forward an audio blob to /voice/transcribe. Returns the
+   *  Whisper transcript text. 503 means OPENAI_API_KEY isn't set
+   *  on the server — caller should fall back to browser native. */
+  async transcribeAudio(audio: Blob, language?: string): Promise<string> {
+    const form = new FormData();
+    // Whisper picks a decoder by extension — name the file after
+    // the blob's mime so the server's extension mapper stays sane.
+    const ext = mimeToExt(audio.type);
+    form.append("audio", audio, `audio.${ext}`);
+    if (language && language !== "auto") form.append("language", language);
+    const res = await this.raw("/voice/transcribe", {
+      method: "POST",
+      body: form,
+    });
+    const text = await res.text();
+    const body = text ? (safeParse(text) as { text?: string } | ErrorEnvelope | null) : null;
+    if (!res.ok) {
+      const env = body as ErrorEnvelope | null;
+      throw new ApiError(
+        env?.error?.code ?? `HTTP_${res.status}`,
+        env?.error?.message ?? res.statusText,
+        res.status,
+      );
+    }
+    return (body as { text?: string } | null)?.text ?? "";
+  }
+  /** Hit /voice/synthesize and return the audio bytes as a Blob. */
+  async synthesizeSpeech(opts: {
+    text: string;
+    voice: string;
+    speed: number;
+  }): Promise<Blob> {
+    const res = await this.raw("/voice/synthesize", {
+      method: "POST",
+      body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      const env = text ? (safeParse(text) as ErrorEnvelope | null) : null;
+      throw new ApiError(
+        env?.error?.code ?? `HTTP_${res.status}`,
+        env?.error?.message ?? res.statusText,
+        res.status,
+      );
+    }
+    return await res.blob();
+  }
+
   // ----- Knowledge bases (RAG) ------------------------------
   listKnowledgeBases() {
     return this.json<KnowledgeBaseListResponse>("/knowledge-bases");
@@ -477,6 +526,19 @@ function safeParse(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+// Map a MediaRecorder mime string back to a file extension. The
+// chat-edge handler renames the upload anyway, but giving Whisper a
+// well-named file makes upstream errors easier to diagnose.
+function mimeToExt(mime: string): string {
+  const lc = mime.toLowerCase();
+  if (lc.startsWith("audio/webm")) return "webm";
+  if (lc.startsWith("audio/mp4")) return "mp4";
+  if (lc.startsWith("audio/mpeg") || lc === "audio/mp3") return "mp3";
+  if (lc.startsWith("audio/wav") || lc === "audio/x-wav") return "wav";
+  if (lc.startsWith("audio/ogg")) return "ogg";
+  return "webm";
 }
 
 export const api = new ApiClient();
