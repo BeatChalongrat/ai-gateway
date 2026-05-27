@@ -351,11 +351,6 @@ function MessageBubbleImpl({
             </ActionButton>
           ) : null}
         </div>
-        {message.token_usage ? (
-          <span className="ml-2 text-[10px] text-text-muted">
-            {message.token_usage.input + message.token_usage.output} tokens
-          </span>
-        ) : null}
         {message.status === "error" ? (
           <span className="ml-2 text-[11px] text-status-danger">
             AI service error
