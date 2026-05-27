@@ -67,67 +67,80 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  const hasKBs = loaded && knowledgeBases.length > 0;
   return (
     <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
-      <header className="border-b border-border/60 px-6 py-5">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-6 pt-8 pb-12">
+        {/* Subtle back link — text-only, no button chrome. Matches
+            the rest of the muted-link affordances elsewhere. */}
+        <Link
+          href="/chat"
+          className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
+        >
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+          Back to chat
+        </Link>
+
+        <div className="mt-6 flex items-start justify-between gap-4">
           <div>
-            {/* Back affordance — explicit arrow + label is clearer
-                than a passive breadcrumb. Tap target hits min 32px. */}
-            <Link
-              href="/chat"
-              className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-text-muted transition-colors hover:text-text-primary"
-            >
-              <svg
-                width={12}
-                height={12}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <path d="M15 6l-6 6 6 6" />
-              </svg>
-              Back to chat
-            </Link>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight text-text-primary">
+            <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
               Knowledge bases
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
               Upload documents that the AI can retrieve from when answering
-              questions. Bind a knowledge base to a conversation from the
-              chat input.
+              questions.
             </p>
           </div>
-          <Button onClick={() => setCreateOpen(true)}>+ Create</Button>
+          {/* + Create only renders when there's at least one KB. The
+              empty-state CTA handles the no-KBs case so we don't
+              double up on calls-to-action. */}
+          {hasKBs ? (
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="focus-ring inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+            >
+              <PlusIcon />
+              Create
+            </button>
+          ) : null}
         </div>
-      </header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-6">
-        {!loaded ? (
-          <div className="flex items-center justify-center py-10 text-text-secondary">
-            <Spinner size={20} />
-          </div>
-        ) : knowledgeBases.length === 0 ? (
-          <EmptyKBState onCreate={() => setCreateOpen(true)} />
-        ) : (
-          <div className="flex flex-col gap-3">
-            {knowledgeBases.map((kb) => (
-              <KBCard
-                key={kb.id}
-                kb={kb}
-                expanded={expandedId === kb.id}
-                onToggle={() =>
-                  setExpandedId((id) => (id === kb.id ? null : kb.id))
-                }
-                onDelete={() => void handleDeleteKB(kb)}
-              />
-            ))}
-          </div>
-        )}
+        <div className="mt-8">
+          {!loaded ? (
+            <div className="flex items-center justify-center py-10 text-text-secondary">
+              <Spinner size={20} />
+            </div>
+          ) : knowledgeBases.length === 0 ? (
+            <EmptyKBState onCreate={() => setCreateOpen(true)} />
+          ) : (
+            <div className="flex flex-col gap-3">
+              {knowledgeBases.map((kb) => (
+                <KBCard
+                  key={kb.id}
+                  kb={kb}
+                  expanded={expandedId === kb.id}
+                  onToggle={() =>
+                    setExpandedId((id) => (id === kb.id ? null : kb.id))
+                  }
+                  onDelete={() => void handleDeleteKB(kb)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </main>
 
       <CreateKBModal
@@ -158,35 +171,58 @@ export default function KnowledgeBasePage() {
 
 function EmptyKBState({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="rounded-lg border border-dashed border-border bg-bg-surface/40 p-10 text-center">
-      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-bg-elevated">
-        <svg
-          width={22}
-          height={22}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-          className="text-text-muted"
-        >
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-        </svg>
-      </div>
+    <div className="rounded-xl border border-dashed border-border bg-transparent px-8 py-16 text-center">
+      <svg
+        width={48}
+        height={48}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        className="mx-auto mb-6 text-text-muted"
+      >
+        <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+        <path d="M14 3v6h6" />
+        <path d="M8 13h8M8 17h6" />
+      </svg>
       <h2 className="text-base font-semibold tracking-tight text-text-primary">
         No knowledge bases yet
       </h2>
-      <p className="mx-auto mt-1 max-w-md text-sm text-text-secondary">
+      <p className="mx-auto mt-2 max-w-sm text-sm text-text-secondary">
         Create a knowledge base to give the AI context from your own
-        documents — internal policies, handbooks, FAQs, anything.
+        documents.
       </p>
-      <Button className="mt-5" onClick={onCreate}>
-        + Create knowledge base
-      </Button>
+      <button
+        type="button"
+        onClick={onCreate}
+        className="focus-ring mt-6 inline-flex items-center gap-1.5 rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+      >
+        <PlusIcon />
+        Create knowledge base
+      </button>
     </div>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
   );
 }
 
@@ -205,38 +241,69 @@ function KBCard({
   onToggle: () => void;
   onDelete: () => void;
 }) {
+  // Status label — only one of indexed/processing/failed/inactive
+  // shows, chosen by the most-relevant signal. Active + all docs
+  // indexed → "Indexed" (positive). Anything else falls through.
+  const statusLabel = !kb.is_active
+    ? "Inactive"
+    : kb.document_count === 0
+      ? "Empty"
+      : "Indexed";
+
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-bg-surface">
+    <section
+      className={`overflow-hidden rounded-xl border bg-bg-surface transition-colors ${
+        expanded ? "border-border-strong" : "border-border hover:border-border-strong"
+      }`}
+    >
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-bg-elevated"
+        aria-expanded={expanded}
+        className="flex w-full items-start justify-between gap-4 p-5 text-left"
       >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-text-primary">
-              {kb.name}
-            </span>
-            {!kb.is_active ? (
-              <span className="rounded-full bg-bg-elevated px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted">
-                inactive
-              </span>
-            ) : null}
-          </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-base font-medium text-text-primary">
+            {kb.name}
+          </h3>
           {kb.description ? (
-            <p className="mt-0.5 truncate text-xs text-text-muted">
+            <p className="mt-1 truncate text-sm text-text-secondary">
               {kb.description}
             </p>
           ) : null}
-          <p className="mt-1 text-[11px] text-text-muted">
-            {kb.document_count} {kb.document_count === 1 ? "doc" : "docs"} ·{" "}
+          <p className="mt-3 text-xs text-text-muted">
+            {kb.document_count} {kb.document_count === 1 ? "document" : "documents"}
+            {" · "}
             {kb.total_chunks} {kb.total_chunks === 1 ? "chunk" : "chunks"}
+            {" · "}
+            {statusLabel}
           </p>
         </div>
-        <ChevronIcon up={expanded} />
+        <span className="inline-flex shrink-0 items-center gap-1 text-sm text-text-secondary transition-colors group-hover:text-text-primary">
+          <span>{expanded ? "Close" : "Manage"}</span>
+          {expanded ? <ChevronIcon up /> : <ArrowRightIcon />}
+        </span>
       </button>
       {expanded ? <KBDocumentsPanel kb={kb} onDelete={onDelete} /> : null}
     </section>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9 6l6 6-6 6" />
+    </svg>
   );
 }
 
@@ -584,27 +651,9 @@ function CreateKBModal({
 }
 
 // ---------------------------------------------------------------------------
-// Icons + helpers
+// Icons + helpers — PlusIcon lives near the empty state above; the
+// rest are shared between the documents panel rows.
 // ---------------------------------------------------------------------------
-
-function PlusIcon() {
-  return (
-    <svg
-      width={12}
-      height={12}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
 
 function TrashIcon() {
   return (

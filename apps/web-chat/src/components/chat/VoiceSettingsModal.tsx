@@ -249,17 +249,30 @@ function SegmentedToggle<T extends string>({
     <div className="grid grid-cols-2 gap-2">
       {options.map((o) => {
         const active = o.value === value;
+        // Selected card gets a 2px text-primary border so it's
+        // unambiguously the picked option, plus a small checkmark
+        // in the top-right corner. Unselected stays at 1px border
+        // — we offset the active card by 1px on each side so the
+        // grid doesn't shift when the user clicks between cards.
         return (
           <button
             key={o.value}
             type="button"
             onClick={() => onChange(o.value)}
-            className={`rounded-md border px-3 py-2 text-left transition-colors ${
+            className={`relative rounded-md text-left transition-colors ${
               active
-                ? "border-border-strong bg-bg-elevated text-text-primary"
-                : "border-border bg-bg-secondary text-text-secondary hover:border-border-strong hover:text-text-primary"
+                ? "border-2 border-text-primary bg-bg-surface text-text-primary p-[calc(0.5rem-1px)] px-[calc(0.75rem-1px)]"
+                : "border border-border bg-bg-secondary text-text-secondary hover:border-border-strong hover:text-text-primary px-3 py-2"
             }`}
           >
+            {active ? (
+              <span
+                aria-hidden
+                className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center text-text-primary"
+              >
+                <CheckIcon />
+              </span>
+            ) : null}
             <span className="block text-sm font-medium">{o.label}</span>
             <span className="mt-0.5 block text-[11px] text-text-muted">
               {o.hint}
@@ -268,6 +281,24 @@ function SegmentedToggle<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
   );
 }
 
