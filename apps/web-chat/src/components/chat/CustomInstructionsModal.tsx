@@ -1,10 +1,26 @@
 "use client";
 
+// CustomInstructionsModal — two free-form text fields that the
+// chat-edge folds into the system prompt for every conversation.
+//
+// Shares its design language with VoiceSettingsModal: each question
+// lives in its own ``bg-bg-base`` section card; the action row uses
+// the same Cancel / inverted-primary Save buttons; spacing /
+// typography / corner radii all match.
+//
+// Two persistence paths:
+//   1. Debounced auto-save (1s idle) — protects against backdrop
+//      dismissal losing the edit.
+//   2. Explicit Save button — surfaces the success / failure toast
+//      and closes the modal.
+
 import { useEffect, useRef, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
+
+import { SettingsCard } from "./VoiceSettingsModal";
 
 interface Props {
   open: boolean;
@@ -113,14 +129,14 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
       open={open}
       onClose={onClose}
       title="Custom instructions"
-      description="Shape how the AI responds in every conversation."
+      description="Shape how the AI responds in every conversation"
       maxWidth={560}
       footer={
         <>
           <button
             type="button"
             onClick={onClose}
-            className="focus-ring rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+            className="focus-ring rounded-lg border border-border bg-transparent px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
             Cancel
           </button>
@@ -128,50 +144,47 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
             type="button"
             onClick={save}
             disabled={saving || loading}
-            // Inverted ChatGPT-style primary — matches the global
-            // Button primary variant after the neutralisation pass.
-            // White-on-dark in dark theme; dark-on-white in light.
-            className="focus-ring rounded-md bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base hover:opacity-90 disabled:opacity-50"
+            className="focus-ring rounded-lg bg-text-primary px-6 py-2 text-sm font-medium text-bg-base transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save"}
           </button>
         </>
       }
     >
-      <div className="flex flex-col gap-5">
-        <Field
-          label="What would you like the AI to know about you?"
-          placeholder="e.g. I'm a software developer working with Python and Go. I prefer concise answers with code examples."
-          value={about}
-          onChange={(v) => {
-            dirtyRef.current = true;
-            setAbout(v);
-          }}
-          loading={loading}
-        />
-        <Field
-          label="How would you like the AI to respond?"
-          placeholder="e.g. Be concise and technical. Use code blocks. Explain trade-offs."
-          value={respond}
-          onChange={(v) => {
-            dirtyRef.current = true;
-            setRespond(v);
-          }}
-          loading={loading}
-        />
+      <div className="flex flex-col gap-4">
+        <SettingsCard title="What would you like the AI to know about you?">
+          <InstructionField
+            placeholder="e.g. I'm a software developer working with Python and Go. I prefer concise answers with code examples."
+            value={about}
+            onChange={(v) => {
+              dirtyRef.current = true;
+              setAbout(v);
+            }}
+            loading={loading}
+          />
+        </SettingsCard>
+        <SettingsCard title="How would you like the AI to respond?">
+          <InstructionField
+            placeholder="e.g. Be concise and technical. Use code blocks. Explain trade-offs."
+            value={respond}
+            onChange={(v) => {
+              dirtyRef.current = true;
+              setRespond(v);
+            }}
+            loading={loading}
+          />
+        </SettingsCard>
       </div>
     </Modal>
   );
 }
 
-function Field({
-  label,
+function InstructionField({
   placeholder,
   value,
   onChange,
   loading,
 }: {
-  label: string;
   placeholder: string;
   value: string;
   onChange: (v: string) => void;
@@ -179,30 +192,27 @@ function Field({
 }) {
   const remaining = MAX_CHARS - value.length;
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-text-secondary">{label}</span>
+    <div className="flex flex-col gap-1.5">
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onInput={(e) => {
-          // dirtyRef lives in the parent component; toggling it
-          // here lets the debounced auto-save effect know there's
-          // unsynced content.
-          void e;
-        }}
         placeholder={placeholder}
         rows={5}
         disabled={loading}
         maxLength={MAX_CHARS}
-        className="scrollbar-thin resize-y rounded-md border border-border bg-bg-base/60 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40 disabled:opacity-50"
+        // bg-bg-surface here, NOT bg-bg-base — the textarea sits
+        // INSIDE a SettingsCard which is already bg-bg-base, so the
+        // input reads as raised within the card. Border picks up on
+        // focus; no accent ring.
+        className="scrollbar-thin min-h-[120px] resize-y rounded-lg border border-border bg-bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-placeholder focus:border-border-strong focus:outline-none focus:ring-0 disabled:opacity-50"
       />
       <span
-        className={`text-right text-[10px] ${
+        className={`text-right text-xs ${
           remaining < 0 ? "text-status-danger" : "text-text-muted"
         }`}
       >
         {value.length}/{MAX_CHARS}
       </span>
-    </label>
+    </div>
   );
 }

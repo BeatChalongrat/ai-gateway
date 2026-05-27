@@ -1,16 +1,27 @@
 "use client";
 
 // VoiceSettingsModal — input method, language, output voice, speed,
-// auto-read. Accessed from the sidebar footer's "Voice" button.
+// auto-read. Accessed from the sidebar footer's Account menu.
 //
 // The store is the single source of truth; this component is a
-// thin form binding. Saving is implicit — every change writes
-// through to localStorage via the store setters.
+// thin form binding. Every change writes through to localStorage
+// via the store setters — there is no explicit "save" step. The
+// Done button just closes the modal.
+//
+// Design language (matches CustomInstructionsModal):
+//
+//   Modal:           bg-bg-surface  rounded-2xl  p-6  shadow-2xl
+//   Section card:    bg-bg-base     rounded-xl   p-5
+//   Section title:   text-xs uppercase tracking-widest text-text-muted
+//   Selection card:  2-up grid, 2px text-primary border + ✓ on the
+//                    active option (1px → 2px shift compensated with
+//                    asymmetric padding so the grid doesn't reflow)
+//   Toggle switch:   44×24, white track when on, gray when off,
+//                    knob colour inverts so it stays visible.
 
 import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { OPENAI_VOICES, useVoiceStore, type OpenAIVoice } from "@/stores/voiceStore";
 
@@ -75,136 +86,118 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
         onClose();
       }}
       title="Voice settings"
-      description="Speech-to-text and text-to-speech"
+      description="Configure speech-to-text and text-to-speech"
       maxWidth={520}
-      footer={
-        <Button onClick={onClose}>Done</Button>
-      }
+      footer={<DoneButton onClick={onClose} />}
     >
-      <div className="flex flex-col gap-5">
-        <Section title="Voice input">
-          <Field label="Method">
-            <SegmentedToggle
-              value={inputMethod}
-              onChange={(v) => setInputMethod(v as typeof inputMethod)}
-              options={[
-                {
-                  value: "web-speech",
-                  label: "Browser",
-                  hint: "Free, real-time. Chrome / Edge / Safari.",
-                },
-                {
-                  value: "whisper",
-                  label: "Whisper",
-                  hint: "Higher accuracy. Requires server config.",
-                },
-              ]}
-            />
-          </Field>
-          <Field label="Language">
-            <select
-              value={inputLang}
-              onChange={(e) => setInputLang(e.target.value)}
-              className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
-            >
-              {INPUT_LANGS.map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </Section>
+      <div className="flex flex-col gap-4">
+        <SettingsCard title="Voice input">
+          <FieldLabel>Method</FieldLabel>
+          <SelectionGrid
+            value={inputMethod}
+            onChange={(v) => setInputMethod(v as typeof inputMethod)}
+            options={[
+              {
+                value: "web-speech",
+                label: "Browser",
+                hint: "Free, real-time. Works in Chrome, Edge, Safari.",
+              },
+              {
+                value: "whisper",
+                label: "Whisper",
+                hint: "Higher accuracy. Requires server key.",
+              },
+            ]}
+          />
+          <FieldLabel className="mt-4">Language</FieldLabel>
+          <Dropdown
+            value={inputLang}
+            onChange={(v) => setInputLang(v)}
+            options={INPUT_LANGS}
+          />
+        </SettingsCard>
 
-        <Section title="Voice output">
-          <Field label="Source">
-            <SegmentedToggle
-              value={outputMode}
-              onChange={(v) => setOutputMode(v as typeof outputMode)}
-              options={[
-                {
-                  value: "browser",
-                  label: "Browser",
-                  hint: "System voices, no round-trip.",
-                },
-                {
-                  value: "openai",
-                  label: "OpenAI TTS",
-                  hint: "Premium voices. Requires server config.",
-                },
-              ]}
-            />
-          </Field>
-          {outputMode === "browser" ? (
-            <Field label="Voice">
-              <select
-                value={browserVoiceName ?? ""}
-                onChange={(e) =>
-                  setBrowserVoice(e.target.value || null)
-                }
-                className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
-              >
-                <option value="">System default (English)</option>
-                {voices.map((v) => (
-                  <option key={`${v.name}-${v.lang}`} value={v.name}>
-                    {v.name} — {v.lang}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : (
-            <Field label="Voice">
-              <select
-                value={openaiVoice}
-                onChange={(e) => setOpenAIVoice(e.target.value as OpenAIVoice)}
-                className="rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
-              >
-                {OPENAI_VOICES.map((v) => (
-                  <option key={v} value={v}>
-                    {v.charAt(0).toUpperCase() + v.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-          <Field label={`Speed (${rate.toFixed(1)}×)`}>
-            <input
-              type="range"
-              min={0.5}
-              max={2}
-              step={0.1}
-              value={rate}
-              onChange={(e) => setRate(Number(e.target.value))}
-              className="w-full accent-[var(--text-primary)]"
-            />
-          </Field>
-          <div className="pt-1">
-            <Button variant="secondary" onClick={preview}>
-              {previewing && speakingMessageId === "__voice_preview__"
-                ? "Stop preview"
-                : "Preview voice"}
-            </Button>
+        <SettingsCard title="Voice output">
+          <FieldLabel>Source</FieldLabel>
+          <SelectionGrid
+            value={outputMode}
+            onChange={(v) => setOutputMode(v as typeof outputMode)}
+            options={[
+              {
+                value: "browser",
+                label: "Browser",
+                hint: "System voices. No server round-trip.",
+              },
+              {
+                value: "openai",
+                label: "OpenAI TTS",
+                hint: "Premium voices. Requires server key.",
+              },
+            ]}
+          />
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div>
+              <FieldLabel>Voice</FieldLabel>
+              {outputMode === "browser" ? (
+                <Dropdown
+                  value={browserVoiceName ?? ""}
+                  onChange={(v) => setBrowserVoice(v || null)}
+                  options={[
+                    { value: "", label: "System default" },
+                    ...voices.map((v) => ({
+                      value: v.name,
+                      label: `${v.name} — ${v.lang}`,
+                    })),
+                  ]}
+                />
+              ) : (
+                <Dropdown
+                  value={openaiVoice}
+                  onChange={(v) => setOpenAIVoice(v as OpenAIVoice)}
+                  options={OPENAI_VOICES.map((v) => ({
+                    value: v,
+                    label: v.charAt(0).toUpperCase() + v.slice(1),
+                  }))}
+                />
+              )}
+            </div>
+            <div>
+              <FieldLabel>
+                Speed{" "}
+                <span className="text-text-secondary">
+                  {rate.toFixed(1)}×
+                </span>
+              </FieldLabel>
+              <SpeedSlider value={rate} onChange={setRate} />
+            </div>
           </div>
-        </Section>
+          <div className="mt-4">
+            <PreviewButton
+              active={previewing && speakingMessageId === "__voice_preview__"}
+              onClick={preview}
+            />
+          </div>
+        </SettingsCard>
 
-        <Section title="Behaviour">
+        <SettingsCard title="Behaviour">
           <ToggleRow
             checked={autoRead}
             onChange={setAutoRead}
             label="Auto-read AI responses"
-            hint="Speak each completed reply out loud automatically."
+            hint="Automatically read new replies aloud."
           />
-        </Section>
+        </SettingsCard>
       </div>
     </Modal>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Small primitives
+// Shared settings primitives — also imported by CustomInstructionsModal so
+// both panels share spacing, type, card style, and button language.
 // ---------------------------------------------------------------------------
 
-function Section({
+export function SettingsCard({
   title,
   children,
 }: {
@@ -212,8 +205,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-3">
-      <h3 className="text-[11px] font-medium uppercase tracking-wider text-text-muted">
+    <section className="rounded-xl bg-bg-base p-5">
+      <h3 className="mb-4 text-[11px] font-medium uppercase tracking-widest text-text-muted">
         {title}
       </h3>
       {children}
@@ -221,22 +214,35 @@ function Section({
   );
 }
 
-function Field({
-  label,
+export function FieldLabel({
   children,
+  className = "",
 }: {
-  label: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-xs text-text-secondary">{label}</label>
+    <label
+      className={`mb-2 block text-sm font-medium text-text-primary ${className}`}
+    >
       {children}
-    </div>
+    </label>
   );
 }
 
-function SegmentedToggle<T extends string>({
+export function DoneButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="focus-ring rounded-lg bg-text-primary px-6 py-2 text-sm font-medium text-bg-base transition-opacity hover:opacity-90"
+    >
+      Done
+    </button>
+  );
+}
+
+function SelectionGrid<T extends string>({
   value,
   onChange,
   options,
@@ -246,37 +252,36 @@ function SegmentedToggle<T extends string>({
   options: { value: T; label: string; hint: string }[];
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-3">
       {options.map((o) => {
         const active = o.value === value;
-        // Selected card gets a 2px text-primary border so it's
-        // unambiguously the picked option, plus a small checkmark
-        // in the top-right corner. Unselected stays at 1px border
-        // — we offset the active card by 1px on each side so the
-        // grid doesn't shift when the user clicks between cards.
         return (
           <button
             key={o.value}
             type="button"
             onClick={() => onChange(o.value)}
-            className={`relative rounded-md text-left transition-colors ${
+            // 1px → 2px border shift compensated with -1px padding
+            // on each axis so clicking between cards doesn't shift
+            // the grid layout. transition-colors only — not -all —
+            // to keep padding stable.
+            className={`relative rounded-lg text-left transition-colors duration-150 ${
               active
-                ? "border-2 border-text-primary bg-bg-surface text-text-primary p-[calc(0.5rem-1px)] px-[calc(0.75rem-1px)]"
-                : "border border-border bg-bg-secondary text-text-secondary hover:border-border-strong hover:text-text-primary px-3 py-2"
+                ? "border-2 border-text-primary bg-bg-surface p-[calc(1rem-1px)]"
+                : "border border-border bg-transparent p-4 hover:border-border-strong"
             }`}
           >
             {active ? (
               <span
                 aria-hidden
-                className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center text-text-primary"
+                className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center rounded-full bg-text-primary text-bg-base"
               >
                 <CheckIcon />
               </span>
             ) : null}
-            <span className="block text-sm font-medium">{o.label}</span>
-            <span className="mt-0.5 block text-[11px] text-text-muted">
-              {o.hint}
-            </span>
+            <div className="text-sm font-medium text-text-primary">
+              {o.label}
+            </div>
+            <div className="mt-1 text-xs text-text-muted">{o.hint}</div>
           </button>
         );
       })}
@@ -284,21 +289,90 @@ function SegmentedToggle<T extends string>({
   );
 }
 
-function CheckIcon() {
+function Dropdown({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
   return (
-    <svg
-      width={12}
-      height={12}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        // Native <select>; appearance-none strips the system arrow
+        // so we can render our own chevron on the right (consistent
+        // with the rest of the design — no platform-flavoured arrow).
+        className="focus-ring w-full appearance-none rounded-lg border border-border bg-bg-base px-3 py-2.5 pr-8 text-sm text-text-primary transition-colors hover:border-border-strong focus:border-border-strong focus:outline-none"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
+      >
+        <ChevronDownIcon />
+      </span>
+    </div>
+  );
+}
+
+function SpeedSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <input
+      type="range"
+      min={0.5}
+      max={2}
+      step={0.1}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      // ``accent-color`` paints the filled track + thumb a single
+      // colour across modern browsers (Chrome / Edge / Safari /
+      // Firefox). It's the only cross-platform way to colour a
+      // native range without a full custom slider component.
+      className="block h-8 w-full cursor-pointer accent-[var(--text-primary)]"
+    />
+  );
+}
+
+function PreviewButton({
+  active,
+  onClick,
+}: {
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border bg-bg-surface px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
     >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
+      {active ? (
+        <>
+          <StopIcon />
+          Stop preview
+        </>
+      ) : (
+        <>
+          <PlayIcon />
+          Preview voice
+        </>
+      )}
+    </button>
   );
 }
 
@@ -317,29 +391,84 @@ function ToggleRow({
     <button
       type="button"
       onClick={() => onChange(!checked)}
-      className="flex items-start justify-between gap-3 rounded-md border border-border bg-bg-secondary px-3 py-2.5 text-left transition-colors hover:bg-bg-elevated"
+      className="flex w-full items-start justify-between gap-4 text-left"
     >
       <span className="min-w-0 flex-1">
-        <span className="block text-sm text-text-primary">{label}</span>
-        <span className="mt-0.5 block text-[11px] text-text-muted">{hint}</span>
+        <span className="block text-sm font-medium text-text-primary">
+          {label}
+        </span>
+        <span className="mt-1 block text-xs text-text-muted">{hint}</span>
       </span>
       <span
         aria-hidden
-        className={`mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+        className={`mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 ${
           checked ? "bg-text-primary" : "bg-border"
         }`}
       >
         <span
-          // Knob colour inverts with the track so it stays visible
-          // in both states: when checked the track is text-primary
-          // (white in dark theme) so the knob switches to bg-base;
-          // when unchecked the track is border (gray) so the knob
-          // stays white-ish via text-primary.
-          className={`inline-block h-4 w-4 transform rounded-full shadow-sm transition-transform ${
-            checked ? "translate-x-4 bg-bg-base" : "translate-x-0.5 bg-text-primary"
+          className={`inline-block h-5 w-5 transform rounded-full shadow-md transition-transform duration-200 ${
+            checked
+              ? "translate-x-[22px] bg-bg-base"
+              : "translate-x-0.5 bg-text-primary"
           }`}
         />
       </span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Icons
+// ---------------------------------------------------------------------------
+
+function CheckIcon() {
+  return (
+    <svg
+      width={10}
+      height={10}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
   );
 }
