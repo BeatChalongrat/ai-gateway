@@ -108,6 +108,27 @@ type Config struct {
 	MaxConvFileTotal    int64  `env:"MAX_CONV_FILE_TOTAL_BYTES" envDefault:"104857600"` // 100 MiB
 	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
 	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`
+
+	// Blob-storage backend selection.
+	//
+	//   STORAGE_BACKEND=local  → write to the filesystem under
+	//                            FileStorageRoot (zero-config default).
+	//   STORAGE_BACKEND=s3     → use S3-compatible object storage.
+	//                            Honours S3_ENDPOINT for MinIO etc.
+	//
+	// Defaults to local so a fresh checkout boots without any S3
+	// credentials configured.
+	StorageBackend     string `env:"STORAGE_BACKEND" envDefault:"local"`
+	S3Bucket           string `env:"S3_BUCKET" envDefault:""`
+	S3Region           string `env:"S3_REGION" envDefault:"us-east-1"`
+	S3Endpoint         string `env:"S3_ENDPOINT" envDefault:""`
+	S3AccessKey        string `env:"S3_ACCESS_KEY" envDefault:""`
+	S3SecretKey        string `env:"S3_SECRET_KEY" envDefault:""`
+	S3ForcePathStyle   bool   `env:"S3_FORCE_PATH_STYLE" envDefault:"false"`
+	// How long presigned GET URLs stay valid. Short enough to limit
+	// link-sharing damage, long enough that a slow client can finish
+	// the download.
+	PresignedURLExpiry time.Duration `env:"PRESIGNED_URL_EXPIRY" envDefault:"15m"`
 }
 
 // ModelEntry is one entry in the model list surfaced by GET /models.
