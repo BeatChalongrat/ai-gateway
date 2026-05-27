@@ -42,11 +42,14 @@ import (
 const (
 	docxContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	pdfContentType  = "application/pdf"
+	pptxContentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 	docxInspectorScript = "scripts/docx_inspector.py"
 	pdfInspectorScript  = "scripts/pdf_inspector.py"
+	pptxInspectorScript = "scripts/pptx_inspector.py"
 	docxGeneratorScript = "scripts/docx_generator.py"
 	pdfGeneratorScript  = "scripts/pdf_generator.py"
+	pptxGeneratorScript = "scripts/pptx_generator.py"
 	docValidatorScript  = "scripts/doc_validator.py"
 
 	docInspectorTimeout = 60 * time.Second
@@ -54,19 +57,28 @@ const (
 	docValidatorTimeout = 60 * time.Second
 )
 
-// IsDocxContentType / IsPdfContentType / IsDocContentType report
-// whether a content type belongs to a doc family the auto-inspect
-// hook + system-prompt injector should treat specially. Exported so
-// FileService.Upload + MessageService.docContext can branch without
-// reaching into the const strings.
+// IsDocxContentType / IsPdfContentType / IsPptxContentType /
+// IsDocContentType report whether a content type belongs to a doc
+// family the auto-inspect hook + system-prompt injector should
+// treat specially. Exported so FileService.Upload +
+// MessageService.docContext can branch without reaching into the
+// const strings.
+//
+// IsDocContentType is the umbrella — it returns true for any of
+// the three so callers (auto-inspect hook, file_service.Upload)
+// stay format-agnostic. Inside DocService we still dispatch on
+// the specific type to pick the right inspector / generator.
 func IsDocxContentType(ct string) bool {
 	return strings.EqualFold(strings.TrimSpace(ct), docxContentType)
 }
 func IsPdfContentType(ct string) bool {
 	return strings.EqualFold(strings.TrimSpace(ct), pdfContentType)
 }
+func IsPptxContentType(ct string) bool {
+	return strings.EqualFold(strings.TrimSpace(ct), pptxContentType)
+}
 func IsDocContentType(ct string) bool {
-	return IsDocxContentType(ct) || IsPdfContentType(ct)
+	return IsDocxContentType(ct) || IsPdfContentType(ct) || IsPptxContentType(ct)
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +92,7 @@ var (
 	ErrDocSourceNotFound  = errors.New("doc: source file not found")
 	ErrDocInvalidPlan     = errors.New("doc: invalid plan")
 	ErrDocUnsupported     = errors.New("doc: unsupported file type")
-	ErrDocInvalidFormat   = errors.New("doc: format must be 'docx' or 'pdf'")
+	ErrDocInvalidFormat   = errors.New("doc: format must be 'docx', 'pdf', or 'pptx'")
 )
 
 // ---------------------------------------------------------------------------
@@ -96,7 +108,10 @@ type DocStructure struct {
 }
 
 // DocGenerationResult mirrors the change_log + counters returned
-// by docx_generator.py / pdf_generator.py.
+// by docx_generator.py / pdf_generator.py / pptx_generator.py.
+// The action/slide-side fields all map to the union of keys the
+// three generators emit; omitempty means a docx-only field is left
+// out of the response when the generator was pptx, and vice versa.
 type DocGenerationResult struct {
 	Success         bool             `json:"success"`
 	Mode            string           `json:"mode,omitempty"`
@@ -104,8 +119,11 @@ type DocGenerationResult struct {
 	FileSizeBytes   int64            `json:"file_size_bytes"`
 	PageCount       int              `json:"page_count,omitempty"`
 	FontUsed        string           `json:"font_used,omitempty"`
-	ActionsExecuted int              `json:"actions_executed"`
-	ActionsFailed   int              `json:"actions_failed"`
+	ActionsExecuted int              `json:"actions_executed,omitempty"`
+	ActionsFailed   int              `json:"actions_failed,omitempty"`
+	SlideCount      int              `json:"slide_count,omitempty"`
+	SlidesCreated   int              `json:"slides_created,omitempty"`
+	SlidesFailed    int              `json:"slides_failed,omitempty"`
 	ChangeLog       []map[string]any `json:"change_log"`
 }
 
@@ -206,6 +224,8 @@ func (s *DocService) InspectDocument(
 		script = docxInspectorScript
 	case IsPdfContentType(contentType):
 		script = pdfInspectorScript
+	case IsPptxContentType(contentType):
+		script = pptxInspectorScript
 	default:
 		return nil, nil, fmt.Errorf("%w: %s", ErrDocUnsupported, contentType)
 	}
@@ -256,7 +276,7 @@ func (s *DocService) ExecutePlan(
 	ctx context.Context, in DocExecution,
 ) (*model.ConversationFile, *DocValidationResult, *DocGenerationResult, error) {
 	format := strings.ToLower(strings.TrimSpace(in.Format))
-	if format != "docx" && format != "pdf" {
+	if format != "docx" && format != "pdf" && format != "pptx" {
 		return nil, nil, nil, ErrDocInvalidFormat
 	}
 
@@ -298,13 +318,16 @@ func (s *DocService) ExecutePlan(
 		script = docxGeneratorScript
 	case "pdf":
 		script = pdfGeneratorScript
+	case "pptx":
+		script = pptxGeneratorScript
 	}
 
 	args := []string{planPath, outPath}
-	// docx supports an optional source argument for the edit path;
-	// pdf is always create-from-scratch (the user can re-feed an
-	// existing PDF's inspection back to the LLM to regenerate).
-	if format == "docx" && source != nil {
+	// docx + pptx support an optional source argument for the edit
+	// path (the script copies the source then mutates / appends).
+	// pdf is always create-from-scratch — the user can re-feed an
+	// existing PDF's inspection back to the LLM to regenerate.
+	if (format == "docx" || format == "pptx") && source != nil {
 		srcPath, cleanup, err := s.storage.OpenLocalCopy(ctx, source.StoragePath)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("source download: %w", err)
@@ -364,9 +387,14 @@ func (s *DocService) ExecutePlan(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("stat output: %w", err)
 	}
-	contentType := docxContentType
-	if format == "pdf" {
+	var contentType string
+	switch format {
+	case "pdf":
 		contentType = pdfContentType
+	case "pptx":
+		contentType = pptxContentType
+	default:
+		contentType = docxContentType
 	}
 	if err := s.storage.Upload(ctx, newKey, body, contentType, info.Size()); err != nil {
 		return nil, nil, nil, fmt.Errorf("upload output: %w", err)

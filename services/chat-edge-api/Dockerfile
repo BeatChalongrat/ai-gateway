@@ -20,7 +20,7 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates python3 py3-pip py3-openpyxl py3-lxml \
     && apk add --no-cache --virtual .build-deps build-base python3-dev \
     && pip install --no-cache-dir --break-system-packages \
-        pdfplumber python-docx reportlab pypdf \
+        pdfplumber python-docx reportlab pypdf python-pptx \
     && apk del .build-deps
 
 WORKDIR /app
