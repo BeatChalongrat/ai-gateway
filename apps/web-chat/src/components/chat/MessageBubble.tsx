@@ -1,7 +1,10 @@
 "use client";
 
-// Redesigned for Phase 3: AI messages render plain (no bubble) with
-// an avatar + model-name label row and a hover-revealed action bar.
+// AI messages render plain (no bubble, no avatar, no model label) so
+// the conversation reads like a clean document. The action bar
+// (copy / thumbs-up / thumbs-down / regenerate) appears on hover.
+// A tiny model caption appears above the body ONLY when the
+// conversation mixes multiple models (see Props.showModelBadge).
 // User messages stay as a soft gray pill aligned to the right.
 //
 // TODO(phase2.session2): add LaTeX support via remark-math + rehype-katex.
@@ -19,7 +22,6 @@ import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
-import { AssistantAvatar } from "./AssistantAvatar";
 import { BranchNavigator } from "./BranchNavigator";
 import { CodeBlock } from "./CodeBlock";
 import { FeedbackButtons } from "./FeedbackButtons";
@@ -30,9 +32,11 @@ interface Props {
   message: Message;
   convId: string;
   modelId?: string | null;
-  /** Always shown on the AI label row when known; rendered as a
-   *  separate pill on user messages only when the conversation
-   *  mixes multiple models. */
+  /** Renders a small "· GPT-4o" caption above the assistant message
+   *  body. Off by default — only the ChatThread enables it when the
+   *  conversation contains replies from multiple distinct models, so
+   *  the user can tell branches apart. Single-model conversations
+   *  stay clean (no header, no avatar, no model label). */
   showModelBadge?: boolean;
   showFeedback?: boolean;
   showRegenerate?: boolean;
@@ -127,14 +131,11 @@ function MessageBubbleImpl({
   const editRef = useRef<HTMLTextAreaElement>(null);
   const [copied, setCopied] = useState(false);
 
-  // Voice output — used by both the manual speaker button and the
-  // auto-read effect below. Reads speakingMessageId straight from the
-  // store so the icon flips between play / stop without extra wiring.
-  const { speak, stop: stopSpeaking, isSupported: voiceOutSupported } =
-    useVoiceOutput();
-  const speakingMessageId = useVoiceStore((s) => s.speakingMessageId);
+  // Voice output — only the auto-read effect uses this now; the
+  // manual speaker button was removed from the action row to match
+  // ChatGPT's icon set (copy + feedback + regenerate).
+  const { speak } = useVoiceOutput();
   const autoRead = useVoiceStore((s) => s.autoRead);
-  const isPlayingThis = speakingMessageId === message.id;
 
   // Auto-read assistant replies once streaming finishes. Guarded by
   // role + status + the autoRead setting so the effect is a no-op
@@ -301,35 +302,27 @@ function MessageBubbleImpl({
   }
 
   // ───────────────────────── ASSISTANT ────────────────────────────
-  const labelName = modelEntry?.name ?? effectiveModelId ?? "SRAN Chat";
+  // Single-model conversations render the body directly — no avatar,
+  // no model label. The optional `showModelBadge` caption only fires
+  // when ChatThread detects multiple distinct models in the timeline.
+  const modelBadgeText = modelEntry?.name ?? effectiveModelId ?? null;
   return (
-    <div className="group message-enter flex w-full flex-col gap-2">
-      {/* Avatar + model label row */}
-      <div className="flex items-center gap-2">
-        <AssistantAvatar modelId={effectiveModelId} size={26} />
-        <span className="text-[13px] font-medium text-text-secondary">
-          {labelName}
-        </span>
-        {showModelBadge && effectiveModelId ? (
-          <span className="text-[10px] text-text-muted">
-            · {effectiveModelId}
-          </span>
-        ) : null}
-      </div>
+    <div className="group message-enter flex w-full flex-col gap-1.5">
+      {showModelBadge && modelBadgeText ? (
+        <span className="text-[11px] text-text-muted">{modelBadgeText}</span>
+      ) : null}
 
       {/* Body */}
-      <div className="prose-chat w-full pl-9 text-text-primary">
+      <div className="prose-chat w-full text-text-primary">
         <AssistantContent message={message} />
       </div>
 
       {message.files && message.files.length > 0 ? (
-        <div className="pl-9">
-          <MessageAttachments files={message.files} />
-        </div>
+        <MessageAttachments files={message.files} />
       ) : null}
 
-      {/* Action row */}
-      <div className="flex items-center gap-1 pl-9">
+      {/* Action row — copy, thumbs-up, thumbs-down, regenerate. */}
+      <div className="flex items-center gap-1">
         <div
           className={`message-actions flex items-center gap-0.5 ${
             message.isStreaming ? "opacity-0" : ""
@@ -342,11 +335,6 @@ function MessageBubbleImpl({
           >
             {copied ? <CheckIcon /> : <CopyIcon />}
           </ActionButton>
-          {showRegenerate && onRegenerate ? (
-            <ActionButton ariaLabel="Regenerate" onClick={onRegenerate}>
-              <RegenerateIcon />
-            </ActionButton>
-          ) : null}
           {showFeedback ? (
             <FeedbackButtons
               convId={convId}
@@ -354,20 +342,9 @@ function MessageBubbleImpl({
               current={message.feedback ?? null}
             />
           ) : null}
-          {voiceOutSupported ? (
-            <ActionButton
-              ariaLabel={isPlayingThis ? "Stop reading" : "Read aloud"}
-              onClick={() => {
-                if (isPlayingThis) stopSpeaking();
-                else void speak(message.content, message.id);
-              }}
-              tone={isPlayingThis ? "danger" : "muted"}
-            >
-              {isPlayingThis ? (
-                <SpeakerStopIcon />
-              ) : (
-                <SpeakerIcon playing={false} />
-              )}
+          {showRegenerate && onRegenerate ? (
+            <ActionButton ariaLabel="Regenerate" onClick={onRegenerate}>
+              <RegenerateIcon />
             </ActionButton>
           ) : null}
         </div>
@@ -454,42 +431,6 @@ function RegenerateIcon() {
     </svg>
   );
 }
-function SpeakerIcon({ playing }: { playing: boolean }) {
-  // Speaker outline + 1 or 2 sound waves depending on play state.
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M11 5L6 9H3v6h3l5 4V5z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M15.5 8.5a4 4 0 0 1 0 7"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-      {playing ? (
-        <path
-          d="M18.5 5.5a8 8 0 0 1 0 13"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-        />
-      ) : null}
-    </svg>
-  );
-}
-function SpeakerStopIcon() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  );
-}
-
 function AssistantContent({ message }: { message: Message }) {
   const hasContent = message.content.length > 0;
   const isStreaming = message.isStreaming;

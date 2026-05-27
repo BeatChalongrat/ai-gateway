@@ -36,6 +36,9 @@ type ConversationHandler struct {
 	// Optional. Used by Update to verify the KB belongs to the
 	// tenant before binding it to a conversation.
 	knowledge *service.KnowledgeService
+	// Optional. Powers POST /conversations/{id}/generate-title.
+	// Left nil in tests that don't exercise title generation.
+	titles *service.TitleService
 }
 
 func NewConversationHandler(c *service.ConversationService) *ConversationHandler {
@@ -48,6 +51,13 @@ func NewConversationHandler(c *service.ConversationService) *ConversationHandler
 // in tests that don't exercise the KB path.
 func (h *ConversationHandler) SetKnowledgeService(k *service.KnowledgeService) {
 	h.knowledge = k
+}
+
+// SetTitleService wires the title-generation service so
+// POST /conversations/{id}/generate-title can produce AI-summarized
+// titles after the first turn lands.
+func (h *ConversationHandler) SetTitleService(t *service.TitleService) {
+	h.titles = t
 }
 
 // SetExportSources wires the dependencies the /export endpoint
@@ -318,6 +328,61 @@ func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Generate title — POST /conversations/{id}/generate-title
+// ---------------------------------------------------------------------------
+
+// GenerateTitle asks the gateway to summarize the conversation's
+// first turn into a 3-6 word sidebar title and persists the result.
+// The frontend fires this once after the first assistant stream
+// completes; the response carries the new title so the client can
+// update the sidebar without an extra round-trip.
+//
+// Response shape: { "title": "..." } on success, standard
+// errorEnvelope on failure. 404 when the conversation isn't owned
+// by the caller; 409 when the conversation has no messages yet;
+// 502 when the upstream gateway is unreachable.
+func (h *ConversationHandler) GenerateTitle(w http.ResponseWriter, r *http.Request) {
+	if h.titles == nil {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "title service not configured")
+		return
+	}
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+
+	title, err := h.titles.Generate(r.Context(), caller.TenantUUID, caller.UserID, convID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTitleConversationNotFound):
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+		case errors.Is(err, service.ErrTitleNoMessages):
+			WriteError(w, http.StatusConflict, CodeConflict, "conversation has no messages yet")
+		default:
+			var ue *service.GatewayUnavailableError
+			if errors.As(err, &ue) {
+				WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "title generation upstream unavailable")
+				return
+			}
+			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		}
+		return
+	}
+	if err := h.conversations.Rename(r.Context(), caller.TenantUUID, convID, title); err != nil {
+		// Title generation succeeded but the persist write failed —
+		// surface 500 so the client knows the sidebar is stale, but
+		// still return the title so a retry isn't strictly required
+		// for display purposes.
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "couldn't persist title")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"title": title})
 }
 
 // ---------------------------------------------------------------------------
