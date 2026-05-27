@@ -548,3 +548,33 @@ input {
 /* Bottom-sheet animation (modal + model selector). */
 @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .sheet-up { animation: sheetUp 220ms cubic-bezier(0.32, 0.72, 0, 1); }
+
+/* Recording indicator — red dot pulse. */
+@keyframes recDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.92); }
+}
+.rec-dot {
+  animation: recDotPulse 1s ease-in-out infinite;
+}
+
+/* Audio waveform fallback (CSS-only bars). Each bar gets a staggered
+   delay via inline style so the row reads as one rolling wave. */
+@keyframes audioBar {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.audio-bar-css {
+  transform-origin: 50% 100%;
+  animation: audioBar 800ms ease-in-out infinite;
+}
+
+/* Speaker-icon pulse used on the assistant message action row while
+   TTS is actively playing. */
+@keyframes speakerPulse {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
+.speaker-playing {
+  animation: speakerPulse 1.2s ease-in-out infinite;
+}
