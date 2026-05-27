@@ -3,11 +3,9 @@
 // /chat landing page — ChatGPT / Claude style.
 //
 // Renders the personalised greeting + category chips + the same
-// rounded-pill input you get inside a conversation. Typing here
-// reuses a recent empty conversation if one exists (the same
-// dedup heuristic the sidebar's "+ New chat" button uses);
-// otherwise it spawns a fresh conversation, navigates to it, and
-// immediately streams the user's first message into it.
+// rounded-pill input you get inside a conversation. The conversation
+// is created lazily — only when the user actually sends their first
+// message. Click "+ New chat" and walk away → nothing in the sidebar.
 //
 // Note: we deliberately do NOT auto-redirect to the most recent
 // existing conversation. The redesigned UX wants a clean landing
@@ -24,7 +22,6 @@ import { useModelStore } from "@/stores/modelStore";
 
 export default function ChatLanding() {
   const router = useRouter();
-  const conversations = useChatStore((s) => s.conversations);
   const createConversation = useChatStore((s) => s.createConversation);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const selectedModelId = useModelStore((s) => s.selectedModelId);
@@ -33,26 +30,19 @@ export default function ChatLanding() {
   // typed survive the navigation into the new conversation.
   const [injectedText, setInjectedText] = useState<string | null>(null);
 
-  // Reuse any empty conversation regardless of model / age. Same
-  // rule as useNewChatHandler — see that file for the rationale.
-  function findReusableConversation(): string | null {
-    const candidate = conversations.find((c) => c.message_count === 0);
-    return candidate ? candidate.id : null;
-  }
-
   async function handleSend(text: string) {
     if (!selectedModelId) return;
-    let convId = findReusableConversation();
-    if (!convId) {
-      const fresh = await createConversation(selectedModelId);
-      convId = fresh.id;
-    }
+    // Lazy create: the conversation row is born here, at first send,
+    // not when the user clicked "+ New chat". This is the bit that
+    // keeps the sidebar from collecting empty "New conversation"
+    // stubs the user never followed through on.
+    const fresh = await createConversation(selectedModelId);
     // Kick off the stream BEFORE navigating so the assistant
     // placeholder mounts inside chatStore by the time the
     // conversation page renders. The page sees messages already
     // streaming via the store; no extra hand-off needed.
-    void sendMessage(convId, text);
-    router.push(`/chat/${convId}`);
+    void sendMessage(fresh.id, text);
+    router.push(`/chat/${fresh.id}`);
   }
 
   return (

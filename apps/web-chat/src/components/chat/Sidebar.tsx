@@ -72,6 +72,8 @@ export function Sidebar({
   const clearSearch = useChatStore((s) => s.clearConversationsSearch);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
+  const activeConversationId = useChatStore((s) => s.activeConversationId);
+  const messagesByConv = useChatStore((s) => s.messages);
   const newChat = useNewChatHandler();
 
   const [search, setSearch] = useState("");
@@ -102,7 +104,18 @@ export function Sidebar({
         key: c.id,
       }));
     }
-    const sorted = [...conversations].sort(
+    // Hide conversations with no messages — they're either legacy
+    // empties from before the lazy-create rollout or transient rows
+    // that never received a first send. The active conversation
+    // gets a pass: during the first send its server-side
+    // message_count is still 0 until the assistant turn persists,
+    // and its local optimistic messages prove the user is mid-send.
+    const filtered = conversations.filter((c) => {
+      if (c.message_count > 0) return true;
+      if (c.id !== activeConversationId) return false;
+      return (messagesByConv[c.id]?.length ?? 0) > 0;
+    });
+    const sorted = filtered.sort(
       (a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     );
@@ -116,10 +129,10 @@ export function Sidebar({
       }
     }
     return out;
-  }, [searchActive, searchResults, conversations]);
+  }, [searchActive, searchResults, conversations, activeConversationId, messagesByConv]);
 
-  async function handleNew() {
-    await newChat();
+  function handleNew() {
+    newChat();
     onClose();
   }
 
