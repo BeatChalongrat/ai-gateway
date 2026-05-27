@@ -36,9 +36,11 @@ import (
 const titleModelID = "gpt-4o-mini"
 
 // titleSystemPrompt frames the request so the model returns just a
-// title, not a sentence-style answer. Keep it short — every token in
-// the system prompt costs on every call.
-const titleSystemPrompt = "Generate a short, descriptive conversation title (3-6 words, no quotes, no punctuation at the end) that captures what the user is asking about. Reply with just the title, nothing else."
+// title, not a sentence-style answer. The language-mirror clause is
+// load-bearing: without it gpt-4o-mini reliably defaults to English
+// even when the user prompt is Thai/Japanese/etc., which produces
+// sidebar titles in the wrong script.
+const titleSystemPrompt = "Generate a short conversation title (3-6 words) based on this exchange. The title MUST be in the same language as the user's message. If the user writes in Thai, the title must be in Thai. If in English, title in English. Reply with just the title, no quotes, no punctuation at the end."
 
 // assistantSnippetMaxRunes caps the assistant text we feed the title
 // model. The full reply is irrelevant for naming — the first sentence
