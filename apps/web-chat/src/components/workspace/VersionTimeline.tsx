@@ -117,7 +117,17 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
         </div>
       ) : null}
 
-      <ol className="relative ml-3 space-y-3 border-l border-border-default pl-5">
+      <ol
+        className="relative ml-3 space-y-3 pl-5"
+        style={{
+          backgroundImage:
+            "linear-gradient(to bottom, transparent 0, currentColor 50%, transparent 50%, transparent 100%)",
+          backgroundSize: "1px 4px",
+          backgroundRepeat: "repeat-y",
+          backgroundPosition: "0 0.5rem",
+          color: "var(--text-tertiary)",
+        }}
+      >
         {list.map((v, i) => {
           const olderNeighbor = list[i + 1];
           const compareKey = olderNeighbor
@@ -125,9 +135,15 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
             : null;
           return (
             <li key={v.id} className="relative">
+              {/* Filled dot = current, outline dot = older.
+                  Monochrome so the timeline reads as a structural
+                  device, not a coloured status alarm — the blue
+                  is reserved for the primary CTA buttons. */}
               <span
-                className={`absolute -left-[1.4rem] top-3 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-bg-surface ${
-                  v.is_current ? "bg-blue-500" : "bg-text-tertiary"
+                className={`absolute -left-[1.42rem] top-3 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-bg-surface ${
+                  v.is_current
+                    ? "bg-text-tertiary"
+                    : "border border-text-tertiary bg-bg-surface"
                 }`}
                 aria-hidden
               />
@@ -136,7 +152,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
                   <span className="text-sm font-semibold text-text-primary">
                     v{v.version}
                     {v.is_current ? (
-                      <span className="ml-2 text-[10px] font-medium uppercase tracking-wider text-blue-500">
+                      <span className="ml-2 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
                         current
                       </span>
                     ) : null}
@@ -178,7 +194,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
                       type="button"
                       onClick={() => handleRollback(v)}
                       disabled={busyAction === `rollback:${v.id}`}
-                      className="focus-ring inline-flex items-center gap-1 rounded-md border border-status-warning/40 bg-status-warning/10 px-2 py-1 text-xs font-medium text-status-warning transition-colors hover:bg-status-warning/20 disabled:opacity-60"
+                      className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface disabled:opacity-60"
                     >
                       <RotateCcw className="h-3 w-3" />
                       Roll back
