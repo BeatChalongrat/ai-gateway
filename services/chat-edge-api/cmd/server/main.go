@@ -154,11 +154,15 @@ func main() {
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
 
-	// Phase 4 — Excel Smart Workspace. Wired before the file
-	// service's auto-inspect hook so an upload that lands the
-	// instant the server starts up still gets inspected.
+	// Phase 4 — Excel Smart Workspace (Session 1) +
+	// Word/PDF Smart Reports (Session 2). Both services wired
+	// before the file service's auto-inspect hook so an upload
+	// that lands the instant the server starts up still gets
+	// inspected.
 	excelSvc := service.NewExcelService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
+	docSvc := service.NewDocService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
 	fileSvc.SetExcelService(excelSvc)
+	fileSvc.SetDocService(docSvc)
 	messageSvc.SetExcelLookup(filesRepo)
 
 	// Wire the file linkage into the message service so /messages
@@ -226,6 +230,7 @@ func main() {
 		Knowledge:    handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
 		Voice:        handler.NewVoiceHandler(),
 		Excel:        handler.NewExcelHandler(excelSvc, filesRepo),
+		Document:     handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
