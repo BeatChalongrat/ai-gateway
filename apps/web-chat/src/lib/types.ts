@@ -157,6 +157,54 @@ export interface DocExecuteResponse {
   changes: string[];
 }
 
+/** Phase 4 Session 5 — Artifact Workspace types. */
+
+/** One entry in the workspace panel's generated-files list. The
+ *  shell extends FileAttachment with the chain rollup (how many
+ *  versions exist and what the original upload was called). */
+export interface GeneratedFileEntry extends FileAttachment {
+  version_count: number;
+  parent_filename?: string;
+}
+
+/** One row in the version timeline. */
+export interface FileVersion extends FileAttachment {
+  is_current: boolean;
+}
+
+export interface ComparisonChange {
+  type: string;
+  detail: string;
+  sheet?: string;
+}
+
+export interface ComparisonReport {
+  v1_size_bytes: number;
+  v2_size_bytes: number;
+  size_change: string;
+  file_type: string;
+  structural_changes: ComparisonChange[];
+  content_diff_summary: string;
+}
+
+export interface ComparisonResponse {
+  v1: {
+    id: string;
+    filename: string;
+    version: number;
+    file_size_bytes: number;
+    created_at: string;
+  };
+  v2: {
+    id: string;
+    filename: string;
+    version: number;
+    file_size_bytes: number;
+    created_at: string;
+  };
+  comparison: ComparisonReport;
+}
+
 /** Phase 4 Session 3 — PowerPoint generation.
  *  Per-slide entry in pptx_generator.py's change_log. */
 export interface PptxChangeLogEntry {

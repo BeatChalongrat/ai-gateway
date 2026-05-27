@@ -161,6 +161,10 @@ func main() {
 	// inspected.
 	excelSvc := service.NewExcelService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
 	docSvc := service.NewDocService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
+	// Session 5 — workspace (rollback + compare). Tenant + chain
+	// scoping happens inside the service; the handler is a thin
+	// HTTP shim per the existing handler pattern.
+	workspaceSvc := service.NewWorkspaceService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
 	fileSvc.SetExcelService(excelSvc)
 	fileSvc.SetDocService(docSvc)
 	messageSvc.SetExcelLookup(filesRepo)
@@ -231,6 +235,7 @@ func main() {
 		Voice:        handler.NewVoiceHandler(),
 		Excel:        handler.NewExcelHandler(excelSvc, filesRepo),
 		Document:     handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
+		Workspace:    handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
