@@ -51,6 +51,15 @@ type fileResponse struct {
 	FileSizeBytes    int64  `json:"file_size_bytes"`
 	ExtractionStatus string `json:"extraction_status"`
 	CreatedAt        string `json:"created_at"`
+	// Phase 4 — Excel Smart Workspace surface fields. Frontend
+	// uses IsGenerated to flip the file card into the
+	// "AI-generated" treatment; Version + ParentFileID drive the
+	// version history view; ChangeLog is the list of executor
+	// changes rendered inside the result card.
+	IsGenerated  bool     `json:"is_generated,omitempty"`
+	ParentFileID string   `json:"parent_file_id,omitempty"`
+	Version      int      `json:"version,omitempty"`
+	ChangeLog    []string `json:"change_log,omitempty"`
 }
 
 // FileToWire formats a model.ConversationFile for the wire. Exported
@@ -64,11 +73,44 @@ func FileToWire(f *model.ConversationFile) fileResponse {
 		FileSizeBytes:    f.FileSizeBytes,
 		ExtractionStatus: f.ExtractionStatus,
 		CreatedAt:        f.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		IsGenerated:      f.IsGenerated,
+		Version:          f.Version,
 	}
 	if f.MessageID != nil {
 		r.MessageID = f.MessageID.String()
 	}
+	if f.ParentFileID != nil {
+		r.ParentFileID = f.ParentFileID.String()
+	}
+	if f.ChangeLog != nil && *f.ChangeLog != "" {
+		// Persisted as newline-joined; split back into a list for
+		// the frontend so the result card can render one bullet
+		// per change without re-splitting.
+		for _, line := range splitLines(*f.ChangeLog) {
+			if line != "" {
+				r.ChangeLog = append(r.ChangeLog, line)
+			}
+		}
+	}
 	return r
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	if start <= len(s) {
+		out = append(out, s[start:])
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
