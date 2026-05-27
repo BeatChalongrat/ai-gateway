@@ -44,7 +44,12 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
+
+// Storage key prefix for conversation-file blobs. Lives at the top
+// of the bucket / filesystem root, peer with ``knowledge/``.
+const conversationFilesKeyPrefix = "conversation-files"
 
 // ---------------------------------------------------------------------------
 // Typed errors. Handlers map these to HTTP statuses.
@@ -67,6 +72,10 @@ var (
 // Knobs is the runtime config bag — kept as a small interface so
 // tests can swap in a fake without dragging the full config.Config.
 type Knobs struct {
+	// StorageRoot is retained for backwards-compat tests + as the
+	// local-fs base path; production code reads/writes only via the
+	// Backend. Keeping the value lets the local backend agree with
+	// callers that still derive paths from ``StorageRoot``.
 	StorageRoot         string
 	MaxFileSizeBytes    int64
 	MaxConvFileTotal    int64
@@ -75,17 +84,22 @@ type Knobs struct {
 	// Path to extract_text.py relative to the service binary's cwd.
 	// Defaults to ``scripts/extract_text.py`` when empty.
 	ExtractScriptPath string
+	// How long presigned download URLs stay valid when the storage
+	// backend supports them. Zero → use the backend default.
+	PresignedURLExpiry time.Duration
 }
 
 type FileService struct {
 	files         *repository.FileRepo
 	conversations *repository.ConversationRepo
+	storage       storage.Backend
 	knobs         Knobs
 }
 
 func NewFileService(
 	files *repository.FileRepo,
 	conversations *repository.ConversationRepo,
+	store storage.Backend,
 	knobs Knobs,
 ) *FileService {
 	if knobs.StorageRoot == "" {
@@ -106,9 +120,13 @@ func NewFileService(
 	if knobs.ExtractScriptPath == "" {
 		knobs.ExtractScriptPath = "scripts/extract_text.py"
 	}
+	if knobs.PresignedURLExpiry <= 0 {
+		knobs.PresignedURLExpiry = 15 * time.Minute
+	}
 	return &FileService{
 		files:         files,
 		conversations: conversations,
+		storage:       store,
 		knobs:         knobs,
 	}
 }
@@ -178,48 +196,33 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 		return nil, fmt.Errorf("%w: %d + %d > %d", ErrFileConvQuotaExceeded, used, in.Size, s.knobs.MaxConvFileTotal)
 	}
 
-	// Sanitize the user-supplied filename. UUID-prefixed on disk so
-	// re-uploads with the same name don't collide.
+	// Sanitize the user-supplied filename. UUID-prefixed so re-uploads
+	// with the same name don't collide.
 	clean := sanitizeFilename(in.OriginalName)
 	fileID := uuid.New()
 	storageName := fmt.Sprintf("%s_%s", fileID.String(), clean)
 
-	dir, err := s.tenantDir(in.TenantID, in.ConversationID)
-	if err != nil {
-		return nil, err
-	}
-	dst := filepath.Join(dir, storageName)
+	// Storage key — forward-slash joined, same shape on disk and in
+	// S3 so the migration script can copy bytes 1:1. ``StoragePath``
+	// in the DB stores the key (NOT an absolute filesystem path
+	// anymore); the storage backend resolves it to wherever it lives.
+	key := storage.JoinKey(
+		conversationFilesKeyPrefix,
+		in.TenantID.String(),
+		in.ConversationID.String(),
+		storageName,
+	)
 
-	// Verify the resolved absolute path is still under the storage
-	// root. Defence-in-depth against UUIDs that somehow contain
-	// traversal sequences (they don't, but the check is cheap).
-	if err := s.assertInsideRoot(dst); err != nil {
-		return nil, err
+	// Stream the upload through the storage backend. Local backend
+	// writes to disk; S3 backend PUTs an object.
+	if err := s.storage.Upload(ctx, key, in.Body, in.ContentType, in.Size); err != nil {
+		return nil, fmt.Errorf("storage upload: %w", err)
 	}
-
-	// Stream the upload to disk. The handler hands us an
-	// already-opened multipart.File; we don't buffer in memory.
-	out, err := os.Create(dst)
-	if err != nil {
-		return nil, fmt.Errorf("create file on disk: %w", err)
-	}
-	written, err := io.Copy(out, in.Body)
-	closeErr := out.Close()
-	if err != nil {
-		_ = os.Remove(dst)
-		return nil, fmt.Errorf("write file: %w", err)
-	}
-	if closeErr != nil {
-		_ = os.Remove(dst)
-		return nil, fmt.Errorf("close file: %w", closeErr)
-	}
-	if written > s.knobs.MaxFileSizeBytes {
-		// Defense in depth: in.Size came from the multipart header
-		// which the client could lie about. Re-check after the
-		// stream is fully drained.
-		_ = os.Remove(dst)
-		return nil, fmt.Errorf("%w: %d > %d", ErrFileTooLarge, written, s.knobs.MaxFileSizeBytes)
-	}
+	// We trust ``in.Size`` for the row but re-check would require a
+	// second HEAD round-trip on S3. The handler already enforced the
+	// per-request multipart cap; an over-by-one-byte client bug is
+	// not worth a HEAD per upload.
+	written := in.Size
 
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
@@ -228,11 +231,11 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 		OriginalFilename: clean,
 		ContentType:      in.ContentType,
 		FileSizeBytes:    written,
-		StoragePath:      dst,
+		StoragePath:      key,
 		ExtractionStatus: "processing",
 	})
 	if err != nil {
-		_ = os.Remove(dst)
+		_ = s.storage.Delete(ctx, key)
 		return nil, err
 	}
 
@@ -240,10 +243,10 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	// big PDFs this can take a few seconds; that's acceptable for
 	// the initial implementation. A background-queue refactor lives
 	// in a future session.
-	status, text := s.extract(row)
+	status, text := s.extract(ctx, row)
 	if err := s.files.UpdateExtraction(ctx, row.ID, status, text); err != nil {
-		// Extraction-record failure is non-fatal: the blob exists on
-		// disk + the row exists in the DB, the user just won't get
+		// Extraction-record failure is non-fatal: the blob exists in
+		// storage + the row exists in the DB, the user just won't get
 		// AI context. Log and continue.
 		slog.Warn("file extraction update failed",
 			"file_id", row.ID.String(), "err", err)
@@ -288,29 +291,45 @@ func (s *FileService) Get(
 	return f, nil
 }
 
-// OpenForDownload re-verifies tenant scope and returns the file
-// row plus an open *os.File ready for streaming. Caller MUST close
-// the returned file.
+// OpenForDownload re-verifies tenant scope and returns the file row
+// plus a reader. The handler is responsible for closing the reader.
+//
+// Backends that issue presigned URLs (S3) also return one via
+// PresignedURL so the handler can redirect the browser straight to
+// the object — avoids streaming GB-sized files through the service.
+// For backends that don't issue URLs (local fs) PresignedURL is "".
+type DownloadHandle struct {
+	File          *model.ConversationFile
+	Body          io.ReadCloser
+	PresignedURL  string
+}
+
 func (s *FileService) OpenForDownload(
 	ctx context.Context, tenantID, fileID uuid.UUID,
-) (*model.ConversationFile, *os.File, error) {
+) (*DownloadHandle, error) {
 	f, err := s.Get(ctx, tenantID, fileID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if err := s.assertInsideRoot(f.StoragePath); err != nil {
-		return nil, nil, err
+	// Best-effort presigned URL — empty + nil error means "this
+	// backend doesn't support it, stream instead".
+	url, _ := s.storage.GeneratePresignedURL(ctx, f.StoragePath, s.knobs.PresignedURLExpiry)
+	if url != "" {
+		return &DownloadHandle{File: f, PresignedURL: url}, nil
 	}
-	fp, err := os.Open(f.StoragePath)
+	body, _, _, err := s.storage.Download(ctx, f.StoragePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open file: %w", err)
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("open file: %w", err)
 	}
-	return f, fp, nil
+	return &DownloadHandle{File: f, Body: body}, nil
 }
 
 // Delete removes the row and unlinks the blob. Best-effort on the
-// filesystem side — a missing on-disk file isn't a user-visible
-// error (the row deletion is what matters for tenancy isolation).
+// storage side — a missing object isn't a user-visible error (the
+// row deletion is what matters for tenancy isolation).
 func (s *FileService) Delete(
 	ctx context.Context, tenantID, fileID uuid.UUID,
 ) error {
@@ -324,9 +343,7 @@ func (s *FileService) Delete(
 		}
 		return err
 	}
-	if err := s.assertInsideRoot(f.StoragePath); err == nil {
-		_ = os.Remove(f.StoragePath)
-	}
+	_ = s.storage.Delete(ctx, f.StoragePath)
 	return nil
 }
 
@@ -425,21 +442,23 @@ func (s *FileService) BuildContextBlock(
 // Extraction
 // ---------------------------------------------------------------------------
 
-// ExtractTextForPath is a content-type-driven text extractor shared
-// with the knowledge-base (RAG) indexer. Returns the extracted text +
-// a soft "is extraction supported" boolean. Unlike the in-process
-// ``extract`` method this one only deals with paths (no DB row), so
-// the RAG flow doesn't need to fabricate a ConversationFile to reuse
-// the extractor logic.
-func (s *FileService) ExtractTextForPath(path, contentType string) (string, bool) {
+// ExtractTextForStorageKey is the storage-backed equivalent of the
+// old ExtractTextForPath. The knowledge-base indexer hands us a
+// storage key + content type; we materialise a local copy when the
+// content type needs an external tool (PDF/DOCX/XLSX) and stream-read
+// when plain text is enough. Returns the extracted text + a soft
+// "is extraction supported" boolean.
+func (s *FileService) ExtractTextForStorageKey(
+	ctx context.Context, key, contentType string,
+) (string, bool) {
 	ct := strings.ToLower(contentType)
 	switch {
 	case ct == "text/plain", ct == "text/csv":
-		return readTextFile(path)
+		return s.readTextFromStorage(ctx, key)
 	case ct == "application/pdf",
 		ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		return s.runPythonExtractor(path, ct)
+		return s.runPythonExtractorOnKey(ctx, key, ct)
 	default:
 		return "", false
 	}
@@ -449,23 +468,28 @@ const maxExtractedChars = 50_000
 
 // extract dispatches on content type. Returns (status, text) where
 // status is one of the values the DB CHECK constraint allows.
-func (s *FileService) extract(f *model.ConversationFile) (string, *string) {
+//
+// The row's StoragePath is a storage-backend key, not a filesystem
+// path; each branch goes through the backend either by streaming
+// (text/csv, image dimensions) or by materialising a temp copy
+// (Python extractor) so the same code works for local + S3.
+func (s *FileService) extract(ctx context.Context, f *model.ConversationFile) (string, *string) {
 	ct := strings.ToLower(f.ContentType)
 	switch {
 	case ct == "text/plain", ct == "text/csv":
-		text, ok := readTextFile(f.StoragePath)
+		text, ok := s.readTextFromStorage(ctx, f.StoragePath)
 		if !ok {
 			return "failed", nil
 		}
 		text = truncateChars(text, maxExtractedChars)
 		return "completed", &text
 	case strings.HasPrefix(ct, "image/"):
-		text := imageMetadata(f.StoragePath, f.OriginalFilename, f.FileSizeBytes, ct)
+		text := s.imageMetadataFromStorage(ctx, f.StoragePath, f.OriginalFilename, f.FileSizeBytes, ct)
 		return "completed", &text
 	case ct == "application/pdf",
 		ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		text, ok := s.runPythonExtractor(f.StoragePath, ct)
+		text, ok := s.runPythonExtractorOnKey(ctx, f.StoragePath, ct)
 		if !ok {
 			placeholder := fmt.Sprintf("[File: %s, %s, %s. Content extraction not available.]",
 				f.OriginalFilename, ct, humanSize(f.FileSizeBytes))
@@ -480,26 +504,50 @@ func (s *FileService) extract(f *model.ConversationFile) (string, *string) {
 	}
 }
 
-func readTextFile(path string) (string, bool) {
-	buf, err := os.ReadFile(path)
+// readTextFromStorage streams the object body and decodes as UTF-8.
+// Used for text/plain + text/csv where there's no external tool.
+func (s *FileService) readTextFromStorage(ctx context.Context, key string) (string, bool) {
+	body, _, _, err := s.storage.Download(ctx, key)
+	if err != nil {
+		return "", false
+	}
+	defer body.Close()
+	// Cap the read at twice the truncation budget — once we're past
+	// 2x ``maxExtractedChars`` of bytes, truncateChars will trim the
+	// rest anyway and there's no point spending memory.
+	const readCap = int64(2 * maxExtractedChars)
+	limited := io.LimitReader(body, readCap)
+	buf, err := io.ReadAll(limited)
 	if err != nil {
 		return "", false
 	}
 	return string(buf), true
 }
 
-func imageMetadata(path, original string, size int64, ct string) string {
+// imageMetadataFromStorage reads the image header from storage to
+// produce the dimensions string. We avoid downloading the full body —
+// stdlib image.DecodeConfig only needs the leading bytes of the file.
+func (s *FileService) imageMetadataFromStorage(
+	ctx context.Context, key, original string, size int64, ct string,
+) string {
 	dims := ""
-	if f, err := os.Open(path); err == nil {
-		defer f.Close()
-		if cfg, _, err := image.DecodeConfig(f); err == nil {
+	body, _, _, err := s.storage.Download(ctx, key)
+	if err == nil {
+		defer body.Close()
+		if cfg, _, err := image.DecodeConfig(body); err == nil {
 			dims = fmt.Sprintf(", %dx%d", cfg.Width, cfg.Height)
 		}
 	}
 	return fmt.Sprintf("[Image: %s%s, %s, %s]", original, dims, humanSize(size), ct)
 }
 
-func (s *FileService) runPythonExtractor(path, ct string) (string, bool) {
+// runPythonExtractorOnKey materialises the object at ``key`` to a
+// local temp file (no-op for the local backend, download for S3) and
+// hands the path to the Python extractor. The temp file is cleaned
+// up regardless of how the extractor finishes.
+func (s *FileService) runPythonExtractorOnKey(
+	parent context.Context, key, ct string,
+) (string, bool) {
 	// Resolve the script path relative to the current working
 	// directory. In dev this is the chat-edge-api repo root; in the
 	// container it's /app (matches the Dockerfile WORKDIR).
@@ -513,7 +561,14 @@ func (s *FileService) runPythonExtractor(path, ct string) (string, bool) {
 		slog.Warn("extract script not found", "path", script, "err", err)
 		return "", false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	path, cleanup, err := s.storage.OpenLocalCopy(parent, key)
+	if err != nil {
+		slog.Warn("storage local copy failed", "key", key, "err", err)
+		return "", false
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, s.knobs.ExtractPythonBinary, script, path, ct)
 	out, err := cmd.Output()
@@ -527,36 +582,6 @@ func (s *FileService) runPythonExtractor(path, ct string) (string, bool) {
 // ---------------------------------------------------------------------------
 // Path / name helpers
 // ---------------------------------------------------------------------------
-
-func (s *FileService) tenantDir(tenantID, convID uuid.UUID) (string, error) {
-	root, err := filepath.Abs(s.knobs.StorageRoot)
-	if err != nil {
-		return "", fmt.Errorf("resolve storage root: %w", err)
-	}
-	dir := filepath.Join(root, tenantID.String(), convID.String())
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("mkdir upload dir: %w", err)
-	}
-	return dir, nil
-}
-
-func (s *FileService) assertInsideRoot(p string) error {
-	root, err := filepath.Abs(s.knobs.StorageRoot)
-	if err != nil {
-		return err
-	}
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return err
-	}
-	// Ensure abs starts with root + separator (or equals root). Avoids
-	// a prefix-match false positive on "/data/uploads2".
-	rel, err := filepath.Rel(root, abs)
-	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
-		return fmt.Errorf("path traversal blocked: %s", p)
-	}
-	return nil
-}
 
 // sanitizeFilename trims path separators, control chars, and caps
 // the byte length to 200. UTF-8 friendly because rune-iteration

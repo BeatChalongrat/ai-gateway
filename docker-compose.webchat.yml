@@ -41,6 +41,17 @@ services:
       - CHAT_EDGE_DEV=1
       - CORS_ALLOW_ORIGINS=http://localhost:3002
       - MAX_CONTEXT_MESSAGES=50
+      # Blob storage — default ``local`` writes under ./data/uploads
+      # inside the container. Set STORAGE_BACKEND=s3 to route uploads
+      # through the bundled MinIO service below (env vars wire in
+      # automatically from .env or shell exports).
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - S3_BUCKET=${S3_BUCKET:-sran-chat-files}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -82,6 +93,54 @@ services:
       timeout: 5s
       retries: 5
 
+  # MinIO — S3-compatible object storage for local dev. Optional
+  # service: nothing pulls it up unless the operator runs it
+  # explicitly via ``docker compose ... up minio`` or starts the
+  # whole stack with STORAGE_BACKEND=s3 set on chat-edge-api.
+  #
+  # The dev credentials below are intentionally weak (``minioadmin
+  # / minioadmin123``) — production deployments must override them via
+  # secrets / env files. The same credentials are baked into the
+  # init container that creates the bucket.
+  minio:
+    image: minio/minio:latest
+    container_name: ai-gateway-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console (login at http://localhost:9001)
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot init container that creates the bucket + sets a download
+  # anonymous policy so presigned URLs aren't strictly required for
+  # development. Exits after running so it's safe to leave in the
+  # compose graph; subsequent ``up`` invocations just re-run it
+  # quickly and the bucket-create command is a no-op once it exists.
+  minio-init:
+    image: minio/mc:latest
+    container_name: ai-gateway-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 minioadmin minioadmin123
+        mc mb --ignore-existing local/${S3_BUCKET:-sran-chat-files}
+        mc anonymous set download local/${S3_BUCKET:-sran-chat-files}
+        echo "MinIO bucket ready: ${S3_BUCKET:-sran-chat-files}"
+
   # Web Chat front-end — Next.js standalone build. The browser talks
   # to chat-edge-api on the host (port 4000) so CORS + cookies work
   # the same dev vs prod; build-time env var bakes in the API base.
@@ -100,3 +159,4 @@ services:
 
 volumes:
   pgdata-webchat:
+  minio-data:
