@@ -24,6 +24,8 @@ import { useVoiceStore } from "@/stores/voiceStore";
 
 import { BranchNavigator } from "./BranchNavigator";
 import { CodeBlock } from "./CodeBlock";
+import { DocPlanCard } from "./DocPlanCard";
+import type { DocPlan } from "./DocPlanCard";
 import { ExcelPlanCard } from "./ExcelPlanCard";
 import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
@@ -488,16 +490,22 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
     return <StreamingContent content={message.content} />;
   }
 
-  // Split the completed content into prose / excel-plan segments.
-  // Each segment renders independently so the card mounts inline
-  // wherever the AI placed the fenced block.
-  const segments = parseExcelPlanSegments(message.content || "");
+  // Split the completed content into prose / plan segments. Each
+  // segment renders independently so the card mounts inline wherever
+  // the AI placed the fenced block. Both :::excel-plan and
+  // :::doc-plan are recognised; everything else passes through to
+  // ReactMarkdown.
+  const segments = parsePlanSegments(message.content || "");
   return (
     <>
-      {segments.map((seg, i) =>
-        seg.kind === "plan" ? (
-          <ExcelPlanCard key={i} convId={convId} plan={seg.plan} />
-        ) : (
+      {segments.map((seg, i) => {
+        if (seg.kind === "excel-plan") {
+          return <ExcelPlanCard key={i} convId={convId} plan={seg.plan} />;
+        }
+        if (seg.kind === "doc-plan") {
+          return <DocPlanCard key={i} convId={convId} plan={seg.plan} />;
+        }
+        return (
           <ReactMarkdown
             key={i}
             remarkPlugins={[remarkGfm]}
@@ -506,39 +514,47 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
           >
             {renderCitations(seg.text)}
           </ReactMarkdown>
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
 
-// :::excel-plan ... ::: detection. The fence is the standard
+// :::excel-plan / :::doc-plan detection. Both fences use the
 // Pandoc-style triple-colon container — react-markdown doesn't
-// parse it natively, so we strip it out before rendering and
-// substitute the ExcelPlanCard at the right position. Malformed
-// JSON inside the fence falls back to rendering the raw block as
+// parse them natively, so we strip them out before rendering and
+// substitute the matching card at the right position. Malformed
+// JSON inside a fence falls back to rendering the raw block as
 // text so the user can see what the AI produced.
-type ExcelPlanSegment =
+type PlanSegment =
   | { kind: "text"; text: string }
-  | { kind: "plan"; plan: ExcelPlan };
+  | { kind: "excel-plan"; plan: ExcelPlan }
+  | { kind: "doc-plan"; plan: DocPlan };
 
-const EXCEL_PLAN_FENCE = /:::excel-plan\s*\n([\s\S]*?)\n:::/g;
+// Single combined regex with a capture group on the plan type so
+// one pass handles both fence flavours in document order. Using a
+// single pass also stops us from double-processing content when
+// the AI emits one of each in the same message.
+const PLAN_FENCE = /:::(excel-plan|doc-plan)\s*\n([\s\S]*?)\n:::/g;
 
-function parseExcelPlanSegments(content: string): ExcelPlanSegment[] {
-  const out: ExcelPlanSegment[] = [];
+function parsePlanSegments(content: string): PlanSegment[] {
+  const out: PlanSegment[] = [];
   let last = 0;
-  EXCEL_PLAN_FENCE.lastIndex = 0;
+  PLAN_FENCE.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = EXCEL_PLAN_FENCE.exec(content)) !== null) {
+  while ((match = PLAN_FENCE.exec(content)) !== null) {
     const before = content.slice(last, match.index);
     if (before.trim()) out.push({ kind: "text", text: before });
-    const raw = match[1].trim();
+    const kind = match[1] as "excel-plan" | "doc-plan";
+    const raw = match[2].trim();
     const parsed = tryParseJson(raw);
     if (parsed && typeof parsed === "object") {
-      out.push({ kind: "plan", plan: parsed as ExcelPlan });
+      if (kind === "excel-plan") {
+        out.push({ kind: "excel-plan", plan: parsed as ExcelPlan });
+      } else {
+        out.push({ kind: "doc-plan", plan: parsed as DocPlan });
+      }
     } else {
-      // Fall back to showing the raw block as a fenced code block
-      // so the user at least sees what the AI emitted.
       out.push({ kind: "text", text: "```json\n" + raw + "\n```" });
     }
     last = match.index + match[0].length;

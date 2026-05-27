@@ -51,6 +51,10 @@ type Handlers struct {
 	// Phase 4 — Excel Smart Workspace. Optional in tests; routes
 	// only register when wired so legacy stacks stay green.
 	Excel *handler.ExcelHandler
+	// Phase 4 Session 2 — Word/PDF Smart Reports. Owns the
+	// type-dispatching /files/{id}/inspect route and the docx/pdf
+	// execute route.
+	Document *handler.DocumentHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -174,12 +178,28 @@ func New(
 				r.Post("/voice/synthesize", h.Voice.Synthesize)
 			}
 
-			// Phase 4 — Excel Smart Workspace.
-			//   POST /files/{fileID}/inspect        — re-run inspector
-			//   POST /conversations/{convID}/excel/execute — apply plan
+			// Phase 4 — Smart Workspace routes.
+			//   POST /files/{fileID}/inspect         — type-dispatching
+			//                                          inspector
+			//                                          (Document handler;
+			//                                          xlsx/docx/pdf)
+			//   POST /conversations/{convID}/excel/execute       — Session 1
+			//   POST /conversations/{convID}/document/execute    — Session 2
+			//                                                      (docx/pdf)
 			//   GET  /conversations/{convID}/files/{fileID}/versions
-			if h.Excel != nil {
+			//
+			// The dispatcher inspect route requires both handlers so
+			// it can branch to whichever backing service knows the
+			// file type. When Document is wired we use it; otherwise
+			// fall back to the Excel-only handler so legacy stacks
+			// that don't register Document keep working.
+			if h.Document != nil {
+				r.Post("/files/{fileID}/inspect", h.Document.Inspect)
+				r.Post("/conversations/{convID}/document/execute", h.Document.Execute)
+			} else if h.Excel != nil {
 				r.Post("/files/{fileID}/inspect", h.Excel.Inspect)
+			}
+			if h.Excel != nil {
 				r.Post("/conversations/{convID}/excel/execute", h.Excel.Execute)
 				r.Get("/conversations/{convID}/files/{fileID}/versions", h.Excel.Versions)
 			}

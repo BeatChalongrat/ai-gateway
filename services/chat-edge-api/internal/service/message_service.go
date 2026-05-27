@@ -1085,6 +1085,9 @@ func (s *MessageService) buildSystemPrefix(
 		if x := s.excelContext(ctx, tenantID, conv.ID); x != "" {
 			parts = append(parts, x)
 		}
+		if d := s.docContext(ctx, tenantID, conv.ID); d != "" {
+			parts = append(parts, d)
+		}
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -1213,6 +1216,119 @@ Same format as EDIT but with "operation": "create_workbook".
 - auto_filter { sheet_name, range }
 - freeze_panes { sheet_name, cell }
 `
+
+// docContext renders the Phase-4 Session 2 doc system block when the
+// conversation has at least one docx or pdf file with a cached
+// inspection. Same shape as excelContext: the model gets the
+// inspection JSON + a contract to emit :::doc-plan blocks that the
+// frontend turns into the DocPlanCard.
+func (s *MessageService) docContext(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) string {
+	if s.excelLookup == nil {
+		return ""
+	}
+	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	var latest *model.ConversationFile
+	for i := len(files) - 1; i >= 0; i-- {
+		f := &files[i]
+		if !IsDocContentType(f.ContentType) {
+			continue
+		}
+		if f.InspectionJSON == nil || *f.InspectionJSON == "" {
+			continue
+		}
+		latest = f
+		break
+	}
+	if latest == nil {
+		// No uploaded doc — still inject the capabilities prompt so
+		// the model can generate from-scratch reports when the user
+		// asks ("create a PDF report about X"). Without the catalog
+		// it would just write prose.
+		return docCapabilitiesPromptHeaderless
+	}
+	return renderDocSystemBlock(latest)
+}
+
+func renderDocSystemBlock(f *model.ConversationFile) string {
+	var b strings.Builder
+	b.WriteString("## Document Context\n\n")
+	b.WriteString("You have access to a document file. Here is its structure:\n\n")
+	b.WriteString("file_id: ")
+	b.WriteString(f.ID.String())
+	b.WriteString("\nfilename: ")
+	b.WriteString(f.OriginalFilename)
+	b.WriteString("\ncontent_type: ")
+	b.WriteString(f.ContentType)
+	b.WriteString("\n\n```json\n")
+	b.WriteString(*f.InspectionJSON)
+	b.WriteString("\n```\n\n")
+	b.WriteString(docCapabilitiesPrompt)
+	return b.String()
+}
+
+// docCapabilitiesPrompt is the static contract injected when an
+// uploaded doc is present. The headerless variant goes out when no
+// doc is uploaded but the user might still ask for one.
+const docCapabilitiesPrompt = `## Document Report Capabilities
+
+When the user asks you to create, edit, or summarize a Word document (.docx) or PDF report, output a JSON plan in this EXACT format. The frontend renders the plan as a card; the user clicks Generate to execute.
+
+:::doc-plan
+{
+  "format": "docx",
+  "source_file_id": "<file_id from above; omit for create-from-scratch>",
+  "output_filename": "report.docx",
+  "document_settings": {
+    "page_size": "A4",
+    "orientation": "portrait",
+    "margins": {"top": 1.0, "bottom": 1.0, "left": 1.0, "right": 1.0},
+    "font_family": "Sarabun",
+    "base_font_size": 16,
+    "language": "th",
+    "header_text": "SRAN AI Report",
+    "footer_text": "หน้า {page} จาก {total}",
+    "title_page": {
+      "title": "รายงานสรุปผลประจำเดือน",
+      "subtitle": "พฤษภาคม 2569",
+      "author": "SRAN AI",
+      "date": "27 พ.ค. 2569"
+    }
+  },
+  "actions": [
+    {"type": "add_title_page"},
+    {"type": "add_heading", "level": 1, "text": "บทสรุปผู้บริหาร"},
+    {"type": "add_paragraph", "text": "เนื้อหา..."},
+    {"type": "add_bullet_list", "items": ["ข้อหนึ่ง", "ข้อสอง"]},
+    {"type": "add_table", "headers": ["หัวข้อ", "ค่า"], "rows": [["A", "1"]], "style": "professional"}
+  ]
+}
+:::
+
+## Rules — MUST follow
+- For ANY create/edit/generate request: output exactly one :::doc-plan ... ::: block. No hedging.
+- Output the explanation in 1-2 short sentences BEFORE the fence; nothing after it.
+- Detect the user's language from the prompt and the inspection metadata:
+  * Thai input → language: "th", font_family: "Sarabun", base_font_size: 16.
+  * English input → language: "en", font_family: "Arial", base_font_size: 12.
+- "format" is "docx" or "pdf" depending on the user's request. If unclear, ask.
+- When source_file_id is set and format is "docx", the generator preserves the source layout; for pdf the source is treated as reference content.
+- Use professional table style (corporate navy headers) for any reporting table.
+
+## Action Types
+CREATE: add_title_page, add_heading {level, text}, add_paragraph {text, bold, italic, alignment}, add_bullet_list {items}, add_numbered_list {items}, add_table {headers, rows, style}, add_page_break, add_spacer {height}, add_horizontal_rule, add_blockquote {text}, add_code_block {code, language}
+EDIT (docx only): replace_text {find, replace}, set_header {text}, set_footer {text}
+`
+
+// docCapabilitiesPromptHeaderless is what we ship when no
+// document is uploaded. Skips the "Here is its structure" preamble
+// since there's nothing to describe, but still gives the model the
+// :::doc-plan contract so create-from-scratch works.
+const docCapabilitiesPromptHeaderless = "## Document Report Capabilities\n\nNo document is currently uploaded, but if the user asks you to create a Word or PDF report you should still emit a :::doc-plan block (omit source_file_id; the generator runs in create mode).\n\n" + docCapabilitiesPrompt
 
 // keep “time“ import referenced even when no other code in this
 // file uses it directly (the GatewayChatUsage struct references

@@ -248,6 +248,25 @@ class ApiClient {
       `/conversations/${convId}/files/${fileId}/versions`,
     );
   }
+
+  /** Phase 4 Session 2 — execute a docx/pdf doc plan. Same shape
+   *  as executeExcelPlan but the plan + format live at the top
+   *  level (no nested wrapping). source_file_id is optional for
+   *  the create-from-scratch path. */
+  executeDocumentPlan(
+    convId: string,
+    body: {
+      source_file_id?: string;
+      output_filename?: string;
+      format: "docx" | "pdf";
+      plan: unknown;
+    },
+  ) {
+    return this.json<import("./types").DocExecuteResponse>(
+      `/conversations/${convId}/document/execute`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  }
   // ----- Preferences ---------------------------------------
   getPreferences() {
     return this.json<UserPreferences>("/user/preferences");
