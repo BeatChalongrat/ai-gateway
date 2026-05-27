@@ -580,6 +580,113 @@ func (s *FileService) readTextFromStorage(ctx context.Context, key string) (stri
 	return string(buf), true
 }
 
+// isImageContentType — small wrapper so the message-builder side
+// can decide "is this attachment vision-eligible?" without
+// re-listing MIME strings. Matches the upload allow-list.
+func isImageContentType(ct string) bool {
+	switch strings.ToLower(strings.TrimSpace(ct)) {
+	case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp":
+		return true
+	}
+	return false
+}
+
+// ImageDataURLsForMessage resolves the image attachments on a
+// single user message to a list of "data:image/...;base64,..."
+// strings that ship into the vision-format gateway request.
+//
+// Caching strategy: every successful conversion writes a sidecar
+// .vision.<ext>.b64 file next to the source key. On subsequent
+// calls (the same message + image being re-shipped on regenerate
+// / edit / multi-turn vision) we read the sidecar instead of
+// re-running image_resize.py. Sidecar lives under the storage's
+// local-copy path so the local backend hits zero IO and the S3
+// backend benefits from the same cache via its temp-file copy.
+//
+// Returns nil on any failure — the caller treats nil as
+// "ship text only" and the AI still gets the turn, minus vision.
+func (s *FileService) ImageDataURLsForMessage(
+	ctx context.Context, tenantID, messageID uuid.UUID,
+) []string {
+	files, err := s.files.ListByMessage(ctx, tenantID, messageID)
+	if err != nil || len(files) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(files))
+	for i := range files {
+		f := &files[i]
+		if !isImageContentType(f.ContentType) {
+			continue
+		}
+		url := s.imageDataURL(ctx, f)
+		if url != "" {
+			out = append(out, url)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// imageDataURL is the per-file path: ensure a local copy of the
+// source blob, run image_resize.py (with caching), read the .b64
+// sidecar, return the data URL.
+func (s *FileService) imageDataURL(ctx context.Context, f *model.ConversationFile) string {
+	srcPath, cleanup, err := s.storage.OpenLocalCopy(ctx, f.StoragePath)
+	if err != nil {
+		slog.Warn("vision: storage local-copy failed",
+			"file_id", f.ID.String(), "err", err)
+		return ""
+	}
+	defer cleanup()
+
+	// Sidecar path matches the source extension so the resize
+	// script can pick the right output format (JPEG when source
+	// is JPEG, PNG otherwise — keeps the file under the same
+	// MIME so the data URL prefix is accurate).
+	outExt := strings.ToLower(filepath.Ext(srcPath))
+	if outExt == "" || outExt == ".jpg" {
+		outExt = ".jpeg"
+	}
+	if outExt != ".png" && outExt != ".jpeg" && outExt != ".gif" && outExt != ".webp" {
+		outExt = ".png"
+	}
+	visionPath := srcPath + ".vision" + outExt
+	b64Path := visionPath + ".b64"
+
+	if data, err := os.ReadFile(b64Path); err == nil && len(data) > 0 {
+		return string(data)
+	}
+
+	script := "scripts/image_resize.py"
+	if !filepath.IsAbs(script) {
+		if abs, aerr := filepath.Abs(script); aerr == nil {
+			script = abs
+		}
+	}
+	if _, err := os.Stat(script); err != nil {
+		slog.Warn("vision: image_resize.py not found", "path", script, "err", err)
+		return ""
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, s.knobs.ExtractPythonBinary, script, srcPath, visionPath, "2048")
+	if out, err := cmd.Output(); err != nil {
+		slog.Warn("vision: image_resize.py failed",
+			"file_id", f.ID.String(), "err", err, "out", string(out))
+		return ""
+	}
+	data, err := os.ReadFile(b64Path)
+	if err != nil {
+		slog.Warn("vision: b64 sidecar missing",
+			"file_id", f.ID.String(), "path", b64Path, "err", err)
+		return ""
+	}
+	return string(data)
+}
+
 // imageMetadataFromStorage reads the image header from storage to
 // produce the dimensions string. We avoid downloading the full body —
 // stdlib image.DecodeConfig only needs the leading bytes of the file.

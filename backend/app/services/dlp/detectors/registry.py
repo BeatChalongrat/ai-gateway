@@ -184,9 +184,20 @@ class DetectorRegistry:
         language = detect_language(joined)
         all_matches: list[DetectionMatch] = []
         for msg in scanned_messages:
-            all_matches.extend(
-                self.scan_text(msg.content, language=language)
-            )
+            # Vision-format messages carry list-of-blocks content;
+            # flatten text-block contents (rust_dlp_client.py uses
+            # the same pattern) so PII scanning still covers the
+            # user's prompt but image blocks pass through untouched.
+            content = msg.content
+            if isinstance(content, list):
+                content = "\n".join(
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            elif not isinstance(content, str):
+                content = "" if content is None else str(content)
+            all_matches.extend(self.scan_text(content, language=language))
         return DetectionResult(
             matches=sorted(all_matches, key=lambda m: (m.start, m.end)),
             scanned_direction=direction,

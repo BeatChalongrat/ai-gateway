@@ -74,9 +74,33 @@ func NewGatewayClient(
 // Request / response types (OpenAI-style wire format the gateway speaks)
 // ---------------------------------------------------------------------------
 
+// GatewayMessage mirrors OpenAI's chat-completion message shape.
+// Content is `any` so it can carry either a plain string (legacy
+// path) OR the vision-format content-block array:
+//
+//	[{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}},
+//	 {"type":"text","text":"What's in this image?"}]
+//
+// The Go layer only fan-outs raw JSON; downstream code that touches
+// Content (response decoder, change-log writer) reads it as a string
+// via assertion because assistant replies never carry image blocks.
 type GatewayMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+// GatewayContentBlock is one element of a vision-format content
+// array. Used by the message builder when image attachments are
+// present on a user turn.
+type GatewayContentBlock struct {
+	Type     string             `json:"type"`
+	Text     string             `json:"text,omitempty"`
+	ImageURL *GatewayImageURL   `json:"image_url,omitempty"`
+}
+
+type GatewayImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type GatewayChatRequest struct {
