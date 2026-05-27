@@ -156,7 +156,10 @@ export function EmptyState({ onPrompt, children }: Props) {
               onClick={() => onPrompt(c.prompt)}
               className="focus-ring tap-44 inline-flex items-center gap-2 rounded-full border border-border-subtle bg-transparent px-4 py-2 text-[13px] text-text-secondary transition-all hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-surface hover:text-text-primary"
             >
-              <span className="text-accent">{c.icon}</span>
+              {/* Icon inherits the chip's text colour — no accent
+                  tint, no green. The chips are intentionally muted
+                  so they read as suggestions, not CTAs. */}
+              <span className="text-text-tertiary">{c.icon}</span>
               <span>{c.label}</span>
             </button>
           ))}
