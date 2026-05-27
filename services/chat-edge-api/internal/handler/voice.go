@@ -34,11 +34,11 @@ import (
 // construction time so mid-process env flips don't change behaviour —
 // matches the embedding/RAG service pattern.
 type VoiceHandler struct {
-	apiKey      string
-	baseURL     string
+	apiKey       string
+	baseURL      string
 	whisperModel string
-	ttsModel    string
-	http        *http.Client
+	ttsModel     string
+	http         *http.Client
 	// Per-request body limit. Whisper accepts up to 25 MB.
 	maxAudioBytes int64
 }
@@ -77,16 +77,16 @@ func (h *VoiceHandler) enabled() bool { return h.apiKey != "" }
 // pinning to what MediaRecorder + iOS Safari actually produce keeps
 // the surface tight.
 var allowedAudioTypes = map[string]bool{
-	"audio/webm":     true,
-	"audio/webm;codecs=opus": true,
-	"audio/mp4":      true,
-	"audio/mpeg":     true,
-	"audio/mp3":      true,
-	"audio/wav":      true,
-	"audio/x-wav":    true,
-	"audio/ogg":      true,
-	"audio/ogg;codecs=opus":  true,
-	"application/octet-stream":            true, // some recorders omit the codec
+	"audio/webm":               true,
+	"audio/webm;codecs=opus":   true,
+	"audio/mp4":                true,
+	"audio/mpeg":               true,
+	"audio/mp3":                true,
+	"audio/wav":                true,
+	"audio/x-wav":              true,
+	"audio/ogg":                true,
+	"audio/ogg;codecs=opus":    true,
+	"application/octet-stream": true, // some recorders omit the codec
 }
 
 func (h *VoiceHandler) Transcribe(w http.ResponseWriter, r *http.Request) {
@@ -330,4 +330,3 @@ func truncateVoice(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
-

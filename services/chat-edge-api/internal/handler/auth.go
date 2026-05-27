@@ -5,7 +5,7 @@
 // refresh / logout all happen against the Portal on port 3001; the
 // chat-edge UI is a pure token consumer. The four legacy endpoints
 // still exist on the router for backward compatibility but each
-// returns ``410 Gone`` + a pointer to the Portal so any stale client
+// returns “410 Gone“ + a pointer to the Portal so any stale client
 // fails loudly rather than silently.
 //
 // The underlying AuthService / RefreshTokenRepo / CSRF + cookie

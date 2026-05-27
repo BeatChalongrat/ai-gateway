@@ -28,8 +28,8 @@ func (r *FeedbackRepo) WithTx(tx pgx.Tx) *FeedbackRepo {
 // ON CONFLICT clause atomic — toggling thumbs_up → thumbs_down
 // updates the existing row in one statement, no race.
 //
-// Returns the persisted row with ``id`` / ``created_at`` populated.
-// On UPDATE conflict the ``created_at`` stays at the original
+// Returns the persisted row with “id“ / “created_at“ populated.
+// On UPDATE conflict the “created_at“ stays at the original
 // insert time; the rating column gets the new value.
 func (r *FeedbackRepo) Upsert(ctx context.Context, f *model.Feedback) (*model.Feedback, error) {
 	const q = `
@@ -49,7 +49,7 @@ func (r *FeedbackRepo) Upsert(ctx context.Context, f *model.Feedback) (*model.Fe
 }
 
 // GetForMessage returns the caller's feedback on a specific
-// message, or ``ErrNotFound``. Used by message-list / detail views
+// message, or “ErrNotFound“. Used by message-list / detail views
 // to render the current thumbs state in the UI.
 func (r *FeedbackRepo) GetForMessage(ctx context.Context, msgID, userID uuid.UUID) (*model.Feedback, error) {
 	const q = `

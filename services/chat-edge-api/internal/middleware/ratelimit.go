@@ -1,9 +1,9 @@
 // Per-user rate limit using Redis INCR + EXPIRE.
 //
-// Bucket key is ``ratelimit:{user_id}:{window_bucket}`` where the
-// bucket is ``now/window``. INCR returns the post-increment counter;
+// Bucket key is “ratelimit:{user_id}:{window_bucket}“ where the
+// bucket is “now/window“. INCR returns the post-increment counter;
 // the first INCR of a bucket also gets a PEXPIRE so the key auto-
-// reaps. Over-limit requests return 429 with a ``Retry-After``
+// reaps. Over-limit requests return 429 with a “Retry-After“
 // header pointing at the next bucket boundary.
 //
 // CRITICAL: applied ONLY to high-cost endpoints (message send,
@@ -23,8 +23,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RateLimit returns a middleware that enforces ``limit`` requests
-// per ``window`` per authenticated user. Requests without a resolved
+// RateLimit returns a middleware that enforces “limit“ requests
+// per “window“ per authenticated user. Requests without a resolved
 // caller (no RequireAuth above) pass through — the caller is
 // expected to chain RateLimit AFTER RequireAuth.
 //

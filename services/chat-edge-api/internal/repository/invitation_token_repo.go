@@ -51,8 +51,8 @@ func (r *InvitationTokenRepo) GetInvitationByToken(ctx context.Context, token st
 	return i, nil
 }
 
-// UseInvitation marks the invitation as consumed by ``usedBy``.
-// The WHERE clause includes ``used_at IS NULL`` so a concurrent
+// UseInvitation marks the invitation as consumed by “usedBy“.
+// The WHERE clause includes “used_at IS NULL“ so a concurrent
 // double-redeem from two browser tabs is rejected — the second
 // UPDATE affects zero rows and the helper returns a sentinel error.
 func (r *InvitationTokenRepo) UseInvitation(ctx context.Context, id, usedBy uuid.UUID) error {

@@ -10,7 +10,7 @@
 //
 // The endpoint is upsert by (message_id, user_id) — toggling vote
 // updates the row in place via INSERT … ON CONFLICT. No free-text
-// ``comment`` field accepted in Phase 1: comments are a new PII
+// “comment“ field accepted in Phase 1: comments are a new PII
 // channel and are deferred until DLP-on-save lands.
 package handler
 

@@ -3,14 +3,14 @@
 //
 // Splitting strategy (largest-first):
 //
-//   1. Split the text on blank-line paragraph breaks.
-//   2. For each paragraph: if it fits inside the chunk size, keep it
-//      whole (best retrieval quality — semantically coherent unit).
-//   3. If it overflows: split on sentence boundaries. A sentence
-//      that's still too large gets chunked by character window.
-//   4. Each character-window chunk overlaps the previous one by
-//      ``overlap`` characters so a thought that straddles the
-//      boundary still survives one chunk's worth of context.
+//  1. Split the text on blank-line paragraph breaks.
+//  2. For each paragraph: if it fits inside the chunk size, keep it
+//     whole (best retrieval quality — semantically coherent unit).
+//  3. If it overflows: split on sentence boundaries. A sentence
+//     that's still too large gets chunked by character window.
+//  4. Each character-window chunk overlaps the previous one by
+//     “overlap“ characters so a thought that straddles the
+//     boundary still survives one chunk's worth of context.
 //
 // 100-char minimum: very-short fragments make poor retrieval anchors
 // and dilute the index — they get appended to the previous chunk
@@ -28,7 +28,7 @@ const (
 	maxOverlapDivisor = 4    // overlap is clamped to chunkSize / 4
 )
 
-// ChunkText slices ``text`` into RAG-ready chunks.
+// ChunkText slices “text“ into RAG-ready chunks.
 //
 // chunkSize is the target character count per chunk (NOT a hard
 // ceiling — paragraphs slightly over are kept whole). Overlap is the
@@ -183,7 +183,7 @@ func splitSentences(p string) []string {
 }
 
 // windowSplit slides a fixed-size window over a too-long string,
-// keeping ``overlap`` characters of the previous window prepended.
+// keeping “overlap“ characters of the previous window prepended.
 func windowSplit(s string, size, overlap int) []string {
 	if size <= 0 {
 		return []string{s}

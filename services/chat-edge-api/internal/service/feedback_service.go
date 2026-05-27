@@ -19,9 +19,9 @@ import (
 
 // Typed errors.
 var (
-	ErrFeedbackBadRating         = errors.New("feedback: rating must be thumbs_up or thumbs_down")
-	ErrFeedbackTargetNotFound    = errors.New("feedback: target message not found")
-	ErrFeedbackNotAssistantMsg   = errors.New("feedback: feedback only allowed on assistant messages")
+	ErrFeedbackBadRating       = errors.New("feedback: rating must be thumbs_up or thumbs_down")
+	ErrFeedbackTargetNotFound  = errors.New("feedback: target message not found")
+	ErrFeedbackNotAssistantMsg = errors.New("feedback: feedback only allowed on assistant messages")
 )
 
 type FeedbackService struct {

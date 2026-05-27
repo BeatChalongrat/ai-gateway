@@ -56,6 +56,7 @@ const NAV_SECTIONS: { title: string; items: { label: string; href: string; icon:
       { label: "Chat Analytics", href: "/chat-analytics", icon: <svg {...S}><path d="M3 3v18h18"/><path d="M7 14l3-3 4 4 5-6"/></svg> },
       { label: "Conversation Logs", href: "/chat-conversations", icon: <svg {...S}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> },
       { label: "Chat Users", href: "/chat-users", icon: <svg {...S}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11l-3-3-3 3"/><path d="M19 8v9"/></svg> },
+      { label: "Knowledge Bases", href: "/chat-knowledge", icon: <svg {...S}><path d="M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg> },
     ],
   },
 ];

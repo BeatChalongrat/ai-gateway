@@ -5,7 +5,7 @@
 //   - Persist the user's real text via MessageService.SendStream /
 //     SendNonStream BEFORE the gateway call.
 //   - Forward each gateway content delta to the browser as an SSE
-//     ``content_delta`` event. The handler never logs the deltas.
+//     “content_delta“ event. The handler never logs the deltas.
 //   - On completion, MessageService persists the accumulated text;
 //     this handler never writes content to the DB directly.
 package handler
@@ -52,17 +52,17 @@ func (h *MessageHandler) SetFileRepo(fr *repository.FileRepo) {
 // ---------------------------------------------------------------------------
 
 type messageResponse struct {
-	ID           string         `json:"id"`
-	Role         string         `json:"role"`
-	Content      string         `json:"content"`
-	Status       string         `json:"status"`
-	ModelID      *string        `json:"model_id,omitempty"`
-	TokenUsage   *tokenUsage    `json:"token_usage,omitempty"`
-	CreatedAt    string         `json:"created_at"`
-	Files        []fileResponse `json:"files,omitempty"`
-	BranchIndex  int            `json:"branch_index"`
-	BranchCount  int            `json:"branch_count"`
-	HasBranches  bool           `json:"has_branches"`
+	ID          string         `json:"id"`
+	Role        string         `json:"role"`
+	Content     string         `json:"content"`
+	Status      string         `json:"status"`
+	ModelID     *string        `json:"model_id,omitempty"`
+	TokenUsage  *tokenUsage    `json:"token_usage,omitempty"`
+	CreatedAt   string         `json:"created_at"`
+	Files       []fileResponse `json:"files,omitempty"`
+	BranchIndex int            `json:"branch_index"`
+	BranchCount int            `json:"branch_count"`
+	HasBranches bool           `json:"has_branches"`
 }
 
 type tokenUsage struct {
@@ -356,7 +356,7 @@ Loop:
 	writeSSEEvent(w, flusher, "message_complete", completeData)
 }
 
-// writeSSEEvent serialises one SSE frame and flushes. ``data`` is
+// writeSSEEvent serialises one SSE frame and flushes. “data“ is
 // JSON-marshalled inline; failures are silently dropped because at
 // this point in the request we've already committed to a 200
 // response — the client will see a missing frame, the SSE clean-up
@@ -392,7 +392,7 @@ func (h *MessageHandler) writeSendError(w http.ResponseWriter, err error) {
 
 // Cancel interrupts the in-flight streaming generation, if any.
 // Idempotent: when no stream is active the response still returns
-// 200 with ``cancelled=false`` so the front-end can retry without
+// 200 with “cancelled=false“ so the front-end can retry without
 // branching on 404 vs success.
 //
 //	POST /api/v1/conversations/{id}/cancel
@@ -427,7 +427,7 @@ func (h *MessageHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 // Regenerate replays the assistant message identified by
-// ``messageID`` using the same conversation context the original
+// “messageID“ using the same conversation context the original
 // reply was built from. Streams the new content over SSE the same
 // way Send does, so the front-end can share its rendering code.
 //
