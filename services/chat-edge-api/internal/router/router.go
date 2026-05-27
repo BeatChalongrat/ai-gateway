@@ -45,6 +45,9 @@ type Handlers struct {
 	// (it always is in the current build but the handler keeps a
 	// guard so omitting it doesn't crash the router setup).
 	Knowledge *handler.KnowledgeHandler
+	// Voice proxies to OpenAI Whisper / TTS. Always wired (the
+	// handler itself fails 503 when the API key isn't configured).
+	Voice *handler.VoiceHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -154,6 +157,14 @@ func New(
 			// Branching: edit a user message + switch active branch.
 			r.Post("/conversations/{id}/messages/{messageID}/edit", h.Message.Edit)
 			r.Post("/conversations/{id}/messages/{messageID}/switch-branch", h.Message.SwitchBranch)
+
+			// Voice (Whisper transcription + OpenAI TTS). Each
+			// handler returns 503 when OPENAI_API_KEY is unset so
+			// the front-end can degrade to browser-native APIs.
+			if h.Voice != nil {
+				r.Post("/voice/transcribe", h.Voice.Transcribe)
+				r.Post("/voice/synthesize", h.Voice.Synthesize)
+			}
 
 			// Knowledge bases (RAG). All tenant-scoped via the
 			// service layer.

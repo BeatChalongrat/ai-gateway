@@ -26,6 +26,7 @@ import { ConversationListSkeleton } from "@/components/ui/Skeleton";
 
 import { ConversationItem } from "./ConversationItem";
 import { CustomInstructionsModal } from "./CustomInstructionsModal";
+import { VoiceSettingsModal } from "./VoiceSettingsModal";
 
 const PORTAL_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PORTAL_URL) ||
@@ -73,6 +74,7 @@ export function Sidebar({
   const [search, setSearch] = useState("");
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const debouncedSearch = useDebounce(search, 300);
 
   useEffect(() => {
@@ -325,6 +327,23 @@ export function Sidebar({
           </button>
           <button
             type="button"
+            onClick={() => setVoiceSettingsOpen(true)}
+            aria-label="Voice settings"
+            title="Voice settings"
+            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+              <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+              <path
+                d="M5 11a7 7 0 0 0 14 0M12 18v3"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
             onClick={() => setInstructionsOpen(true)}
             aria-label="Custom instructions"
             title="Custom instructions"
@@ -363,6 +382,10 @@ export function Sidebar({
       <CustomInstructionsModal
         open={instructionsOpen}
         onClose={() => setInstructionsOpen(false)}
+      />
+      <VoiceSettingsModal
+        open={voiceSettingsOpen}
+        onClose={() => setVoiceSettingsOpen(false)}
       />
     </>
   );
