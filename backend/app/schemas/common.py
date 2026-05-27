@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,7 +11,15 @@ class Message(BaseModel):
     # may have content=null per the OpenAI spec. Downstream code that
     # reads .content already isinstance-checks for str (DLP scanners,
     # observability snapshots) so a None here doesn't crash.
-    content: Optional[str] = None
+    #
+    # Phase 4 Session 4 — vision: user turns that carry image
+    # attachments ship `content` as a list of content blocks
+    # ([{"type":"image_url",...}, {"type":"text","text":"..."}])
+    # matching OpenAI / Anthropic vision message shape. The DLP
+    # scanner already flattens list content to text-only blocks
+    # (rust_dlp_client.py); the transformer guards against list
+    # content by skipping it (image bytes have no PII).
+    content: Optional[Union[str, List[dict]]] = None
     # OpenAI function-calling passthrough. Each entry mirrors the
     # OpenAI tool_call shape:
     #   {"id": str, "type": "function",
