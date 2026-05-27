@@ -321,11 +321,14 @@ function MessageBubbleImpl({
         <MessageAttachments files={message.files} />
       ) : null}
 
-      {/* Action row — copy, thumbs-up, thumbs-down, regenerate. */}
-      <div className="flex items-center gap-1">
+      {/* Action row — copy, thumbs-up, thumbs-down, regenerate.
+          Always visible on AI messages (matches ChatGPT). Hidden only
+          during streaming so the buttons don't reflow as the bubble
+          grows. */}
+      <div className="mt-2 flex items-center gap-1">
         <div
-          className={`message-actions flex items-center gap-0.5 ${
-            message.isStreaming ? "opacity-0" : ""
+          className={`flex items-center gap-0.5 transition-opacity ${
+            message.isStreaming ? "pointer-events-none opacity-0" : "opacity-100"
           }`}
         >
           <ActionButton
@@ -375,14 +378,12 @@ function ActionButton({
   ariaLabel: string;
   onClick: () => void;
   children: React.ReactNode;
-  tone?: "muted" | "success" | "danger";
+  tone?: "muted" | "success";
 }) {
   const colorClass =
     tone === "success"
       ? "text-status-success"
-      : tone === "danger"
-        ? "text-status-danger speaker-playing"
-        : "text-text-muted hover:text-text-primary";
+      : "text-text-muted hover:text-text-secondary";
   return (
     <button
       type="button"
@@ -396,38 +397,75 @@ function ActionButton({
   );
 }
 
+// Icon set — Lucide-style 18px / stroke-1.5 stroke icons. All four
+// share weight + cap so the assistant action row reads as one row
+// of related controls instead of a grab-bag of paths.
 function CopyIcon() {
   return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
     </svg>
   );
 }
 function CheckIcon() {
   return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5 13l4 4L19 7" />
     </svg>
   );
 }
 function EditIcon() {
   return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M12 20h9M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 20h9M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
     </svg>
   );
 }
 function RegenerateIcon() {
   return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
     </svg>
   );
 }
