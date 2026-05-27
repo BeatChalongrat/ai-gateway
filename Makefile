@@ -1,4 +1,4 @@
-.PHONY: up prod down logs seed clean clean-portal-users fresh test shell-backend shell-admin shell-portal build rebuild ps help
+.PHONY: up prod down logs seed clean clean-portal-users fresh test shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -82,3 +82,6 @@ shell-admin: ## Exec into the admin-ui container
 
 shell-portal: ## Exec into the portal container
 	docker compose exec portal /bin/sh
+
+chat-edge-migrate: ## Apply chat-edge SQL migrations to the running postgres-webchat (idempotent; needed after pulling new migrations because docker initdb only runs on first volume init)
+	bash services/chat-edge-api/scripts/apply_migrations.sh
