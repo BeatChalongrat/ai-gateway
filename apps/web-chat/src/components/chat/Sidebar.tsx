@@ -5,7 +5,9 @@
 //   • Header: "SRAN Chat" wordmark + collapse button (desktop)
 //   • Top actions: + New chat, Search chats (both subtle outlined)
 //   • Conversation list grouped by time, plain-text items
-//   • Footer: user avatar + name + theme toggle + settings + logout
+//   • Footer: ONE user row that opens a popup menu (theme toggle,
+//     KB, voice settings, custom instructions, logout). Mirrors
+//     ChatGPT's footer — a single tap target, no icon-grid.
 //
 // Below 80 rows we render plain divs; above that we virtualize via
 // @tanstack/react-virtual. Server-side search is debounced 300ms.
@@ -290,94 +292,15 @@ export function Sidebar({
           }}
         />
 
-        {/* Footer — user profile + actions */}
-        <div className="flex items-center gap-2 border-t border-border-subtle px-3 py-2.5">
-          <span
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
-            style={{ background: "var(--accent)" }}
-            aria-hidden
-          >
-            {userInitial}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div
-              className="truncate text-[13px] font-medium text-text-primary"
-              title={userDisplay}
-            >
-              {userDisplay}
-            </div>
-          </div>
-          <ThemeToggleButton />
-          <button
-            type="button"
-            onClick={() => router.push("/chat/knowledge")}
-            aria-label="Knowledge base"
-            title="Knowledge base"
-            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-          >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => setVoiceSettingsOpen(true)}
-            aria-label="Voice settings"
-            title="Voice settings"
-            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-          >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-              <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
-              <path
-                d="M5 11a7 7 0 0 0 14 0M12 18v3"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => setInstructionsOpen(true)}
-            aria-label="Custom instructions"
-            title="Custom instructions"
-            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-          >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-              <path
-                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 0 1 4.21 16.97l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06A2 2 0 1 1 7.03 4.29l.06.06A1.65 1.65 0 0 0 8.91 4.6 1.65 1.65 0 0 0 9.91 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            aria-label="Logout"
-            title="Logout"
-            className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-          >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M16 17l5-5-5-5M21 12H9M13 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
+        {/* Footer — single user row that opens the popup menu. */}
+        <UserMenu
+          userDisplay={userDisplay}
+          userInitial={userInitial}
+          onKnowledgeBase={() => router.push("/chat/knowledge")}
+          onVoiceSettings={() => setVoiceSettingsOpen(true)}
+          onCustomInstructions={() => setInstructionsOpen(true)}
+          onLogout={handleLogout}
+        />
       </aside>
       <CustomInstructionsModal
         open={instructionsOpen}
@@ -391,40 +314,297 @@ export function Sidebar({
   );
 }
 
-function ThemeToggleButton() {
+// UserMenu — ChatGPT-style sidebar footer. One row, one tap target;
+// every secondary action (theme, KB, voice, custom instructions,
+// logout) lives inside the popup that opens ABOVE the row.
+//
+// The popup uses position:absolute against the same wrapper so it
+// inherits the sidebar width. Outside-click + Escape both close it.
+function UserMenu({
+  userDisplay,
+  userInitial,
+  onKnowledgeBase,
+  onVoiceSettings,
+  onCustomInstructions,
+  onLogout,
+}: {
+  userDisplay: string;
+  userInitial: string;
+  onKnowledgeBase: () => void;
+  onVoiceSettings: () => void;
+  onCustomInstructions: () => void;
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const theme = useThemeStore((s) => s.theme);
-  const toggle = useThemeStore((s) => s.toggle);
+  const toggleTheme = useThemeStore((s) => s.toggle);
   const isDark = theme === "dark";
+
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", off);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", off);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative border-t border-border-subtle">
+      {open ? (
+        <div
+          role="menu"
+          aria-label="Account menu"
+          className="popover-appear absolute inset-x-2 bottom-full z-40 mb-1 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-2xl"
+        >
+          <MenuItem
+            onClick={toggleTheme}
+            icon={<ThemeIcon isDark={isDark} />}
+            label={isDark ? "Dark mode" : "Light mode"}
+            trailing={<ThemePill isDark={isDark} />}
+            closeOnClick={false}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onKnowledgeBase}
+            icon={<BookIcon />}
+            label="Knowledge base"
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onVoiceSettings}
+            icon={<MicIcon />}
+            label="Voice settings"
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onCustomInstructions}
+            icon={<GearIcon />}
+            label="Custom instructions"
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <div className="border-t border-border/60" />
+          <MenuItem
+            onClick={onLogout}
+            icon={<LogoutIcon />}
+            label="Log out"
+            danger
+            setOpen={setOpen}
+          />
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="safe-bottom flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-bg-elevated"
+        style={{ minHeight: 48 }}
+      >
+        <span
+          aria-hidden
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+          style={{ background: "var(--bg-elevated, #3a3a3a)" }}
+        >
+          {userInitial}
+        </span>
+        <span
+          className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary"
+          title={userDisplay}
+        >
+          {userDisplay}
+        </span>
+        <span aria-hidden className="shrink-0 text-text-muted">
+          <DotsIcon />
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function MenuItem({
+  onClick,
+  icon,
+  label,
+  trailing,
+  danger,
+  closeOnClick = true,
+  setOpen,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  trailing?: React.ReactNode;
+  danger?: boolean;
+  closeOnClick?: boolean;
+  setOpen: (v: boolean) => void;
+}) {
   return (
     <button
       type="button"
-      onClick={toggle}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className="focus-ring tap-44 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+      role="menuitem"
+      onClick={() => {
+        onClick();
+        if (closeOnClick) setOpen(false);
+      }}
+      className={`flex w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-bg-elevated ${
+        danger
+          ? "text-status-danger hover:text-status-danger"
+          : "text-text-primary"
+      }`}
+      style={{ height: 40 }}
     >
-      {isDark ? (
-        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-          <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.7" />
-          <path
-            d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinecap="round"
-          />
-        </svg>
-      ) : (
-        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )}
+      <span
+        aria-hidden
+        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center ${
+          danger ? "text-status-danger" : "text-text-secondary"
+        }`}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing ? (
+        <span aria-hidden className="shrink-0 text-text-muted">
+          {trailing}
+        </span>
+      ) : null}
     </button>
+  );
+}
+
+// ── Icons ────────────────────────────────────────────────────
+
+function DotsIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="5" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="19" cy="12" r="1.6" />
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M9 6l6 6-6 6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ThemeIcon({ isDark }: { isDark: boolean }) {
+  return isDark ? (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ) : (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ThemePill({ isDark }: { isDark: boolean }) {
+  // Read-only pill that mirrors the current theme so the user sees
+  // their state at a glance. Clicking the row toggles; the pill
+  // animates the knob across.
+  return (
+    <span
+      aria-hidden
+      className="inline-flex h-4 w-7 items-center rounded-full bg-border-subtle"
+    >
+      <span
+        className="inline-block h-3 w-3 transform rounded-full bg-text-secondary transition-transform"
+        style={{ transform: isDark ? "translateX(14px)" : "translateX(2px)" }}
+      />
+    </span>
+  );
+}
+
+function BookIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M5 11a7 7 0 0 0 14 0M12 18v3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 0 1 4.21 16.97l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06A2 2 0 1 1 7.03 4.29l.06.06A1.65 1.65 0 0 0 8.91 4.6 1.65 1.65 0 0 0 9.91 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M16 17l5-5-5-5M21 12H9M13 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

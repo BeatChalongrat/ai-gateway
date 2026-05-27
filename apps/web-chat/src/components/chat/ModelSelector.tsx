@@ -227,7 +227,9 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
         aria-expanded={open}
         title="Switch model"
       >
-        {compact ? <AssistantAvatar modelId={activeId ?? null} size={16} /> : null}
+        {compact ? (
+          <AssistantAvatar modelId={activeId ?? null} size={16} neutral />
+        ) : null}
         <span className="font-medium text-text-primary">
           {activeModel ? shortName : "Select model"}
         </span>
