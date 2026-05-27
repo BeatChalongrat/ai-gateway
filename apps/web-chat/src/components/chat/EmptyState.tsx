@@ -14,6 +14,8 @@
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 
 interface Props {
   onPrompt: (text: string) => void;
@@ -27,19 +29,18 @@ interface Props {
 }
 
 interface ChipDef {
-  label: string;
+  // Translation key (e.g. ``empty.chip.write``) — t() resolves it
+  // at render time so a locale switch updates the chip text
+  // without forcing the parent to re-render.
+  labelKey: DictKey;
+  promptKey: DictKey;
   icon: React.ReactNode;
-  // Text injected into the textarea when the chip is tapped. The
-  // chip doesn't auto-send; the user reviews/edits before pressing
-  // Enter. (Spec said auto-send, but the Claude UX of "fill the
-  // box and let the user tweak" matches more carefully — pressing
-  // Enter is one keypress away.)
-  prompt: string;
 }
 
 const CHIPS: ChipDef[] = [
   {
-    label: "Write",
+    labelKey: "empty.chip.write",
+    promptKey: "empty.chip.write.prompt",
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -51,10 +52,10 @@ const CHIPS: ChipDef[] = [
         />
       </svg>
     ),
-    prompt: "Help me draft ",
   },
   {
-    label: "Learn",
+    labelKey: "empty.chip.learn",
+    promptKey: "empty.chip.learn.prompt",
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -66,10 +67,10 @@ const CHIPS: ChipDef[] = [
         />
       </svg>
     ),
-    prompt: "Explain ",
   },
   {
-    label: "Code",
+    labelKey: "empty.chip.code",
+    promptKey: "empty.chip.code.prompt",
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -81,10 +82,10 @@ const CHIPS: ChipDef[] = [
         />
       </svg>
     ),
-    prompt: "Write a ",
   },
   {
-    label: "Analyze",
+    labelKey: "empty.chip.analyze",
+    promptKey: "empty.chip.analyze.prompt",
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -96,17 +97,19 @@ const CHIPS: ChipDef[] = [
         />
       </svg>
     ),
-    prompt: "Analyze this ",
   },
 ];
 
-function timeOfDayGreeting(now: Date): string {
+// Returns a translation-key for the active hour-of-day bucket; the
+// caller runs it through ``t()`` so the greeting localises with the
+// rest of the empty state.
+function greetingKey(now: Date): DictKey {
   const h = now.getHours();
-  if (h < 5) return "Still up";
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  if (h < 22) return "Good evening";
-  return "Burning the midnight oil";
+  if (h < 5) return "empty.greet.lateNight";
+  if (h < 12) return "empty.greet.morning";
+  if (h < 17) return "empty.greet.afternoon";
+  if (h < 22) return "empty.greet.evening";
+  return "empty.greet.midnight";
 }
 
 function firstName(input: string | null | undefined): string {
@@ -121,14 +124,16 @@ function firstName(input: string | null | undefined): string {
 
 export function EmptyState({ onPrompt, children }: Props) {
   const { user } = useAuth();
+  const t = useT();
   const name = firstName(user?.email ?? user?.user_id ?? null);
-  // Time-of-day greeting is computed AFTER mount so SSR renders a
-  // stable placeholder and the client swaps in the localised
+  // Time-of-day greeting key is computed AFTER mount so SSR renders
+  // a stable placeholder and the client swaps in the localised
   // version without a hydration mismatch warning.
-  const [greeting, setGreeting] = useState(`Hello, ${name}`);
+  const [greetKey, setGreetKey] = useState<DictKey | null>(null);
   useEffect(() => {
-    setGreeting(`${timeOfDayGreeting(new Date())}, ${name}`);
-  }, [name]);
+    setGreetKey(greetingKey(new Date()));
+  }, []);
+  const greeting = greetKey ? `${t(greetKey)}, ${name}` : `Hello, ${name}`;
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
@@ -143,7 +148,7 @@ export function EmptyState({ onPrompt, children }: Props) {
           {greeting}
         </h1>
         <p className="mt-2 text-base text-text-secondary md:text-lg">
-          How can I help you today?
+          {t("empty.subtitle")}
         </p>
 
         {children ? <div className="mt-6 text-left">{children}</div> : null}
@@ -151,16 +156,16 @@ export function EmptyState({ onPrompt, children }: Props) {
         <div className="scrollbar-thin mt-6 flex flex-wrap items-center justify-center gap-2 overflow-x-auto pb-1">
           {CHIPS.map((c) => (
             <button
-              key={c.label}
+              key={c.labelKey}
               type="button"
-              onClick={() => onPrompt(c.prompt)}
+              onClick={() => onPrompt(t(c.promptKey))}
               className="focus-ring tap-44 inline-flex items-center gap-2 rounded-full border border-border-subtle bg-transparent px-4 py-2 text-[13px] text-text-secondary transition-all hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-surface hover:text-text-primary"
             >
               {/* Icon inherits the chip's text colour — no accent
                   tint, no green. The chips are intentionally muted
                   so they read as suggestions, not CTAs. */}
               <span className="text-text-tertiary">{c.icon}</span>
-              <span>{c.label}</span>
+              <span>{t(c.labelKey)}</span>
             </button>
           ))}
         </div>

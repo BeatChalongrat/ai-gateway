@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 import { SettingsCard } from "./VoiceSettingsModal";
 
@@ -30,6 +31,7 @@ interface Props {
 const MAX_CHARS = 1500;
 
 export function CustomInstructionsModal({ open, onClose }: Props) {
+  const t = useT();
   const [about, setAbout] = useState("");
   const [respond, setRespond] = useState("");
   const [loading, setLoading] = useState(false);
@@ -128,8 +130,8 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
     <Modal
       open={open}
       onClose={onClose}
-      title="Custom instructions"
-      description="Shape how the AI responds in every conversation"
+      title={t("instr.title")}
+      description={t("instr.subtitle")}
       maxWidth={560}
       footer={
         <>
@@ -138,7 +140,7 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
             onClick={onClose}
             className="focus-ring rounded-lg border border-border bg-transparent px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Cancel
+            {t("instr.cancel")}
           </button>
           <button
             type="button"
@@ -146,15 +148,15 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
             disabled={saving || loading}
             className="focus-ring rounded-lg bg-text-primary px-6 py-2 text-sm font-medium text-bg-base transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("instr.saving") : t("instr.save")}
           </button>
         </>
       }
     >
       <div className="flex flex-col gap-4">
-        <SettingsCard title="What would you like the AI to know about you?">
+        <SettingsCard title={t("instr.about.label")}>
           <InstructionField
-            placeholder="e.g. I'm a software developer working with Python and Go. I prefer concise answers with code examples."
+            placeholder={t("instr.about.placeholder")}
             value={about}
             onChange={(v) => {
               dirtyRef.current = true;
@@ -163,9 +165,9 @@ export function CustomInstructionsModal({ open, onClose }: Props) {
             loading={loading}
           />
         </SettingsCard>
-        <SettingsCard title="How would you like the AI to respond?">
+        <SettingsCard title={t("instr.respond.label")}>
           <InstructionField
-            placeholder="e.g. Be concise and technical. Use code blocks. Explain trade-offs."
+            placeholder={t("instr.respond.placeholder")}
             value={respond}
             onChange={(v) => {
               dirtyRef.current = true;

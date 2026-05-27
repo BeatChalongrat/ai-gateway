@@ -23,6 +23,7 @@ import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
+import { useT } from "@/lib/i18n";
 import { OPENAI_VOICES, useVoiceStore, type OpenAIVoice } from "@/stores/voiceStore";
 
 interface Props {
@@ -60,6 +61,7 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
 
   const { voices, speak, stop, speakingMessageId } = useVoiceOutput();
   const [previewing, setPreviewing] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     if (!open) setPreviewing(false);
@@ -85,31 +87,31 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
         stop();
         onClose();
       }}
-      title="Voice settings"
-      description="Configure speech-to-text and text-to-speech"
+      title={t("voice.title")}
+      description={t("voice.subtitle")}
       maxWidth={520}
-      footer={<DoneButton onClick={onClose} />}
+      footer={<DoneButton label={t("voice.done")} onClick={onClose} />}
     >
       <div className="flex flex-col gap-4">
-        <SettingsCard title="Voice input">
-          <FieldLabel>Method</FieldLabel>
+        <SettingsCard title={t("voice.section.input")}>
+          <FieldLabel>{t("voice.field.method")}</FieldLabel>
           <SelectionGrid
             value={inputMethod}
             onChange={(v) => setInputMethod(v as typeof inputMethod)}
             options={[
               {
                 value: "web-speech",
-                label: "Browser",
-                hint: "Free, real-time. Works in Chrome, Edge, Safari.",
+                label: t("voice.method.browser"),
+                hint: t("voice.method.browser.hint"),
               },
               {
                 value: "whisper",
-                label: "Whisper",
-                hint: "Higher accuracy. Requires server key.",
+                label: t("voice.method.whisper"),
+                hint: t("voice.method.whisper.hint"),
               },
             ]}
           />
-          <FieldLabel className="mt-4">Language</FieldLabel>
+          <FieldLabel className="mt-4">{t("voice.field.language")}</FieldLabel>
           <Dropdown
             value={inputLang}
             onChange={(v) => setInputLang(v)}
@@ -117,33 +119,33 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
           />
         </SettingsCard>
 
-        <SettingsCard title="Voice output">
-          <FieldLabel>Source</FieldLabel>
+        <SettingsCard title={t("voice.section.output")}>
+          <FieldLabel>{t("voice.field.source")}</FieldLabel>
           <SelectionGrid
             value={outputMode}
             onChange={(v) => setOutputMode(v as typeof outputMode)}
             options={[
               {
                 value: "browser",
-                label: "Browser",
-                hint: "System voices. No server round-trip.",
+                label: t("voice.source.browser"),
+                hint: t("voice.source.browser.hint"),
               },
               {
                 value: "openai",
-                label: "OpenAI TTS",
-                hint: "Premium voices. Requires server key.",
+                label: t("voice.source.openai"),
+                hint: t("voice.source.openai.hint"),
               },
             ]}
           />
           <div className="mt-4 grid grid-cols-2 gap-4">
             <div>
-              <FieldLabel>Voice</FieldLabel>
+              <FieldLabel>{t("voice.field.voice")}</FieldLabel>
               {outputMode === "browser" ? (
                 <Dropdown
                   value={browserVoiceName ?? ""}
                   onChange={(v) => setBrowserVoice(v || null)}
                   options={[
-                    { value: "", label: "System default" },
+                    { value: "", label: t("voice.voice.systemDefault") },
                     ...voices.map((v) => ({
                       value: v.name,
                       label: `${v.name} — ${v.lang}`,
@@ -163,7 +165,7 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
             </div>
             <div>
               <FieldLabel>
-                Speed{" "}
+                {t("voice.field.speed")}{" "}
                 <span className="text-text-secondary">
                   {rate.toFixed(1)}×
                 </span>
@@ -175,16 +177,18 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
             <PreviewButton
               active={previewing && speakingMessageId === "__voice_preview__"}
               onClick={preview}
+              playLabel={t("voice.preview.play")}
+              stopLabel={t("voice.preview.stop")}
             />
           </div>
         </SettingsCard>
 
-        <SettingsCard title="Behaviour">
+        <SettingsCard title={t("voice.section.behaviour")}>
           <ToggleRow
             checked={autoRead}
             onChange={setAutoRead}
-            label="Auto-read AI responses"
-            hint="Automatically read new replies aloud."
+            label={t("voice.autoRead")}
+            hint={t("voice.autoRead.hint")}
           />
         </SettingsCard>
       </div>
@@ -230,14 +234,20 @@ export function FieldLabel({
   );
 }
 
-export function DoneButton({ onClick }: { onClick: () => void }) {
+export function DoneButton({
+  onClick,
+  label = "Done",
+}: {
+  onClick: () => void;
+  label?: string;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className="focus-ring rounded-lg bg-text-primary px-6 py-2 text-sm font-medium text-bg-base transition-opacity hover:opacity-90"
     >
-      Done
+      {label}
     </button>
   );
 }
@@ -351,9 +361,13 @@ function SpeedSlider({
 function PreviewButton({
   active,
   onClick,
+  playLabel,
+  stopLabel,
 }: {
   active: boolean;
   onClick: () => void;
+  playLabel: string;
+  stopLabel: string;
 }) {
   return (
     <button
@@ -364,12 +378,12 @@ function PreviewButton({
       {active ? (
         <>
           <StopIcon />
-          Stop preview
+          {stopLabel}
         </>
       ) : (
         <>
           <PlayIcon />
-          Preview voice
+          {playLabel}
         </>
       )}
     </button>

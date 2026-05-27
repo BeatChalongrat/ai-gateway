@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useT } from "@/lib/i18n";
 import type { Conversation } from "@/lib/types";
 
 interface Props {
@@ -19,6 +20,7 @@ export function ConversationItem({
   onRename,
   onDelete,
 }: Props) {
+  const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -136,7 +138,7 @@ export function ConversationItem({
               >
                 <path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z" />
               </svg>
-              Rename
+              {t("conv.rename")}
             </button>
             <button
               type="button"
@@ -160,7 +162,7 @@ export function ConversationItem({
                 <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 011.334-1.334h2.666a1.333 1.333 0 011.334 1.334V4M6.667 7.333v4M9.333 7.333v4" />
                 <path d="M3.333 4l.667 9.333a1.333 1.333 0 001.333 1.334h5.334a1.333 1.333 0 001.333-1.334L12.667 4" />
               </svg>
-              Delete
+              {t("conv.delete")}
             </button>
           </div>
         ) : null}

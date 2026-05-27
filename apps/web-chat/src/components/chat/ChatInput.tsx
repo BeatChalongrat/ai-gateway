@@ -8,6 +8,7 @@ import {
   MAX_FILES_PER_MESSAGE,
   validateFile,
 } from "@/lib/fileUtil";
+import { useT } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useWhisperInput } from "@/hooks/useWhisperInput";
@@ -60,6 +61,7 @@ export function ChatInput({
   injectedText,
   onInjectedTextConsumed,
 }: Props) {
+  const t = useT();
   const [text, setText] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   // Distance (px) the on-screen keyboard is occluding the bottom of
@@ -409,10 +411,10 @@ export function ChatInput({
               disabled={disabled}
               placeholder={
                 streaming
-                  ? "Streaming response…"
+                  ? t("input.placeholder.streaming")
                   : isUploading
-                    ? "Uploading…"
-                    : "Message SRAN Chat…"
+                    ? t("input.placeholder.uploading")
+                    : t("input.placeholder")
               }
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKeyDown}
@@ -433,8 +435,8 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  aria-label="Attach files"
-                  title="Attach files"
+                  aria-label={t("input.attach")}
+                  title={t("input.attach")}
                   disabled={streaming || disabled}
                   className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -470,8 +472,8 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={startVoice}
-                  aria-label="Start voice input"
-                  title="Voice input"
+                  aria-label={t("input.voice")}
+                  title={t("input.voice")}
                   disabled={disabled}
                   className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -485,7 +487,7 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={onStop}
-                  aria-label="Stop generation"
+                  aria-label={t("input.stop")}
                   className="focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-status-danger/85 text-white transition-colors duration-150 hover:bg-status-danger"
                 >
                   <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -497,7 +499,7 @@ export function ChatInput({
                   type="button"
                   onClick={submit}
                   disabled={!canSend}
-                  aria-label="Send"
+                  aria-label={t("input.send")}
                   // ChatGPT-style send button: when something is typed,
                   // the circle inverts to the foreground colour (white
                   // in dark mode, near-black in light mode) so the icon
@@ -546,7 +548,7 @@ export function ChatInput({
         </div>
 
         <p className="text-center text-[11px] text-text-muted">
-          SRAN Chat can make mistakes. Check important info.
+          {t("input.footer")}
         </p>
       </div>
     </div>
