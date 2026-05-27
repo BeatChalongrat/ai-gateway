@@ -108,8 +108,8 @@ export function AudioWaveform({ stream, size = 22, className = "" }: Props) {
           data-bar
           className={
             cssOnly
-              ? "audio-bar audio-bar-css inline-block w-[3px] rounded-sm bg-accent"
-              : "inline-block w-[3px] rounded-sm bg-accent transition-[height] duration-75 ease-out"
+              ? "audio-bar audio-bar-css inline-block w-[3px] rounded-sm bg-text-primary"
+              : "inline-block w-[3px] rounded-sm bg-text-primary transition-[height] duration-75 ease-out"
           }
           style={
             cssOnly

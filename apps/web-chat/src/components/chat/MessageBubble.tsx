@@ -83,7 +83,7 @@ function CitationPill({ filename }: { filename: string }) {
   return (
     <span
       title={`From knowledge base: ${filename}`}
-      className="mx-0.5 inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 align-baseline text-[11px] font-medium text-accent"
+      className="mx-0.5 inline-flex items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-0.5 align-baseline text-[11px] font-medium text-text-secondary"
     >
       <svg
         width={10}
@@ -234,7 +234,7 @@ function MessageBubbleImpl({
                     }
                   }}
                   rows={2}
-                  className="scrollbar-thin w-full min-w-[260px] resize-none rounded-lg border border-accent bg-bg-base px-3 py-2 text-[15px] text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  className="scrollbar-thin w-full min-w-[260px] resize-none rounded-lg border border-border-strong bg-bg-base px-3 py-2 text-[15px] text-text-primary focus:outline-none focus:ring-2 focus:ring-border-strong/40"
                 />
                 <div className="flex justify-end gap-2">
                   <button
@@ -247,7 +247,7 @@ function MessageBubbleImpl({
                   <button
                     type="button"
                     onClick={submitEdit}
-                    className="focus-ring rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white hover:bg-accent-hover"
+                    className="focus-ring rounded-md bg-text-primary px-2.5 py-1 text-[12px] font-medium text-bg-base hover:opacity-90"
                   >
                     Save & Submit
                   </button>

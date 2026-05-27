@@ -9,9 +9,14 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
 }
 
+// ChatGPT-style primary: inverted foreground/background — white pill
+// + dark text in dark mode, near-black pill + light text in light
+// mode. Drops the accent green that was reading as out-of-place
+// across the redesigned UI (the only remaining accent in the app is
+// the OpenAI provider mark on assistant avatars, where green = brand).
 const variantClasses: Record<Variant, string> = {
   primary:
-    "bg-accent hover:bg-accent-hover text-white shadow-sm disabled:bg-accent/40 disabled:cursor-not-allowed",
+    "bg-text-primary hover:opacity-90 text-bg-base shadow-sm disabled:opacity-40 disabled:cursor-not-allowed",
   secondary:
     "bg-bg-secondary hover:bg-bg-elevated text-text-primary border border-border disabled:opacity-50",
   ghost:
@@ -28,7 +33,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <button
       ref={ref}
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-accent/40 ${variantClasses[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-border-strong/40 ${variantClasses[variant]} ${className}`}
       {...rest}
     >
       {loading ? (
