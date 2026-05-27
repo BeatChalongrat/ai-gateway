@@ -161,9 +161,13 @@ export function Sidebar({
         >
           <span
             aria-label="SRAN Chat"
-            className="font-brand text-xl font-bold tracking-tight text-text-primary"
+            className="font-brand text-xl tracking-tight text-text-primary"
           >
-            SRAN
+            {/* ChatGPT-style weight split: bold "SRAN" + lighter
+                "Chat" gives the wordmark a brand/product hierarchy
+                without changing typeface or size. */}
+            <span className="font-bold">SRAN</span>
+            <span className="font-normal">Chat</span>
           </span>
           <button
             type="button"
