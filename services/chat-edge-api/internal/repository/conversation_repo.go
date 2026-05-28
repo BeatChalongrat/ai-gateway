@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -204,6 +206,70 @@ func (r *ConversationRepo) SearchByUser(
 			return nil, fmt.Errorf("search scan: %w", err)
 		}
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ConversationSearchHit is one row from SearchTitlesForUser —
+// includes the live message count so the search service can show
+// "Conversation 'Q1 review' (24 messages)" without a second query
+// per row.
+type ConversationSearchHit struct {
+	ID           uuid.UUID
+	Title        string
+	UpdatedAt    time.Time
+	MessageCount int
+	Rank         float64
+}
+
+// SearchTitlesForUser is the S6 tsvector counterpart to
+// SearchByUser. Different use case from the sidebar's
+// search-as-you-type (which uses ILIKE for substring matches
+// against partial words): this one does whole-word matching for
+// the AI's search_past_conversations tool + the /api/v1/search
+// endpoint. Returns hits sorted by ts_rank desc then updated_at.
+//
+// Limit defaults to 10, capped at 50.
+func (r *ConversationRepo) SearchTitlesForUser(
+	ctx context.Context, tenantID, userID uuid.UUID, query string, limit int,
+) ([]ConversationSearchHit, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	const sql = `
+		SELECT
+			c.id,
+			c.title,
+			c.updated_at,
+			c.message_count,
+			ts_rank(c.search_vector, plainto_tsquery('simple', $3))::float8 AS rank
+		FROM chat.conversations c
+		WHERE c.tenant_id = $1
+		  AND c.user_id   = $2
+		  AND c.is_deleted = false
+		  AND c.search_vector @@ plainto_tsquery('simple', $3)
+		ORDER BY rank DESC, c.updated_at DESC
+		LIMIT $4
+	`
+	rows, err := r.db.Query(ctx, sql, tenantID, userID, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search titles for user: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ConversationSearchHit, 0, limit)
+	for rows.Next() {
+		var h ConversationSearchHit
+		if err := rows.Scan(&h.ID, &h.Title, &h.UpdatedAt, &h.MessageCount, &h.Rank); err != nil {
+			return nil, fmt.Errorf("search titles scan: %w", err)
+		}
+		out = append(out, h)
 	}
 	return out, rows.Err()
 }

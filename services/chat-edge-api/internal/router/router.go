@@ -61,6 +61,9 @@ type Handlers struct {
 	// S1 — Personal Memory Core. CRUD + pin + confirm + audit
 	// for chat.user_memories.
 	Memory *handler.MemoryHandler
+	// S6 — Past-conversation search. Backs both the AI tool and
+	// the frontend's "search my chats" surface (future).
+	Search *handler.SearchHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -234,6 +237,12 @@ func New(
 				r.Get("/conversations/{convID}/generated-files", h.Workspace.ListGenerated)
 				r.Post("/conversations/{convID}/files/{fileID}/rollback", h.Workspace.Rollback)
 				r.Get("/conversations/{convID}/file-compare", h.Workspace.Compare)
+			}
+
+			// S6 — Past conversation search. Auth-gated; tenant +
+			// user scoping happens inside SearchService.
+			if h.Search != nil {
+				r.Get("/search", h.Search.Search)
 			}
 
 			// S1 — Personal Memory Core. Bulk-clear lives at

@@ -288,6 +288,53 @@ func (r *MemoryRepo) ExistsByNormalizedKey(
 	return exists, nil
 }
 
+// SearchByContent runs a tsvector full-text search across the
+// user's active memories. Reuses the GIN index from migration 014.
+// Tie-breaks by importance then recency so the most useful matches
+// surface first.
+//
+// Limit defaults to 10, capped at 50. Empty query short-circuits
+// to nil — the search service is responsible for sanitising the
+// input string before calling.
+func (r *MemoryRepo) SearchByContent(
+	ctx context.Context, userID, tenantID uuid.UUID, query string, limit int,
+) ([]model.Memory, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	sql := `SELECT ` + memoryColumns + `
+	        FROM chat.user_memories
+	        WHERE user_id = $1
+	          AND tenant_id = $2
+	          AND status = 'active'
+	          AND search_vector @@ plainto_tsquery('simple', $3)
+	        ORDER BY ts_rank(search_vector, plainto_tsquery('simple', $3)) DESC,
+	                 importance_score DESC,
+	                 updated_at DESC
+	        LIMIT $4`
+	rows, err := r.db.Query(ctx, sql, userID, tenantID, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search memories by content: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.Memory, 0, limit)
+	for rows.Next() {
+		var m model.Memory
+		if err := scanMemory(rows, &m); err != nil {
+			return nil, fmt.Errorf("search memories scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // IncrementUseCount bumps use_count and stamps last_used_at. Called
 // in the background after the injection block ships, so a write
 // failure must not block the message turn — caller swallows the
