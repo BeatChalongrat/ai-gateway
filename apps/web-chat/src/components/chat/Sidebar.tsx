@@ -26,6 +26,7 @@ import type { Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
+import { Brain, BrainCircuit } from "lucide-react";
 
 import { ConversationItem } from "./ConversationItem";
 import { CustomInstructionsModal } from "./CustomInstructionsModal";
@@ -133,6 +134,21 @@ export function Sidebar({
 
   function handleNew() {
     newChat();
+    onClose();
+  }
+
+  function handleTemporaryChat() {
+    // Set the store flag the next createConversation() consumes;
+    // navigation to /chat lazy-creates on the first send, so the
+    // PATCH to memory_enabled=false runs at create-time before the
+    // first message turn.
+    useChatStore.getState().setNextConversationTemporary(true);
+    newChat();
+    onClose();
+  }
+
+  function handleOpenMemory() {
+    router.push("/chat/memory");
     onClose();
   }
 
@@ -321,6 +337,8 @@ export function Sidebar({
           onKnowledgeBase={() => router.push("/chat/knowledge")}
           onVoiceSettings={() => setVoiceSettingsOpen(true)}
           onCustomInstructions={() => setInstructionsOpen(true)}
+          onMemory={handleOpenMemory}
+          onTemporaryChat={handleTemporaryChat}
           onLogout={handleLogout}
         />
       </aside>
@@ -348,6 +366,8 @@ function UserMenu({
   onKnowledgeBase,
   onVoiceSettings,
   onCustomInstructions,
+  onMemory,
+  onTemporaryChat,
   onLogout,
 }: {
   userDisplay: string;
@@ -355,6 +375,8 @@ function UserMenu({
   onKnowledgeBase: () => void;
   onVoiceSettings: () => void;
   onCustomInstructions: () => void;
+  onMemory: () => void;
+  onTemporaryChat: () => void;
   onLogout: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -425,6 +447,19 @@ function UserMenu({
             icon={<GearIcon />}
             label={t("menu.customInstructions")}
             trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onMemory}
+            icon={<Brain width={14} height={14} aria-hidden />}
+            label="Memory"
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onTemporaryChat}
+            icon={<BrainCircuit width={14} height={14} aria-hidden />}
+            label="Temporary chat"
             setOpen={setOpen}
           />
           <div className="border-t border-border/60" />

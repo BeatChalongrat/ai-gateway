@@ -20,6 +20,9 @@ import type {
   KnowledgeBaseListResponse,
   KnowledgeDocument,
   KnowledgeSearchResponse,
+  Memory,
+  MemoryEventListResponse,
+  MemoryListResponse,
   Message,
   MessageListResponse,
   ModelListResponse,
@@ -128,6 +131,15 @@ class ApiClient {
     return this.json<Conversation>(`/conversations/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ knowledge_base_id }),
+    });
+  }
+  /** S1 — toggle the cross-conversation memory layer for THIS
+   *  conversation. False = "temporary chat" (no memory injection,
+   *  no save/list tools). Returns the updated conversation. */
+  setConversationMemory(id: string, enabled: boolean) {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ memory_enabled: enabled }),
     });
   }
   deleteConversation(id: string) {
@@ -307,6 +319,86 @@ class ApiClient {
       { method: "POST", body: JSON.stringify(body) },
     );
   }
+  // ----- Memory (S1) ----------------------------------------
+  /** List the caller's saved memories. Filters mirror the server
+   *  side: scope_type / memory_type / status, with paging via
+   *  limit + offset. Defaults match the API (active only, pinned
+   *  first via the server's ORDER BY). */
+  listMemories(params?: {
+    scope_type?: string;
+    memory_type?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const search = new URLSearchParams();
+    if (params?.scope_type) search.set("scope_type", params.scope_type);
+    if (params?.memory_type) search.set("memory_type", params.memory_type);
+    if (params?.status) search.set("status", params.status);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return this.json<MemoryListResponse>(
+      `/memories${qs ? `?${qs}` : ""}`,
+    );
+  }
+  createMemory(data: {
+    scope_type?: string;
+    memory_type: string;
+    content: string;
+    category?: string;
+  }) {
+    return this.json<Memory>("/memories", {
+      method: "POST",
+      body: JSON.stringify({
+        scope_type: data.scope_type ?? "global_user",
+        memory_type: data.memory_type,
+        content: data.content,
+        category: data.category,
+      }),
+    });
+  }
+  updateMemory(
+    id: string,
+    data: {
+      content?: string;
+      category?: string;
+      memory_type?: string;
+      importance_score?: number;
+    },
+  ) {
+    return this.json<Memory>(`/memories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+  deleteMemory(id: string) {
+    return this.raw(`/memories/${id}`, { method: "DELETE" });
+  }
+  pinMemory(id: string, pinned: boolean) {
+    return this.json<Memory>(`/memories/${id}/pin`, {
+      method: "POST",
+      body: JSON.stringify({ pinned }),
+    });
+  }
+  confirmMemory(id: string, confirmed: boolean) {
+    return this.json<Memory>(`/memories/${id}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ confirmed }),
+    });
+  }
+  /** Bulk soft-delete. Pass a scope_type to limit (e.g. only
+   *  conversation-scoped memories); omit to clear everything. */
+  clearAllMemories(scopeType?: string) {
+    const qs = scopeType ? `?scope_type=${encodeURIComponent(scopeType)}` : "";
+    return this.json<{ deleted_count: number }>(`/memories/all${qs}`, {
+      method: "DELETE",
+    });
+  }
+  getMemoryEvents(id: string) {
+    return this.json<MemoryEventListResponse>(`/memories/${id}/events`);
+  }
+
   // ----- Preferences ---------------------------------------
   getPreferences() {
     return this.json<UserPreferences>("/user/preferences");

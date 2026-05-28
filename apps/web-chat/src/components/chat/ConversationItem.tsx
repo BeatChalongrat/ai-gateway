@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { BrainCircuit } from "lucide-react";
+
 import { useT } from "@/lib/i18n";
 import type { Conversation } from "@/lib/types";
 
@@ -90,8 +92,23 @@ export function ConversationItem({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="flex-1 truncate" title={conv.title}>
-            {conv.title || "Untitled"}
+          <span
+            className="flex flex-1 items-center gap-1.5 truncate"
+            title={
+              conv.memory_enabled === false
+                ? `${conv.title || "Untitled"} — temporary chat (memory off)`
+                : conv.title
+            }
+          >
+            {conv.memory_enabled === false ? (
+              <BrainCircuit
+                width={12}
+                height={12}
+                aria-hidden
+                className="shrink-0 text-text-muted opacity-70"
+              />
+            ) : null}
+            <span className="truncate">{conv.title || "Untitled"}</span>
           </span>
         )}
         <button
