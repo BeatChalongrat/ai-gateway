@@ -155,6 +155,12 @@ type GatewayChatRequest struct {
 	// the provider's tool-routing tax unnecessarily.
 	Tools      []GatewayTool `json:"tools,omitempty"`
 	ToolChoice any           `json:"tool_choice,omitempty"`
+	// S3 — bounded sampling for internal extraction calls
+	// (ConversationStateService). Both omitempty so the main chat
+	// flow keeps using the gateway / provider defaults — only the
+	// extractor sets them today.
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
 }
 
 // GatewayCallContext carries the per-request identity headers we

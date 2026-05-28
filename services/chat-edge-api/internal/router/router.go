@@ -165,6 +165,12 @@ func New(
 			// human-readable name instead of a truncated user prompt.
 			r.Post("/conversations/{id}/generate-title", h.Conversation.GenerateTitle)
 
+			// S3 — Structured Conversation State (read-only). The
+			// AI mutates state via the update_conversation_state
+			// tool; this surface lets the frontend display
+			// goals / decisions / tasks if it wants to in future.
+			r.Get("/conversations/{id}/state", h.Conversation.GetState)
+
 			// Conversation sharing (authenticated half — the
 			// public share-view endpoint is registered outside the
 			// RequireAuth subgroup below).

@@ -39,6 +39,9 @@ type ConversationHandler struct {
 	// Optional. Powers POST /conversations/{id}/generate-title.
 	// Left nil in tests that don't exercise title generation.
 	titles *service.TitleService
+	// Optional. Powers GET /conversations/{id}/state — the S3
+	// read-only surface for the structured conversation-state row.
+	states *service.ConversationStateService
 }
 
 func NewConversationHandler(c *service.ConversationService) *ConversationHandler {
@@ -58,6 +61,13 @@ func (h *ConversationHandler) SetKnowledgeService(k *service.KnowledgeService) {
 // titles after the first turn lands.
 func (h *ConversationHandler) SetTitleService(t *service.TitleService) {
 	h.titles = t
+}
+
+// SetConversationStateService wires the S3 state read path so
+// GET /conversations/{id}/state can serve the structured-state
+// row to the frontend.
+func (h *ConversationHandler) SetConversationStateService(s *service.ConversationStateService) {
+	h.states = s
 }
 
 // SetExportSources wires the dependencies the /export endpoint
@@ -399,6 +409,58 @@ func (h *ConversationHandler) GenerateTitle(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"title": title})
+}
+
+// ---------------------------------------------------------------------------
+// Get structured conversation state — GET /conversations/{id}/state
+// ---------------------------------------------------------------------------
+
+// GetState returns the S3 structured-state row for the
+// conversation. Ownership is enforced via AssertOwnership; missing
+// state rows return an empty envelope (200) rather than 404 so the
+// frontend can render an empty "no state yet" surface without
+// branching on the error path.
+func (h *ConversationHandler) GetState(w http.ResponseWriter, r *http.Request) {
+	if h.states == nil {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "state service not configured")
+		return
+	}
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	if _, err := h.conversations.AssertOwnership(r.Context(), caller.TenantUUID, caller.UserID, convID); err != nil {
+		if errors.Is(err, service.ErrConversationNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	state, err := h.states.Get(r.Context(), convID, caller.UserID, caller.TenantUUID)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if state == nil {
+		// Empty envelope — same shape as a populated row, just with
+		// null / empty arrays. Saves the frontend a branch on 404.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"conversation_id":      convID.String(),
+			"current_goal":         nil,
+			"structured_summary":   map[string]any{},
+			"confirmed_decisions":  []any{},
+			"active_artifacts":     []any{},
+			"open_tasks":           []any{},
+			"rejected_approaches":  []any{},
+			"unresolved_questions": []any{},
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(state)
 }
 
 // ---------------------------------------------------------------------------
