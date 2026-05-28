@@ -22,6 +22,16 @@ if TYPE_CHECKING:
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 
+# Public reasoning mode → OpenAI ``reasoning_effort`` value.
+# ``auto`` resolves to ``medium`` (same posture the audit recommended).
+# ``off`` is filtered out before this table is consulted.
+_REASONING_EFFORT_MAP: dict[str, str] = {
+    "auto": "medium",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+}
+
 
 class OpenAIAdapter(BaseProviderAdapter):
     provider_name = "openai"
@@ -74,6 +84,34 @@ class OpenAIAdapter(BaseProviderAdapter):
         tool_choice = getattr(payload, "tool_choice", None)
         if tool_choice is not None:
             body["tool_choice"] = tool_choice
+
+        # Reasoning (T2) — o-series. Gated on both ``payload.reasoning``
+        # being non-off AND the resolved model being flagged
+        # ``supports_reasoning=True`` (migration 045). When both are
+        # true we:
+        #   1. Add ``reasoning_effort`` (low / medium / high).
+        #   2. Rename ``max_tokens`` → ``max_completion_tokens`` —
+        #      o-series rejects ``max_tokens`` because the completion
+        #      budget must cover BOTH reasoning + visible answer.
+        #   3. Drop ``temperature`` and ``top_p`` — o-series rejects
+        #      both (they're fixed at 1 and ignore sampling knobs).
+        # If either gate fails the request flows through unchanged so
+        # gpt-4o-mini etc. continue to behave identically. Reasoning
+        # summary text (``show_summary=true``) requires the Responses
+        # API; on /chat/completions we only get the count back via
+        # ``usage.completion_tokens_details.reasoning_tokens``.
+        reasoning_cfg = getattr(payload, "reasoning", None)
+        if reasoning_cfg is not None and reasoning_cfg.mode != "off":
+            from app.services.providers.model_registry import get_candidate
+            candidate = get_candidate(model)
+            if candidate is not None and candidate.supports_reasoning:
+                body["reasoning_effort"] = _REASONING_EFFORT_MAP.get(
+                    reasoning_cfg.mode, _REASONING_EFFORT_MAP["auto"]
+                )
+                if "max_tokens" in body:
+                    body["max_completion_tokens"] = body.pop("max_tokens")
+                body.pop("temperature", None)
+                body.pop("top_p", None)
 
         return body
 
@@ -144,10 +182,20 @@ def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
     usage_dict = data.get("usage")
     usage = None
     if isinstance(usage_dict, dict):
+        # o-series reasoning token count lives under
+        # ``usage.completion_tokens_details.reasoning_tokens``. Absent
+        # for non-reasoning models / non-OpenAI providers — defaults
+        # to 0 then.
+        details = usage_dict.get("completion_tokens_details") or {}
+        reasoning_tok = (
+            int(details.get("reasoning_tokens", 0) or 0)
+            if isinstance(details, dict) else 0
+        )
         usage = ProviderUsage(
             prompt_tokens=int(usage_dict.get("prompt_tokens", 0) or 0),
             completion_tokens=int(usage_dict.get("completion_tokens", 0) or 0),
             total_tokens=int(usage_dict.get("total_tokens", 0) or 0),
+            reasoning_tokens=reasoning_tok,
         )
 
     choices = data.get("choices", [])
@@ -172,10 +220,23 @@ def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
     # plain text chunk stays a plain text chunk.
     raw_tool_calls = delta.get("tool_calls")
     tool_calls = raw_tool_calls if isinstance(raw_tool_calls, list) and raw_tool_calls else None
+    # Reasoning content delta (T2). OpenAI o-series on the Chat
+    # Completions API doesn't emit reasoning text in the streaming
+    # delta — only the final ``usage.completion_tokens_details.reasoning_tokens``
+    # count. But DeepSeek-R1 and Groq's R1-distill DO emit
+    # ``delta.reasoning_content`` over the same OpenAI-compatible
+    # endpoint, and this adapter's parser is reused by the
+    # ``OpenAICompatibleAdapter`` base via ``_parse_sse_line`` — so
+    # reading the field here surfaces reasoning for those providers
+    # without a parallel parser. ``None`` when absent so plain OpenAI
+    # gpt-4o streams are unchanged on the wire.
+    reasoning_raw = delta.get("reasoning_content")
+    reasoning_delta = reasoning_raw if isinstance(reasoning_raw, str) and reasoning_raw else None
     return ProviderStreamChunk(
         delta=delta.get("content") or "",
         finish_reason=choices[0].get("finish_reason"),
         model=data.get("model", ""),
         usage=usage,
         tool_calls=tool_calls,
+        reasoning_delta=reasoning_delta,
     )

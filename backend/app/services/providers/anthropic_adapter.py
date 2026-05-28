@@ -43,6 +43,16 @@ _STOP_REASON_MAP: dict[str, str] = {
     "tool_use": "tool_calls",
 }
 
+# Reasoning-mode → Anthropic thinking budget_tokens. ``auto`` resolves
+# to the mid-tier so a caller that hasn't tuned the knob gets a usable
+# default. ``off`` is filtered out before this table is consulted.
+_REASONING_BUDGET_TOKENS: dict[str, int] = {
+    "auto": 4096,
+    "low": 2048,
+    "medium": 4096,
+    "high": 8192,
+}
+
 
 class AnthropicAdapter(BaseProviderAdapter):
     provider_name = "anthropic"
@@ -83,6 +93,43 @@ class AnthropicAdapter(BaseProviderAdapter):
             val = getattr(payload, param, None) or payload.metadata.get(param)
             if val is not None:
                 body[param] = val
+
+        # Extended thinking (T2). Three things have to be true:
+        #   1. Caller sent ``payload.reasoning`` with mode != "off".
+        #   2. Resolved model is flagged ``supports_reasoning=True``
+        #      in ``model_configs`` (set by migration 045 for Claude 4
+        #      family + the rows discovery later surfaces).
+        # If both hold we emit the ``thinking`` block, force
+        # ``temperature=1`` (Anthropic rejects other values when
+        # thinking is on), and bump ``max_tokens`` to ensure the
+        # response has room for the thinking budget PLUS the visible
+        # answer — Anthropic requires ``max_tokens > thinking.budget``.
+        # If either gate fails, we send a plain request and the
+        # ``reasoning`` field is silently ignored (same posture every
+        # adapter follows for unsupported-on-this-model params).
+        reasoning_cfg = getattr(payload, "reasoning", None)
+        if reasoning_cfg is not None and reasoning_cfg.mode != "off":
+            from app.services.providers.model_registry import get_candidate
+            candidate = get_candidate(model)
+            if candidate is not None and candidate.supports_reasoning:
+                budget = _REASONING_BUDGET_TOKENS.get(
+                    reasoning_cfg.mode, _REASONING_BUDGET_TOKENS["auto"]
+                )
+                body["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": budget,
+                }
+                # Anthropic requires temperature=1 with thinking on.
+                body["temperature"] = 1
+                # top_p / top_k are also disallowed with thinking — drop
+                # if present so a caller's stale temperature/top_p
+                # request doesn't 400 us.
+                body.pop("top_p", None)
+                # Ensure max_tokens > budget. Pad with 4096 so the
+                # final answer has its own headroom on top of the
+                # thinking budget.
+                if body["max_tokens"] <= budget:
+                    body["max_tokens"] = budget + 4096
 
         # Function-calling passthrough. Clients send the OpenAI
         # tools/tool_choice shape; this adapter translates to Anthropic
@@ -328,6 +375,10 @@ class AnthropicAdapter(BaseProviderAdapter):
         # from "stray delta we don't recognise" without re-checking
         # the (possibly missing) content_block in the delta event.
         tool_use_indices: set[int] = set()
+        # Sibling set for thinking blocks (T2). A ``thinking_delta``
+        # event only carries an index; we cross-check against this
+        # set to drop strays the same way the tool_use branch does.
+        thinking_indices: set[int] = set()
 
         async for raw in lines:
             line = raw.rstrip("\r")
@@ -386,6 +437,17 @@ class AnthropicAdapter(BaseProviderAdapter):
                             }
                         ],
                     )
+                elif block.get("type") in ("thinking", "redacted_thinking"):
+                    # Extended thinking (T2). Register the index so
+                    # later ``thinking_delta`` events can be matched
+                    # to a known block. ``redacted_thinking`` is
+                    # Anthropic's encrypted-thoughts variant — we
+                    # accept the index for symmetry but never get
+                    # ``thinking_delta`` text for it; deltas come in
+                    # as opaque ``data`` blobs we deliberately drop
+                    # rather than surface to the client.
+                    idx = data.get("index", 0)
+                    thinking_indices.add(idx)
 
             elif current_event == "content_block_delta":
                 delta = data.get("delta") or {}
@@ -396,6 +458,30 @@ class AnthropicAdapter(BaseProviderAdapter):
                         yield ProviderStreamChunk(
                             delta=text, model=final_model
                         )
+                elif delta_type == "thinking_delta":
+                    # Extended-thinking fragment (T2). Forward only
+                    # when paired with a known ``thinking`` content
+                    # block (registered above) so a stray delta does
+                    # not leak into the reasoning channel. The SSE
+                    # emitter in public_chat.py gates emit on
+                    # ``payload.reasoning.show_summary``, so the
+                    # client never sees these unless the caller asked.
+                    idx = data.get("index", 0)
+                    if idx not in thinking_indices:
+                        continue
+                    thought = delta.get("thinking") or ""
+                    if thought:
+                        yield ProviderStreamChunk(
+                            reasoning_delta=thought, model=final_model
+                        )
+                elif delta_type == "signature_delta":
+                    # Cryptographic signature attached to a thinking
+                    # block — required when round-tripping thinking
+                    # back to Anthropic on a follow-up call but has no
+                    # user-facing text. Deliberately dropped here;
+                    # T4-or-later work can persist signatures if we
+                    # ever need to replay thinking back upstream.
+                    continue
                 elif delta_type == "input_json_delta":
                     # Tool-use arguments stream as raw partial JSON
                     # fragments. We forward each fragment under
