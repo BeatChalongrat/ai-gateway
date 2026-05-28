@@ -158,10 +158,18 @@ func MemoryToolDefs() []GatewayTool {
 			Type: "function",
 			Function: GatewayToolFunction{
 				Name: "save_memory",
-				Description: "Save a fact, preference, or instruction to memory so it persists across all conversations. " +
-					"Use when the user says 'remember', 'จำไว้ว่า', 'note that', 'from now on', 'ต่อไปนี้', " +
-					"or gives a standing preference/instruction. " +
-					"Do NOT save passwords, API keys, tokens, ID numbers, credit card numbers, bank accounts, or salary amounts.",
+				Description: "Save a fact, preference, or instruction to memory so it persists across conversations.\n\n" +
+					"Call this tool PROACTIVELY — do NOT wait for the user to say 'remember' or 'จำไว้'. " +
+					"You SHOULD call save_memory when the user:\n" +
+					"- shares personal info: name, occupation, location, team, company\n" +
+					"- states a preference: language, response style, level of detail\n" +
+					"- gives a standing instruction: 'always…', 'never…', 'from now on…', 'ต่อไปนี้…'\n" +
+					"- corrects you about themselves: 'actually I prefer…', 'no, my name is…'\n" +
+					"- mentions an ongoing project or interest they are working on\n\n" +
+					"Save silently — do NOT announce that you are saving; just save and continue the conversation. " +
+					"Example: user says 'ผมชื่อ Beat' → save 'User's name is Beat' as explicit_fact, then respond naturally.\n\n" +
+					"Do NOT save: passwords, API keys, tokens, ID numbers, credit card numbers, bank accounts, salary amounts, " +
+					"or one-time contextual facts (weather, mood, one-off tasks).",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{

@@ -468,6 +468,32 @@ func (s *MemoryService) CountByStatus(
 }
 
 // ---------------------------------------------------------------------------
+// BuildMemoryPolicyBlock — always-on persona snippet
+// ---------------------------------------------------------------------------
+
+// MemoryPolicyBlock is the persona-level instruction that teaches
+// the model to save memories proactively. Returned verbatim from
+// the helper below so the message-service can prepend it to the
+// system prefix whenever conv.MemoryEnabled is true — even when
+// the user has zero saved memories yet. Without this, a brand-new
+// user never sees the proactive-save directive and the assistant
+// reverts to its passive default of waiting for "remember".
+const MemoryPolicyBlock = "<memory_policy>\n" +
+	"When the user shares personal information, preferences, or standing " +
+	"instructions during normal conversation, call the save_memory tool to " +
+	"persist them. Do NOT wait for them to say 'remember' or 'จำไว้' — save " +
+	"naturally when:\n" +
+	"- they share personal info (name, role, location, team)\n" +
+	"- they state a preference (tone, length, language, level of detail)\n" +
+	"- they give a standing instruction (always / never / from now on)\n" +
+	"- they correct you about themselves\n" +
+	"- they mention an ongoing project or interest\n\n" +
+	"Save silently — do not announce the save. Just call the tool and " +
+	"continue the conversation as normal. Skip transient context (weather, " +
+	"mood, one-off tasks) and never save secrets (passwords, API keys, IDs).\n" +
+	"</memory_policy>\n"
+
+// ---------------------------------------------------------------------------
 // BuildMemoryContext — system-prompt injection block
 // ---------------------------------------------------------------------------
 
@@ -507,7 +533,7 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 
 	var sb strings.Builder
 	sb.WriteString("<saved_user_memory>\n")
-	sb.WriteString("Facts and preferences this user has asked you to remember:\n")
+	sb.WriteString("Facts and preferences you have saved about this user:\n")
 	for i := range memories {
 		sb.WriteString("- ")
 		sb.WriteString(memories[i].Content)
@@ -515,7 +541,6 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 	}
 	sb.WriteString("\nUse this information naturally in your responses.\n")
 	sb.WriteString("Do not say 'according to my memory' or mention the memory system.\n")
-	sb.WriteString("When the user says 'จำไว้ว่า', 'remember that', or gives a standing instruction, use the save_memory tool.\n")
 	sb.WriteString("</saved_user_memory>\n")
 
 	// S7 — one source per injected memory. Metadata carries the

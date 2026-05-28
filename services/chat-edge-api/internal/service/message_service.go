@@ -1277,6 +1277,12 @@ func (s *MessageService) buildSystemPrefixWithSources(
 		}
 	}
 	if s.memorySvc != nil && conv != nil && conv.MemoryEnabled {
+		// Policy block fires whenever memory is enabled — even for a
+		// brand-new user with zero saved memories — so the model
+		// always knows it should save proactively. The saved-facts
+		// block (if any) is appended right after so the model sees
+		// the directive first and then what's already on file.
+		parts = append(parts, MemoryPolicyBlock)
 		if mem, srcs := s.memorySvc.BuildMemoryContextWithSources(ctx, userID, tenantID); mem != "" {
 			parts = append(parts, mem)
 			sources = append(sources, srcs...)
