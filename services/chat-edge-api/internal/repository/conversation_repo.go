@@ -34,11 +34,13 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 	const q = `
 		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
 		VALUES ($1, $2, $3)
-		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled
+		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary
 	`
 	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
 		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -53,7 +55,8 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UUID) (*model.Conversation, error) {
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
-		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled
+		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary
 		FROM chat.conversations
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
@@ -62,6 +65,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -119,7 +123,8 @@ func (r *ConversationRepo) ListByUser(
 	// without a second query. The (limit+1)th row becomes next_cursor.
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
-		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled
+		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -144,6 +149,7 @@ func (r *ConversationRepo) ListByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
 		); err != nil {
 			return nil, uuid.Nil, fmt.Errorf("list scan: %w", err)
 		}
@@ -181,7 +187,8 @@ func (r *ConversationRepo) SearchByUser(
 ) ([]model.Conversation, error) {
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
-		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled
+		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -202,6 +209,7 @@ func (r *ConversationRepo) SearchByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
 		); err != nil {
 			return nil, fmt.Errorf("search scan: %w", err)
 		}
@@ -357,6 +365,36 @@ func (r *ConversationRepo) UpdateMemoryEnabled(
 	tag, err := r.db.Exec(ctx, q, convID, tenantID, enabled)
 	if err != nil {
 		return fmt.Errorf("update memory_enabled: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateReasoningSettings persists T4 thinking-mode preferences for
+// a single conversation. All three fields are pointer-typed so the
+// handler can patch any subset (e.g. flip enabled without touching
+// the previously-chosen mode). Tenant-scoped via WHERE; ownership
+// gate runs at the service layer.
+func (r *ConversationRepo) UpdateReasoningSettings(
+	ctx context.Context, tenantID, convID uuid.UUID,
+	enabled *bool, mode *string, showSummary *bool,
+) error {
+	// COALESCE keeps unset fields at their current value — same
+	// pattern the memory toggle would use if it ever grew a partial
+	// PATCH. Doing it in one statement keeps the update atomic.
+	const q = `
+		UPDATE chat.conversations
+		SET reasoning_enabled      = COALESCE($3, reasoning_enabled),
+		    reasoning_mode         = COALESCE($4, reasoning_mode),
+		    show_reasoning_summary = COALESCE($5, show_reasoning_summary),
+		    updated_at             = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
+	`
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, enabled, mode, showSummary)
+	if err != nil {
+		return fmt.Errorf("update reasoning settings: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound

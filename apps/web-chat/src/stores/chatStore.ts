@@ -20,9 +20,11 @@ import type {
   Conversation,
   FileAttachment,
   Message,
+  SSEAnalysisStatus,
   SSEContentDelta,
   SSEMessageComplete,
   SSEMessageStart,
+  SSEReasoningDelta,
 } from "@/lib/types";
 
 // ─── Pending-file state ──────────────────────────────────────
@@ -105,6 +107,16 @@ interface ChatState {
   /** S1 — flip the per-conversation memory layer. Optimistic
    *  update with rollback so the header chip stays responsive. */
   setConversationMemory: (id: string, enabled: boolean) => Promise<void>;
+  /** T4 — patch Thinking Mode preferences (any subset). Optimistic
+   *  with rollback per the memory pattern. */
+  setConversationReasoning: (
+    id: string,
+    patch: {
+      reasoning_enabled?: boolean;
+      reasoning_mode?: string;
+      show_reasoning_summary?: boolean;
+    },
+  ) => Promise<void>;
   /** Marks the NEXT lazily-created conversation as a temporary
    *  chat. Read + cleared by createConversation(). Used by the
    *  sidebar's "Temporary chat" launcher: navigates to /chat,
@@ -406,6 +418,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
           c.id === id ? { ...c, memory_enabled: prev ?? true } : c,
         ),
       }));
+      throw err;
+    }
+  },
+
+  async setConversationReasoning(id, patch) {
+    // Optimistic — snapshot all three fields so a rollback fully
+    // restores the prior state even when the user toggled
+    // multiple fields in quick succession.
+    const prev = get().conversations.find((c) => c.id === id);
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, ...patch } : c,
+      ),
+    }));
+    try {
+      const updated = await api.setConversationReasoning(id, patch);
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, ...updated } : c,
+        ),
+      }));
+    } catch (err) {
+      if (prev) {
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  reasoning_enabled: prev.reasoning_enabled,
+                  reasoning_mode: prev.reasoning_mode,
+                  show_reasoning_summary: prev.show_reasoning_summary,
+                }
+              : c,
+          ),
+        }));
+      }
       throw err;
     }
   },
@@ -896,6 +944,13 @@ async function consumeStream(
   // the streaming message at most once per frame.
   let pendingDelta = "";
   let rafHandle: number | null = null;
+  // T4 — Thinking Mode. Mirror the content RAF batching pattern
+  // for reasoning fragments so a fast reasoning stream doesn't
+  // monopolise the React tree either. ``thinkingStartedAt`` is
+  // captured on ``analysis_status: started`` so the duration can
+  // be reported on ``completed``.
+  let pendingReasoning = "";
+  let thinkingStartedAt: number | null = null;
   // ``runRaf`` lets tests / non-browser environments fall back to
   // setTimeout when requestAnimationFrame isn't available.
   const runRaf =
@@ -908,18 +963,29 @@ async function consumeStream(
       : (h: number) => window.clearTimeout(h);
 
   const flush = () => {
-    if (!pendingDelta) return;
-    const chunk = pendingDelta;
+    if (!pendingDelta && !pendingReasoning) return;
+    const contentChunk = pendingDelta;
+    const reasoningChunk = pendingReasoning;
     pendingDelta = "";
+    pendingReasoning = "";
     set((s) => {
       const list = s.messages[convId] ?? [];
       const id = realAssistantId ?? tempAsstId;
       return {
         messages: {
           ...s.messages,
-          [convId]: list.map((m) =>
-            m.id === id ? { ...m, content: m.content + chunk } : m,
-          ),
+          [convId]: list.map((m) => {
+            if (m.id !== id) return m;
+            const next = { ...m };
+            if (contentChunk) {
+              next.content = m.content + contentChunk;
+            }
+            if (reasoningChunk) {
+              next.reasoning_content =
+                (m.reasoning_content ?? "") + reasoningChunk;
+            }
+            return next;
+          }),
         },
       };
     });
@@ -959,6 +1025,65 @@ async function consumeStream(
         const data = evt.data as SSEContentDelta;
         pendingDelta += data.delta;
         scheduleFlush();
+      } else if (evt.event === "reasoning_delta") {
+        // T4 — thinking fragment. Same RAF batching as content
+        // deltas (reasoning models like o3 can emit hundreds of
+        // small fragments per turn).
+        const data = evt.data as SSEReasoningDelta;
+        pendingReasoning += data.delta;
+        scheduleFlush();
+      } else if (evt.event === "analysis_status") {
+        // T4 — phase marker. ``started`` flips the per-message
+        // is_thinking flag so the ThinkingBlock renders with
+        // bouncing dots; ``completed`` flips it off + records the
+        // total analysis duration for the "Analyzed Xs" header.
+        const data = evt.data as SSEAnalysisStatus;
+        if (data.status === "started") {
+          thinkingStartedAt = Date.now();
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            const id = realAssistantId ?? tempAsstId;
+            return {
+              messages: {
+                ...s.messages,
+                [convId]: list.map((m) =>
+                  m.id === id ? { ...m, is_thinking: true } : m,
+                ),
+              },
+            };
+          });
+        } else if (data.status === "completed") {
+          const duration =
+            thinkingStartedAt !== null
+              ? Date.now() - thinkingStartedAt
+              : undefined;
+          // Flush any pending reasoning fragment BEFORE flipping the
+          // flag so the final paint includes every fragment under
+          // the "Analyzed" header rather than orphaning the tail.
+          if (rafHandle != null) {
+            cancelRaf(rafHandle);
+            rafHandle = null;
+          }
+          flush();
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            const id = realAssistantId ?? tempAsstId;
+            return {
+              messages: {
+                ...s.messages,
+                [convId]: list.map((m) =>
+                  m.id === id
+                    ? {
+                        ...m,
+                        is_thinking: false,
+                        thinking_duration_ms: duration,
+                      }
+                    : m,
+                ),
+              },
+            };
+          });
+        }
       } else if (evt.event === "message_complete") {
         // Flush any buffered tail BEFORE writing the terminal state
         // so the final content paint includes every token.

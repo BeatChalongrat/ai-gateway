@@ -22,6 +22,18 @@ export type ModelCategory =
   | "specialized"
   | "other";
 
+/** T4 — Thinking Mode capability block. Present only on models
+ *  whose chat-edge entry advertises reasoning support. The frontend
+ *  uses ``supported`` to gate the ReasoningToggle and ``modes`` to
+ *  populate the mode picker. Absent (undefined) for non-reasoning
+ *  models — the toggle stays hidden. */
+export interface ReasoningCapability {
+  supported: boolean;
+  modes: string[];
+  default_mode: string;
+  summary_supported: boolean;
+}
+
 export interface ModelEntry {
   id: string;
   name: string;
@@ -35,6 +47,8 @@ export interface ModelEntry {
   input_price_per_1m?: number;
   output_price_per_1m?: number;
   allowed: boolean;
+  /** T4 — reasoning capability. Undefined for non-reasoning models. */
+  reasoning?: ReasoningCapability;
 }
 
 export interface ModelListResponse {
@@ -58,6 +72,15 @@ export interface Conversation {
    *  predate the field flow through as `undefined` which the UI
    *  treats as "memory on". */
   memory_enabled?: boolean;
+  /** T4 — Thinking Mode. ``reasoning_enabled`` is the master
+   *  toggle; ``reasoning_mode`` mirrors the public ReasoningConfig
+   *  modes (off/auto/low/medium/high); ``show_reasoning_summary``
+   *  gates whether the SSE stream surfaces the model's thinking
+   *  text to the client. All three default server-side (false /
+   *  "auto" / true) so older payloads degrade cleanly. */
+  reasoning_enabled?: boolean;
+  reasoning_mode?: string;
+  show_reasoning_summary?: boolean;
 }
 
 export interface ConversationListResponse {
@@ -259,6 +282,15 @@ export interface Message {
   isStreaming?: boolean;
   /** local-only — current feedback rating for this message. */
   feedback?: "thumbs_up" | "thumbs_down" | null;
+  /** T4 — Thinking Mode. ``reasoning_content`` is the accumulated
+   *  thinking text (persisted on the server); ``is_thinking`` is
+   *  the local-only flag the SSE handler flips while reasoning
+   *  fragments are arriving; ``thinking_duration_ms`` is the
+   *  measured analysis duration captured between
+   *  ``analysis_status: started`` and ``analysis_status: completed``. */
+  reasoning_content?: string | null;
+  is_thinking?: boolean;
+  thinking_duration_ms?: number;
 }
 
 /** S7 — one source the AI drew on while producing an assistant
@@ -439,9 +471,23 @@ export interface SSEContentDelta {
   delta: string;
 }
 
+/** T4 — one fragment of reasoning / thinking text from the model.
+ *  Emitted between ``analysis_status: started`` and
+ *  ``analysis_status: completed``. */
+export interface SSEReasoningDelta {
+  delta: string;
+}
+
+/** T4 — phase marker bracketing the reasoning stream. The
+ *  ChatStore flips Message.is_thinking on `started` and back off
+ *  on `completed`, computing the duration in between. */
+export interface SSEAnalysisStatus {
+  status: "started" | "completed";
+}
+
 export interface SSEMessageComplete {
   message_id: UUID;
-  token_usage?: TokenUsage;
+  token_usage?: TokenUsage & { reasoning?: number };
 }
 
 export interface SSEError {

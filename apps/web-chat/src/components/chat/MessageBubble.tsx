@@ -36,6 +36,7 @@ import { MessageAttachments } from "./MessageAttachments";
 import { PptxPlanCard } from "./PptxPlanCard";
 import type { PptxPlan } from "./PptxPlanCard";
 import { StreamingContent } from "./StreamingContent";
+import { ThinkingBlock } from "./ThinkingBlock";
 
 interface Props {
   message: Message;
@@ -341,6 +342,19 @@ function MessageBubbleImpl({
     <div className="group message-enter flex w-full flex-col gap-1.5">
       {showModelBadge && modelBadgeText ? (
         <span className="text-[11px] text-text-muted">{modelBadgeText}</span>
+      ) : null}
+
+      {/* T4 — Thinking Mode. Renders ABOVE the body so the user
+          reads "thought first, then answered". Self-hides when
+          neither reasoning_content nor is_thinking is set, so
+          non-reasoning turns are byte-identical to the pre-T4
+          layout. */}
+      {(message.reasoning_content || message.is_thinking) ? (
+        <ThinkingBlock
+          content={message.reasoning_content ?? ""}
+          isStreaming={message.is_thinking ?? false}
+          durationMs={message.thinking_duration_ms}
+        />
       ) : null}
 
       {/* Body */}

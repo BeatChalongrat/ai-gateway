@@ -120,17 +120,27 @@ type conversationResponse struct {
 	// chip when false so the user knows nothing they say here will
 	// feed into their long-term memory.
 	MemoryEnabled bool `json:"memory_enabled"`
+	// T4 — Thinking Mode. Per-conversation reasoning preference
+	// surfaced so the frontend can restore the toggle state when
+	// the user reopens the conversation. Defaults match the DB
+	// defaults (enabled=false, mode="auto", show_summary=true).
+	ReasoningEnabled     bool   `json:"reasoning_enabled"`
+	ReasoningMode        string `json:"reasoning_mode"`
+	ShowReasoningSummary bool   `json:"show_reasoning_summary"`
 }
 
 func toResponse(c *model.Conversation) conversationResponse {
 	r := conversationResponse{
-		ID:            c.ID.String(),
-		Title:         c.Title,
-		ModelID:       c.ModelID,
-		MessageCount:  c.MessageCount,
-		CreatedAt:     c.CreatedAt,
-		UpdatedAt:     c.UpdatedAt,
-		MemoryEnabled: c.MemoryEnabled,
+		ID:                   c.ID.String(),
+		Title:                c.Title,
+		ModelID:              c.ModelID,
+		MessageCount:         c.MessageCount,
+		CreatedAt:            c.CreatedAt,
+		UpdatedAt:            c.UpdatedAt,
+		MemoryEnabled:        c.MemoryEnabled,
+		ReasoningEnabled:     c.ReasoningEnabled,
+		ReasoningMode:        c.ReasoningMode,
+		ShowReasoningSummary: c.ShowReasoningSummary,
 	}
 	if c.KnowledgeBaseID != nil {
 		s := c.KnowledgeBaseID.String()
@@ -267,6 +277,24 @@ type updateRequest struct {
 	// for this conversation. Pointer so the handler can distinguish
 	// "field omitted" from "field set to false".
 	MemoryEnabled *bool `json:"memory_enabled,omitempty"`
+	// T4 — Thinking Mode. All three pointer-typed so the frontend
+	// can patch any subset (e.g. mode without flipping enabled).
+	// reasoning_mode must be one of: "off" / "auto" / "low" /
+	// "medium" / "high"; anything else gets a 422.
+	ReasoningEnabled     *bool   `json:"reasoning_enabled,omitempty"`
+	ReasoningMode        *string `json:"reasoning_mode,omitempty"`
+	ShowReasoningSummary *bool   `json:"show_reasoning_summary,omitempty"`
+}
+
+// validReasoningModes mirrors the Gateway's ReasoningConfig.mode
+// Literal (backend/app/schemas/public.py — T1). Kept here as a flat
+// set so the handler can reject unknown values with a clean 422.
+var validReasoningModes = map[string]struct{}{
+	"off":    {},
+	"auto":   {},
+	"low":    {},
+	"medium": {},
+	"high":   {},
 }
 
 func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -281,9 +309,20 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
 		return
 	}
-	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 && req.MemoryEnabled == nil {
+	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 &&
+		req.MemoryEnabled == nil && req.ReasoningEnabled == nil &&
+		req.ReasoningMode == nil && req.ShowReasoningSummary == nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
+	}
+	// T4: validate reasoning_mode up-front so a typo doesn't sneak
+	// past the repo's COALESCE into the DB.
+	if req.ReasoningMode != nil {
+		if _, ok := validReasoningModes[*req.ReasoningMode]; !ok {
+			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
+				"reasoning_mode must be one of: off, auto, low, medium, high")
+			return
+		}
 	}
 
 	if req.Title != nil {
@@ -324,6 +363,15 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MemoryEnabled != nil {
 		if err := h.conversations.SetMemoryEnabled(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.MemoryEnabled); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if req.ReasoningEnabled != nil || req.ReasoningMode != nil || req.ShowReasoningSummary != nil {
+		if err := h.conversations.SetReasoning(
+			r.Context(), caller.TenantUUID, caller.UserID, convID,
+			req.ReasoningEnabled, req.ReasoningMode, req.ShowReasoningSummary,
+		); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
