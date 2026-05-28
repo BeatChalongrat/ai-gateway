@@ -205,6 +205,13 @@ func main() {
 	// compaction so older messages keep their fingerprint in
 	// <conversation_state>.
 	messageSvc.SetContextCompiler(service.NewContextCompiler(stateSvc))
+	// S6 — cross-conversation search. Backs the AI's
+	// search_past_conversations tool + the GET /api/v1/search
+	// endpoint. Reuses the same memory + conversation + message
+	// repos; the new tsvector columns from migration 016 power
+	// the queries.
+	searchSvc := service.NewSearchService(messages, conversations, memoriesRepo)
+	messageSvc.SetSearchService(searchSvc)
 
 	// Knowledge base (RAG) pipeline.
 	//
@@ -270,6 +277,7 @@ func main() {
 		Document:     handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
 		Workspace:    handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
 		Memory:       handler.NewMemoryHandler(memorySvc),
+		Search:       handler.NewSearchHandler(searchSvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
