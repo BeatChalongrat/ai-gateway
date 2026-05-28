@@ -84,6 +84,12 @@ type MessageService struct {
 	// from finalizeConversation when message count crosses the
 	// thresholds defined below.
 	stateSvc *ConversationStateService
+	// Optional. Token-budgeted context assembly (S4). When wired,
+	// every send path runs the loaded history + freshly-built
+	// system prefix through Compile to trim to the model's working
+	// context window before shipping to the gateway. Falls back to
+	// the legacy "send everything prepareSend loaded" path when nil.
+	compiler *ContextCompiler
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -250,6 +256,14 @@ func (s *MessageService) SetConversationStateService(svc *ConversationStateServi
 	}
 }
 
+// SetContextCompiler wires the S4 token-budgeted compiler. Without
+// it the send paths fall through to the legacy "ship everything
+// prepareSend loaded" behaviour — useful for tests + a graceful
+// downgrade if the compiler ever needs to be disabled.
+func (s *MessageService) SetContextCompiler(c *ContextCompiler) {
+	s.compiler = c
+}
+
 // ---------------------------------------------------------------------------
 // ListMessages — handler reads conversation history
 // ---------------------------------------------------------------------------
@@ -311,9 +325,8 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		return nil, err
 	}
 
-	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
 	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
-	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
@@ -459,9 +472,8 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// StreamHandle.Cancel() when the client disconnects, and the
 	// external POST /cancel endpoint invokes CancelStream(convID).
 	streamCtx, cancel := context.WithCancel(context.Background())
-	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
 	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
-	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
@@ -714,9 +726,8 @@ func (s *MessageService) openAssistantStream(
 	// Regenerate: the query for RAG is the last user message in the
 	// history (the prompt the original assistant turn was answering).
 	ragQuery := lastUserContent(history)
-	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
 	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
-	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -966,9 +977,8 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	if ragQuery == "" {
 		ragQuery = lastUserContent(history)
 	}
-	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
 	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
-	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -1750,6 +1760,125 @@ func (s *MessageService) persistError(
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
+
+// compileAndBuildRequest is the S4 integration shim. Every send
+// path (Send / SendStream / Regenerate / Edit) used to call
+// buildSystemPrefix + buildGatewayRequestWithImages back-to-back;
+// they now call this instead so the compiler can trim the history
+// to the model's working budget before the request goes out.
+//
+// When the compiler isn't wired (legacy / test setup), falls back
+// to the original behaviour: prefix + history shipped verbatim.
+// numTools is the count of GatewayTool entries the caller plans
+// to attach AFTER this call — used by the compiler's budget math
+// to reserve room for tool-definition payload.
+func (s *MessageService) compileAndBuildRequest(
+	ctx context.Context,
+	conv *model.Conversation,
+	userID uuid.UUID,
+	tenantID uuid.UUID,
+	ragQuery string,
+	history []model.Message,
+	imageURLs []string,
+) GatewayChatRequest {
+	// Tool-reserve budget — the actual attachment happens at the
+	// call site after this function returns (so the compiler's
+	// budget math accounts for tool definitions even though we
+	// don't ship them through Compile itself).
+	numTools := 0
+	if s.toolExec != nil && conv != nil && conv.MemoryEnabled {
+		numTools = len(s.toolExec.ToolDefs())
+	}
+	// Closure so the compiler can ask for a fresh prefix AFTER
+	// triggering state extraction without re-importing every
+	// dependency MessageService has wired.
+	build := func() string {
+		return s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery)
+	}
+
+	if s.compiler == nil {
+		return buildGatewayRequestWithImages(conv.ModelID, history, build(), imageURLs)
+	}
+
+	compiled, err := s.compiler.Compile(ctx, CompileInputs{
+		Conv:        conv,
+		UserID:      userID,
+		TenantID:    tenantID,
+		History:     history,
+		ImageURLs:   imageURLs,
+		BuildPrefix: build,
+		NumTools:    numTools,
+	})
+	if err != nil || compiled == nil {
+		// Defensive fallback — should never happen since Compile
+		// doesn't return an error today, but the contract is
+		// "always send something rather than fail the turn".
+		slog.Warn("context_compiler: fell back to legacy assembly",
+			"conv", conv.ID.String(), "err", err)
+		return buildGatewayRequestWithImages(conv.ModelID, history, build(), imageURLs)
+	}
+	return buildGatewayRequestWithImages(conv.ModelID, compiled.History, compiled.SystemPrefix, imageURLs)
+}
+
+// InspectContext is the public dry-run entry point — runs the
+// compiler against the current state of a conversation without
+// actually sending a request. Backs GET /conversations/{id}/context
+// -info so the frontend (or a curl from the operator) can see
+// the budget breakdown before chatting.
+//
+// Returns nil + ErrMessageConversationNotFound when the caller
+// doesn't own the conversation; tenant + user are pulled from
+// the supplied IDs so the handler does ownership verification
+// before calling this.
+func (s *MessageService) InspectContext(
+	ctx context.Context, convID, userID, tenantID uuid.UUID,
+) (*CompiledContext, error) {
+	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMessageConversationNotFound
+		}
+		return nil, err
+	}
+	if conv.UserID != userID {
+		return nil, ErrMessageConversationNotFound
+	}
+	history, err := s.messages.ListContextByConversation(ctx, tenantID, convID, s.maxContext)
+	if err != nil {
+		return nil, err
+	}
+	imageURLs := s.lastUserImageURLs(ctx, tenantID, history)
+	ragQuery := lastUserContent(history)
+	numTools := 0
+	if s.toolExec != nil && conv.MemoryEnabled {
+		numTools = len(s.toolExec.ToolDefs())
+	}
+	if s.compiler == nil {
+		// Synthesize a CompiledContext so callers see the same
+		// shape they'd get with the compiler wired — just with no
+		// compaction ever applied.
+		prefix := s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery)
+		budget := CalculateBudget(conv.ModelID, EstimateTokens(prefix)+4, 0, 0, 0, numTools*perToolTokens)
+		return &CompiledContext{
+			SystemPrefix:  prefix,
+			History:       history,
+			Budget:        budget,
+			MessagesTotal: len(history),
+			MessagesSent:  len(history),
+		}, nil
+	}
+	return s.compiler.Compile(ctx, CompileInputs{
+		Conv:     conv,
+		UserID:   userID,
+		TenantID: tenantID,
+		History:  history,
+		ImageURLs: imageURLs,
+		BuildPrefix: func() string {
+			return s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery)
+		},
+		NumTools: numTools,
+	})
+}
 
 func buildGatewayRequest(model string, history []model.Message, systemPrefix string) GatewayChatRequest {
 	return buildGatewayRequestWithImages(model, history, systemPrefix, nil)

@@ -198,6 +198,13 @@ func main() {
 	// ToolExecutor (created inside SetMemoryService) picks up the
 	// state service via its internal back-wire.
 	messageSvc.SetConversationStateService(stateSvc)
+	// S4 — token-budgeted context compiler. Sits between
+	// prepareSend (which loads history) and the gateway call,
+	// trimming the history slice to fit the model's working window
+	// and synchronously refreshing the state block before
+	// compaction so older messages keep their fingerprint in
+	// <conversation_state>.
+	messageSvc.SetContextCompiler(service.NewContextCompiler(stateSvc))
 
 	// Knowledge base (RAG) pipeline.
 	//
@@ -228,6 +235,7 @@ func main() {
 	conversationHandler.SetKnowledgeService(knowledgeSvc)
 	conversationHandler.SetTitleService(titles)
 	conversationHandler.SetConversationStateService(stateSvc)
+	conversationHandler.SetMessageService(messageSvc)
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)
