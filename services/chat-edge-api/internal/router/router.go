@@ -253,6 +253,11 @@ func New(
 				r.Get("/memories", h.Memory.List)
 				r.Post("/memories", h.Memory.Create)
 				r.Delete("/memories/all", h.Memory.ClearAll)
+				// S8 — pending-count must register BEFORE the
+				// /memories/{id} routes so chi's segment matcher
+				// resolves "pending-count" as a literal rather
+				// than trying to parse it as a uuid.
+				r.Get("/memories/pending-count", h.Memory.PendingCount)
 				r.Put("/memories/{id}", h.Memory.Update)
 				r.Delete("/memories/{id}", h.Memory.Delete)
 				r.Post("/memories/{id}/pin", h.Memory.Pin)

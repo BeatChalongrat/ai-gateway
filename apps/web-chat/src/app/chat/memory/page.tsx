@@ -21,11 +21,14 @@ import {
   AlertTriangle,
   Brain,
   Plus,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 
 import { MemoryCard } from "@/components/chat/MemoryCard";
 import { MemoryFormDialog } from "@/components/chat/MemoryFormDialog";
+import { PendingPreferenceCard } from "@/components/chat/PendingPreferenceCard";
+import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { api, ApiError } from "@/lib/api";
@@ -55,12 +58,31 @@ export default function MemorySettingsPage() {
     [conversations],
   );
 
+  const [pending, setPending] = useState<Memory[]>([]);
+  const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+  // S8 — keep the sidebar badge + chat-header dot honest the
+  // instant the user acts on a suggestion. refresh() does a fresh
+  // GET /memories/pending-count rather than decrementing the
+  // local cache so a concurrent extraction firing elsewhere
+  // doesn't desync.
+  const refreshPendingCount = useMemoryPendingStore((s) => s.refresh);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.listMemories({ limit: 100 });
-      setMemories(res.memories);
+      // Two parallel fetches — active rows for the main list +
+      // pending_confirmation rows for the S8 suggestions section
+      // that sits above it. Each runs in its own try/catch so a
+      // failure on one source doesn't blank the other.
+      const [active, pendingRes] = await Promise.all([
+        api.listMemories({ limit: 100 }),
+        api
+          .listMemories({ status: "pending_confirmation", limit: 50 })
+          .catch(() => ({ memories: [], total: 0 })),
+      ]);
+      setMemories(active.memories);
+      setPending(pendingRes.memories);
     } catch (err) {
       const msg =
         err instanceof ApiError ? err.message : "Couldn't load memories.";
@@ -74,6 +96,41 @@ export default function MemorySettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function handleConfirmPending(id: string) {
+    setPendingBusy(id);
+    try {
+      const updated = await api.confirmMemory(id, true);
+      setPending((prev) => prev.filter((m) => m.id !== id));
+      // Promoted to active → splice into the main list (sorted).
+      setMemories((prev) => {
+        if (!prev) return [updated];
+        const next = prev.filter((x) => x.id !== id);
+        next.unshift(updated);
+        return sortMemories(next);
+      });
+      toast("Preference confirmed.");
+      void refreshPendingCount();
+    } catch {
+      toast("Couldn't confirm preference.");
+    } finally {
+      setPendingBusy(null);
+    }
+  }
+
+  async function handleRejectPending(id: string) {
+    setPendingBusy(id);
+    try {
+      await api.deleteMemory(id);
+      setPending((prev) => prev.filter((m) => m.id !== id));
+      toast("Suggestion dismissed.");
+      void refreshPendingCount();
+    } catch {
+      toast("Couldn't dismiss suggestion.");
+    } finally {
+      setPendingBusy(null);
+    }
+  }
 
   function upsertLocal(m: Memory) {
     setMemories((prev) => {
@@ -167,6 +224,37 @@ export default function MemorySettingsPage() {
             </p>
           </div>
         </header>
+
+        {/* S8 — Suggested Preferences. Only renders when the
+            background extractor has surfaced patterns the user
+            hasn't acted on yet. Sits ABOVE the saved-memories
+            section so the action is the first thing the user
+            sees on landing here from the sidebar badge. */}
+        {pending.length > 0 ? (
+          <section className="mt-8">
+            <div className="flex items-baseline gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-text-tertiary" aria-hidden />
+              <h2 className="text-xs font-medium uppercase tracking-wider text-text-muted">
+                Suggested preferences ({pending.length})
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-text-tertiary">
+              AI noticed these patterns. Confirm to activate; reject to dismiss.
+            </p>
+            <div className="mt-3 space-y-2">
+              {pending.map((m) => (
+                <PendingPreferenceCard
+                  key={m.id}
+                  memory={m}
+                  saving={pendingBusy === m.id}
+                  onConfirm={(id) => handleConfirmPending(id)}
+                  onReject={(id) => handleRejectPending(id)}
+                />
+              ))}
+            </div>
+            <div className="my-8 h-px bg-border-subtle" />
+          </section>
+        ) : null}
 
         <section className="mt-8">
           <div className="flex items-baseline justify-between">

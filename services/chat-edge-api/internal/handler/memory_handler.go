@@ -299,6 +299,29 @@ func (h *MemoryHandler) Confirm(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Pending count (S8 — preference suggestions badge)
+// ---------------------------------------------------------------------------
+
+// PendingCount returns the number of pending_confirmation
+// memories for the caller. Backs the sidebar Memory badge + the
+// MemoryIndicator chat-header dot — polled every ~2 minutes by
+// the frontend, so the response is intentionally tiny.
+//
+// Returns 200 with count=0 on any read failure rather than 500 so
+// the badge degrades gracefully (no flash of "?" on a hiccup).
+func (h *MemoryHandler) PendingCount(w http.ResponseWriter, r *http.Request) {
+	caller := middleware.MustCaller(r.Context())
+	n, err := h.memories.CountByStatus(
+		r.Context(), caller.UserID, caller.TenantUUID, model.MemoryStatusPendingConfirmation,
+	)
+	if err != nil {
+		n = 0
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"count": n})
+}
+
+// ---------------------------------------------------------------------------
 // Events (audit trail)
 // ---------------------------------------------------------------------------
 
