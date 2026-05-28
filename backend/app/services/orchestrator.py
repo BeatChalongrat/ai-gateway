@@ -1656,6 +1656,41 @@ class GatewayOrchestrator:
                 if final_tool_calls is not None
                 else provider_response.tool_calls
             )
+            # Reasoning (T2) — gating mirrors the streaming path:
+            #   * ``reasoning_content`` is surfaced ONLY when the
+            #     caller opted in via ``payload.reasoning.show_summary=True``
+            #     AND the provider returned thinking text. Otherwise
+            #     the field stays None and ``response_model_exclude_none``
+            #     drops it from the wire — the model can still have
+            #     thought (better answers); the user just doesn't see it.
+            #   * ``reasoning_tokens`` is surfaced unconditionally
+            #     when known so the caller can audit billing even
+            #     when summary is hidden. Source priority:
+            #       1. provider-reported (OpenAI o-series usage details)
+            #       2. length estimate from reasoning_content (~4 chars/token)
+            #       3. None when neither is available
+            _reasoning_cfg_resp = getattr(payload, "reasoning", None)
+            _show_summary_resp = bool(
+                _reasoning_cfg_resp
+                and _reasoning_cfg_resp.show_summary
+                and _reasoning_cfg_resp.mode != "off"
+            )
+            response_reasoning_content = (
+                provider_response.reasoning_content
+                if _show_summary_resp and provider_response.reasoning_content
+                else None
+            )
+            response_reasoning_tokens: int | None = None
+            if (
+                provider_response.usage is not None
+                and provider_response.usage.reasoning_tokens
+            ):
+                response_reasoning_tokens = provider_response.usage.reasoning_tokens
+            elif provider_response.reasoning_content:
+                response_reasoning_tokens = max(
+                    1, len(provider_response.reasoning_content) // 4
+                )
+
             response = ChatCompletionsResponse(
                 id=request_id,
                 model=route.model_name,
@@ -1678,6 +1713,8 @@ class GatewayOrchestrator:
                 usage=usage,
                 policy_action=overall_action.name.lower(),
                 policy_reasons=all_reasons,
+                reasoning_content=response_reasoning_content,
+                reasoning_tokens=response_reasoning_tokens,
             )
 
         # 12. Response cache store — store the MASKED response (the
