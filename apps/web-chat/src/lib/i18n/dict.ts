@@ -128,6 +128,11 @@ export const en = {
   "kb.unit.chunk": "chunk",
   "kb.unit.chunks": "chunks",
 
+  // ── Model selector ───────────────────────────────────────
+  "model.auto.name": "Auto",
+  "model.auto.description": "Selects the best model automatically",
+  "model.selectModel": "Select model",
+
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
   "memory.title": "Memory",
@@ -410,6 +415,11 @@ const th: Record<DictKey, string> = {
   "kb.unit.documents": "เอกสาร",
   "kb.unit.chunk": "ชิ้น",
   "kb.unit.chunks": "ชิ้น",
+
+  // Model selector
+  "model.auto.name": "อัตโนมัติ",
+  "model.auto.description": "เลือก model ให้อัตโนมัติ",
+  "model.selectModel": "เลือกโมเดล",
 
   // Memory page
   "memory.back": "กลับไปแชท",
