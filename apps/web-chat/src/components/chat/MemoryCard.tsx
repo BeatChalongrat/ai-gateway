@@ -18,18 +18,21 @@
 import { Pencil, Pin, PinOff, X } from "lucide-react";
 
 import { timeAgo } from "@/components/workspace/workspaceUtil";
+import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import type { Memory } from "@/lib/types";
 
-// Human labels for the memory_type enum the API exposes. Kept
-// here so the dropdown in MemoryFormDialog + the metadata line
-// here stay in lockstep.
-export const MEMORY_TYPE_LABELS: Record<string, string> = {
-  explicit_fact: "fact",
-  response_preference: "preference",
-  ongoing_interest: "interest",
-  confirmed_instruction: "instruction",
-  inferred_preference: "suggested",
-  artifact_reference: "file reference",
+// Maps the memory_type enum the API exposes to the i18n dict key
+// for its lowercase noun form ("fact", "preference"…). Used by the
+// metadata line; the dialog dropdown uses the parallel
+// `memory.form.opt.*` keys for capitalised labels.
+export const MEMORY_TYPE_DICT_KEYS: Record<string, DictKey> = {
+  explicit_fact: "memory.type.fact",
+  response_preference: "memory.type.preference",
+  ongoing_interest: "memory.type.interest",
+  confirmed_instruction: "memory.type.instruction",
+  inferred_preference: "memory.type.suggested",
+  artifact_reference: "memory.type.fileReference",
 };
 
 interface Props {
@@ -39,8 +42,8 @@ interface Props {
   onTogglePin: (id: string, pinned: boolean) => void;
   /** Optional. When wired, the source line resolves the source
    *  conversation id to its title via this lookup. Falls back to
-   *  "another conversation" when the id isn't in the user's
-   *  current conversation list. */
+   *  "another conversation" inside the card when the id isn't in
+   *  the user's current conversation list. */
   resolveConversationTitle?: (id: string) => string | undefined;
 }
 
@@ -51,16 +54,17 @@ export function MemoryCard({
   onTogglePin,
   resolveConversationTitle,
 }: Props) {
-  const typeLabel =
-    MEMORY_TYPE_LABELS[memory.memory_type] ?? memory.memory_type;
+  const t = useT();
+  const typeKey = MEMORY_TYPE_DICT_KEYS[memory.memory_type];
+  const typeLabel = typeKey ? t(typeKey) : memory.memory_type;
   const metaParts = [
     memory.category || null,
     typeLabel,
-    `saved ${timeAgo(memory.created_at)}`,
+    t("memory.card.savedAgo", { time: timeAgo(memory.created_at) }),
   ].filter(Boolean) as string[];
 
-  const sourceLabel = renderSource(memory, resolveConversationTitle);
-  const usageLabel = renderUsage(memory);
+  const sourceLabel = renderSource(memory, t, resolveConversationTitle);
+  const usageLabel = renderUsage(memory, t);
 
   return (
     <div
@@ -71,7 +75,7 @@ export function MemoryCard({
         {memory.is_pinned ? (
           <Pin
             className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-text-tertiary"
-            aria-label="Pinned"
+            aria-label={t("memory.card.pinned")}
           />
         ) : null}
         <p className="min-w-0 flex-1 text-sm text-text-primary">{memory.content}</p>
@@ -81,7 +85,8 @@ export function MemoryCard({
 
       {sourceLabel ? (
         <p className="mt-0.5 text-xs text-text-muted">
-          Source: <span className="text-text-tertiary">{sourceLabel}</span>
+          {t("memory.card.sourceLabel")}{" "}
+          <span className="text-text-tertiary">{sourceLabel}</span>
         </p>
       ) : null}
 
@@ -91,12 +96,12 @@ export function MemoryCard({
 
       <div className="mt-2 flex items-center justify-end gap-1">
         <CardAction
-          label="Edit"
+          label={t("memory.card.edit")}
           icon={<Pencil className="h-3.5 w-3.5" />}
           onClick={() => onEdit(memory)}
         />
         <CardAction
-          label={memory.is_pinned ? "Unpin" : "Pin"}
+          label={memory.is_pinned ? t("memory.card.unpin") : t("memory.card.pin")}
           icon={
             memory.is_pinned ? (
               <PinOff className="h-3.5 w-3.5" />
@@ -107,7 +112,7 @@ export function MemoryCard({
           onClick={() => onTogglePin(memory.id, !memory.is_pinned)}
         />
         <CardAction
-          label="Delete"
+          label={t("memory.card.delete")}
           icon={<X className="h-4 w-4" />}
           onClick={() => onDelete(memory.id)}
           danger
@@ -152,31 +157,42 @@ function CardAction({
 // origin in plain English.
 function renderSource(
   m: Memory,
+  t: (key: DictKey, vars?: Record<string, string>) => string,
   resolveConversationTitle?: (id: string) => string | undefined,
 ): string | null {
   if (m.source_conversation_id && resolveConversationTitle) {
     const title = resolveConversationTitle(m.source_conversation_id);
-    if (title) return `"${title}" conversation`;
+    if (title) return t("memory.card.source.conv", { title });
   }
   switch (m.source_type) {
     case "user_explicit":
-      return m.source_conversation_id ? "saved from a conversation" : "direct input";
+      return m.source_conversation_id
+        ? t("memory.card.source.userExplicitConv")
+        : t("memory.card.source.userExplicitDirect");
     case "assistant_inferred":
-      return "AI detected from conversation";
+      return t("memory.card.source.assistantInferred");
     case "conversation_summary":
-      return "conversation summary";
+      return t("memory.card.source.summary");
     case "artifact_event":
-      return "file event";
+      return t("memory.card.source.artifact");
     default:
       return null;
   }
 }
 
-function renderUsage(m: Memory): string | null {
+function renderUsage(
+  m: Memory,
+  t: (key: DictKey, vars?: Record<string, string>) => string,
+): string | null {
   if (m.use_count <= 0) return null;
-  const used = `Used ${m.use_count} ${m.use_count === 1 ? "time" : "times"}`;
+  const used =
+    m.use_count === 1
+      ? t("memory.card.usedOne")
+      : t("memory.card.usedMany", { count: String(m.use_count) });
   if (m.last_used_at) {
-    return `${used} · last used ${timeAgo(m.last_used_at)}`;
+    return `${used} · ${t("memory.card.lastUsed", {
+      time: timeAgo(m.last_used_at),
+    })}`;
   }
   return used;
 }
