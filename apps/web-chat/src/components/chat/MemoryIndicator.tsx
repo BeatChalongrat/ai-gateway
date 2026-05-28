@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { Brain, BrainCircuit } from "lucide-react";
 
 import { toast } from "@/components/ui/Toast";
+import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { useChatStore } from "@/stores/chatStore";
 
 interface Props {
@@ -40,6 +41,10 @@ export function MemoryIndicator({ conversationId }: Props) {
 
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // S8 — small blue dot when the user has unreviewed preference
+  // suggestions. Subscribes to the same store the sidebar badge
+  // reads; the chat layout's useMemoryPendingPoll keeps it fresh.
+  const pendingCount = useMemoryPendingStore((s) => s.count);
 
   useEffect(() => {
     if (!open) return;
@@ -86,8 +91,14 @@ export function MemoryIndicator({ conversationId }: Props) {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={enabled ? "Memory is active" : "Memory is off for this chat"}
-        className={`focus-ring inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors hover:bg-bg-elevated ${
+        title={
+          enabled
+            ? pendingCount > 0
+              ? `Memory is active — ${pendingCount} suggested preference${pendingCount === 1 ? "" : "s"} pending`
+              : "Memory is active"
+            : "Memory is off for this chat"
+        }
+        className={`focus-ring relative inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors hover:bg-bg-elevated ${
           enabled ? "text-text-tertiary" : "text-text-muted"
         }`}
       >
@@ -99,6 +110,15 @@ export function MemoryIndicator({ conversationId }: Props) {
         <span className="hidden sm:inline">
           {enabled ? "Memory" : "No memory"}
         </span>
+        {/* S8 — small blue dot when pending suggestions exist.
+            Tiny + absolute so it overlays the Brain icon without
+            reflowing the row's width. */}
+        {pendingCount > 0 ? (
+          <span
+            aria-hidden
+            className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-blue-500 ring-2 ring-bg-base"
+          />
+        ) : null}
       </button>
 
       {open ? (

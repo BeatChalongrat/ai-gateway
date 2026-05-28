@@ -262,6 +262,118 @@ func (r *MemoryRepo) SetConfirmed(
 	return nil
 }
 
+// CountByStatus returns the number of rows in the given status
+// for the user. Backs the S8 pending-count badge (GET
+// /memories/pending-count). Hard-scoped by user_id + tenant_id.
+func (r *MemoryRepo) CountByStatus(
+	ctx context.Context, userID, tenantID uuid.UUID, status string,
+) (int, error) {
+	const q = `
+		SELECT COUNT(*)::int FROM chat.user_memories
+		WHERE user_id = $1 AND tenant_id = $2 AND status = $3
+	`
+	var n int
+	if err := r.db.QueryRow(ctx, q, userID, tenantID, status).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count memories by status: %w", err)
+	}
+	return n, nil
+}
+
+// SetStatus updates a memory's status without touching any other
+// field. Used by the S8 auto-promotion path (pending → active for
+// the newest of a similar set, superseded for the older
+// duplicates) and the rare future "demote / re-pend" flow.
+//
+// Tenant + user scoped — the WHERE clause prevents a leaked id
+// from mutating another tenant's row.
+func (r *MemoryRepo) SetStatus(
+	ctx context.Context, id, userID, tenantID uuid.UUID, status string,
+) error {
+	const q = `
+		UPDATE chat.user_memories
+		SET status = $4, updated_at = NOW()
+		WHERE id = $1 AND user_id = $2 AND tenant_id = $3
+	`
+	tag, err := r.db.Exec(ctx, q, id, userID, tenantID, status)
+	if err != nil {
+		return fmt.Errorf("set status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// FindSimilarPending returns rows whose normalized_key matches
+// the supplied key and whose status is pending OR active. The S8
+// auto-promotion path uses the count to decide: 3+ observations
+// of the same suggestion across distinct conversations → promote
+// the newest to active and supersede the rest.
+//
+// Filter is restricted to inferred_preference rows so a manual
+// active memory matching a fresh inferred suggestion doesn't get
+// counted toward the promotion threshold.
+func (r *MemoryRepo) FindSimilarPending(
+	ctx context.Context, userID, tenantID uuid.UUID, normalizedKey string,
+) ([]model.Memory, error) {
+	if strings.TrimSpace(normalizedKey) == "" {
+		return nil, nil
+	}
+	q := `SELECT ` + memoryColumns + `
+	      FROM chat.user_memories
+	      WHERE user_id = $1
+	        AND tenant_id = $2
+	        AND memory_type = 'inferred_preference'
+	        AND status IN ('pending_confirmation', 'active')
+	        AND normalized_key = $3
+	      ORDER BY created_at DESC`
+	rows, err := r.db.Query(ctx, q, userID, tenantID, normalizedKey)
+	if err != nil {
+		return nil, fmt.Errorf("find similar pending: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.Memory, 0, 4)
+	for rows.Next() {
+		var m model.Memory
+		if err := scanMemory(rows, &m); err != nil {
+			return nil, fmt.Errorf("find similar pending scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ExistsByNormalizedKeyOrPending is the dedup gate used by the S8
+// extractor. Returns true when an active row OR a pending
+// inferred-preference row already carries the same normalised
+// content — either way we shouldn't re-create the same suggestion.
+//
+// Sibling of ExistsByNormalizedKey (which checks active only and
+// powers the explicit-save dedup); extractor uses this stricter
+// variant so a freshly-extracted pattern isn't re-suggested when
+// the user hasn't yet confirmed an identical earlier suggestion.
+func (r *MemoryRepo) ExistsByNormalizedKeyOrPending(
+	ctx context.Context, userID, tenantID uuid.UUID, normalizedKey string,
+) (bool, error) {
+	if strings.TrimSpace(normalizedKey) == "" {
+		return false, nil
+	}
+	const q = `
+		SELECT EXISTS (
+		  SELECT 1
+		  FROM chat.user_memories
+		  WHERE user_id = $1 AND tenant_id = $2
+		    AND normalized_key = $3
+		    AND status IN ('active', 'pending_confirmation')
+		)
+	`
+	var exists bool
+	if err := r.db.QueryRow(ctx, q, userID, tenantID, normalizedKey).Scan(&exists); err != nil {
+		return false, fmt.Errorf("exists by normalized key or pending: %w", err)
+	}
+	return exists, nil
+}
+
 // ExistsByNormalizedKey is the dedup gate. Returns true when an
 // active row already carries the same normalised content for this
 // user (we don't fire on superseded / deleted rows so re-saving an

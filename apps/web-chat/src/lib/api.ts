@@ -398,6 +398,12 @@ class ApiClient {
   getMemoryEvents(id: string) {
     return this.json<MemoryEventListResponse>(`/memories/${id}/events`);
   }
+  /** S8 — pending preference-suggestion count. Drives the badge
+   *  on the sidebar Memory menu item + the dot on the chat
+   *  header's MemoryIndicator. Polled every ~2 minutes. */
+  getMemoryPendingCount() {
+    return this.json<{ count: number }>("/memories/pending-count");
+  }
 
   // ----- Preferences ---------------------------------------
   getPreferences() {
