@@ -367,29 +367,6 @@ export function ChatInput({
       }
     >
       <div className="mx-auto flex w-full max-w-chat flex-col gap-2">
-        {/* Pending-file preview row */}
-        {pendingFiles.length > 0 ? (
-          <div className="scrollbar-thin flex gap-2 overflow-x-auto py-1">
-            {pendingFiles.map((p) => (
-              <FilePreviewCard
-                key={p.id}
-                pending={p}
-                onRemove={() => {
-                  if (conversationId) removePendingFile(conversationId, p.id);
-                }}
-                onRetry={
-                  p.status === "error" && conversationId
-                    ? () => {
-                        removePendingFile(conversationId, p.id);
-                        void uploadOne(conversationId, p.file);
-                      }
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        ) : null}
-
         {/* Recording mode replaces the composer pill with a
             full-width recording bar. Same outer container — the
             decision is purely render-level so flex/scroll constraints
@@ -405,10 +382,10 @@ export function ChatInput({
           />
         ) : null}
 
-        {/* Composer pill — Claude-style two-row layout.
-            Row 1: full-width textarea (auto-grows).
-            Row 2: [+ attach] on the left, [model pill] [send/stop]
-                   on the right.
+        {/* Composer pill — Claude-style.
+            Pending files (when any) sit at the top of the pill so the
+            container visibly grows when the user attaches something.
+            Row textarea → row toolbar follows underneath.
             Decoupling the buttons from the textarea row sidesteps
             every "send is misaligned with first line" problem — the
             send button now sits in its own row with its own padding
@@ -430,6 +407,30 @@ export function ChatInput({
             className="hidden"
             onChange={onPickFiles}
           />
+
+          {/* Row 0: pending-file chips. Wraps to a second line rather
+              than scrolling horizontally — feels native to the pill. */}
+          {pendingFiles.length > 0 ? (
+            <div className="flex flex-wrap gap-2 px-3 pt-3">
+              {pendingFiles.map((p) => (
+                <FilePreviewCard
+                  key={p.id}
+                  pending={p}
+                  onRemove={() => {
+                    if (conversationId) removePendingFile(conversationId, p.id);
+                  }}
+                  onRetry={
+                    p.status === "error" && conversationId
+                      ? () => {
+                          removePendingFile(conversationId, p.id);
+                          void uploadOne(conversationId, p.file);
+                        }
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          ) : null}
 
           {/* Row 1: textarea, full width */}
           <div className="px-4 pt-3">
