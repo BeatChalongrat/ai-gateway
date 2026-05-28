@@ -28,7 +28,10 @@ from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.http_client import create_provider_client
-from app.services.providers.openai_adapter import _parse_sse_line
+from app.services.providers.openai_adapter import (
+    _REASONING_EFFORT_MAP,
+    _parse_sse_line,
+)
 from app.services.providers.parsers import parse_openai_response
 
 if TYPE_CHECKING:
@@ -77,6 +80,28 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             val = getattr(payload, param, None) or payload.metadata.get(param)
             if val is not None:
                 body[param] = val
+
+        # T3: forward ``reasoning_effort`` for reasoning-capable models
+        # served over the OpenAI-compatible wire (covers DeepSeek-R1
+        # and Groq R1-distill today; future R1-style models pick this
+        # up automatically when their registry row is flagged
+        # ``supports_reasoning=True`` with strategy
+        # ``openai_compatible_reasoning``). DeepSeek/Groq actually
+        # surface reasoning even WITHOUT this knob (their R1 models
+        # always emit ``reasoning_content``); sending the param is a
+        # forward-compat hint for providers that gate on it. Non-
+        # reasoning rows skip this branch and stay byte-identical.
+        # Unlike the native OpenAI adapter we do NOT strip temperature
+        # / top_p or swap ``max_tokens`` → ``max_completion_tokens``
+        # — DeepSeek-R1 / Groq accept the legacy sampling knobs.
+        reasoning_cfg = getattr(payload, "reasoning", None)
+        if reasoning_cfg is not None and reasoning_cfg.mode != "off":
+            from app.services.providers.model_registry import get_candidate
+            candidate = get_candidate(model)
+            if candidate is not None and candidate.supports_reasoning:
+                body["reasoning_effort"] = _REASONING_EFFORT_MAP.get(
+                    reasoning_cfg.mode, _REASONING_EFFORT_MAP["auto"]
+                )
 
         return body
 

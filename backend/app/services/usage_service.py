@@ -65,6 +65,34 @@ def _estimate_cost(
     return round((prompt_tokens + completion_tokens) * rate, 8)
 
 
+def _estimate_reasoning_cost(model: str, reasoning_tokens: int) -> float:
+    """USD cost attributable to reasoning tokens (T3).
+
+    Reasoning tokens bill at the model's *output* rate on every
+    provider we currently route to — OpenAI o-series, Anthropic
+    extended thinking, Gemini 2.5+ all fold reasoning into the
+    completion-side meter. This helper returns the reasoning-only
+    portion so the request_log row can attribute spend separately
+    from the visible completion cost (which is computed once for
+    the full ``completion_tokens`` count via ``_estimate_cost`` —
+    callers that want the *visible-only* cost should subtract the
+    reasoning portion themselves to avoid double-counting).
+
+    Falls back to the legacy flat rate when the candidate has no
+    output rate set — same posture as ``_estimate_cost``.
+    """
+    if reasoning_tokens <= 0:
+        return 0.0
+    from app.services.providers.model_registry import get_candidate
+
+    candidate = get_candidate(model)
+    if candidate and candidate.cost_per_output_token > 0.0:
+        return round(reasoning_tokens * candidate.cost_per_output_token, 8)
+
+    rate = _legacy_flat_rate(model)
+    return round(reasoning_tokens * rate, 8)
+
+
 class UsageService:
 
     def estimate(self, payload, response_text: str, model_name: str) -> UsageInfo:

@@ -26,6 +26,8 @@ class RequestLogService:
             completion_tokens=record.completion_tokens,
             total_tokens=record.total_tokens,
             estimated_cost_usd=record.estimated_cost_usd,
+            reasoning_tokens=record.reasoning_tokens,
+            reasoning_cost=record.reasoning_cost,
             error_code=record.error_code,
             dlp_input_findings=record.dlp_input_findings,
             dlp_input_action=record.dlp_input_action,
