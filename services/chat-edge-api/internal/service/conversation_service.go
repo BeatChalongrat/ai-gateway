@@ -225,6 +225,24 @@ func (s *ConversationService) SetKnowledgeBase(
 	return nil
 }
 
+// SetMemoryEnabled toggles the per-conversation memory layer
+// (S1 — temporary chat). User-scope gate runs first so a same-tenant
+// caller can't flip another user's conversation.
+func (s *ConversationService) SetMemoryEnabled(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, enabled bool,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
+	if err := s.conversations.UpdateMemoryEnabled(ctx, tenantID, convID, enabled); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // Delete soft-deletes the conversation. Messages remain in
 // chat.messages_masked for audit; only the sidebar listing hides.
 func (s *ConversationService) Delete(

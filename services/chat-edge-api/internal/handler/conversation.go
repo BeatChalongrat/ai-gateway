@@ -93,16 +93,22 @@ type conversationResponse struct {
 	// KnowledgeBaseID is null when the conversation has no RAG
 	// source bound — most conversations.
 	KnowledgeBaseID *string `json:"knowledge_base_id"`
+	// MemoryEnabled exposes the per-conversation memory toggle
+	// (S1 — temporary chat). Default true; the frontend renders a
+	// chip when false so the user knows nothing they say here will
+	// feed into their long-term memory.
+	MemoryEnabled bool `json:"memory_enabled"`
 }
 
 func toResponse(c *model.Conversation) conversationResponse {
 	r := conversationResponse{
-		ID:           c.ID.String(),
-		Title:        c.Title,
-		ModelID:      c.ModelID,
-		MessageCount: c.MessageCount,
-		CreatedAt:    c.CreatedAt,
-		UpdatedAt:    c.UpdatedAt,
+		ID:            c.ID.String(),
+		Title:         c.Title,
+		ModelID:       c.ModelID,
+		MessageCount:  c.MessageCount,
+		CreatedAt:     c.CreatedAt,
+		UpdatedAt:     c.UpdatedAt,
+		MemoryEnabled: c.MemoryEnabled,
 	}
 	if c.KnowledgeBaseID != nil {
 		s := c.KnowledgeBaseID.String()
@@ -235,6 +241,10 @@ type updateRequest struct {
 	Title           *string         `json:"title,omitempty"`
 	ModelID         *string         `json:"model_id,omitempty"`
 	KnowledgeBaseID json.RawMessage `json:"knowledge_base_id,omitempty"`
+	// MemoryEnabled toggles the S1 cross-conversation memory layer
+	// for this conversation. Pointer so the handler can distinguish
+	// "field omitted" from "field set to false".
+	MemoryEnabled *bool `json:"memory_enabled,omitempty"`
 }
 
 func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +259,7 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
 		return
 	}
-	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 {
+	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 && req.MemoryEnabled == nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
 	}
@@ -286,6 +296,12 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := h.conversations.SetKnowledgeBase(r.Context(), caller.TenantUUID, caller.UserID, convID, kbID); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if req.MemoryEnabled != nil {
+		if err := h.conversations.SetMemoryEnabled(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.MemoryEnabled); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
