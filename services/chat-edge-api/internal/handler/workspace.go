@@ -72,6 +72,15 @@ func (h *WorkspaceHandler) ListGenerated(w http.ResponseWriter, r *http.Request)
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
 		return
 	}
+	// Conversation-ownership gate. The repo query below is tenant-
+	// scoped only; without this check a same-tenant attacker could
+	// list another user's generated artifacts by guessing convIDs.
+	if err := h.workspace.AssertConvOwnership(
+		r.Context(), caller.TenantUUID, caller.UserID, convID,
+	); err != nil {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+		return
+	}
 	leaves, err := h.files.ListGeneratedLeaves(r.Context(), caller.TenantUUID, convID)
 	if err != nil {
 		slog.Warn("workspace: list generated failed",
@@ -120,6 +129,7 @@ func (h *WorkspaceHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := h.workspace.Rollback(r.Context(), service.RollbackInput{
 		TenantID:        caller.TenantUUID,
+		UserID:          caller.UserID,
 		ConversationID:  convID,
 		LineageFileID:   lineageID,
 		TargetVersionID: targetID,
@@ -167,6 +177,7 @@ func (h *WorkspaceHandler) Compare(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.workspace.Compare(r.Context(), service.CompareInput{
 		TenantID:       caller.TenantUUID,
+		UserID:         caller.UserID,
 		ConversationID: convID,
 		V1FileID:       v1,
 		V2FileID:       v2,

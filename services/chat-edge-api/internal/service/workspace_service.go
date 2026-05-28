@@ -82,15 +82,24 @@ type ComparisonResult struct {
 // ---------------------------------------------------------------------------
 
 type WorkspaceService struct {
-	files   *repository.FileRepo
-	storage storage.Backend
+	files         *repository.FileRepo
+	conversations *repository.ConversationRepo
+	storage       storage.Backend
 
 	pythonBin  string
 	scriptsDir string
 }
 
+// NewWorkspaceService wires the repos + Python runtime. The
+// conversations repo is used by Rollback / Compare to verify the
+// caller owns the conversation before walking any lineage —
+// without it a same-tenant-different-user caller could rollback or
+// diff another user's generated artifacts.
 func NewWorkspaceService(
-	files *repository.FileRepo, store storage.Backend, pythonBin, scriptsDir string,
+	files *repository.FileRepo,
+	conversations *repository.ConversationRepo,
+	store storage.Backend,
+	pythonBin, scriptsDir string,
 ) *WorkspaceService {
 	if pythonBin == "" {
 		pythonBin = "python3"
@@ -99,11 +108,41 @@ func NewWorkspaceService(
 		scriptsDir = "scripts"
 	}
 	return &WorkspaceService{
-		files:      files,
-		storage:    store,
-		pythonBin:  pythonBin,
-		scriptsDir: scriptsDir,
+		files:         files,
+		conversations: conversations,
+		storage:       store,
+		pythonBin:     pythonBin,
+		scriptsDir:    scriptsDir,
 	}
+}
+
+// AssertConvOwnership exposes the conv-ownership gate to handlers
+// that hit the file repo directly (e.g. WorkspaceHandler.
+// ListGenerated, ExcelHandler.Versions). Returns
+// ErrWorkspaceTargetNotFound on every failure mode so the upstream
+// handler maps a single error to 404 without leaking existence.
+func (s *WorkspaceService) AssertConvOwnership(
+	ctx context.Context, tenantID, userID, convID uuid.UUID,
+) error {
+	return s.assertConvOwnership(ctx, tenantID, userID, convID)
+}
+
+// assertConvOwnership is the internal call. Kept separate so the
+// service's own methods can use it without the public name.
+func (s *WorkspaceService) assertConvOwnership(
+	ctx context.Context, tenantID, userID, convID uuid.UUID,
+) error {
+	c, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrWorkspaceTargetNotFound
+		}
+		return err
+	}
+	if c.UserID != userID {
+		return ErrWorkspaceTargetNotFound
+	}
+	return nil
 }
 
 func (s *WorkspaceService) scriptPath(name string) (string, error) {
@@ -131,6 +170,7 @@ func (s *WorkspaceService) scriptPath(name string) (string, error) {
 // RollbackInput is the typed payload from the handler.
 type RollbackInput struct {
 	TenantID        uuid.UUID
+	UserID          uuid.UUID
 	ConversationID  uuid.UUID
 	LineageFileID   uuid.UUID // any file in the chain (typically the leaf)
 	TargetVersionID uuid.UUID // the old version whose content to clone forward
@@ -144,6 +184,9 @@ type RollbackInput struct {
 func (s *WorkspaceService) Rollback(
 	ctx context.Context, in RollbackInput,
 ) (*model.ConversationFile, error) {
+	if err := s.assertConvOwnership(ctx, in.TenantID, in.UserID, in.ConversationID); err != nil {
+		return nil, err
+	}
 	target, err := s.files.GetByID(ctx, in.TenantID, in.TargetVersionID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -153,6 +196,12 @@ func (s *WorkspaceService) Rollback(
 	}
 	if target.ConversationID != in.ConversationID {
 		// Cross-conversation cross-link guard.
+		return nil, ErrWorkspaceTargetNotFound
+	}
+	if target.UserID != in.UserID {
+		// Belt-and-braces — the conv ownership check above already
+		// covers this, but a defensive denormalised check is cheap
+		// and fails closed if migration 013's backfill missed a row.
 		return nil, ErrWorkspaceTargetNotFound
 	}
 	if !target.IsGenerated {
@@ -231,6 +280,7 @@ func (s *WorkspaceService) Rollback(
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
 		TenantID:         in.TenantID,
+		UserID:           in.UserID,
 		Filename:         storageName,
 		OriginalFilename: newName,
 		ContentType:      target.ContentType,
@@ -290,6 +340,7 @@ func buildRollbackFilename(prev string, newVersion int) string {
 
 type CompareInput struct {
 	TenantID       uuid.UUID
+	UserID         uuid.UUID
 	ConversationID uuid.UUID
 	V1FileID       uuid.UUID
 	V2FileID       uuid.UUID
@@ -302,6 +353,9 @@ type CompareOutput struct {
 }
 
 func (s *WorkspaceService) Compare(ctx context.Context, in CompareInput) (*CompareOutput, error) {
+	if err := s.assertConvOwnership(ctx, in.TenantID, in.UserID, in.ConversationID); err != nil {
+		return nil, err
+	}
 	v1, err := s.files.GetByID(ctx, in.TenantID, in.V1FileID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -319,6 +373,14 @@ func (s *WorkspaceService) Compare(ctx context.Context, in CompareInput) (*Compa
 	// Conversation-scope guard — prevents two files in different
 	// threads (but same tenant) from being cross-compared.
 	if v1.ConversationID != in.ConversationID || v2.ConversationID != in.ConversationID {
+		return nil, ErrWorkspaceTargetNotFound
+	}
+	// Belt-and-braces user_id guard on the file rows. The
+	// assertConvOwnership above already passes only when the conv
+	// belongs to in.UserID, and the conversation-scope check pins
+	// both files to that conv — but a defensive denormalised check
+	// fails closed if migration 013's backfill ever missed a row.
+	if v1.UserID != in.UserID || v2.UserID != in.UserID {
 		return nil, ErrWorkspaceTargetNotFound
 	}
 	if !v1.IsGenerated || !v2.IsGenerated {
