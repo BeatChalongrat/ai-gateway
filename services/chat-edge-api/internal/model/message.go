@@ -37,4 +37,12 @@ type Message struct {
 	ParentID    *uuid.UUID
 	BranchIndex int
 	IsActive    bool
+
+	// T4 — Thinking Mode (migration 019). Reasoning / thinking
+	// summary the model emitted for this assistant turn. Stored
+	// masked; raw reasoning text is filtered by the Gateway's
+	// outbound DLP scan on the reasoning channel before the
+	// chat-edge ever sees it. Nullable — non-reasoning turns and
+	// pre-T4 rows return ``nil``.
+	ReasoningContent *string
 }
