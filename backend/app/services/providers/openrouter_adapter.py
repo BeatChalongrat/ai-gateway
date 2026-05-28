@@ -23,6 +23,15 @@ if TYPE_CHECKING:
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# Reasoning mode → OpenRouter ``reasoning.effort`` value. ``auto``
+# collapses to medium (same posture the audit recommended).
+_OPENROUTER_REASONING_EFFORT: dict[str, str] = {
+    "auto": "medium",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+}
+
 
 class OpenRouterAdapter(BaseProviderAdapter):
     provider_name = "openrouter"
@@ -43,6 +52,27 @@ class OpenRouterAdapter(BaseProviderAdapter):
             val = getattr(payload, param, None) or payload.metadata.get(param)
             if val is not None:
                 body[param] = val
+
+        # T3: OpenRouter reasoning. The OR API accepts both the legacy
+        # ``include_reasoning: true`` flag AND the newer
+        # ``reasoning: {effort: low|medium|high}`` shape; we send
+        # both so upstream-side rollouts of either still apply our
+        # mode. Gated on the resolved model being flagged
+        # ``supports_reasoning=True`` (migration 045) — non-reasoning
+        # OR models are byte-identical to the pre-T3 body.
+        # Response-side parsing (``message.reasoning_content`` /
+        # ``delta.reasoning_content``) already comes for free via the
+        # shared OpenAI-compatible parsers updated in T2.
+        reasoning_cfg = getattr(payload, "reasoning", None)
+        if reasoning_cfg is not None and reasoning_cfg.mode != "off":
+            from app.services.providers.model_registry import get_candidate
+            candidate = get_candidate(model)
+            if candidate is not None and candidate.supports_reasoning:
+                body["include_reasoning"] = True
+                effort = _OPENROUTER_REASONING_EFFORT.get(
+                    reasoning_cfg.mode, _OPENROUTER_REASONING_EFFORT["auto"]
+                )
+                body["reasoning"] = {"effort": effort}
 
         return body
 

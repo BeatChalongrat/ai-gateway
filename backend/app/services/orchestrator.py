@@ -69,7 +69,11 @@ from app.services.provider_dispatcher import ProviderDispatcher
 from app.services.routing_service import RoutingService
 from app.services.audit_service import AuditService
 from app.services.request_log_service import RequestLogService
-from app.services.usage_service import UsageService, _estimate_cost
+from app.services.usage_service import (
+    UsageService,
+    _estimate_cost,
+    _estimate_reasoning_cost,
+)
 from app.services.rate_limit_service import RateLimitService
 from app.services.quota_service import QuotaService
 from app.services.budget_service import BudgetService
@@ -961,6 +965,15 @@ class GatewayOrchestrator:
                 provider_response.usage.completion_tokens,
             )
             _cost_info = currency_service.format_cost(_usd)
+            # T3: surface ``reasoning_tokens`` on UsageInfo when the
+            # provider broke it out (or we estimate from
+            # ``reasoning_content`` length when Anthropic folded it
+            # into ``output_tokens``). ``None`` keeps the wire shape
+            # backward-compatible for non-reasoning calls.
+            _provider_rtok = provider_response.usage.reasoning_tokens or 0
+            if _provider_rtok == 0 and provider_response.reasoning_content:
+                _provider_rtok = max(1, len(provider_response.reasoning_content) // 4)
+            _reasoning_tok_for_usage = _provider_rtok or None
             usage = UsageInfo(
                 prompt_tokens=provider_response.usage.prompt_tokens,
                 completion_tokens=provider_response.usage.completion_tokens,
@@ -968,6 +981,7 @@ class GatewayOrchestrator:
                 estimated_cost_usd=_usd,
                 cost_thb=_cost_info["thb"],
                 cost_display=_cost_info["display"],
+                reasoning_tokens=_reasoning_tok_for_usage,
             )
         else:
             usage = self.usage_service.estimate(
@@ -975,6 +989,15 @@ class GatewayOrchestrator:
                 response_text=provider_response.content,
                 model_name=route.model_name,
             )
+            # Heuristic estimator doesn't know reasoning tokens, but if
+            # the adapter parsed ``reasoning_content`` we can still
+            # length-estimate. Leave ``None`` when neither is available.
+            if provider_response.reasoning_content:
+                usage = usage.model_copy(update={
+                    "reasoning_tokens": max(
+                        1, len(provider_response.reasoning_content) // 4
+                    )
+                })
 
         # 8. DLP scan response THEN restore (order matters).
         #
@@ -1548,6 +1571,15 @@ class GatewayOrchestrator:
                 completion_tokens=usage.completion_tokens,
                 total_tokens=usage.total_tokens,
                 estimated_cost_usd=usage.estimated_cost_usd,
+                # T3: persist reasoning attribution. ``usage.reasoning_tokens``
+                # is None on non-reasoning calls so we coerce to 0 for
+                # the request_log column (NOT NULL DEFAULT 0). The
+                # cost helper short-circuits to 0.0 when the token
+                # count is zero so non-reasoning rows stay byte-identical.
+                reasoning_tokens=(usage.reasoning_tokens or 0),
+                reasoning_cost=_estimate_reasoning_cost(
+                    route.model_name, usage.reasoning_tokens or 0
+                ),
                 fallback_used=fallback_result is not None,
                 fallback_attempts=fallback_attempts_list,
                 original_provider=original_provider,
@@ -1680,16 +1712,11 @@ class GatewayOrchestrator:
                 if _show_summary_resp and provider_response.reasoning_content
                 else None
             )
-            response_reasoning_tokens: int | None = None
-            if (
-                provider_response.usage is not None
-                and provider_response.usage.reasoning_tokens
-            ):
-                response_reasoning_tokens = provider_response.usage.reasoning_tokens
-            elif provider_response.reasoning_content:
-                response_reasoning_tokens = max(
-                    1, len(provider_response.reasoning_content) // 4
-                )
+            # T3: ``usage.reasoning_tokens`` was already resolved at
+            # step 7 (provider-reported OR length-estimated from
+            # ``reasoning_content``); reuse it here so the top-level
+            # response field and ``usage.reasoning_tokens`` agree.
+            response_reasoning_tokens = usage.reasoning_tokens
 
             response = ChatCompletionsResponse(
                 id=request_id,

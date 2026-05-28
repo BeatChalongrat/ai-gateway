@@ -44,6 +44,16 @@ _FINISH_MAP = {
     "OTHER": "stop",
 }
 
+# Reasoning mode → Gemini ``thinkingConfig.thinkingLevel``. Gemini's
+# native vocabulary is uppercase. ``auto`` collapses to MEDIUM —
+# matches the Anthropic / OpenAI mode-mapping convention.
+_GEMINI_THINKING_LEVEL_MAP: dict[str, str] = {
+    "auto": "MEDIUM",
+    "low": "LOW",
+    "medium": "MEDIUM",
+    "high": "HIGH",
+}
+
 
 def _split_system(messages: list[Message]) -> tuple[list[Message], str]:
     """Peel system messages off the front; Gemini takes them separately."""
@@ -71,11 +81,23 @@ def _build_contents(messages: list[Message]) -> list[dict]:
 def _parse_response(data: dict) -> ProviderResponse:
     candidates = data.get("candidates") or []
     content = ""
+    reasoning_text = ""
     finish_reason = "stop"
     if candidates:
         first = candidates[0]
         parts = (first.get("content") or {}).get("parts") or []
-        content = "".join(p.get("text", "") for p in parts)
+        # T3: Gemini 2.5+ marks reasoning parts with ``thought: true``.
+        # Concatenate those into ``reasoning_content`` and surface text
+        # parts as the visible ``content`` — same split the Anthropic
+        # parser does for ``thinking`` content blocks.
+        for p in parts:
+            if not isinstance(p, dict):
+                continue
+            text = p.get("text", "") or ""
+            if p.get("thought"):
+                reasoning_text += text
+            else:
+                content += text
         finish_reason = _FINISH_MAP.get(
             first.get("finishReason", "STOP"),
             first.get("finishReason", "stop").lower(),
@@ -87,10 +109,14 @@ def _parse_response(data: dict) -> ProviderResponse:
         prompt = int(meta.get("promptTokenCount") or 0)
         completion = int(meta.get("candidatesTokenCount") or 0)
         total = int(meta.get("totalTokenCount") or (prompt + completion))
+        # T3: Gemini reports reasoning token spend under
+        # ``thoughtsTokenCount``. 0 / absent for non-reasoning models.
+        reasoning_tok = int(meta.get("thoughtsTokenCount") or 0)
         usage = ProviderUsage(
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=total,
+            reasoning_tokens=reasoning_tok,
         )
 
     return ProviderResponse(
@@ -99,6 +125,7 @@ def _parse_response(data: dict) -> ProviderResponse:
         finish_reason=finish_reason,
         usage=usage,
         raw=data,
+        reasoning_content=reasoning_text or None,
     )
 
 
@@ -106,11 +133,25 @@ def _parse_stream_chunk(data: dict) -> ProviderStreamChunk | None:
     """Each SSE chunk from streamGenerateContent is a partial response."""
     candidates = data.get("candidates") or []
     delta = ""
+    reasoning_delta = ""
     finish_reason: str | None = None
     if candidates:
         first = candidates[0]
         parts = (first.get("content") or {}).get("parts") or []
-        delta = "".join(p.get("text", "") for p in parts)
+        # T3: split parts into reasoning vs visible content the same
+        # way the non-stream parser does. A single Gemini chunk may
+        # carry BOTH a ``thought=true`` part and a regular text part;
+        # we emit one ProviderStreamChunk carrying both fields. The
+        # SSE emitter in public_chat.py forwards reasoning_delta and
+        # delta independently.
+        for p in parts:
+            if not isinstance(p, dict):
+                continue
+            text = p.get("text", "") or ""
+            if p.get("thought"):
+                reasoning_delta += text
+            else:
+                delta += text
         raw_finish = first.get("finishReason")
         if raw_finish:
             finish_reason = _FINISH_MAP.get(raw_finish, raw_finish.lower())
@@ -121,13 +162,15 @@ def _parse_stream_chunk(data: dict) -> ProviderStreamChunk | None:
         prompt = int(meta.get("promptTokenCount") or 0)
         completion = int(meta.get("candidatesTokenCount") or 0)
         total = int(meta.get("totalTokenCount") or (prompt + completion))
+        reasoning_tok = int(meta.get("thoughtsTokenCount") or 0)
         usage = ProviderUsage(
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=total,
+            reasoning_tokens=reasoning_tok,
         )
 
-    if not delta and finish_reason is None and usage is None:
+    if not delta and not reasoning_delta and finish_reason is None and usage is None:
         return None
 
     return ProviderStreamChunk(
@@ -135,6 +178,7 @@ def _parse_stream_chunk(data: dict) -> ProviderStreamChunk | None:
         finish_reason=finish_reason,
         model=data.get("modelVersion", "") or "",
         usage=usage,
+        reasoning_delta=reasoning_delta or None,
     )
 
 
@@ -165,6 +209,30 @@ class GoogleAIAdapter(BaseProviderAdapter):
         top_p = getattr(payload, "top_p", None) or payload.metadata.get("top_p")
         if top_p is not None:
             gen["topP"] = top_p
+
+        # T3: Gemini 2.5+ thinking. Gated on the resolved model being
+        # flagged ``supports_reasoning=True`` (migration 045 records
+        # which Gemini variants opt in via ``reasoning_strategy =
+        # 'gemini_thinking_level'``). When enabled we add the
+        # ``thinkingConfig`` block; ``includeThoughts`` is wired to
+        # ``show_summary`` so the upstream API decides whether to
+        # stream ``thought=true`` parts back. Skipped silently for
+        # non-capable models so existing Gemini 1.5 / 2.0 calls are
+        # byte-identical.
+        reasoning_cfg = getattr(payload, "reasoning", None)
+        if reasoning_cfg is not None and reasoning_cfg.mode != "off":
+            from app.services.providers.model_registry import get_candidate
+            effective_model = resolved_model or payload.model
+            candidate = get_candidate(effective_model)
+            if candidate is not None and candidate.supports_reasoning:
+                gen["thinkingConfig"] = {
+                    "thinkingLevel": _GEMINI_THINKING_LEVEL_MAP.get(
+                        reasoning_cfg.mode,
+                        _GEMINI_THINKING_LEVEL_MAP["auto"],
+                    ),
+                    "includeThoughts": bool(reasoning_cfg.show_summary),
+                }
+
         if gen:
             body["generationConfig"] = gen
 

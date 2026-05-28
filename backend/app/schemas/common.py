@@ -50,6 +50,12 @@ class UsageInfo(BaseModel):
     # response contracts that don't set them continue to behave.
     cost_thb: Optional[float] = None
     cost_display: Optional[str] = None
+    # Reasoning subdivision of ``completion_tokens`` (T3). Surfaced
+    # here so the response wire shape matches OpenAI's
+    # ``usage.completion_tokens_details.reasoning_tokens`` convention.
+    # Optional so absent-when-not-reasoning is dropped from the wire
+    # by ``response_model_exclude_none`` on routes that opt in.
+    reasoning_tokens: Optional[int] = None
 
 
 class ErrorDetail(BaseModel):

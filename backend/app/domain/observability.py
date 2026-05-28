@@ -53,6 +53,13 @@ class RequestRecord:
     completion_tokens: int = 0
     total_tokens: int = 0
     estimated_cost_usd: float = 0.0
+    # Reasoning / thinking token accounting (T3). Subdivision of
+    # ``completion_tokens`` for o-series-style providers; folded into
+    # ``output_tokens`` and length-estimated for Anthropic. Both
+    # default to 0 so any non-reasoning call site that constructs a
+    # ``RequestRecord`` continues to work unchanged.
+    reasoning_tokens: int = 0
+    reasoning_cost: float = 0.0
 
     # Routing
     route_provider: str = ""
