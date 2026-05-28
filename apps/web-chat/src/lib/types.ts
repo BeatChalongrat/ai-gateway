@@ -249,10 +249,37 @@ export interface Message {
   branch_index?: number;
   branch_count?: number;
   has_branches?: boolean;
+  /** S7 — context attribution for assistant messages. Populated on
+   *  the conversation-list response when the AI's reply drew on
+   *  saved memories, conversation state, a past-conversation
+   *  search, or a compaction event. Absent / empty for user
+   *  messages and assistant messages with no special context. */
+  context_sources?: ContextSource[];
   /** local-only — true while content is being streamed in. */
   isStreaming?: boolean;
   /** local-only — current feedback rating for this message. */
   feedback?: "thumbs_up" | "thumbs_down" | null;
+}
+
+/** S7 — one source the AI drew on while producing an assistant
+ *  message. Mirrors chat.response_context_sources on the wire. */
+export type ContextSourceType =
+  | "saved_memory"
+  | "conversation_state"
+  | "past_conversation"
+  | "file_context"
+  | "compacted_history";
+
+export interface ContextSource {
+  id: UUID;
+  source_type: ContextSourceType;
+  source_id?: string | null;
+  display_label: string;
+  /** Per-type metadata. For saved_memory: { memory_type, category }.
+   *  For past_conversation: { conversation_title, hit_type,
+   *  relevance, date }. For file_context: { filename, file_type }. */
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
 }
 
 export interface UserPreferences {

@@ -13,6 +13,8 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 
+import { useRouter } from "next/navigation";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -29,6 +31,7 @@ import type { DocPlan } from "./DocPlanCard";
 import { ExcelPlanCard } from "./ExcelPlanCard";
 import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
+import { SourcesCard } from "./SourcesCard";
 import { MessageAttachments } from "./MessageAttachments";
 import { PptxPlanCard } from "./PptxPlanCard";
 import type { PptxPlan } from "./PptxPlanCard";
@@ -130,6 +133,7 @@ function MessageBubbleImpl({
   const modelEntry = useModelStore((s) =>
     effectiveModelId ? s.getModelById(effectiveModelId) : undefined,
   );
+  const router = useRouter();
 
   // Inline-edit state for user messages.
   const [editing, setEditing] = useState(false);
@@ -325,6 +329,22 @@ function MessageBubbleImpl({
 
       {message.files && message.files.length > 0 ? (
         <MessageAttachments files={message.files} />
+      ) : null}
+
+      {/* S7 — "Sources used" rail. Renders only when the
+          assistant turn drew on saved memory / state / search /
+          compaction. Skipped during streaming so the card doesn't
+          flash in before all sources are persisted server-side. */}
+      {!message.isStreaming &&
+      message.context_sources &&
+      message.context_sources.length > 0 ? (
+        <SourcesCard
+          sources={message.context_sources}
+          onEditMemory={() => router.push("/chat/memory")}
+          onOpenConversation={(id) => {
+            if (id) router.push(`/chat/${id}`);
+          }}
+        />
       ) : null}
 
       {/* Action row — copy, thumbs-up, thumbs-down, regenerate.
@@ -600,6 +620,12 @@ function areEqual(prev: Props, next: Props): boolean {
     a.has_branches === b.has_branches &&
     a.token_usage === b.token_usage &&
     a.files === b.files &&
+    // S7 — re-render when the per-turn context_sources array
+    // arrives or changes. The first render after a stream
+    // finishes carries no sources (they persist async); the next
+    // message-list refresh hydrates them and we want the
+    // SourcesCard to appear.
+    a.context_sources === b.context_sources &&
     prev.showFeedback === next.showFeedback &&
     prev.showRegenerate === next.showRegenerate &&
     prev.showModelBadge === next.showModelBadge &&

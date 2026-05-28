@@ -378,21 +378,38 @@ func (s *MemoryService) GetEvents(
 // BuildMemoryContext — system-prompt injection block
 // ---------------------------------------------------------------------------
 
-// BuildMemoryContext assembles the <saved_user_memory> block that
-// the message service prepends to every turn for memory-enabled
-// conversations. Returns "" on any failure or when the user has no
-// active memories — the message service treats "" as "skip block".
-//
-// Side effect: bumps use_count + last_used_at for every recalled
-// memory in the background, so the management UI can show the most-
-// referenced facts. Background writes use a fresh ctx so a client
-// disconnect doesn't kill the accounting.
+// BuildMemoryContext is the legacy wrapper retained for callers
+// that don't need source attribution (tests, the
+// MemoryReader interface). New code should prefer
+// BuildMemoryContextWithSources so the source attribution table
+// stays populated.
 func (s *MemoryService) BuildMemoryContext(
 	ctx context.Context, userID, tenantID uuid.UUID,
 ) string {
+	text, _ := s.BuildMemoryContextWithSources(ctx, userID, tenantID)
+	return text
+}
+
+// BuildMemoryContextWithSources assembles the <saved_user_memory>
+// block AND returns one ContextSource per memory injected. The
+// message-flow's compile step records these so the S7 sources
+// card can show "Memory: Preferred name is Beat" under the
+// assistant response.
+//
+// Returns ("", nil) on any failure or when the user has no
+// active memories — the message service treats "" as "skip block"
+// and nil sources contribute zero rows to the attribution table.
+//
+// Side effect: bumps use_count + last_used_at for every recalled
+// memory in the background, so the management UI can show the
+// most-referenced facts. Background writes use a fresh ctx so a
+// client disconnect doesn't kill the accounting.
+func (s *MemoryService) BuildMemoryContextWithSources(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) (string, []ContextSource) {
 	memories, err := s.repo.GetActiveForInjection(ctx, userID, tenantID)
 	if err != nil || len(memories) == 0 {
-		return ""
+		return "", nil
 	}
 
 	var sb strings.Builder
@@ -407,6 +424,28 @@ func (s *MemoryService) BuildMemoryContext(
 	sb.WriteString("Do not say 'according to my memory' or mention the memory system.\n")
 	sb.WriteString("When the user says 'จำไว้ว่า', 'remember that', or gives a standing instruction, use the save_memory tool.\n")
 	sb.WriteString("</saved_user_memory>\n")
+
+	// S7 — one source per injected memory. Metadata carries the
+	// memory_type + category so the SourcesCard can render the
+	// secondary line ("saved memory · identity") without a second
+	// lookup.
+	sources := make([]ContextSource, 0, len(memories))
+	for i := range memories {
+		m := &memories[i]
+		meta := map[string]any{}
+		if m.MemoryType != "" {
+			meta["memory_type"] = m.MemoryType
+		}
+		if m.Category != "" {
+			meta["category"] = m.Category
+		}
+		sources = append(sources, ContextSource{
+			SourceType:   model.SourceTypeSavedMemory,
+			SourceID:     m.ID.String(),
+			DisplayLabel: TruncateLabel(m.Content),
+			Metadata:     MarshalMeta(meta),
+		})
+	}
 
 	// Async use_count bump. Each goroutine carries its own background
 	// ctx so the message turn doesn't block on these writes — and so
@@ -425,7 +464,7 @@ func (s *MemoryService) BuildMemoryContext(
 		}
 	}(ids)
 
-	return sb.String()
+	return sb.String(), sources
 }
 
 // ---------------------------------------------------------------------------
