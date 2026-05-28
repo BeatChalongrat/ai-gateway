@@ -12,11 +12,22 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class ProviderUsage:
-    """Token usage as reported by the upstream provider."""
+    """Token usage as reported by the upstream provider.
+
+    ``reasoning_tokens`` is the OpenAI o-series subdivision of
+    ``completion_tokens`` (returned under
+    ``usage.completion_tokens_details.reasoning_tokens``). Anthropic
+    folds thinking tokens into ``output_tokens`` with no separate
+    counter — the Anthropic parser leaves the field at 0; the
+    gateway estimates from ``reasoning_content`` length when surfacing
+    to the caller. 0 = no reasoning tokens spent (or provider doesn't
+    break the count out).
+    """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 @dataclass(frozen=True)

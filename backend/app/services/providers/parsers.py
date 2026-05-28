@@ -14,7 +14,9 @@ from app.domain.providers import ProviderResponse, ProviderUsage
 def parse_openai_response(data: dict) -> ProviderResponse:
     """Parse an OpenAI-compatible chat completion response.
 
-    Works for both OpenAI and OpenRouter responses.
+    Works for both OpenAI and OpenRouter responses, as well as the
+    DeepSeek-R1 / Groq R1-distill bodies which share the same wire
+    shape and add ``message.reasoning_content``.
     """
     choice = data["choices"][0]
     message = choice["message"]
@@ -22,11 +24,30 @@ def parse_openai_response(data: dict) -> ProviderResponse:
     usage = None
     if "usage" in data:
         u = data["usage"]
+        # OpenAI o-series surfaces reasoning token count under
+        # ``completion_tokens_details.reasoning_tokens``. Absent on
+        # non-reasoning models / non-OpenAI providers → 0.
+        details = u.get("completion_tokens_details") or {}
+        reasoning_tok = (
+            int(details.get("reasoning_tokens", 0) or 0)
+            if isinstance(details, dict) else 0
+        )
         usage = ProviderUsage(
             prompt_tokens=u.get("prompt_tokens", 0),
             completion_tokens=u.get("completion_tokens", 0),
             total_tokens=u.get("total_tokens", 0),
+            reasoning_tokens=reasoning_tok,
         )
+
+    # Reasoning text — only DeepSeek-R1 / Groq R1-distill / OpenRouter
+    # routed to reasoning models surface this on the non-streaming
+    # response (OpenAI o-series via /chat/completions doesn't return
+    # reasoning text, only the token count). ``None`` when absent so
+    # the response stays byte-identical for plain OpenAI calls.
+    reasoning_raw = message.get("reasoning_content")
+    reasoning_content = (
+        reasoning_raw if isinstance(reasoning_raw, str) and reasoning_raw else None
+    )
 
     return ProviderResponse(
         content=message.get("content", ""),
@@ -40,6 +61,7 @@ def parse_openai_response(data: dict) -> ProviderResponse:
         # serialiser uses ``response_model_exclude_none`` to drop it
         # from the wire when unset.
         tool_calls=message.get("tool_calls"),
+        reasoning_content=reasoning_content,
     )
 
 
@@ -50,6 +72,13 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
     content blocks alongside ``text`` blocks; this parser surfaces
     them as OpenAI-format ``tool_calls`` on the ProviderResponse so
     clients see the same shape regardless of which provider answered.
+
+    Extended thinking (T2): when the request enabled the ``thinking``
+    parameter, Anthropic also returns ``thinking`` content blocks
+    before the visible text. The parser concatenates the thinking
+    text into ``reasoning_content``; ``redacted_thinking`` blocks are
+    deliberately dropped (they're opaque to the client and have no
+    text payload).
     """
     content_blocks = data.get("content", [])
     text_parts = [
@@ -58,6 +87,17 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
         if isinstance(block, dict) and block.get("type") == "text"
     ]
     content = "".join(text_parts)
+
+    # Extended thinking — text from visible thinking blocks. ``None``
+    # when the response carries no thinking (the request didn't
+    # enable it, or the model decided not to think) so the response
+    # field is dropped from the wire by ``response_model_exclude_none``.
+    thinking_parts = [
+        block.get("thinking", "")
+        for block in content_blocks
+        if isinstance(block, dict) and block.get("type") == "thinking"
+    ]
+    reasoning_content = "".join(thinking_parts) or None
 
     # Convert each ``tool_use`` block to the OpenAI tool_call shape.
     # Anthropic exposes arguments as a JSON object on ``input``; OpenAI
@@ -114,4 +154,5 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
         usage=usage,
         raw=data,
         tool_calls=tool_calls,
+        reasoning_content=reasoning_content,
     )
