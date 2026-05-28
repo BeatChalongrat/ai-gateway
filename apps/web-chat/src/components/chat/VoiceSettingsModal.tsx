@@ -8,7 +8,7 @@
 // via the store setters — there is no explicit "save" step. The
 // Done button just closes the modal.
 //
-// Design language (matches CustomInstructionsModal):
+// Design language:
 //
 //   Modal:           bg-bg-surface  rounded-2xl  p-6  shadow-2xl
 //   Section card:    bg-bg-base     rounded-xl   p-5
@@ -197,8 +197,8 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared settings primitives — also imported by CustomInstructionsModal so
-// both panels share spacing, type, card style, and button language.
+// Shared settings primitives — exported so future settings panels can
+// inherit the same spacing, type, card style, and button language.
 // ---------------------------------------------------------------------------
 
 export function SettingsCard({

@@ -24,14 +24,22 @@ interface ModelState {
   loaded: boolean;
   /** True while the loadModels promise is in-flight. */
   loading: boolean;
+  /** When true, the trigger pill reads "Auto" instead of the model
+   *  name and the backend still receives a concrete id (the first
+   *  fast-tier model). Cleared the moment the user picks a real
+   *  model from the dropdown. */
+  autoMode: boolean;
 
   loadModels: () => Promise<void>;
   selectModel: (id: string) => void;
+  selectAuto: () => string | null;
+  resolveAutoModelId: () => string | null;
   getModelById: (id: string) => ModelEntry | undefined;
 }
 
 const SELECTED_KEY = "sran-webchat-selected-model";
 const RECENT_KEY = "sran-webchat-recent-models";
+const AUTO_KEY = "sran-webchat-auto-mode";
 const CACHE_KEY = "sran-webchat-models-cache";
 const MAX_RECENT = 3;
 
@@ -83,6 +91,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
   recentModelIds: [],
   loaded: false,
   loading: false,
+  autoMode: readLocal(AUTO_KEY) === "1",
 
   async loadModels() {
     if (get().loading) return;
@@ -132,6 +141,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
 
   selectModel(id) {
     writeLocal(SELECTED_KEY, id);
+    writeLocal(AUTO_KEY, "0");
     set((s) => {
       // Bump the chosen id to the front of recents, dedup, cap to 3.
       const next = [id, ...s.recentModelIds.filter((x) => x !== id)].slice(
@@ -139,8 +149,32 @@ export const useModelStore = create<ModelState>((set, get) => ({
         MAX_RECENT,
       );
       writeLocal(RECENT_KEY, JSON.stringify(next));
-      return { selectedModelId: id, recentModelIds: next };
+      return { selectedModelId: id, recentModelIds: next, autoMode: false };
     });
+  },
+
+  // Picks the first fast-tier model and flags the store as auto. The
+  // pill displays "Auto" until the user picks a concrete model from
+  // the dropdown. Backend always sees a real model id.
+  selectAuto() {
+    const resolved = get().resolveAutoModelId();
+    if (!resolved) return null;
+    writeLocal(SELECTED_KEY, resolved);
+    writeLocal(AUTO_KEY, "1");
+    set((s) => ({
+      selectedModelId: resolved,
+      autoMode: true,
+      recentModelIds: s.recentModelIds,
+    }));
+    return resolved;
+  },
+
+  // Resolves "auto" to a concrete model id without touching state.
+  // Preference order: first fast-tier → first model overall.
+  resolveAutoModelId() {
+    const all = get().models;
+    const fast = all.find((m) => m.category === "fast");
+    return (fast?.id ?? all[0]?.id) ?? null;
   },
 
   getModelById(id) {
