@@ -553,9 +553,16 @@ input {
 .message-enter   { animation: messageSlideIn 200ms ease-out; }
 .popover-appear  { animation: popoverIn 150ms ease-out; transform-origin: top right; }
 .popover-enter   { animation: popoverIn 150ms ease-out; transform-origin: top right; }
+/* Toast-specific entrance: opacity only. The toast centers itself with
+   ``-translate-x-1/2`` (a transform), so it must NOT borrow .popover-appear —
+   that keyframe animates ``transform: scale()`` which overrides the centering
+   translate for the animation's duration, making the toast appear shifted
+   right then snap to center. Animating opacity alone leaves transform free. */
+.toast-appear    { animation: toastFadeIn 150ms ease-out; }
 @keyframes fadeInUp        { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes messageSlideIn  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes popoverIn       { from { opacity: 0; transform: scale(0.96); }      to { opacity: 1; transform: scale(1); } }
+@keyframes toastFadeIn     { from { opacity: 0; } to { opacity: 1; } }
 
 /* Hover-reveal action row for AI messages. */
 .message-actions {
