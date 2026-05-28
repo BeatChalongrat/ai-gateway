@@ -7,9 +7,8 @@
 //   - mode="edit":   form pre-filled from `initial`; submit calls
 //                    updateMemory(initial.id, ...)
 //
-// Mirrors the design language of CustomInstructionsModal /
-// VoiceSettingsModal: Modal shell + inverted-primary save button
-// + outlined cancel.
+// Mirrors the design language of VoiceSettingsModal: Modal shell +
+// inverted-primary save button + outlined cancel.
 
 import { useEffect, useState } from "react";
 
