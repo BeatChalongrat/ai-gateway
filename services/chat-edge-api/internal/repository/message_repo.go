@@ -198,6 +198,80 @@ func (r *MessageRepo) ListContextByConversation(
 	return out, nil
 }
 
+// CountMessages returns the active message count for one
+// conversation. Tenant-scoped. Used by the S3 auto-extraction
+// trigger to decide whether enough new messages have accumulated
+// since the last summary to warrant another extraction pass.
+// Cheaper than ListByConversation when we only need the number.
+func (r *MessageRepo) CountMessages(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) (int, error) {
+	const q = `
+		SELECT COUNT(*)::int
+		FROM chat.messages_masked
+		WHERE conversation_id = $1 AND tenant_id = $2 AND is_active = true
+	`
+	var n int
+	if err := r.db.QueryRow(ctx, q, convID, tenantID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count messages: %w", err)
+	}
+	return n, nil
+}
+
+// ListAfter returns active messages with created_at strictly AFTER
+// the given anchor message's timestamp, in chronological order.
+// Used by the S3 state extractor to feed only the new tail of the
+// conversation into the LLM extraction prompt.
+//
+// Anchor lookup uses the message's own created_at — we don't rely
+// on monotonic id ordering because UUIDv4s don't sort by time.
+// Limit defaults to 200 (same cap as ListContextByConversation).
+func (r *MessageRepo) ListAfter(
+	ctx context.Context, tenantID, convID, afterMessageID uuid.UUID, limit int,
+) ([]model.Message, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	const q = `
+		WITH anchor AS (
+			SELECT created_at FROM chat.messages_masked
+			WHERE id = $3 AND tenant_id = $2
+		)
+		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
+		       status, model_id, token_usage_input, token_usage_output,
+		       secure_trace_id, created_at, parent_id, branch_index, is_active
+		FROM chat.messages_masked
+		WHERE conversation_id = $1
+		  AND tenant_id = $2
+		  AND is_active = true
+		  AND created_at > COALESCE((SELECT created_at FROM anchor), 'epoch'::timestamptz)
+		ORDER BY created_at ASC, id ASC
+		LIMIT $4
+	`
+	rows, err := r.db.Query(ctx, q, convID, tenantID, afterMessageID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list messages after: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.Message, 0, limit)
+	for rows.Next() {
+		var m model.Message
+		if err := rows.Scan(
+			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
+			&m.ContentMasked, &m.Status, &m.ModelID,
+			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
+			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
+		); err != nil {
+			return nil, fmt.Errorf("list messages after scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // GetByID returns a single message scoped by tenant. Used by the
 // regenerate flow to look up the target assistant row.
 func (r *MessageRepo) GetByID(ctx context.Context, tenantID, msgID uuid.UUID) (*model.Message, error) {
