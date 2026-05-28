@@ -31,7 +31,7 @@ func (r *FileRepo) WithTx(tx pgx.Tx) *FileRepo {
 // migration 012 are always populated and we don't have stale-row
 // pitfalls where the model has fields the SQL never filled in.
 const fileColumns = `
-	id, conversation_id, message_id, tenant_id, filename,
+	id, conversation_id, message_id, tenant_id, user_id, filename,
 	original_filename, content_type, file_size_bytes,
 	storage_path, extracted_text, extraction_status,
 	created_at, updated_at,
@@ -40,7 +40,7 @@ const fileColumns = `
 
 func scanFile(row pgx.Row, f *model.ConversationFile) error {
 	return row.Scan(
-		&f.ID, &f.ConversationID, &f.MessageID, &f.TenantID, &f.Filename,
+		&f.ID, &f.ConversationID, &f.MessageID, &f.TenantID, &f.UserID, &f.Filename,
 		&f.OriginalFilename, &f.ContentType, &f.FileSizeBytes,
 		&f.StoragePath, &f.ExtractedText, &f.ExtractionStatus,
 		&f.CreatedAt, &f.UpdatedAt,
@@ -60,10 +60,10 @@ func scanFile(row pgx.Row, f *model.ConversationFile) error {
 func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*model.ConversationFile, error) {
 	const q = `
 		INSERT INTO chat.conversation_files
-			(conversation_id, tenant_id, filename, original_filename,
+			(conversation_id, tenant_id, user_id, filename, original_filename,
 			 content_type, file_size_bytes, storage_path, extraction_status,
 			 is_generated, parent_file_id, version, change_log, inspection_json)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING id, created_at, updated_at
 	`
 	if f.ExtractionStatus == "" {
@@ -73,7 +73,7 @@ func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*mode
 		f.Version = 1
 	}
 	err := r.db.QueryRow(ctx, q,
-		f.ConversationID, f.TenantID, f.Filename, f.OriginalFilename,
+		f.ConversationID, f.TenantID, f.UserID, f.Filename, f.OriginalFilename,
 		f.ContentType, f.FileSizeBytes, f.StoragePath, f.ExtractionStatus,
 		f.IsGenerated, f.ParentFileID, f.Version, f.ChangeLog, f.InspectionJSON,
 	).Scan(&f.ID, &f.CreatedAt, &f.UpdatedAt)
@@ -329,7 +329,7 @@ func (r *FileRepo) ListGeneratedLeaves(
 			GROUP BY leaf_id
 		)
 		SELECT
-		  cf.id, cf.conversation_id, cf.message_id, cf.tenant_id, cf.filename,
+		  cf.id, cf.conversation_id, cf.message_id, cf.tenant_id, cf.user_id, cf.filename,
 		  cf.original_filename, cf.content_type, cf.file_size_bytes,
 		  cf.storage_path, cf.extracted_text, cf.extraction_status,
 		  cf.created_at, cf.updated_at,
@@ -354,7 +354,7 @@ func (r *FileRepo) ListGeneratedLeaves(
 		var parentName *string
 		if err := rows.Scan(
 			&leaf.File.ID, &leaf.File.ConversationID, &leaf.File.MessageID,
-			&leaf.File.TenantID, &leaf.File.Filename, &leaf.File.OriginalFilename,
+			&leaf.File.TenantID, &leaf.File.UserID, &leaf.File.Filename, &leaf.File.OriginalFilename,
 			&leaf.File.ContentType, &leaf.File.FileSizeBytes, &leaf.File.StoragePath,
 			&leaf.File.ExtractedText, &leaf.File.ExtractionStatus,
 			&leaf.File.CreatedAt, &leaf.File.UpdatedAt,

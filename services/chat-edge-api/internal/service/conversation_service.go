@@ -74,6 +74,31 @@ func (s *ConversationService) Get(ctx context.Context, tenantID, convID uuid.UUI
 	return c, nil
 }
 
+// AssertOwnership is the canonical "does this user own this
+// conversation" check, reused by sibling services that need to
+// gate file/workspace/feedback access through the conversation
+// chain. Returns the conversation on success so callers don't
+// have to round-trip a second GetByID.
+//
+// Returns ErrConversationNotFound on every failure mode (wrong
+// tenant, wrong user, soft-deleted, missing) so the upstream HTTP
+// layer can map a single error to 404 without leaking existence.
+func (s *ConversationService) AssertOwnership(
+	ctx context.Context, tenantID, userID, convID uuid.UUID,
+) (*model.Conversation, error) {
+	c, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, err
+	}
+	if c.UserID != userID {
+		return nil, ErrConversationNotFound
+	}
+	return c, nil
+}
+
 // List returns the user's conversations with cursor pagination.
 // “limit“ is clamped to [1, 100]; default 50. Up from the
 // previous 20-default because the new sidebar's infinite-scroll
@@ -127,7 +152,16 @@ func (s *ConversationService) Search(
 // Rename updates the title. Validates non-empty + length cap to
 // match the DB column expectations (TEXT is unbounded but the UI
 // renders a sidebar list so we keep titles compact).
-func (s *ConversationService) Rename(ctx context.Context, tenantID, convID uuid.UUID, title string) error {
+//
+// User-scope gate: AssertOwnership runs before the UPDATE so a
+// same-tenant-different-user caller can't rename someone else's
+// conversation.
+func (s *ConversationService) Rename(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, title string,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return errors.New("title is required")
@@ -150,7 +184,12 @@ func (s *ConversationService) Rename(ctx context.Context, tenantID, convID uuid.
 // PATCH /conversations/{id} when the user picks a different model
 // mid-conversation. Validates that the new id is in the allow-list
 // so an admin-removed model can't be re-pinned to a conversation.
-func (s *ConversationService) SetModel(ctx context.Context, tenantID, convID uuid.UUID, modelID string) error {
+func (s *ConversationService) SetModel(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, modelID string,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
 		return errors.New("model_id is required")
@@ -172,8 +211,11 @@ func (s *ConversationService) SetModel(ctx context.Context, tenantID, convID uui
 // already verified the KB belongs to the same tenant (the handler
 // does this via a GetKB lookup before invoking the service).
 func (s *ConversationService) SetKnowledgeBase(
-	ctx context.Context, tenantID, convID uuid.UUID, kbID uuid.UUID,
+	ctx context.Context, tenantID, userID, convID uuid.UUID, kbID uuid.UUID,
 ) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
 	if err := s.conversations.UpdateKnowledgeBase(ctx, tenantID, convID, kbID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrConversationNotFound
@@ -185,7 +227,12 @@ func (s *ConversationService) SetKnowledgeBase(
 
 // Delete soft-deletes the conversation. Messages remain in
 // chat.messages_masked for audit; only the sidebar listing hides.
-func (s *ConversationService) Delete(ctx context.Context, tenantID, convID uuid.UUID) error {
+func (s *ConversationService) Delete(
+	ctx context.Context, tenantID, userID, convID uuid.UUID,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
 	if err := s.conversations.SoftDelete(ctx, tenantID, convID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrConversationNotFound

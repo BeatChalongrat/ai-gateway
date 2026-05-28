@@ -249,6 +249,7 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
 		TenantID:         in.TenantID,
+		UserID:           in.UserID,
 		Filename:         storageName,
 		OriginalFilename: clean,
 		ContentType:      in.ContentType,
@@ -332,10 +333,17 @@ func (s *FileService) List(
 	return s.files.ListByConversation(ctx, tenantID, convID)
 }
 
-// Get returns metadata for a single file. Tenant-scoped via the
-// repo. Returns ErrFileNotFound when missing.
+// Get returns metadata for a single file. Tenant- AND user-scoped:
+// returns ErrFileNotFound when the file doesn't exist OR when it
+// belongs to a different user in the same tenant (the multi-user-
+// per-tenant case the Portal supports via the "member" role).
+//
+// Memory-system pre-flight (migration 013): user_id is now a
+// column on conversation_files itself, so the check is a single
+// equality against the row we already pulled — no second hop
+// through chat.conversations.
 func (s *FileService) Get(
-	ctx context.Context, tenantID, fileID uuid.UUID,
+	ctx context.Context, tenantID, userID, fileID uuid.UUID,
 ) (*model.ConversationFile, error) {
 	f, err := s.files.GetByID(ctx, tenantID, fileID)
 	if err != nil {
@@ -343,6 +351,9 @@ func (s *FileService) Get(
 			return nil, ErrFileNotFound
 		}
 		return nil, err
+	}
+	if f.UserID != userID {
+		return nil, ErrFileNotFound
 	}
 	return f, nil
 }
@@ -361,9 +372,9 @@ type DownloadHandle struct {
 }
 
 func (s *FileService) OpenForDownload(
-	ctx context.Context, tenantID, fileID uuid.UUID,
+	ctx context.Context, tenantID, userID, fileID uuid.UUID,
 ) (*DownloadHandle, error) {
-	f, err := s.Get(ctx, tenantID, fileID)
+	f, err := s.Get(ctx, tenantID, userID, fileID)
 	if err != nil {
 		return nil, err
 	}
@@ -386,10 +397,14 @@ func (s *FileService) OpenForDownload(
 // Delete removes the row and unlinks the blob. Best-effort on the
 // storage side — a missing object isn't a user-visible error (the
 // row deletion is what matters for tenancy isolation).
+//
+// User-scope gate via Get: cross-user deletion attempts return
+// ErrFileNotFound rather than 403 so we don't leak the file's
+// existence.
 func (s *FileService) Delete(
-	ctx context.Context, tenantID, fileID uuid.UUID,
+	ctx context.Context, tenantID, userID, fileID uuid.UUID,
 ) error {
-	f, err := s.Get(ctx, tenantID, fileID)
+	f, err := s.Get(ctx, tenantID, userID, fileID)
 	if err != nil {
 		return err
 	}

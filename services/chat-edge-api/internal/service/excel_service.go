@@ -259,6 +259,11 @@ func (s *ExcelService) ExecutePlan(
 		// Don't leak cross-conversation existence.
 		return nil, nil, ErrExcelSourceNotFound
 	}
+	if source.UserID != in.UserID {
+		// Same-tenant-different-user — never returns 403, always 404
+		// shape so the existence of the file isn't probeable.
+		return nil, nil, ErrExcelSourceNotFound
+	}
 
 	tmp, err := os.MkdirTemp("", "excel-exec-*")
 	if err != nil {
@@ -351,6 +356,7 @@ func (s *ExcelService) ExecutePlan(
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
 		TenantID:         in.TenantID,
+		UserID:           in.UserID,
 		Filename:         storageName,
 		OriginalFilename: outFilename,
 		ContentType:      xlsxContentType,
