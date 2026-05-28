@@ -9,6 +9,7 @@ import { ChatThread } from "@/components/chat/ChatThread";
 import { ConversationFiles } from "@/components/chat/ConversationFiles";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
+import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
 import { ShareModal } from "@/components/chat/ShareModal";
 import { WorkspaceButton } from "@/components/workspace/WorkspaceButton";
 import { WorkspacePanel } from "@/components/workspace/WorkspacePanel";
@@ -154,6 +155,7 @@ export default function ConversationPage() {
           here was redundant). Just the file-attachments indicator
           + the "..." menu on the right. */}
       <div className="hidden items-center justify-end gap-1 px-4 pt-1 md:flex">
+        <MemoryIndicator conversationId={convId} />
         <WorkspaceButton
           conversationId={convId}
           onOpen={() => setWorkspaceOpen(true)}
