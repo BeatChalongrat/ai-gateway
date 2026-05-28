@@ -103,6 +103,7 @@ func main() {
 	prefsRepo := repository.NewPreferencesRepo(pool)
 	shareRepo := repository.NewShareRepo(pool)
 	knowledgeRepo := repository.NewKnowledgeRepo(pool)
+	memoriesRepo := repository.NewMemoryRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -153,6 +154,10 @@ func main() {
 	})
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
+	// S1 — Personal Memory Core. Service is wired alongside prefs +
+	// share so the message service can pick it up via SetMemoryReader
+	// below (system-prompt injection + AI tool execution).
+	memorySvc := service.NewMemoryService(memoriesRepo)
 
 	// Phase 4 — Excel Smart Workspace (Session 1) +
 	// Word/PDF Smart Reports (Session 2). Both services wired
@@ -175,6 +180,10 @@ func main() {
 	// into the gateway request's system prompt.
 	messageSvc.SetFileLinker(fileSvc)
 	messageSvc.SetPreferencesReader(prefsSvc)
+	// S1 — wire the memory layer. Enables the <saved_user_memory>
+	// system-prompt block + the save_memory / list_memories AI tools
+	// on every conversation where memory_enabled = true.
+	messageSvc.SetMemoryService(memorySvc)
 
 	// Knowledge base (RAG) pipeline.
 	//
@@ -237,6 +246,7 @@ func main() {
 		Excel:        handler.NewExcelHandler(excelSvc, filesRepo),
 		Document:     handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
 		Workspace:    handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
+		Memory:       handler.NewMemoryHandler(memorySvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a

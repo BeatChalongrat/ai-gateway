@@ -69,6 +69,14 @@ type MessageService struct {
 	// inject the workbook structure + action catalog into the
 	// system prompt. Wired via SetExcelLookup.
 	excelLookup ExcelLookup
+	// Optional. Builds the <saved_user_memory> system-prompt block
+	// (S1 — Personal Memory Core). Gated by conv.MemoryEnabled.
+	memorySvc MemoryReader
+	// Optional. Dispatches AI tool_calls (save_memory, list_memories
+	// today; future tools register here). Same MemoryEnabled gate
+	// hides the tools from the gateway request when the toggle is
+	// off so the model doesn't try to call them.
+	toolExec *ToolExecutor
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -108,6 +116,14 @@ type PreferencesReader interface {
 // the system prompt prefix.
 type RAGReader interface {
 	BuildContext(ctx context.Context, tenantID uuid.UUID, kbID uuid.UUID, query string) string
+}
+
+// MemoryReader is the slice of MemoryService the message flow needs.
+// BuildMemoryContext returns the <saved_user_memory> block (or "")
+// for the system prompt; the message service handles the
+// conv.MemoryEnabled gate before calling.
+type MemoryReader interface {
+	BuildMemoryContext(ctx context.Context, userID, tenantID uuid.UUID) string
 }
 
 // ExcelLookup is the slice of the file repo the Phase 4 Excel
@@ -190,6 +206,23 @@ func (s *MessageService) SetRAGReader(r RAGReader) {
 	s.ragSvc = r
 }
 
+// SetMemoryService wires the S1 memory layer. When set:
+//   - buildSystemPrefix injects the <saved_user_memory> block
+//     (gated by conv.MemoryEnabled)
+//   - Send/Regenerate/Edit include MemoryToolDefs() in the gateway
+//     request's tool list (same gate)
+//   - tool_call responses from the gateway dispatch through a
+//     ToolExecutor that wraps this service
+//
+// Optional — without it the message flow falls back to the legacy
+// memory-free behaviour.
+func (s *MessageService) SetMemoryService(m *MemoryService) {
+	s.memorySvc = m
+	if m != nil {
+		s.toolExec = NewToolExecutor(m)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ListMessages — handler reads conversation history
 // ---------------------------------------------------------------------------
@@ -254,6 +287,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
 	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
 	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
+	toolsAttached := s.attachTools(&gwReq, conv)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -268,6 +302,35 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		}
 		return nil, err
 	}
+
+	// Tool-execution loop. When the model emits tool_calls instead of
+	// (or alongside) content, we dispatch them through the executor,
+	// append the results as role="tool" messages, and re-call the
+	// gateway. Bounded by maxToolIterations.
+	if toolsAttached {
+		iter := 0
+		for iter < maxToolIterations && hasToolCalls(gwResp) {
+			tcMsg, results := s.executeToolCalls(ctx, toolCallsOf(gwResp), ToolExecContext{
+				TenantID:       in.TenantID,
+				UserID:         in.UserID,
+				ConversationID: conv.ID,
+			})
+			gwReq.Messages = append(gwReq.Messages, tcMsg)
+			gwReq.Messages = append(gwReq.Messages, results...)
+			next, err := s.gateway.SendChatCompletion(ctx, gatewayCallContext(in, conv), gwReq)
+			if err != nil {
+				_ = s.persistError(ctx, in, conv, "")
+				var ue *GatewayUnavailableError
+				if errors.As(err, &ue) {
+					return nil, fmt.Errorf("%w: %s", ErrMessageGatewayUnavailable, ue.Error())
+				}
+				return nil, err
+			}
+			gwResp = next
+			iter++
+		}
+	}
+
 	content := extractContent(gwResp)
 	var tokInput, tokOutput *int
 	if gwResp.Usage != nil {
@@ -372,6 +435,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	sysPrefix := s.buildSystemPrefix(ctx, in.TenantID, in.UserID, conv, in.Content)
 	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
 	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
+	toolsAttached := s.attachTools(&gwReq, conv)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -393,29 +457,20 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	s.activeStreams.Store(conv.ID, reg)
 
 	ch := make(chan StreamUpdate, 16)
-	go func() {
-		defer close(ch)
-		defer stream.Close()
-		for {
-			ev, err := stream.Next()
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			if err != nil {
-				ch <- StreamUpdate{Err: err}
-				return
-			}
-			if ev.Done {
-				ch <- StreamUpdate{Done: true, Usage: ev.Usage}
-				return
-			}
-			ch <- StreamUpdate{
-				Delta:        ev.Delta,
-				Usage:        ev.Usage,
-				FinishReason: ev.FinishReason,
-			}
-		}
-	}()
+	go s.pumpStreamWithTools(streamPumpInput{
+		initialStream: stream,
+		initialReq:    gwReq,
+		callCtx:       gatewayCallContext(in, conv),
+		streamCtx:     streamCtx,
+		toolsAttached: toolsAttached,
+		toolExecCtx: ToolExecContext{
+			TenantID:       in.TenantID,
+			UserID:         in.UserID,
+			ConversationID: conv.ID,
+			MessageID:      asstMsg.ID,
+		},
+		out: ch,
+	})
 
 	// finish closes the message lifecycle. Caller invokes exactly
 	// once after consuming the events channel.
@@ -635,16 +690,14 @@ func (s *MessageService) openAssistantStream(
 	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
 	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
 	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
-	stream, err := s.gateway.SendChatCompletionStream(
-		streamCtx,
-		GatewayCallContext{
-			TenantID:       conv.TenantID,
-			UserID:         userID,
-			ConversationID: conv.ID,
-			RequestID:      requestID,
-		},
-		gwReq,
-	)
+	toolsAttached := s.attachTools(&gwReq, conv)
+	callCtx := GatewayCallContext{
+		TenantID:       conv.TenantID,
+		UserID:         userID,
+		ConversationID: conv.ID,
+		RequestID:      requestID,
+	}
+	stream, err := s.gateway.SendChatCompletionStream(streamCtx, callCtx, gwReq)
 	if err != nil {
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
@@ -659,25 +712,20 @@ func (s *MessageService) openAssistantStream(
 	s.activeStreams.Store(conv.ID, reg)
 
 	ch := make(chan StreamUpdate, 16)
-	go func() {
-		defer close(ch)
-		defer stream.Close()
-		for {
-			ev, err := stream.Next()
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			if err != nil {
-				ch <- StreamUpdate{Err: err}
-				return
-			}
-			if ev.Done {
-				ch <- StreamUpdate{Done: true, Usage: ev.Usage}
-				return
-			}
-			ch <- StreamUpdate{Delta: ev.Delta, Usage: ev.Usage, FinishReason: ev.FinishReason}
-		}
-	}()
+	go s.pumpStreamWithTools(streamPumpInput{
+		initialStream: stream,
+		initialReq:    gwReq,
+		callCtx:       callCtx,
+		streamCtx:     streamCtx,
+		toolsAttached: toolsAttached,
+		toolExecCtx: ToolExecContext{
+			TenantID:       conv.TenantID,
+			UserID:         userID,
+			ConversationID: conv.ID,
+			MessageID:      asstMsg.ID,
+		},
+		out: ch,
+	})
 
 	finish := func(content, finishReason string, usage *GatewayChatUsage) {
 		s.activeStreams.Delete(conv.ID)
@@ -894,16 +942,14 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	sysPrefix := s.buildSystemPrefix(ctx, conv.TenantID, userID, conv, ragQuery)
 	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
 	gwReq := buildGatewayRequestWithImages(conv.ModelID, history, sysPrefix, imageURLs)
-	stream, err := s.gateway.SendChatCompletionStream(
-		streamCtx,
-		GatewayCallContext{
-			TenantID:       conv.TenantID,
-			UserID:         userID,
-			ConversationID: conv.ID,
-			RequestID:      requestID,
-		},
-		gwReq,
-	)
+	toolsAttached := s.attachTools(&gwReq, conv)
+	callCtx := GatewayCallContext{
+		TenantID:       conv.TenantID,
+		UserID:         userID,
+		ConversationID: conv.ID,
+		RequestID:      requestID,
+	}
+	stream, err := s.gateway.SendChatCompletionStream(streamCtx, callCtx, gwReq)
 	if err != nil {
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
@@ -918,25 +964,20 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	s.activeStreams.Store(conv.ID, reg)
 
 	ch := make(chan StreamUpdate, 16)
-	go func() {
-		defer close(ch)
-		defer stream.Close()
-		for {
-			ev, err := stream.Next()
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			if err != nil {
-				ch <- StreamUpdate{Err: err}
-				return
-			}
-			if ev.Done {
-				ch <- StreamUpdate{Done: true, Usage: ev.Usage}
-				return
-			}
-			ch <- StreamUpdate{Delta: ev.Delta, Usage: ev.Usage, FinishReason: ev.FinishReason}
-		}
-	}()
+	go s.pumpStreamWithTools(streamPumpInput{
+		initialStream: stream,
+		initialReq:    gwReq,
+		callCtx:       callCtx,
+		streamCtx:     streamCtx,
+		toolsAttached: toolsAttached,
+		toolExecCtx: ToolExecContext{
+			TenantID:       conv.TenantID,
+			UserID:         userID,
+			ConversationID: conv.ID,
+			MessageID:      asstMsg.ID,
+		},
+		out: ch,
+	})
 
 	finish := func(content, finishReason string, usage *GatewayChatUsage) {
 		s.activeStreams.Delete(conv.ID)
@@ -1081,10 +1122,21 @@ func (s *MessageService) buildSystemPrefix(
 	conv *model.Conversation,
 	ragQuery string,
 ) string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 5)
 	if s.prefsSvc != nil {
 		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
 			parts = append(parts, p)
+		}
+	}
+	// S1 — memory context. Sits between persona (custom instructions)
+	// and the conversation-scoped blocks (RAG, files, plan capabilities)
+	// so cross-conversation facts ("user prefers Thai", "user's name
+	// is Beat") shape the model's tone but don't override an explicit
+	// RAG citation or a file's actual contents. Gated by
+	// conv.MemoryEnabled — skipped for "temporary chats".
+	if s.memorySvc != nil && conv != nil && conv.MemoryEnabled {
+		if mem := s.memorySvc.BuildMemoryContext(ctx, userID, tenantID); mem != "" {
+			parts = append(parts, mem)
 		}
 	}
 	if conv != nil {
@@ -1733,4 +1785,211 @@ func makeTitleFrom(content string) string {
 		return content
 	}
 	return string(runes[:maxRunes]) + "…"
+}
+
+// ---------------------------------------------------------------------------
+// Tool calling (S1 — memory)
+// ---------------------------------------------------------------------------
+
+// maxToolIterations caps the tool-call loop so a model that keeps
+// asking for tools can't run away. After this many rounds the loop
+// closes the stream and lets the model's last partial text (if any)
+// stand as the final answer.
+const maxToolIterations = 5
+
+// attachTools mutates the request to expose the memory tool set when
+// the conversation has memory enabled AND the executor is wired.
+// Returns true when tools were attached (caller uses this to decide
+// whether to enter the tool-loop accumulator).
+func (s *MessageService) attachTools(req *GatewayChatRequest, conv *model.Conversation) bool {
+	if s.toolExec == nil || conv == nil || !conv.MemoryEnabled {
+		return false
+	}
+	req.Tools = append(req.Tools, MemoryToolDefs()...)
+	// tool_choice="auto" lets the model decide whether to call a
+	// tool — most turns won't, and forcing "required" would make
+	// the model invent tool calls for vanilla chat.
+	req.ToolChoice = "auto"
+	return true
+}
+
+// accumulateToolCallDeltas merges a partial tool_calls delta into
+// the in-flight accumulator slice, growing as needed. OpenAI ships
+// tool calls in stream as a sparse sequence of (index, partial)
+// updates; this normalises them into a flat slice the executor can
+// dispatch against.
+func accumulateToolCallDeltas(acc []GatewayToolCall, deltas []StreamToolCallDelta) []GatewayToolCall {
+	for _, d := range deltas {
+		for len(acc) <= d.Index {
+			acc = append(acc, GatewayToolCall{Type: "function"})
+		}
+		t := &acc[d.Index]
+		if d.ID != "" {
+			t.ID = d.ID
+		}
+		if d.Type != "" {
+			t.Type = d.Type
+		}
+		if d.FunctionName != "" {
+			t.Function.Name = d.FunctionName
+		}
+		if d.FunctionArgsFrag != "" {
+			t.Function.Arguments += d.FunctionArgsFrag
+		}
+	}
+	return acc
+}
+
+// streamPumpInput bundles the parameters pumpStreamWithTools needs.
+// Keeping them in a struct keeps the call site at Send/Regenerate/
+// Edit readable (each only differs in callCtx + toolExecCtx).
+type streamPumpInput struct {
+	initialStream *StreamReader
+	initialReq    GatewayChatRequest
+	callCtx       GatewayCallContext
+	streamCtx     context.Context
+	toolsAttached bool
+	toolExecCtx   ToolExecContext
+	out           chan<- StreamUpdate
+}
+
+// pumpStreamWithTools reads chunks from the initial gateway stream,
+// forwards content deltas to `out`, and on a tool_calls finish:
+//
+//   1. Accumulates the streamed tool_call deltas into a flat slice.
+//   2. Executes each tool via the executor, capturing result text.
+//   3. Appends (assistant tool_calls msg, tool result msgs) to the
+//      running request's Messages slice.
+//   4. Opens a follow-up gateway stream with the augmented request
+//      and continues forwarding deltas.
+//
+// Loops until either a non-tool finish (forwards Done + exits),
+// maxToolIterations is hit (emits Done + exits — the model's last
+// partial text stands as the final answer), or an error / EOF.
+//
+// The caller's `finish` callback handles persistence — pump only
+// feeds the events channel and closes it when no more streams.
+func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
+	defer close(in.out)
+
+	current := in.initialStream
+	req := in.initialReq
+	var lastUsage *GatewayChatUsage
+
+	for outerIter := 0; outerIter < maxToolIterations; outerIter++ {
+		var acc []GatewayToolCall
+		finishReason := ""
+		isToolCallStream := false
+
+		for {
+			ev, err := current.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				in.out <- StreamUpdate{Err: err}
+				_ = current.Close()
+				return
+			}
+			if ev.Usage != nil {
+				lastUsage = ev.Usage
+			}
+			if len(ev.ToolCallDeltas) > 0 {
+				acc = accumulateToolCallDeltas(acc, ev.ToolCallDeltas)
+			}
+			if ev.FinishReason != "" {
+				finishReason = ev.FinishReason
+			}
+			if ev.Delta != "" {
+				in.out <- StreamUpdate{
+					Delta:        ev.Delta,
+					Usage:        ev.Usage,
+					FinishReason: ev.FinishReason,
+				}
+			}
+			if ev.Done {
+				// finish_reason="tool_calls" means another round.
+				// Anything else (stop / length / cancelled) ends.
+				if finishReason == "tool_calls" && in.toolsAttached && len(acc) > 0 {
+					isToolCallStream = true
+					break
+				}
+				in.out <- StreamUpdate{Done: true, Usage: ev.Usage}
+				_ = current.Close()
+				return
+			}
+		}
+		_ = current.Close()
+
+		if !isToolCallStream {
+			// Stream ended without a Done event (EOF path) — emit a
+			// synthetic Done so the handler's terminator fires.
+			in.out <- StreamUpdate{Done: true, Usage: lastUsage}
+			return
+		}
+
+		// Dispatch tools + extend the request for the next round.
+		asstToolMsg, results := s.executeToolCalls(in.streamCtx, acc, in.toolExecCtx)
+		req.Messages = append(req.Messages, asstToolMsg)
+		req.Messages = append(req.Messages, results...)
+
+		next, err := s.gateway.SendChatCompletionStream(in.streamCtx, in.callCtx, req)
+		if err != nil {
+			in.out <- StreamUpdate{Err: err}
+			return
+		}
+		current = next
+	}
+
+	// Hit the iteration cap — close the current stream and emit Done.
+	_ = current.Close()
+	in.out <- StreamUpdate{Done: true, Usage: lastUsage}
+}
+
+// hasToolCalls reports whether a non-stream gateway response wants
+// us to dispatch tools. Defensive against nil + empty choices so a
+// surprise upstream shape doesn't panic the message flow.
+func hasToolCalls(r *GatewayChatResponse) bool {
+	if r == nil || len(r.Choices) == 0 {
+		return false
+	}
+	return len(r.Choices[0].Message.ToolCalls) > 0
+}
+
+// toolCallsOf is the matching extractor — returns nil-safe slice.
+func toolCallsOf(r *GatewayChatResponse) []GatewayToolCall {
+	if !hasToolCalls(r) {
+		return nil
+	}
+	return r.Choices[0].Message.ToolCalls
+}
+
+// executeToolCalls runs every accumulated tool call against the
+// executor and returns (assistantToolMsg, []toolResultMsgs).
+//
+// assistantToolMsg is the synthetic assistant message that carries
+// the tool_calls — appended to the running history so the model's
+// next turn has the call/response pair available.
+//
+// toolResultMsgs is one role="tool" message per tool call, in
+// the order the model emitted them.
+func (s *MessageService) executeToolCalls(
+	ctx context.Context, toolCalls []GatewayToolCall, ec ToolExecContext,
+) (GatewayMessage, []GatewayMessage) {
+	asstMsg := GatewayMessage{
+		Role:      "assistant",
+		Content:   "",
+		ToolCalls: toolCalls,
+	}
+	results := make([]GatewayMessage, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		out := s.toolExec.Execute(ctx, tc, ec)
+		results = append(results, GatewayMessage{
+			Role:       "tool",
+			ToolCallID: tc.ID,
+			Name:       tc.Function.Name,
+			Content:    out,
+		})
+	}
+	return asstMsg, results
 }
