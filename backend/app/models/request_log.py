@@ -22,6 +22,17 @@ class RequestLogORM(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, server_default=sa.text("0"))
     total_tokens: Mapped[int] = mapped_column(Integer, server_default=sa.text("0"))
     estimated_cost_usd: Mapped[float] = mapped_column(Float, server_default=sa.text("0.0"))
+    # Reasoning / thinking token accounting (migration 046, T3).
+    # ``reasoning_tokens`` is the o-series style sub-count of
+    # ``completion_tokens``; ``reasoning_cost`` is the USD attributable
+    # to those tokens at the model's output-token rate. Both default to
+    # 0 so SUM() aggregations across pre-T3 rows read correctly.
+    reasoning_tokens: Mapped[int] = mapped_column(
+        Integer, server_default=sa.text("0")
+    )
+    reasoning_cost: Mapped[float] = mapped_column(
+        Float, server_default=sa.text("0.0")
+    )
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
