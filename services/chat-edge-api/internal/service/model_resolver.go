@@ -47,6 +47,27 @@ func modelTier(id string) string {
 	return "flagship"
 }
 
+// isReasoningCapableID reports whether ``id`` is in the static
+// reasoning-capable set the model handler maintains (T4 — same
+// list as ``reasoningCapableModels`` in handler/model.go, plus
+// the Gemini 2.5+ / 3 prefix rule). Kept as a free function in
+// the resolver package so the auto-routing path can prefer
+// reasoning models without dragging the handler layer in.
+func isReasoningCapableID(id string) bool {
+	switch id {
+	case "o1", "o3", "o3-mini", "o3-2025-04-16",
+		"o3-mini-2025-01-31", "o4-mini", "o3-pro",
+		"claude-sonnet-4-20250514", "claude-opus-4-20250514",
+		"claude-sonnet-4.5-20250514",
+		"deepseek-reasoner", "deepseek-r1-distill-llama-70b":
+		return true
+	}
+	if strings.HasPrefix(id, "gemini-2.5") || strings.HasPrefix(id, "gemini-3") {
+		return true
+	}
+	return false
+}
+
 // ResolveAutoModel picks the concrete model id Auto should serve
 // this turn. Decision factors (in order; first match wins):
 //
@@ -66,8 +87,47 @@ func ResolveAutoModel(
 	conversationMessageCount int,
 	availableIDs []string,
 ) string {
+	return ResolveAutoModelWithReasoning(
+		message, hasFiles, hasImages, conversationMessageCount,
+		availableIDs, false,
+	)
+}
+
+// ResolveAutoModelWithReasoning extends ResolveAutoModel with the
+// T4 reasoning preference: when ``reasoningEnabled`` is true and
+// the catalog has at least one reasoning-capable id, that id wins
+// over the heuristic tier choice. Falls through to the standard
+// fast/flagship rules when no reasoning model exists (so a
+// catalog without R1 / o3 / Claude 4 / Gemini 2.5 still works).
+//
+// Kept as a separate entry-point so the legacy ResolveAutoModel
+// signature stays a one-arg-list call site for tests + callers
+// that don't have a conversation handy.
+func ResolveAutoModelWithReasoning(
+	message string,
+	hasFiles, hasImages bool,
+	conversationMessageCount int,
+	availableIDs []string,
+	reasoningEnabled bool,
+) string {
 	if len(availableIDs) == 0 {
 		return "gpt-4o-mini"
+	}
+
+	// T4: prefer a reasoning model when the user has reasoning ON.
+	// Iterate availableIDs in catalog order so the operator's
+	// preferred reasoning model (the first one listed) wins
+	// deterministically.
+	if reasoningEnabled {
+		for _, id := range availableIDs {
+			if isReasoningCapableID(id) {
+				return id
+			}
+		}
+		// No reasoning model in the catalog — fall through to the
+		// regular heuristic. The Gateway silently ignores the
+		// reasoning param on a non-capable model so the request
+		// still succeeds, just without thinking output.
 	}
 
 	var fast, flagship string

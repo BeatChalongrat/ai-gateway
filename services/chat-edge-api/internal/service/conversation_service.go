@@ -245,6 +245,29 @@ func (s *ConversationService) SetMemoryEnabled(
 	return nil
 }
 
+// SetReasoning persists the per-conversation thinking-mode settings
+// (T4 — migration 019). All three params are pointer-typed so the
+// handler can patch any subset. User-scope gate first so a
+// same-tenant caller can't flip another user's conversation.
+func (s *ConversationService) SetReasoning(
+	ctx context.Context,
+	tenantID, userID, convID uuid.UUID,
+	enabled *bool, mode *string, showSummary *bool,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
+	if err := s.conversations.UpdateReasoningSettings(
+		ctx, tenantID, convID, enabled, mode, showSummary,
+	); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // Delete soft-deletes the conversation. Messages remain in
 // chat.messages_masked for audit; only the sidebar listing hides.
 func (s *ConversationService) Delete(

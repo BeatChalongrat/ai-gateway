@@ -370,6 +370,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 
 	var (
 		content      strings.Builder
+		reasoning    strings.Builder
 		finalUsage   *service.GatewayChatUsage
 		finishReason string
 		gotErr       error
@@ -401,6 +402,20 @@ Loop:
 					"delta": ev.Delta,
 				})
 			}
+			// T4: reasoning delta + analysis status forwarded as
+			// dedicated SSE event verbs so the frontend can render
+			// the ThinkingBlock without parsing inside content_delta.
+			if ev.ReasoningDelta != "" {
+				reasoning.WriteString(ev.ReasoningDelta)
+				writeSSEEvent(w, flusher, "reasoning_delta", map[string]any{
+					"delta": ev.ReasoningDelta,
+				})
+			}
+			if ev.AnalysisStatus != "" {
+				writeSSEEvent(w, flusher, "analysis_status", map[string]any{
+					"status": ev.AnalysisStatus,
+				})
+			}
 			if ev.FinishReason != "" {
 				finishReason = ev.FinishReason
 			}
@@ -420,7 +435,7 @@ Loop:
 	if gotErr != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(content.String(), persistFinishReason, finalUsage)
+	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
 
 	// Emit final completion frame. Even on error we send a
 	// message_complete so the client always has a deterministic
@@ -429,10 +444,16 @@ Loop:
 		"message_id": stream.AssistantID.String(),
 	}
 	if finalUsage != nil {
-		completeData["token_usage"] = map[string]int{
+		tokenUsage := map[string]int{
 			"input":  finalUsage.PromptTokens,
 			"output": finalUsage.CompletionTokens,
 		}
+		// T4: surface reasoning_tokens when the Gateway broke it out
+		// (OpenAI o-series / Anthropic estimate / Gemini thoughts).
+		if finalUsage.ReasoningTokens > 0 {
+			tokenUsage["reasoning"] = finalUsage.ReasoningTokens
+		}
+		completeData["token_usage"] = tokenUsage
 	}
 	writeSSEEvent(w, flusher, "message_complete", completeData)
 }
@@ -559,6 +580,7 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		content      strings.Builder
+		reasoning    strings.Builder
 		finalUsage   *service.GatewayChatUsage
 		finishReason string
 		gotErr       error
@@ -584,6 +606,15 @@ Loop:
 				content.WriteString(ev.Delta)
 				writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": ev.Delta})
 			}
+			// T4: reasoning delta + analysis status — see sendStream
+			// docstring above for the contract.
+			if ev.ReasoningDelta != "" {
+				reasoning.WriteString(ev.ReasoningDelta)
+				writeSSEEvent(w, flusher, "reasoning_delta", map[string]any{"delta": ev.ReasoningDelta})
+			}
+			if ev.AnalysisStatus != "" {
+				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
+			}
 			if ev.FinishReason != "" {
 				finishReason = ev.FinishReason
 			}
@@ -600,14 +631,18 @@ Loop:
 	if gotErr != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(content.String(), persistFinishReason, finalUsage)
+	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
 	if finalUsage != nil {
-		completeData["token_usage"] = map[string]int{
+		tokenUsage := map[string]int{
 			"input":  finalUsage.PromptTokens,
 			"output": finalUsage.CompletionTokens,
 		}
+		if finalUsage.ReasoningTokens > 0 {
+			tokenUsage["reasoning"] = finalUsage.ReasoningTokens
+		}
+		completeData["token_usage"] = tokenUsage
 	}
 	writeSSEEvent(w, flusher, "message_complete", completeData)
 }
@@ -673,6 +708,7 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		content      strings.Builder
+		reasoning    strings.Builder
 		finalUsage   *service.GatewayChatUsage
 		finishReason string
 		gotErr       error
@@ -698,6 +734,15 @@ Loop:
 				content.WriteString(ev.Delta)
 				writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": ev.Delta})
 			}
+			// T4: reasoning delta + analysis status — see sendStream
+			// docstring above for the contract.
+			if ev.ReasoningDelta != "" {
+				reasoning.WriteString(ev.ReasoningDelta)
+				writeSSEEvent(w, flusher, "reasoning_delta", map[string]any{"delta": ev.ReasoningDelta})
+			}
+			if ev.AnalysisStatus != "" {
+				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
+			}
 			if ev.FinishReason != "" {
 				finishReason = ev.FinishReason
 			}
@@ -713,14 +758,18 @@ Loop:
 	if gotErr != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(content.String(), persistFinishReason, finalUsage)
+	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
 	if finalUsage != nil {
-		completeData["token_usage"] = map[string]int{
+		tokenUsage := map[string]int{
 			"input":  finalUsage.PromptTokens,
 			"output": finalUsage.CompletionTokens,
 		}
+		if finalUsage.ReasoningTokens > 0 {
+			tokenUsage["reasoning"] = finalUsage.ReasoningTokens
+		}
+		completeData["token_usage"] = tokenUsage
 	}
 	writeSSEEvent(w, flusher, "message_complete", completeData)
 }
