@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,12 @@ type MessageService struct {
 	// hides the tools from the gateway request when the toggle is
 	// off so the model doesn't try to call them.
 	toolExec *ToolExecutor
+	// Optional. Builds the <conversation_state> system-prompt block
+	// (S3 — Structured Conversation State) AND backs the
+	// update_conversation_state AI tool. Auto-extraction kicks in
+	// from finalizeConversation when message count crosses the
+	// thresholds defined below.
+	stateSvc *ConversationStateService
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -220,6 +227,26 @@ func (s *MessageService) SetMemoryService(m *MemoryService) {
 	s.memorySvc = m
 	if m != nil {
 		s.toolExec = NewToolExecutor(m)
+		// If the state service was wired BEFORE memory, re-attach it
+		// here so the executor exposes the S3 tool too.
+		if s.stateSvc != nil {
+			s.toolExec.SetConversationStateService(s.stateSvc)
+		}
+	}
+}
+
+// SetConversationStateService wires the S3 conversation-state
+// layer. When set:
+//   - buildSystemPrefix injects the <conversation_state> block
+//     between the user-memory block and the file/RAG blocks
+//   - the ToolExecutor exposes update_conversation_state alongside
+//     save_memory / list_memories
+//   - finalizeConversation triggers async state extraction on
+//     thresholds (10 / +20 messages)
+func (s *MessageService) SetConversationStateService(svc *ConversationStateService) {
+	s.stateSvc = svc
+	if s.toolExec != nil {
+		s.toolExec.SetConversationStateService(svc)
 	}
 }
 
@@ -1139,6 +1166,16 @@ func (s *MessageService) buildSystemPrefix(
 			parts = append(parts, mem)
 		}
 	}
+	// S3 — structured conversation state. Sits AFTER user memory
+	// (cross-conversation) and BEFORE file / RAG blocks (this-
+	// conversation specifics). The goal / decisions / artifacts /
+	// tasks recorded here survive the rolling message-history window
+	// so the model still knows what was decided 80 messages ago.
+	if s.stateSvc != nil && conv != nil {
+		if st := s.stateSvc.BuildStateContext(ctx, conv.ID, userID, tenantID); st != "" {
+			parts = append(parts, st)
+		}
+	}
 	if conv != nil {
 		if rag := s.ragContext(ctx, conv, ragQuery); rag != "" {
 			parts = append(parts, rag)
@@ -1605,6 +1642,8 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 //   - bump message_count by 2 (user + assistant)
 //   - auto-title from the first user message if the conversation
 //     is still on its default title
+//   - S3: trigger async conversation-state extraction when the
+//     message count crosses one of the thresholds (10 / +20)
 func (s *MessageService) finalizeConversation(
 	ctx context.Context,
 	conv *model.Conversation,
@@ -1618,6 +1657,71 @@ func (s *MessageService) finalizeConversation(
 		title := makeTitleFrom(userMsg.ContentMasked)
 		_ = s.conversations.UpdateTitle(ctx, conv.TenantID, conv.ID, title)
 	}
+
+	// S3 — kick the state-extraction trigger. Runs async so the
+	// user's response isn't blocked on the gateway extraction call.
+	s.maybeUpdateConversationState(ctx, conv)
+}
+
+// State-extraction triggers.
+//
+// firstExtractionAtMessages: conversations under this size still
+// fit in the rolling window; no need to spend a gateway call yet.
+//
+// extractEveryNMessages: once a state row exists, re-extract every
+// time this many new messages accumulate. Bigger = cheaper but
+// staler; smaller = fresher but more $$.
+const (
+	firstExtractionAtMessages = 10
+	extractEveryNMessages     = 20
+)
+
+// maybeUpdateConversationState decides whether the conversation
+// has accumulated enough new messages to warrant another
+// extraction pass and, if so, fires it on a background goroutine.
+//
+// Disabled when:
+//   - the state service isn't wired (tests, legacy builds)
+//   - conv.MemoryEnabled is false (temporary chat — the user
+//     opted out of persisted state)
+//
+// Read uses background ctx so the trigger survives the request
+// ctx cancellation that fires on stream completion.
+func (s *MessageService) maybeUpdateConversationState(
+	parent context.Context, conv *model.Conversation,
+) {
+	if s.stateSvc == nil || conv == nil || !conv.MemoryEnabled {
+		return
+	}
+
+	// Use the parent ctx for the cheap "should we run?" checks so a
+	// shutdown still cancels us cleanly. The actual extraction goroutine
+	// gets context.Background() because we want it to complete after
+	// the request ends.
+	count, err := s.messages.CountMessages(parent, conv.TenantID, conv.ID)
+	if err != nil {
+		return
+	}
+	existing, _ := s.stateSvc.Get(parent, conv.ID, conv.UserID, conv.TenantID)
+
+	run := false
+	if existing == nil && count >= firstExtractionAtMessages {
+		run = true
+	} else if existing != nil && count-existing.MessageCountAtSummary >= extractEveryNMessages {
+		run = true
+	}
+	if !run {
+		return
+	}
+
+	convID, userID, tenantID := conv.ID, conv.UserID, conv.TenantID
+	go func() {
+		bg := context.Background()
+		if _, err := s.stateSvc.GenerateOrUpdateState(bg, convID, userID, tenantID); err != nil {
+			slog.Warn("conversation state: auto-extraction failed",
+				"conv", convID.String(), "err", err)
+		}
+	}()
 }
 
 // persistError saves a placeholder assistant row with status=error
@@ -1797,15 +1901,18 @@ func makeTitleFrom(content string) string {
 // stand as the final answer.
 const maxToolIterations = 5
 
-// attachTools mutates the request to expose the memory tool set when
-// the conversation has memory enabled AND the executor is wired.
+// attachTools mutates the request to expose the full tool set the
+// executor can dispatch (memory tools + update_conversation_state
+// when the state service is wired). Gated by conv.MemoryEnabled so
+// temporary chats see no tools at all.
+//
 // Returns true when tools were attached (caller uses this to decide
 // whether to enter the tool-loop accumulator).
 func (s *MessageService) attachTools(req *GatewayChatRequest, conv *model.Conversation) bool {
 	if s.toolExec == nil || conv == nil || !conv.MemoryEnabled {
 		return false
 	}
-	req.Tools = append(req.Tools, MemoryToolDefs()...)
+	req.Tools = append(req.Tools, s.toolExec.ToolDefs()...)
 	// tool_choice="auto" lets the model decide whether to call a
 	// tool — most turns won't, and forcing "required" would make
 	// the model invent tool calls for vanilla chat.
