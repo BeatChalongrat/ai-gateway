@@ -1,17 +1,32 @@
 "use client";
 
-// Card rendered between the textarea and the chat thread while a
-// file is uploading or waiting to be sent. Shows thumbnail for
-// images, file-icon emoji + size for everything else, plus a
-// progress bar and a remove button.
+// Card rendered between the textarea and the chat thread for each
+// file currently staged on the next outgoing message.
+//
+// Two layouts share the same outer container size so the flex-wrap
+// row stays visually regular regardless of mix:
+//
+//   ImagePreviewCard    — 160×140 with a 100px-tall thumbnail
+//                         (blob URL via createObjectURL), name +
+//                         size beneath, optional uploading/error
+//                         overlay.
+//   DocumentPreviewCard — 160×140 with the monochrome FileTypeBadge
+//                         centred, name + size beneath.
+//
+// Both render a hover-only ✕ button (backdrop-blurred chip) and a
+// status-aware overlay (spinner while uploading, alert+retry on
+// error). FilePreviewCard dispatches to the right layout based on
+// MIME / extension.
 
 import { useEffect, useState } from "react";
 
+import { AlertTriangle, ImageIcon, Loader2, RotateCw, X } from "lucide-react";
+
+import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import type { PendingFile } from "@/stores/chatStore";
 import {
+  fileExtension,
   formatBytes,
-  iconEmojiFor,
-  iconKindFor,
   isImageMime,
 } from "@/lib/fileUtil";
 
@@ -21,115 +36,188 @@ interface Props {
   onRetry?: () => void;
 }
 
-export function FilePreviewCard({ pending, onRemove, onRetry }: Props) {
-  const isImage = isImageMime(pending.file.type);
-  const [thumb, setThumb] = useState<string | null>(null);
-
-  // For image uploads, generate a local object URL once so the card
-  // can render a 48px preview. Revoke on unmount to avoid leaks.
-  useEffect(() => {
-    if (!isImage) return;
-    const url = URL.createObjectURL(pending.file);
-    setThumb(url);
-    return () => URL.revokeObjectURL(url);
-  }, [isImage, pending.file]);
-
-  const kind = iconKindFor(pending.file.name, pending.file.type);
-  const sizeStr = formatBytes(pending.file.size);
-  const isUploading = pending.status === "uploading";
-  const isReady = pending.status === "ready";
-  const isError = pending.status === "error";
-
+// Common card shell — gets the size, rounded corners, status
+// overlay, and remove/retry chrome. Children render whatever sits
+// above the metadata line (thumbnail for images, big badge for
+// documents).
+function CardShell({
+  children,
+  name,
+  size,
+  status,
+  errorMsg,
+  onRemove,
+  onRetry,
+}: {
+  children: React.ReactNode;
+  name: string;
+  size: number;
+  status: PendingFile["status"];
+  errorMsg?: string;
+  onRemove: () => void;
+  onRetry?: () => void;
+}) {
+  const isError = status === "error";
+  const isUploading = status === "uploading";
   return (
     <div
-      className={`group relative flex shrink-0 items-start gap-2 rounded-lg border px-2.5 py-2 text-xs transition-colors ${
+      className={`group relative flex flex-col overflow-hidden rounded-xl border transition-colors ${
         isError
-          ? "border-status-danger/40 bg-status-danger/10"
-          : "border-border bg-bg-secondary"
+          ? "border-status-danger/40 bg-status-danger/5"
+          : "border-border-default bg-bg-secondary"
       }`}
-      style={{ minWidth: 200, maxWidth: 260 }}
+      style={{ width: 160 }}
     >
-      {isImage && thumb ? (
-        <img
-          src={thumb}
-          alt={pending.file.name}
-          className="h-12 w-12 shrink-0 rounded object-cover ring-1 ring-border"
-        />
-      ) : (
-        <div
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-bg-base text-2xl"
-          aria-hidden
-        >
-          {iconEmojiFor(kind)}
-        </div>
-      )}
+      {children}
 
-      <div className="min-w-0 flex-1 pr-5">
-        <div
-          className="truncate font-medium text-text-primary"
-          title={pending.file.name}
+      <div className="px-2.5 py-2">
+        <p
+          className="truncate text-xs font-medium text-text-primary"
+          title={name}
         >
-          {pending.file.name}
-        </div>
-        <div className="mt-0.5 flex items-center gap-1 text-[10px] text-text-muted">
-          <span>{sizeStr}</span>
-          <span>·</span>
-          <span className="uppercase tracking-wider">{kind}</span>
-          {isReady ? (
-            <span className="ml-auto inline-flex items-center text-status-success" aria-label="Ready">
-              <svg width={11} height={11} viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M5 13l4 4L19 7"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-          ) : null}
-        </div>
-        {isUploading ? (
-          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
-            <div
-              className="h-full rounded-full bg-text-primary transition-all"
-              style={{ width: `${pending.progress}%` }}
-            />
-          </div>
-        ) : null}
-        {isError ? (
-          <div className="mt-1 flex items-center gap-1 text-[10px] text-status-danger">
-            <span className="truncate" title={pending.error}>
-              {pending.error ?? "Upload failed"}
-            </span>
-            {onRetry ? (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="focus-ring rounded px-1 py-0.5 underline hover:text-text-primary"
-              >
-                Retry
-              </button>
-            ) : null}
-          </div>
+          {name}
+        </p>
+        <p className="mt-0.5 text-[11px] text-text-tertiary">
+          {formatBytes(size)}
+        </p>
+        {isError && errorMsg ? (
+          <p
+            className="mt-1 truncate text-[10px] text-status-danger"
+            title={errorMsg}
+          >
+            {errorMsg}
+          </p>
         ) : null}
       </div>
 
+      {isUploading ? (
+        <div
+          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 backdrop-blur-[1px]"
+          aria-label="Uploading"
+        >
+          <Loader2 className="h-5 w-5 animate-spin text-white" aria-hidden />
+        </div>
+      ) : null}
+
+      {isError ? (
+        <div className="pointer-events-none absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-status-danger/85 text-white">
+          <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+        </div>
+      ) : null}
+
+      {/* Hover-only remove ✕. Appears on group-hover OR keyboard
+          focus-within so keyboard users can find it without a
+          pointer. backdrop-blur keeps the contrast legible over a
+          dark image thumbnail. */}
       <button
         type="button"
         aria-label="Remove file"
-        onClick={onRemove}
-        className="focus-ring absolute right-1 top-1 rounded p-0.5 text-text-muted opacity-70 transition-opacity hover:bg-bg-elevated hover:text-text-primary group-hover:opacity-100"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        className="focus-ring absolute left-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-border-default bg-bg-surface/85 text-text-secondary opacity-0 backdrop-blur-sm transition-opacity hover:bg-bg-surface hover:text-text-primary group-hover:opacity-100 group-focus-within:opacity-100"
       >
-        <svg width={11} height={11} viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M6 6l12 12M18 6l-12 12"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
+        <X className="h-3.5 w-3.5" aria-hidden />
       </button>
+
+      {isError && onRetry ? (
+        <button
+          type="button"
+          aria-label="Retry upload"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+          className="focus-ring absolute bottom-2 right-2 inline-flex h-6 items-center gap-1 rounded-full border border-border-default bg-bg-surface/85 px-2 text-[10px] font-medium text-text-secondary backdrop-blur-sm transition-colors hover:bg-bg-surface hover:text-text-primary"
+        >
+          <RotateCw className="h-3 w-3" aria-hidden />
+          Retry
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+function ImagePreviewCard({ pending, onRemove, onRetry }: Props) {
+  // Generate a local blob URL once for the thumbnail. createObjectURL
+  // is synchronous and cheap; revoke on unmount so we don't leak
+  // memory if the user attaches a lot of images in a session.
+  const [thumb, setThumb] = useState<string | null>(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(pending.file);
+    setThumb(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pending.file]);
+
+  return (
+    <CardShell
+      name={pending.file.name}
+      size={pending.file.size}
+      status={pending.status}
+      errorMsg={pending.error}
+      onRemove={onRemove}
+      onRetry={onRetry}
+    >
+      <div
+        className="relative bg-bg-elevated"
+        style={{ height: 100, width: "100%" }}
+      >
+        {thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumb}
+            alt={pending.file.name}
+            className="h-full w-full object-cover"
+            draggable={false}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-text-tertiary">
+            <ImageIcon className="h-7 w-7" aria-hidden />
+          </div>
+        )}
+      </div>
+    </CardShell>
+  );
+}
+
+function DocumentPreviewCard({ pending, onRemove, onRetry }: Props) {
+  const ext = fileExtension(pending.file.name);
+  return (
+    <CardShell
+      name={pending.file.name}
+      size={pending.file.size}
+      status={pending.status}
+      errorMsg={pending.error}
+      onRemove={onRemove}
+      onRetry={onRetry}
+    >
+      <div
+        className="flex items-center justify-center bg-bg-elevated"
+        style={{ height: 100, width: "100%" }}
+      >
+        <FileTypeBadge
+          extension={ext ? `.${ext}` : undefined}
+          filename={pending.file.name}
+          contentType={pending.file.type}
+          size="lg"
+        />
+      </div>
+    </CardShell>
+  );
+}
+
+export function FilePreviewCard({ pending, onRemove, onRetry }: Props) {
+  const isImage =
+    isImageMime(pending.file.type) ||
+    /\.(png|jpe?g|gif|webp|svg)$/i.test(pending.file.name);
+  return isImage ? (
+    <ImagePreviewCard pending={pending} onRemove={onRemove} onRetry={onRetry} />
+  ) : (
+    <DocumentPreviewCard
+      pending={pending}
+      onRemove={onRemove}
+      onRetry={onRetry}
+    />
   );
 }

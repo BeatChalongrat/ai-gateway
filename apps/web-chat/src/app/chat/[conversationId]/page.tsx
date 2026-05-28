@@ -17,8 +17,9 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageThreadSkeleton } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
 import { useIsStreaming } from "@/hooks/useStream";
+import { ApiError } from "@/lib/api";
 import { useChatStore } from "@/stores/chatStore";
-import { useModelStore } from "@/stores/modelStore";
+import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 
 export default function ConversationPage() {
   const params = useParams();
@@ -120,13 +121,33 @@ export default function ConversationPage() {
       activeModelId={conv?.model_id ?? null}
       onModelPick={async (modelId) => {
         if (!convId) return;
+        // Update the global default in the same step so the next
+        // conversation the user opens inherits this pick. Runs
+        // BEFORE the server round-trip so the pill flips
+        // immediately if the network is slow; the chatStore action
+        // also does an optimistic update of conv.model_id, so the
+        // visible state is consistent without waiting on the PATCH.
+        selectGlobalModel(modelId);
         try {
           await setConversationModel(convId, modelId);
-          selectGlobalModel(modelId);
-          const m = getModelById(modelId);
-          toast(`Switched to ${m?.name ?? modelId}`);
-        } catch {
-          toast("Couldn't change model.");
+          const label =
+            modelId === AUTO_MODEL_ID
+              ? "Auto"
+              : getModelById(modelId)?.name ?? modelId;
+          toast(`Switched to ${label}`);
+        } catch (err) {
+          // Surface the SERVER's reason rather than a generic
+          // "Couldn't change model" — covers "model not allowed",
+          // "conversation not found", auth errors, etc. Falls back
+          // to the generic message when the error wasn't an
+          // ApiError (network glitch, bug).
+          // eslint-disable-next-line no-console
+          console.error("setConversationModel failed", err);
+          const msg =
+            err instanceof ApiError && err.message
+              ? `Couldn't change model: ${err.message}`
+              : "Couldn't change model.";
+          toast(msg);
         }
       }}
       activeKBId={conv?.knowledge_base_id ?? null}
