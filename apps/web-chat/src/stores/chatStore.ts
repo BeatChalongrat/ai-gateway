@@ -557,20 +557,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const convModelId =
       get().conversations.find((c) => c.id === convId)?.model_id ?? null;
 
-    // Build optimistic file shells from the current pendingFiles list
-    // so the user immediately sees badges/thumbnails under their
-    // message even before the server reloads message history.
-    const pending = get().pendingFiles[convId] ?? [];
-    const optimisticFiles: FileAttachment[] = pending
-      .filter((p) => p.status === "ready" && p.serverId)
-      .map((p) => ({
-        id: p.serverId!,
-        filename: p.file.name,
-        content_type: p.file.type || "application/octet-stream",
-        file_size_bytes: p.file.size,
-        extraction_status: "completed" as const,
-        created_at: new Date().toISOString(),
-      }));
+    // Build optimistic file shells from the current pendingFiles
+    // list so the user immediately sees badges/thumbnails under
+    // their message even before the server reloads message history.
+    //
+    // We search EVERY bucket and match by serverId because chips
+    // can be staged under two different keys depending on the entry
+    // point:
+    //   - Conv page: ChatInput stages into pendingFiles[convId]
+    //     (its render bucket equals the URL conv id).
+    //   - Landing page: ChatInput stages into pendingFiles[DRAFT]
+    //     because its conversationId prop stays null for the
+    //     instance's whole lifetime — only ensureConv knows the
+    //     real id, and it materialises here, not in the staging
+    //     bucket. A naive pendingFiles[convId] lookup misses every
+    //     landing send and the user bubble renders an empty pill
+    //     with no files visible.
+    // Filtering by fileIds keeps unrelated still-uploading rows
+    // (from a previous send that the user abandoned) off this
+    // message.
+    const fileIdSet = new Set(fileIds ?? []);
+    const optimisticFiles: FileAttachment[] =
+      fileIdSet.size === 0
+        ? []
+        : Object.values(get().pendingFiles)
+            .flat()
+            .filter((p) => p.serverId && fileIdSet.has(p.serverId))
+            .map((p) => ({
+              id: p.serverId!,
+              filename: p.file.name,
+              content_type: p.file.type || "application/octet-stream",
+              file_size_bytes: p.file.size,
+              extraction_status: "completed" as const,
+              created_at: new Date().toISOString(),
+            }));
 
     set((s) => ({
       messages: {
