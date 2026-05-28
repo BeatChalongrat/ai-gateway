@@ -17,8 +17,9 @@ import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
-import { ChatInput, uploadFiles } from "@/components/chat/ChatInput";
+import { ChatInput, DRAFT_CONV_KEY, uploadFiles } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
+import { toast } from "@/components/ui/Toast";
 import { useChatStore } from "@/stores/chatStore";
 import { useModelStore } from "@/stores/modelStore";
 
@@ -37,11 +38,16 @@ export default function ChatLanding() {
   // typed survive the navigation into the new conversation.
   const [injectedText, setInjectedText] = useState<string | null>(null);
 
-  // Eager-created conversation id. Starts null; the first attach /
-  // paste / drop / send promotes it to a real uuid via ensureConv.
-  // Stored in a ref so the synchronous attach handler can read it
-  // without racing the React setState batch.
-  const [draftConvId, setDraftConvId] = useState<string | null>(null);
+  // Eager-created conversation id. Stored ONLY in a ref — not in
+  // React state — so the landing-page ChatInput never re-renders
+  // with a real conversationId once ensureConv resolves. Why: the
+  // chips ChatInput renders are keyed by `conversationId ?? DRAFT`,
+  // so if conversationId flipped from null to a real id mid-upload,
+  // the selector would switch buckets and the chip would disappear.
+  // Keeping conversationId={null} for the landing instance means
+  // the chips live in the DRAFT bucket for the entire landing
+  // lifetime; after submit the page navigates away and a fresh
+  // ChatInput mounts on the conv page with the real id.
   const draftConvIdRef = useRef<string | null>(null);
   const creatingRef = useRef<Promise<string | null> | null>(null);
 
@@ -54,14 +60,24 @@ export default function ChatLanding() {
   const ensureConv = useCallback(async (): Promise<string | null> => {
     if (draftConvIdRef.current) return draftConvIdRef.current;
     if (creatingRef.current) return creatingRef.current;
-    if (!selectedModelId) return null;
+    if (!selectedModelId) {
+      // Most common reason a fresh user sees "nothing happens" when
+      // clicking + on the landing page: the model catalog hasn't
+      // finished loading yet (loadModels is async, no localStorage
+      // pick on first visit). Surface it so the user understands
+      // they're not stuck on a broken button.
+      toast("Pick a model before attaching files.");
+      return null;
+    }
     const promise = (async () => {
       try {
         const fresh = await createConversation(selectedModelId);
         draftConvIdRef.current = fresh.id;
-        setDraftConvId(fresh.id);
         return fresh.id;
-      } catch {
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("chat/landing: createConversation failed", err);
+        toast("Couldn't start a new conversation. Please try again.");
         return null;
       } finally {
         creatingRef.current = null;
@@ -72,7 +88,10 @@ export default function ChatLanding() {
   }, [createConversation, selectedModelId]);
 
   async function handleSend(text: string, fileIds: string[]) {
-    if (!selectedModelId) return;
+    if (!selectedModelId) {
+      toast("Pick a model first.");
+      return;
+    }
     // Attaching a file already created the draft conv; reuse it so
     // the upload + the send target the same row. When the user
     // types-and-sends without attaching, this falls through to a
@@ -94,18 +113,33 @@ export default function ChatLanding() {
       onFiles={async (files) => {
         const id = await ensureConv();
         if (!id) return;
-        void uploadFiles(id, files, {
-          addPendingFile,
-          updateFileProgress,
-          markFileReady,
-          markFileError,
-        });
+        // Chip bucket is DRAFT_CONV_KEY so the dropped-file chip
+        // appears in the landing-page ChatInput (which renders
+        // from that bucket because conversationId is null here).
+        // Network target is the eager-created conv id.
+        void uploadFiles(
+          id,
+          files,
+          {
+            addPendingFile,
+            updateFileProgress,
+            markFileReady,
+            markFileError,
+          },
+          DRAFT_CONV_KEY,
+        );
       }}
     >
       <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto">
         <EmptyState onPrompt={(text) => setInjectedText(text)}>
           <ChatInput
-            conversationId={draftConvId}
+            // Intentionally always null: keeps ChatInput's chip
+            // bucket constant (DRAFT) for this instance's lifetime
+            // so files staged before ensureConv resolves stay
+            // visible without a render-time bucket flip. ensureConv
+            // (passed via onRequestConversation) provides the real
+            // id to the upload + the send paths.
+            conversationId={null}
             disabled={false}
             streaming={false}
             activeModelId={selectedModelId ?? null}
