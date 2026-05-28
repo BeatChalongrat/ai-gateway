@@ -48,7 +48,7 @@ from app.schemas.public import (
 from app.services.orchestrator import GatewayOrchestrator
 from app.services.policy.profile_service import get_runtime_profile
 from app.services.policy.profiles import get_profile as get_runtime_profile_fallback
-from app.services.usage_service import _estimate_cost
+from app.services.usage_service import _estimate_cost, _estimate_reasoning_cost
 
 logger = structlog.get_logger(__name__)
 
@@ -733,6 +733,18 @@ async def chat_completions(
         _reasoning_started = False
         _reasoning_completed = False
         _reasoning_text_total = ""
+        # T3: rolling-window DLP buffer for reasoning text — mirrors
+        # the content-channel ``tail_masked`` pattern but is its own
+        # independent buffer because the two channels stream
+        # interleaved fragments and must not share masked-token state.
+        # Same MIN_TAIL_CHARS (120) ceiling so a PII pattern spanning
+        # two reasoning chunks (e.g. an email split across boundary)
+        # is still caught when the second half arrives. The reasoning
+        # channel deliberately skips the post-mask restore + orphan
+        # redact passes — reasoning is the model's internal monologue,
+        # so masked tokens should stay masked rather than be replaced
+        # with the user's original PII.
+        _reasoning_tail_masked = ""
 
         def _dlp_scan_and_mask(
             text: str,
@@ -959,21 +971,48 @@ async def chat_completions(
                                 _reasoning_started = True
                                 yield _emit_analysis_status("started")
                                 first_chunk_yielded = True
-                            # One-shot DLP scan per fragment (T2).
-                            # Reasoning text doesn't get the rolling
-                            # tail window the content channel has —
-                            # T3 will add per-channel rolling
-                            # protection. The fail-closed posture in
-                            # ``_dlp_scan_and_mask`` (drop the chunk
-                            # on any scanner error) covers us against
-                            # mid-thought PII leaking.
-                            masked_reasoning, reasoning_actions = (
-                                _dlp_scan_and_mask(chunk.reasoning_delta)
-                            )
-                            if reasoning_actions:
-                                accumulated_outbound_actions.extend(reasoning_actions)
-                            if masked_reasoning:
-                                yield _emit_reasoning_chunk(masked_reasoning)
+                            # T3 rolling-window DLP. Same pattern as
+                            # the content channel: scan
+                            # tail+new_chunk together, emit everything
+                            # except the last MIN_TAIL_CHARS, retain
+                            # the tail so PII spanning a chunk
+                            # boundary still matches when the second
+                            # half arrives. Boundary-split protection
+                            # for masked tokens (``<<...>>`` and
+                            # ``<...>``) mirrors the content path so
+                            # an already-masked placeholder is never
+                            # split mid-stream.
+                            r_window = _reasoning_tail_masked + chunk.reasoning_delta
+                            r_masked_window, r_actions = _dlp_scan_and_mask(r_window)
+                            if r_actions:
+                                accumulated_outbound_actions.extend(r_actions)
+                            if len(r_masked_window) > MIN_TAIL_CHARS:
+                                r_safe = r_masked_window[:-MIN_TAIL_CHARS]
+                                _reasoning_tail_masked = r_masked_window[-MIN_TAIL_CHARS:]
+                                # Pull a trailing ``<<...`` (no
+                                # matching ``>>``) back into the tail
+                                # so we never split a pseudonym token.
+                                _last_dbl_open = r_safe.rfind("<<")
+                                _last_dbl_close = r_safe.rfind(">>")
+                                if (
+                                    _last_dbl_open != -1
+                                    and _last_dbl_close < _last_dbl_open
+                                ):
+                                    _reasoning_tail_masked = (
+                                        r_safe[_last_dbl_open:] + _reasoning_tail_masked
+                                    )
+                                    r_safe = r_safe[:_last_dbl_open]
+                                # Same guard for legacy ``<rN>`` shape.
+                                _last_lt = r_safe.rfind("<")
+                                if _last_lt != -1 and r_safe.rfind(">") < _last_lt:
+                                    _reasoning_tail_masked = (
+                                        r_safe[_last_lt:] + _reasoning_tail_masked
+                                    )
+                                    r_safe = r_safe[:_last_lt]
+                                if r_safe:
+                                    yield _emit_reasoning_chunk(r_safe)
+                            else:
+                                _reasoning_tail_masked = r_masked_window
                     # Analysis-status transition: any non-reasoning
                     # signal (content delta / tool_calls / finish)
                     # arriving after reasoning started flips us into
@@ -1362,6 +1401,19 @@ async def chat_completions(
         # Resolve usage: prefer provider-reported counts (from the trailing
         # usage chunk under stream_options.include_usage); fall back to the
         # heuristic estimator when the provider didn't surface them.
+        # T3: reasoning_tokens resolution mirrors the non-stream
+        # orchestrator path — provider-reported takes precedence; fall
+        # back to a length estimate on the streamed reasoning text
+        # (~4 chars/token) for Anthropic which folds thinking into
+        # ``output_tokens``. Result is plumbed onto UsageInfo and into
+        # the request_log row so the admin dashboard can attribute
+        # spend to reasoning separately from regular completion.
+        _stream_reasoning_tok = 0
+        if provider_usage is not None and provider_usage.reasoning_tokens:
+            _stream_reasoning_tok = provider_usage.reasoning_tokens
+        elif _reasoning_text_total:
+            _stream_reasoning_tok = max(1, len(_reasoning_text_total) // 4)
+
         if provider_usage is not None:
             from app.services.currency_service import currency_service
             _usd = _estimate_cost(
@@ -1377,6 +1429,7 @@ async def chat_completions(
                 estimated_cost_usd=_usd,
                 cost_thb=_cost_info["thb"],
                 cost_display=_cost_info["display"],
+                reasoning_tokens=_stream_reasoning_tok or None,
             )
         else:
             usage = orchestrator.usage_service.estimate(
@@ -1384,6 +1437,10 @@ async def chat_completions(
                 response_text=full_text,
                 model_name=route.model_name,
             )
+            if _stream_reasoning_tok:
+                usage = usage.model_copy(update={
+                    "reasoning_tokens": _stream_reasoning_tok,
+                })
 
         latency_ms = int((time.perf_counter() - t_start) * 1000)
 
@@ -1414,6 +1471,13 @@ async def chat_completions(
                     completion_tokens=usage.completion_tokens,
                     total_tokens=usage.total_tokens,
                     estimated_cost_usd=usage.estimated_cost_usd,
+                    # T3: persist reasoning attribution. Defaults to 0
+                    # on non-reasoning streams so the request_log row
+                    # is byte-identical to the pre-T3 shape.
+                    reasoning_tokens=_stream_reasoning_tok,
+                    reasoning_cost=_estimate_reasoning_cost(
+                        route.model_name, _stream_reasoning_tok
+                    ),
                     fallback_used=_stream_fallback_used,
                     fallback_attempts=_stream_fallback_attempts_list,
                     original_provider=_stream_original_provider,
@@ -1472,6 +1536,17 @@ async def chat_completions(
             output_raw,
             api_key_id=str(auth.key_id) if auth else None,
         )
+
+        # T3: flush the reasoning rolling-window tail. The tail buffer
+        # held the trailing MIN_TAIL_CHARS of the last masked window
+        # so any PII spanning chunk boundaries would be caught — at
+        # stream end we emit whatever remains, masked. No restore /
+        # orphan-redact pass here (reasoning is internal monologue;
+        # masked tokens stay masked rather than be replaced with
+        # inbound PII).
+        if _show_reasoning and _reasoning_tail_masked:
+            yield _emit_reasoning_chunk(_reasoning_tail_masked)
+            _reasoning_tail_masked = ""
 
         # Defensive analysis_status: completed (T2). If the stream
         # ended without ever transitioning out of the reasoning phase
