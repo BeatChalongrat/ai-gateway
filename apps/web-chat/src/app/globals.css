@@ -78,28 +78,6 @@
   --font-mono: var(--font-jetbrains), 'JetBrains Mono', 'Fira Code',
                'SF Mono', 'Cascadia Code', Consolas, monospace;
   --font-brand: var(--font-outfit), var(--font-sans);
-
-  /* Toast horizontal-offset (T4 follow-up). Toast.tsx anchors via
-     ``left: calc(50% + var(--toast-x-offset))`` so a chat layout
-     with a 260px desktop sidebar can bias the toast onto the
-     visual center of the chat content area instead of the
-     viewport. Defaulting in CSS — not solely from a useEffect —
-     means the FIRST paint already has the right offset, so the
-     toast never flickers from viewport-center to content-center.
-     Chat layout's useLayoutEffect overrides this when the sidebar
-     collapses; navigating to a non-chat route falls back to the
-     default (which is also 0px below the desktop breakpoint). */
-  --toast-x-offset: 130px;
-}
-
-@media (max-width: 767px) {
-  /* Mobile: the sidebar is a ``position: fixed`` overlay that
-     doesn't contribute to layout flow, so the chat content area
-     spans the full viewport. Zero out the offset so toasts land
-     on the viewport midline at mobile widths. */
-  :root {
-    --toast-x-offset: 0px;
-  }
 }
 
 /* Light theme overrides. Applied when <html data-theme="light"> is

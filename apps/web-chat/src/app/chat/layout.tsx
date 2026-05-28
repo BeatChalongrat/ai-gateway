@@ -1,14 +1,7 @@
 "use client";
 
 import { useSelectedLayoutSegments } from "next/navigation";
-import { useEffect, useLayoutEffect, useState } from "react";
-
-// SSR-safe ``useLayoutEffect``. Next.js pre-renders client
-// components on the server where ``useLayoutEffect`` warns
-// (DOM isn't available). Falling back to ``useEffect`` on the
-// server is the React-team-blessed workaround.
-const useIsomorphicLayoutEffect =
-  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+import { useEffect, useState } from "react";
 
 import { Sidebar } from "@/components/chat/Sidebar";
 import { Spinner } from "@/components/ui/Spinner";
@@ -20,8 +13,7 @@ import { useMemoryPendingPoll } from "@/hooks/useMemoryPendingCount";
 import { getPortalToken, redirectToPortalLogin } from "@/lib/auth";
 import { useAuthStore } from "@/stores/authStore";
 import { useModelStore } from "@/stores/modelStore";
-
-const COLLAPSED_KEY = "sran-webchat-sidebar-collapsed";
+import { useSidebarStore } from "@/stores/sidebarStore";
 
 export default function ChatLayout({
   children,
@@ -31,23 +23,14 @@ export default function ChatLayout({
   const segments = useSelectedLayoutSegments();
   const activeId = segments?.[0] ?? null;
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  // ``collapsed`` lives in a shared Zustand store so other UI
+  // (notably the Toast component, which biases its horizontal
+  // position by the sidebar width) can read it synchronously
+  // during render. The store handles its own localStorage
+  // persistence — no useEffect-driven hydration in this layout.
+  const collapsed = useSidebarStore((s) => s.collapsed);
+  const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed);
   const newChat = useNewChatHandler();
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === "1");
-  }, []);
-
-  function toggleCollapsed() {
-    setCollapsed((prev) => {
-      const next = !prev;
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
-      }
-      return next;
-    });
-  }
 
   const [isReady, setIsReady] = useState(false);
 
@@ -81,40 +64,12 @@ export default function ChatLayout({
     };
   }, [sidebarOpen]);
 
-  // Publish the sidebar's horizontal footprint to ``<html>`` so the
-  // ToastViewport (mounted at AppProviders, outside this layout) can
-  // bias its ``left: calc(50% + var(--toast-x-offset))`` toward the
-  // chat content area's visual center instead of the viewport's.
-  // The sidebar contributes ``260px`` at desktop sizes when not
-  // collapsed (see Sidebar.tsx's ``md:w-[260px]``); at mobile it's
-  // an overlay that doesn't take horizontal space, and when
-  // ``collapsed`` it animates to width 0.
-  //
-  // CSS owns the FIRST-PAINT default in globals.css (130px desktop,
-  // 0px below 768px) so the toast never appears off-axis before
-  // this effect runs. ``useLayoutEffect`` flushes the collapsed-
-  // state override BEFORE the browser paints, so toggling the
-  // sidebar doesn't flicker either. Cleanup on unmount so
-  // navigating away from /chat leaves the CSS default in charge.
-  useIsomorphicLayoutEffect(() => {
-    const root = document.documentElement;
-    const SIDEBAR_DESKTOP_WIDTH = 260;
-    const mq = window.matchMedia("(min-width: 768px)");
-    const sync = () => {
-      const isDesktop = mq.matches;
-      const sidebarWidth = isDesktop && !collapsed ? SIDEBAR_DESKTOP_WIDTH : 0;
-      // Half the sidebar width — moves the toast center toward the
-      // right by the same amount the sidebar pushed the content
-      // area off-axis.
-      root.style.setProperty("--toast-x-offset", `${sidebarWidth / 2}px`);
-    };
-    sync();
-    mq.addEventListener("change", sync);
-    return () => {
-      mq.removeEventListener("change", sync);
-      root.style.removeProperty("--toast-x-offset");
-    };
-  }, [collapsed]);
+  // Toast positioning offset is no longer wired here — the Toast
+  // component reads ``collapsed`` from ``useSidebarStore`` directly
+  // and computes its own offset synchronously during render. See
+  // Toast.tsx for the inline computation. Removing the CSS-variable
+  // round-trip eliminates the one-frame flicker that the prior
+  // useLayoutEffect-based publication could not avoid on first paint.
 
   // S8 — poll the pending-preference count so the sidebar Memory
   // badge + MemoryIndicator dot have something to read. Single
