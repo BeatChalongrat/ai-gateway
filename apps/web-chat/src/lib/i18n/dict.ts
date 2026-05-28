@@ -127,6 +127,167 @@ export const en = {
   "kb.unit.documents": "documents",
   "kb.unit.chunk": "chunk",
   "kb.unit.chunks": "chunks",
+
+  // ── Memory page ──────────────────────────────────────────
+  "memory.back": "Back to chat",
+  "memory.title": "Memory",
+  "memory.description":
+    "SRAN Chat remembers facts from your conversations to personalize future responses.",
+  "memory.savedCount.zero": "0 saved memories",
+  "memory.savedCount.one": "1 saved memory",
+  "memory.savedCount.other": "{count} saved memories",
+  "memory.addMemory": "Add memory",
+  "memory.searchPlaceholder": "Search memories…",
+  "memory.noResults": "No memories match “{query}”.",
+
+  "memory.empty.title": "No memories yet",
+  "memory.empty.description":
+    "Just chat naturally — the AI will automatically remember important facts about you, like your name, preferences, and interests. You can also tell it directly: “remember that…” or “จำไว้ว่า…”",
+  "memory.empty.hint":
+    "Try saying: “My name is Beat and I prefer concise Thai responses.”",
+
+  "memory.suggested.title": "Suggested preferences ({count})",
+  "memory.suggested.description":
+    "AI noticed these patterns. Confirm to activate; reject to dismiss.",
+
+  // ── Memory card ──────────────────────────────────────────
+  "memory.type.fact": "fact",
+  "memory.type.preference": "preference",
+  "memory.type.interest": "interest",
+  "memory.type.instruction": "instruction",
+  "memory.type.suggested": "suggested",
+  "memory.type.fileReference": "file reference",
+  "memory.type.inferred": "inferred",
+  "memory.card.pinned": "Pinned",
+  "memory.card.savedAgo": "saved {time}",
+  "memory.card.sourceLabel": "Source:",
+  "memory.card.source.conv": "“{title}” conversation",
+  "memory.card.source.userExplicitConv": "saved from a conversation",
+  "memory.card.source.userExplicitDirect": "direct input",
+  "memory.card.source.assistantInferred": "AI detected from conversation",
+  "memory.card.source.summary": "conversation summary",
+  "memory.card.source.artifact": "file event",
+  "memory.card.source.detectedAgo": "detected {time}",
+  "memory.card.source.fromConvAgo": "from a conversation {time}",
+  "memory.card.usedOne": "Used 1 time",
+  "memory.card.usedMany": "Used {count} times",
+  "memory.card.lastUsed": "last used {time}",
+  "memory.card.edit": "Edit",
+  "memory.card.pin": "Pin",
+  "memory.card.unpin": "Unpin",
+  "memory.card.delete": "Delete",
+
+  // ── Pending preference card ──────────────────────────────
+  "memory.pending.confirm": "Confirm",
+  "memory.pending.reject": "Reject",
+
+  // ── Memory form dialog ───────────────────────────────────
+  "memory.form.titleAdd": "Add memory",
+  "memory.form.titleEdit": "Edit memory",
+  "memory.form.descriptionAdd":
+    "Save a fact or preference so it persists across all chats.",
+  "memory.form.descriptionEdit":
+    "Update the saved fact, preference, or instruction.",
+  "memory.form.contentLabel": "What should I remember?",
+  "memory.form.contentPlaceholder": "e.g. My name is Beat",
+  "memory.form.typeLabel": "Type",
+  "memory.form.categoryLabel": "Category (optional)",
+  "memory.form.categoryPlaceholder":
+    "identity, language, coding, work…",
+  "memory.form.cancel": "Cancel",
+  "memory.form.saving": "Saving…",
+  "memory.form.saveNew": "Save memory",
+  "memory.form.saveEdit": "Save changes",
+  "memory.form.errorEmpty": "Please enter what should be remembered.",
+  "memory.form.errorTooLong":
+    "Memory text is limited to {max} characters.",
+  "memory.form.toastSaved": "Memory saved.",
+  "memory.form.toastUpdated": "Memory updated.",
+  "memory.form.toastError": "Couldn’t save the memory.",
+
+  "memory.form.opt.fact": "Fact",
+  "memory.form.opt.preference": "Preference",
+  "memory.form.opt.interest": "Interest",
+  "memory.form.opt.instruction": "Instruction",
+  "memory.form.opt.fileReference": "File reference",
+  "memory.form.describe.fact":
+    "A personal fact — name, role, identity, etc.",
+  "memory.form.describe.preference":
+    "How you want the AI to respond (tone, length, language).",
+  "memory.form.describe.interest":
+    "What you’re currently working on or interested in.",
+  "memory.form.describe.instruction":
+    "A standing rule to follow in every conversation.",
+  "memory.form.describe.fileReference":
+    "Something about a file the AI should remember.",
+
+  // ── Temporary chat section ───────────────────────────────
+  "memory.temporary.title": "Temporary chat",
+  "memory.temporary.description":
+    "Start a conversation that doesn’t use or create memory. Useful when you don’t want a particular topic feeding into your saved facts.",
+  "memory.temporary.button": "Start temporary chat",
+  "memory.temporary.toast":
+    "Starting a temporary chat — memory is off for this one.",
+
+  // ── Data management ──────────────────────────────────────
+  "memory.export.title": "Data management",
+  "memory.export.description":
+    "Download a JSON snapshot of every memory the AI has stored about you. The export expires after 24 hours.",
+  "memory.export.button": "Export my memories",
+  "memory.export.busy": "Preparing export…",
+  "memory.export.ready": "Export ready ({size})",
+  "memory.export.error": "Couldn’t export memories.",
+
+  // ── Danger zone ──────────────────────────────────────────
+  "memory.danger.title": "Danger zone",
+  "memory.danger.clearDescription":
+    "Clear every saved memory. The chat history stays — only the cross-conversation facts the AI remembers about you are removed.",
+  "memory.danger.clearButton": "Clear all memories",
+  "memory.danger.purgeDescription":
+    "Permanently delete all data. Irreversibly remove every memory, event, conversation state, and source attribution. Past export files are also unlinked.",
+  "memory.danger.purgeDescriptionPrefix": "Permanently delete all data.",
+  "memory.danger.purgeButton": "Permanently delete everything",
+  "memory.danger.purgeBusy": "Deleting…",
+  "memory.danger.purgePromptPhrase": "DELETE ALL MY MEMORIES",
+  "memory.danger.purgePromptBody":
+    "To permanently delete ALL memories, events, conversation states, and source attributions, type exactly:\n\nDELETE ALL MY MEMORIES",
+  "memory.danger.purgeMismatch":
+    "Confirmation did not match. Deletion cancelled.",
+  "memory.danger.purgeError": "Permanent delete failed.",
+  "memory.danger.purgeDoneOne":
+    "Permanently deleted 1 memory + related data.",
+  "memory.danger.purgeDoneMany":
+    "Permanently deleted {count} memories + related data.",
+
+  // ── Confirm dialogs ──────────────────────────────────────
+  "memory.confirm.cancel": "Cancel",
+  "memory.confirm.clearTitle": "Clear all memories?",
+  "memory.confirm.clearBody":
+    "This will remove every saved memory for your account. This action cannot be undone.",
+  "memory.confirm.clearAction": "Clear all",
+  "memory.confirm.deleteTitle": "Delete this memory?",
+  "memory.confirm.deleteAction": "Delete",
+  "memory.confirm.purgeTitle": "Permanently delete all data?",
+  "memory.confirm.purgeBody":
+    "This will irreversibly delete every memory, memory event, conversation state, and source attribution. It also unlinks any past export files. You’ll need to type the confirmation phrase next.",
+  "memory.confirm.purgeAction": "Continue",
+  "memory.clear.toastNone": "No memories to clear.",
+  "memory.clear.toastOne": "Cleared 1 memory.",
+  "memory.clear.toastMany": "Cleared {count} memories.",
+  "memory.clear.toastError": "Couldn’t clear memories.",
+
+  // ── Suggested-preference toasts ──────────────────────────
+  "memory.toast.preferenceConfirmed": "Preference confirmed.",
+  "memory.toast.preferenceConfirmError": "Couldn’t confirm preference.",
+  "memory.toast.suggestionDismissed": "Suggestion dismissed.",
+  "memory.toast.suggestionDismissError": "Couldn’t dismiss suggestion.",
+  "memory.toast.memoryDeleted": "Memory deleted.",
+  "memory.toast.memoryDeleteError": "Couldn’t delete memory.",
+  "memory.toast.pinError": "Couldn’t update pin.",
+
+  // ── Generic states ───────────────────────────────────────
+  "memory.error.loadFailed": "Couldn’t load memories.",
+  "memory.error.tryAgain": "Try again",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -249,6 +410,167 @@ const th: Record<DictKey, string> = {
   "kb.unit.documents": "เอกสาร",
   "kb.unit.chunk": "ชิ้น",
   "kb.unit.chunks": "ชิ้น",
+
+  // Memory page
+  "memory.back": "กลับไปแชท",
+  "memory.title": "ความจำ",
+  "memory.description":
+    "SRAN Chat จดจำข้อมูลจากการสนทนาเพื่อปรับคำตอบให้เหมาะกับคุณ",
+  "memory.savedCount.zero": "ยังไม่มีความจำที่บันทึก",
+  "memory.savedCount.one": "บันทึกไว้ 1 รายการ",
+  "memory.savedCount.other": "บันทึกไว้ {count} รายการ",
+  "memory.addMemory": "เพิ่มความจำ",
+  "memory.searchPlaceholder": "ค้นหาความจำ…",
+  "memory.noResults": "ไม่พบความจำที่ตรงกับ “{query}”",
+
+  "memory.empty.title": "ยังไม่มีความจำ",
+  "memory.empty.description":
+    "แค่คุยไปตามปกติ AI จะจดจำข้อมูลสำคัญเกี่ยวกับคุณเอง เช่น ชื่อ ความชอบ และสิ่งที่สนใจ หรือจะบอกตรง ๆ ก็ได้ เช่น “จำไว้ว่า…”",
+  "memory.empty.hint":
+    "ลองพูดว่า: “ผมชื่อ Beat ชอบคำตอบภาษาไทยแบบกระชับ”",
+
+  "memory.suggested.title": "ความชอบที่แนะนำ ({count})",
+  "memory.suggested.description":
+    "AI สังเกตพฤติกรรมเหล่านี้ กดยืนยันเพื่อเปิดใช้งาน หรือไม่ใช่เพื่อปฏิเสธ",
+
+  // Memory card
+  "memory.type.fact": "ข้อเท็จจริง",
+  "memory.type.preference": "ความชอบ",
+  "memory.type.interest": "สิ่งที่สนใจ",
+  "memory.type.instruction": "คำสั่งถาวร",
+  "memory.type.suggested": "แนะนำ",
+  "memory.type.fileReference": "อ้างอิงไฟล์",
+  "memory.type.inferred": "อนุมาน",
+  "memory.card.pinned": "ปักหมุดไว้",
+  "memory.card.savedAgo": "บันทึกเมื่อ {time}",
+  "memory.card.sourceLabel": "ที่มา:",
+  "memory.card.source.conv": "สนทนา “{title}”",
+  "memory.card.source.userExplicitConv": "บันทึกจากการสนทนา",
+  "memory.card.source.userExplicitDirect": "เพิ่มโดยตรง",
+  "memory.card.source.assistantInferred": "AI ตรวจพบจากการสนทนา",
+  "memory.card.source.summary": "สรุปการสนทนา",
+  "memory.card.source.artifact": "เหตุการณ์ไฟล์",
+  "memory.card.source.detectedAgo": "ตรวจพบเมื่อ {time}",
+  "memory.card.source.fromConvAgo": "จากการสนทนาเมื่อ {time}",
+  "memory.card.usedOne": "ใช้ไปแล้ว 1 ครั้ง",
+  "memory.card.usedMany": "ใช้ไปแล้ว {count} ครั้ง",
+  "memory.card.lastUsed": "ครั้งล่าสุดเมื่อ {time}",
+  "memory.card.edit": "แก้ไข",
+  "memory.card.pin": "ปักหมุด",
+  "memory.card.unpin": "เลิกปักหมุด",
+  "memory.card.delete": "ลบ",
+
+  // Pending preference card
+  "memory.pending.confirm": "ยืนยัน",
+  "memory.pending.reject": "ไม่ใช่",
+
+  // Memory form dialog
+  "memory.form.titleAdd": "เพิ่มความจำ",
+  "memory.form.titleEdit": "แก้ไขความจำ",
+  "memory.form.descriptionAdd":
+    "บันทึกข้อเท็จจริงหรือความชอบเพื่อใช้ได้ในทุกบทสนทนา",
+  "memory.form.descriptionEdit":
+    "แก้ไขข้อเท็จจริง ความชอบ หรือคำสั่งที่บันทึกไว้",
+  "memory.form.contentLabel": "ต้องการให้จำอะไร?",
+  "memory.form.contentPlaceholder": "เช่น ผมชื่อ Beat",
+  "memory.form.typeLabel": "ประเภท",
+  "memory.form.categoryLabel": "หมวดหมู่ (ไม่บังคับ)",
+  "memory.form.categoryPlaceholder":
+    "เช่น ตัวตน, ภาษา, เขียนโค้ด, งาน…",
+  "memory.form.cancel": "ยกเลิก",
+  "memory.form.saving": "กำลังบันทึก…",
+  "memory.form.saveNew": "บันทึก",
+  "memory.form.saveEdit": "บันทึกการแก้ไข",
+  "memory.form.errorEmpty": "กรุณาระบุสิ่งที่ต้องการให้จำ",
+  "memory.form.errorTooLong":
+    "ข้อความความจำจำกัด {max} ตัวอักษร",
+  "memory.form.toastSaved": "บันทึกความจำแล้ว",
+  "memory.form.toastUpdated": "อัปเดตความจำแล้ว",
+  "memory.form.toastError": "บันทึกความจำไม่สำเร็จ",
+
+  "memory.form.opt.fact": "ข้อเท็จจริง",
+  "memory.form.opt.preference": "ความชอบ",
+  "memory.form.opt.interest": "สิ่งที่สนใจ",
+  "memory.form.opt.instruction": "คำสั่งถาวร",
+  "memory.form.opt.fileReference": "อ้างอิงไฟล์",
+  "memory.form.describe.fact":
+    "ข้อมูลส่วนตัว เช่น ชื่อ บทบาท ตัวตน",
+  "memory.form.describe.preference":
+    "วิธีที่อยากให้ AI ตอบ (โทน ความยาว ภาษา)",
+  "memory.form.describe.interest":
+    "สิ่งที่กำลังทำหรือสนใจอยู่ในตอนนี้",
+  "memory.form.describe.instruction":
+    "กฎที่ต้องปฏิบัติทุกบทสนทนา",
+  "memory.form.describe.fileReference":
+    "สิ่งที่ AI ควรจำเกี่ยวกับไฟล์",
+
+  // Temporary chat
+  "memory.temporary.title": "แชทชั่วคราว",
+  "memory.temporary.description":
+    "เริ่มสนทนาที่ไม่ใช้และไม่สร้างความจำ เหมาะเมื่อไม่ต้องการให้หัวข้อบางอย่างถูกบันทึก",
+  "memory.temporary.button": "เริ่มแชทชั่วคราว",
+  "memory.temporary.toast":
+    "เริ่มแชทชั่วคราว — ปิดความจำเฉพาะแชทนี้",
+
+  // Data management
+  "memory.export.title": "จัดการข้อมูล",
+  "memory.export.description":
+    "ดาวน์โหลดข้อมูลความจำทั้งหมดในรูปแบบ JSON ไฟล์จะหมดอายุใน 24 ชั่วโมง",
+  "memory.export.button": "ส่งออกความจำ",
+  "memory.export.busy": "กำลังเตรียมไฟล์…",
+  "memory.export.ready": "ไฟล์พร้อมแล้ว ({size})",
+  "memory.export.error": "ส่งออกความจำไม่สำเร็จ",
+
+  // Danger zone
+  "memory.danger.title": "โซนอันตราย",
+  "memory.danger.clearDescription":
+    "ล้างความจำทั้งหมด ประวัติการสนทนาจะยังอยู่ — ลบเฉพาะข้อมูลที่ AI จดจำข้ามบทสนทนา",
+  "memory.danger.clearButton": "ล้างความจำทั้งหมด",
+  "memory.danger.purgeDescription":
+    "ลบข้อมูลทั้งหมดถาวร ลบความจำ เหตุการณ์ สถานะการสนทนา และแหล่งอ้างอิงทั้งหมดอย่างถาวร ไฟล์ส่งออกในอดีตจะถูกตัดการเชื่อมโยงด้วย",
+  "memory.danger.purgeDescriptionPrefix": "ลบข้อมูลทั้งหมดถาวร",
+  "memory.danger.purgeButton": "ลบทุกอย่างถาวร",
+  "memory.danger.purgeBusy": "กำลังลบ…",
+  "memory.danger.purgePromptPhrase": "DELETE ALL MY MEMORIES",
+  "memory.danger.purgePromptBody":
+    "เพื่อยืนยันการลบความจำ เหตุการณ์ สถานะการสนทนา และแหล่งอ้างอิงทั้งหมดอย่างถาวร พิมพ์ข้อความนี้ตรงตัว:\n\nDELETE ALL MY MEMORIES",
+  "memory.danger.purgeMismatch":
+    "ข้อความยืนยันไม่ตรงกัน ยกเลิกการลบ",
+  "memory.danger.purgeError": "ลบถาวรไม่สำเร็จ",
+  "memory.danger.purgeDoneOne":
+    "ลบความจำ 1 รายการ พร้อมข้อมูลที่เกี่ยวข้องถาวรแล้ว",
+  "memory.danger.purgeDoneMany":
+    "ลบความจำ {count} รายการ พร้อมข้อมูลที่เกี่ยวข้องถาวรแล้ว",
+
+  // Confirm dialogs
+  "memory.confirm.cancel": "ยกเลิก",
+  "memory.confirm.clearTitle": "ล้างความจำทั้งหมด?",
+  "memory.confirm.clearBody":
+    "การดำเนินการนี้จะลบความจำทั้งหมดของบัญชีคุณ ไม่สามารถย้อนกลับได้",
+  "memory.confirm.clearAction": "ล้างทั้งหมด",
+  "memory.confirm.deleteTitle": "ลบความจำนี้?",
+  "memory.confirm.deleteAction": "ลบ",
+  "memory.confirm.purgeTitle": "ลบข้อมูลทั้งหมดถาวร?",
+  "memory.confirm.purgeBody":
+    "การดำเนินการนี้จะลบความจำ เหตุการณ์ สถานะการสนทนา และแหล่งอ้างอิงทั้งหมดอย่างถาวร ไฟล์ส่งออกในอดีตจะถูกตัดการเชื่อมโยงด้วย ขั้นต่อไปต้องพิมพ์ข้อความยืนยัน",
+  "memory.confirm.purgeAction": "ดำเนินการต่อ",
+  "memory.clear.toastNone": "ไม่มีความจำให้ล้าง",
+  "memory.clear.toastOne": "ล้างความจำ 1 รายการ",
+  "memory.clear.toastMany": "ล้างความจำ {count} รายการ",
+  "memory.clear.toastError": "ล้างความจำไม่สำเร็จ",
+
+  // Suggested-preference toasts
+  "memory.toast.preferenceConfirmed": "ยืนยันความชอบแล้ว",
+  "memory.toast.preferenceConfirmError": "ยืนยันความชอบไม่สำเร็จ",
+  "memory.toast.suggestionDismissed": "ปิดคำแนะนำแล้ว",
+  "memory.toast.suggestionDismissError": "ปิดคำแนะนำไม่สำเร็จ",
+  "memory.toast.memoryDeleted": "ลบความจำแล้ว",
+  "memory.toast.memoryDeleteError": "ลบความจำไม่สำเร็จ",
+  "memory.toast.pinError": "อัปเดตการปักหมุดไม่สำเร็จ",
+
+  // Generic states
+  "memory.error.loadFailed": "โหลดความจำไม่สำเร็จ",
+  "memory.error.tryAgain": "ลองใหม่",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

@@ -15,20 +15,28 @@ import { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { api, ApiError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import type { Memory } from "@/lib/types";
-
-import { MEMORY_TYPE_LABELS } from "./MemoryCard";
 
 // Order intentional — fact first (most common), file_reference last
 // (most niche). inferred_preference is omitted from the manual-add
 // dropdown because it's Phase 4 background-inference territory.
-const TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: "explicit_fact", label: "Fact" },
-  { value: "response_preference", label: "Preference" },
-  { value: "ongoing_interest", label: "Interest" },
-  { value: "confirmed_instruction", label: "Instruction" },
-  { value: "artifact_reference", label: "File reference" },
+const TYPE_OPTIONS: { value: string; labelKey: DictKey }[] = [
+  { value: "explicit_fact", labelKey: "memory.form.opt.fact" },
+  { value: "response_preference", labelKey: "memory.form.opt.preference" },
+  { value: "ongoing_interest", labelKey: "memory.form.opt.interest" },
+  { value: "confirmed_instruction", labelKey: "memory.form.opt.instruction" },
+  { value: "artifact_reference", labelKey: "memory.form.opt.fileReference" },
 ];
+
+const TYPE_DESCRIBE_KEYS: Record<string, DictKey> = {
+  explicit_fact: "memory.form.describe.fact",
+  response_preference: "memory.form.describe.preference",
+  ongoing_interest: "memory.form.describe.interest",
+  confirmed_instruction: "memory.form.describe.instruction",
+  artifact_reference: "memory.form.describe.fileReference",
+};
 
 const MAX_CONTENT_CHARS = 1500;
 
@@ -47,6 +55,7 @@ export function MemoryFormDialog({
   onClose,
   onSaved,
 }: Props) {
+  const t = useT();
   const [content, setContent] = useState("");
   const [memoryType, setMemoryType] = useState("explicit_fact");
   const [category, setCategory] = useState("");
@@ -71,11 +80,11 @@ export function MemoryFormDialog({
   async function handleSave() {
     const trimmed = content.trim();
     if (!trimmed) {
-      toast("Please enter what should be remembered.");
+      toast(t("memory.form.errorEmpty"));
       return;
     }
     if (trimmed.length > MAX_CONTENT_CHARS) {
-      toast(`Memory text is limited to ${MAX_CONTENT_CHARS} characters.`);
+      toast(t("memory.form.errorTooLong", { max: String(MAX_CONTENT_CHARS) }));
       return;
     }
     setSaving(true);
@@ -95,16 +104,16 @@ export function MemoryFormDialog({
         });
       }
       onSaved(saved);
-      toast(mode === "edit" ? "Memory updated." : "Memory saved.");
+      toast(mode === "edit" ? t("memory.form.toastUpdated") : t("memory.form.toastSaved"));
       onClose();
     } catch (err) {
       if (err instanceof ApiError) {
         // The backend returns a tailored message for DLP rejects /
         // duplicates — surface it directly so the user sees WHY the
         // save was rejected.
-        toast(err.message || "Couldn't save the memory.");
+        toast(err.message || t("memory.form.toastError"));
       } else {
-        toast("Couldn't save the memory.");
+        toast(t("memory.form.toastError"));
       }
     } finally {
       setSaving(false);
@@ -112,11 +121,13 @@ export function MemoryFormDialog({
   }
 
   const remaining = MAX_CONTENT_CHARS - content.length;
-  const title = mode === "edit" ? "Edit memory" : "Add memory";
+  const title =
+    mode === "edit" ? t("memory.form.titleEdit") : t("memory.form.titleAdd");
   const description =
     mode === "edit"
-      ? "Update the saved fact, preference, or instruction."
-      : "Save a fact or preference so it persists across all chats.";
+      ? t("memory.form.descriptionEdit")
+      : t("memory.form.descriptionAdd");
+  const describeKey = TYPE_DESCRIBE_KEYS[memoryType];
 
   return (
     <Modal
@@ -132,7 +143,7 @@ export function MemoryFormDialog({
             onClick={onClose}
             className="focus-ring rounded-lg border border-border bg-transparent px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Cancel
+            {t("memory.form.cancel")}
           </button>
           <button
             type="button"
@@ -140,17 +151,21 @@ export function MemoryFormDialog({
             disabled={saving || !content.trim()}
             className="focus-ring rounded-lg bg-text-primary px-6 py-2 text-sm font-medium text-bg-base transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {saving ? "Saving…" : mode === "edit" ? "Save changes" : "Save memory"}
+            {saving
+              ? t("memory.form.saving")
+              : mode === "edit"
+                ? t("memory.form.saveEdit")
+                : t("memory.form.saveNew")}
           </button>
         </>
       }
     >
       <div className="flex flex-col gap-4">
-        <Field label="What should I remember?">
+        <Field label={t("memory.form.contentLabel")}>
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="e.g. My name is Beat"
+            placeholder={t("memory.form.contentPlaceholder")}
             rows={3}
             maxLength={MAX_CONTENT_CHARS}
             autoFocus
@@ -165,7 +180,7 @@ export function MemoryFormDialog({
           </span>
         </Field>
 
-        <Field label="Type">
+        <Field label={t("memory.form.typeLabel")}>
           <select
             value={memoryType}
             onChange={(e) => setMemoryType(e.target.value)}
@@ -173,21 +188,21 @@ export function MemoryFormDialog({
           >
             {TYPE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
-                {opt.label}
+                {t(opt.labelKey)}
               </option>
             ))}
           </select>
           <span className="text-xs text-text-muted">
-            {describeType(memoryType)}
+            {describeKey ? t(describeKey) : memoryType}
           </span>
         </Field>
 
-        <Field label="Category (optional)">
+        <Field label={t("memory.form.categoryLabel")}>
           <input
             type="text"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            placeholder="identity, language, coding, work…"
+            placeholder={t("memory.form.categoryPlaceholder")}
             maxLength={50}
             className="rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-placeholder focus:border-border-strong focus:outline-none"
           />
@@ -212,21 +227,4 @@ function Field({
       {children}
     </div>
   );
-}
-
-function describeType(t: string): string {
-  switch (t) {
-    case "explicit_fact":
-      return "A personal fact — name, role, identity, etc.";
-    case "response_preference":
-      return "How you want the AI to respond (tone, length, language).";
-    case "ongoing_interest":
-      return "What you're currently working on or interested in.";
-    case "confirmed_instruction":
-      return "A standing rule to follow in every conversation.";
-    case "artifact_reference":
-      return "Something about a file the AI should remember.";
-    default:
-      return MEMORY_TYPE_LABELS[t] ?? t;
-  }
 }
