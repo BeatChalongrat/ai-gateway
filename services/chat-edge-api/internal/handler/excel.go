@@ -62,6 +62,11 @@ func (h *ExcelHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
+	if f.UserID != caller.UserID {
+		// Same-tenant-different-user — never expose existence.
+		WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+		return
+	}
 	if !service.IsExcelContentType(f.ContentType) {
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
 			"file is not an Excel workbook")
@@ -186,16 +191,20 @@ func (h *ExcelHandler) Versions(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	// Filter to the requested conversation so a leaked version id
-	// from another thread can't cross-link. Then compute is_current
-	// = the highest-versioned generated row in the surviving slice
-	// (Session 5: lets the timeline UI mark the leaf without
-	// requiring the client to sort + pick).
+	// Filter to the requested conversation AND to the caller's user_id
+	// so a leaked version id from another thread / another user in the
+	// same tenant can't cross-link. Then compute is_current = the
+	// highest-versioned generated row in the surviving slice (Session
+	// 5: lets the timeline UI mark the leaf without requiring the
+	// client to sort + pick).
 	filtered := versions[:0]
 	var currentID uuid.UUID
 	currentVersion := -1
 	for i := range versions {
 		if versions[i].ConversationID != convID {
+			continue
+		}
+		if versions[i].UserID != caller.UserID {
 			continue
 		}
 		filtered = append(filtered, versions[i])

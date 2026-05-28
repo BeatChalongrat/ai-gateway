@@ -255,13 +255,13 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Title != nil {
-		if err := h.conversations.Rename(r.Context(), caller.TenantUUID, convID, *req.Title); err != nil {
+		if err := h.conversations.Rename(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.Title); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
 	}
 	if req.ModelID != nil {
-		if err := h.conversations.SetModel(r.Context(), caller.TenantUUID, convID, *req.ModelID); err != nil {
+		if err := h.conversations.SetModel(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.ModelID); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
@@ -285,7 +285,7 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := h.conversations.SetKnowledgeBase(r.Context(), caller.TenantUUID, convID, kbID); err != nil {
+		if err := h.conversations.SetKnowledgeBase(r.Context(), caller.TenantUUID, caller.UserID, convID, kbID); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
@@ -319,7 +319,7 @@ func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
 		return
 	}
-	if err := h.conversations.Delete(r.Context(), caller.TenantUUID, convID); err != nil {
+	if err := h.conversations.Delete(r.Context(), caller.TenantUUID, caller.UserID, convID); err != nil {
 		if errors.Is(err, service.ErrConversationNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
 			return
@@ -373,7 +373,7 @@ func (h *ConversationHandler) GenerateTitle(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
-	if err := h.conversations.Rename(r.Context(), caller.TenantUUID, convID, title); err != nil {
+	if err := h.conversations.Rename(r.Context(), caller.TenantUUID, caller.UserID, convID, title); err != nil {
 		// Title generation succeeded but the persist write failed —
 		// surface 500 so the client knows the sidebar is stale, but
 		// still return the title so a retry isn't strictly required

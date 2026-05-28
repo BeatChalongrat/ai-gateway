@@ -51,6 +51,27 @@ func CallerFrom(ctx context.Context) (Caller, bool) {
 	return c, ok
 }
 
+// MustCaller is the convenience form: returns the Caller assuming
+// the route is behind RequireAuth. On a route the auth middleware
+// never ran on it returns the zero value — callers MUST only use
+// this from handlers wired inside the protected subgroup. Returns
+// the caller directly so handler code reads as
+// ``caller := middleware.MustCaller(r.Context())`` without the
+// (caller, _) := destructure dance every site repeats.
+func MustCaller(ctx context.Context) Caller {
+	c, _ := ctx.Value(callerKey).(Caller)
+	return c
+}
+
+// UserIDFrom is the most common single-field accessor — sugar for
+// MustCaller(ctx).UserID. Returns uuid.Nil on a route the auth
+// middleware never ran on; downstream queries that filter by
+// user_id naturally return zero rows in that case (defence in
+// depth — the route SHOULD have been auth-gated).
+func UserIDFrom(ctx context.Context) uuid.UUID {
+	return MustCaller(ctx).UserID
+}
+
 // RequireAuth produces middleware that:
 //
 //  1. Parses Portal JWT from “Authorization: Bearer <jwt>“ (or
