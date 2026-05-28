@@ -28,6 +28,16 @@ class ModelCandidate:
     # in ``usage_service`` for billing.
     cost_per_input_token: float = 0.0
     cost_per_output_token: float = 0.0
+    # Reasoning / thinking capability (migration 045). T1 plumbs the
+    # fields through the registry → candidate → routing surface;
+    # ``_route_auto`` filters on ``supports_reasoning`` when the caller
+    # asks for the ``reasoning`` use_case. ``reasoning_strategy`` is
+    # consumed by T2 adapters to pick the right per-provider
+    # translation; ``default_reasoning_mode`` is the gateway's choice
+    # when the caller enables reasoning without an explicit ``mode``.
+    supports_reasoning: bool = False
+    reasoning_strategy: str = "none"
+    default_reasoning_mode: str = "auto"
 
 
 @dataclass(frozen=True)

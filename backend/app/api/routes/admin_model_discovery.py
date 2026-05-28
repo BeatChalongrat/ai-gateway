@@ -63,6 +63,11 @@ class ModelConfigUpdate(BaseModel):
     supports_streaming: Optional[bool] = None
     supports_tools: Optional[bool] = None
     supports_vision: Optional[bool] = None
+    # Reasoning / thinking capability (migration 045). All three are
+    # admin-overridable like the other capability flags.
+    supports_reasoning: Optional[bool] = None
+    reasoning_strategy: Optional[str] = None
+    default_reasoning_mode: Optional[str] = None
     max_context_tokens: Optional[int] = None
     cost_tier: Optional[str] = None
     latency_tier: Optional[str] = None
@@ -79,6 +84,9 @@ def _serialize_row(row: ModelConfigORM) -> dict:
         "supports_streaming": row.supports_streaming,
         "supports_tools": row.supports_tools,
         "supports_vision": row.supports_vision,
+        "supports_reasoning": getattr(row, "supports_reasoning", False),
+        "reasoning_strategy": getattr(row, "reasoning_strategy", "none"),
+        "default_reasoning_mode": getattr(row, "default_reasoning_mode", "auto"),
         "max_context_tokens": row.max_context_tokens,
         "cost_tier": row.cost_tier,
         "latency_tier": row.latency_tier,
