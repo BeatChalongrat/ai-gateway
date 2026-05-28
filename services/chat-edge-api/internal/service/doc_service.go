@@ -142,15 +142,24 @@ type DocValidationResult struct {
 // ---------------------------------------------------------------------------
 
 type DocService struct {
-	files   *repository.FileRepo
-	storage storage.Backend
+	files         *repository.FileRepo
+	conversations *repository.ConversationRepo
+	storage       storage.Backend
 
 	pythonBin  string
 	scriptsDir string
 }
 
+// NewDocService constructs the service. The conversations repo is
+// used to assert caller ownership of in.ConversationID on the
+// create-from-scratch path (when no source file is supplied — a
+// source file's user_id check implicitly covers the with-source
+// path).
 func NewDocService(
-	files *repository.FileRepo, store storage.Backend, pythonBin, scriptsDir string,
+	files *repository.FileRepo,
+	conversations *repository.ConversationRepo,
+	store storage.Backend,
+	pythonBin, scriptsDir string,
 ) *DocService {
 	if pythonBin == "" {
 		pythonBin = "python3"
@@ -159,10 +168,11 @@ func NewDocService(
 		scriptsDir = "scripts"
 	}
 	return &DocService{
-		files:      files,
-		storage:    store,
-		pythonBin:  pythonBin,
-		scriptsDir: scriptsDir,
+		files:         files,
+		conversations: conversations,
+		storage:       store,
+		pythonBin:     pythonBin,
+		scriptsDir:    scriptsDir,
 	}
 }
 
@@ -292,7 +302,27 @@ func (s *DocService) ExecutePlan(
 		if s2.ConversationID != in.ConversationID {
 			return nil, nil, nil, ErrDocSourceNotFound
 		}
+		if s2.UserID != in.UserID {
+			// Same-tenant-different-user — 404 shape, no existence leak.
+			return nil, nil, nil, ErrDocSourceNotFound
+		}
 		source = s2
+	} else {
+		// Create-from-scratch path — no source file to walk back to,
+		// so verify the caller actually owns the destination
+		// conversation. Without this a same-tenant attacker could pass
+		// another user's conversation_id and plant a generated report
+		// inside their thread.
+		conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, nil, nil, ErrDocSourceNotFound
+			}
+			return nil, nil, nil, err
+		}
+		if conv.UserID != in.UserID {
+			return nil, nil, nil, ErrDocSourceNotFound
+		}
 	}
 
 	tmp, err := os.MkdirTemp("", "doc-exec-*")
@@ -426,6 +456,7 @@ func (s *DocService) ExecutePlan(
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
 		TenantID:         in.TenantID,
+		UserID:           in.UserID,
 		Filename:         storageName,
 		OriginalFilename: outFilename,
 		ContentType:      contentType,

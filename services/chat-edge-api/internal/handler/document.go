@@ -66,6 +66,11 @@ func (h *DocumentHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
+	if f.UserID != caller.UserID {
+		// Same-tenant-different-user — never expose existence.
+		WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+		return
+	}
 
 	switch {
 	case service.IsExcelContentType(f.ContentType):

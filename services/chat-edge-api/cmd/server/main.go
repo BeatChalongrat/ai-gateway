@@ -120,7 +120,7 @@ func main() {
 	messageSvc := service.NewMessageService(
 		conversations, messages, gateway, titles, cfg, cfg.MaxContextMessages,
 	)
-	feedbackSvc := service.NewFeedbackService(feedbackRepo, messages)
+	feedbackSvc := service.NewFeedbackService(feedbackRepo, messages, conversations)
 	provisionSvc := service.NewProvisionService(pool)
 
 	// Blob storage — backed by either the local filesystem (default)
@@ -160,11 +160,12 @@ func main() {
 	// that lands the instant the server starts up still gets
 	// inspected.
 	excelSvc := service.NewExcelService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
-	docSvc := service.NewDocService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
-	// Session 5 — workspace (rollback + compare). Tenant + chain
-	// scoping happens inside the service; the handler is a thin
-	// HTTP shim per the existing handler pattern.
-	workspaceSvc := service.NewWorkspaceService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
+	docSvc := service.NewDocService(filesRepo, conversations, storageBackend, cfg.ExtractPythonBinary, "scripts")
+	// Session 5 — workspace (rollback + compare). Tenant + user
+	// scoping happens inside the service via the conversations repo
+	// (the conv ownership check gates Rollback/Compare/ListGenerated);
+	// the handler is a thin HTTP shim per the existing handler pattern.
+	workspaceSvc := service.NewWorkspaceService(filesRepo, conversations, storageBackend, cfg.ExtractPythonBinary, "scripts")
 	fileSvc.SetExcelService(excelSvc)
 	fileSvc.SetDocService(docSvc)
 	messageSvc.SetExcelLookup(filesRepo)

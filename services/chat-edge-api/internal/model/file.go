@@ -23,6 +23,11 @@ type ConversationFile struct {
 	ConversationID   uuid.UUID
 	MessageID        *uuid.UUID
 	TenantID         uuid.UUID
+	// UserID denormalises the owning conversation's user_id onto the
+	// file row (migration 013). Populated on every Create path so
+	// ownership checks + the upcoming memory system's "this user's
+	// artifacts" queries don't have to join conversations.
+	UserID           uuid.UUID
 	Filename         string // sanitized, used on disk
 	OriginalFilename string // what the user typed
 	ContentType      string

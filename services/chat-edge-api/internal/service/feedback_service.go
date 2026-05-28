@@ -25,12 +25,27 @@ var (
 )
 
 type FeedbackService struct {
-	feedback *repository.FeedbackRepo
-	messages *repository.MessageRepo
+	feedback      *repository.FeedbackRepo
+	messages      *repository.MessageRepo
+	conversations *repository.ConversationRepo
 }
 
-func NewFeedbackService(feedback *repository.FeedbackRepo, messages *repository.MessageRepo) *FeedbackService {
-	return &FeedbackService{feedback: feedback, messages: messages}
+// NewFeedbackService wires the repos. The conversations repo lets
+// Create verify the caller actually owns the conversation the
+// target message belongs to — without it a same-tenant attacker
+// could thumbs-vote arbitrary messages in other users' threads
+// (the feedback table's (message_id, user_id) UNIQUE constraint
+// keeps it from overwriting, but still leaks message existence).
+func NewFeedbackService(
+	feedback *repository.FeedbackRepo,
+	messages *repository.MessageRepo,
+	conversations *repository.ConversationRepo,
+) *FeedbackService {
+	return &FeedbackService{
+		feedback:      feedback,
+		messages:      messages,
+		conversations: conversations,
+	}
 }
 
 // CreateInput is the typed payload from the handler.
@@ -57,6 +72,20 @@ func (s *FeedbackService) Create(ctx context.Context, in FeedbackCreateInput) (*
 	}
 	if target.Role != "assistant" {
 		return nil, ErrFeedbackNotAssistantMsg
+	}
+	// Walk the message → conversation → user_id chain so a same-
+	// tenant caller can't thumbs-vote messages in other users'
+	// threads. Returns ErrFeedbackTargetNotFound on any mismatch
+	// so the existence of the target message stays hidden.
+	conv, err := s.conversations.GetByID(ctx, in.TenantID, target.ConversationID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrFeedbackTargetNotFound
+		}
+		return nil, err
+	}
+	if conv.UserID != in.UserID {
+		return nil, ErrFeedbackTargetNotFound
 	}
 
 	return s.feedback.Upsert(ctx, &model.Feedback{
