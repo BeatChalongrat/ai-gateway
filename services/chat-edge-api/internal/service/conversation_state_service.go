@@ -505,12 +505,25 @@ func (s *ConversationStateService) Get(
 func (s *ConversationStateService) BuildStateContext(
 	ctx context.Context, convID, userID, tenantID uuid.UUID,
 ) string {
+	text, _ := s.BuildStateContextWithSources(ctx, convID, userID, tenantID)
+	return text
+}
+
+// BuildStateContextWithSources is the S7 variant: returns the
+// rendered <conversation_state> block AND a single ContextSource
+// that summarises the row (goal if present, else "summary
+// available"). The SourcesCard renders this as
+// "📋 Goal: …" so the user knows the AI's answer drew on
+// structured state, not just raw messages.
+func (s *ConversationStateService) BuildStateContextWithSources(
+	ctx context.Context, convID, userID, tenantID uuid.UUID,
+) (string, []ContextSource) {
 	state, err := s.states.Get(ctx, convID, userID, tenantID)
 	if err != nil || state == nil {
-		return ""
+		return "", nil
 	}
 	if isStateEmpty(state) {
-		return ""
+		return "", nil
 	}
 
 	var sb strings.Builder
@@ -547,7 +560,17 @@ func (s *ConversationStateService) BuildStateContext(
 	writeJSONArray(&sb, "Unresolved questions", state.UnresolvedQuestions, "question")
 
 	sb.WriteString("\n</conversation_state>\n")
-	return sb.String()
+
+	label := "Conversation state available"
+	if state.CurrentGoal != nil && *state.CurrentGoal != "" {
+		label = "Goal: " + *state.CurrentGoal
+	}
+	sources := []ContextSource{{
+		SourceType:   model.SourceTypeConversationState,
+		SourceID:     state.ConversationID.String(),
+		DisplayLabel: TruncateLabel(label),
+	}}
+	return sb.String(), sources
 }
 
 // writeJSONArray renders one "Label:\n- item\n- item\n" block.
