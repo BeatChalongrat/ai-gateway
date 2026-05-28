@@ -715,6 +715,25 @@ async def chat_completions(
         # returning; the asymmetry is documented there.
         _streaming_tool_call_args: dict[int, dict] = {}
 
+        # Reasoning / thinking SSE state (T2). Tracks the analysis
+        # phase so the emitter can bracket the reasoning stream with
+        # ``analysis_status: started`` / ``analysis_status: completed``
+        # events and accumulate reasoning text for the post-stream
+        # token-count estimate. ``show_reasoning`` is the per-request
+        # gate: model still thinks (better answers) when False, but
+        # the client never sees the reasoning bytes — only the
+        # ``reasoning_tokens`` total in the final usage frame. Mirrors
+        # the OpenAI Responses-API contract.
+        _reasoning_cfg = getattr(payload, "reasoning", None)
+        _show_reasoning = bool(
+            _reasoning_cfg
+            and _reasoning_cfg.show_summary
+            and _reasoning_cfg.mode != "off"
+        )
+        _reasoning_started = False
+        _reasoning_completed = False
+        _reasoning_text_total = ""
+
         def _dlp_scan_and_mask(
             text: str,
         ) -> tuple[str, list]:
@@ -849,6 +868,54 @@ async def chat_completions(
                 )
             )
 
+        def _emit_reasoning_chunk(text: str) -> str:
+            """Serialise a reasoning-delta SSE frame (T2).
+
+            Provider-neutral event type ``reasoning_summary_delta`` so
+            the same frame shape carries Anthropic thinking, OpenAI
+            o-series reasoning summary, DeepSeek-R1 reasoning_content,
+            etc. The frame intentionally omits the OpenAI
+            ``chat.completion.chunk`` envelope — the SDK should
+            distinguish reasoning from content by event type, not by
+            position inside the choices array. Clients that don't yet
+            understand the event type will simply ignore the frame
+            (their parser will skip lines whose ``type`` is unknown).
+            """
+            return "data: {}\n\n".format(
+                json.dumps(
+                    {
+                        "id": ctx.request_id,
+                        "type": "reasoning_summary_delta",
+                        "created": int(time.time()),
+                        "model": final_model,
+                        "text": text,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        def _emit_analysis_status(status: str) -> str:
+            """Serialise an analysis-status SSE frame (T2).
+
+            Brackets the reasoning stream. ``started`` is emitted on
+            the first reasoning_delta; ``completed`` is emitted when
+            the model transitions to visible output (or at stream end
+            if no visible output ever arrives). Lets the client show
+            a "thinking…" indicator that flips to "thinking complete"
+            without parsing every reasoning fragment.
+            """
+            return "data: {}\n\n".format(
+                json.dumps(
+                    {
+                        "id": ctx.request_id,
+                        "type": "analysis_status",
+                        "created": int(time.time()),
+                        "status": status,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
         from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
         # Mutable state for the in-generator fallback retry. The outer
@@ -875,6 +942,58 @@ async def chat_completions(
                     resolved_model=route.model_name,
                     api_key=stream_api_key,
                 ):
+                    # Reasoning / thinking branch (T2). Runs before the
+                    # content / tool_calls branches because Anthropic
+                    # emits thinking blocks BEFORE the visible text;
+                    # processing reasoning first keeps the
+                    # ``analysis_status: started → completed`` ordering
+                    # natural. Always accumulate reasoning text for
+                    # the post-stream usage estimate even when the
+                    # caller didn't opt in to ``show_summary`` — the
+                    # token count is part of billing and must reflect
+                    # actual model spend.
+                    if chunk.reasoning_delta:
+                        _reasoning_text_total += chunk.reasoning_delta
+                        if _show_reasoning:
+                            if not _reasoning_started:
+                                _reasoning_started = True
+                                yield _emit_analysis_status("started")
+                                first_chunk_yielded = True
+                            # One-shot DLP scan per fragment (T2).
+                            # Reasoning text doesn't get the rolling
+                            # tail window the content channel has —
+                            # T3 will add per-channel rolling
+                            # protection. The fail-closed posture in
+                            # ``_dlp_scan_and_mask`` (drop the chunk
+                            # on any scanner error) covers us against
+                            # mid-thought PII leaking.
+                            masked_reasoning, reasoning_actions = (
+                                _dlp_scan_and_mask(chunk.reasoning_delta)
+                            )
+                            if reasoning_actions:
+                                accumulated_outbound_actions.extend(reasoning_actions)
+                            if masked_reasoning:
+                                yield _emit_reasoning_chunk(masked_reasoning)
+                    # Analysis-status transition: any non-reasoning
+                    # signal (content delta / tool_calls / finish)
+                    # arriving after reasoning started flips us into
+                    # the "completed" state exactly once. Gated on
+                    # ``_show_reasoning`` so we don't emit a phantom
+                    # ``completed`` to clients that never saw the
+                    # ``started`` event.
+                    if (
+                        _show_reasoning
+                        and _reasoning_started
+                        and not _reasoning_completed
+                        and (
+                            chunk.delta
+                            or chunk.tool_calls
+                            or chunk.finish_reason
+                        )
+                    ):
+                        _reasoning_completed = True
+                        yield _emit_analysis_status("completed")
+
                     if chunk.delta:
                         cumulative_raw += chunk.delta
                         # Combine retained masked tail + new raw chunk text.
@@ -1354,10 +1473,28 @@ async def chat_completions(
             api_key_id=str(auth.key_id) if auth else None,
         )
 
+        # Defensive analysis_status: completed (T2). If the stream
+        # ended without ever transitioning out of the reasoning phase
+        # (no content / tool_calls / finish_reason chunk arrived after
+        # the thinking blocks closed), close the bracket here so the
+        # client never sees a dangling ``started`` without a paired
+        # ``completed``. Gated on ``_show_reasoning`` for symmetry
+        # with the in-loop emit.
+        if _show_reasoning and _reasoning_started and not _reasoning_completed:
+            _reasoning_completed = True
+            yield _emit_analysis_status("completed")
+
         # 5. Finish-reason frame + [DONE]. Content deltas were already
         # emitted incrementally above (one per chunk whose masked
         # window grew past MIN_TAIL_CHARS, plus one tail flush).
-        yield "data: {}\n\n".format(json.dumps({
+        # T2: when reasoning was used, attach a minimal ``usage``
+        # block to the finish frame so clients can surface the
+        # reasoning_tokens count without parsing the request_log.
+        # Prefer the provider-reported count (OpenAI o-series
+        # ``completion_tokens_details.reasoning_tokens``); fall back
+        # to a length-based estimate (~4 chars/token) for providers
+        # like Anthropic that fold thinking tokens into ``output_tokens``.
+        _final_frame: dict = {
             "id": ctx.request_id,
             "object": "chat.completion.chunk",
             "created": int(time.time()),
@@ -1367,7 +1504,19 @@ async def chat_completions(
                 "delta": {},
                 "finish_reason": final_finish_reason,
             }],
-        }, ensure_ascii=False))
+        }
+        if _reasoning_text_total:
+            provider_reasoning_tok = (
+                provider_usage.reasoning_tokens
+                if provider_usage is not None else 0
+            )
+            estimated = max(1, len(_reasoning_text_total) // 4)
+            _final_frame["usage"] = {
+                "reasoning_tokens": provider_reasoning_tok or estimated
+            }
+        yield "data: {}\n\n".format(
+            json.dumps(_final_frame, ensure_ascii=False)
+        )
         yield "data: [DONE]\n\n"
 
     # Headers are sealed before the generator runs; they describe the
