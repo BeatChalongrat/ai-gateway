@@ -21,10 +21,11 @@ import { ModelSelector } from "./ModelSelector";
 import { RecordingBar } from "./RecordingBar";
 
 interface Props {
-  /** Active conversation id. The input needs it for the pending-
-   *  files store + to call the upload endpoint. Pass null on the
-   *  landing page (no conv yet); the paperclip + drop zone are
-   *  hidden when null. */
+  /** Active conversation id. The input uses it as the key for the
+   *  pending-files store + to call the upload endpoint. Pass null
+   *  on the landing page; in that mode the input calls
+   *  `onRequestConversation` before any upload-related action so a
+   *  conversation row is eager-created on first attach/paste/drop. */
   conversationId: string | null;
   disabled: boolean;
   streaming: boolean;
@@ -39,6 +40,15 @@ interface Props {
   onStop: () => void;
   injectedText?: string | null;
   onInjectedTextConsumed?: () => void;
+  /** Lazy conversation provider. ChatInput calls this whenever an
+   *  upload-related action (attach click, drag-drop, paste image)
+   *  fires without a `conversationId` in props. The landing page
+   *  wires it to a function that eager-creates a conversation, sets
+   *  its local state, and returns the new id — so the next render
+   *  of ChatInput receives a real conversationId and the existing
+   *  pending-files plumbing takes over. Returning null aborts the
+   *  upload silently. */
+  onRequestConversation?: () => Promise<string | null>;
 }
 
 // 6 lines × ~24px on desktop; trimmed to 4 lines on phones so the
@@ -60,6 +70,7 @@ export function ChatInput({
   onStop,
   injectedText,
   onInjectedTextConsumed,
+  onRequestConversation,
 }: Props) {
   const t = useT();
   const [text, setText] = useState("");
@@ -263,6 +274,21 @@ export function ChatInput({
   }
 
   // ── File upload pipeline ─────────────────────────────────
+
+  // Resolves the conversation id to use for the next upload action.
+  // Falls back to `onRequestConversation` (set by the landing page)
+  // so the very first attach/paste/drop kicks off an eager
+  // conversation create rather than silently doing nothing.
+  async function ensureConvId(): Promise<string | null> {
+    if (conversationId) return conversationId;
+    if (!onRequestConversation) return null;
+    try {
+      return await onRequestConversation();
+    } catch {
+      return null;
+    }
+  }
+
   async function uploadOne(convId: string, file: File) {
     const pendingId = addPendingFile(convId, file);
     try {
@@ -279,7 +305,8 @@ export function ChatInput({
   }
 
   async function handleFiles(filesRaw: File[]) {
-    if (!conversationId) return;
+    const convId = await ensureConvId();
+    if (!convId) return;
     // Per-message cap. Existing valid pending + new candidates.
     const existing = pendingFiles.filter((p) => p.status !== "error").length;
     const slots = Math.max(0, MAX_FILES_PER_MESSAGE - existing);
@@ -312,7 +339,7 @@ export function ChatInput({
         (async () => {
           while (cursor < accepted.length) {
             const idx = cursor++;
-            await uploadOne(conversationId, accepted[idx]);
+            await uploadOne(convId, accepted[idx]);
           }
         })(),
       );
@@ -333,11 +360,13 @@ export function ChatInput({
   // the same handleFiles pipeline pickers use. preventDefault only
   // fires when an image is present so plain-text paste into the
   // textarea still works. Listens at the textarea so paste only
-  // fires when the composer is focused.
+  // fires when the composer is focused. The handler stays bound
+  // even before a conversation exists — handleFiles → ensureConvId
+  // eager-creates one for the landing page.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const el = taRef.current;
-    if (!el || !conversationId) return;
+    if (!el) return;
     const onPaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items || items.length === 0) return;
@@ -355,7 +384,7 @@ export function ChatInput({
     };
     el.addEventListener("paste", onPaste);
     return () => el.removeEventListener("paste", onPaste);
-  }, [conversationId]);
+  }, []);
 
   return (
     <div
@@ -459,9 +488,15 @@ export function ChatInput({
           {/* Row 2: attach (left) · model + send (right) */}
           <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
             {/* Left — attach button. The plus mark replaces the
-                paperclip per the Claude reference; same behaviour. */}
+                paperclip per the Claude reference; same behaviour.
+                Renders even on the landing page where no
+                conversation exists yet — the click handler delegates
+                to handleFiles, which eager-creates a conv via
+                onRequestConversation before kicking off the upload.
+                Hidden only when no upload path is wired (no
+                conversation in props AND no provider callback). */}
             <div className="flex items-center">
-              {conversationId ? (
+              {conversationId || onRequestConversation ? (
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
