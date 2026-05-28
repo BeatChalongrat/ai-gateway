@@ -1,7 +1,14 @@
 "use client";
 
 import { useSelectedLayoutSegments } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
+
+// SSR-safe ``useLayoutEffect``. Next.js pre-renders client
+// components on the server where ``useLayoutEffect`` warns
+// (DOM isn't available). Falling back to ``useEffect`` on the
+// server is the React-team-blessed workaround.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 import { Sidebar } from "@/components/chat/Sidebar";
 import { Spinner } from "@/components/ui/Spinner";
@@ -81,10 +88,15 @@ export default function ChatLayout({
   // The sidebar contributes ``260px`` at desktop sizes when not
   // collapsed (see Sidebar.tsx's ``md:w-[260px]``); at mobile it's
   // an overlay that doesn't take horizontal space, and when
-  // ``collapsed`` it animates to width 0. Cleanup on unmount so
-  // navigating away from /chat leaves global state pristine.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  // ``collapsed`` it animates to width 0.
+  //
+  // CSS owns the FIRST-PAINT default in globals.css (130px desktop,
+  // 0px below 768px) so the toast never appears off-axis before
+  // this effect runs. ``useLayoutEffect`` flushes the collapsed-
+  // state override BEFORE the browser paints, so toggling the
+  // sidebar doesn't flicker either. Cleanup on unmount so
+  // navigating away from /chat leaves the CSS default in charge.
+  useIsomorphicLayoutEffect(() => {
     const root = document.documentElement;
     const SIDEBAR_DESKTOP_WIDTH = 260;
     const mq = window.matchMedia("(min-width: 768px)");
