@@ -87,7 +87,7 @@ export function ToastViewport({ duration = 2500 }: { duration?: number }) {
   const sidebarOffset = isDesktop && !collapsed ? SIDEBAR_DESKTOP_WIDTH / 2 : 0;
   return (
     <div
-      className="popover-appear pointer-events-none fixed bottom-6 z-50 -translate-x-1/2 rounded-full border border-border bg-bg-surface/95 px-4 py-2 text-xs text-text-primary shadow-2xl backdrop-blur-sm"
+      className="toast-appear pointer-events-none fixed bottom-6 z-50 -translate-x-1/2 rounded-full border border-border bg-bg-surface/95 px-4 py-2 text-xs text-text-primary shadow-2xl backdrop-blur-sm"
       style={{ left: `calc(50% + ${sidebarOffset}px)` }}
       role="status"
       aria-live="polite"
