@@ -17,22 +17,32 @@ import { create } from "zustand";
 import { api, ApiError } from "@/lib/api";
 import type { ModelEntry } from "@/lib/types";
 
+/** Sentinel id sent to the backend when the user has Auto selected.
+ *  The Chat Edge resolver picks a concrete model per-request based
+ *  on message complexity, so the frontend never has to predict it. */
+export const AUTO_MODEL_ID = "auto";
+
 interface ModelState {
   models: ModelEntry[];
+  /** Either a real model id from `models` OR the literal "auto"
+   *  sentinel. Backend accepts "auto" verbatim. */
   selectedModelId: string | null;
   recentModelIds: string[];
   loaded: boolean;
   /** True while the loadModels promise is in-flight. */
   loading: boolean;
-  /** When true, the trigger pill reads "Auto" instead of the model
-   *  name and the backend still receives a concrete id (the first
-   *  fast-tier model). Cleared the moment the user picks a real
-   *  model from the dropdown. */
+  /** Derived convenience flag — true whenever `selectedModelId`
+   *  equals AUTO_MODEL_ID. Kept on state so subscribers can react
+   *  without re-comparing strings. */
   autoMode: boolean;
 
   loadModels: () => Promise<void>;
   selectModel: (id: string) => void;
-  selectAuto: () => string | null;
+  selectAuto: () => void;
+  /** Returns the model id used to RENDER the Auto row's "Uses X"
+   *  subtitle — first fast-tier model, falling back to the first
+   *  available. The backend ignores this; it does its own per-
+   *  request resolution. */
   resolveAutoModelId: () => string | null;
   getModelById: (id: string) => ModelEntry | undefined;
 }
@@ -85,9 +95,19 @@ function readCachedModels(): ModelEntry[] {
   return [];
 }
 
+// readInitialSelection — reads the persisted selected id at module
+// init time. Used so the store boots with the user's last pick (or
+// AUTO_MODEL_ID if they were last in auto mode) before the catalog
+// fetch completes. Without this the model pill flashes "Select
+// model" on every reload.
+function readInitialSelection(): string | null {
+  if (readLocal(AUTO_KEY) === "1") return AUTO_MODEL_ID;
+  return readLocal(SELECTED_KEY);
+}
+
 export const useModelStore = create<ModelState>((set, get) => ({
   models: [],
-  selectedModelId: null,
+  selectedModelId: readInitialSelection(),
   recentModelIds: [],
   loaded: false,
   loading: false,
@@ -100,15 +120,18 @@ export const useModelStore = create<ModelState>((set, get) => ({
       const res = await api.models();
       const allowed = res.models.filter((m) => m.allowed);
       const stored = readLocal(SELECTED_KEY);
+      const auto = readLocal(AUTO_KEY) === "1";
       const recents = readRecents();
-      const pick =
-        stored && allowed.some((m) => m.id === stored)
+      const pick = auto
+        ? AUTO_MODEL_ID
+        : stored && allowed.some((m) => m.id === stored)
           ? stored
           : allowed[0]?.id ?? null;
       writeLocal(CACHE_KEY, JSON.stringify(allowed));
       set({
         models: allowed,
         selectedModelId: pick,
+        autoMode: auto,
         recentModelIds: recents.filter((id) => allowed.some((m) => m.id === id)),
         loaded: true,
         loading: false,
@@ -123,13 +146,16 @@ export const useModelStore = create<ModelState>((set, get) => ({
       }
       const cached = readCachedModels();
       const stored = readLocal(SELECTED_KEY);
-      const pick =
-        stored && cached.some((m) => m.id === stored)
+      const auto = readLocal(AUTO_KEY) === "1";
+      const pick = auto
+        ? AUTO_MODEL_ID
+        : stored && cached.some((m) => m.id === stored)
           ? stored
           : cached[0]?.id ?? null;
       set({
         models: cached,
         selectedModelId: pick,
+        autoMode: auto,
         recentModelIds: readRecents().filter((id) =>
           cached.some((m) => m.id === id),
         ),
@@ -140,6 +166,14 @@ export const useModelStore = create<ModelState>((set, get) => ({
   },
 
   selectModel(id) {
+    // Callers that forward the user's raw pick (landing page +
+    // conversation page) can hand us the "auto" sentinel — route it
+    // through selectAuto so the persisted AUTO_KEY + autoMode stay
+    // in lockstep.
+    if (id === AUTO_MODEL_ID) {
+      get().selectAuto();
+      return;
+    }
     writeLocal(SELECTED_KEY, id);
     writeLocal(AUTO_KEY, "0");
     set((s) => {
@@ -153,24 +187,20 @@ export const useModelStore = create<ModelState>((set, get) => ({
     });
   },
 
-  // Picks the first fast-tier model and flags the store as auto. The
-  // pill displays "Auto" until the user picks a concrete model from
-  // the dropdown. Backend always sees a real model id.
+  // Auto mode persists AUTO_MODEL_ID as the selected id. The
+  // backend treats "auto" as a special sentinel and runs its own
+  // per-request resolution based on message complexity, so the
+  // frontend never has to predict which concrete model will serve
+  // the turn. The Auto row's "Uses X" subtitle is purely advisory.
   selectAuto() {
-    const resolved = get().resolveAutoModelId();
-    if (!resolved) return null;
-    writeLocal(SELECTED_KEY, resolved);
+    writeLocal(SELECTED_KEY, AUTO_MODEL_ID);
     writeLocal(AUTO_KEY, "1");
-    set((s) => ({
-      selectedModelId: resolved,
-      autoMode: true,
-      recentModelIds: s.recentModelIds,
-    }));
-    return resolved;
+    set({ selectedModelId: AUTO_MODEL_ID, autoMode: true });
   },
 
-  // Resolves "auto" to a concrete model id without touching state.
-  // Preference order: first fast-tier → first model overall.
+  // Returns the model id the dropdown subtitle uses to describe
+  // what Auto would currently pick — first fast-tier, falling back
+  // to the first available. Pure read; no state mutation.
   resolveAutoModelId() {
     const all = get().models;
     const fast = all.find((m) => m.category === "fast");
