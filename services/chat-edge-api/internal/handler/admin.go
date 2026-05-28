@@ -35,6 +35,10 @@ import (
 type AdminHandler struct {
 	pool *pgxpool.Pool
 	kb   AdminKBSink
+	// Optional. Wired in main.go so the S9 admin memory-stats
+	// endpoint can call MemoryRepo.GetAggregateStats without
+	// AdminHandler depending on the full service layer.
+	memoryStatsFn func(ctx context.Context, tenantID uuid.UUID) (any, error)
 }
 
 // AdminKBSink is the function-bag the admin KB endpoints call when
@@ -56,6 +60,50 @@ func NewAdminHandler(pool *pgxpool.Pool) *AdminHandler {
 // knowledge-base admin.
 func (h *AdminHandler) SetKBSink(s AdminKBSink) {
 	h.kb = s
+}
+
+// SetMemoryStatsFn wires the S9 aggregate-stats lookup. Closure
+// shape (rather than a typed repo dependency) keeps admin.go
+// import-light — main.go assembles the closure with the
+// MemoryRepo + the model marshalling.
+func (h *AdminHandler) SetMemoryStatsFn(fn func(ctx context.Context, tenantID uuid.UUID) (any, error)) {
+	h.memoryStatsFn = fn
+}
+
+// MemoryStats serves the S9 aggregate counts. Admin-bearer-only
+// (routed under the RequireAdmin group). Tenant query param
+// selects the target; default is the caller's own tenant when
+// the admin surface eventually carries per-user identity, but
+// for the bearer-secret admin path we require an explicit
+// tenant_id query param so the operator picks deliberately.
+//
+// Response shape is intentionally counts-only — see
+// MemoryRepo.GetAggregateStats's docstring.
+func (h *AdminHandler) MemoryStats(w http.ResponseWriter, r *http.Request) {
+	if h.memoryStatsFn == nil {
+		http.Error(w, `{"error":"memory stats not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	raw := r.URL.Query().Get("tenant_id")
+	if raw == "" {
+		http.Error(w, `{"error":"tenant_id query param required"}`, http.StatusBadRequest)
+		return
+	}
+	tid, err := uuid.Parse(raw)
+	if err != nil {
+		http.Error(w, `{"error":"invalid tenant_id"}`, http.StatusBadRequest)
+		return
+	}
+	stats, err := h.memoryStatsFn(r.Context(), tid)
+	if err != nil {
+		http.Error(w, `{"error":"stats lookup failed"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"tenant_id": tid.String(),
+		"stats":     stats,
+	})
 }
 
 // ---------------------------------------------------------------------------

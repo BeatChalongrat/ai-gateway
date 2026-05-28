@@ -64,6 +64,8 @@ type Handlers struct {
 	// S6 — Past-conversation search. Backs both the AI tool and
 	// the frontend's "search my chats" surface (future).
 	Search *handler.SearchHandler
+	// S9 — GDPR-style data export + right-to-erasure for memory.
+	Account *handler.AccountHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -245,6 +247,17 @@ func New(
 				r.Get("/search", h.Search.Search)
 			}
 
+			// S9 — Account data management. Export generates a JSON
+			// snapshot of the user's memories + audit metadata; the
+			// download endpoint streams it back; purge is the
+			// right-to-erasure cascade (requires the literal
+			// confirmation string in the body).
+			if h.Account != nil {
+				r.Post("/account/export-memories", h.Account.ExportMemories)
+				r.Get("/account/exports/{id}/download", h.Account.DownloadExport)
+				r.Delete("/account/purge-memories", h.Account.PurgeMemories)
+			}
+
 			// S1 — Personal Memory Core. Bulk-clear lives at
 			// /memories/all so chi's segment matcher doesn't fight
 			// the /memories/{id} patterns; pin + confirm + events
@@ -299,6 +312,10 @@ func New(
 			// Knowledge-base admin (cross-tenant). Read endpoints
 			// query the pool directly; mutations route through the
 			// KnowledgeService via the AdminKBSink injected from main.go.
+			// S9 — aggregate memory stats per tenant. Counts only,
+			// never content. Requires tenant_id query param.
+			r.Get("/admin/memory-stats", h.Admin.MemoryStats)
+
 			r.Get("/admin/knowledge-bases", h.Admin.ListKnowledgeBases)
 			r.Get("/admin/knowledge-bases/{id}", h.Admin.KnowledgeBaseDetail)
 			r.Delete("/admin/knowledge-bases/{id}", h.Admin.DeleteKnowledgeBase)
