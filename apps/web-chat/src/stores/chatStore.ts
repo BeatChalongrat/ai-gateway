@@ -95,10 +95,23 @@ interface ChatState {
   searchConversations: (query: string) => Promise<void>;
   clearConversationsSearch: () => void;
   setActive: (id: string | null) => void;
-  createConversation: (modelId: string) => Promise<Conversation>;
+  createConversation: (
+    modelId: string,
+    opts?: { temporary?: boolean },
+  ) => Promise<Conversation>;
   renameConversation: (id: string, title: string) => Promise<void>;
   setConversationModel: (id: string, modelId: string) => Promise<void>;
   setConversationKB: (id: string, kbId: string | null) => Promise<void>;
+  /** S1 — flip the per-conversation memory layer. Optimistic
+   *  update with rollback so the header chip stays responsive. */
+  setConversationMemory: (id: string, enabled: boolean) => Promise<void>;
+  /** Marks the NEXT lazily-created conversation as a temporary
+   *  chat. Read + cleared by createConversation(). Used by the
+   *  sidebar's "Temporary chat" launcher: navigates to /chat,
+   *  sets this flag, and the first send creates the row with
+   *  memory_enabled=false. */
+  nextConversationTemporary: boolean;
+  setNextConversationTemporary: (v: boolean) => void;
   deleteConversation: (id: string) => Promise<void>;
 
   // ── message ops ──────────────────────────────────────────
@@ -134,6 +147,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loadingOlder: {},
   pendingFiles: {},
   errorBanner: null,
+  nextConversationTemporary: false,
+  setNextConversationTemporary(v) {
+    set({ nextConversationTemporary: v });
+  },
 
   // ────────────────────────────────────────────────────────
   // Pending-file actions. All purely client-side; the upload
@@ -286,8 +303,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ activeConversationId: id });
   },
 
-  async createConversation(modelId) {
-    const c = await api.createConversation(modelId);
+  async createConversation(modelId, opts) {
+    let c = await api.createConversation(modelId);
+    // S1 — temporary chat. Two trigger paths land here: the explicit
+    // opts.temporary flag (called from /chat landing when the user
+    // clicked the temp-chat launcher) or the persisted
+    // nextConversationTemporary store flag (set by the sidebar
+    // before navigation, consumed on the next create). Either way
+    // we PATCH memory_enabled=false on the fresh row so the very
+    // first send already skips memory + tools.
+    const wantTemp = opts?.temporary === true || get().nextConversationTemporary;
+    if (wantTemp) {
+      try {
+        c = await api.setConversationMemory(c.id, false);
+      } catch {
+        // Non-fatal — the user can still toggle from the header.
+      }
+      set({ nextConversationTemporary: false });
+    }
     // Brand-new conversation is, by definition, fully loaded with
     // zero messages — flip the discriminator so the page skips the
     // skeleton and renders EmptyState immediately.
@@ -334,6 +367,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ),
         }));
       }
+      throw err;
+    }
+  },
+
+  async setConversationMemory(id, enabled) {
+    // Optimistic toggle so the header chip + sidebar BrainOff icon
+    // flip the instant the user clicks. Rollback on failure.
+    const prev = get().conversations.find((c) => c.id === id)?.memory_enabled;
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, memory_enabled: enabled } : c,
+      ),
+    }));
+    try {
+      const updated = await api.setConversationMemory(id, enabled);
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, ...updated } : c,
+        ),
+      }));
+    } catch (err) {
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, memory_enabled: prev ?? true } : c,
+        ),
+      }));
       throw err;
     }
   },

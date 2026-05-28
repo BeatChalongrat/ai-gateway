@@ -51,6 +51,13 @@ export interface Conversation {
   /** When set, the message flow retrieves context from this KB and
    *  injects it into the system prompt with [Source: ...] citations. */
   knowledge_base_id?: UUID | null;
+  /** S1 (Personal Memory). When false this conversation is a
+   *  "temporary chat": no <saved_user_memory> block is injected and
+   *  the save_memory / list_memories tools are hidden from the
+   *  model. Defaults to true server-side; older payloads that
+   *  predate the field flow through as `undefined` which the UI
+   *  treats as "memory on". */
+  memory_enabled?: boolean;
 }
 
 export interface ConversationListResponse {
@@ -343,6 +350,55 @@ export interface KnowledgeSearchHit {
 
 export interface KnowledgeSearchResponse {
   results: KnowledgeSearchHit[];
+}
+
+// ── Memory system (S1) ─────────────────────────────────────────
+
+/** One row from chat.user_memories. Mirrors the JSON shape the
+ *  MemoryHandler serialises — every field optional / null-safe so
+ *  the frontend can render rows with missing metadata without
+ *  defensive checks at every site. */
+export interface Memory {
+  id: UUID;
+  scope_type: string;
+  scope_id?: UUID | null;
+  memory_type: string;
+  category?: string;
+  content: string;
+  source_type: string;
+  source_conversation_id?: UUID | null;
+  source_message_id?: UUID | null;
+  evidence_excerpt?: string;
+  status: string;
+  confidence_score: number;
+  importance_score: number;
+  is_user_confirmed: boolean;
+  is_pinned: boolean;
+  sensitivity_level: string;
+  use_count: number;
+  last_used_at?: string | null;
+  valid_until?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryListResponse {
+  memories: Memory[];
+  total: number;
+}
+
+export interface MemoryEvent {
+  id: UUID;
+  memory_id?: UUID | null;
+  action: string;
+  actor_type: string;
+  reason?: string;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface MemoryEventListResponse {
+  events: MemoryEvent[];
 }
 
 // ── SSE event shapes ────────────────────────────────────────────
