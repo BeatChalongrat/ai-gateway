@@ -156,3 +156,18 @@ func (r *ConversationStateRepo) Delete(
 	}
 	return nil
 }
+
+// HardDeleteAllByUser is the GDPR right-to-erasure cascade for
+// conversation_states. Issues a DELETE for every row belonging to
+// the user — the S9 purge flow calls this alongside the memory +
+// memory-event + response-source purges.
+func (r *ConversationStateRepo) HardDeleteAllByUser(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) (int, error) {
+	const q = `DELETE FROM chat.conversation_states WHERE user_id = $1 AND tenant_id = $2`
+	tag, err := r.db.Exec(ctx, q, userID, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("hard delete conversation states: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}

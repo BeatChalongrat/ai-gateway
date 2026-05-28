@@ -13,14 +13,16 @@
 //   2. Temporary Chat launcher
 //   3. Danger Zone — clear all
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
   AlertTriangle,
   Brain,
+  Download,
   Plus,
+  Search,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -60,6 +62,15 @@ export default function MemorySettingsPage() {
 
   const [pending, setPending] = useState<Memory[]>([]);
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+
+  // S9 — local-only filter + export/purge busy states. The
+  // search is intentionally client-side: at 200 memories
+  // (default max), an in-page contains() is faster than a
+  // backend round-trip on every keystroke.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const [confirmPurge, setConfirmPurge] = useState(false);
   // S8 — keep the sidebar badge + chat-header dot honest the
   // instant the user acts on a suggestion. refresh() does a fresh
   // GET /memories/pending-count rather than decrementing the
@@ -187,12 +198,78 @@ export default function MemorySettingsPage() {
     }
   }
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const res = await api.exportMemories();
+      // Browser-side download: open a fresh tab pointed at the
+      // download endpoint. The auth layer attaches the Portal
+      // token via the same fetch chain elsewhere — for a direct
+      // navigation we lean on the portal_access_token cookie that
+      // the Portal mirrors cross-port on localhost (same trick
+      // file downloads use today).
+      window.open(api.exportDownloadUrl(res.export_id), "_blank");
+      toast(`Export ready (${prettySize(res.size_bytes)})`);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Couldn't export memories.";
+      toast(msg);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handlePermanentPurge() {
+    setConfirmPurge(false);
+    // Second factor: must type the literal phrase. window.prompt
+    // is intentional — the backend enforces the same exact string
+    // (handler.PurgeConfirmationPhrase) and we want both layers
+    // to agree byte-for-byte rather than relying on UI state.
+    const phrase = window.prompt(
+      "To permanently delete ALL memories, events, conversation states, and source attributions, type exactly:\n\nDELETE ALL MY MEMORIES",
+    );
+    if (phrase !== "DELETE ALL MY MEMORIES") {
+      toast("Confirmation did not match. Deletion cancelled.");
+      return;
+    }
+    setPurging(true);
+    try {
+      const res = await api.purgeMemories(phrase);
+      // Wipe local state — the user expects a clean slate.
+      setMemories([]);
+      setPending([]);
+      void refreshPendingCount();
+      toast(
+        `Permanently deleted ${res.memories_deleted} memor${res.memories_deleted === 1 ? "y" : "ies"} + related data.`,
+      );
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Permanent delete failed.";
+      toast(msg);
+    } finally {
+      setPurging(false);
+    }
+  }
+
   function startTemporaryChat() {
     setNextConversationTemporary(true);
     useChatStore.getState().setActive(null);
     router.push("/chat");
     toast("Starting a temporary chat — memory is off for this one.");
   }
+
+  // S9 — client-side filter. Lowercase contains across content +
+  // category. Cheap at the per-user cap; falls through to the
+  // full list when the search box is empty so the count + sort
+  // stay correct.
+  const filteredMemories = useMemo<Memory[] | null>(() => {
+    if (!memories) return memories;
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return memories;
+    return memories.filter((m) => {
+      if (m.content && m.content.toLowerCase().includes(q)) return true;
+      if (m.category && m.category.toLowerCase().includes(q)) return true;
+      return false;
+    });
+  }, [memories, searchQuery]);
 
   const count = memories?.length ?? 0;
 
@@ -271,6 +348,26 @@ export default function MemorySettingsPage() {
             </button>
           </div>
 
+          {/* S9 — client-side search input. Only renders when we
+              have memories loaded; the input itself stays in DOM
+              even when zero match the query so the user can
+              clear or rephrase without losing focus. */}
+          {memories && memories.length > 0 ? (
+            <div className="relative mt-3">
+              <Search
+                aria-hidden
+                className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-tertiary"
+              />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search memories…"
+                className="w-full rounded-lg border border-border-subtle bg-bg-surface py-1.5 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-placeholder focus:border-border-strong focus:outline-none"
+              />
+            </div>
+          ) : null}
+
           <div className="mt-3">
             {loading && memories === null ? (
               <LoadingSkeleton />
@@ -278,9 +375,13 @@ export default function MemorySettingsPage() {
               <ErrorState message={error} onRetry={() => void load()} />
             ) : !memories || memories.length === 0 ? (
               <EmptyState onAdd={() => setCreateOpen(true)} />
+            ) : filteredMemories && filteredMemories.length === 0 ? (
+              <p className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-6 text-center text-xs text-text-tertiary">
+                No memories match &ldquo;{searchQuery}&rdquo;.
+              </p>
             ) : (
               <div className="space-y-2">
-                {memories.map((m) => (
+                {(filteredMemories ?? memories).map((m) => (
                   <MemoryCard
                     key={m.id}
                     memory={m}
@@ -318,6 +419,32 @@ export default function MemorySettingsPage() {
 
         <Divider />
 
+        {/* S9 — Data Management. Sits between Temporary chat and
+            Danger zone so the user reads through the
+            increasingly-destructive options in order. Export is
+            non-destructive; clear-all is soft; permanent-delete
+            is the final option in the Danger zone below. */}
+        <section>
+          <h2 className="text-sm font-semibold text-text-primary">
+            Data management
+          </h2>
+          <p className="mt-1 text-sm text-text-secondary">
+            Download a JSON snapshot of every memory the AI has stored about
+            you. The export expires after 24 hours.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={exporting || !memories || memories.length === 0}
+            className="focus-ring mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {exporting ? "Preparing export…" : "Export my memories"}
+          </button>
+        </section>
+
+        <Divider />
+
         <section>
           <h2 className="text-sm font-semibold text-status-danger">
             Danger zone
@@ -334,6 +461,26 @@ export default function MemorySettingsPage() {
           >
             <Trash2 className="h-3.5 w-3.5" />
             Clear all memories
+          </button>
+
+          {/* S9 — permanent delete (GDPR right-to-erasure). HARD
+              deletes memories + events + conversation states +
+              source attributions + exports. Two-step confirm: the
+              ConfirmDialog gates the action, and the next prompt
+              forces the literal phrase the backend enforces. */}
+          <p className="mt-6 text-sm text-text-secondary">
+            <span className="font-semibold text-status-danger">Permanently delete all data.</span>{" "}
+            Irreversibly remove every memory, event, conversation state, and
+            source attribution. Past export files are also unlinked.
+          </p>
+          <button
+            type="button"
+            onClick={() => setConfirmPurge(true)}
+            disabled={purging}
+            className="focus-ring mt-3 inline-flex items-center gap-1.5 rounded-lg border border-status-danger bg-status-danger/10 px-3 py-1.5 text-xs font-medium text-status-danger transition-colors hover:bg-status-danger/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {purging ? "Deleting…" : "Permanently delete everything"}
           </button>
         </section>
       </main>
@@ -369,8 +516,25 @@ export default function MemorySettingsPage() {
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => void confirmDelete()}
       />
+      <ConfirmDialog
+        open={confirmPurge}
+        title="Permanently delete all data?"
+        body="This will irreversibly delete every memory, memory event, conversation state, and source attribution. It also unlinks any past export files. You'll need to type the confirmation phrase next."
+        confirmLabel="Continue"
+        danger
+        onCancel={() => setConfirmPurge(false)}
+        onConfirm={() => void handlePermanentPurge()}
+      />
     </div>
   );
+}
+
+// prettySize — formats the export size for the toast. KB/MB cap
+// is enough for JSON memory dumps under a few MB.
+function prettySize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 // ── Section primitives ─────────────────────────────────────────
