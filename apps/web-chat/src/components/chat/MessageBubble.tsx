@@ -218,73 +218,94 @@ function MessageBubbleImpl({
 
   // ───────────────────────────── USER ─────────────────────────────
   if (isUser) {
+    // File-only sends now reach this branch with content="" — the
+    // backend accepts them and ships a placeholder prompt to the
+    // Gateway. Skip the empty text pill in that case so the user
+    // doesn't see a tiny empty rounded rectangle floating above
+    // their attachment cards. Edit mode always renders the pill so
+    // the user can ADD text to a file-only message.
+    const hasText = editing || message.content.trim().length > 0;
+    const hasFiles = (message.files?.length ?? 0) > 0;
+    if (!hasText && !hasFiles) {
+      // Defensive: a completely empty user turn shouldn't exist any
+      // more. If one slipped through (legacy DB row), render nothing
+      // rather than a phantom pill.
+      return null;
+    }
     return (
       <div className="group message-enter flex w-full justify-end">
         <div className="flex max-w-[85%] flex-col items-end gap-1.5">
-          <div
-            className="rounded-bubble bg-bubble-user px-4 py-2.5 text-[15px] leading-relaxed text-text-primary shadow-sm"
-            style={{ borderRadius: "20px" }}
-          >
-            {editing ? (
-              <div className="flex w-full flex-col gap-2">
-                <textarea
-                  ref={editRef}
-                  value={draft}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    const ta = e.currentTarget;
-                    ta.style.height = "auto";
-                    ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`;
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      submitEdit();
-                    } else if (e.key === "Escape") {
-                      setEditing(false);
-                    }
-                  }}
-                  rows={2}
-                  className="scrollbar-thin w-full min-w-[260px] resize-none rounded-lg border border-border-strong bg-bg-base px-3 py-2 text-[15px] text-text-primary focus:outline-none focus:ring-2 focus:ring-border-strong/40"
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditing(false)}
-                    className="focus-ring rounded-md border border-border px-2.5 py-1 text-[12px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submitEdit}
-                    className="focus-ring rounded-md bg-text-primary px-2.5 py-1 text-[12px] font-medium text-bg-base hover:opacity-90"
-                  >
-                    Save & Submit
-                  </button>
+          {hasText ? (
+            <div
+              className="rounded-bubble bg-bubble-user px-4 py-2.5 text-[15px] leading-relaxed text-text-primary shadow-sm"
+              style={{ borderRadius: "20px" }}
+            >
+              {editing ? (
+                <div className="flex w-full flex-col gap-2">
+                  <textarea
+                    ref={editRef}
+                    value={draft}
+                    onChange={(e) => {
+                      setDraft(e.target.value);
+                      const ta = e.currentTarget;
+                      ta.style.height = "auto";
+                      ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        submitEdit();
+                      } else if (e.key === "Escape") {
+                        setEditing(false);
+                      }
+                    }}
+                    rows={2}
+                    className="scrollbar-thin w-full min-w-[260px] resize-none rounded-lg border border-border-strong bg-bg-base px-3 py-2 text-[15px] text-text-primary focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(false)}
+                      className="focus-ring rounded-md border border-border px-2.5 py-1 text-[12px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitEdit}
+                      className="focus-ring rounded-md bg-text-primary px-2.5 py-1 text-[12px] font-medium text-bg-base hover:opacity-90"
+                    >
+                      Save & Submit
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <span className="whitespace-pre-wrap break-words">
-                {message.content}
-              </span>
-            )}
-          </div>
-
-          {message.files && message.files.length > 0 ? (
-            <MessageAttachments files={message.files} />
+              ) : (
+                <span className="whitespace-pre-wrap break-words">
+                  {message.content}
+                </span>
+              )}
+            </div>
           ) : null}
 
-          {/* User message actions — copy + edit, revealed on hover */}
+          {hasFiles ? (
+            <MessageAttachments files={message.files!} />
+          ) : null}
+
+          {/* User message actions — copy + edit, revealed on hover.
+              Copy is suppressed when there's no text to copy; edit
+              stays available so users can add text to a file-only
+              message after the fact. */}
           {!editing ? (
             <div className="message-actions flex items-center gap-0.5">
-              <ActionButton
-                ariaLabel={copied ? "Copied" : "Copy message"}
-                onClick={copyMessageContent}
-                tone={copied ? "success" : "muted"}
-              >
-                {copied ? <CheckIcon /> : <CopyIcon />}
-              </ActionButton>
+              {hasText ? (
+                <ActionButton
+                  ariaLabel={copied ? "Copied" : "Copy message"}
+                  onClick={copyMessageContent}
+                  tone={copied ? "success" : "muted"}
+                >
+                  {copied ? <CheckIcon /> : <CopyIcon />}
+                </ActionButton>
+              ) : null}
               {onEdit && !message.isStreaming ? (
                 <ActionButton
                   ariaLabel="Edit message"
