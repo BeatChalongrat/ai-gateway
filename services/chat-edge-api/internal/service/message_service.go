@@ -1678,7 +1678,14 @@ var _ time.Duration
 func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 	*model.Conversation, *model.Message, []model.Message, error,
 ) {
-	if strings.TrimSpace(in.Content) == "" {
+	// "Empty content" is only invalid when the user ALSO didn't
+	// attach any files. A file-only send (e.g. drag a PDF in, hit
+	// Send without typing anything) is a legitimate flow — Claude
+	// and ChatGPT both accept it. buildGatewayRequestWithImages
+	// substitutes a "please analyze the attached files" prompt at
+	// request time so the upstream provider gets a non-empty user
+	// turn even though the persisted message bubble stays empty.
+	if strings.TrimSpace(in.Content) == "" && len(in.FileIDs) == 0 {
 		return nil, nil, nil, ErrMessageEmptyContent
 	}
 	conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
@@ -2143,40 +2150,59 @@ func buildGatewayRequestWithImages(
 		})
 	}
 
-	// Pre-compute the index of the last user-role entry — that's
-	// the slot we decorate with image blocks (if any).
+	// Pre-compute the index of the last user-role entry. Used for
+	// two things now: image-block decoration (existing) AND the
+	// empty-content fallback below. Empty user content is reachable
+	// whenever the user attached files without typing text — every
+	// upstream provider rejects an empty user turn so we substitute
+	// a prompt that engages whatever file context the system-prefix
+	// builder already injected. Computed unconditionally now (no
+	// more "only when images" gate) so document-only sends get the
+	// same treatment.
 	lastUserIdx := -1
-	if len(lastUserImageURLs) > 0 {
-		for i := len(history) - 1; i >= 0; i-- {
-			if history[i].Role == "user" {
-				lastUserIdx = i
-				break
-			}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			lastUserIdx = i
+			break
 		}
 	}
 
 	for i, m := range history {
 		var content any = m.ContentMasked
 		if i == lastUserIdx {
-			blocks := make([]GatewayContentBlock, 0, len(lastUserImageURLs)+1)
-			for _, url := range lastUserImageURLs {
-				blocks = append(blocks, GatewayContentBlock{
-					Type: "image_url",
-					ImageURL: &GatewayImageURL{
-						URL:    url,
-						Detail: "auto",
-					},
-				})
-			}
 			text := m.ContentMasked
-			if strings.TrimSpace(text) == "" {
-				text = "What's in this image?"
+			emptyText := strings.TrimSpace(text) == ""
+			if len(lastUserImageURLs) > 0 {
+				// Image-attach path: build multimodal blocks (image
+				// URLs followed by one text block). Empty text gets
+				// an image-specific prompt.
+				blocks := make([]GatewayContentBlock, 0, len(lastUserImageURLs)+1)
+				for _, url := range lastUserImageURLs {
+					blocks = append(blocks, GatewayContentBlock{
+						Type: "image_url",
+						ImageURL: &GatewayImageURL{
+							URL:    url,
+							Detail: "auto",
+						},
+					})
+				}
+				if emptyText {
+					text = "What's in this image?"
+				}
+				blocks = append(blocks, GatewayContentBlock{
+					Type: "text",
+					Text: text,
+				})
+				content = blocks
+			} else if emptyText {
+				// Non-image attach path: text-only schema, but the
+				// stored content is empty. Substitute a generic
+				// "analyze the files" prompt. The system prefix
+				// already carries the file context (extracted text,
+				// excel inspection, doc structure, etc.) so the
+				// model has everything it needs to engage.
+				content = "Please analyze the attached files."
 			}
-			blocks = append(blocks, GatewayContentBlock{
-				Type: "text",
-				Text: text,
-			})
-			content = blocks
 		}
 		msgs = append(msgs, GatewayMessage{Role: m.Role, Content: content})
 	}
