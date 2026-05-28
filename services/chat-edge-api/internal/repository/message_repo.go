@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -196,6 +197,86 @@ func (r *MessageRepo) ListContextByConversation(
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
+}
+
+// MessageSearchHit is a single row from SearchUserMessages —
+// JOINs the matched message row with its conversation's title so
+// the search service can render results without a second lookup.
+//
+// Rank is ts_rank() against the matched query; the search service
+// thresholds it to label results as "high" / "medium" relevance.
+type MessageSearchHit struct {
+	MessageID         uuid.UUID
+	ConversationID    uuid.UUID
+	ConversationTitle string
+	Role              string
+	Content           string
+	CreatedAt         time.Time
+	Rank              float64
+}
+
+// SearchUserMessages runs a tsvector full-text search across every
+// active message in conversations owned by (userID, tenantID).
+// JOINs through chat.conversations so the ownership scope is
+// enforced server-side — a leaked message id from another tenant
+// can never surface here.
+//
+// Only user / assistant messages are indexed (see migration 016's
+// trigger); the WHERE clause restates the role filter as defence
+// in depth in case a backfill pass somehow indexed a system row.
+//
+// Limit defaults to 10, capped at 50 — keeps the formatted tool
+// result inside a usable prompt budget.
+func (r *MessageRepo) SearchUserMessages(
+	ctx context.Context, userID, tenantID uuid.UUID, query string, limit int,
+) ([]MessageSearchHit, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	const sql = `
+		SELECT
+			m.id,
+			m.conversation_id,
+			c.title,
+			m.role,
+			m.content_masked,
+			m.created_at,
+			ts_rank(m.search_vector, plainto_tsquery('simple', $3))::float8 AS rank
+		FROM chat.messages_masked m
+		JOIN chat.conversations c ON c.id = m.conversation_id
+		WHERE c.user_id = $1
+		  AND c.tenant_id = $2
+		  AND c.is_deleted = false
+		  AND m.is_active = true
+		  AND m.role IN ('user', 'assistant')
+		  AND m.search_vector @@ plainto_tsquery('simple', $3)
+		ORDER BY rank DESC, m.created_at DESC
+		LIMIT $4
+	`
+	rows, err := r.db.Query(ctx, sql, userID, tenantID, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search user messages: %w", err)
+	}
+	defer rows.Close()
+	out := make([]MessageSearchHit, 0, limit)
+	for rows.Next() {
+		var hit MessageSearchHit
+		if err := rows.Scan(
+			&hit.MessageID, &hit.ConversationID, &hit.ConversationTitle,
+			&hit.Role, &hit.Content, &hit.CreatedAt, &hit.Rank,
+		); err != nil {
+			return nil, fmt.Errorf("search user messages scan: %w", err)
+		}
+		out = append(out, hit)
+	}
+	return out, rows.Err()
 }
 
 // CountMessages returns the active message count for one

@@ -264,6 +264,16 @@ func (s *MessageService) SetContextCompiler(c *ContextCompiler) {
 	s.compiler = c
 }
 
+// SetSearchService wires the S6 read-only search layer onto the
+// ToolExecutor. Optional — when nil, search_past_conversations is
+// hidden from the tool list. Must run after SetMemoryService
+// because the executor is created inside SetMemoryService.
+func (s *MessageService) SetSearchService(svc *SearchService) {
+	if s.toolExec != nil {
+		s.toolExec.SetSearchService(svc)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ListMessages — handler reads conversation history
 // ---------------------------------------------------------------------------
@@ -1784,10 +1794,12 @@ func (s *MessageService) compileAndBuildRequest(
 	// Tool-reserve budget — the actual attachment happens at the
 	// call site after this function returns (so the compiler's
 	// budget math accounts for tool definitions even though we
-	// don't ship them through Compile itself).
+	// don't ship them through Compile itself). The S6 search tool
+	// stays visible in temporary chats, so we let ToolDefs(conv)
+	// decide rather than gating on conv.MemoryEnabled here.
 	numTools := 0
-	if s.toolExec != nil && conv != nil && conv.MemoryEnabled {
-		numTools = len(s.toolExec.ToolDefs())
+	if s.toolExec != nil {
+		numTools = len(s.toolExec.ToolDefs(conv))
 	}
 	// Closure so the compiler can ask for a fresh prefix AFTER
 	// triggering state extraction without re-importing every
@@ -1850,8 +1862,8 @@ func (s *MessageService) InspectContext(
 	imageURLs := s.lastUserImageURLs(ctx, tenantID, history)
 	ragQuery := lastUserContent(history)
 	numTools := 0
-	if s.toolExec != nil && conv.MemoryEnabled {
-		numTools = len(s.toolExec.ToolDefs())
+	if s.toolExec != nil {
+		numTools = len(s.toolExec.ToolDefs(conv))
 	}
 	if s.compiler == nil {
 		// Synthesize a CompiledContext so callers see the same
@@ -2030,18 +2042,24 @@ func makeTitleFrom(content string) string {
 // stand as the final answer.
 const maxToolIterations = 5
 
-// attachTools mutates the request to expose the full tool set the
-// executor can dispatch (memory tools + update_conversation_state
-// when the state service is wired). Gated by conv.MemoryEnabled so
-// temporary chats see no tools at all.
+// attachTools mutates the request to expose the per-conversation
+// tool set. The executor's ToolDefs(conv) already gates each tool
+// by what's appropriate for THIS conv: memory-write tools require
+// conv.MemoryEnabled, the S6 read-only search tool stays
+// available in temporary chats too.
 //
-// Returns true when tools were attached (caller uses this to decide
-// whether to enter the tool-loop accumulator).
+// Returns true when at least one tool was attached (caller uses
+// this to decide whether to enter the tool-loop accumulator —
+// no tools → no tool_calls to worry about).
 func (s *MessageService) attachTools(req *GatewayChatRequest, conv *model.Conversation) bool {
-	if s.toolExec == nil || conv == nil || !conv.MemoryEnabled {
+	if s.toolExec == nil {
 		return false
 	}
-	req.Tools = append(req.Tools, s.toolExec.ToolDefs()...)
+	defs := s.toolExec.ToolDefs(conv)
+	if len(defs) == 0 {
+		return false
+	}
+	req.Tools = append(req.Tools, defs...)
 	// tool_choice="auto" lets the model decide whether to call a
 	// tool — most turns won't, and forcing "required" would make
 	// the model invent tool calls for vanilla chat.
