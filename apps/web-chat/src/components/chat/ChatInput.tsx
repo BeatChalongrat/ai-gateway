@@ -57,6 +57,11 @@ const MAX_TEXTAREA_HEIGHT_DESKTOP = 180;
 const MAX_TEXTAREA_HEIGHT_MOBILE = 120;
 const MAX_CONCURRENT_UPLOADS = 3;
 const EMPTY_PENDING_FILES = [] as const;
+// Sentinel bucket key used to stage files BEFORE a conversation id
+// exists (landing-page attach flow). Once ensureConv resolves, the
+// rows migrate from this key onto the real conv id so the existing
+// pendingFiles[realConvId] selector keeps rendering them.
+const DRAFT_CONV_KEY = "__chat_input_draft__";
 
 export function ChatInput({
   conversationId,
@@ -137,10 +142,14 @@ export function ChatInput({
       vv.removeEventListener("scroll", sync);
     };
   }, []);
-  const pendingFiles = useChatStore((s) =>
-    conversationId
-      ? s.pendingFiles[conversationId] ?? EMPTY_PENDING_FILES
-      : EMPTY_PENDING_FILES,
+  // Render bucket: when conversationId is present, follow it; when
+  // it's null we read from the DRAFT bucket so files staged before
+  // ensureConv resolves still produce chips. Both buckets carry the
+  // exact same PendingFile shape so FilePreviewCard doesn't notice
+  // the difference.
+  const renderBucket = conversationId ?? DRAFT_CONV_KEY;
+  const pendingFiles = useChatStore(
+    (s) => s.pendingFiles[renderBucket] ?? EMPTY_PENDING_FILES,
   );
   const addPendingFile = useChatStore((s) => s.addPendingFile);
   const updateFileProgress = useChatStore((s) => s.updateFileProgress);
@@ -263,7 +272,15 @@ export function ChatInput({
     const t = text.trim();
     onSend(t, readyFileIds);
     setText("");
-    if (conversationId) clearPendingFiles(conversationId);
+    // Clear whichever bucket the visible chips were rendering from —
+    // covers both the conv-page case (real id) and the landing
+    // path where the chips might still be on the DRAFT key at the
+    // moment of send (e.g. user attached + sent very quickly before
+    // ensureConv resolved).
+    clearPendingFiles(renderBucket);
+    if (conversationId && conversationId !== renderBucket) {
+      clearPendingFiles(conversationId);
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -274,40 +291,72 @@ export function ChatInput({
   }
 
   // ── File upload pipeline ─────────────────────────────────
+  //
+  // Two-phase design so the FilePreviewCard chip appears INSTANTLY
+  // when the user picks a file:
+  //
+  //   Phase 1 (synchronous): validate every File, then stage each
+  //     accepted entry into the current render bucket via
+  //     addPendingFile. Because that bucket is `conversationId ??
+  //     DRAFT_CONV_KEY`, the same bucket the render selector reads,
+  //     React schedules an immediate re-render with the new chip.
+  //   Phase 2 (async): resolve the real conversation id via
+  //     ensureConvId. If it differs from the staging bucket (landing
+  //     page with no conversationId yet), migrate the pending rows
+  //     onto the real id so the upload completion handlers can find
+  //     them. Then run the bounded-parallel upload.
+  //
+  // Every silent failure path now emits a toast — previously the
+  // user could click +, pick a file, and see absolutely nothing if
+  // ensureConv silently returned null (e.g. landing page with no
+  // selected model). Now they get a clear "Couldn't create
+  // conversation" / "Upload failed" surface.
 
-  // Resolves the conversation id to use for the next upload action.
-  // Falls back to `onRequestConversation` (set by the landing page)
-  // so the very first attach/paste/drop kicks off an eager
-  // conversation create rather than silently doing nothing.
   async function ensureConvId(): Promise<string | null> {
     if (conversationId) return conversationId;
     if (!onRequestConversation) return null;
     try {
       return await onRequestConversation();
-    } catch {
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("ChatInput.ensureConvId: onRequestConversation threw", err);
+      toast("Couldn't prepare the conversation. Please try again.");
       return null;
     }
   }
 
-  async function uploadOne(convId: string, file: File) {
-    const pendingId = addPendingFile(convId, file);
+  // uploadOneStaged splits the convId into two:
+  //   - netConvId : the conversation the file is POSTed against on
+  //                 the backend (returns a serverId tied to it)
+  //   - chipBucket: the chatStore key where the visible chip lives,
+  //                 used for progress / ready / error updates
+  // Most of the time these are equal; on the landing page the chip
+  // bucket is DRAFT_CONV_KEY while the network target is the real
+  // conversation eager-created by ensureConv.
+  async function uploadOneStaged(
+    netConvId: string,
+    chipBucket: string,
+    pendingId: string,
+    file: File,
+  ) {
     try {
-      const row = await api.uploadFile(convId, file, {
-        onProgress: (p) => updateFileProgress(convId, pendingId, p),
+      const row = await api.uploadFile(netConvId, file, {
+        onProgress: (p) => updateFileProgress(chipBucket, pendingId, p),
       });
-      markFileReady(convId, pendingId, row.id);
+      markFileReady(chipBucket, pendingId, row.id);
     } catch (err) {
       const msg =
         err instanceof ApiError ? err.message : "Upload failed. Try again.";
-      markFileError(convId, pendingId, msg);
+      markFileError(chipBucket, pendingId, msg);
       toast(msg);
     }
   }
 
   async function handleFiles(filesRaw: File[]) {
-    const convId = await ensureConvId();
-    if (!convId) return;
-    // Per-message cap. Existing valid pending + new candidates.
+    // Per-message cap. Count rows already in the render bucket; we
+    // re-read the selector value because closures see the snapshot
+    // captured at render time and that's exactly what the user
+    // sees right now.
     const existing = pendingFiles.filter((p) => p.status !== "error").length;
     const slots = Math.max(0, MAX_FILES_PER_MESSAGE - existing);
     if (slots === 0) {
@@ -330,8 +379,44 @@ export function ChatInput({
     }
     if (accepted.length === 0) return;
 
-    // Parallel upload, max 3 concurrent. Roll our own little
-    // bounded executor — simpler than pulling p-limit.
+    // Phase 1 — stage every accepted file IMMEDIATELY at the
+    // render bucket. This is what makes the chip pop the instant
+    // the file picker closes; no waiting on the network round-trip
+    // for createConversation. The CRUCIAL invariant: every
+    // subsequent store call for THIS upload batch (progress, ready,
+    // error) uses the same staging bucket the chips were rendered
+    // into. The upload's NETWORK target (realConvId) is independent
+    // of the chip bucket; the backend tags returned serverIds to
+    // the real conv, and the submit() path forwards those serverIds
+    // through onSend so the message lands correctly.
+    const stagingBucket = conversationId ?? DRAFT_CONV_KEY;
+    const pendingIds = accepted.map((f) => addPendingFile(stagingBucket, f));
+
+    // Phase 2 — resolve the real conv id. On the conv page this is
+    // synchronous (returns props.conversationId); on the landing
+    // page this awaits onRequestConversation → createConversation.
+    const realConvId = await ensureConvId();
+    if (!realConvId) {
+      // Conv create failed (or no model selected on landing). Mark
+      // every staged row as error so the user sees WHY their chip
+      // turned red. The toast inside ensureConvId already surfaced
+      // the root cause.
+      for (const pid of pendingIds) {
+        markFileError(
+          stagingBucket,
+          pid,
+          "Couldn't create conversation for upload",
+        );
+      }
+      return;
+    }
+
+    // Bounded parallel upload. Each worker uploads to realConvId
+    // (the network target) but updates the staging bucket (where
+    // the visible chip lives) for progress + final status. Keeping
+    // the chip bucket constant across the entire batch avoids any
+    // selector flicker if `conversationId` flips from null to a
+    // real id mid-upload (landing → conv page transition).
     let cursor = 0;
     const workers: Promise<void>[] = [];
     for (let i = 0; i < Math.min(MAX_CONCURRENT_UPLOADS, accepted.length); i++) {
@@ -339,7 +424,12 @@ export function ChatInput({
         (async () => {
           while (cursor < accepted.length) {
             const idx = cursor++;
-            await uploadOne(convId, accepted[idx]);
+            await uploadOneStaged(
+              realConvId,
+              stagingBucket,
+              pendingIds[idx],
+              accepted[idx],
+            );
           }
         })(),
       );
@@ -438,21 +528,26 @@ export function ChatInput({
           />
 
           {/* Row 0: pending-file chips. Wraps to a second line rather
-              than scrolling horizontally — feels native to the pill. */}
+              than scrolling horizontally — feels native to the pill.
+              The bucket is `conversationId ?? DRAFT_CONV_KEY` so a
+              landing-page user who picked a file before the conv
+              row was created still sees their chip immediately. */}
           {pendingFiles.length > 0 ? (
             <div className="flex flex-wrap gap-2 px-3 pt-3">
               {pendingFiles.map((p) => (
                 <FilePreviewCard
                   key={p.id}
                   pending={p}
-                  onRemove={() => {
-                    if (conversationId) removePendingFile(conversationId, p.id);
-                  }}
+                  onRemove={() => removePendingFile(renderBucket, p.id)}
                   onRetry={
-                    p.status === "error" && conversationId
+                    p.status === "error"
                       ? () => {
-                          removePendingFile(conversationId, p.id);
-                          void uploadOne(conversationId, p.file);
+                          // Retry path: drop the failed row + re-run
+                          // the full handleFiles pipeline against the
+                          // same File. handleFiles re-resolves the
+                          // conv id, restakes the chip, and uploads.
+                          removePendingFile(renderBucket, p.id);
+                          void handleFiles([p.file]);
                         }
                       : undefined
                   }
@@ -620,11 +715,20 @@ export function ChatInput({
   );
 }
 
+// Re-exported so callers (like the landing page's drag-and-drop
+// wrapper) can stage chips into the SAME bucket the ChatInput
+// instance is rendering from.
+export { DRAFT_CONV_KEY };
+
 // Imperative API for the drag-and-drop wrapper. The conversation
 // page's drop handler calls this directly rather than re-implementing
-// validation.
+// validation. `chipBucket` controls where the visible PendingFile
+// rows live in chatStore — defaults to netConvId, but the landing
+// page passes DRAFT_CONV_KEY so the chips render in the same place
+// the landing's ChatInput is reading from. `netConvId` is always
+// the real conversation id (uploads go there on the backend).
 export async function uploadFiles(
-  convId: string,
+  netConvId: string,
   files: File[],
   store: {
     addPendingFile: (id: string, f: File) => string;
@@ -632,6 +736,7 @@ export async function uploadFiles(
     markFileReady: (id: string, pid: string, sid: string) => void;
     markFileError: (id: string, pid: string, err: string) => void;
   },
+  chipBucket: string = netConvId,
 ): Promise<void> {
   for (const f of files) {
     const v = validateFile(f);
@@ -639,15 +744,15 @@ export async function uploadFiles(
       toast(`${f.name}: ${v.reason}`);
       continue;
     }
-    const pid = store.addPendingFile(convId, f);
+    const pid = store.addPendingFile(chipBucket, f);
     try {
-      const row = await api.uploadFile(convId, f, {
-        onProgress: (p) => store.updateFileProgress(convId, pid, p),
+      const row = await api.uploadFile(netConvId, f, {
+        onProgress: (p) => store.updateFileProgress(chipBucket, pid, p),
       });
-      store.markFileReady(convId, pid, row.id);
+      store.markFileReady(chipBucket, pid, row.id);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Upload failed.";
-      store.markFileError(convId, pid, msg);
+      store.markFileError(chipBucket, pid, msg);
       toast(msg);
     }
   }
