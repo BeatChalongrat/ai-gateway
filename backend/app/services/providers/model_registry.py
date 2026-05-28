@@ -501,6 +501,11 @@ class ModelRegistry:
 
     @staticmethod
     def _row_to_candidate(row) -> ModelCandidate:
+        # Reasoning fields (migration 045) are read with ``getattr``
+        # defaults so a process that boots against a DB that hasn't run
+        # migration 045 yet still gets a usable candidate — the
+        # gateway then behaves identically to its pre-T1 self until
+        # the migration applies.
         return ModelCandidate(
             provider=row.provider,
             model=row.model,
@@ -511,6 +516,9 @@ class ModelRegistry:
             latency_tier=row.latency_tier,
             cost_per_input_token=row.cost_per_input_token,
             cost_per_output_token=row.cost_per_output_token,
+            supports_reasoning=getattr(row, "supports_reasoning", False),
+            reasoning_strategy=getattr(row, "reasoning_strategy", "none"),
+            default_reasoning_mode=getattr(row, "default_reasoning_mode", "auto") or "auto",
         )
 
     def get_candidate(self, model: str) -> ModelCandidate | None:
