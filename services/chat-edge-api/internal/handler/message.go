@@ -34,6 +34,10 @@ type MessageHandler struct {
 	// into each message's response. Construction in main.go wires
 	// this immediately after the file repo is built.
 	files *repository.FileRepo
+	// Optional. When set, the list endpoint joins S7 context-source
+	// attribution onto each assistant message via a single batched
+	// query (no N+1).
+	sources *repository.ResponseContextSourceRepo
 }
 
 func NewMessageHandler(m *service.MessageService) *MessageHandler {
@@ -47,27 +51,77 @@ func (h *MessageHandler) SetFileRepo(fr *repository.FileRepo) {
 	h.files = fr
 }
 
+// SetSourceRepo wires the S7 attribution repo so the list
+// endpoint can render each assistant message's "Sources used"
+// card without a per-message round-trip.
+func (h *MessageHandler) SetSourceRepo(sr *repository.ResponseContextSourceRepo) {
+	h.sources = sr
+}
+
 // ---------------------------------------------------------------------------
 // Wire types
 // ---------------------------------------------------------------------------
 
 type messageResponse struct {
-	ID          string         `json:"id"`
-	Role        string         `json:"role"`
-	Content     string         `json:"content"`
-	Status      string         `json:"status"`
-	ModelID     *string        `json:"model_id,omitempty"`
-	TokenUsage  *tokenUsage    `json:"token_usage,omitempty"`
-	CreatedAt   string         `json:"created_at"`
-	Files       []fileResponse `json:"files,omitempty"`
-	BranchIndex int            `json:"branch_index"`
-	BranchCount int            `json:"branch_count"`
-	HasBranches bool           `json:"has_branches"`
+	ID             string                          `json:"id"`
+	Role           string                          `json:"role"`
+	Content        string                          `json:"content"`
+	Status         string                          `json:"status"`
+	ModelID        *string                         `json:"model_id,omitempty"`
+	TokenUsage     *tokenUsage                     `json:"token_usage,omitempty"`
+	CreatedAt      string                          `json:"created_at"`
+	Files          []fileResponse                  `json:"files,omitempty"`
+	BranchIndex    int                             `json:"branch_index"`
+	BranchCount    int                             `json:"branch_count"`
+	HasBranches    bool                            `json:"has_branches"`
+	// S7 — populated only on assistant messages that have at least
+	// one context source recorded. Empty / nil for user messages
+	// and for assistants that drew on no special context (memory,
+	// state, search, compaction). omitempty keeps the wire size
+	// honest.
+	ContextSources []contextSourceResponse `json:"context_sources,omitempty"`
+}
+
+// contextSourceResponse mirrors model.ResponseContextSource on the
+// wire. Defined here (handler package) rather than reused from
+// model so the metadata JSON stays a typed map[string]any for the
+// frontend's convenience.
+type contextSourceResponse struct {
+	ID           string         `json:"id"`
+	SourceType   string         `json:"source_type"`
+	SourceID     *string        `json:"source_id,omitempty"`
+	DisplayLabel string         `json:"display_label"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedAt    string         `json:"created_at"`
 }
 
 type tokenUsage struct {
 	Input  int `json:"input"`
 	Output int `json:"output"`
+}
+
+// sourceToWire formats one S7 source row for the wire response.
+// Metadata is decoded into a generic map so the frontend gets
+// typed access to category / conversation_title / hit_type without
+// re-parsing JSON on the client.
+func sourceToWire(s *model.ResponseContextSource) contextSourceResponse {
+	out := contextSourceResponse{
+		ID:           s.ID.String(),
+		SourceType:   s.SourceType,
+		DisplayLabel: s.DisplayLabel,
+		CreatedAt:    s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+	if s.SourceID != nil {
+		sid := s.SourceID.String()
+		out.SourceID = &sid
+	}
+	if len(s.Metadata) > 0 {
+		var meta map[string]any
+		if err := json.Unmarshal(s.Metadata, &meta); err == nil {
+			out.Metadata = meta
+		}
+	}
+	return out
 }
 
 func messageToWire(m *model.Message) messageResponse {
@@ -140,6 +194,33 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 				if c, ok := counts[*msgs[i].ParentID]; ok && c > 1 {
 					items[i].BranchCount = c
 					items[i].HasBranches = true
+				}
+			}
+		}
+	}
+
+	// S7 — Join context-source attribution for assistant messages.
+	// One batched query for every assistant id; skipped silently
+	// when the source repo isn't wired so test/legacy setups keep
+	// working without the column.
+	if h.sources != nil && len(msgs) > 0 {
+		asstIDs := make([]uuid.UUID, 0, len(msgs))
+		for i := range msgs {
+			if msgs[i].Role == "assistant" {
+				asstIDs = append(asstIDs, msgs[i].ID)
+			}
+		}
+		if len(asstIDs) > 0 {
+			byMsg, err := h.sources.ListByMessages(r.Context(), asstIDs, caller.UserID, caller.TenantUUID)
+			if err == nil {
+				for i := range items {
+					if srcs, ok := byMsg[msgs[i].ID]; ok && len(srcs) > 0 {
+						wire := make([]contextSourceResponse, 0, len(srcs))
+						for j := range srcs {
+							wire = append(wire, sourceToWire(&srcs[j]))
+						}
+						items[i].ContextSources = wire
+					}
 				}
 			}
 		}

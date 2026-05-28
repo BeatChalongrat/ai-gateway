@@ -31,6 +31,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -70,7 +71,13 @@ type CompileInputs struct {
 	TenantID    uuid.UUID
 	History     []model.Message
 	ImageURLs   []string
-	BuildPrefix func() string
+	// BuildPrefix is the per-call closure that re-renders the
+	// system-prompt prefix AND returns the ContextSource list the
+	// blocks contributed (memory entries, state goal). S7 changed
+	// the signature from `func() string` so the compiler can
+	// surface attribution without re-walking the source data
+	// itself.
+	BuildPrefix func() (string, []ContextSource)
 	// NumTools is the count of GatewayTool entries the caller plans
 	// to attach. Used purely for the budget's reserve estimate;
 	// the compiler doesn't enumerate tools itself.
@@ -92,6 +99,12 @@ type CompiledContext struct {
 	// state-extraction call before trimming. Surfaces in the
 	// observability log so we can see when the slow-path fired.
 	ExtractionTriggered bool
+	// Sources is the S7 attribution list — every context block
+	// that contributed to the system prompt (memory entries, state
+	// goal, compaction marker). The send paths flush these into
+	// the per-turn SourcesAccumulator so tool execution can add
+	// more (search hits), and finish() persists the union.
+	Sources []ContextSource
 }
 
 // Compile is the single entry point for the message-service send
@@ -110,12 +123,13 @@ func (c *ContextCompiler) Compile(
 		}, nil
 	}
 
-	prefix := in.BuildPrefix()
+	prefix, sources := in.BuildPrefix()
 	out := &CompiledContext{
 		SystemPrefix:  prefix,
 		History:       in.History,
 		MessagesTotal: len(in.History),
 		MessagesSent:  len(in.History),
+		Sources:       sources,
 	}
 
 	budget := c.budgetFor(in, prefix)
@@ -140,9 +154,11 @@ func (c *ContextCompiler) Compile(
 					"conv", in.Conv.ID.String(), "err", err)
 			} else {
 				// Re-build the prefix so the new state block is
-				// reflected in the system message.
-				prefix = in.BuildPrefix()
+				// reflected in the system message — AND the source
+				// list (the state row might be brand-new).
+				prefix, sources = in.BuildPrefix()
 				out.SystemPrefix = prefix
+				out.Sources = sources
 				budget = c.budgetFor(in, prefix)
 				out.Budget = budget
 			}
@@ -158,9 +174,32 @@ func (c *ContextCompiler) Compile(
 	out.MessagesSent = len(trimmed)
 	out.Compacted = len(trimmed) < len(in.History)
 
+	// S7 — record the compaction event as a source so the UI can
+	// show "📦 Conversation compacted (N messages summarized)"
+	// under the response. The user learns that older context was
+	// folded into the state block instead of being sent raw.
+	if out.Compacted {
+		dropped := len(in.History) - len(trimmed)
+		out.Sources = append(out.Sources, ContextSource{
+			SourceType: model.SourceTypeCompactedHistory,
+			DisplayLabel: fmt.Sprintf(
+				"Conversation compacted (%d older %s summarized)",
+				dropped, pluralCompact(dropped),
+			),
+		})
+	}
+
 	finalTokens := estimateHistoryTokens(trimmed, in.ImageURLs)
 	c.logCompiled(in, out, finalTokens, "compacted")
 	return out, nil
+}
+
+// pluralCompact — tiny pluraliser for the compaction marker copy.
+func pluralCompact(n int) string {
+	if n == 1 {
+		return "message"
+	}
+	return "messages"
 }
 
 // budgetFor measures each system-prompt component INSIDE the

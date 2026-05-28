@@ -105,6 +105,7 @@ func main() {
 	knowledgeRepo := repository.NewKnowledgeRepo(pool)
 	memoriesRepo := repository.NewMemoryRepo(pool)
 	statesRepo := repository.NewConversationStateRepo(pool)
+	sourcesRepo := repository.NewResponseContextSourceRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -212,6 +213,12 @@ func main() {
 	// the queries.
 	searchSvc := service.NewSearchService(messages, conversations, memoriesRepo)
 	messageSvc.SetSearchService(searchSvc)
+	// S7 — wire the source-attribution repo so per-turn sources
+	// (memory + state + compaction + search) get persisted to
+	// chat.response_context_sources after each assistant turn
+	// lands. The message-list handler hydrates them inline via
+	// the same repo.
+	messageSvc.SetResponseSourceRepo(sourcesRepo)
 
 	// Knowledge base (RAG) pipeline.
 	//
@@ -246,6 +253,7 @@ func main() {
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)
+	messageHandler.SetSourceRepo(sourcesRepo)
 
 	adminHandler := handler.NewAdminHandler(pool)
 	// Wire the KB mutators so the admin endpoints can reindex / delete

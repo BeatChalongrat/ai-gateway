@@ -218,11 +218,18 @@ func MemoryToolDefs() []GatewayTool {
 // pointers into each tool execution. Tools that mutate user-scoped
 // data (save_memory) need UserID + TenantID; tools that record
 // provenance (save_memory's source_conversation_id) need ConvID.
+//
+// Sources is the S7 attribution accumulator — search tools push
+// their hits in here so the finish callback in MessageService can
+// persist them to chat.response_context_sources alongside the
+// memory + state + compaction sources from the compiler. Nil-safe
+// (the accumulator's Add method tolerates a nil receiver).
 type ToolExecContext struct {
 	TenantID       uuid.UUID
 	UserID         uuid.UUID
 	ConversationID uuid.UUID
 	MessageID      uuid.UUID
+	Sources        *SourcesAccumulator
 }
 
 // ToolExecutor dispatches a single tool call to its handler.
@@ -342,6 +349,37 @@ func (e *ToolExecutor) execSearchPastConversations(
 	}
 	if len(hits) == 0 {
 		return fmt.Sprintf("No results found for %q. Try different keywords.", args.Query)
+	}
+
+	// S7 — push each search hit into the per-turn source
+	// accumulator so the response's "Sources used" card can
+	// surface the past-conversation / memory matches the AI
+	// drew on. Nil-safe via SourcesAccumulator.Add.
+	for i := range hits {
+		h := &hits[i]
+		switch h.Type {
+		case "message", "conversation":
+			ec.Sources.Add(ContextSource{
+				SourceType:   model.SourceTypePastConversation,
+				SourceID:     h.ConversationID,
+				DisplayLabel: TruncateLabel(searchHitLabel(h)),
+				Metadata: MarshalMeta(map[string]any{
+					"conversation_title": h.ConversationTitle,
+					"hit_type":           h.Type,
+					"relevance":          h.Relevance,
+					"date":               h.Date,
+				}),
+			})
+		case "memory":
+			ec.Sources.Add(ContextSource{
+				SourceType:   model.SourceTypeSavedMemory,
+				DisplayLabel: TruncateLabel(h.Content),
+				Metadata: MarshalMeta(map[string]any{
+					"memory_type": h.MemoryType,
+					"via":         "search",
+				}),
+			})
+		}
 	}
 
 	var sb strings.Builder
@@ -563,4 +601,19 @@ func pluralize(n int, singular, plural string) string {
 		return singular
 	}
 	return plural
+}
+
+// searchHitLabel renders the SourcesCard display string for one
+// search hit. Different shape per hit type — a message match
+// prefers the conversation title; a title-only match falls back
+// to the title alone. Truncation happens at the call site via
+// TruncateLabel.
+func searchHitLabel(h *PastContextResult) string {
+	if h.ConversationTitle != "" {
+		return fmt.Sprintf(`"%s"`, h.ConversationTitle)
+	}
+	if h.Content != "" {
+		return h.Content
+	}
+	return "Past conversation"
 }
