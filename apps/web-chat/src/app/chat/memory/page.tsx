@@ -34,11 +34,13 @@ import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { api, ApiError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import type { Memory } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 
 export default function MemorySettingsPage() {
   const router = useRouter();
+  const t = useT();
   const [memories, setMemories] = useState<Memory[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,14 +97,22 @@ export default function MemorySettingsPage() {
       setMemories(active.memories);
       setPending(pendingRes.memories);
     } catch (err) {
+      // 404 from the list endpoint just means "no memories yet"
+      // (or an early migration race) — surface the empty state,
+      // not an error banner.
+      if (err instanceof ApiError && err.status === 404) {
+        setMemories([]);
+        setPending([]);
+        return;
+      }
       const msg =
-        err instanceof ApiError ? err.message : "Couldn't load memories.";
+        err instanceof ApiError ? err.message : t("memory.error.loadFailed");
       setError(msg);
       setMemories(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -120,10 +130,10 @@ export default function MemorySettingsPage() {
         next.unshift(updated);
         return sortMemories(next);
       });
-      toast("Preference confirmed.");
+      toast(t("memory.toast.preferenceConfirmed"));
       void refreshPendingCount();
     } catch {
-      toast("Couldn't confirm preference.");
+      toast(t("memory.toast.preferenceConfirmError"));
     } finally {
       setPendingBusy(null);
     }
@@ -134,10 +144,10 @@ export default function MemorySettingsPage() {
     try {
       await api.deleteMemory(id);
       setPending((prev) => prev.filter((m) => m.id !== id));
-      toast("Suggestion dismissed.");
+      toast(t("memory.toast.suggestionDismissed"));
       void refreshPendingCount();
     } catch {
-      toast("Couldn't dismiss suggestion.");
+      toast(t("memory.toast.suggestionDismissError"));
     } finally {
       setPendingBusy(null);
     }
@@ -164,9 +174,9 @@ export default function MemorySettingsPage() {
     try {
       await api.deleteMemory(target.id);
       setMemories((prev) => prev?.filter((m) => m.id !== target.id) ?? null);
-      toast("Memory deleted.");
+      toast(t("memory.toast.memoryDeleted"));
     } catch {
-      toast("Couldn't delete memory.");
+      toast(t("memory.toast.memoryDeleteError"));
     }
   }
 
@@ -179,7 +189,7 @@ export default function MemorySettingsPage() {
         return sortMemories(next);
       });
     } catch {
-      toast("Couldn't update pin.");
+      toast(t("memory.toast.pinError"));
     }
   }
 
@@ -189,12 +199,14 @@ export default function MemorySettingsPage() {
       const { deleted_count } = await api.clearAllMemories();
       setMemories([]);
       toast(
-        deleted_count > 0
-          ? `Cleared ${deleted_count} ${deleted_count === 1 ? "memory" : "memories"}.`
-          : "No memories to clear.",
+        deleted_count === 0
+          ? t("memory.clear.toastNone")
+          : deleted_count === 1
+            ? t("memory.clear.toastOne")
+            : t("memory.clear.toastMany", { count: String(deleted_count) }),
       );
     } catch {
-      toast("Couldn't clear memories.");
+      toast(t("memory.clear.toastError"));
     }
   }
 
@@ -209,9 +221,10 @@ export default function MemorySettingsPage() {
       // the Portal mirrors cross-port on localhost (same trick
       // file downloads use today).
       window.open(api.exportDownloadUrl(res.export_id), "_blank");
-      toast(`Export ready (${prettySize(res.size_bytes)})`);
+      toast(t("memory.export.ready", { size: prettySize(res.size_bytes) }));
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Couldn't export memories.";
+      const msg =
+        err instanceof ApiError ? err.message : t("memory.export.error");
       toast(msg);
     } finally {
       setExporting(false);
@@ -224,11 +237,9 @@ export default function MemorySettingsPage() {
     // is intentional — the backend enforces the same exact string
     // (handler.PurgeConfirmationPhrase) and we want both layers
     // to agree byte-for-byte rather than relying on UI state.
-    const phrase = window.prompt(
-      "To permanently delete ALL memories, events, conversation states, and source attributions, type exactly:\n\nDELETE ALL MY MEMORIES",
-    );
-    if (phrase !== "DELETE ALL MY MEMORIES") {
-      toast("Confirmation did not match. Deletion cancelled.");
+    const phrase = window.prompt(t("memory.danger.purgePromptBody"));
+    if (phrase !== t("memory.danger.purgePromptPhrase")) {
+      toast(t("memory.danger.purgeMismatch"));
       return;
     }
     setPurging(true);
@@ -239,10 +250,15 @@ export default function MemorySettingsPage() {
       setPending([]);
       void refreshPendingCount();
       toast(
-        `Permanently deleted ${res.memories_deleted} memor${res.memories_deleted === 1 ? "y" : "ies"} + related data.`,
+        res.memories_deleted === 1
+          ? t("memory.danger.purgeDoneOne")
+          : t("memory.danger.purgeDoneMany", {
+              count: String(res.memories_deleted),
+            }),
       );
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Permanent delete failed.";
+      const msg =
+        err instanceof ApiError ? err.message : t("memory.danger.purgeError");
       toast(msg);
     } finally {
       setPurging(false);
@@ -253,7 +269,7 @@ export default function MemorySettingsPage() {
     setNextConversationTemporary(true);
     useChatStore.getState().setActive(null);
     router.push("/chat");
-    toast("Starting a temporary chat — memory is off for this one.");
+    toast(t("memory.temporary.toast"));
   }
 
   // S9 — client-side filter. Lowercase contains across content +
@@ -272,6 +288,12 @@ export default function MemorySettingsPage() {
   }, [memories, searchQuery]);
 
   const count = memories?.length ?? 0;
+  const countLabel =
+    count === 0
+      ? t("memory.savedCount.zero")
+      : count === 1
+        ? t("memory.savedCount.one")
+        : t("memory.savedCount.other", { count: String(count) });
 
   return (
     <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
@@ -281,7 +303,7 @@ export default function MemorySettingsPage() {
           className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
         >
           <BackArrow />
-          <span>Back to chat</span>
+          <span>{t("memory.back")}</span>
         </Link>
 
         <header className="mt-6 flex items-start gap-3">
@@ -293,11 +315,10 @@ export default function MemorySettingsPage() {
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-semibold tracking-tight text-text-primary">
-              Memory
+              {t("memory.title")}
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              SRAN Chat remembers facts from your conversations to personalize
-              future responses.
+              {t("memory.description")}
             </p>
           </div>
         </header>
@@ -312,11 +333,11 @@ export default function MemorySettingsPage() {
             <div className="flex items-baseline gap-2">
               <Sparkles className="h-3.5 w-3.5 text-text-tertiary" aria-hidden />
               <h2 className="text-xs font-medium uppercase tracking-wider text-text-muted">
-                Suggested preferences ({pending.length})
+                {t("memory.suggested.title", { count: String(pending.length) })}
               </h2>
             </div>
             <p className="mt-1 text-xs text-text-tertiary">
-              AI noticed these patterns. Confirm to activate; reject to dismiss.
+              {t("memory.suggested.description")}
             </p>
             <div className="mt-3 space-y-2">
               {pending.map((m) => (
@@ -336,7 +357,7 @@ export default function MemorySettingsPage() {
         <section className="mt-8">
           <div className="flex items-baseline justify-between">
             <h2 className="text-xs font-medium uppercase tracking-wider text-text-muted">
-              {count === 1 ? "1 saved memory" : `${count} saved memories`}
+              {countLabel}
             </h2>
             <button
               type="button"
@@ -344,7 +365,7 @@ export default function MemorySettingsPage() {
               className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-elevated"
             >
               <Plus className="h-3.5 w-3.5" />
-              Add memory
+              {t("memory.addMemory")}
             </button>
           </div>
 
@@ -362,7 +383,7 @@ export default function MemorySettingsPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search memories…"
+                placeholder={t("memory.searchPlaceholder")}
                 className="w-full rounded-lg border border-border-subtle bg-bg-surface py-1.5 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-placeholder focus:border-border-strong focus:outline-none"
               />
             </div>
@@ -372,12 +393,16 @@ export default function MemorySettingsPage() {
             {loading && memories === null ? (
               <LoadingSkeleton />
             ) : error ? (
-              <ErrorState message={error} onRetry={() => void load()} />
+              <ErrorState
+                message={error}
+                retryLabel={t("memory.error.tryAgain")}
+                onRetry={() => void load()}
+              />
             ) : !memories || memories.length === 0 ? (
               <EmptyState onAdd={() => setCreateOpen(true)} />
             ) : filteredMemories && filteredMemories.length === 0 ? (
               <p className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-6 text-center text-xs text-text-tertiary">
-                No memories match &ldquo;{searchQuery}&rdquo;.
+                {t("memory.noResults", { query: searchQuery })}
               </p>
             ) : (
               <div className="space-y-2">
@@ -400,12 +425,10 @@ export default function MemorySettingsPage() {
 
         <section>
           <h2 className="text-sm font-semibold text-text-primary">
-            Temporary chat
+            {t("memory.temporary.title")}
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
-            Start a conversation that doesn't use or create memory. Useful
-            when you don't want a particular topic feeding into your saved
-            facts.
+            {t("memory.temporary.description")}
           </p>
           <button
             type="button"
@@ -413,7 +436,7 @@ export default function MemorySettingsPage() {
             className="focus-ring mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-elevated"
           >
             <Brain className="h-3.5 w-3.5" />
-            Start temporary chat
+            {t("memory.temporary.button")}
           </button>
         </section>
 
@@ -426,11 +449,10 @@ export default function MemorySettingsPage() {
             is the final option in the Danger zone below. */}
         <section>
           <h2 className="text-sm font-semibold text-text-primary">
-            Data management
+            {t("memory.export.title")}
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
-            Download a JSON snapshot of every memory the AI has stored about
-            you. The export expires after 24 hours.
+            {t("memory.export.description")}
           </p>
           <button
             type="button"
@@ -439,7 +461,7 @@ export default function MemorySettingsPage() {
             className="focus-ring mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Download className="h-3.5 w-3.5" />
-            {exporting ? "Preparing export…" : "Export my memories"}
+            {exporting ? t("memory.export.busy") : t("memory.export.button")}
           </button>
         </section>
 
@@ -447,11 +469,10 @@ export default function MemorySettingsPage() {
 
         <section>
           <h2 className="text-sm font-semibold text-status-danger">
-            Danger zone
+            {t("memory.danger.title")}
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
-            Clear every saved memory. The chat history stays — only the
-            cross-conversation facts the AI remembers about you are removed.
+            {t("memory.danger.clearDescription")}
           </p>
           <button
             type="button"
@@ -460,7 +481,7 @@ export default function MemorySettingsPage() {
             className="focus-ring mt-3 inline-flex items-center gap-1.5 rounded-lg border border-status-danger/40 bg-transparent px-3 py-1.5 text-xs text-status-danger transition-colors hover:bg-status-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Clear all memories
+            {t("memory.danger.clearButton")}
           </button>
 
           {/* S9 — permanent delete (GDPR right-to-erasure). HARD
@@ -469,9 +490,10 @@ export default function MemorySettingsPage() {
               ConfirmDialog gates the action, and the next prompt
               forces the literal phrase the backend enforces. */}
           <p className="mt-6 text-sm text-text-secondary">
-            <span className="font-semibold text-status-danger">Permanently delete all data.</span>{" "}
-            Irreversibly remove every memory, event, conversation state, and
-            source attribution. Past export files are also unlinked.
+            <span className="font-semibold text-status-danger">
+              {t("memory.danger.purgeDescriptionPrefix")}
+            </span>{" "}
+            {t("memory.danger.purgeDescription")}
           </p>
           <button
             type="button"
@@ -480,7 +502,7 @@ export default function MemorySettingsPage() {
             className="focus-ring mt-3 inline-flex items-center gap-1.5 rounded-lg border border-status-danger bg-status-danger/10 px-3 py-1.5 text-xs font-medium text-status-danger transition-colors hover:bg-status-danger/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            {purging ? "Deleting…" : "Permanently delete everything"}
+            {purging ? t("memory.danger.purgeBusy") : t("memory.danger.purgeButton")}
           </button>
         </section>
       </main>
@@ -500,27 +522,30 @@ export default function MemorySettingsPage() {
       />
       <ConfirmDialog
         open={confirmClear}
-        title="Clear all memories?"
-        body="This will remove every saved memory for your account. This action cannot be undone."
-        confirmLabel="Clear all"
+        title={t("memory.confirm.clearTitle")}
+        body={t("memory.confirm.clearBody")}
+        cancelLabel={t("memory.confirm.cancel")}
+        confirmLabel={t("memory.confirm.clearAction")}
         danger
         onCancel={() => setConfirmClear(false)}
         onConfirm={() => void handleClearAll()}
       />
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="Delete this memory?"
+        title={t("memory.confirm.deleteTitle")}
         body={pendingDelete ? `"${pendingDelete.content}"` : ""}
-        confirmLabel="Delete"
+        cancelLabel={t("memory.confirm.cancel")}
+        confirmLabel={t("memory.confirm.deleteAction")}
         danger
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => void confirmDelete()}
       />
       <ConfirmDialog
         open={confirmPurge}
-        title="Permanently delete all data?"
-        body="This will irreversibly delete every memory, memory event, conversation state, and source attribution. It also unlinks any past export files. You'll need to type the confirmation phrase next."
-        confirmLabel="Continue"
+        title={t("memory.confirm.purgeTitle")}
+        body={t("memory.confirm.purgeBody")}
+        cancelLabel={t("memory.confirm.cancel")}
+        confirmLabel={t("memory.confirm.purgeAction")}
         danger
         onCancel={() => setConfirmPurge(false)}
         onConfirm={() => void handlePermanentPurge()}
@@ -570,22 +595,29 @@ function LoadingSkeleton() {
   );
 }
 
+// EmptyState — communicates that memory is automatic. AI learns
+// from natural conversation; the Add button is secondary.
 function EmptyState({ onAdd }: { onAdd: () => void }) {
+  const t = useT();
   return (
     <div className="rounded-lg border border-border-subtle bg-bg-surface px-6 py-10 text-center">
-      <Brain className="mx-auto h-8 w-8 text-text-tertiary" />
-      <p className="mt-3 text-sm text-text-secondary">No memories saved yet</p>
-      <p className="mt-1 text-xs text-text-muted">
-        Tell the AI &ldquo;จำไว้ว่า…&rdquo; or &ldquo;remember that…&rdquo; in
-        any chat to save facts, or add them manually.
+      <Brain className="mx-auto h-9 w-9 text-text-tertiary" />
+      <p className="mt-4 text-sm font-medium text-text-primary">
+        {t("memory.empty.title")}
+      </p>
+      <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-text-secondary">
+        {t("memory.empty.description")}
+      </p>
+      <p className="mx-auto mt-2 max-w-md text-xs italic text-text-muted">
+        {t("memory.empty.hint")}
       </p>
       <button
         type="button"
         onClick={onAdd}
-        className="focus-ring mx-auto mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-elevated"
+        className="focus-ring mx-auto mt-5 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
         <Plus className="h-3.5 w-3.5" />
-        Add memory
+        {t("memory.addMemory")}
       </button>
     </div>
   );
@@ -593,9 +625,11 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 function ErrorState({
   message,
+  retryLabel,
   onRetry,
 }: {
   message: string;
+  retryLabel: string;
   onRetry: () => void;
 }) {
   return (
@@ -607,7 +641,7 @@ function ErrorState({
         onClick={onRetry}
         className="focus-ring mt-3 rounded-md px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
-        Try again
+        {retryLabel}
       </button>
     </div>
   );
@@ -619,6 +653,7 @@ function ConfirmDialog({
   open,
   title,
   body,
+  cancelLabel,
   confirmLabel,
   danger,
   onCancel,
@@ -627,6 +662,7 @@ function ConfirmDialog({
   open: boolean;
   title: string;
   body: string;
+  cancelLabel: string;
   confirmLabel: string;
   danger?: boolean;
   onCancel: () => void;
@@ -645,7 +681,7 @@ function ConfirmDialog({
             onClick={onCancel}
             className="focus-ring rounded-lg border border-border bg-transparent px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             type="button"

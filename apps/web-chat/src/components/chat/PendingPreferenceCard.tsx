@@ -16,6 +16,7 @@
 import { Check, X } from "lucide-react";
 
 import { timeAgo } from "@/components/workspace/workspaceUtil";
+import { useT } from "@/lib/i18n";
 import type { Memory } from "@/lib/types";
 
 interface Props {
@@ -26,13 +27,18 @@ interface Props {
 }
 
 export function PendingPreferenceCard({ memory, onConfirm, onReject, saving }: Props) {
+	const t = useT();
 	const metaParts: string[] = [];
 	if (memory.category) metaParts.push(memory.category);
-	metaParts.push("inferred");
+	metaParts.push(t("memory.type.inferred"));
 	if (memory.source_conversation_id) {
-		metaParts.push(`from a conversation ${timeAgo(memory.created_at)}`);
+		metaParts.push(
+			t("memory.card.source.fromConvAgo", { time: timeAgo(memory.created_at) }),
+		);
 	} else {
-		metaParts.push(`detected ${timeAgo(memory.created_at)}`);
+		metaParts.push(
+			t("memory.card.source.detectedAgo", { time: timeAgo(memory.created_at) }),
+		);
 	}
 
 	return (
@@ -54,7 +60,7 @@ export function PendingPreferenceCard({ memory, onConfirm, onReject, saving }: P
 					className="focus-ring inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
 				>
 					<Check className="h-3.5 w-3.5" aria-hidden />
-					Confirm
+					{t("memory.pending.confirm")}
 				</button>
 				<button
 					type="button"
@@ -63,7 +69,7 @@ export function PendingPreferenceCard({ memory, onConfirm, onReject, saving }: P
 					className="focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:opacity-60"
 				>
 					<X className="h-3.5 w-3.5" aria-hidden />
-					Reject
+					{t("memory.pending.reject")}
 				</button>
 			</div>
 		</div>
