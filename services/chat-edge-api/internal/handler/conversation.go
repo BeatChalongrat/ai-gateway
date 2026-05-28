@@ -42,6 +42,11 @@ type ConversationHandler struct {
 	// Optional. Powers GET /conversations/{id}/state — the S3
 	// read-only surface for the structured conversation-state row.
 	states *service.ConversationStateService
+	// Optional. Powers GET /conversations/{id}/context-info —
+	// dry-run of the S4 context compiler so the operator (or a
+	// future UI debug panel) can see the budget breakdown without
+	// actually sending a request.
+	messages *service.MessageService
 }
 
 func NewConversationHandler(c *service.ConversationService) *ConversationHandler {
@@ -68,6 +73,13 @@ func (h *ConversationHandler) SetTitleService(t *service.TitleService) {
 // row to the frontend.
 func (h *ConversationHandler) SetConversationStateService(s *service.ConversationStateService) {
 	h.states = s
+}
+
+// SetMessageService wires the dry-run path for the S4
+// /context-info endpoint. Optional — without it the endpoint
+// returns 503.
+func (h *ConversationHandler) SetMessageService(m *service.MessageService) {
+	h.messages = m
 }
 
 // SetExportSources wires the dependencies the /export endpoint
@@ -461,6 +473,53 @@ func (h *ConversationHandler) GetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(state)
+}
+
+// ---------------------------------------------------------------------------
+// Get compiled-context preview — GET /conversations/{id}/context-info
+// ---------------------------------------------------------------------------
+
+// GetContextInfo runs the S4 ContextCompiler in dry-run mode against
+// the current conversation state. Returns the budget breakdown +
+// "messages we'd send" preview so the operator (and a future
+// debug UI panel) can see how compaction will behave before
+// sending a real message.
+//
+// Ownership is enforced inside MessageService.InspectContext; this
+// handler only translates auth + URL params.
+func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Request) {
+	if h.messages == nil {
+		WriteError(w, http.StatusServiceUnavailable, CodeInternalError, "context inspection unavailable")
+		return
+	}
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	compiled, err := h.messages.InspectContext(r.Context(), convID, caller.UserID, caller.TenantUUID)
+	if err != nil {
+		if errors.Is(err, service.ErrMessageConversationNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"conversation_id":       convID.String(),
+		"total_budget":          compiled.Budget.TotalBudget,
+		"system_prompt_tokens":  compiled.Budget.SystemPromptTokens,
+		"output_reserve":        compiled.Budget.OutputReserve,
+		"tool_reserve":          compiled.Budget.ToolReserve,
+		"messages_budget":       compiled.Budget.MessagesRemaining,
+		"messages_total":        compiled.MessagesTotal,
+		"messages_would_send":   compiled.MessagesSent,
+		"compacted":             compiled.Compacted,
+		"extraction_triggered":  compiled.ExtractionTriggered,
+	})
 }
 
 // ---------------------------------------------------------------------------

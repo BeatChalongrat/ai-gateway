@@ -171,6 +171,13 @@ func New(
 			// goals / decisions / tasks if it wants to in future.
 			r.Get("/conversations/{id}/state", h.Conversation.GetState)
 
+			// S4 — Context compiler dry-run. Returns the token
+			// budget breakdown + how many messages would be sent
+			// on the next turn without actually sending one.
+			// Useful for debugging long conversations + powering
+			// a future "your chat is getting long" UI nudge.
+			r.Get("/conversations/{id}/context-info", h.Conversation.GetContextInfo)
+
 			// Conversation sharing (authenticated half — the
 			// public share-view endpoint is registered outside the
 			// RequireAuth subgroup below).
