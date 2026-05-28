@@ -3,50 +3,68 @@
 // Minimal model selector — Claude-style.
 //
 // Trigger pill: model name + chevron, no provider icon, no badge.
+// When the user has Auto selected the pill reads "Auto" with a
+// Sparkles glyph; the backend receives the literal "auto" sentinel
+// and runs its own per-request resolution.
+//
 // Dropdown: one row per model (name on the left, context size muted
-// on the right, checkmark when active). "Auto" sits at the top and
-// resolves to the first fast-tier model on pick — the pill then
-// reads "Auto" until the user explicitly chooses a model.
+// on the right, checkmark when active). "Auto" sits at the top with
+// an i18n-aware description ("Selects the best model automatically").
 
 import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
-import { useModelStore } from "@/stores/modelStore";
+import { useT } from "@/lib/i18n";
+import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 import type { ModelEntry } from "@/lib/types";
 
 interface Props {
   /** Model id displayed in the trigger pill. When omitted, falls back
    *  to modelStore.selectedModelId. Conversation pages pass the
    *  conversation's model_id so the pill reflects the conv's binding
-   *  rather than the global default. */
+   *  rather than the global default. The literal value "auto" is
+   *  treated as the Auto sentinel. */
   activeModelId?: string | null;
   disabled?: boolean;
   /** Compact pill mode used inside ChatInput. */
   compact?: boolean;
-  /** Called when the user picks a model. Optional — defaults to
-   *  ``modelStore.selectModel``. Conversation pages override to
-   *  additionally PATCH the conversation's model_id. */
+  /** Called when the user picks a model. The model entry passed in
+   *  for the Auto row carries `id === "auto"` — the parent forwards
+   *  that string to the backend verbatim. Optional — defaults to
+   *  ``modelStore.selectModel`` / ``selectAuto``. */
   onPick?: (model: ModelEntry) => void;
 }
 
-const AUTO_ID = "__auto__";
+// Synthetic ModelEntry used to fire onPick when the user clicks
+// Auto. The id is the same sentinel the backend special-cases —
+// the rest of the fields are filler so the existing onPick contract
+// keeps its non-null shape.
+const AUTO_PICK_ENTRY: ModelEntry = {
+  id: AUTO_MODEL_ID,
+  name: "Auto",
+  provider: "auto",
+  description: "",
+  context_window: 0,
+  capabilities: [],
+  icon: "",
+  category: "fast",
+  allowed: true,
+};
 
 export function ModelSelector({ activeModelId, disabled, compact, onPick }: Props) {
+  const t = useT();
   const models = useModelStore((s) => s.models);
   const selectedId = useModelStore((s) => s.selectedModelId);
   const selectModel = useModelStore((s) => s.selectModel);
   const selectAuto = useModelStore((s) => s.selectAuto);
-  const resolveAuto = useModelStore((s) => s.resolveAutoModelId);
-  const autoMode = useModelStore((s) => s.autoMode);
   const modelsLoaded = useModelStore((s) => s.loaded);
   const modelsLoading = useModelStore((s) => s.loading);
 
+  // Active id resolution: prefer the explicit prop (conversation
+  // binding), fall back to the persisted global default.
   const activeId = activeModelId ?? selectedId;
-  const activeModel = models.find((m) => m.id === activeId);
-  // Auto mode applies to the global default; when a conversation
-  // passes its own activeModelId, the pill follows that id and the
-  // auto label only shows on the landing page.
-  const showAutoLabel = autoMode && (activeModelId === undefined || activeModelId === selectedId);
+  const isAuto = activeId === AUTO_MODEL_ID;
+  const activeModel = isAuto ? null : models.find((m) => m.id === activeId);
 
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -58,7 +76,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
   // outweighs the navigation benefit.
   const flat = useMemo<Array<{ id: string; entry: ModelEntry | null }>>(() => {
     return [
-      { id: AUTO_ID, entry: null },
+      { id: AUTO_MODEL_ID, entry: null },
       ...models.map((m) => ({ id: m.id, entry: m })),
     ];
   }, [models]);
@@ -84,14 +102,10 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
   }, [open]);
 
   const pickAuto = useCallback(() => {
-    const resolvedId = selectAuto();
-    if (!resolvedId) {
-      setOpen(false);
-      return;
-    }
     if (onPick) {
-      const resolvedModel = useModelStore.getState().models.find((m) => m.id === resolvedId);
-      if (resolvedModel) onPick(resolvedModel);
+      onPick(AUTO_PICK_ENTRY);
+    } else {
+      selectAuto();
     }
     setOpen(false);
   }, [onPick, selectAuto]);
@@ -117,7 +131,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
       e.preventDefault();
       const row = flat[highlight];
       if (!row) return;
-      if (row.id === AUTO_ID) pickAuto();
+      if (row.id === AUTO_MODEL_ID) pickAuto();
       else if (row.entry) pick(row.entry);
     } else if (e.key === "Escape") {
       e.preventDefault();
@@ -125,11 +139,11 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
     }
   }
 
-  const triggerLabel = showAutoLabel
-    ? "Auto"
+  const triggerLabel = isAuto
+    ? t("model.auto.name")
     : activeModel
       ? shortLabel(activeModel.name ?? activeModel.id)
-      : "Select model";
+      : t("model.selectModel");
 
   return (
     <div ref={ref} className="relative" onKeyDown={handleKeyDown}>
@@ -142,8 +156,11 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
         }`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Switch model"
+        title={t("model.selectModel")}
       >
+        {isAuto ? (
+          <Sparkles width={12} height={12} className="text-text-tertiary" aria-hidden />
+        ) : null}
         <span className="font-medium text-text-primary">{triggerLabel}</span>
         <svg width={10} height={10} viewBox="0 0 24 24" fill="none" aria-hidden className="text-text-muted">
           <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -167,7 +184,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
               border border-border bg-bg-surface text-xs shadow-2xl
               fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-2xl safe-bottom
               sm:absolute sm:bottom-full sm:left-0 sm:inset-x-auto sm:mb-2
-              sm:w-[min(260px,90vw)] sm:max-h-[360px] sm:rounded-xl
+              sm:w-[min(280px,90vw)] sm:max-h-[360px] sm:rounded-xl
               sm:sheet-up:animate-none
             "
           >
@@ -190,17 +207,13 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
               ) : null}
 
               {flat.map((row, idx) => {
-                if (row.id === AUTO_ID) {
-                  const resolvedAutoId = resolveAuto();
-                  const resolvedLabel = resolvedAutoId
-                    ? shortLabel(models.find((m) => m.id === resolvedAutoId)?.name ?? resolvedAutoId)
-                    : null;
+                if (row.id === AUTO_MODEL_ID) {
                   return (
                     <Row
                       key="auto"
-                      label="Auto"
-                      sub={resolvedLabel ? `Uses ${resolvedLabel}` : undefined}
-                      selected={showAutoLabel}
+                      label={t("model.auto.name")}
+                      sub={t("model.auto.description")}
+                      selected={isAuto}
                       highlighted={highlight === idx}
                       onClick={pickAuto}
                       onHover={() => setHighlight(idx)}
@@ -209,7 +222,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
                   );
                 }
                 const m = row.entry!;
-                const isSelected = !showAutoLabel && m.id === activeId;
+                const isSelected = !isAuto && m.id === activeId;
                 return (
                   <Row
                     key={m.id}
@@ -222,13 +235,6 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
                   />
                 );
               })}
-
-              {/* Separator under Auto. Rendered via the gap between
-                  the Auto row and the first model row so we don't
-                  need a real <hr>. */}
-              {flat.length > 1 ? (
-                <div className="mx-3 my-1 border-t border-border-subtle" style={{ order: 1 }} aria-hidden />
-              ) : null}
             </div>
           </div>
         </>

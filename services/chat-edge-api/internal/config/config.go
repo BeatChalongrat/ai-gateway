@@ -182,11 +182,32 @@ func (c *Config) Models() []ModelEntry {
 // ModelAllowed returns true iff “id“ matches an entry in the
 // configured model list. Used by handlers to gate
 // conversation/message creation.
+//
+// The literal "auto" id is also accepted as a sentinel: the
+// service layer (service.ResolveAutoModel) turns it into a
+// concrete catalog id at gateway-call time, so admin allow-list
+// gating still happens — just one indirection later.
 func (c *Config) ModelAllowed(id string) bool {
+	if id == "auto" {
+		return true
+	}
 	for _, m := range c.Models() {
 		if m.ID == id {
 			return true
 		}
 	}
 	return false
+}
+
+// ModelIDs returns just the ids from Models(). Powers the Auto-
+// model resolver in the service layer (service.ResolveAutoModel),
+// which only needs the id strings to classify tier + pick a
+// concrete model per-request.
+func (c *Config) ModelIDs() []string {
+	ms := c.Models()
+	out := make([]string, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, m.ID)
+	}
+	return out
 }
