@@ -90,6 +90,12 @@ type MessageService struct {
 	// context window before shipping to the gateway. Falls back to
 	// the legacy "send everything prepareSend loaded" path when nil.
 	compiler *ContextCompiler
+	// Optional. Persists per-response context sources (S7). When
+	// wired, every send path collects sources during compile + tool
+	// execution and flushes them to chat.response_context_sources
+	// in the finish callback. Nil-safe — no source rows when
+	// unwired (tests, downgrade path).
+	sourceRepo *repository.ResponseContextSourceRepo
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -137,6 +143,10 @@ type RAGReader interface {
 // conv.MemoryEnabled gate before calling.
 type MemoryReader interface {
 	BuildMemoryContext(ctx context.Context, userID, tenantID uuid.UUID) string
+	// S7 — same shape but also returns the per-memory source
+	// attribution list. Concrete MemoryService implements both;
+	// fakes can implement either depending on what they exercise.
+	BuildMemoryContextWithSources(ctx context.Context, userID, tenantID uuid.UUID) (string, []ContextSource)
 }
 
 // ExcelLookup is the slice of the file repo the Phase 4 Excel
@@ -274,6 +284,44 @@ func (s *MessageService) SetSearchService(svc *SearchService) {
 	}
 }
 
+// SetResponseSourceRepo wires the S7 attribution persist path.
+// Without it, sources collected during compile + tool execution
+// are simply dropped at the end of the turn (no errors, no rows).
+func (s *MessageService) SetResponseSourceRepo(r *repository.ResponseContextSourceRepo) {
+	s.sourceRepo = r
+}
+
+// persistSources flushes an accumulator's snapshot to
+// chat.response_context_sources. Best-effort: a failed insert
+// logs a warning but never blocks the turn. Uses background ctx
+// so a client disconnect during the very last instant doesn't
+// strand the rows.
+func (s *MessageService) persistSources(
+	parent context.Context,
+	asstMsgID, userID, tenantID, convID uuid.UUID,
+	acc *SourcesAccumulator,
+) {
+	if s.sourceRepo == nil || acc == nil {
+		return
+	}
+	snapshot := acc.Snapshot()
+	if len(snapshot) == 0 {
+		return
+	}
+	rows := toModelSources(snapshot, asstMsgID.String(), userID.String(), tenantID.String(), convID.String())
+	if len(rows) == 0 {
+		return
+	}
+	// Detach: persist runs on whichever goroutine called finish,
+	// but the request ctx may already be cancelled. Use background.
+	bg := context.Background()
+	if err := s.sourceRepo.CreateBatch(bg, rows); err != nil {
+		slog.Warn("context sources: persist failed",
+			"asst_msg", asstMsgID.String(), "count", len(rows), "err", err)
+	}
+	_ = parent // kept for signature symmetry with other persist helpers
+}
+
 // ---------------------------------------------------------------------------
 // ListMessages — handler reads conversation history
 // ---------------------------------------------------------------------------
@@ -336,7 +384,8 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	}
 
 	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs)
+	sourcesAcc := NewSourcesAccumulator()
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs, sourcesAcc)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
@@ -364,6 +413,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 				TenantID:       in.TenantID,
 				UserID:         in.UserID,
 				ConversationID: conv.ID,
+				Sources:        sourcesAcc,
 			})
 			gwReq.Messages = append(gwReq.Messages, tcMsg)
 			gwReq.Messages = append(gwReq.Messages, results...)
@@ -404,6 +454,9 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	}
 
 	s.finalizeConversation(ctx, conv, userMsg, asstMsg)
+	// S7 — persist the per-turn source attribution. Best-effort;
+	// nil-safe when the source repo isn't wired.
+	s.persistSources(ctx, asstMsg.ID, in.UserID, in.TenantID, conv.ID, sourcesAcc)
 
 	return &SendResult{UserMessage: userMsg, AssistantMessage: asstMsg}, nil
 }
@@ -483,7 +536,8 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// external POST /cancel endpoint invokes CancelStream(convID).
 	streamCtx, cancel := context.WithCancel(context.Background())
 	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs)
+	sourcesAcc := NewSourcesAccumulator()
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs, sourcesAcc)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
@@ -517,6 +571,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 			UserID:         in.UserID,
 			ConversationID: conv.ID,
 			MessageID:      asstMsg.ID,
+			Sources:        sourcesAcc,
 		},
 		out: ch,
 	})
@@ -561,6 +616,10 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		assistantFinal.TokenUsageInput = tokInput
 		assistantFinal.TokenUsageOutput = tokOutput
 		s.finalizeConversation(persistCtx, conv, userMsg, &assistantFinal)
+		// S7 — persist the per-turn source attribution after the
+		// assistant message has been finalised. Best-effort; does
+		// nothing when sourceRepo isn't wired.
+		s.persistSources(persistCtx, asstMsg.ID, in.UserID, in.TenantID, conv.ID, sourcesAcc)
 	}
 
 	return &StreamHandle{
@@ -737,7 +796,8 @@ func (s *MessageService) openAssistantStream(
 	// history (the prompt the original assistant turn was answering).
 	ragQuery := lastUserContent(history)
 	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs)
+	sourcesAcc := NewSourcesAccumulator()
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs, sourcesAcc)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -771,6 +831,7 @@ func (s *MessageService) openAssistantStream(
 			UserID:         userID,
 			ConversationID: conv.ID,
 			MessageID:      asstMsg.ID,
+			Sources:        sourcesAcc,
 		},
 		out: ch,
 	})
@@ -803,6 +864,9 @@ func (s *MessageService) openAssistantStream(
 		} else {
 			_ = s.conversations.UpdateTimestamp(persistCtx, conv.ID)
 		}
+		// S7 — persist per-turn source attribution. Same pattern
+		// as SendStream's finish callback.
+		s.persistSources(persistCtx, asstMsg.ID, userID, conv.TenantID, conv.ID, sourcesAcc)
 	}
 
 	return &StreamHandle{
@@ -988,7 +1052,8 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		ragQuery = lastUserContent(history)
 	}
 	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs)
+	sourcesAcc := NewSourcesAccumulator()
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs, sourcesAcc)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -1022,6 +1087,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 			UserID:         userID,
 			ConversationID: conv.ID,
 			MessageID:      asstMsg.ID,
+			Sources:        sourcesAcc,
 		},
 		out: ch,
 	})
@@ -1046,6 +1112,8 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		_ = s.messages.UpdateContent(persistCtx, asstMsg.ID, content, status, tokInput, tokOutput)
 		// Bump message_count + updated_at so the sidebar refreshes.
 		_ = s.conversations.IncrementMessageCount(persistCtx, conv.ID, 2)
+		// S7 — persist per-turn source attribution.
+		s.persistSources(persistCtx, asstMsg.ID, userID, conv.TenantID, conv.ID, sourcesAcc)
 	}
 
 	return &StreamHandle{
@@ -1169,31 +1237,43 @@ func (s *MessageService) buildSystemPrefix(
 	conv *model.Conversation,
 	ragQuery string,
 ) string {
+	text, _ := s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery)
+	return text
+}
+
+// buildSystemPrefixWithSources is the S7 variant: assembles the
+// same prefix as buildSystemPrefix AND returns the ContextSource
+// list each block contributed (memory entries, state goal).
+//
+// File / RAG / Excel / Doc / Pptx blocks DO NOT emit sources yet
+// — wiring them is a separate session (each context builder needs
+// its own *WithSources variant). For S7 the attribution covers
+// memory + state + compaction + search-tool which captures the
+// primary "how did the AI know X?" stories.
+func (s *MessageService) buildSystemPrefixWithSources(
+	ctx context.Context,
+	tenantID, userID uuid.UUID,
+	conv *model.Conversation,
+	ragQuery string,
+) (string, []ContextSource) {
 	parts := make([]string, 0, 5)
+	sources := make([]ContextSource, 0, 8)
+
 	if s.prefsSvc != nil {
 		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
 			parts = append(parts, p)
 		}
 	}
-	// S1 — memory context. Sits between persona (custom instructions)
-	// and the conversation-scoped blocks (RAG, files, plan capabilities)
-	// so cross-conversation facts ("user prefers Thai", "user's name
-	// is Beat") shape the model's tone but don't override an explicit
-	// RAG citation or a file's actual contents. Gated by
-	// conv.MemoryEnabled — skipped for "temporary chats".
 	if s.memorySvc != nil && conv != nil && conv.MemoryEnabled {
-		if mem := s.memorySvc.BuildMemoryContext(ctx, userID, tenantID); mem != "" {
+		if mem, srcs := s.memorySvc.BuildMemoryContextWithSources(ctx, userID, tenantID); mem != "" {
 			parts = append(parts, mem)
+			sources = append(sources, srcs...)
 		}
 	}
-	// S3 — structured conversation state. Sits AFTER user memory
-	// (cross-conversation) and BEFORE file / RAG blocks (this-
-	// conversation specifics). The goal / decisions / artifacts /
-	// tasks recorded here survive the rolling message-history window
-	// so the model still knows what was decided 80 messages ago.
 	if s.stateSvc != nil && conv != nil {
-		if st := s.stateSvc.BuildStateContext(ctx, conv.ID, userID, tenantID); st != "" {
+		if st, srcs := s.stateSvc.BuildStateContextWithSources(ctx, conv.ID, userID, tenantID); st != "" {
 			parts = append(parts, st)
+			sources = append(sources, srcs...)
 		}
 	}
 	if conv != nil {
@@ -1213,7 +1293,7 @@ func (s *MessageService) buildSystemPrefix(
 			parts = append(parts, p)
 		}
 	}
-	return strings.Join(parts, "\n\n")
+	return strings.Join(parts, "\n\n"), sources
 }
 
 // excelContext renders the Phase-4 Excel system block when the
@@ -1790,26 +1870,28 @@ func (s *MessageService) compileAndBuildRequest(
 	ragQuery string,
 	history []model.Message,
 	imageURLs []string,
+	sources *SourcesAccumulator,
 ) GatewayChatRequest {
-	// Tool-reserve budget — the actual attachment happens at the
-	// call site after this function returns (so the compiler's
-	// budget math accounts for tool definitions even though we
-	// don't ship them through Compile itself). The S6 search tool
-	// stays visible in temporary chats, so we let ToolDefs(conv)
-	// decide rather than gating on conv.MemoryEnabled here.
 	numTools := 0
 	if s.toolExec != nil {
 		numTools = len(s.toolExec.ToolDefs(conv))
 	}
-	// Closure so the compiler can ask for a fresh prefix AFTER
-	// triggering state extraction without re-importing every
-	// dependency MessageService has wired.
-	build := func() string {
-		return s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery)
+	// Source-aware closure: the same call site can run multiple
+	// times inside Compile (initial + post-extraction rebuild),
+	// so the closure returns both the prefix text AND the
+	// ContextSource list each block contributed. Compile uses the
+	// MOST RECENT call's sources via CompiledContext.Sources.
+	build := func() (string, []ContextSource) {
+		return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery)
 	}
 
 	if s.compiler == nil {
-		return buildGatewayRequestWithImages(conv.ModelID, history, build(), imageURLs)
+		// Legacy fallback: no compiler wired. Still collect S7
+		// sources from the single prefix build so attribution
+		// works in test setups.
+		prefix, srcs := build()
+		sources.Add(srcs...)
+		return buildGatewayRequestWithImages(conv.ModelID, history, prefix, imageURLs)
 	}
 
 	compiled, err := s.compiler.Compile(ctx, CompileInputs{
@@ -1827,8 +1909,15 @@ func (s *MessageService) compileAndBuildRequest(
 		// "always send something rather than fail the turn".
 		slog.Warn("context_compiler: fell back to legacy assembly",
 			"conv", conv.ID.String(), "err", err)
-		return buildGatewayRequestWithImages(conv.ModelID, history, build(), imageURLs)
+		prefix, srcs := build()
+		sources.Add(srcs...)
+		return buildGatewayRequestWithImages(conv.ModelID, history, prefix, imageURLs)
 	}
+	// S7 — flush the compiler's sources (memory + state +
+	// compaction marker) into the per-turn accumulator so the
+	// finish() callback can persist them alongside any search-
+	// tool hits the model adds during the turn.
+	sources.Add(compiled.Sources...)
 	return buildGatewayRequestWithImages(conv.ModelID, compiled.History, compiled.SystemPrefix, imageURLs)
 }
 
@@ -1885,8 +1974,8 @@ func (s *MessageService) InspectContext(
 		TenantID: tenantID,
 		History:  history,
 		ImageURLs: imageURLs,
-		BuildPrefix: func() string {
-			return s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery)
+		BuildPrefix: func() (string, []ContextSource) {
+			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery)
 		},
 		NumTools: numTools,
 	})
