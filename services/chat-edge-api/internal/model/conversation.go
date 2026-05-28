@@ -39,4 +39,24 @@ type Conversation struct {
 	//   - omits the save_memory / list_memories tools from the
 	//     gateway request's tool list
 	MemoryEnabled bool
+
+	// T4 — Thinking Mode (migration 019). ReasoningEnabled is the
+	// master toggle; when true the message-build path adds the
+	// ``reasoning`` block to the Gateway request and the SSE pump
+	// forwards reasoning_summary_delta + analysis_status frames to
+	// the client. Default false so existing conversations are
+	// byte-identical to their pre-T4 behaviour.
+	//
+	// ReasoningMode mirrors the public ReasoningConfig.mode values
+	// (off / auto / low / medium / high). Persisted even when
+	// ReasoningEnabled is false so the previously-chosen depth
+	// restores when the user re-enables.
+	//
+	// ShowReasoningSummary gates wire emission of the reasoning
+	// channel. When false the Gateway still asks the model to
+	// think (better answers) but the chat-edge SSE pump drops the
+	// reasoning frames before they reach the browser.
+	ReasoningEnabled     bool
+	ReasoningMode        string
+	ShowReasoningSummary bool
 }

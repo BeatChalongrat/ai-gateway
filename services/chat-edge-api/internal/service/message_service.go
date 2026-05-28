@@ -486,7 +486,7 @@ type StreamHandle struct {
 	ConversationID uuid.UUID
 
 	Events chan StreamUpdate
-	finish func(content string, finishReason string, usage *GatewayChatUsage)
+	finish func(content string, reasoning string, finishReason string, usage *GatewayChatUsage)
 	cancel func()
 }
 
@@ -494,12 +494,29 @@ type StreamHandle struct {
 // terminal metadata. The handler emits a “content_delta“ SSE
 // event for every non-empty Delta and a “message_complete“ SSE
 // event when Done is true.
+//
+// T4 — Thinking Mode adds two pass-through channels:
+//   - ReasoningDelta: emitted by the Gateway as
+//     ``reasoning_summary_delta`` frames; the handler forwards
+//     them to the frontend as ``reasoning_delta`` SSE events.
+//   - AnalysisStatus: ``started`` or ``completed`` markers that
+//     bracket the reasoning stream; the handler forwards them as
+//     ``analysis_status`` SSE events so the client can show a
+//     "thinking…" indicator without parsing every reasoning
+//     fragment.
+//
+// Each frame populates ONE of (Delta / ReasoningDelta /
+// AnalysisStatus) on a given update — the pump never combines
+// them so the handler can route to the right event verb cleanly.
 type StreamUpdate struct {
 	Delta        string
 	Done         bool
 	FinishReason string
 	Usage        *GatewayChatUsage
 	Err          error
+
+	ReasoningDelta string
+	AnalysisStatus string
 }
 
 // Cancel terminates the upstream gateway connection. Used by the
@@ -510,8 +527,13 @@ func (h *StreamHandle) Cancel() { h.cancel() }
 // exactly once after the Events channel is fully drained, even on
 // error (the handler still persists partial content with
 // status=error so the conversation timeline survives).
-func (h *StreamHandle) Finish(content, finishReason string, usage *GatewayChatUsage) {
-	h.finish(content, finishReason, usage)
+//
+// T4: ``reasoning`` is the accumulated reasoning summary text the
+// handler captured from StreamUpdate.ReasoningDelta. Empty string
+// when reasoning was off / no reasoning frames arrived — the
+// persist path skips the reasoning_content write in that case.
+func (h *StreamHandle) Finish(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+	h.finish(content, reasoning, finishReason, usage)
 }
 
 func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamHandle, error) {
@@ -590,7 +612,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 
 	// finish closes the message lifecycle. Caller invokes exactly
 	// once after consuming the events channel.
-	finish := func(content, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
 		// Always free the active-stream slot so a future POST /cancel
 		// for the same conversation doesn't dangle.
 		s.activeStreams.Delete(conv.ID)
@@ -622,6 +644,13 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		_ = s.messages.UpdateContent(
 			persistCtx, asstMsg.ID, content, status, tokInput, tokOutput,
 		)
+		// T4: persist reasoning summary if the model produced one.
+		// Skipped for empty / cancelled / error turns — the message
+		// has no useful reasoning to surface and we'd just clutter
+		// the row with the partial fragment.
+		if reasoning != "" && status == "completed" {
+			_ = s.messages.SetReasoningContent(persistCtx, asstMsg.ID, reasoning)
+		}
 		assistantFinal := *asstMsg
 		assistantFinal.ContentMasked = content
 		assistantFinal.Status = status
@@ -848,7 +877,7 @@ func (s *MessageService) openAssistantStream(
 		out: ch,
 	})
 
-	finish := func(content, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
 		status := "completed"
@@ -866,6 +895,10 @@ func (s *MessageService) openAssistantStream(
 			tokInput, tokOutput = &ti, &to
 		}
 		_ = s.messages.UpdateContent(persistCtx, asstMsg.ID, content, status, tokInput, tokOutput)
+		// T4: persist reasoning summary (regenerate path).
+		if reasoning != "" && status == "completed" {
+			_ = s.messages.SetReasoningContent(persistCtx, asstMsg.ID, reasoning)
+		}
 		assistantFinal := *asstMsg
 		assistantFinal.ContentMasked = content
 		assistantFinal.Status = status
@@ -1104,7 +1137,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		out: ch,
 	})
 
-	finish := func(content, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
 		status := "completed"
@@ -1122,6 +1155,10 @@ func (s *MessageService) openAssistantStreamWithBranch(
 			tokInput, tokOutput = &ti, &to
 		}
 		_ = s.messages.UpdateContent(persistCtx, asstMsg.ID, content, status, tokInput, tokOutput)
+		// T4: persist reasoning summary (edit-message path).
+		if reasoning != "" && status == "completed" {
+			_ = s.messages.SetReasoningContent(persistCtx, asstMsg.ID, reasoning)
+		}
 		// Bump message_count + updated_at so the sidebar refreshes.
 		_ = s.conversations.IncrementMessageCount(persistCtx, conv.ID, 2)
 		// S7 — persist per-turn source attribution.
@@ -1991,7 +2028,9 @@ func (s *MessageService) compileAndBuildRequest(
 		// works in test setups.
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		return buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
+		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
+		attachReasoning(&req, conv)
+		return req
 	}
 
 	compiled, err := s.compiler.Compile(ctx, CompileInputs{
@@ -2011,14 +2050,44 @@ func (s *MessageService) compileAndBuildRequest(
 			"conv", conv.ID.String(), "err", err)
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		return buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
+		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
+		attachReasoning(&req, conv)
+		return req
 	}
 	// S7 — flush the compiler's sources (memory + state +
 	// compaction marker) into the per-turn accumulator so the
 	// finish() callback can persist them alongside any search-
 	// tool hits the model adds during the turn.
 	sources.Add(compiled.Sources...)
-	return buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imageURLs)
+	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imageURLs)
+	attachReasoning(&req, conv)
+	return req
+}
+
+// attachReasoning sets the Gateway request's ``Reasoning`` field
+// when the conversation has thinking mode enabled (T4 — migration
+// 019). Called from compileAndBuildRequest after the request is
+// built so every send path (Send, Regenerate, EditMessage) opts in
+// consistently without duplicating the gating check.
+//
+// Gating:
+//   - conv.ReasoningEnabled must be true (master toggle).
+//   - conv.ReasoningMode must not be ``off`` or empty.
+// On a non-capable model the Gateway silently ignores the field
+// (per its per-adapter gate), so forwarding whenever the
+// conversation-level toggle is on stays safe.
+func attachReasoning(req *GatewayChatRequest, conv *model.Conversation) {
+	if conv == nil || !conv.ReasoningEnabled {
+		return
+	}
+	mode := conv.ReasoningMode
+	if mode == "" || mode == "off" {
+		return
+	}
+	req.Reasoning = &GatewayReasoningConfig{
+		Mode:        mode,
+		ShowSummary: conv.ShowReasoningSummary,
+	}
 }
 
 // resolveAutoIfNeeded returns the model id to ship to the gateway
@@ -2051,7 +2120,16 @@ func (s *MessageService) resolveAutoIfNeeded(
 	if s.models != nil {
 		available = s.models.ModelIDs()
 	}
-	resolved := ResolveAutoModel(message, hasFiles, hasImages, historyLen, available)
+	// T4: when the conversation has reasoning enabled, prefer a
+	// reasoning-capable model from the catalog. Falls through to
+	// the standard fast/flagship heuristic when no reasoning model
+	// is registered (Gateway silently ignores the reasoning param
+	// on a non-capable model so the request still succeeds — just
+	// without thinking output).
+	resolved := ResolveAutoModelWithReasoning(
+		message, hasFiles, hasImages, historyLen, available,
+		conv != nil && conv.ReasoningEnabled && conv.ReasoningMode != "" && conv.ReasoningMode != "off",
+	)
 	slog.Info("auto_model_resolved",
 		"conversation_id", conv.ID.String(),
 		"resolved_model", resolved,
@@ -2059,6 +2137,7 @@ func (s *MessageService) resolveAutoIfNeeded(
 		"has_files", hasFiles,
 		"has_images", hasImages,
 		"message_count", historyLen,
+		"reasoning_preferred", conv != nil && conv.ReasoningEnabled,
 	)
 	return resolved
 }
@@ -2410,6 +2489,17 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 					Usage:        ev.Usage,
 					FinishReason: ev.FinishReason,
 				}
+			}
+			// T4 reasoning frames — forwarded as separate updates so
+			// the handler can emit dedicated SSE event verbs. The
+			// Gateway never combines reasoning text with normal
+			// content text in the same frame, so distinct updates
+			// here preserve causal ordering on the wire.
+			if ev.ReasoningDelta != "" {
+				in.out <- StreamUpdate{ReasoningDelta: ev.ReasoningDelta}
+			}
+			if ev.AnalysisStatus != "" {
+				in.out <- StreamUpdate{AnalysisStatus: ev.AnalysisStatus}
 			}
 			if ev.Done {
 				// finish_reason="tool_calls" means another round.

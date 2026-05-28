@@ -142,6 +142,22 @@ class ApiClient {
       body: JSON.stringify({ memory_enabled: enabled }),
     });
   }
+  /** T4 — patch Thinking Mode preferences for a conversation.
+   *  Any subset of the three fields can be sent; the server uses
+   *  COALESCE to keep unset fields at their current value. */
+  setConversationReasoning(
+    id: string,
+    patch: {
+      reasoning_enabled?: boolean;
+      reasoning_mode?: string;
+      show_reasoning_summary?: boolean;
+    },
+  ) {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
   deleteConversation(id: string) {
     return this.raw(`/conversations/${id}`, { method: "DELETE" });
   }

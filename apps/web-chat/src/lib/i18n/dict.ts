@@ -293,6 +293,19 @@ export const en = {
   // ── Generic states ───────────────────────────────────────
   "memory.error.loadFailed": "Couldn’t load memories.",
   "memory.error.tryAgain": "Try again",
+
+  // ── Reasoning / Thinking Mode (T4) ──────────────────────
+  "reasoning.label": "Thinking",
+  "reasoning.toggle": "Toggle reasoning mode",
+  "reasoning.effort": "Reasoning effort",
+  "reasoning.analyzing": "Analyzing",
+  "reasoning.analyzed": "Analyzed",
+  "reasoning.duration": "{seconds}s",
+  "reasoning.mode.auto": "Auto",
+  "reasoning.mode.low": "Quick",
+  "reasoning.mode.medium": "Balanced",
+  "reasoning.mode.high": "Deep",
+  "reasoning.showSummary": "Show analysis",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -581,6 +594,19 @@ const th: Record<DictKey, string> = {
   // Generic states
   "memory.error.loadFailed": "โหลดความจำไม่สำเร็จ",
   "memory.error.tryAgain": "ลองใหม่",
+
+  // Reasoning / Thinking Mode (T4)
+  "reasoning.label": "วิเคราะห์",
+  "reasoning.toggle": "เปิด/ปิดโหมดวิเคราะห์",
+  "reasoning.effort": "ระดับการวิเคราะห์",
+  "reasoning.analyzing": "กำลังวิเคราะห์",
+  "reasoning.analyzed": "วิเคราะห์แล้ว",
+  "reasoning.duration": "{seconds} วิ",
+  "reasoning.mode.auto": "อัตโนมัติ",
+  "reasoning.mode.low": "เร็ว",
+  "reasoning.mode.medium": "สมดุล",
+  "reasoning.mode.high": "ละเอียด",
+  "reasoning.showSummary": "แสดงการวิเคราะห์",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

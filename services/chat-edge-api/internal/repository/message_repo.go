@@ -99,10 +99,16 @@ func (r *MessageRepo) ListByConversation(
 	// page is the LAST served row (see conversation_repo for the
 	// rationale) — never the probe row. Filters to is_active=true
 	// so inactive branches don't pollute the default view.
+	// T4: reasoning_content surfaces the thinking summary the model
+	// emitted for assistant turns where the user enabled reasoning.
+	// Only fetched on the user-facing list (this read powers the
+	// React chat thread); the context-building reads below leave it
+	// out so prompt history stays focused on visible content.
 	const q = `
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
-		       secure_trace_id, created_at, parent_id, branch_index, is_active
+		       secure_trace_id, created_at, parent_id, branch_index, is_active,
+		       reasoning_content
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
@@ -128,6 +134,7 @@ func (r *MessageRepo) ListByConversation(
 			&m.ContentMasked, &m.Status, &m.ModelID,
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
 			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
+			&m.ReasoningContent,
 		); err != nil {
 			return nil, false, fmt.Errorf("list scan: %w", err)
 		}
@@ -569,6 +576,29 @@ func (r *MessageRepo) BranchCountByParent(
 		out[pid] = n
 	}
 	return out, rows.Err()
+}
+
+// SetReasoningContent writes the per-message thinking summary
+// captured during a streaming assistant turn (T4 — migration 019).
+// Separate from UpdateContent so the existing 6 callsites don't
+// need to fan out a new parameter — success-path finish closures
+// call this BEFORE UpdateContent when ``reasoning != ""`` and
+// skip it otherwise. Empty / nil reasoning never reaches the DB.
+//
+// Idempotent: calling with the same text overwrites the same
+// value; calling with an empty string leaves the column NULL
+// (the caller is expected to skip the call instead).
+func (r *MessageRepo) SetReasoningContent(
+	ctx context.Context, msgID uuid.UUID, reasoning string,
+) error {
+	if reasoning == "" {
+		return nil
+	}
+	const q = `UPDATE chat.messages_masked SET reasoning_content = $2 WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, reasoning); err != nil {
+		return fmt.Errorf("set reasoning_content: %w", err)
+	}
+	return nil
 }
 
 // UpdateContent overwrites the content + status + token usage of

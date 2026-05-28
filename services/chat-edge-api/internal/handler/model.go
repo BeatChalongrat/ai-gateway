@@ -31,6 +31,21 @@ func NewModelHandler(cfg *config.Config) *ModelHandler {
 	return &ModelHandler{cfg: cfg}
 }
 
+// reasoningCapability mirrors the Gateway's ReasoningCapability
+// block (backend/app/schemas/public.py — T1). Surfaced on each
+// known reasoning-capable model so the frontend can render the
+// ReasoningToggle and the mode picker without an extra call.
+//
+// ``Modes`` lists every value the Gateway's ReasoningConfig.mode
+// Literal accepts so a new mode added Gateway-side requires only
+// a single-line change here.
+type reasoningCapability struct {
+	Supported        bool     `json:"supported"`
+	Modes            []string `json:"modes"`
+	DefaultMode      string   `json:"default_mode"`
+	SummarySupported bool     `json:"summary_supported"`
+}
+
 // modelResponse is the wire shape returned by GET /api/v1/models.
 // Mirrors the front-end Model type in apps/web-chat/src/stores/modelStore.ts.
 type modelResponse struct {
@@ -46,6 +61,36 @@ type modelResponse struct {
 	InputPricePerM  float64  `json:"input_price_per_1m,omitempty"`
 	OutputPricePerM float64  `json:"output_price_per_1m,omitempty"`
 	Allowed         bool     `json:"allowed"`
+	// T4 — Thinking Mode capability. ``nil`` when the model
+	// does NOT support reasoning so the wire stays unchanged for
+	// non-reasoning models. Populated for the known set in
+	// ``reasoningCapableModels`` below.
+	Reasoning *reasoningCapability `json:"reasoning,omitempty"`
+}
+
+// reasoningCapableModels is the known set of model ids whose
+// Gateway-side row is flagged ``supports_reasoning=True`` by
+// migration 045. Kept as a static map rather than fetching live
+// from the Gateway so the model list stays a single in-process
+// lookup (the existing /api/v1/models contract). Operators who
+// onboard a new reasoning model in migration 045 should add the
+// id here so the frontend toggle becomes visible.
+var reasoningCapableModels = map[string]struct{}{
+	// OpenAI o-series — reasoning_effort.
+	"o1":                   {},
+	"o3":                   {},
+	"o3-mini":              {},
+	"o3-2025-04-16":        {},
+	"o3-mini-2025-01-31":   {},
+	"o4-mini":              {},
+	"o3-pro":               {},
+	// Anthropic Claude 4 family — adaptive thinking.
+	"claude-sonnet-4-20250514":   {},
+	"claude-opus-4-20250514":     {},
+	"claude-sonnet-4.5-20250514": {},
+	// DeepSeek / Groq R1 distill — openai_compatible_reasoning.
+	"deepseek-reasoner":              {},
+	"deepseek-r1-distill-llama-70b": {},
 }
 
 // modelMeta is the static display-metadata shape. The map below is
@@ -197,6 +242,24 @@ func (h *ModelHandler) List(w http.ResponseWriter, r *http.Request) {
 		if len(caps) == 0 {
 			caps = []string{"streaming"}
 		}
+		// T4: Gemini 2.5+ ids are versioned (e.g. gemini-2.5-pro,
+		// gemini-2.5-flash) — match by prefix so the operator
+		// doesn't have to enumerate every Gemini variant in the
+		// capable-set map. Other reasoning-capable models match by
+		// exact id.
+		_, reasoning := reasoningCapableModels[m.ID]
+		if !reasoning && (strings.HasPrefix(m.ID, "gemini-2.5") || strings.HasPrefix(m.ID, "gemini-3")) {
+			reasoning = true
+		}
+		var rb *reasoningCapability
+		if reasoning {
+			rb = &reasoningCapability{
+				Supported:        true,
+				Modes:            []string{"off", "auto", "low", "medium", "high"},
+				DefaultMode:      "auto",
+				SummarySupported: true,
+			}
+		}
 		out = append(out, modelResponse{
 			ID:              m.ID,
 			Name:            m.Name,
@@ -210,6 +273,7 @@ func (h *ModelHandler) List(w http.ResponseWriter, r *http.Request) {
 			InputPricePerM:  meta.InputPricePerM,
 			OutputPricePerM: meta.OutputPricePerM,
 			Allowed:         true,
+			Reasoning:       rb,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

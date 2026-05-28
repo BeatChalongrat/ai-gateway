@@ -143,6 +143,22 @@ type GatewayImageURL struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// GatewayReasoningConfig mirrors the Gateway's public
+// ``ReasoningConfig`` (backend/app/schemas/public.py — T1). Provider-
+// neutral on the wire; the Gateway adapter translates ``mode`` into
+// the provider-native shape (Anthropic ``thinking`` block, OpenAI
+// ``reasoning_effort``, Gemini ``thinkingConfig.thinkingLevel``,
+// DeepSeek / Groq R1 ``reasoning_content`` parsing).
+//
+// Mode values: ``off`` / ``auto`` / ``low`` / ``medium`` / ``high``.
+// ``ShowSummary`` controls whether reasoning text is streamed back —
+// the model still thinks (better answers) either way; only the
+// SSE emit / response field is gated.
+type GatewayReasoningConfig struct {
+	Mode        string `json:"mode"`
+	ShowSummary bool   `json:"show_summary"`
+}
+
 type GatewayChatRequest struct {
 	Model         string           `json:"model"`
 	Messages      []GatewayMessage `json:"messages"`
@@ -161,6 +177,12 @@ type GatewayChatRequest struct {
 	// extractor sets them today.
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
+	// T4 — reasoning / thinking mode. Omitted when the caller (a
+	// conversation with reasoning_enabled=false OR a non-reasoning
+	// internal call like title generation) didn't opt in. Gateway
+	// silently ignores reasoning on non-capable models, so it is
+	// safe to forward whenever the user-facing toggle is on.
+	Reasoning *GatewayReasoningConfig `json:"reasoning,omitempty"`
 }
 
 // GatewayCallContext carries the per-request identity headers we
@@ -185,6 +207,12 @@ type GatewayChatUsage struct {
 	CompletionTokens int     `json:"completion_tokens"`
 	TotalTokens      int     `json:"total_tokens"`
 	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+	// T4 — Gateway surfaces the reasoning-token subdivision under
+	// ``usage.reasoning_tokens`` on both the trailing
+	// stream_options.include_usage chunk AND the dedicated final
+	// frame that fires when reasoning happened. 0 / absent for
+	// non-reasoning calls.
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
 type GatewayChatResponse struct {
@@ -246,6 +274,16 @@ type StreamEvent struct {
 	// MessageService accumulator stitches these into complete
 	// GatewayToolCall values before dispatching.
 	ToolCallDeltas []StreamToolCallDelta
+	// T4 — reasoning / thinking. The Gateway emits two new SSE
+	// frame shapes alongside the OpenAI-format chunks:
+	//   * ``{"type":"reasoning_summary_delta","text":"..."}``
+	//   * ``{"type":"analysis_status","status":"started|completed"}``
+	// ReasoningDelta carries the visible reasoning text fragment;
+	// AnalysisStatus carries the started/completed phase marker.
+	// Each frame yields a StreamEvent with ONLY the relevant field
+	// populated — the pump distinguishes by checking which is set.
+	ReasoningDelta string
+	AnalysisStatus string
 }
 
 // StreamToolCallDelta is one fragment from a tool_calls[] stream
@@ -344,6 +382,13 @@ func (s *StreamReader) Next() (*StreamEvent, error) {
 // have no content. parseStreamChunk reads both and lets the caller
 // decide whether to forward as a content delta or accumulate as a
 // tool-call delta.
+//
+// T4 adds two reasoning-channel shapes the Gateway emits alongside
+// the OpenAI chunks: ``reasoning_summary_delta`` (carries
+// ``text``) and ``analysis_status`` (carries ``status``). Both have
+// ``type`` at the top level rather than nesting under ``choices``,
+// so we sniff for that key first and short-circuit before falling
+// through to the OpenAI-shape decoder.
 type streamChunk struct {
 	Choices []struct {
 		Delta struct {
@@ -363,7 +408,47 @@ type streamChunk struct {
 	Usage *GatewayChatUsage `json:"usage"`
 }
 
+// reasoningEnvelope is the minimal shape we need to detect a
+// Gateway T2/T3 reasoning frame. ``Type`` is the discriminator.
+// We unmarshal everything first into this small struct, then
+// re-unmarshal into the typed shape if it's an OpenAI chunk —
+// cheaper than a full ``map[string]any`` round-trip and keeps the
+// hot path allocation-light.
+type reasoningEnvelope struct {
+	Type   string `json:"type"`
+	Text   string `json:"text"`
+	Status string `json:"status"`
+	// Usage hint — the Gateway's final SSE frame includes a
+	// ``usage`` block when reasoning happened so the chat-edge can
+	// surface reasoning_tokens to the message_complete event. The
+	// usage shape on this frame is `{reasoning_tokens: N}` only;
+	// full prompt/completion counts come on the trailing
+	// stream_options.include_usage chunk via the OpenAI-shape
+	// branch and are merged at the pump.
+	Usage *struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"usage,omitempty"`
+}
+
 func parseStreamChunk(raw string) (*StreamEvent, error) {
+	// Reasoning-channel frames (T2/T3) carry ``type`` at the top
+	// level. Sniff first so we never accidentally swallow a
+	// reasoning frame into the OpenAI-shape decoder.
+	var env reasoningEnvelope
+	if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
+		switch env.Type {
+		case "reasoning_summary_delta":
+			return &StreamEvent{ReasoningDelta: env.Text}, nil
+		case "analysis_status":
+			return &StreamEvent{AnalysisStatus: env.Status}, nil
+		// Gateway's final chat.completion.chunk frame ALSO has
+		// ``object: "chat.completion.chunk"`` but no top-level
+		// ``type`` — it falls through to the OpenAI branch below.
+		// Unknown ``type`` values fall through too so future
+		// Gateway-side frame additions don't crash the pump.
+		}
+	}
+
 	var c streamChunk
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		return nil, err
