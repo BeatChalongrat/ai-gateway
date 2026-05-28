@@ -219,6 +219,14 @@ func main() {
 	// lands. The message-list handler hydrates them inline via
 	// the same repo.
 	messageSvc.SetResponseSourceRepo(sourcesRepo)
+	// S8 — wire the background preference-pattern learner. Fires
+	// from finalizeConversation once per qualifying conversation
+	// (20+ messages, memory enabled, no prior extraction). Pending
+	// suggestions surface in Settings → Memory; auto-promotion
+	// kicks in after the same pattern is observed in 3+
+	// conversations.
+	prefExtractor := service.NewPreferenceExtractor(memorySvc, memoriesRepo, messages, conversations, gateway)
+	messageSvc.SetPreferenceExtractor(prefExtractor)
 
 	// Knowledge base (RAG) pipeline.
 	//

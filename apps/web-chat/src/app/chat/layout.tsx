@@ -9,6 +9,7 @@ import {
   useKeyboardShortcuts,
   useNewChatHandler,
 } from "@/hooks/useKeyboardShortcuts";
+import { useMemoryPendingPoll } from "@/hooks/useMemoryPendingCount";
 import { getPortalToken, redirectToPortalLogin } from "@/lib/auth";
 import { useAuthStore } from "@/stores/authStore";
 import { useModelStore } from "@/stores/modelStore";
@@ -72,6 +73,11 @@ export default function ChatLayout({
       document.body.style.overflow = prev;
     };
   }, [sidebarOpen]);
+
+  // S8 — poll the pending-preference count so the sidebar Memory
+  // badge + MemoryIndicator dot have something to read. Single
+  // mount per chat session via the layout.
+  useMemoryPendingPoll();
 
   // Global keyboard shortcuts: Cmd/Ctrl+Shift+S toggles sidebar,
   // Cmd/Ctrl+K focuses the sidebar search, Cmd/Ctrl+Shift+N starts
