@@ -28,4 +28,15 @@ type Conversation struct {
 	// because most conversations have no KB attached. When set, the
 	// message flow injects retrieved chunks into the system prompt.
 	KnowledgeBaseID *uuid.UUID
+
+	// MemoryEnabled toggles the cross-conversation memory layer for
+	// THIS conversation (S1 — migration 014). Default true; set to
+	// false for "temporary chats" the user doesn't want feeding into
+	// their long-term memory.
+	//
+	// When false the message flow:
+	//   - skips injecting the <saved_user_memory> system-prompt block
+	//   - omits the save_memory / list_memories tools from the
+	//     gateway request's tool list
+	MemoryEnabled bool
 }

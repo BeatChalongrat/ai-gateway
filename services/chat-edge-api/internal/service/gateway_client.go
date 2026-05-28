@@ -84,9 +84,49 @@ func NewGatewayClient(
 // The Go layer only fan-outs raw JSON; downstream code that touches
 // Content (response decoder, change-log writer) reads it as a string
 // via assertion because assistant replies never carry image blocks.
+//
+// Tool-call fields (S1):
+//   - ToolCalls — populated on assistant responses when the model
+//     wants to invoke a function. Echoed back unchanged on the
+//     follow-up assistant turn so the chain stays auditable.
+//   - ToolCallID + Name — set on role="tool" messages we send back
+//     to the gateway carrying the result of a tool execution.
 type GatewayMessage struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
+	Role       string             `json:"role"`
+	Content    any                `json:"content"`
+	ToolCalls  []GatewayToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID string             `json:"tool_call_id,omitempty"`
+	Name       string             `json:"name,omitempty"`
+}
+
+// GatewayToolCall mirrors OpenAI's tool_calls[] response shape. The
+// arguments field is a JSON-encoded string (NOT a parsed object) —
+// the provider returns it verbatim and the chat-edge tool executor
+// parses it before dispatch.
+type GatewayToolCall struct {
+	ID       string                  `json:"id"`
+	Type     string                  `json:"type"`
+	Function GatewayToolCallFunction `json:"function"`
+}
+
+type GatewayToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// GatewayTool is one entry in the request's tools[]. Mirrors OpenAI's
+// function-calling spec; the backend gateway forwards tools[] +
+// tool_choice verbatim to the provider adapter (see
+// backend/app/schemas/public.py).
+type GatewayTool struct {
+	Type     string              `json:"type"`
+	Function GatewayToolFunction `json:"function"`
+}
+
+type GatewayToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 // GatewayContentBlock is one element of a vision-format content
@@ -110,6 +150,11 @@ type GatewayChatRequest struct {
 	StreamOptions *struct {
 		IncludeUsage bool `json:"include_usage"`
 	} `json:"stream_options,omitempty"`
+	// S1 — tool calling. Omitted when no tools are registered for
+	// the conversation (e.g. memory_enabled=false) so we don't pay
+	// the provider's tool-routing tax unnecessarily.
+	Tools      []GatewayTool `json:"tools,omitempty"`
+	ToolChoice any           `json:"tool_choice,omitempty"`
 }
 
 // GatewayCallContext carries the per-request identity headers we
@@ -189,6 +234,23 @@ type StreamEvent struct {
 	Usage        *GatewayChatUsage
 	// Done is true on the synthetic ``[DONE]`` sentinel event.
 	Done bool
+	// S1 — tool-call deltas. OpenAI ships tool calls in stream as
+	// an incremental array of partial entries (each with an index +
+	// optional id / function name / arguments-fragment). The
+	// MessageService accumulator stitches these into complete
+	// GatewayToolCall values before dispatching.
+	ToolCallDeltas []StreamToolCallDelta
+}
+
+// StreamToolCallDelta is one fragment from a tool_calls[] stream
+// chunk. Index pins the entry across chunks; ID / Name / Arguments
+// fields are individually optional and arrive piecemeal.
+type StreamToolCallDelta struct {
+	Index            int
+	ID               string
+	Type             string
+	FunctionName     string
+	FunctionArgsFrag string
 }
 
 // SendChatCompletionStream opens a streaming completion. The
@@ -269,10 +331,26 @@ func (s *StreamReader) Next() (*StreamEvent, error) {
 }
 
 // parseStreamChunk decodes one chunk JSON into a typed StreamEvent.
+//
+// The delta shape carries either content (plain text) or tool_calls
+// (partial function invocation). Both are optional per chunk — most
+// content chunks have no tool_calls, and tool-call chunks usually
+// have no content. parseStreamChunk reads both and lets the caller
+// decide whether to forward as a content delta or accumulate as a
+// tool-call delta.
 type streamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content   string `json:"content"`
+			ToolCalls []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id,omitempty"`
+				Type     string `json:"type,omitempty"`
+				Function struct {
+					Name      string `json:"name,omitempty"`
+					Arguments string `json:"arguments,omitempty"`
+				} `json:"function"`
+			} `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -286,9 +364,22 @@ func parseStreamChunk(raw string) (*StreamEvent, error) {
 	}
 	ev := &StreamEvent{Usage: c.Usage}
 	if len(c.Choices) > 0 {
-		ev.Delta = c.Choices[0].Delta.Content
-		if c.Choices[0].FinishReason != nil {
-			ev.FinishReason = *c.Choices[0].FinishReason
+		choice := c.Choices[0]
+		ev.Delta = choice.Delta.Content
+		if choice.FinishReason != nil {
+			ev.FinishReason = *choice.FinishReason
+		}
+		if len(choice.Delta.ToolCalls) > 0 {
+			ev.ToolCallDeltas = make([]StreamToolCallDelta, 0, len(choice.Delta.ToolCalls))
+			for _, tc := range choice.Delta.ToolCalls {
+				ev.ToolCallDeltas = append(ev.ToolCallDeltas, StreamToolCallDelta{
+					Index:            tc.Index,
+					ID:               tc.ID,
+					Type:             tc.Type,
+					FunctionName:     tc.Function.Name,
+					FunctionArgsFrag: tc.Function.Arguments,
+				})
+			}
 		}
 	}
 	return ev, nil

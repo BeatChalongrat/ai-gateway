@@ -58,6 +58,9 @@ type Handlers struct {
 	// Phase 4 Session 5 — Artifact Workspace. Owns the
 	// generated-files list, rollback, and file-compare routes.
 	Workspace *handler.WorkspaceHandler
+	// S1 — Personal Memory Core. CRUD + pin + confirm + audit
+	// for chat.user_memories.
+	Memory *handler.MemoryHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -218,6 +221,21 @@ func New(
 				r.Get("/conversations/{convID}/generated-files", h.Workspace.ListGenerated)
 				r.Post("/conversations/{convID}/files/{fileID}/rollback", h.Workspace.Rollback)
 				r.Get("/conversations/{convID}/file-compare", h.Workspace.Compare)
+			}
+
+			// S1 — Personal Memory Core. Bulk-clear lives at
+			// /memories/all so chi's segment matcher doesn't fight
+			// the /memories/{id} patterns; pin + confirm + events
+			// nest under /memories/{id}/...
+			if h.Memory != nil {
+				r.Get("/memories", h.Memory.List)
+				r.Post("/memories", h.Memory.Create)
+				r.Delete("/memories/all", h.Memory.ClearAll)
+				r.Put("/memories/{id}", h.Memory.Update)
+				r.Delete("/memories/{id}", h.Memory.Delete)
+				r.Post("/memories/{id}/pin", h.Memory.Pin)
+				r.Post("/memories/{id}/confirm", h.Memory.Confirm)
+				r.Get("/memories/{id}/events", h.Memory.Events)
 			}
 
 			// Knowledge bases (RAG). All tenant-scoped via the

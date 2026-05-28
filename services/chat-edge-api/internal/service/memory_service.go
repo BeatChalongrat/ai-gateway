@@ -1,0 +1,551 @@
+// MemoryService — the durable cross-conversation memory layer
+// (Phase S1). Owns DLP / dedup / classification + audit logging
+// around chat.user_memories so the handler + AI-tool layer stay
+// thin shells over typed inputs.
+//
+// Contract notes for downstream callers:
+//   - Every mutation path also emits a chat.memory_events row via
+//     the same transaction-free flow the rest of chat-edge uses
+//     (best-effort; event-log failure logs a warning but doesn't
+//     fail the user-visible operation — the actual data change is
+//     the load-bearing side effect).
+//   - BuildMemoryContext is read-only and must never block the
+//     message turn — failures return "" so the AI still gets a
+//     reply, just without memory injection.
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"regexp"
+	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+)
+
+// ---------------------------------------------------------------------------
+// Typed errors
+// ---------------------------------------------------------------------------
+
+var (
+	ErrMemoryEmpty             = errors.New("memory: content is required")
+	ErrMemoryProhibitedContent = errors.New("memory: content contains prohibited data")
+	ErrMemoryDuplicate         = errors.New("memory: identical memory already exists")
+	ErrMemoryInvalidScope      = errors.New("memory: invalid scope_type")
+	ErrMemoryInvalidType       = errors.New("memory: invalid memory_type")
+	ErrMemoryInvalidSource     = errors.New("memory: invalid source_type")
+	ErrMemoryNotFound          = errors.New("memory: not found")
+)
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+type MemoryService struct {
+	repo *repository.MemoryRepo
+}
+
+func NewMemoryService(repo *repository.MemoryRepo) *MemoryService {
+	return &MemoryService{repo: repo}
+}
+
+// ---------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------
+
+// CreateMemoryInput is the typed payload from handler + AI tool.
+type CreateMemoryInput struct {
+	TenantID  uuid.UUID
+	UserID    uuid.UUID
+	ScopeType string
+	ScopeID   *uuid.UUID
+
+	MemoryType string
+	Category   string
+	Content    string
+
+	SourceType            string
+	SourceConversationID  *uuid.UUID
+	SourceMessageID       *uuid.UUID
+	EvidenceExcerpt       string
+
+	// ActorType is the audit-log actor: "user" (manual API), "assistant"
+	// (AI tool call), or "system" (background extractor — Phase 4).
+	ActorType string
+}
+
+// CreateMemory validates + DLP-gates + dedup-checks + persists a new
+// memory. Returns ErrMemoryProhibitedContent for DLP rejections,
+// ErrMemoryDuplicate for dedup hits, ErrMemoryInvalid* for shape
+// errors. Successful creates emit a 'created' audit event.
+func (s *MemoryService) CreateMemory(
+	ctx context.Context, in CreateMemoryInput,
+) (*model.Memory, error) {
+	content := strings.TrimSpace(in.Content)
+	if content == "" {
+		return nil, ErrMemoryEmpty
+	}
+
+	if !validScopeType(in.ScopeType) {
+		return nil, ErrMemoryInvalidScope
+	}
+	if !validMemoryType(in.MemoryType) {
+		return nil, ErrMemoryInvalidType
+	}
+	if !validSourceType(in.SourceType) {
+		return nil, ErrMemoryInvalidSource
+	}
+
+	// DLP — refuse to persist anything that looks like a credential,
+	// raw PII number, or financial detail. The check is intentionally
+	// conservative; better to refuse a borderline benign string than
+	// to silently store a leaked key.
+	if containsProhibitedData(content) {
+		return nil, ErrMemoryProhibitedContent
+	}
+
+	normKey := normalizeKey(content)
+
+	// Dedup. Only active rows count — a soft-deleted memory with the
+	// same text should be allowed back so the user can re-save a
+	// preference they deleted by mistake.
+	dup, err := s.repo.ExistsByNormalizedKey(ctx, in.UserID, in.TenantID, normKey)
+	if err != nil {
+		return nil, err
+	}
+	if dup {
+		return nil, ErrMemoryDuplicate
+	}
+
+	// Trust defaults. User-explicit memories are confirmed + high
+	// confidence; inferred ones (Phase 4) need explicit
+	// confirmation and start at 0.7.
+	confidence := 0.7
+	confirmed := false
+	if in.SourceType == model.MemorySourceUserExplicit {
+		confidence = 0.95
+		confirmed = true
+	}
+
+	scopeType := in.ScopeType
+	if scopeType == "" {
+		scopeType = model.MemoryScopeGlobalUser
+	}
+
+	row := &model.Memory{
+		TenantID:             in.TenantID,
+		UserID:               in.UserID,
+		ScopeType:            scopeType,
+		ScopeID:              in.ScopeID,
+		MemoryType:           in.MemoryType,
+		Category:             strings.TrimSpace(in.Category),
+		Content:              content,
+		NormalizedKey:        normKey,
+		SourceType:           in.SourceType,
+		SourceConversationID: in.SourceConversationID,
+		SourceMessageID:      in.SourceMessageID,
+		EvidenceExcerpt:      strings.TrimSpace(in.EvidenceExcerpt),
+		Status:               model.MemoryStatusActive,
+		ConfidenceScore:      confidence,
+		ImportanceScore:      0.5,
+		IsUserConfirmed:      confirmed,
+		SensitivityLevel:     model.MemorySensitivityNormal,
+	}
+
+	out, err := s.repo.Create(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logEvent(ctx, &model.MemoryEvent{
+		MemoryID:  &out.ID,
+		TenantID:  in.TenantID,
+		UserID:    in.UserID,
+		Action:    "created",
+		ActorType: orDefault(in.ActorType, "user"),
+		Reason:    fmt.Sprintf("%s memory via %s", in.MemoryType, in.SourceType),
+	})
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// Update / Pin / Confirm
+// ---------------------------------------------------------------------------
+
+// UpdateMemoryInput is the typed payload for PUT /memories/:id.
+// Nil fields skip that field (no implicit clear).
+type UpdateMemoryInput struct {
+	Content         *string
+	Category        *string
+	MemoryType      *string
+	ImportanceScore *float64
+}
+
+func (s *MemoryService) UpdateMemory(
+	ctx context.Context, id, userID, tenantID uuid.UUID, in UpdateMemoryInput,
+) (*model.Memory, error) {
+	existing, err := s.repo.GetByID(ctx, id, userID, tenantID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMemoryNotFound
+		}
+		return nil, err
+	}
+	if in.Content != nil {
+		c := strings.TrimSpace(*in.Content)
+		if c == "" {
+			return nil, ErrMemoryEmpty
+		}
+		if containsProhibitedData(c) {
+			return nil, ErrMemoryProhibitedContent
+		}
+		existing.Content = c
+		existing.NormalizedKey = normalizeKey(c)
+	}
+	if in.Category != nil {
+		existing.Category = strings.TrimSpace(*in.Category)
+	}
+	if in.MemoryType != nil {
+		if !validMemoryType(*in.MemoryType) {
+			return nil, ErrMemoryInvalidType
+		}
+		existing.MemoryType = *in.MemoryType
+	}
+	if in.ImportanceScore != nil {
+		v := *in.ImportanceScore
+		if v < 0 {
+			v = 0
+		} else if v > 1 {
+			v = 1
+		}
+		existing.ImportanceScore = v
+	}
+	if err := s.repo.Update(ctx, existing); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMemoryNotFound
+		}
+		return nil, err
+	}
+	s.logEvent(ctx, &model.MemoryEvent{
+		MemoryID:  &existing.ID,
+		TenantID:  tenantID,
+		UserID:    userID,
+		Action:    "updated",
+		ActorType: "user",
+	})
+	// Re-read so the response carries the trigger-updated timestamp.
+	return s.repo.GetByID(ctx, id, userID, tenantID)
+}
+
+func (s *MemoryService) SetPinned(
+	ctx context.Context, id, userID, tenantID uuid.UUID, pinned bool,
+) (*model.Memory, error) {
+	if err := s.repo.SetPinned(ctx, id, userID, tenantID, pinned); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMemoryNotFound
+		}
+		return nil, err
+	}
+	action := "pinned"
+	if !pinned {
+		action = "unpinned"
+	}
+	s.logEvent(ctx, &model.MemoryEvent{
+		MemoryID:  &id,
+		TenantID:  tenantID,
+		UserID:    userID,
+		Action:    action,
+		ActorType: "user",
+	})
+	return s.repo.GetByID(ctx, id, userID, tenantID)
+}
+
+func (s *MemoryService) SetConfirmed(
+	ctx context.Context, id, userID, tenantID uuid.UUID, confirmed bool,
+) (*model.Memory, error) {
+	if err := s.repo.SetConfirmed(ctx, id, userID, tenantID, confirmed); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMemoryNotFound
+		}
+		return nil, err
+	}
+	action := "confirmed"
+	if !confirmed {
+		action = "rejected"
+	}
+	s.logEvent(ctx, &model.MemoryEvent{
+		MemoryID:  &id,
+		TenantID:  tenantID,
+		UserID:    userID,
+		Action:    action,
+		ActorType: "user",
+	})
+	return s.repo.GetByID(ctx, id, userID, tenantID)
+}
+
+// ---------------------------------------------------------------------------
+// Delete / bulk clear
+// ---------------------------------------------------------------------------
+
+func (s *MemoryService) DeleteMemory(
+	ctx context.Context, id, userID, tenantID uuid.UUID,
+) error {
+	// Ownership is enforced by the repo's user_id + tenant_id WHERE
+	// clause; a missing row returns ErrNotFound which we surface as
+	// ErrMemoryNotFound regardless of whether the row truly doesn't
+	// exist or belongs to another user.
+	if err := s.repo.SoftDelete(ctx, id, userID, tenantID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrMemoryNotFound
+		}
+		return err
+	}
+	s.logEvent(ctx, &model.MemoryEvent{
+		MemoryID:  &id,
+		TenantID:  tenantID,
+		UserID:    userID,
+		Action:    "deleted",
+		ActorType: "user",
+	})
+	return nil
+}
+
+func (s *MemoryService) ClearAll(
+	ctx context.Context, userID, tenantID uuid.UUID, scopeType *string,
+) (int, error) {
+	n, err := s.repo.ClearAll(ctx, userID, tenantID, scopeType)
+	if err != nil {
+		return 0, err
+	}
+	scopeLabel := "all"
+	if scopeType != nil && *scopeType != "" {
+		scopeLabel = *scopeType
+	}
+	s.logEvent(ctx, &model.MemoryEvent{
+		TenantID:  tenantID,
+		UserID:    userID,
+		Action:    "deleted",
+		ActorType: "user",
+		Reason:    fmt.Sprintf("bulk clear scope=%s count=%d", scopeLabel, n),
+		Metadata:  map[string]any{"count": n, "scope": scopeLabel},
+	})
+	return n, nil
+}
+
+// ---------------------------------------------------------------------------
+// List / Get / Events
+// ---------------------------------------------------------------------------
+
+func (s *MemoryService) ListByUser(
+	ctx context.Context, userID, tenantID uuid.UUID, filters repository.MemoryListFilters,
+) ([]model.Memory, int, error) {
+	rows, err := s.repo.ListByUser(ctx, userID, tenantID, filters)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.repo.CountByUser(ctx, userID, tenantID, filters)
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
+func (s *MemoryService) GetMemory(
+	ctx context.Context, id, userID, tenantID uuid.UUID,
+) (*model.Memory, error) {
+	m, err := s.repo.GetByID(ctx, id, userID, tenantID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMemoryNotFound
+		}
+		return nil, err
+	}
+	return m, nil
+}
+
+func (s *MemoryService) GetEvents(
+	ctx context.Context, memoryID, userID, tenantID uuid.UUID, limit int,
+) ([]model.MemoryEvent, error) {
+	return s.repo.GetEvents(ctx, memoryID, userID, tenantID, limit)
+}
+
+// ---------------------------------------------------------------------------
+// BuildMemoryContext — system-prompt injection block
+// ---------------------------------------------------------------------------
+
+// BuildMemoryContext assembles the <saved_user_memory> block that
+// the message service prepends to every turn for memory-enabled
+// conversations. Returns "" on any failure or when the user has no
+// active memories — the message service treats "" as "skip block".
+//
+// Side effect: bumps use_count + last_used_at for every recalled
+// memory in the background, so the management UI can show the most-
+// referenced facts. Background writes use a fresh ctx so a client
+// disconnect doesn't kill the accounting.
+func (s *MemoryService) BuildMemoryContext(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) string {
+	memories, err := s.repo.GetActiveForInjection(ctx, userID, tenantID)
+	if err != nil || len(memories) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<saved_user_memory>\n")
+	sb.WriteString("Facts and preferences this user has asked you to remember:\n")
+	for i := range memories {
+		sb.WriteString("- ")
+		sb.WriteString(memories[i].Content)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nUse this information naturally in your responses.\n")
+	sb.WriteString("Do not say 'according to my memory' or mention the memory system.\n")
+	sb.WriteString("When the user says 'จำไว้ว่า', 'remember that', or gives a standing instruction, use the save_memory tool.\n")
+	sb.WriteString("</saved_user_memory>\n")
+
+	// Async use_count bump. Each goroutine carries its own background
+	// ctx so the message turn doesn't block on these writes — and so
+	// a client disconnect doesn't cancel them mid-flight.
+	ids := make([]uuid.UUID, len(memories))
+	for i := range memories {
+		ids[i] = memories[i].ID
+	}
+	go func(ids []uuid.UUID) {
+		bg := context.Background()
+		for _, id := range ids {
+			if err := s.repo.IncrementUseCount(bg, id); err != nil {
+				slog.Warn("memory: increment use_count failed",
+					"memory_id", id.String(), "err", err)
+			}
+		}
+	}(ids)
+
+	return sb.String()
+}
+
+// ---------------------------------------------------------------------------
+// Audit log helper
+// ---------------------------------------------------------------------------
+
+// logEvent best-effort writes a chat.memory_events row. A failure
+// logs a warning but never bubbles up to the caller — losing an
+// audit row is bad but losing the user's create/delete is worse.
+func (s *MemoryService) logEvent(ctx context.Context, e *model.MemoryEvent) {
+	if err := s.repo.LogEvent(ctx, e); err != nil {
+		slog.Warn("memory: log event failed",
+			"action", e.Action, "actor", e.ActorType, "err", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DLP — prohibited content patterns
+// ---------------------------------------------------------------------------
+
+var (
+	// Thai national ID — 13 consecutive digits.
+	reThaiNID = regexp.MustCompile(`\b\d{13}\b`)
+	// "salary = 123,456" / "เงินเดือน: 50000" — refuses to persist
+	// concrete pay figures even if the user types them.
+	reSalary = regexp.MustCompile(`(?i)(salary|เงินเดือน)\s*[=:]\s*[\d,]+`)
+)
+
+// Lowered substrings that mark prohibited-content secrets. Lower-
+// cased once at module load via the const list below + lowercased
+// scan input so we don't compile a regex per check.
+var prohibitedSubstrings = []string{
+	// API keys / tokens — common SaaS prefixes.
+	"sk-", "sk_live_", "sk_test_",
+	"api_key=", "apikey:", "secret_key",
+	"access_token", "bearer ",
+	"ghp_", "gho_", "glpat-", "xoxb-", "xoxp-",
+	// Credential field labels.
+	"password:", "password=", "passwd:", "pwd=",
+	// Financial.
+	"credit card", "card number", "cvv",
+	"bank account", "routing number",
+	"เลขบัตรเครดิต", "เลขบัญชี",
+}
+
+// containsProhibitedData returns true when the supplied content
+// looks like something we MUST not persist into memory. Conservative
+// on purpose — false positives ask the user to rephrase; false
+// negatives leak a secret. Reviewed-against-OWASP-defaults rather
+// than provider-specific.
+func containsProhibitedData(content string) bool {
+	lower := strings.ToLower(content)
+	for _, p := range prohibitedSubstrings {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	if reThaiNID.MatchString(content) {
+		return true
+	}
+	if reSalary.MatchString(content) {
+		return true
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
+
+func validScopeType(s string) bool {
+	switch s {
+	case "", // empty allowed; service defaults to global_user
+		model.MemoryScopeGlobalUser,
+		model.MemoryScopeConversation,
+		model.MemoryScopeArtifact,
+		model.MemoryScopeTemporary:
+		return true
+	}
+	return false
+}
+
+func validMemoryType(s string) bool {
+	switch s {
+	case model.MemoryTypeExplicitFact,
+		model.MemoryTypeResponsePreference,
+		model.MemoryTypeOngoingInterest,
+		model.MemoryTypeConfirmedInstruction,
+		model.MemoryTypeInferredPreference,
+		model.MemoryTypeArtifactReference:
+		return true
+	}
+	return false
+}
+
+func validSourceType(s string) bool {
+	switch s {
+	case model.MemorySourceUserExplicit,
+		model.MemorySourceAssistantInferred,
+		model.MemorySourceConversationSummary,
+		model.MemorySourceArtifactEvent:
+		return true
+	}
+	return false
+}
+
+// normalizeKey produces the dedup key: lowercased + trimmed +
+// capped at 200 chars. Truncation uses byte slice because the cap
+// is dedup-collision tolerance, not user-visible.
+func normalizeKey(content string) string {
+	k := strings.ToLower(strings.TrimSpace(content))
+	if len(k) > 200 {
+		k = k[:200]
+	}
+	return k
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
