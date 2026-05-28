@@ -346,21 +346,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Optimistic: flip the sidebar entry immediately so the model
     // pill in the chat header / input updates without waiting on
     // the network. On failure the catch path rolls back.
-    const prev = get().conversations.find((c) => c.id === id)?.model_id;
-    set((s) => ({
-      conversations: s.conversations.map((c) =>
-        c.id === id ? { ...c, model_id: modelId } : c,
-      ),
-    }));
-    try {
-      const updated = await api.setConversationModel(id, modelId);
+    //
+    // `existed` covers the "user landed on /chat/[id] directly and
+    // the conversation list hasn't fetched yet" case: there's no
+    // entry to flip optimistically, but the PATCH still goes
+    // through and the success branch upserts the row using the
+    // server response. Without this the model pill would stay
+    // stale until the next sidebar refresh.
+    const existing = get().conversations.find((c) => c.id === id);
+    const prev = existing?.model_id;
+    if (existing) {
       set((s) => ({
         conversations: s.conversations.map((c) =>
-          c.id === id ? { ...c, ...updated } : c,
+          c.id === id ? { ...c, model_id: modelId } : c,
         ),
       }));
+    }
+    try {
+      const updated = await api.setConversationModel(id, modelId);
+      set((s) => {
+        const found = s.conversations.some((c) => c.id === id);
+        return {
+          conversations: found
+            ? s.conversations.map((c) => (c.id === id ? { ...c, ...updated } : c))
+            : [updated, ...s.conversations],
+        };
+      });
     } catch (err) {
-      if (prev !== undefined) {
+      if (existing && prev !== undefined) {
         set((s) => ({
           conversations: s.conversations.map((c) =>
             c.id === id ? { ...c, model_id: prev } : c,
