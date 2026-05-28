@@ -1961,6 +1961,14 @@ func (s *MessageService) compileAndBuildRequest(
 	if s.toolExec != nil {
 		numTools = len(s.toolExec.ToolDefs(conv))
 	}
+	// Auto-model resolution. The conversation row stores the user's
+	// preference verbatim (so "auto" persists across turns); the
+	// concrete model id only materialises at request time. This
+	// keeps the heuristic responsive to the CURRENT turn's signals
+	// (images / files / message length / code markers) rather than
+	// being locked in at conversation create.
+	modelID := s.resolveAutoIfNeeded(ctx, conv, tenantID, ragQuery, imageURLs, len(history))
+
 	// Source-aware closure: the same call site can run multiple
 	// times inside Compile (initial + post-extraction rebuild),
 	// so the closure returns both the prefix text AND the
@@ -1976,7 +1984,7 @@ func (s *MessageService) compileAndBuildRequest(
 		// works in test setups.
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		return buildGatewayRequestWithImages(conv.ModelID, history, prefix, imageURLs)
+		return buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
 	}
 
 	compiled, err := s.compiler.Compile(ctx, CompileInputs{
@@ -1996,14 +2004,56 @@ func (s *MessageService) compileAndBuildRequest(
 			"conv", conv.ID.String(), "err", err)
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		return buildGatewayRequestWithImages(conv.ModelID, history, prefix, imageURLs)
+		return buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
 	}
 	// S7 — flush the compiler's sources (memory + state +
 	// compaction marker) into the per-turn accumulator so the
 	// finish() callback can persist them alongside any search-
 	// tool hits the model adds during the turn.
 	sources.Add(compiled.Sources...)
-	return buildGatewayRequestWithImages(conv.ModelID, compiled.History, compiled.SystemPrefix, imageURLs)
+	return buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imageURLs)
+}
+
+// resolveAutoIfNeeded returns the model id to ship to the gateway
+// this turn. Pass-through for explicit picks; runs the heuristic
+// ResolveAutoModel for the "auto" sentinel (and treats empty as
+// auto so a migration row without a model_id still resolves).
+//
+// Per-turn signals used by the resolver:
+//   - hasImages: the LAST user turn carries at least one image.
+//   - hasFiles : the conversation has any extracted file context.
+//   - len(message) / history length: complexity proxies.
+//
+// Logs the decision once per turn so an operator reading the slog
+// stream can always reconstruct WHY a given turn was upgraded to
+// flagship (or stayed fast).
+func (s *MessageService) resolveAutoIfNeeded(
+	ctx context.Context,
+	conv *model.Conversation,
+	tenantID uuid.UUID,
+	message string,
+	imageURLs []string,
+	historyLen int,
+) string {
+	if !IsAutoModel(conv.ModelID) {
+		return conv.ModelID
+	}
+	hasFiles := strings.TrimSpace(s.fileContext(ctx, tenantID, conv.ID)) != ""
+	hasImages := len(imageURLs) > 0
+	available := []string{}
+	if s.models != nil {
+		available = s.models.ModelIDs()
+	}
+	resolved := ResolveAutoModel(message, hasFiles, hasImages, historyLen, available)
+	slog.Info("auto_model_resolved",
+		"conversation_id", conv.ID.String(),
+		"resolved_model", resolved,
+		"message_length", len(message),
+		"has_files", hasFiles,
+		"has_images", hasImages,
+		"message_count", historyLen,
+	)
+	return resolved
 }
 
 // InspectContext is the public dry-run entry point — runs the

@@ -24,10 +24,12 @@ var (
 )
 
 // ModelChecker is the small contract the service needs from the
-// config: "is this model id in our allow-list?" Keeps the service
-// decoupled from the concrete Config type for testing.
+// config: "is this model id in our allow-list?" plus an enumeration
+// of allowed IDs (used by the Auto-model resolver). Keeps the
+// service decoupled from the concrete Config type for testing.
 type ModelChecker interface {
 	ModelAllowed(id string) bool
+	ModelIDs() []string
 }
 
 type ConversationService struct {
