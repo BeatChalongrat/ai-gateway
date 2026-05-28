@@ -75,8 +75,23 @@ type CreateMemoryInput struct {
 	EvidenceExcerpt       string
 
 	// ActorType is the audit-log actor: "user" (manual API), "assistant"
-	// (AI tool call), or "system" (background extractor — Phase 4).
+	// (AI tool call), or "system" (background extractor — S8).
 	ActorType string
+
+	// S8 overrides — used by the PreferenceExtractor so background-
+	// inferred preferences land as pending_confirmation rather than
+	// the active default. Empty / zero values fall through to the
+	// trust defaults (user-explicit → active+confirmed+0.95,
+	// everything else → active+unconfirmed+0.7).
+	//
+	// Status: only `pending_confirmation` is accepted as an override
+	// AND only when SourceType is assistant_inferred. Any other
+	// value falls back to active.
+	//
+	// ConfidenceScoreOverride: when > 0 replaces the trust-default
+	// confidence — extractor passes its per-suggestion confidence.
+	StatusOverride          string
+	ConfidenceScoreOverride float64
 }
 
 // CreateMemory validates + DLP-gates + dedup-checks + persists a new
@@ -111,25 +126,47 @@ func (s *MemoryService) CreateMemory(
 
 	normKey := normalizeKey(content)
 
-	// Dedup. Only active rows count — a soft-deleted memory with the
-	// same text should be allowed back so the user can re-save a
-	// preference they deleted by mistake.
-	dup, err := s.repo.ExistsByNormalizedKey(ctx, in.UserID, in.TenantID, normKey)
-	if err != nil {
-		return nil, err
+	// Dedup. Background-inferred preferences also dedup against
+	// pending rows so the extractor doesn't re-suggest the same
+	// pattern on every conversation. User-explicit + assistant tool
+	// saves use the narrower active-only check so soft-deleted
+	// memories can be re-added.
+	var dup bool
+	var derr error
+	if in.SourceType == model.MemorySourceAssistantInferred {
+		dup, derr = s.repo.ExistsByNormalizedKeyOrPending(ctx, in.UserID, in.TenantID, normKey)
+	} else {
+		dup, derr = s.repo.ExistsByNormalizedKey(ctx, in.UserID, in.TenantID, normKey)
+	}
+	if derr != nil {
+		return nil, derr
 	}
 	if dup {
 		return nil, ErrMemoryDuplicate
 	}
 
 	// Trust defaults. User-explicit memories are confirmed + high
-	// confidence; inferred ones (Phase 4) need explicit
-	// confirmation and start at 0.7.
+	// confidence; inferred ones (S8) need explicit confirmation
+	// and start at 0.7 — but the extractor can override with its
+	// per-suggestion confidence via ConfidenceScoreOverride.
 	confidence := 0.7
 	confirmed := false
 	if in.SourceType == model.MemorySourceUserExplicit {
 		confidence = 0.95
 		confirmed = true
+	}
+	if in.ConfidenceScoreOverride > 0 {
+		confidence = in.ConfidenceScoreOverride
+	}
+
+	// S8 — pending status is permitted ONLY for assistant_inferred
+	// rows. Any other status override falls back to active so the
+	// public API can't sneak rows past the user's review surface.
+	status := model.MemoryStatusActive
+	if in.StatusOverride == model.MemoryStatusPendingConfirmation &&
+		in.SourceType == model.MemorySourceAssistantInferred {
+		status = model.MemoryStatusPendingConfirmation
+		confirmed = false
 	}
 
 	scopeType := in.ScopeType
@@ -150,7 +187,7 @@ func (s *MemoryService) CreateMemory(
 		SourceConversationID: in.SourceConversationID,
 		SourceMessageID:      in.SourceMessageID,
 		EvidenceExcerpt:      strings.TrimSpace(in.EvidenceExcerpt),
-		Status:               model.MemoryStatusActive,
+		Status:               status,
 		ConfidenceScore:      confidence,
 		ImportanceScore:      0.5,
 		IsUserConfirmed:      confirmed,
@@ -274,6 +311,22 @@ func (s *MemoryService) SetConfirmed(
 		}
 		return nil, err
 	}
+
+	// S8 — when the user confirms a pending suggestion, the SQL in
+	// SetConfirmed already promotes status from pending_confirmation
+	// to active. Bump the confidence score too so the now-active
+	// row sits at the same trust level as a user-explicit save
+	// (otherwise the inferred 0.7 default would underweight a
+	// human-confirmed preference).
+	if confirmed {
+		if updated, err := s.repo.GetByID(ctx, id, userID, tenantID); err == nil && updated != nil {
+			if updated.ConfidenceScore < 0.95 {
+				updated.ConfidenceScore = 0.95
+				_ = s.repo.Update(ctx, updated)
+			}
+		}
+	}
+
 	action := "confirmed"
 	if !confirmed {
 		action = "rejected"
@@ -372,6 +425,15 @@ func (s *MemoryService) GetEvents(
 	ctx context.Context, memoryID, userID, tenantID uuid.UUID, limit int,
 ) ([]model.MemoryEvent, error) {
 	return s.repo.GetEvents(ctx, memoryID, userID, tenantID, limit)
+}
+
+// CountByStatus is a thin pass-through used by the S8 pending-
+// count endpoint. Kept on the service so the handler doesn't have
+// to depend on the repo directly.
+func (s *MemoryService) CountByStatus(
+	ctx context.Context, userID, tenantID uuid.UUID, status string,
+) (int, error) {
+	return s.repo.CountByStatus(ctx, userID, tenantID, status)
 }
 
 // ---------------------------------------------------------------------------

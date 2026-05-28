@@ -28,6 +28,8 @@ import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
 import { Brain, BrainCircuit } from "lucide-react";
 
+import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
+
 import { ConversationItem } from "./ConversationItem";
 import { CustomInstructionsModal } from "./CustomInstructionsModal";
 import { VoiceSettingsModal } from "./VoiceSettingsModal";
@@ -453,7 +455,7 @@ function UserMenu({
             onClick={onMemory}
             icon={<Brain width={14} height={14} aria-hidden />}
             label="Memory"
-            trailing={<ArrowIcon />}
+            trailing={<MemoryTrailing />}
             setOpen={setOpen}
           />
           <MenuItem
@@ -700,6 +702,28 @@ function GearIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+// S8 — trailing slot for the Memory menu item: a blue pill with
+// the pending-preference count + the existing arrow caret.
+// Renders only the arrow when count is 0 so the menu row stays
+// quiet for users who don't have any suggestions.
+function MemoryTrailing() {
+  const count = useMemoryPendingStore((s) => s.count);
+  if (count <= 0) {
+    return <ArrowIcon />;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+        aria-label={`${count} pending preference${count === 1 ? "" : "s"}`}
+      >
+        {count > 99 ? "99+" : count}
+      </span>
+      <ArrowIcon />
+    </span>
   );
 }
 

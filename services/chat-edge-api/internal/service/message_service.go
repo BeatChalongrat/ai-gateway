@@ -96,6 +96,10 @@ type MessageService struct {
 	// in the finish callback. Nil-safe — no source rows when
 	// unwired (tests, downgrade path).
 	sourceRepo *repository.ResponseContextSourceRepo
+	// Optional. Background pattern learner (S8). Fires from
+	// finalizeConversation alongside the S3 state extractor — once
+	// per qualifying conversation. Nil-safe.
+	prefExtractor *PreferenceExtractor
 
 	maxContext int // max history messages threaded to the gateway
 
@@ -289,6 +293,14 @@ func (s *MessageService) SetSearchService(svc *SearchService) {
 // are simply dropped at the end of the turn (no errors, no rows).
 func (s *MessageService) SetResponseSourceRepo(r *repository.ResponseContextSourceRepo) {
 	s.sourceRepo = r
+}
+
+// SetPreferenceExtractor wires the S8 background pattern learner.
+// Without it, finalizeConversation skips the
+// maybeExtractPreferences hook entirely (no extraction goroutines,
+// no pending suggestions).
+func (s *MessageService) SetPreferenceExtractor(e *PreferenceExtractor) {
+	s.prefExtractor = e
 }
 
 // persistSources flushes an accumulator's snapshot to
@@ -1761,6 +1773,10 @@ func (s *MessageService) finalizeConversation(
 	// S3 — kick the state-extraction trigger. Runs async so the
 	// user's response isn't blocked on the gateway extraction call.
 	s.maybeUpdateConversationState(ctx, conv)
+	// S8 — kick the preference-pattern extractor on the same path.
+	// Skipped when memory is off (temporary chats) and capped to
+	// once per conversation lifetime.
+	s.maybeExtractPreferences(ctx, conv)
 }
 
 // State-extraction triggers.
@@ -1819,6 +1835,69 @@ func (s *MessageService) maybeUpdateConversationState(
 		bg := context.Background()
 		if _, err := s.stateSvc.GenerateOrUpdateState(bg, convID, userID, tenantID); err != nil {
 			slog.Warn("conversation state: auto-extraction failed",
+				"conv", convID.String(), "err", err)
+		}
+	}()
+}
+
+// preferenceExtractAtMessages — minimum conversation size before
+// the S8 background pattern learner runs. Higher than the S3
+// state trigger (10) because preference patterns need MORE signal
+// to surface reliably; one short conversation rarely shows a
+// behaviour.
+const preferenceExtractAtMessages = 20
+
+// maybeExtractPreferences fires the S8 PreferenceExtractor at most
+// ONCE per conversation, on a background goroutine, when:
+//   - the extractor is wired
+//   - the conv has memory enabled (temp chats opt out — they
+//     mustn't surface suggestions either)
+//   - the conv has crossed preferenceExtractAtMessages messages
+//   - no inferred_preference row from THIS conv exists yet (dedup
+//     check via the source_conversation_id filter)
+//
+// Same async-on-background-ctx pattern as
+// maybeUpdateConversationState so the user's response is never
+// blocked on the extraction call.
+func (s *MessageService) maybeExtractPreferences(
+	parent context.Context, conv *model.Conversation,
+) {
+	if s.prefExtractor == nil || conv == nil || !conv.MemoryEnabled {
+		return
+	}
+
+	count, err := s.messages.CountMessages(parent, conv.TenantID, conv.ID)
+	if err != nil {
+		return
+	}
+	if count < preferenceExtractAtMessages {
+		return
+	}
+
+	// Only extract once per conversation. We use the memory service's
+	// list path with the source_conversation_id field on a single
+	// scan — cheaper than a dedicated count query for a row that
+	// realistically has at most a handful of suggestions.
+	existing, err := s.prefExtractor.memoryRepo.ListByUser(
+		parent, conv.UserID, conv.TenantID, repository.MemoryListFilters{
+			MemoryType: model.MemoryTypeInferredPreference,
+			Status:     model.MemoryStatusPendingConfirmation,
+			Limit:      100,
+		},
+	)
+	if err == nil {
+		for i := range existing {
+			if existing[i].SourceConversationID != nil && *existing[i].SourceConversationID == conv.ID {
+				return // already extracted from this conv
+			}
+		}
+	}
+
+	convID, userID, tenantID := conv.ID, conv.UserID, conv.TenantID
+	go func() {
+		bg := context.Background()
+		if _, err := s.prefExtractor.ExtractPreferences(bg, convID, userID, tenantID); err != nil {
+			slog.Warn("preference extraction failed",
 				"conv", convID.String(), "err", err)
 		}
 	}()
