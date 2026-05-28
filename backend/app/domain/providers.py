@@ -36,6 +36,14 @@ class ProviderResponse:
         report usage (e.g. some OpenRouter models).
     raw : dict
         Full raw provider JSON response for debugging / audit.
+    reasoning_content : str | None
+        Full reasoning / thinking text emitted by the model when
+        reasoning mode is enabled (OpenAI o-series ``reasoning_content``,
+        Anthropic ``thinking`` blocks, Gemini ``thoughts``, DeepSeek-R1
+        ``reasoning_content``). ``None`` when the request did not enable
+        reasoning or the provider returned no reasoning output. T1 just
+        threads this field through the dataclass — adapters do not
+        populate it yet; T2 wires per-provider parsing.
     """
 
     content: str
@@ -48,6 +56,10 @@ class ProviderResponse:
     # ({"id", "type", "function": {"name", "arguments"}}). None when the
     # response is plain text — keeps the dataclass backward-compatible.
     tool_calls: list[dict] | None = None
+    # Reasoning / thinking text. Populated by T2 adapter changes once
+    # per-provider parsing lands; defaults to None so every existing
+    # adapter (which does not set it) stays byte-identical.
+    reasoning_content: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +78,13 @@ class ProviderStreamChunk:
         Token counts. Only set on the trailing usage chunk emitted when the
         adapter requests `stream_options.include_usage` from the upstream
         provider. None for intermediate content chunks.
+    reasoning_delta : str | None
+        Incremental reasoning / thinking text fragment. Populated only
+        when the model emits a thinking-block delta (Anthropic
+        ``thinking_delta``, OpenAI-compatible ``delta.reasoning_content``,
+        Gemini ``thoughts`` parts). ``None`` for plain text / tool-call
+        chunks. T1 just threads the field; T2 wires adapters + the SSE
+        emitter to forward it.
     """
 
     delta: str = ""
@@ -80,3 +99,7 @@ class ProviderStreamChunk:
     # (text) and ``tool_calls``; the SSE emitter forwards each
     # independently.
     tool_calls: list[dict] | None = None
+    # Reasoning / thinking delta. A single chunk MAY carry both
+    # ``delta`` (final-answer text) and ``reasoning_delta`` (thought
+    # text); T2's SSE emitter forwards each independently.
+    reasoning_delta: str | None = None

@@ -235,6 +235,35 @@ class RoutingService:
         rejected: list[RejectedCandidate] = []
         preferred_provider_reason: str | None = None
 
+        # use_case='reasoning' (T1): restrict the candidate pool to
+        # ``supports_reasoning=True`` rows. ``_AUTO_DEFAULTS["reasoning"]``
+        # is a back-compat alias for the coding default which usually
+        # is NOT reasoning-capable — so we re-elect ``preferred`` from
+        # the reasoning-capable pool here. If the pool is empty (no
+        # reasoning models registered, or all blocked by region /
+        # policy), fall through to the existing non-reasoning behaviour
+        # rather than 503'ing the request.
+        if request.use_case == "reasoning":
+            reasoning_pool = [
+                c for c in get_all_candidates() if c.supports_reasoning
+            ]
+            reasoning_pool = filter_candidates(
+                reasoning_pool,
+                requires_streaming=request.stream,
+                allowed_providers=request.allowed_providers,
+                blocked_models=request.blocked_models,
+            )
+            if reasoning_pool:
+                reasoning_pool.sort(
+                    key=lambda c: _score_candidate(
+                        c,
+                        request.prefer_cost,
+                        request.prefer_latency,
+                        preferred_provider=request.preferred_provider,
+                    )
+                )
+                preferred = reasoning_pool[0]
+
         # Soft preference: when the project has set ``preferred_provider``
         # and the registry has at least one candidate on that provider
         # that survives capability/policy filtering, override the auto
