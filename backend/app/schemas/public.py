@@ -6,7 +6,7 @@ are normalized away before reaching these schemas.
 
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -14,8 +14,54 @@ from app.schemas.common import Message, UsageInfo
 
 
 # ---------------------------------------------------------------------------
+# Reasoning / thinking config — provider-neutral request knob.
+# ---------------------------------------------------------------------------
+
+
+class ReasoningConfig(BaseModel):
+    """Unified reasoning / thinking configuration.
+
+    Provider-neutral on the wire. The Gateway translates this into the
+    upstream provider's native shape inside each adapter (T2):
+
+      * OpenAI o-series          → ``reasoning_effort``
+      * Anthropic Claude 4+      → ``thinking`` block with budget tokens
+      * Gemini 2.5+              → ``thinkingConfig.thinkingLevel``
+      * DeepSeek-R1 / Groq R1    → adapter parses ``reasoning_content``
+
+    ``mode='off'`` is explicit-disable; sending no ``reasoning`` field
+    at all is equivalent (the gateway treats absent + off the same).
+    ``show_summary=True`` asks the gateway to surface reasoning text
+    back to the caller — when False (the default) the gateway still
+    counts reasoning tokens for billing but does not emit reasoning
+    deltas on the SSE stream / does not set ``reasoning_content`` on
+    the non-streaming response.
+    """
+
+    mode: Literal["off", "auto", "low", "medium", "high"] = "off"
+    show_summary: bool = False
+
+
+# ---------------------------------------------------------------------------
 # Models / discovery
 # ---------------------------------------------------------------------------
+
+
+class ReasoningCapability(BaseModel):
+    """Reasoning / thinking capability block on a ``ModelInfo``.
+
+    Surfaced by GET /v1/models so clients (Chat Edge, SDKs) can
+    discover which models accept the public ``ReasoningConfig`` knob
+    and what the per-model defaults are. Mirrors the per-row state of
+    ``model_configs`` after migration 045.
+    """
+
+    supported: bool = False
+    modes: List[str] = Field(
+        default_factory=lambda: ["off", "auto", "low", "medium", "high"]
+    )
+    default_mode: str = "auto"
+    summary_supported: bool = True
 
 
 class ModelInfo(BaseModel):
@@ -23,6 +69,12 @@ class ModelInfo(BaseModel):
 
     id: str
     provider: str
+    # Reasoning capability metadata (migration 045 / T1). Optional so
+    # the synthetic ``id="auto"`` gateway entry — which has no backing
+    # ``model_configs`` row — serialises without a default-filled
+    # capability block. ``response_model_exclude_none`` on the route
+    # drops it from the wire when absent.
+    reasoning: Optional[ReasoningCapability] = None
 
 
 class ModelListResponse(BaseModel):
@@ -71,6 +123,13 @@ class ChatCompletionsRequest(BaseModel):
     # constraints, etc.) without gateway-side validation drift.
     tools: Optional[List[dict]] = None
     tool_choice: Optional[Any] = None
+
+    # Reasoning / thinking config — provider-neutral. None (or omitted)
+    # is the existing no-reasoning behaviour, so every existing caller
+    # stays byte-identical. T1 only accepts + threads this through; T2
+    # adapters translate to provider-specific params and surface
+    # reasoning deltas back to the client.
+    reasoning: Optional[ReasoningConfig] = None
 
     @field_validator("policy_profile_id")
     @classmethod
@@ -123,6 +182,19 @@ class ChatCompletionsResponse(BaseModel):
     policy_action: str = "allow"
     policy_reasons: List[str] = Field(default_factory=list)
     cached: bool = False
+
+    # Reasoning / thinking output. ``reasoning_content`` holds the full
+    # thinking summary when the caller requested it via
+    # ``ReasoningConfig.show_summary=True`` AND the provider emitted
+    # reasoning text. ``reasoning_tokens`` is the count of reasoning-
+    # only tokens (billed separately by OpenAI o-series and Anthropic
+    # extended thinking) — surfaced on the response so callers can
+    # display + audit cost without parsing provider-specific usage
+    # nesting. Both default to None; ``response_model_exclude_none``
+    # drops them from the wire when unset so existing callers see no
+    # new fields.
+    reasoning_content: Optional[str] = None
+    reasoning_tokens: Optional[int] = None
 
 
 class FeedbackRequest(BaseModel):

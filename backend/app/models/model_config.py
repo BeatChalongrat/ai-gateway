@@ -51,6 +51,19 @@ class ModelConfigORM(Base):
     supports_vision: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sa.text("false")
     )
+    # Reasoning / thinking capability (migration 045). Mirrors the
+    # ``supports_streaming/tools/vision`` pattern. ``reasoning_strategy``
+    # names the adapter pathway used to translate the public
+    # ``ReasoningConfig`` into provider-native shape (T2 consumes it).
+    supports_reasoning: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    reasoning_strategy: Mapped[str] = mapped_column(
+        String(80), nullable=False, server_default=sa.text("'none'")
+    )
+    default_reasoning_mode: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, server_default=sa.text("'auto'")
+    )
     max_context_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=sa.text("128000")
     )

@@ -429,6 +429,9 @@ def list_models() -> AdminListResponse[ModelDetail]:
                 supports_streaming=c.supports_streaming,
                 cost_tier=c.cost_tier,
                 latency_tier=c.latency_tier,
+                supports_reasoning=c.supports_reasoning,
+                reasoning_strategy=c.reasoning_strategy,
+                default_reasoning_mode=c.default_reasoning_mode,
             )
             for c in candidates
         ]

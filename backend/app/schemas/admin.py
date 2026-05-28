@@ -45,6 +45,12 @@ class ModelDetail(BaseModel):
     supports_streaming: bool
     cost_tier: str
     latency_tier: str
+    # Reasoning / thinking capability (migration 045). Defaults so
+    # existing tests + admin clients that don't yet send the new keys
+    # still parse the response.
+    supports_reasoning: bool = False
+    reasoning_strategy: str = "none"
+    default_reasoning_mode: str = "auto"
 
 
 class RequestLogDetail(BaseModel):
