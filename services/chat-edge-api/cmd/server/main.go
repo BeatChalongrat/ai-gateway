@@ -104,6 +104,7 @@ func main() {
 	shareRepo := repository.NewShareRepo(pool)
 	knowledgeRepo := repository.NewKnowledgeRepo(pool)
 	memoriesRepo := repository.NewMemoryRepo(pool)
+	statesRepo := repository.NewConversationStateRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -158,6 +159,12 @@ func main() {
 	// share so the message service can pick it up via SetMemoryReader
 	// below (system-prompt injection + AI tool execution).
 	memorySvc := service.NewMemoryService(memoriesRepo)
+	// S3 — Structured Conversation State. Backs the
+	// <conversation_state> system-prompt block, the
+	// update_conversation_state AI tool, and the GET
+	// /conversations/{id}/state read endpoint. Uses the gateway
+	// client for its extraction calls (low-temperature JSON).
+	stateSvc := service.NewConversationStateService(statesRepo, messages, conversations, gateway)
 
 	// Phase 4 — Excel Smart Workspace (Session 1) +
 	// Word/PDF Smart Reports (Session 2). Both services wired
@@ -184,6 +191,13 @@ func main() {
 	// system-prompt block + the save_memory / list_memories AI tools
 	// on every conversation where memory_enabled = true.
 	messageSvc.SetMemoryService(memorySvc)
+	// S3 — wire the conversation-state layer. Adds the
+	// <conversation_state> system-prompt block + the
+	// update_conversation_state tool + the auto-extraction trigger
+	// in finalizeConversation. Must follow SetMemoryService so the
+	// ToolExecutor (created inside SetMemoryService) picks up the
+	// state service via its internal back-wire.
+	messageSvc.SetConversationStateService(stateSvc)
 
 	// Knowledge base (RAG) pipeline.
 	//
@@ -213,6 +227,7 @@ func main() {
 	conversationHandler.SetExportSources(conversations, messages, filesRepo, cfg)
 	conversationHandler.SetKnowledgeService(knowledgeSvc)
 	conversationHandler.SetTitleService(titles)
+	conversationHandler.SetConversationStateService(stateSvc)
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)

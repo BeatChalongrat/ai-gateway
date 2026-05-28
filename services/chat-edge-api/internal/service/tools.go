@@ -1,8 +1,13 @@
 // AI tool registry + execution dispatcher.
 //
-// S1 ships two tools that mutate / read the memory layer:
+// S1 ships two memory-layer tools:
 //   - save_memory   — AI writes a fact/preference on user instruction
 //   - list_memories — AI lists what it remembers about the user
+//
+// S3 adds one more, scoped to the current conversation:
+//   - update_conversation_state — AI records goal / decisions /
+//     completed tasks / rejected approaches the instant they land,
+//     without waiting for the background extraction trigger.
 //
 // The OpenAI tool-calling spec is forwarded verbatim by the backend
 // gateway (see backend/app/schemas/public.py — tools + tool_choice
@@ -32,6 +37,64 @@ import (
 // ---------------------------------------------------------------------------
 // Tool registry
 // ---------------------------------------------------------------------------
+
+// updateConversationStateToolDef is the S3 tool definition.
+// Exported as a free function so MemoryToolDefs (which the
+// MessageService calls) can splice it into the same gated tool
+// list.
+func updateConversationStateToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "update_conversation_state",
+			Description: "Update the structured state of this conversation. " +
+				"Call this when:\n" +
+				"- The user states or changes the goal of the conversation\n" +
+				"- A significant decision is made or confirmed\n" +
+				"- A task is completed or a new task is identified\n" +
+				"- An approach is rejected\n" +
+				"- An important file/artifact is created or modified\n" +
+				"Do NOT call for casual chat, greetings, or minor clarifications.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"current_goal": map[string]any{
+						"type":        "string",
+						"description": "One sentence: what is the user trying to accomplish in this conversation? Only update if the goal changed.",
+					},
+					"add_decision": map[string]any{
+						"type":        "string",
+						"description": "A decision that was just confirmed.",
+					},
+					"add_task": map[string]any{
+						"type":        "string",
+						"description": "A new task identified.",
+					},
+					"complete_task": map[string]any{
+						"type":        "string",
+						"description": "A task that was just completed. Match the wording from open_tasks.",
+					},
+					"add_artifact": map[string]any{
+						"type":        "string",
+						"description": "A file/artifact just created or modified.",
+					},
+					"reject_approach": map[string]any{
+						"type":        "string",
+						"description": "An approach that was just rejected.",
+					},
+					"add_question": map[string]any{
+						"type":        "string",
+						"description": "An unresolved question identified.",
+					},
+					"resolve_question": map[string]any{
+						"type":        "string",
+						"description": "A question that was just answered. Match the wording from unresolved_questions.",
+					},
+				},
+			},
+		},
+	}
+}
 
 // MemoryToolDefs returns the OpenAI tool definitions the memory
 // layer registers with the gateway. Stable values — safe to call on
@@ -119,10 +182,33 @@ type ToolExecContext struct {
 // a string result"; the executor decides how to do that.
 type ToolExecutor struct {
 	memories *MemoryService
+	// S3 — optional. When wired, the executor handles
+	// update_conversation_state; when nil, that tool isn't
+	// exposed (see ToolDefs() below).
+	states *ConversationStateService
 }
 
 func NewToolExecutor(memories *MemoryService) *ToolExecutor {
 	return &ToolExecutor{memories: memories}
+}
+
+// SetConversationStateService wires the S3 state layer. Optional
+// so unit tests that don't exercise the state path stay decoupled.
+func (e *ToolExecutor) SetConversationStateService(s *ConversationStateService) {
+	e.states = s
+}
+
+// ToolDefs returns the full set of tool definitions the executor
+// can dispatch, gated by what's wired. The MessageService calls
+// this from attachTools — it replaces the old MemoryToolDefs()
+// direct splice so S3's tool joins the list when its service is
+// available.
+func (e *ToolExecutor) ToolDefs() []GatewayTool {
+	defs := MemoryToolDefs()
+	if e.states != nil {
+		defs = append(defs, updateConversationStateToolDef())
+	}
+	return defs
 }
 
 // Execute runs the named tool with the supplied JSON arguments and
@@ -138,9 +224,57 @@ func (e *ToolExecutor) Execute(
 		return e.execSaveMemory(ctx, call.Function.Arguments, ec)
 	case "list_memories":
 		return e.execListMemories(ctx, call.Function.Arguments, ec)
+	case "update_conversation_state":
+		return e.execUpdateConversationState(ctx, call.Function.Arguments, ec)
 	default:
 		return fmt.Sprintf("Unknown tool %q.", call.Function.Name)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// update_conversation_state
+// ---------------------------------------------------------------------------
+
+type updateConversationStateArgs struct {
+	CurrentGoal     string `json:"current_goal"`
+	AddDecision     string `json:"add_decision"`
+	AddTask         string `json:"add_task"`
+	CompleteTask    string `json:"complete_task"`
+	AddArtifact     string `json:"add_artifact"`
+	RejectApproach  string `json:"reject_approach"`
+	AddQuestion     string `json:"add_question"`
+	ResolveQuestion string `json:"resolve_question"`
+}
+
+func (e *ToolExecutor) execUpdateConversationState(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if e.states == nil {
+		return "The conversation state tool isn't available right now."
+	}
+	var args updateConversationStateArgs
+	if rawArgs != "" {
+		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+			return "I couldn't parse the update_conversation_state arguments."
+		}
+	}
+	changes, err := e.states.ApplyToolUpdate(ctx, ec.ConversationID, ec.UserID, ec.TenantID, ToolStateUpdate{
+		CurrentGoal:     args.CurrentGoal,
+		AddDecision:     args.AddDecision,
+		AddTask:         args.AddTask,
+		CompleteTask:    args.CompleteTask,
+		AddArtifact:     args.AddArtifact,
+		RejectApproach:  args.RejectApproach,
+		AddQuestion:     args.AddQuestion,
+		ResolveQuestion: args.ResolveQuestion,
+	})
+	if err != nil {
+		return "I couldn't update the conversation state right now."
+	}
+	if len(changes) == 0 {
+		return "No changes to record."
+	}
+	return "Updated conversation state:\n" + strings.Join(changes, "\n")
 }
 
 // ---------------------------------------------------------------------------
