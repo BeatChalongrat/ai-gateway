@@ -5,9 +5,9 @@
 //   • Header: "SRAN Chat" wordmark + collapse button (desktop)
 //   • Top actions: + New chat, Search chats (both subtle outlined)
 //   • Conversation list grouped by time, plain-text items
-//   • Footer: ONE user row that opens a popup menu (theme toggle,
-//     KB, voice settings, custom instructions, logout). Mirrors
-//     ChatGPT's footer — a single tap target, no icon-grid.
+//   • Footer: ONE user row that opens a popup menu (theme, language,
+//     KB, voice settings, Memory, logout). Mirrors ChatGPT's footer
+//     — a single tap target, no icon-grid.
 //
 // Below 80 rows we render plain divs; above that we virtualize via
 // @tanstack/react-virtual. Server-side search is debounced 300ms.
@@ -26,12 +26,11 @@ import type { Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
-import { Brain, BrainCircuit } from "lucide-react";
+import { Brain } from "lucide-react";
 
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 
 import { ConversationItem } from "./ConversationItem";
-import { CustomInstructionsModal } from "./CustomInstructionsModal";
 import { VoiceSettingsModal } from "./VoiceSettingsModal";
 
 const PORTAL_URL =
@@ -81,7 +80,6 @@ export function Sidebar({
 
   const [search, setSearch] = useState("");
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const debouncedSearch = useDebounce(search, 300);
   const t = useT();
@@ -135,16 +133,6 @@ export function Sidebar({
   }, [searchActive, searchResults, conversations, activeConversationId, messagesByConv]);
 
   function handleNew() {
-    newChat();
-    onClose();
-  }
-
-  function handleTemporaryChat() {
-    // Set the store flag the next createConversation() consumes;
-    // navigation to /chat lazy-creates on the first send, so the
-    // PATCH to memory_enabled=false runs at create-time before the
-    // first message turn.
-    useChatStore.getState().setNextConversationTemporary(true);
     newChat();
     onClose();
   }
@@ -338,16 +326,10 @@ export function Sidebar({
           userInitial={userInitial}
           onKnowledgeBase={() => router.push("/chat/knowledge")}
           onVoiceSettings={() => setVoiceSettingsOpen(true)}
-          onCustomInstructions={() => setInstructionsOpen(true)}
           onMemory={handleOpenMemory}
-          onTemporaryChat={handleTemporaryChat}
           onLogout={handleLogout}
         />
       </aside>
-      <CustomInstructionsModal
-        open={instructionsOpen}
-        onClose={() => setInstructionsOpen(false)}
-      />
       <VoiceSettingsModal
         open={voiceSettingsOpen}
         onClose={() => setVoiceSettingsOpen(false)}
@@ -367,18 +349,14 @@ function UserMenu({
   userInitial,
   onKnowledgeBase,
   onVoiceSettings,
-  onCustomInstructions,
   onMemory,
-  onTemporaryChat,
   onLogout,
 }: {
   userDisplay: string;
   userInitial: string;
   onKnowledgeBase: () => void;
   onVoiceSettings: () => void;
-  onCustomInstructions: () => void;
   onMemory: () => void;
-  onTemporaryChat: () => void;
   onLogout: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -445,23 +423,10 @@ function UserMenu({
             setOpen={setOpen}
           />
           <MenuItem
-            onClick={onCustomInstructions}
-            icon={<GearIcon />}
-            label={t("menu.customInstructions")}
-            trailing={<ArrowIcon />}
-            setOpen={setOpen}
-          />
-          <MenuItem
             onClick={onMemory}
             icon={<Brain width={14} height={14} aria-hidden />}
             label="Memory"
             trailing={<MemoryTrailing />}
-            setOpen={setOpen}
-          />
-          <MenuItem
-            onClick={onTemporaryChat}
-            icon={<BrainCircuit width={14} height={14} aria-hidden />}
-            label="Temporary chat"
             setOpen={setOpen}
           />
           <div className="border-t border-border/60" />
@@ -685,21 +650,6 @@ function MicIcon() {
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-      <path
-        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 0 1 4.21 16.97l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06A2 2 0 1 1 7.03 4.29l.06.06A1.65 1.65 0 0 0 8.91 4.6 1.65 1.65 0 0 0 9.91 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );

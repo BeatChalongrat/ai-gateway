@@ -31,7 +31,6 @@ export const en = {
   "menu.language": "Language",
   "menu.knowledgeBase": "Knowledge base",
   "menu.voiceSettings": "Voice settings",
-  "menu.customInstructions": "Custom instructions",
   "menu.logout": "Log out",
 
   // ── Empty state / greeting ───────────────────────────────
@@ -153,7 +152,6 @@ const th: Record<DictKey, string> = {
   "menu.language": "ภาษา",
   "menu.knowledgeBase": "ฐานความรู้",
   "menu.voiceSettings": "ตั้งค่าเสียง",
-  "menu.customInstructions": "คำสั่งแบบกำหนดเอง",
   "menu.logout": "ออกจากระบบ",
 
   // Empty
