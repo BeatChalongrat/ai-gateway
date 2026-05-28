@@ -74,6 +74,36 @@ export default function ChatLayout({
     };
   }, [sidebarOpen]);
 
+  // Publish the sidebar's horizontal footprint to ``<html>`` so the
+  // ToastViewport (mounted at AppProviders, outside this layout) can
+  // bias its ``left: calc(50% + var(--toast-x-offset))`` toward the
+  // chat content area's visual center instead of the viewport's.
+  // The sidebar contributes ``260px`` at desktop sizes when not
+  // collapsed (see Sidebar.tsx's ``md:w-[260px]``); at mobile it's
+  // an overlay that doesn't take horizontal space, and when
+  // ``collapsed`` it animates to width 0. Cleanup on unmount so
+  // navigating away from /chat leaves global state pristine.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root = document.documentElement;
+    const SIDEBAR_DESKTOP_WIDTH = 260;
+    const mq = window.matchMedia("(min-width: 768px)");
+    const sync = () => {
+      const isDesktop = mq.matches;
+      const sidebarWidth = isDesktop && !collapsed ? SIDEBAR_DESKTOP_WIDTH : 0;
+      // Half the sidebar width — moves the toast center toward the
+      // right by the same amount the sidebar pushed the content
+      // area off-axis.
+      root.style.setProperty("--toast-x-offset", `${sidebarWidth / 2}px`);
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => {
+      mq.removeEventListener("change", sync);
+      root.style.removeProperty("--toast-x-offset");
+    };
+  }, [collapsed]);
+
   // S8 — poll the pending-preference count so the sidebar Memory
   // badge + MemoryIndicator dot have something to read. Single
   // mount per chat session via the layout.
