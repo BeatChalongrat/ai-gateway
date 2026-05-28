@@ -10,6 +10,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -179,24 +180,28 @@ func (c *Config) Models() []ModelEntry {
 	return out
 }
 
-// ModelAllowed returns true iff “id“ matches an entry in the
-// configured model list. Used by handlers to gate
-// conversation/message creation.
+// ModelAllowed returns true for any non-empty model id. The upstream
+// Gateway is the authority on which models are actually available;
+// duplicating that catalog here would just create a stale-mirror
+// problem where every Gateway change forces a Chat Edge config
+// rebuild. Instead we accept any id the frontend passes through and
+// let the Gateway reject bogus ones at request time (the user sees
+// "AI service error" with the upstream message, which is honest).
 //
-// The literal "auto" id is also accepted as a sentinel: the
-// service layer (service.ResolveAutoModel) turns it into a
-// concrete catalog id at gateway-call time, so admin allow-list
-// gating still happens — just one indirection later.
+// "auto" is documented explicitly even though the general rule
+// already covers it — it's the sentinel ResolveAutoModel reads, so
+// keeping its acceptance visible at the gate prevents a future
+// reader from "tightening" this back into a strict allowlist
+// without understanding the contract.
+//
+// Note: Models() / ModelIDs() still return the OPERATOR'S curated
+// catalog — that's what the dropdown shows and what Auto picks
+// from. Only the GATE is permissive; recommendation stays curated.
 func (c *Config) ModelAllowed(id string) bool {
-	if id == "auto" {
-		return true
+	if strings.TrimSpace(id) == "" {
+		return false
 	}
-	for _, m := range c.Models() {
-		if m.ID == id {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 // ModelIDs returns just the ids from Models(). Powers the Auto-
