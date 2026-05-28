@@ -40,6 +40,10 @@ var (
 	ErrMemoryInvalidType       = errors.New("memory: invalid memory_type")
 	ErrMemoryInvalidSource     = errors.New("memory: invalid source_type")
 	ErrMemoryNotFound          = errors.New("memory: not found")
+	// S9 — enforced when the user is at or above the tenant's
+	// max_memories_per_user setting. Message includes the
+	// observed/limit pair so the UI can render a clear hint.
+	ErrMemoryLimitReached = errors.New("memory: per-user limit reached")
 )
 
 // ---------------------------------------------------------------------------
@@ -48,10 +52,21 @@ var (
 
 type MemoryService struct {
 	repo *repository.MemoryRepo
+	// Optional. When wired (S9), CreateMemory enforces the
+	// tenant's max_memories_per_user setting before persisting.
+	// Nil-safe — without it the cap defaults effectively to
+	// "unlimited" (tests + legacy boot paths).
+	settings *repository.TenantMemorySettingsRepo
 }
 
 func NewMemoryService(repo *repository.MemoryRepo) *MemoryService {
 	return &MemoryService{repo: repo}
+}
+
+// SetTenantSettings wires the S9 per-tenant settings repo so the
+// CreateMemory path can enforce the max-memories-per-user cap.
+func (s *MemoryService) SetTenantSettings(r *repository.TenantMemorySettingsRepo) {
+	s.settings = r
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +137,22 @@ func (s *MemoryService) CreateMemory(
 	// to silently store a leaked key.
 	if containsProhibitedData(content) {
 		return nil, ErrMemoryProhibitedContent
+	}
+
+	// S9 — per-tenant max-memories cap. Skipped when the settings
+	// repo isn't wired (legacy boot path) so tests don't have to
+	// stand up the table. Limit counts active + pending — a
+	// pending suggestion still occupies a slot from the user's POV.
+	if s.settings != nil {
+		ts, sErr := s.settings.Get(ctx, in.TenantID)
+		if sErr == nil && ts != nil && ts.MaxMemoriesPerUser > 0 {
+			activeN, _ := s.repo.CountByStatus(ctx, in.UserID, in.TenantID, model.MemoryStatusActive)
+			pendingN, _ := s.repo.CountByStatus(ctx, in.UserID, in.TenantID, model.MemoryStatusPendingConfirmation)
+			if activeN+pendingN >= ts.MaxMemoriesPerUser {
+				return nil, fmt.Errorf("%w: %d/%d slots used",
+					ErrMemoryLimitReached, activeN+pendingN, ts.MaxMemoriesPerUser)
+			}
+		}
 	}
 
 	normKey := normalizeKey(content)

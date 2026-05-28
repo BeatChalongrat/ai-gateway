@@ -106,6 +106,8 @@ func main() {
 	memoriesRepo := repository.NewMemoryRepo(pool)
 	statesRepo := repository.NewConversationStateRepo(pool)
 	sourcesRepo := repository.NewResponseContextSourceRepo(pool)
+	tenantSettingsRepo := repository.NewTenantMemorySettingsRepo(pool)
+	exportsRepo := repository.NewDataExportRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -160,6 +162,15 @@ func main() {
 	// share so the message service can pick it up via SetMemoryReader
 	// below (system-prompt injection + AI tool execution).
 	memorySvc := service.NewMemoryService(memoriesRepo)
+	// S9 — wire the tenant settings repo onto the memory service
+	// so CreateMemory enforces the per-tenant max-memories cap.
+	memorySvc.SetTenantSettings(tenantSettingsRepo)
+	// S9 — Export + Purge + Retention. Storage root reuses the
+	// existing FileStorageRoot config so exports land in the
+	// same bind-mount as uploads (./data by default).
+	exportSvc := service.NewExportService(memoriesRepo, exportsRepo, tenantSettingsRepo, cfg.FileStorageRoot)
+	purgeSvc := service.NewPurgeService(memoriesRepo, statesRepo, sourcesRepo, exportsRepo, tenantSettingsRepo, cfg.FileStorageRoot)
+	retentionEnforcer := service.NewRetentionEnforcer(memoriesRepo, tenantSettingsRepo)
 	// S3 — Structured Conversation State. Backs the
 	// <conversation_state> system-prompt block, the
 	// update_conversation_state AI tool, and the GET
@@ -264,6 +275,17 @@ func main() {
 	messageHandler.SetSourceRepo(sourcesRepo)
 
 	adminHandler := handler.NewAdminHandler(pool)
+	// S9 — wire the aggregate stats lookup as a closure so the
+	// admin handler doesn't need a direct MemoryRepo import.
+	// Returns the typed struct as `any` for the handler's JSON
+	// encoder; the structural fields go straight to the wire.
+	adminHandler.SetMemoryStatsFn(func(ctx context.Context, tenantID uuid.UUID) (any, error) {
+		stats, err := memoriesRepo.GetAggregateStats(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		return stats, nil
+	})
 	// Wire the KB mutators so the admin endpoints can reindex / delete
 	// without duplicating the cascade + blob-cleanup logic the
 	// tenant-facing service already implements. Closures swallow the
@@ -294,6 +316,7 @@ func main() {
 		Workspace:    handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
 		Memory:       handler.NewMemoryHandler(memorySvc),
 		Search:       handler.NewSearchHandler(searchSvc),
+		Account:      handler.NewAccountHandler(exportSvc, purgeSvc),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
@@ -312,6 +335,12 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	// S9 — start the retention enforcer goroutine. Lifetime is
+	// tied to bgCtx, which we cancel during shutdown so the
+	// background goroutine drains alongside the HTTP server.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	go retentionEnforcer.StartBackground(bgCtx)
+
 	// Run + graceful shutdown.
 	go func() {
 		slog.Info("chat-edge-api listening", "port", cfg.Port)
@@ -326,6 +355,7 @@ func main() {
 	<-stop
 	slog.Info("shutdown signal received")
 
+	bgCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

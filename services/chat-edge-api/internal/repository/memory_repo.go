@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -260,6 +261,170 @@ func (r *MemoryRepo) SetConfirmed(
 		return ErrNotFound
 	}
 	return nil
+}
+
+// MemoryAggregateStats is the per-tenant rollup the S9 admin
+// dashboard reads. All counts; no content; no per-user breakdown.
+type MemoryAggregateStats struct {
+	TotalUsersWithMemories int
+	TotalActive            int
+	TotalPending           int
+	TotalDeleted           int
+	TotalEvents            int
+	AvgMemoriesPerUser     float64
+	TopMemoryTypes         map[string]int
+}
+
+// GetAggregateStats returns the per-tenant rollup the S9 admin
+// /memory-stats endpoint serves. ZERO content / per-user data
+// leaves this method — only counts grouped by status + type. The
+// memory_event count is taken from the audit table to give the
+// admin a sense of activity level.
+func (r *MemoryRepo) GetAggregateStats(
+	ctx context.Context, tenantID uuid.UUID,
+) (*MemoryAggregateStats, error) {
+	out := &MemoryAggregateStats{
+		TopMemoryTypes: map[string]int{},
+	}
+	// Counts query — one round trip via FILTER aggregates.
+	const countsQ = `
+		SELECT
+			COUNT(DISTINCT user_id)                                 AS users_with,
+			COUNT(*) FILTER (WHERE status = 'active')               AS active,
+			COUNT(*) FILTER (WHERE status = 'pending_confirmation') AS pending,
+			COUNT(*) FILTER (WHERE status = 'deleted')              AS deleted
+		FROM chat.user_memories
+		WHERE tenant_id = $1
+	`
+	if err := r.db.QueryRow(ctx, countsQ, tenantID).Scan(
+		&out.TotalUsersWithMemories, &out.TotalActive, &out.TotalPending, &out.TotalDeleted,
+	); err != nil {
+		return nil, fmt.Errorf("aggregate counts: %w", err)
+	}
+	if out.TotalUsersWithMemories > 0 {
+		out.AvgMemoriesPerUser = float64(out.TotalActive) / float64(out.TotalUsersWithMemories)
+	}
+
+	// Top memory types — only active rows; deleted tombstones
+	// have their type intact but shouldn't count toward "what's
+	// in use" stats.
+	const typesQ = `
+		SELECT memory_type, COUNT(*)::int AS n
+		FROM chat.user_memories
+		WHERE tenant_id = $1 AND status = 'active'
+		GROUP BY memory_type
+		ORDER BY n DESC
+	`
+	rows, err := r.db.Query(ctx, typesQ, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate types: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t string
+		var n int
+		if err := rows.Scan(&t, &n); err != nil {
+			return nil, fmt.Errorf("aggregate types scan: %w", err)
+		}
+		out.TopMemoryTypes[t] = n
+	}
+
+	// Event count — separate query so a missing event table won't
+	// drag down the rest of the stats. Best-effort: errors leave
+	// TotalEvents at 0.
+	const eventsQ = `SELECT COUNT(*)::int FROM chat.memory_events WHERE tenant_id = $1`
+	_ = r.db.QueryRow(ctx, eventsQ, tenantID).Scan(&out.TotalEvents)
+	return out, nil
+}
+
+// ListAllForExport returns every memory row for the user — active,
+// pending, superseded, and deleted tombstones included so the
+// exported file is a complete history. Caller is the GDPR-export
+// path; the deleted rows still ship with their scrubbed content
+// (set to '[deleted]' / '[expired]' by the soft-delete +
+// retention paths).
+func (r *MemoryRepo) ListAllForExport(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) ([]model.Memory, error) {
+	q := `SELECT ` + memoryColumns + `
+	      FROM chat.user_memories
+	      WHERE user_id = $1 AND tenant_id = $2
+	      ORDER BY created_at ASC`
+	rows, err := r.db.Query(ctx, q, userID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list all for export: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.Memory, 0)
+	for rows.Next() {
+		var m model.Memory
+		if err := scanMemory(rows, &m); err != nil {
+			return nil, fmt.Errorf("list all export scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// HardDeleteAllByUser is the GDPR right-to-erasure path. Issues a
+// genuine DELETE (not the soft-delete that SoftDelete + ClearAll
+// use) so no trace of the row content remains. Returns the
+// affected row count for the audit log + the response envelope.
+func (r *MemoryRepo) HardDeleteAllByUser(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) (int, error) {
+	const q = `DELETE FROM chat.user_memories WHERE user_id = $1 AND tenant_id = $2`
+	tag, err := r.db.Exec(ctx, q, userID, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("hard delete memories: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// HardDeleteAllEventsByUser purges the memory-events audit trail
+// for one user as part of the GDPR purge cascade. Even the audit
+// rows go — the spec's contract is "permanently delete EVERYTHING
+// memory-related", and the audit table carries action timestamps
+// + actor metadata that could still identify behaviour.
+func (r *MemoryRepo) HardDeleteAllEventsByUser(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) (int, error) {
+	const q = `DELETE FROM chat.memory_events WHERE user_id = $1 AND tenant_id = $2`
+	tag, err := r.db.Exec(ctx, q, userID, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("hard delete memory events: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// ExpireOlderThan is the RetentionEnforcer's nightly write. Soft-
+// deletes (status='deleted') active memories whose created_at is
+// older than the cutoff AND scrubs the content + search_vector so
+// the data really is gone from indexable form. Pinned memories
+// are EXEMPT — if a user pinned it, they want to keep it.
+//
+// Returns the affected row count for observability.
+func (r *MemoryRepo) ExpireOlderThan(
+	ctx context.Context, tenantID uuid.UUID, cutoff time.Time,
+) (int, error) {
+	const q = `
+		UPDATE chat.user_memories
+		SET status           = 'deleted',
+		    content          = '[expired]',
+		    normalized_key   = NULL,
+		    evidence_excerpt = NULL,
+		    search_vector    = NULL,
+		    updated_at       = NOW()
+		WHERE tenant_id = $1
+		  AND status = 'active'
+		  AND is_pinned = false
+		  AND created_at < $2
+	`
+	tag, err := r.db.Exec(ctx, q, tenantID, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("expire older than: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // CountByStatus returns the number of rows in the given status

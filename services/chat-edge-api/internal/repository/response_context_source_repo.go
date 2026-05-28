@@ -157,6 +157,21 @@ func (r *ResponseContextSourceRepo) ListByMessages(
 	return out, rows.Err()
 }
 
+// HardDeleteAllByUser is the GDPR right-to-erasure cascade for
+// response_context_sources. Issues a DELETE for every row
+// belonging to the user — the S9 purge flow calls this alongside
+// the memory + memory-event + state purges.
+func (r *ResponseContextSourceRepo) HardDeleteAllByUser(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) (int, error) {
+	const q = `DELETE FROM chat.response_context_sources WHERE user_id = $1 AND tenant_id = $2`
+	tag, err := r.db.Exec(ctx, q, userID, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("hard delete response sources: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // DeleteByMessage clears the source rows for one message. Called
 // from the message-delete cascade hook (when added). Tenant-
 // scoped via the WHERE clause.

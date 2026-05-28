@@ -405,6 +405,40 @@ class ApiClient {
     return this.json<{ count: number }>("/memories/pending-count");
   }
 
+  // ----- Account data management (S9) ----------------------
+  /** Generate a JSON export of every memory the caller owns.
+   *  Returns metadata + an ID the download endpoint consumes. */
+  exportMemories() {
+    return this.json<{
+      export_id: string;
+      filename: string;
+      size_bytes: number;
+      expires_at: string;
+    }>("/account/export-memories", { method: "POST" });
+  }
+  /** Absolute URL the browser hits to stream the export file —
+   *  hits /account/exports/{id}/download with the bearer token
+   *  carried via the same auth layer the rest of the client uses. */
+  exportDownloadUrl(exportID: string): string {
+    return `${API_BASE}/account/exports/${encodeURIComponent(exportID)}/download`;
+  }
+  /** S9 GDPR right-to-erasure. Confirm string MUST match
+   *  exactly: "DELETE ALL MY MEMORIES" (the backend rejects
+   *  anything else with 400). */
+  purgeMemories(confirm: string) {
+    return this.json<{
+      memories_deleted: number;
+      events_deleted: number;
+      states_deleted: number;
+      sources_deleted: number;
+      exports_deleted: number;
+      export_files_unlinked: number;
+    }>("/account/purge-memories", {
+      method: "DELETE",
+      body: JSON.stringify({ confirm }),
+    });
+  }
+
   // ----- Preferences ---------------------------------------
   getPreferences() {
     return this.json<UserPreferences>("/user/preferences");
