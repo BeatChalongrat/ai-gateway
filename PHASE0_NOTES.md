@@ -113,6 +113,45 @@ ZADD) in **both** engines plus updating their pinned always-ZADD tests (>2h),
 
 ---
 
-## Pending
-- Session 0.4 — DLP parity suite (incl. evasion vectors) + Python-wrapper preprocessing.
-- Session 0.5 — DLP flip + `PHASE0_BENCHMARK.md`.
+## Session 0.4 — DLP parity suite + shadow validation ✅ (analysis only — flip DESCOPED)
+
+The premise of the DLP track (Rust at parity → validate → flip) proved **false**. Two findings:
+1. **Detector drift** (`DLP_DETECTOR_PARITY_MAP.md`): of 29 ported detectors, **18 exact / 7
+   differing / 4 missing**. Current Python gained patterns/keywords from May-2026 E2E audits the
+   Rust port never received. Blocking false-negatives: thai_tax_id (leading-zero corporate IDs +
+   checksum-bypass missing — verified in source), password_field (1 of 3 forms), api_key_secret
+   (GitHub PATs), income (labels).
+2. **Preprocessing gap**: Rust is NFKC-only; no base64 decode-and-scan, zero-width strip + offset
+   remap, or homoglyph map (`preprocessor.py`).
+
+**Decision (Beat): descope the DLP flip from Phase 0.** Keep `DLP_ENGINE=python`. Deliver the
+parity gate + report; Rust detector remediation + the Python preprocessing wrapper become a
+dedicated follow-up DLP-parity track; flip only once the gate is 100%.
+
+- **Gate tooling:** `backend/tests/dlp_parity_runner.py` — compares Python `scan_text` vs Rust
+  gRPC over all 192 fixtures + 5 evasion cases (`ner_enabled=False`, compares `(detector,start,end)`
+  sets, never prints raw text). Run: `docker exec ai-gateway-backend-1 python /app/tests/dlp_parity_runner.py`.
+- **Result (`DLP_PARITY_REPORT.md`):** **188/197 full parity (95.4%) — gate FAIL.** 9 Rust FN, 3 FP.
+  All 5 evasion vectors fail; GitHub PAT missed (secret leak); thai_tax_id span off-by-one (missing
+  offset remap corrupts a legitimate Thai input); ipv4→phone FP. **95.4% is a ceiling** — fixtures
+  don't yet cover the leading-zero tax ID / Thai-prose password gaps the map found.
+- Latency: Python p50 0.42ms vs Rust p50 2.63ms (gRPC hop dominates on small inputs; Rust's win is
+  GIL-offload under concurrency, not small-input p50).
+
+## Session 0.5 — DLP Rust flip ⛔ DESCOPED
+Not executed — gated on Session 0.4's parity suite reaching 100%, which it does not. `DLP_ENGINE`
+remains `python`. The follow-up DLP-parity track owns: (1) Python preprocessing wrapper, (2) Rust
+detector remediation (4 blocking + 7 minor), (3) fixture expansion to cover every known gap, (4)
+re-run gate → 100% → 7-day shadow soak → flip. See `DLP_PARITY_REPORT.md` §"Cutover requirements".
+
+---
+
+## Phase 0 outcome
+- ✅ Go log-worker flipped + R5 fallback fix (validated live).
+- ✅ Rust rate-limiter flipped (validated live: enforcement + failover).
+- ✅ NER confirmed remote; stale compose comment fixed.
+- 📋 DLP: flip **descoped** — parity gate built + run proves the Rust DLP is not yet safe to flip;
+  remediation tracked as a follow-up.
+- Deferred TODOs: log-worker `reasoning_tokens`/`reasoning_cost` proto fields (before reasoning goes
+  live); rate-limiter Lua atomic (before high-concurrency); DLP-parity follow-up track.
+- Benchmark gate (`PHASE0_BENCHMARK.md`): pending — log-worker + rate-limiter before/after.
