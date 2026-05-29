@@ -180,7 +180,7 @@ export default function ProjectsPage() {
 
       {/* Info bar */}
       {!loading && !error && items.length > 0 && (
-        <div className="pj-anim" style={{ animationDelay: "0.05s", background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: "20px 28px", marginBottom: 16, display: "flex", alignItems: "center", gap: 28 }}>
+        <div className="pj-anim" style={{ animationDelay: "0.05s", background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: "20px 28px", marginBottom: 16, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 28 }}>
           {/* Donut */}
           <div style={{ position: "relative", width: 64, height: 64, flexShrink: 0 }}>
             <svg width="64" height="64" viewBox="0 0 64 64" style={{ transform: "rotate(-90deg)" }}>

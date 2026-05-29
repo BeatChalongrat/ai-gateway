@@ -16,12 +16,15 @@ export default function PageHeader({
 }) {
   const right = actions ?? action;
   return (
-    <div className="sran-page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-      <div>
-        <h1 className="sran-page-title">{title}</h1>
+    <div
+      className="sran-page-header"
+      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <h1 className="sran-page-title" style={{ overflowWrap: "anywhere" }}>{title}</h1>
         {subtitle && <p className="sran-page-subtitle">{subtitle}</p>}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
         {right}
         <ThemeToggle />
       </div>
