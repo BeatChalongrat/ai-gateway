@@ -19,6 +19,7 @@ class ModelCandidate:
     model: str
     supports_streaming: bool = True
     supports_tools: bool = False
+    supports_vision: bool = False
     max_context_tokens: int = 128000
     cost_tier: str = "standard"  # "budget", "standard", "premium"
     latency_tier: str = "standard"  # "fast", "standard", "slow"
@@ -52,6 +53,13 @@ class RoutingRequest:
     allowed_providers: frozenset[str] | None = None
     blocked_models: frozenset[str] | None = None
     preferred_provider: str | None = None
+
+    # Hard capabilities the request needs — a model (primary OR
+    # fallback) lacking these can't serve it, so candidate filtering
+    # excludes them. Reasoning is intentionally NOT here (best-effort
+    # under Auto Thinking Mode — see capability_detection).
+    requires_vision: bool = False
+    requires_tools: bool = False
 
     # Cost/latency preferences
     prefer_cost: bool = False  # prefer cheaper models
