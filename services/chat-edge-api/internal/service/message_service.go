@@ -2064,29 +2064,26 @@ func (s *MessageService) compileAndBuildRequest(
 	return req
 }
 
-// attachReasoning sets the Gateway request's ``Reasoning`` field
-// when the conversation has thinking mode enabled (T4 — migration
-// 019). Called from compileAndBuildRequest after the request is
-// built so every send path (Send, Regenerate, EditMessage) opts in
-// consistently without duplicating the gating check.
+// attachReasoning always advertises adaptive reasoning to the Gateway
+// (Auto Thinking Mode). Called from compileAndBuildRequest after the
+// request is built so every send path (Send, Regenerate, EditMessage)
+// opts in consistently.
 //
-// Gating:
-//   - conv.ReasoningEnabled must be true (master toggle).
-//   - conv.ReasoningMode must not be ``off`` or empty.
-// On a non-capable model the Gateway silently ignores the field
-// (per its per-adapter gate), so forwarding whenever the
-// conversation-level toggle is on stays safe.
+// There is no user-facing Thinking toggle anymore: the system decides
+// whether to think by picking the RIGHT model (resolveAutoIfNeeded
+// routes complex turns to a reasoning model). We therefore forward
+// ``mode=auto, show_summary=true`` unconditionally and let the Gateway
+// enable the provider's native thinking ONLY when the resolved model
+// supports it — on a fast / non-reasoning model the Gateway's
+// per-adapter gate silently ignores the field, so forwarding it always
+// is safe and never alters a non-reasoning turn.
+//
+// ``conv`` is retained in the signature for call-site symmetry and
+// future per-conversation overrides, but is intentionally unused.
 func attachReasoning(req *GatewayChatRequest, conv *model.Conversation) {
-	if conv == nil || !conv.ReasoningEnabled {
-		return
-	}
-	mode := conv.ReasoningMode
-	if mode == "" || mode == "off" {
-		return
-	}
 	req.Reasoning = &GatewayReasoningConfig{
-		Mode:        mode,
-		ShowSummary: conv.ShowReasoningSummary,
+		Mode:        "auto",
+		ShowSummary: true,
 	}
 }
 
@@ -2120,15 +2117,16 @@ func (s *MessageService) resolveAutoIfNeeded(
 	if s.models != nil {
 		available = s.models.ModelIDs()
 	}
-	// T4: when the conversation has reasoning enabled, prefer a
-	// reasoning-capable model from the catalog. Falls through to
-	// the standard fast/flagship heuristic when no reasoning model
-	// is registered (Gateway silently ignores the reasoning param
-	// on a non-capable model so the request still succeeds — just
-	// without thinking output).
+	// Auto Thinking Mode: query complexity — not a user toggle —
+	// decides whether to prefer a reasoning-capable model. When the
+	// turn looks complex AND the catalog has a reasoning model, that
+	// model wins; otherwise we fall through to the fast/flagship
+	// heuristic (the Gateway silently ignores the reasoning param on a
+	// non-capable model so the request still succeeds, just without
+	// thinking output).
+	preferReasoning := isComplexQuery(message, hasFiles, hasImages, historyLen)
 	resolved := ResolveAutoModelWithReasoning(
-		message, hasFiles, hasImages, historyLen, available,
-		conv != nil && conv.ReasoningEnabled && conv.ReasoningMode != "" && conv.ReasoningMode != "off",
+		message, hasFiles, hasImages, historyLen, available, preferReasoning,
 	)
 	slog.Info("auto_model_resolved",
 		"conversation_id", conv.ID.String(),
@@ -2137,7 +2135,7 @@ func (s *MessageService) resolveAutoIfNeeded(
 		"has_files", hasFiles,
 		"has_images", hasImages,
 		"message_count", historyLen,
-		"reasoning_preferred", conv != nil && conv.ReasoningEnabled,
+		"reasoning_preferred", preferReasoning,
 	)
 	return resolved
 }
