@@ -170,14 +170,14 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
                   </div>
                 ) : null}
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <a
-                    href={api.downloadUrl(v.id)}
-                    download={v.filename}
+                  <button
+                    type="button"
+                    onClick={() => void api.downloadFile(v.id, v.filename)}
                     className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
                   >
                     <Download className="h-3 w-3" />
                     Download
-                  </a>
+                  </button>
                   {olderNeighbor ? (
                     <button
                       type="button"

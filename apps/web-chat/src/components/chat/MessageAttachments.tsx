@@ -11,6 +11,8 @@
 
 import { useRef, useState } from "react";
 
+import { Download } from "lucide-react";
+
 import { api } from "@/lib/api";
 import { formatBytes, isImageMime } from "@/lib/fileUtil";
 import type { FileAttachment } from "@/lib/types";
@@ -36,9 +38,9 @@ export function MessageAttachments({ files }: Props) {
         </div>
       ) : null}
       {others.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-col gap-1.5">
           {others.map((f) => (
-            <FileBadge key={f.id} file={f} />
+            <FileCard key={f.id} file={f} />
           ))}
         </div>
       ) : null}
@@ -71,7 +73,10 @@ function ImageThumb({ file }: { file: FileAttachment }) {
   );
 }
 
-function FileBadge({ file }: { file: FileAttachment }) {
+// Non-image attachment → a clean download card (icon + name + size +
+// download affordance). Download rides the authenticated blob fetch
+// (api.downloadFile), so it survives portal_access_token cookie expiry.
+function FileCard({ file }: { file: FileAttachment }) {
   const [busy, setBusy] = useState(false);
   return (
     <button
@@ -85,20 +90,24 @@ function FileBadge({ file }: { file: FileAttachment }) {
           setBusy(false);
         }
       }}
-      className="focus-ring inline-flex max-w-[260px] items-center gap-2 rounded-md border border-border bg-bg-secondary px-2 py-1.5 text-[11px] text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-elevated hover:text-text-primary disabled:opacity-60"
+      className="focus-ring flex w-full max-w-[300px] items-center gap-3 rounded-lg border border-border bg-bg-secondary p-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated disabled:opacity-60"
       title={`Download ${file.filename}`}
     >
       <FileTypeBadge
         filename={file.filename}
         contentType={file.content_type}
-        size="sm"
+        size="md"
+        className="shrink-0"
       />
-      <span className="min-w-0 flex-1 truncate text-left font-medium text-text-primary">
-        {file.filename}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-text-primary">
+          {file.filename}
+        </span>
+        <span className="block text-xs text-text-muted">
+          {formatBytes(file.file_size_bytes)}
+        </span>
       </span>
-      <span className="shrink-0 text-text-muted">
-        {formatBytes(file.file_size_bytes)}
-      </span>
+      <Download className="h-4 w-4 shrink-0 text-text-muted" aria-hidden />
     </button>
   );
 }
