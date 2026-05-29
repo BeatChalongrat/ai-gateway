@@ -546,6 +546,61 @@ func (g *GatewayClient) bearer() (string, error) {
 	return tok, nil
 }
 
+// GatewayModelInfo is one entry from the Gateway's GET /v1/models.
+// The Gateway returns a minimal shape (id + provider, plus an optional
+// reasoning block for reasoning-capable models); chat-edge enriches it
+// with display metadata before serving to the frontend.
+type GatewayModelInfo struct {
+	ID        string                  `json:"id"`
+	Provider  string                  `json:"provider"`
+	Reasoning *GatewayReasoningCapability `json:"reasoning,omitempty"`
+}
+
+// GatewayReasoningCapability mirrors the Gateway's ReasoningCapability
+// block. Present only on models the Gateway flags supports_reasoning.
+type GatewayReasoningCapability struct {
+	Supported        bool     `json:"supported"`
+	Modes            []string `json:"modes"`
+	DefaultMode      string   `json:"default_mode"`
+	SummarySupported bool     `json:"summary_supported"`
+}
+
+// ListModels fetches the Gateway's active model catalog (GET
+// /v1/models). This is the dynamic source of truth for the chat model
+// selector: models the operator discovers (by adding a provider key)
+// appear here without a chat-edge redeploy. Callers should fall back to
+// the static config catalog on error.
+func (g *GatewayClient) ListModels(ctx context.Context) ([]GatewayModelInfo, error) {
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, g.BaseURL+"/models", nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway models: build request: %w", err)
+	}
+	bearer, err := g.bearer()
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+bearer)
+	httpReq.Header.Set("Accept", "application/json")
+
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("gateway models: status %d", resp.StatusCode)
+	}
+	var out struct {
+		Data []GatewayModelInfo `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("gateway models: decode: %w", err)
+	}
+	return out.Data, nil
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

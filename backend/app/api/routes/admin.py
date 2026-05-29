@@ -59,6 +59,10 @@ from app.schemas.admin import (
 from app.schemas.common import ErrorResponse
 from app.services.api_key_service import ApiKeyService
 
+import structlog
+
+log = structlog.get_logger(__name__)
+
 router = APIRouter(dependencies=[Depends(require_admin_session)])
 _api_key_service = ApiKeyService()
 
@@ -336,11 +340,42 @@ async def add_provider_key(
     row = svc.add_key(session, provider_name, api_key, label=label)
     svc.update_test_result(session, row.id, "valid", test_result["latency_ms"])
 
+    # Auto-discover the models this key can access and upsert them into
+    # ``model_configs`` so they appear in the admin model list + the
+    # SRAN Chat selector immediately — no waiting for the daily
+    # scheduler sweep. Best-effort: the key is valid and saved
+    # regardless, so a discovery failure (provider list API down,
+    # unknown provider) is logged and swallowed, never surfaced as a
+    # key-add error. Reuses the existing discovery service so the
+    # capability inference / pricing / registry-reload all run.
+    model_sync = None
+    try:
+        from app.services.discovery.discovery_service import ModelDiscoveryService
+        from app.services.discovery.provider_discovery import PROVIDER_DISCOVERY
+
+        if provider_name in PROVIDER_DISCOVERY:
+            sync_result = await ModelDiscoveryService().sync_provider(
+                provider_name, session
+            )
+            model_sync = sync_result.to_dict()
+        else:
+            log.info("model_discovery_skipped_unknown_provider", provider=provider_name)
+    except Exception as exc:  # noqa: BLE001 — discovery is best-effort
+        log.warning(
+            "model_discovery_on_key_add_failed",
+            provider=provider_name,
+            error=str(exc),
+        )
+
     return {
         "id": row.id,
         "label": row.label,
         "valid": True,
         "latency_ms": test_result["latency_ms"],
+        # Present when discovery ran; null when it was skipped/failed.
+        # Shape: {provider, inserted, updated, skipped_override,
+        # deactivated, errors, duration_seconds, synced_at}.
+        "model_sync": model_sync,
     }
 
 
