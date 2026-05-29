@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from functools import partial
 from typing import TYPE_CHECKING, Optional
 
 import structlog
@@ -203,11 +204,29 @@ class _RequestLogQueue:
             # blocking the caller. If there is no running loop (sync
             # call from a thread), we drop straight to the legacy
             # queue/sync path so this path stays universally non-
-            # blocking.
+            # blocking. A *per-RPC* failure (sidecar reachable but
+            # erroring/timing out) is recovered later in
+            # ``_on_grpc_done`` by re-routing to the legacy path — so a
+            # dispatched-but-failed record is never lost.
             if self._dispatch_to_grpc(record):
                 return
-            # fall through on grpc dispatch failure → legacy path
+            # fall through on grpc *dispatch setup* failure → legacy path
 
+        self._enqueue_local(record, fallback_session)
+
+    def _enqueue_local(
+        self,
+        record: RequestRecord,
+        fallback_session: "Session | None" = None,
+    ) -> None:
+        """Put a record on the legacy asyncio queue (drop-oldest on
+        full); persist inline when no worker is running.
+
+        Shared by the ``engine=python`` path and the ``engine=go``
+        per-RPC fallback in ``_on_grpc_done`` — a flapping Go sidecar
+        therefore degrades to the in-process queue instead of dropping
+        audit rows.
+        """
         if self._queue is None:
             self._sync_fallback(record, fallback_session)
             return
@@ -249,9 +268,10 @@ class _RequestLogQueue:
 
         Returns True if the dispatch was scheduled (caller can return);
         False on any setup failure (caller falls through to the legacy
-        queue path). Per-RPC failures are NOT returned — they're
-        swallowed in the awaited task so a slow sidecar never blocks
-        the request handler.
+        queue path). Per-RPC failures are NOT returned synchronously —
+        they're handled in ``_on_grpc_done``, which re-routes the record
+        to the legacy queue so a slow/erroring sidecar never blocks the
+        request handler *and* never loses the audit row.
         """
         try:
             from app.services.log_worker_client import (
@@ -280,23 +300,46 @@ class _RequestLogQueue:
             # gRPC path; the legacy queue / sync persist still runs.
             return False
 
-        # ``ensure_future`` schedules on the running loop without
-        # blocking. The done-callback logs failures but never raises.
+        # ``create_task`` schedules on the running loop without
+        # blocking. The done-callback (bound to this record) recovers
+        # the row on any per-RPC failure; it never raises.
         task = loop.create_task(client.enqueue(record))
-        task.add_done_callback(self._on_grpc_done)
+        task.add_done_callback(partial(self._on_grpc_done, record))
         return True
 
-    @staticmethod
-    def _on_grpc_done(task: asyncio.Task) -> None:
+    def _on_grpc_done(self, record: RequestRecord, task: asyncio.Task) -> None:
+        """Done-callback for the fire-and-forget gRPC Enqueue.
+
+        On any per-RPC failure — the call returned ``accepted=False``
+        (rejected) or raised (timeout / Unavailable / unexpected) — the
+        record was dispatched but never landed on the legacy queue, so
+        it would otherwise be silently lost (R5). Re-route it through
+        ``_enqueue_local`` so a flapping Go sidecar degrades to the
+        Python queue/inline persist instead of dropping audit rows.
+
+        Runs on the event loop (done-callbacks do), so ``_enqueue_local``
+        is non-blocking. The caller's request session is long gone by
+        now, hence no ``fallback_session``.
+        """
         try:
             ok = task.result()
+        except asyncio.CancelledError:
+            # Shutdown cancelled the in-flight RPC — drop quietly; the
+            # graceful-shutdown drain owns remaining rows.
+            return
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "log_worker_grpc_task_failed", error=str(exc)[:200]
             )
+            ok = False
+        if ok:
             return
-        if not ok:
-            logger.info("log_worker_grpc_rejected")
+        logger.warning(
+            "log_worker_grpc_fallback",
+            request_id=record.request_id,
+            reason="rpc_rejected_or_failed",
+        )
+        self._enqueue_local(record, None)
 
     def _sync_fallback(
         self,
