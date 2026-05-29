@@ -95,6 +95,27 @@ class ProviderKeyService:
     def get_api_key(self, session: Session, provider_name: str) -> str | None:
         return self.get_active_key(session, provider_name)
 
+    def providers_with_valid_keys(self, session: Session) -> set[str]:
+        """Providers that have at least one active, validated key.
+
+        ``valid`` is the status the Add & Validate flow (and the manual
+        key test) writes after a successful live API call — so this is
+        the set of providers whose models are actually callable.
+        Untested / invalid keys, and env-var-only fallbacks that were
+        never tested through the table, don't count. Used to filter the
+        public model list so the UI never offers a model the gateway
+        can't reach.
+        """
+        rows = session.execute(
+            select(ProviderKeyORM.provider_name)
+            .where(
+                ProviderKeyORM.is_active.is_(True),
+                ProviderKeyORM.last_test_status == "valid",
+            )
+            .distinct()
+        ).scalars().all()
+        return set(rows)
+
     # ------------------------------------------------------------------
     # Multi-key CRUD
     # ------------------------------------------------------------------

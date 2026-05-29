@@ -50,6 +50,11 @@ class DiscoveredModel:
     # (currently only OpenRouter). The orchestrator uses this flag to
     # decide whether litellm pricing should overwrite or skip.
     cost_from_provider: bool = False
+    # Reasoning capability inferred from the model id. Discovery only
+    # PROMOTES a row to reasoning (never demotes) so seed/manual
+    # reasoning rows are never clobbered by an inference miss.
+    supports_reasoning: bool = False
+    reasoning_strategy: str = "none"
     raw: dict = field(default_factory=dict)
 
 
@@ -95,6 +100,29 @@ def _infer_capability(model_id: str, raw: dict) -> dict:
         "supports_tools": supports_tools,
         "is_chat": is_chat,
     }
+
+
+def _infer_reasoning(provider: str, model_id: str) -> tuple[bool, str]:
+    """Detect reasoning capability from a model id.
+
+    OpenAI o-series (the ``o1`` / ``o3`` / ``o4`` families) reason via
+    the Responses-style ``reasoning_effort`` knob. Gated to the
+    ``openai`` provider so a same-prefixed model on another provider
+    isn't mis-tagged with an OpenAI-specific strategy.
+
+    Other providers' reasoning models (DeepSeek-R1, Groq R1-distill,
+    Claude 4, Gemini 2.5) are tagged via seed/manual rows today, and the
+    persist step only PROMOTES to reasoning — so returning ``(False,
+    "none")`` here never demotes them.
+
+    Returns ``(supports_reasoning, reasoning_strategy)``.
+    """
+    name = model_id.lower()
+    if provider == "openai" and (
+        name.startswith("o1") or name.startswith("o3") or name.startswith("o4")
+    ):
+        return True, "openai_responses_reasoning"
+    return False, "none"
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +180,7 @@ async def _discover_openai_compatible(
         caps = _infer_capability(model_id, item)
         if not caps["is_chat"]:
             continue
+        supports_reasoning, reasoning_strategy = _infer_reasoning(provider, model_id)
         results.append(
             DiscoveredModel(
                 provider=provider,
@@ -164,6 +193,8 @@ async def _discover_openai_compatible(
                     or item.get("max_tokens")
                     or 128000
                 ),
+                supports_reasoning=supports_reasoning,
+                reasoning_strategy=reasoning_strategy,
                 raw=item,
             )
         )
