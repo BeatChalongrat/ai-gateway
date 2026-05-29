@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import orjson
 from typing import Any
 
 from app.services._redis_pool import get_async_redis, run_sync
@@ -90,7 +91,7 @@ class CacheService:
                 await _maybe_await(client.incr(f"cache_misses:{project_id}"))
                 return None
             await _maybe_await(client.incr(f"cache_hits:{project_id}"))
-            return json.loads(raw)
+            return orjson.loads(raw)
         except Exception:
             return None
 
@@ -109,7 +110,7 @@ class CacheService:
                 client.setex(
                     self._key(model, messages, project_id, api_key_id),
                     ttl or self.default_ttl,
-                    json.dumps(response, ensure_ascii=False),
+                    orjson.dumps(response).decode("utf-8"),
                 )
             )
         except Exception:
@@ -190,7 +191,7 @@ class CacheService:
                 self._incr_fake(f"cache_misses:{project_id}")
                 return None
             self._incr_fake(f"cache_hits:{project_id}")
-            return json.loads(raw)
+            return orjson.loads(raw)
         except Exception:
             return None
 
@@ -207,7 +208,7 @@ class CacheService:
             self._fake_client.setex(
                 self._key(model, messages, project_id, api_key_id),
                 ttl or self.default_ttl,
-                json.dumps(response, ensure_ascii=False),
+                orjson.dumps(response).decode("utf-8"),
             )
         except Exception:
             pass
