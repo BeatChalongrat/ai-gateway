@@ -6,7 +6,7 @@ import {
   useSelectedLayoutSegments,
 } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BookOpen, Brain, MoreHorizontal, Plus } from "lucide-react";
+import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
 import { Sidebar } from "@/components/chat/Sidebar";
 import { Spinner } from "@/components/ui/Spinner";
@@ -197,19 +197,16 @@ function CollapsedRail({
 // linking to the routes the sidebar footer also exposes (Memory,
 // Knowledge). Desktop is untouched — the sidebar owns these there.
 //
-// Both buttons share a subtle, integrated circle style (Claude-like):
-// a faint surface fill + a hairline ring, NOT a bright CTA. Rendered
-// with theme tokens rather than literal white/15 + text-white/90: the
-// chat app has a reachable light theme (themeStore / [data-theme=
-// "light"]) where white-translucent fills + white icons would vanish
-// on the white top bar. In dark theme --border-default already IS
-// rgba(255,255,255,0.12) (the translucent ring the design calls for);
-// in light it's rgba(0,0,0,0.10) — so border-border + bg-bg-surface +
-// text-text-primary reproduce the subtle look in BOTH themes.
+// Both buttons are ghost icon buttons (Claude-like): no fill, no
+// border, just the icon with a faint hover highlight. Theme tokens
+// rather than literal text-white/70 + hover:bg-white/10 — the chat app
+// has a reachable light theme (themeStore / [data-theme="light"]) where
+// a white icon would vanish on the white top bar. text-text-secondary→
+// primary + hover:bg-bg-elevated mirrors the hamburger button: looks
+// identical in dark, stays visible in light.
 const SUBTLE_TOPBAR_BTN =
   "focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-xl " +
-  "border border-border bg-bg-surface text-text-primary transition-colors " +
-  "hover:bg-bg-elevated";
+  "text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary";
 
 const MORE_MENU_ITEMS: { label: string; Icon: typeof Brain; href: string }[] = [
   { label: "Memory", Icon: Brain, href: "/chat/memory" },
@@ -236,7 +233,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
         onClick={onNewChat}
         className={SUBTLE_TOPBAR_BTN}
       >
-        <Plus size={18} aria-hidden />
+        <ChatBubblePlusIcon />
       </button>
 
       <button
@@ -282,6 +279,24 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
         </>
       ) : null}
     </div>
+  );
+}
+
+function ChatBubblePlusIcon() {
+  // Chat-bubble-with-plus — the "compose a new conversation" mark.
+  // currentColor so it inherits the button's text-secondary→primary.
+  return (
+    <svg width={24} height={24} viewBox="0 0 36 36" fill="none" aria-hidden>
+      <path
+        d="M10 12C10 10.3 11.3 9 13 9H23C24.7 9 26 10.3 26 12V19C26 20.7 24.7 22 23 22H20L16 26V22H13C11.3 22 10 20.7 10 19V12Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <line x1="18" y1="13" x2="18" y2="18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <line x1="15.5" y1="15.5" x2="20.5" y2="15.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }
 
