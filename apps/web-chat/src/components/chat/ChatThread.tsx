@@ -13,14 +13,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { Message } from "@/lib/types";
-import {
-  getModelSwitchPoints,
-  hasMultipleModels,
-} from "@/stores/chatStore";
+import { hasMultipleModels } from "@/stores/chatStore";
 
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
-import { ModelSwitchDivider } from "./ModelSwitchDivider";
 
 interface Props {
   convId: string;
@@ -165,10 +161,6 @@ export function ChatThread({
 
   const lastAsstIdx = useMemo(() => lastAssistantIndex(messages), [messages]);
   const showModelBadges = useMemo(() => hasMultipleModels(messages), [messages]);
-  const switchPoints = useMemo(
-    () => new Set(getModelSwitchPoints(messages)),
-    [messages],
-  );
 
   const shouldVirtualize = messages.length >= VIRTUALIZE_THRESHOLD;
 
@@ -196,7 +188,6 @@ export function ChatThread({
                   modelId={modelId}
                   messages={messages}
                   showModelBadges={showModelBadges}
-                  switchPoints={switchPoints}
                   lastAsstIdx={lastAsstIdx}
                   anyStreaming={anyStreaming}
                   onRegenerate={onRegenerate}
@@ -209,7 +200,6 @@ export function ChatThread({
                   modelId={modelId}
                   messages={messages}
                   showModelBadges={showModelBadges}
-                  switchPoints={switchPoints}
                   lastAsstIdx={lastAsstIdx}
                   anyStreaming={anyStreaming}
                   onRegenerate={onRegenerate}
@@ -268,7 +258,6 @@ interface InnerProps {
   modelId?: string | null;
   messages: Message[];
   showModelBadges: boolean;
-  switchPoints: Set<number>;
   lastAsstIdx: number;
   anyStreaming: boolean;
   onRegenerate: (messageId: string) => void;
@@ -340,7 +329,6 @@ function renderRow(m: Message, i: number, props: InnerProps) {
     modelId,
     messages,
     showModelBadges,
-    switchPoints,
     lastAsstIdx,
     anyStreaming,
     onRegenerate,
@@ -351,9 +339,6 @@ function renderRow(m: Message, i: number, props: InnerProps) {
   const extraGap = prev && prev.role !== m.role ? "mt-2" : "";
   return (
     <div className={extraGap}>
-      {switchPoints.has(i) && m.model_id ? (
-        <ModelSwitchDivider newModelId={m.model_id} />
-      ) : null}
       <MessageBubble
         convId={convId}
         modelId={modelId}
