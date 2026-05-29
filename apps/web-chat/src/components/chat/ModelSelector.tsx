@@ -1,18 +1,20 @@
 "use client";
 
-// Minimal model selector — Claude-style.
+// Model selector — Claude-style trigger pill + sectioned picker.
 //
-// Trigger pill: model name + chevron, no provider icon, no badge.
-// When the user has Auto selected the pill reads "Auto" with a
-// Sparkles glyph; the backend receives the literal "auto" sentinel
+// Trigger pill: model name + chevron (Sparkles + "Auto" when the Auto
+// sentinel is active). The backend receives the literal "auto" string
 // and runs its own per-request resolution.
 //
-// Dropdown: one row per model (name on the left, context size muted
-// on the right, checkmark when active). "Auto" sits at the top with
-// an i18n-aware description ("Selects the best model automatically").
+// Picker content (the catalog now runs to 100+ models, dynamic from the
+// Gateway): a search box plus sections — Auto, Popular (most-selected),
+// Recently used, then per-provider groups (3 preview rows + an expand
+// affordance). Popular/Recent are tracked locally in localStorage. The
+// outer shell (mobile bottom sheet / desktop popover, backdrop, theme
+// tokens) is unchanged from the previous flat-list version.
 
-import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Search, Sparkles, X } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
@@ -35,10 +37,7 @@ interface Props {
   onPick?: (model: ModelEntry) => void;
 }
 
-// Synthetic ModelEntry used to fire onPick when the user clicks
-// Auto. The id is the same sentinel the backend special-cases —
-// the rest of the fields are filler so the existing onPick contract
-// keeps its non-null shape.
+// Synthetic ModelEntry used to fire onPick when the user clicks Auto.
 const AUTO_PICK_ENTRY: ModelEntry = {
   id: AUTO_MODEL_ID,
   name: "Auto",
@@ -51,36 +50,100 @@ const AUTO_PICK_ENTRY: ModelEntry = {
   allowed: true,
 };
 
+// Preview rows shown per provider group before the "…N more" expander.
+const PROVIDER_PREVIEW_COUNT = 3;
+const POPULAR_COUNT = 4;
+const RECENT_COUNT = 3;
+
+// ─── Local usage/recency tracking (localStorage) ────────────────
+// Powers the Popular + Recently-used sections without a backend call.
+// All access is guarded so SSR (window undefined) and disabled storage
+// degrade to "no history" rather than throwing.
+
+const USAGE_KEY = "sran-model-usage";
+const RECENT_KEY = "sran-recent-models";
+
+function readJSON<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJSON(key: string, value: unknown): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* quota exceeded / storage disabled — non-fatal */
+  }
+}
+
+function trackModelUsage(id: string): void {
+  if (id === AUTO_MODEL_ID) return;
+  const usage = readJSON<Record<string, number>>(USAGE_KEY, {});
+  usage[id] = (usage[id] || 0) + 1;
+  writeJSON(USAGE_KEY, usage);
+}
+
+function trackRecentModel(id: string): void {
+  if (id === AUTO_MODEL_ID) return;
+  const recent = readJSON<string[]>(RECENT_KEY, []);
+  writeJSON(RECENT_KEY, [id, ...recent.filter((x) => x !== id)].slice(0, RECENT_COUNT + 2));
+}
+
+// ─── Provider presentation ──────────────────────────────────────
+// Brand-ish accent dots so a glance distinguishes providers. Colours
+// read fine on both the dark and light surface (they're saturated dots,
+// not text), so no theme branching needed.
+const PROVIDER_COLORS: Record<string, string> = {
+  openai: "#10a37f",
+  anthropic: "#d4a27f",
+  openrouter: "#e44d8a",
+  google: "#4285f4",
+  deepseek: "#5b6ee1",
+  groq: "#f97316",
+  mistral: "#ff7000",
+  cohere: "#39594d",
+  xai: "#8b8b8b",
+  perplexity: "#20808d",
+  default: "#888888",
+};
+
+function providerColor(provider: string): string {
+  return PROVIDER_COLORS[provider.toLowerCase()] || PROVIDER_COLORS.default;
+}
+
+function filterModels(models: ModelEntry[], query: string): ModelEntry[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return models;
+  return models.filter(
+    (m) =>
+      m.name.toLowerCase().includes(q) ||
+      m.id.toLowerCase().includes(q) ||
+      (m.provider || "").toLowerCase().includes(q),
+  );
+}
+
 export function ModelSelector({ activeModelId, disabled, compact, onPick }: Props) {
   const t = useT();
   const models = useModelStore((s) => s.models);
   const selectedId = useModelStore((s) => s.selectedModelId);
   const selectModel = useModelStore((s) => s.selectModel);
   const selectAuto = useModelStore((s) => s.selectAuto);
-  const modelsLoaded = useModelStore((s) => s.loaded);
-  const modelsLoading = useModelStore((s) => s.loading);
 
-  // Active id resolution: prefer the explicit prop (conversation
-  // binding), fall back to the persisted global default.
   const activeId = activeModelId ?? selectedId;
   const isAuto = activeId === AUTO_MODEL_ID;
   const activeModel = isAuto ? null : models.find((m) => m.id === activeId);
 
   const [open, setOpen] = useState(false);
-  const [highlight, setHighlight] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Flat list — Auto first, then every available model in catalog
-  // order. We deliberately drop the category grouping and recents
-  // section; the catalog is small enough that any extra chrome
-  // outweighs the navigation benefit.
-  const flat = useMemo<Array<{ id: string; entry: ModelEntry | null }>>(() => {
-    return [
-      { id: AUTO_MODEL_ID, entry: null },
-      ...models.map((m) => ({ id: m.id, entry: m })),
-    ];
-  }, [models]);
-
+  // Close on outside click (mousedown so it fires before the trigger's
+  // own click toggles it back open).
   useEffect(() => {
     if (!open) return;
     const off = (e: globalThis.MouseEvent) => {
@@ -90,54 +153,26 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
     return () => document.removeEventListener("mousedown", off);
   }, [open]);
 
-  useEffect(() => {
-    setHighlight((p) => (flat.length === 0 ? 0 : Math.min(p, flat.length - 1)));
-  }, [flat.length]);
-
+  // Lazy-load the catalog the first time the picker opens.
   useEffect(() => {
     if (!open) return;
-    setHighlight(0);
     const s = useModelStore.getState();
     if (!s.loaded && !s.loading) void s.loadModels();
   }, [open]);
 
-  const pickAuto = useCallback(() => {
-    if (onPick) {
-      onPick(AUTO_PICK_ENTRY);
-    } else {
-      selectAuto();
-    }
+  const pickAuto = () => {
+    if (onPick) onPick(AUTO_PICK_ENTRY);
+    else selectAuto();
     setOpen(false);
-  }, [onPick, selectAuto]);
+  };
 
-  const pick = useCallback(
-    (m: ModelEntry) => {
-      if (onPick) onPick(m);
-      else selectModel(m.id);
-      setOpen(false);
-    },
-    [onPick, selectModel],
-  );
-
-  function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (!open) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHighlight((p) => (flat.length ? (p + 1) % flat.length : 0));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHighlight((p) => (flat.length ? (p - 1 + flat.length) % flat.length : 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const row = flat[highlight];
-      if (!row) return;
-      if (row.id === AUTO_MODEL_ID) pickAuto();
-      else if (row.entry) pick(row.entry);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setOpen(false);
-    }
-  }
+  const pickModel = (m: ModelEntry) => {
+    trackModelUsage(m.id);
+    trackRecentModel(m.id);
+    if (onPick) onPick(m);
+    else selectModel(m.id);
+    setOpen(false);
+  };
 
   const triggerLabel = isAuto
     ? t("model.auto.name")
@@ -146,7 +181,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
       : t("model.selectModel");
 
   return (
-    <div ref={ref} className="relative" onKeyDown={handleKeyDown}>
+    <div ref={ref} className="relative">
       <button
         type="button"
         disabled={disabled}
@@ -184,7 +219,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
               border border-border bg-bg-surface text-xs shadow-2xl
               fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-2xl safe-bottom
               sm:absolute sm:bottom-full sm:left-0 sm:inset-x-auto sm:mb-2
-              sm:w-[min(280px,90vw)] sm:max-h-[360px] sm:rounded-xl
+              sm:w-[min(320px,92vw)] sm:max-h-[420px] sm:rounded-xl
               sm:sheet-up:animate-none
             "
           >
@@ -192,53 +227,261 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
               <span className="h-1 w-10 rounded-full bg-border" />
             </div>
 
-            <div className="scrollbar-thin flex-1 overflow-y-auto py-1">
-              {flat.length <= 1 ? (
-                <div className="px-3 py-6 text-center text-text-muted">
-                  {modelsLoading || !modelsLoaded ? (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
-                      Loading…
-                    </span>
-                  ) : (
-                    <>No models available.</>
-                  )}
-                </div>
-              ) : null}
-
-              {flat.map((row, idx) => {
-                if (row.id === AUTO_MODEL_ID) {
-                  return (
-                    <Row
-                      key="auto"
-                      label={t("model.auto.name")}
-                      sub={t("model.auto.description")}
-                      selected={isAuto}
-                      highlighted={highlight === idx}
-                      onClick={pickAuto}
-                      onHover={() => setHighlight(idx)}
-                      leading={<Sparkles width={13} height={13} className="text-text-tertiary" aria-hidden />}
-                    />
-                  );
-                }
-                const m = row.entry!;
-                const isSelected = !isAuto && m.id === activeId;
-                return (
-                  <Row
-                    key={m.id}
-                    label={m.name}
-                    sub={m.context_window > 0 ? formatContext(m.context_window) : undefined}
-                    selected={isSelected}
-                    highlighted={highlight === idx}
-                    onClick={() => pick(m)}
-                    onHover={() => setHighlight(idx)}
-                  />
-                );
-              })}
-            </div>
+            <ModelPicker
+              models={models}
+              activeId={activeId}
+              isAuto={isAuto}
+              onPickAuto={pickAuto}
+              onPickModel={pickModel}
+              t={t}
+            />
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+// ─── Picker content ─────────────────────────────────────────────
+// Mounted only while the popover is open, so search + expanded-group
+// state resets cleanly on every open.
+
+function ModelPicker({
+  models,
+  activeId,
+  isAuto,
+  onPickAuto,
+  onPickModel,
+  t,
+}: {
+  models: ModelEntry[];
+  activeId: string | null;
+  isAuto: boolean;
+  onPickAuto: () => void;
+  onPickModel: (m: ModelEntry) => void;
+  t: ReturnType<typeof useT>;
+}) {
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const loaded = useModelStore((s) => s.loaded);
+  const loading = useModelStore((s) => s.loading);
+
+  // Autofocus the search on desktop only — on touch this would pop the
+  // on-screen keyboard over the bottom sheet, which is jarring.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(pointer: fine)").matches) {
+      inputRef.current?.focus();
+    }
+  }, []);
+
+  const filtered = useMemo(() => filterModels(models, search), [models, search]);
+  const searching = search.trim().length > 0;
+
+  // Popular: most-selected (usage>0), desc, top N. Recent: last-selected
+  // order. Both read once per render from localStorage; only shown when
+  // not actively searching.
+  const popular = useMemo<ModelEntry[]>(() => {
+    if (searching) return [];
+    const usage = readJSON<Record<string, number>>(USAGE_KEY, {});
+    return models
+      .filter((m) => (usage[m.id] || 0) > 0)
+      .sort((a, b) => (usage[b.id] || 0) - (usage[a.id] || 0))
+      .slice(0, POPULAR_COUNT);
+  }, [models, searching]);
+
+  const recent = useMemo<ModelEntry[]>(() => {
+    if (searching) return [];
+    const ids = readJSON<string[]>(RECENT_KEY, []);
+    return ids
+      .map((id) => models.find((m) => m.id === id))
+      .filter((m): m is ModelEntry => Boolean(m))
+      .slice(0, RECENT_COUNT);
+  }, [models, searching]);
+
+  const providerGroups = useMemo(() => {
+    const groups = new Map<string, ModelEntry[]>();
+    for (const m of filtered) {
+      const p = m.provider || "other";
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p)!.push(m);
+    }
+    // Most-populated providers first.
+    return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [filtered]);
+
+  const toggle = (p: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+
+  const showAuto = !searching || "auto".includes(search.trim().toLowerCase());
+  const noModels = models.length === 0;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Search — always visible, pinned above the scroll area. */}
+      <div className="shrink-0 border-b border-border p-2">
+        <div className="flex items-center gap-2 rounded-lg bg-bg-base px-2.5 py-1.5">
+          <Search width={14} height={14} className="shrink-0 text-text-tertiary" aria-hidden />
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && search) {
+                e.stopPropagation();
+                setSearch("");
+              }
+            }}
+            placeholder={t("model.searchPlaceholder")}
+            className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+          />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}
+              className="focus-ring shrink-0 rounded text-text-tertiary hover:text-text-primary"
+            >
+              <X width={14} height={14} aria-hidden />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="scrollbar-thin flex-1 overflow-y-auto py-1">
+        {/* Auto — always first (unless filtered out by search). */}
+        {showAuto ? (
+          <ModelRow
+            label={t("model.auto.name")}
+            sub={t("model.auto.description")}
+            selected={isAuto}
+            onClick={onPickAuto}
+            leading={<Sparkles width={13} height={13} className="text-text-tertiary" aria-hidden />}
+          />
+        ) : null}
+
+        {/* Loading / empty states. */}
+        {noModels ? (
+          <div className="px-3 py-6 text-center text-text-muted">
+            {loading || !loaded ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
+                Loading…
+              </span>
+            ) : (
+              <>No models available.</>
+            )}
+          </div>
+        ) : null}
+
+        {popular.length > 0 ? (
+          <Section title={t("model.popular")}>
+            {popular.map((m) => (
+              <ModelRow
+                key={`pop-${m.id}`}
+                label={m.name}
+                sub={m.provider}
+                dotColor={providerColor(m.provider)}
+                selected={!isAuto && m.id === activeId}
+                onClick={() => onPickModel(m)}
+              />
+            ))}
+          </Section>
+        ) : null}
+
+        {recent.length > 0 ? (
+          <Section title={t("model.recent")}>
+            {recent.map((m) => (
+              <ModelRow
+                key={`rec-${m.id}`}
+                label={m.name}
+                sub={m.provider}
+                dotColor={providerColor(m.provider)}
+                selected={!isAuto && m.id === activeId}
+                onClick={() => onPickModel(m)}
+              />
+            ))}
+          </Section>
+        ) : null}
+
+        {providerGroups.map(([provider, group]) => {
+          const isExpanded = searching || expanded.has(provider);
+          const preview = isExpanded ? group : group.slice(0, PROVIDER_PREVIEW_COUNT);
+          const hiddenCount = group.length - preview.length;
+          return (
+            <Section
+              key={provider}
+              title={provider}
+              count={group.length}
+              dotColor={providerColor(provider)}
+            >
+              {preview.map((m) => (
+                <ModelRow
+                  key={`${provider}-${m.id}`}
+                  label={m.name}
+                  selected={!isAuto && m.id === activeId}
+                  onClick={() => onPickModel(m)}
+                />
+              ))}
+              {hiddenCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => toggle(provider)}
+                  className="focus-ring w-full rounded-md px-3 py-2 text-left text-[12px] text-text-tertiary transition-colors hover:bg-bg-elevated/60 hover:text-text-secondary"
+                >
+                  …{hiddenCount} more
+                </button>
+              ) : null}
+            </Section>
+          );
+        })}
+
+        {/* Search yielded nothing (Auto already hidden in this branch). */}
+        {searching && filtered.length === 0 && !showAuto ? (
+          <div className="px-3 py-8 text-center text-text-muted">No models found</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  count,
+  dotColor,
+  children,
+}: {
+  title: string;
+  count?: number;
+  dotColor?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-t border-border first:border-t-0">
+      <div className="flex items-center justify-between px-3 pb-1 pt-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {dotColor ? (
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: dotColor }}
+              aria-hidden
+            />
+          ) : null}
+          <span className="truncate text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
+            {title}
+          </span>
+        </div>
+        {count ? <span className="shrink-0 text-[10px] text-text-tertiary">{count}</span> : null}
+      </div>
+      <div>{children}</div>
     </div>
   );
 }
@@ -247,27 +490,33 @@ interface RowProps {
   label: string;
   sub?: string;
   selected: boolean;
-  highlighted: boolean;
   onClick: () => void;
-  onHover: () => void;
   leading?: React.ReactNode;
+  dotColor?: string;
 }
 
-function Row({ label, sub, selected, highlighted, onClick, onHover, leading }: RowProps) {
+function ModelRow({ label, sub, selected, onClick, leading, dotColor }: RowProps) {
   return (
     <div
       role="option"
       aria-selected={selected}
       onClick={onClick}
-      onMouseEnter={onHover}
       className={`flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors ${
-        highlighted ? "bg-bg-elevated" : selected ? "bg-bg-elevated/60" : "hover:bg-bg-elevated/60"
+        selected ? "bg-bg-elevated/60" : "hover:bg-bg-elevated/60"
       }`}
     >
-      {leading ? <span className="inline-flex shrink-0 items-center">{leading}</span> : null}
+      {leading ? (
+        <span className="inline-flex shrink-0 items-center">{leading}</span>
+      ) : dotColor ? (
+        <span
+          className="h-1.5 w-1.5 shrink-0 rounded-full"
+          style={{ background: dotColor }}
+          aria-hidden
+        />
+      ) : null}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-text-primary">{label}</div>
-        {sub ? <div className="truncate text-[11px] text-text-muted">{sub}</div> : null}
+        <span className="text-sm font-medium text-text-primary">{label}</span>
+        {sub ? <span className="ml-1.5 text-[11px] text-text-muted">{sub}</span> : null}
       </div>
       {selected ? (
         <svg
@@ -289,12 +538,6 @@ function Row({ label, sub, selected, highlighted, onClick, onHover, leading }: R
       ) : null}
     </div>
   );
-}
-
-function formatContext(tokens: number): string {
-  if (tokens >= 1_000_000) return `${Math.round(tokens / 100_000) / 10}M context`;
-  if (tokens >= 1_000) return `${Math.round(tokens / 1000)}K context`;
-  return `${tokens} context`;
 }
 
 function shortLabel(name: string): string {
