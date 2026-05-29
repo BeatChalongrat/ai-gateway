@@ -70,6 +70,13 @@ type messageResponse struct {
 	ModelID        *string                         `json:"model_id,omitempty"`
 	TokenUsage     *tokenUsage                     `json:"token_usage,omitempty"`
 	CreatedAt      string                          `json:"created_at"`
+	// Auto Thinking Mode — the model's thinking summary for this
+	// assistant turn (masked, persisted in migration 019). nil for
+	// user turns and assistant turns that didn't think, so the wire
+	// stays unchanged for non-reasoning messages. Lets the
+	// ThinkingBlock re-render after a page reload (the live SSE
+	// reasoning_delta stream is gone once the turn completes).
+	ReasoningContent *string `json:"reasoning_content,omitempty"`
 	Files          []fileResponse                  `json:"files,omitempty"`
 	BranchIndex    int                             `json:"branch_index"`
 	BranchCount    int                             `json:"branch_count"`
@@ -134,6 +141,9 @@ func messageToWire(m *model.Message) messageResponse {
 		CreatedAt:   m.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		BranchIndex: m.BranchIndex,
 		BranchCount: 1,
+	}
+	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
+		r.ReasoningContent = m.ReasoningContent
 	}
 	if m.TokenUsageInput != nil && m.TokenUsageOutput != nil {
 		r.TokenUsage = &tokenUsage{
