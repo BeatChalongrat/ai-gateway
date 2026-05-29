@@ -28,7 +28,15 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
   },
   icons: {
-    icon: "/sran-logo.png",
+    // SVG first: ``icon.svg`` is a self-contained tile (its own
+    // dark-navy background + light glyph) so it stays visible on both
+    // light and dark browser tabs. The transparent ``sran-logo.png``
+    // disappeared on Chrome's dark tab strip. PNG kept as a fallback
+    // for browsers without SVG-favicon support.
+    icon: [
+      { url: "/icons/icon.svg", type: "image/svg+xml" },
+      { url: "/sran-logo.png", type: "image/png" },
+    ],
     apple: "/sran-logo.png",
   },
 };
