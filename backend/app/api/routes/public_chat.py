@@ -623,12 +623,19 @@ async def chat_completions(
     _stream_attempt_number = 1
     _stream_fallback_attempts: list[dict] = []
 
+    # Hard capabilities (vision/tools) so a streaming pre-check / mid-
+    # stream swap never falls back to a model that can't serve them.
+    from app.services.capability_detection import detect_required_capabilities
+
+    _stream_required_caps = detect_required_capabilities(payload)
+
     if await _is_unhealthy(route.provider_name):
         fb_runner = orchestrator._get_fallback_orchestrator()
         fb_candidate = fb_runner.select_streaming_candidate(
             original_provider=_stream_original_provider,
             original_model=_stream_original_model,
             session=session,
+            required=_stream_required_caps,
         )
         if fb_candidate is not None:
             log.info(
@@ -1233,6 +1240,7 @@ async def chat_completions(
                         original_model=_stream_original_model,
                         session=_lookup_session,
                         skip_providers=skip_providers,
+                        required=_stream_required_caps,
                     )
                 finally:
                     _lookup_session.close()

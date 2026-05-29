@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from app.domain.entities import RequestContext
     from app.domain.providers import ProviderResponse
     from app.schemas.common import Message
+    from app.services.capability_detection import RequiredCapabilities
     from app.schemas.public import ChatCompletionsRequest
     from app.services.provider_dispatcher import ProviderDispatcher
     from app.services.provider_key_service import ProviderKeyService
@@ -251,6 +252,15 @@ class FallbackOrchestrator:
                 },
             )
 
+        from app.services.capability_detection import (
+            detect_required_capabilities,
+            model_meets,
+        )
+
+        # Hard capabilities (vision/tools) the request needs. A fallback
+        # that can't serve them would silently produce a wrong answer.
+        required_caps = detect_required_capabilities(request)
+
         attempts: list[FallbackAttempt] = []
         last_error: GatewayError | None = None
         tried = 0
@@ -261,6 +271,19 @@ class FallbackOrchestrator:
 
             provider = candidate["provider"]
             model = candidate["model"]
+
+            # Capability gate — skip a candidate that lacks a required
+            # capability. Does NOT consume an attempt slot (mirrors the
+            # missing-key skip) so the runner keeps looking for a model
+            # that CAN serve the request.
+            if not model_meets(required_caps, model):
+                log.info(
+                    "fallback_candidate_skipped",
+                    candidate_provider=provider,
+                    candidate_model=model,
+                    reason="capability_mismatch",
+                )
+                continue
 
             # Key check first — a missing key is recorded but does NOT
             # consume one of the ``max_candidates`` real attempt slots.
@@ -408,6 +431,7 @@ class FallbackOrchestrator:
         original_model: str,
         session: "Session | None",
         skip_providers: set[str] | None = None,
+        required: "RequiredCapabilities | None" = None,
     ) -> dict | None:
         """Pick the first viable streaming fallback for a primary.
 
@@ -444,6 +468,14 @@ class FallbackOrchestrator:
             model = candidate["model"]
             if provider in skip:
                 continue
+
+            # Capability gate — don't stream a vision/tools request from
+            # a model that can't serve it.
+            if required is not None:
+                from app.services.capability_detection import model_meets
+
+                if not model_meets(required, model):
+                    continue
 
             api_key = self.key_service.get_api_key(session, provider)
             if not api_key:

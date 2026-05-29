@@ -252,6 +252,8 @@ class RoutingService:
                 requires_streaming=request.stream,
                 allowed_providers=request.allowed_providers,
                 blocked_models=request.blocked_models,
+                requires_vision=request.requires_vision,
+                requires_tools=request.requires_tools,
             )
             if reasoning_pool:
                 reasoning_pool.sort(
@@ -279,6 +281,8 @@ class RoutingService:
                 requires_streaming=request.stream,
                 allowed_providers=request.allowed_providers,
                 blocked_models=request.blocked_models,
+                requires_vision=request.requires_vision,
+                requires_tools=request.requires_tools,
             )
             if preferred_pool:
                 preferred_pool.sort(
@@ -301,6 +305,8 @@ class RoutingService:
             requires_streaming=request.stream,
             allowed_providers=request.allowed_providers,
             blocked_models=request.blocked_models,
+            requires_vision=request.requires_vision,
+            requires_tools=request.requires_tools,
         )
 
         if filtered:
@@ -315,6 +321,8 @@ class RoutingService:
                 requires_streaming=request.stream,
                 allowed_providers=request.allowed_providers,
                 blocked_models=request.blocked_models,
+                requires_vision=request.requires_vision,
+                requires_tools=request.requires_tools,
             )
             fallbacks.sort(
                 key=lambda c: _score_candidate(
@@ -346,6 +354,8 @@ class RoutingService:
             requires_streaming=request.stream,
             allowed_providers=request.allowed_providers,
             blocked_models=request.blocked_models,
+            requires_vision=request.requires_vision,
+            requires_tools=request.requires_tools,
         )
 
         alternatives.sort(
@@ -421,6 +431,14 @@ class RoutingService:
                 all_known = get_all_providers()
                 allowed_providers = all_known - region_blocked
 
+        # Hard capabilities the request needs (vision/tools). Threaded
+        # into routing so neither the auto-selected primary nor its
+        # fallbacks can land on a model that would silently drop the
+        # image / tool call. Reasoning is best-effort and excluded.
+        from app.services.capability_detection import detect_required_capabilities
+
+        caps = detect_required_capabilities(payload)
+
         request = RoutingRequest(
             requested_model=payload.model,
             stream=getattr(payload, "stream", False),
@@ -428,6 +446,8 @@ class RoutingService:
             allowed_providers=allowed_providers,
             blocked_models=blocked_models,
             preferred_provider=preferred_provider,
+            requires_vision=caps.vision,
+            requires_tools=caps.tools,
         )
         result = self.route(request)
         return RouteDecision(
