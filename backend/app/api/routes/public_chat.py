@@ -532,6 +532,11 @@ async def chat_completions(
     route = orchestrator.routing_service.select_route(
         ctx=ctx, payload=payload, policy_decision=input_enforcement
     )
+    # Auto Thinking Mode: enable adaptive reasoning when the resolved
+    # model can think and the caller didn't opt out. Must run before
+    # ``_show_reasoning`` is computed below so the SSE emitter knows to
+    # forward reasoning frames.
+    orchestrator._maybe_enable_adaptive_reasoning(payload, route.model_name)
 
     # 3. Supports-streaming check — fall back to the non-streaming path
     # if the selected adapter can't stream (e.g. router picked a

@@ -18,9 +18,7 @@ import { useVoiceStore } from "@/stores/voiceStore";
 import { FilePreviewCard } from "./FilePreviewCard";
 import { KBSelector } from "./KBSelector";
 import { ModelSelector } from "./ModelSelector";
-import { ReasoningToggle } from "./ReasoningToggle";
 import { RecordingBar } from "./RecordingBar";
-import { useModelStore } from "@/stores/modelStore";
 
 interface Props {
   /** Active conversation id. The input uses it as the key for the
@@ -160,31 +158,13 @@ export function ChatInput({
   const removePendingFile = useChatStore((s) => s.removePendingFile);
   const clearPendingFiles = useChatStore((s) => s.clearPendingFiles);
 
-  // T4 — Thinking Mode wiring. Reads the active conversation's
-  // reasoning settings + the active model's reasoning capability,
-  // then renders the ReasoningToggle next to the ModelSelector
-  // when the model supports it. Auto mode is treated as
-  // "potentially reasoning-capable" — we only HIDE the toggle when
-  // a concrete non-reasoning model is selected.
-  const conversation = useChatStore((s) =>
-    conversationId
-      ? s.conversations.find((c) => c.id === conversationId) ?? null
-      : null,
-  );
-  const setConversationReasoning = useChatStore(
-    (s) => s.setConversationReasoning,
-  );
-  const reasoningModel = useModelStore((s) =>
-    activeModelId ? s.getModelById(activeModelId) : undefined,
-  );
-  const showReasoningToggle =
-    !!activeModelId &&
-    (activeModelId === "auto" ||
-      (reasoningModel?.reasoning?.supported ?? false));
-  const reasoningEnabled = conversation?.reasoning_enabled ?? false;
-  const reasoningMode =
-    (conversation?.reasoning_mode as "off" | "auto" | "low" | "medium" | "high") ??
-    "auto";
+  // Auto Thinking Mode: there are no user-facing reasoning controls.
+  // The system decides whether to think by picking the right model
+  // (chat-edge's Auto resolver routes complex queries to a reasoning
+  // model; that model's native adaptive thinking then engages). The
+  // ThinkingBlock in MessageBubble still renders the thinking output
+  // whenever the AI produces it — display is preserved, control is
+  // removed.
 
   // Auto-grow up to the device's max line count.
   useEffect(() => {
@@ -656,31 +636,6 @@ export function ChatInput({
                 compact
                 onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
               />
-              {showReasoningToggle && conversationId ? (
-                <ReasoningToggle
-                  enabled={reasoningEnabled}
-                  mode={
-                    (reasoningMode === "off"
-                      ? "auto"
-                      : reasoningMode) as "auto" | "low" | "medium" | "high"
-                  }
-                  disabled={streaming}
-                  onToggle={(v) => {
-                    void setConversationReasoning(conversationId, {
-                      reasoning_enabled: v,
-                      // When toggling on, ensure mode isn't stuck on
-                      // "off" from a previous session.
-                      reasoning_mode:
-                        v && reasoningMode === "off" ? "auto" : reasoningMode,
-                    });
-                  }}
-                  onModeChange={(m) => {
-                    void setConversationReasoning(conversationId, {
-                      reasoning_mode: m,
-                    });
-                  }}
-                />
-              ) : null}
               {voiceSupported && !streaming ? (
                 <button
                   type="button"
