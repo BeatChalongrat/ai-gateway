@@ -109,12 +109,20 @@ services:
       start_period: 90s
     restart: unless-stopped
 
-  # Phase-3c Rust DLP sidecar (Batch 1 stub). Boots a gRPC server
-  # that answers Health/0 and returns UNIMPLEMENTED on the scan
-  # RPCs — the registry + 9 simple-regex detectors live in the
-  # library crate today, exercised by the parity test suite.
-  # Batch 2-4 wire the registry into the gRPC handlers and ship a
-  # Python client + shadow mode.
+  # Phase-3c Rust DLP sidecar. gRPC server is OPERATIONAL: ScanText,
+  # ScanMessages and Health are all implemented (src/main.rs). The
+  # registry ports 29 regex/heuristic detectors (NER-on default;
+  # NER-off swaps in thai_name_no_prefix → 30) — full parity with the
+  # Python regex detector set. spaCy NER is intentionally NOT ported;
+  # it stays in the dedicated ner-service. Shadow mode is wired
+  # (DLP_ENGINE=shadow runs both and logs dlp_shadow_diff).
+  # Gated by DLP_ENGINE (default: python). Fail-open: any gRPC
+  # error/timeout falls back to the Python registry.
+  # KNOWN GAP (pre-flip): the Rust path normalises with NFKC only and
+  # does NOT yet port the Python encoding-bypass preprocessing
+  # (zero-width strip + offset remap, homoglyph mapping, base64
+  # decode-and-scan — preprocessor.py / registry.py:106-137). Close
+  # or accept this before flipping DLP_ENGINE=rust. See Phase-0 notes.
   dlp-sidecar:
     build:
       context: ./dlp-sidecar

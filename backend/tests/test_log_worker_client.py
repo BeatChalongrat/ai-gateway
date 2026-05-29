@@ -277,12 +277,17 @@ def test_grpc_timeout_returns_false_and_dispatch_falls_back(
     asyncio.run(_run())
 
 
-def test_accepted_false_logs_warning_does_not_fallback(
-    reset_client, monkeypatch, caplog
+def test_accepted_false_recovers_row_via_local_path(
+    reset_client, monkeypatch
 ):
-    """accepted=False is a soft rejection — the queue logs but does NOT
-    synchronously fall back to the legacy persist. Documents the
-    fire-and-forget contract pinned by the audit."""
+    """accepted=False (sidecar reachable but rejected the record, e.g.
+    its buffer overflowed and drop-oldest'd) must NOT lose the audit
+    row. Phase-0 R5 fix: ``_on_grpc_done`` re-routes any failed/rejected
+    dispatch through ``_enqueue_local`` — with no worker running that
+    lands on ``_sync_fallback`` so the row is still persisted.
+
+    (Supersedes the pre-R5 contract, which deliberately dropped the
+    row on accepted=false in the name of fire-and-forget.)"""
     from app.core.config import settings
     from app.services.log_worker_client import LogWorkerClient
     from app.services.log_worker_client.client import _import_stubs
@@ -303,10 +308,10 @@ def test_accepted_false_logs_warning_does_not_fallback(
         LogWorkerClient, "instance", classmethod(lambda cls: client)
     )
 
-    sync_fallback_called: list[bool] = []
+    recovered: list[RequestRecord] = []
 
     def _capture_fallback(self, record, session):  # noqa: ARG001
-        sync_fallback_called.append(True)
+        recovered.append(record)
 
     monkeypatch.setattr(
         request_log_queue._RequestLogQueue,
@@ -315,20 +320,108 @@ def test_accepted_false_logs_warning_does_not_fallback(
     )
 
     async def _run():
+        # No worker running → _enqueue_local routes to _sync_fallback.
+        request_log_queue._singleton._queue = None
         request_log_queue.enqueue(_record())
         # Yield so the create_task'd RPC + done-callback can run.
-        # 0.1s is plenty for a single in-memory stub call.
         await asyncio.sleep(0.1)
 
     asyncio.run(_run())
 
-    # Fire-and-forget contract: NO sync fallback fired. The legacy
-    # path would have appended to sync_fallback_called; the gRPC
-    # path does not.
-    assert sync_fallback_called == [], (
-        "accepted=false must not trigger synchronous fallback — "
-        "fire-and-forget contract requires the caller to keep moving"
+    assert len(recovered) == 1, (
+        "R5: a rejected gRPC dispatch must be recovered via the local "
+        "path, not silently dropped"
     )
+    assert recovered[0].request_id == "req_log_worker_test"
+
+
+def test_grpc_rpc_error_recovers_row_via_local_path(
+    reset_client, monkeypatch
+):
+    """A transport failure (RPC raises → client.enqueue returns False)
+    must also recover the row via the local path. Core R5 case."""
+    from app.core.config import settings
+    from app.services.log_worker_client import LogWorkerClient
+    from app.services.log_worker_client.client import _import_stubs
+
+    monkeypatch.setattr(settings, "log_worker_engine", "go")
+
+    grpc_mod, _pb, _pb_grpc = _import_stubs()
+
+    class _FailingStub:
+        async def Enqueue(self, _req, timeout=None):  # noqa: ARG002
+            raise grpc_mod.RpcError("simulated transport failure")
+
+    client = LogWorkerClient(address="unused:0", timeout_seconds=0.1)
+    client._stub = _FailingStub()
+    client._channel = MagicMock()
+    monkeypatch.setattr(
+        LogWorkerClient, "instance", classmethod(lambda cls: client)
+    )
+
+    recovered: list[RequestRecord] = []
+    monkeypatch.setattr(
+        request_log_queue._RequestLogQueue,
+        "_sync_fallback",
+        lambda self, record, session: recovered.append(record),  # noqa: ARG005
+    )
+
+    async def _run():
+        request_log_queue._singleton._queue = None
+        request_log_queue.enqueue(_record())
+        await asyncio.sleep(0.1)
+
+    asyncio.run(_run())
+
+    assert len(recovered) == 1
+    assert recovered[0].request_id == "req_log_worker_test"
+
+
+def test_grpc_failure_routes_to_running_queue_not_sync(
+    reset_client, monkeypatch
+):
+    """When the legacy worker IS running, a failed dispatch is recovered
+    onto the asyncio queue (non-blocking), NOT via the synchronous
+    own-session persist. Pins that the R5 fallback prefers the cheap
+    batched path."""
+    from app.core.config import settings
+    from app.services.log_worker_client import LogWorkerClient
+    from app.services.log_worker_client.client import _import_stubs
+
+    monkeypatch.setattr(settings, "log_worker_engine", "go")
+
+    _grpc, pb, _pb_grpc = _import_stubs()
+
+    class _RejectingStub:
+        async def Enqueue(self, _req, timeout=None):  # noqa: ARG002
+            return pb.EnqueueResponse(accepted=False, reason="x")
+
+    client = LogWorkerClient(address="unused:0", timeout_seconds=0.5)
+    client._stub = _RejectingStub()
+    client._channel = MagicMock()
+    monkeypatch.setattr(
+        LogWorkerClient, "instance", classmethod(lambda cls: client)
+    )
+
+    sync_called: list[bool] = []
+    monkeypatch.setattr(
+        request_log_queue._RequestLogQueue,
+        "_sync_fallback",
+        lambda self, r, s: sync_called.append(True),  # noqa: ARG005
+    )
+
+    async def _run():
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        request_log_queue._singleton._queue = q
+        request_log_queue.enqueue(_record())
+        await asyncio.sleep(0.1)
+        return q
+
+    q = asyncio.run(_run())
+
+    assert sync_called == [], "should use the queue, not sync persist"
+    assert q.qsize() == 1, "failed dispatch must land on the running queue"
+    request_log_queue._singleton._queue = None
 
 
 def test_concurrent_enqueue_safe(reset_client, monkeypatch):
