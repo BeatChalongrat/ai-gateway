@@ -3,9 +3,9 @@
 // AI messages render plain (no bubble, no avatar, no model label) so
 // the conversation reads like a clean document. The action bar
 // (copy / thumbs-up / thumbs-down / regenerate) appears on hover.
-// A tiny model caption appears above the body ONLY when the
-// conversation mixes multiple models (see Props.showModelBadge).
-// User messages stay as a soft gray pill aligned to the right.
+// The active model is shown only in the composer's model selector,
+// never per-message. User messages stay as a soft gray pill aligned
+// to the right.
 //
 // TODO(phase2.session2): add LaTeX support via remark-math + rehype-katex.
 // Skipped here to avoid pulling katex's 100kB+ stylesheet into the chat
@@ -21,7 +21,6 @@ import rehypeHighlight from "rehype-highlight";
 
 import type { Message } from "@/lib/types";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
-import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
 import { BranchNavigator } from "./BranchNavigator";
@@ -41,13 +40,6 @@ import { ThinkingBlock } from "./ThinkingBlock";
 interface Props {
   message: Message;
   convId: string;
-  modelId?: string | null;
-  /** Renders a small "· GPT-4o" caption above the assistant message
-   *  body. Off by default — only the ChatThread enables it when the
-   *  conversation contains replies from multiple distinct models, so
-   *  the user can tell branches apart. Single-model conversations
-   *  stay clean (no header, no avatar, no model label). */
-  showModelBadge?: boolean;
   showFeedback?: boolean;
   showRegenerate?: boolean;
   onRegenerate?: () => void;
@@ -121,8 +113,6 @@ function CitationPill({ filename }: { filename: string }) {
 function MessageBubbleImpl({
   message,
   convId,
-  modelId,
-  showModelBadge,
   showFeedback,
   showRegenerate,
   onRegenerate,
@@ -130,10 +120,6 @@ function MessageBubbleImpl({
   onSwitchBranch,
 }: Props) {
   const isUser = message.role === "user";
-  const effectiveModelId = message.model_id ?? modelId ?? null;
-  const modelEntry = useModelStore((s) =>
-    effectiveModelId ? s.getModelById(effectiveModelId) : undefined,
-  );
   const router = useRouter();
 
   // Inline-edit state for user messages.
@@ -334,16 +320,11 @@ function MessageBubbleImpl({
   }
 
   // ───────────────────────── ASSISTANT ────────────────────────────
-  // Single-model conversations render the body directly — no avatar,
-  // no model label. The optional `showModelBadge` caption only fires
-  // when ChatThread detects multiple distinct models in the timeline.
-  const modelBadgeText = modelEntry?.name ?? effectiveModelId ?? null;
+  // Assistant messages render the body directly — no avatar, no model
+  // label. The active model is shown only in the composer's model
+  // selector, never per-message.
   return (
     <div className="group message-enter flex w-full flex-col gap-1.5">
-      {showModelBadge && modelBadgeText ? (
-        <span className="text-[11px] text-text-muted">{modelBadgeText}</span>
-      ) : null}
-
       {/* T4 — Thinking Mode. Renders ABOVE the body so the user
           reads "thought first, then answered". Self-hides when
           neither reasoning_content nor is_thinking is set, so
@@ -641,8 +622,7 @@ function areEqual(prev: Props, next: Props): boolean {
   if (a === b) {
     return (
       prev.showFeedback === next.showFeedback &&
-      prev.showRegenerate === next.showRegenerate &&
-      prev.showModelBadge === next.showModelBadge
+      prev.showRegenerate === next.showRegenerate
     );
   }
   return (
@@ -662,9 +642,7 @@ function areEqual(prev: Props, next: Props): boolean {
     // SourcesCard to appear.
     a.context_sources === b.context_sources &&
     prev.showFeedback === next.showFeedback &&
-    prev.showRegenerate === next.showRegenerate &&
-    prev.showModelBadge === next.showModelBadge &&
-    prev.modelId === next.modelId
+    prev.showRegenerate === next.showRegenerate
   );
 }
 

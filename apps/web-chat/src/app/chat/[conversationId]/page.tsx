@@ -222,7 +222,6 @@ export default function ConversationPage() {
             <ErrorBoundary resetKey={convId}>
               <ChatThread
                 convId={convId}
-                modelId={conv?.model_id ?? null}
                 messages={messages}
                 hasMoreOlder={hasMoreOlder ?? false}
                 loadingOlder={loadingOlder ?? false}
