@@ -13,14 +13,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { Message } from "@/lib/types";
-import { hasMultipleModels } from "@/stores/chatStore";
-
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
 
 interface Props {
   convId: string;
-  modelId?: string | null;
   messages: Message[];
   onRegenerate: (messageId: string) => void;
   onPromptPick?: (text: string) => void;
@@ -41,7 +38,6 @@ const VIRTUALIZE_THRESHOLD = 50;
 
 export function ChatThread({
   convId,
-  modelId,
   messages,
   onRegenerate,
   onPromptPick,
@@ -160,7 +156,6 @@ export function ChatThread({
   }
 
   const lastAsstIdx = useMemo(() => lastAssistantIndex(messages), [messages]);
-  const showModelBadges = useMemo(() => hasMultipleModels(messages), [messages]);
 
   const shouldVirtualize = messages.length >= VIRTUALIZE_THRESHOLD;
 
@@ -185,9 +180,7 @@ export function ChatThread({
                 <VirtualMessageList
                   scrollerRef={scrollerRef}
                   convId={convId}
-                  modelId={modelId}
                   messages={messages}
-                  showModelBadges={showModelBadges}
                   lastAsstIdx={lastAsstIdx}
                   anyStreaming={anyStreaming}
                   onRegenerate={onRegenerate}
@@ -197,9 +190,7 @@ export function ChatThread({
               ) : (
                 <PlainMessageList
                   convId={convId}
-                  modelId={modelId}
                   messages={messages}
-                  showModelBadges={showModelBadges}
                   lastAsstIdx={lastAsstIdx}
                   anyStreaming={anyStreaming}
                   onRegenerate={onRegenerate}
@@ -255,9 +246,7 @@ export function ChatThread({
 
 interface InnerProps {
   convId: string;
-  modelId?: string | null;
   messages: Message[];
-  showModelBadges: boolean;
   lastAsstIdx: number;
   anyStreaming: boolean;
   onRegenerate: (messageId: string) => void;
@@ -326,9 +315,7 @@ function VirtualMessageList(
 function renderRow(m: Message, i: number, props: InnerProps) {
   const {
     convId,
-    modelId,
     messages,
-    showModelBadges,
     lastAsstIdx,
     anyStreaming,
     onRegenerate,
@@ -341,9 +328,7 @@ function renderRow(m: Message, i: number, props: InnerProps) {
     <div className={extraGap}>
       <MessageBubble
         convId={convId}
-        modelId={modelId}
         message={m}
-        showModelBadge={showModelBadges}
         showFeedback={
           m.role === "assistant" &&
           !m.isStreaming &&
