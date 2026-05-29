@@ -309,7 +309,7 @@ export default function ModelsPage() {
 
       {/* ── Stats row ── */}
       {!loading && !error && items.length > 0 && (
-        <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1.25rem" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: "0.75rem", marginBottom: "1.25rem" }}>
           <StatCard value={items.length} label="Total Models" icon={iconModels} accent="#3b82f6" delay={0} iconClass="mr-icon-pulse" />
           <StatCard value={providers.length} label="Providers" icon={iconProviders} accent="#8b5cf6" delay={80} iconClass="mr-icon-rock" />
           <StatCard value={streamingCount} label="Streaming" icon={iconStream} accent="#10a37f" delay={160} iconClass="mr-icon-breathe" />
