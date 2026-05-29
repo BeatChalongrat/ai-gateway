@@ -286,7 +286,7 @@ function ChatBubblePlusIcon() {
   // Chat-bubble-with-plus — the "compose a new conversation" mark.
   // currentColor so it inherits the button's text-secondary→primary.
   return (
-    <svg width={32} height={32} viewBox="0 0 36 36" fill="none" aria-hidden>
+    <svg width={40} height={40} viewBox="0 0 36 36" fill="none" aria-hidden>
       <path
         d="M10 12C10 10.3 11.3 9 13 9H23C24.7 9 26 10.3 26 12V19C26 20.7 24.7 22 23 22H20L16 26V22H13C11.3 22 10 20.7 10 19V12Z"
         fill="none"
