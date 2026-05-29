@@ -16,19 +16,39 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/config"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 )
+
+// modelCatalogTTL bounds how often chat-edge re-fetches the Gateway's
+// model list. Short enough that a newly-discovered model (added via a
+// provider key) shows up within a few minutes; long enough that the
+// chat page load doesn't hammer the Gateway.
+const modelCatalogTTL = 5 * time.Minute
 
 type ModelHandler struct {
 	cfg *config.Config
+	// Optional. When set, the list endpoint serves the Gateway's live
+	// model catalog (so operator-discovered models appear without a
+	// redeploy). When nil, or on any fetch error, the handler falls
+	// back to the static config catalog.
+	gateway *service.GatewayClient
+
+	mu       sync.RWMutex
+	cached   []modelResponse
+	cachedAt time.Time
 }
 
-func NewModelHandler(cfg *config.Config) *ModelHandler {
-	return &ModelHandler{cfg: cfg}
+func NewModelHandler(cfg *config.Config, gateway *service.GatewayClient) *ModelHandler {
+	return &ModelHandler{cfg: cfg, gateway: gateway}
 }
 
 // reasoningCapability mirrors the Gateway's ReasoningCapability
@@ -231,22 +251,108 @@ var providerDefaults = map[string]modelMeta{
 }
 
 func (h *ModelHandler) List(w http.ResponseWriter, r *http.Request) {
+	out := h.catalog(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"models": out})
+}
+
+// catalog returns the model list to serve. It prefers the Gateway's
+// live catalog (cached for modelCatalogTTL) so operator-discovered
+// models surface without a redeploy, and falls back to the static
+// config catalog when the Gateway is unreachable or returns nothing.
+func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
+	if h.gateway == nil {
+		return h.configCatalog()
+	}
+
+	h.mu.RLock()
+	if h.cached != nil && time.Since(h.cachedAt) < modelCatalogTTL {
+		cached := h.cached
+		h.mu.RUnlock()
+		return cached
+	}
+	h.mu.RUnlock()
+
+	gwModels, err := h.gateway.ListModels(ctx)
+	if err != nil || len(gwModels) == 0 {
+		if err != nil {
+			slog.Warn("model catalog: gateway fetch failed, using config fallback", "err", err)
+		}
+		// Serve a stale cache if we have one; otherwise the config list.
+		h.mu.RLock()
+		stale := h.cached
+		h.mu.RUnlock()
+		if stale != nil {
+			return stale
+		}
+		return h.configCatalog()
+	}
+
+	out := h.buildFromGateway(gwModels)
+	h.mu.Lock()
+	h.cached = out
+	h.cachedAt = time.Now()
+	h.mu.Unlock()
+	return out
+}
+
+// buildFromGateway enriches the Gateway's minimal model entries (id +
+// provider + optional reasoning block) with chat-edge's display
+// metadata. Curated models keep their friendly names + rich metadata;
+// discovered models fall back to a humanized name + provider-default
+// metadata so the picker always renders something sensible. Reasoning
+// capability is taken from the Gateway (DB-authoritative), so a newly
+// onboarded reasoning model no longer needs a code change here.
+func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelResponse {
+	// Friendly names from the operator's curated catalog take priority
+	// over a humanized id for models that appear in both.
+	names := map[string]string{}
+	for _, m := range h.cfg.Models() {
+		names[m.ID] = m.Name
+	}
+
+	out := make([]modelResponse, 0, len(gw))
+	for _, m := range gw {
+		// The Gateway exposes an "auto" pseudo-model; the frontend
+		// renders its own Auto row, so skip it here.
+		if m.ID == "auto" {
+			continue
+		}
+		name := names[m.ID]
+		if name == "" {
+			name = humanizeModelID(m.ID)
+		}
+		var rb *reasoningCapability
+		if m.Reasoning != nil && m.Reasoning.Supported {
+			modes := m.Reasoning.Modes
+			if len(modes) == 0 {
+				modes = []string{"off", "auto", "low", "medium", "high"}
+			}
+			defaultMode := m.Reasoning.DefaultMode
+			if defaultMode == "" {
+				defaultMode = "auto"
+			}
+			rb = &reasoningCapability{
+				Supported:        true,
+				Modes:            modes,
+				DefaultMode:      defaultMode,
+				SummarySupported: m.Reasoning.SummarySupported,
+			}
+		}
+		out = append(out, h.buildModelResponse(m.ID, name, m.Provider, rb))
+	}
+	return out
+}
+
+// configCatalog is the static fallback path (Gateway unreachable). It
+// preserves the pre-dynamic behaviour: the operator's curated catalog
+// enriched with local metadata + the static reasoning-capable set.
+func (h *ModelHandler) configCatalog() []modelResponse {
 	models := h.cfg.Models()
 	out := make([]modelResponse, 0, len(models))
 	for _, m := range models {
-		meta := lookupMeta(m)
-		caps := meta.Capabilities
-		if len(caps) == 0 {
-			caps = m.Capabilities
-		}
-		if len(caps) == 0 {
-			caps = []string{"streaming"}
-		}
-		// T4: Gemini 2.5+ ids are versioned (e.g. gemini-2.5-pro,
-		// gemini-2.5-flash) — match by prefix so the operator
-		// doesn't have to enumerate every Gemini variant in the
-		// capable-set map. Other reasoning-capable models match by
-		// exact id.
+		// T4: Gemini 2.5+ ids are versioned — match by prefix; other
+		// reasoning-capable models match by exact id.
 		_, reasoning := reasoningCapableModels[m.ID]
 		if !reasoning && (strings.HasPrefix(m.ID, "gemini-2.5") || strings.HasPrefix(m.ID, "gemini-3")) {
 			reasoning = true
@@ -260,24 +366,75 @@ func (h *ModelHandler) List(w http.ResponseWriter, r *http.Request) {
 				SummarySupported: true,
 			}
 		}
-		out = append(out, modelResponse{
-			ID:              m.ID,
-			Name:            m.Name,
-			Provider:        m.Provider,
-			Description:     meta.Description,
-			ContextWindow:   meta.ContextWindow,
-			Capabilities:    caps,
-			Icon:            iconFor(m.Provider),
-			Category:        meta.Category,
-			MaxOutputTokens: meta.MaxOutputTokens,
-			InputPricePerM:  meta.InputPricePerM,
-			OutputPricePerM: meta.OutputPricePerM,
-			Allowed:         true,
-			Reasoning:       rb,
-		})
+		resp := h.buildModelResponse(m.ID, m.Name, m.Provider, rb)
+		// Honour config-supplied capabilities when local metadata had none.
+		if len(resp.Capabilities) == 1 && resp.Capabilities[0] == "streaming" && len(m.Capabilities) > 0 {
+			resp.Capabilities = m.Capabilities
+		}
+		out = append(out, resp)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"models": out})
+	return out
+}
+
+// buildModelResponse assembles one wire entry from an id/name/provider
+// plus an already-resolved reasoning block. Shared by the dynamic
+// (Gateway) and static (config) paths so display metadata lookup +
+// capability defaults stay identical.
+func (h *ModelHandler) buildModelResponse(id, name, provider string, rb *reasoningCapability) modelResponse {
+	meta := lookupMeta(config.ModelEntry{ID: id, Name: name, Provider: provider})
+	caps := meta.Capabilities
+	if len(caps) == 0 {
+		caps = []string{"streaming"}
+	}
+	return modelResponse{
+		ID:              id,
+		Name:            name,
+		Provider:        provider,
+		Description:     meta.Description,
+		ContextWindow:   meta.ContextWindow,
+		Capabilities:    caps,
+		Icon:            iconFor(provider),
+		Category:        meta.Category,
+		MaxOutputTokens: meta.MaxOutputTokens,
+		InputPricePerM:  meta.InputPricePerM,
+		OutputPricePerM: meta.OutputPricePerM,
+		Allowed:         true,
+		Reasoning:       rb,
+	}
+}
+
+// humanizeModelID turns a raw model id into a presentable name for
+// discovered models that aren't in the curated catalog. Drops any
+// "provider/" prefix (OpenRouter ids), splits on - / _, and upper-cases
+// a few well-known acronym tokens. Imperfect but readable: e.g.
+// "gpt-4.1-mini" → "GPT 4.1 Mini", "anthropic/claude-3-opus" →
+// "Claude 3 Opus".
+func humanizeModelID(id string) string {
+	s := id
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.ReplaceAll(s, "_", " ")
+	s = strings.ReplaceAll(s, "-", " ")
+	parts := strings.Fields(s)
+	for i, p := range parts {
+		switch strings.ToLower(p) {
+		case "gpt":
+			parts[i] = "GPT"
+		case "ai":
+			parts[i] = "AI"
+		case "llm":
+			parts[i] = "LLM"
+		default:
+			if len(p) > 0 {
+				parts[i] = strings.ToUpper(p[:1]) + p[1:]
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return id
+	}
+	return strings.Join(parts, " ")
 }
 
 // lookupMeta returns rich display metadata for a configured model.
