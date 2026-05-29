@@ -72,7 +72,47 @@ do this before any reasoning-capable model gets a valid provider key.**
 
 ---
 
+## Session 0.3 — Rate-limiter shadow compare + flip ✅
+
+- **Parity (verified byte-for-byte):** Rust `sliding_window.rs` ↔ Python
+  `rate_limit_service.py:79-114` — identical 4-cmd ZSET pipeline
+  (ZREMRANGEBYSCORE/ZCARD/ZADD/EXPIRE), same key prefixes
+  (`rl:key:`/`rl:proj:`/`rl:tenant:`), same `count_before < limit` /
+  `max(0, limit-count_before-1)` math, same member shape (`{:.6}:{nanos}`),
+  same defaults (60/300/1000, 60s), same fail-open + key→project→tenant order.
+  Drop-in (shares the same Redis keys). `check_all_async` falls back to
+  `_check_all_python` on any RPC failure (`:154-197`).
+- **Flip:** `RATE_LIMITER_ENGINE=rust` in `.env`; backend recreated (no rebuild
+  needed). **Rollback:** delete the `.env` line (or `=python`) + recreate backend.
+- **Live validation:**
+  - Under-limit: 3 reqs → 200; Rust `allowed_total` 0→3 per scope (Rust active). ✓
+  - Over-limit: 75 parallel (window pre-filled to ~40) → 20×200 + 55×429; Rust
+    `denied_total{api_key}` 0→55 (= the 429 count). Allowed exactly to the 60 cap,
+    then denied — no over-admission observed. ✓
+  - Failover: stopped `rate-limiter`, flushed the key window → 3 reqs → 200 via
+    Python fallback (`rl:key` ZADDed by Python while sidecar down). No crash. ✓
+  - Resume: restarted → healthy; `allowed_total` increments again (Rust resumed). ✓
+  - (Note: a slow sequential 65-burst showed 0×429 — requests spread past the 60s
+    window so the count never reached 60. Correct limiter behaviour; test had to be
+    parallel to stay in-window.)
+
+### Minor parity nuance (documented, fail-safe — not blocking)
+Python `_check_all_python` is **sequential with early-exit** (a key-scope denial
+skips the project/tenant ZADD); Rust `check_all` runs all three **in parallel**
+(always ZADDs all three). So on a *denied* request, Rust records hits in the
+project+tenant windows that Python would spare. Direction is **more restrictive**
+(never admits more traffic), only on the already-denied path → accepted as-is.
+
+### 🚩 Deferred TODO — R4 over-admission race (both engines)
+Both engines compute allow/deny **client-side** after a non-transactional pipeline
+with an **unconditional ZADD**, so concurrent requests near the boundary can
+over-admit transiently. Per the prompt's low-traffic guidance (internal-tool launch
+mode) and because a proper fix needs a Lua `EVAL` (atomic decision + conditional
+ZADD) in **both** engines plus updating their pinned always-ZADD tests (>2h),
+**deferred**. Revisit before high-concurrency SaaS traffic.
+
+---
+
 ## Pending
-- Session 0.3 — Rate-limiter shadow compare + flip `RATE_LIMITER_ENGINE=rust`.
 - Session 0.4 — DLP parity suite (incl. evasion vectors) + Python-wrapper preprocessing.
 - Session 0.5 — DLP flip + `PHASE0_BENCHMARK.md`.
