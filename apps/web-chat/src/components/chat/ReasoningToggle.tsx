@@ -93,7 +93,7 @@ export function ReasoningToggle({
       {open && enabled ? (
         <div
           role="menu"
-          className="absolute bottom-full right-0 z-20 mb-2 min-w-[160px] rounded-lg border border-border-default bg-surface-primary p-1.5 shadow-lg"
+          className="absolute bottom-full right-0 z-20 mb-2 min-w-[160px] rounded-lg border border-border-default bg-bg-surface p-1.5 shadow-lg"
         >
           <div className="px-2 py-1 text-[11px] uppercase tracking-wide text-text-muted">
             {t("reasoning.effort")}
