@@ -323,6 +323,12 @@ services:
         NEXT_PUBLIC_ADMIN_API_KEY: ${NEXT_PUBLIC_ADMIN_API_KEY:-}
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      # Server-side base URL the chat-edge proxy uses to validate the
+      # admin session against gateway-api's /auth/session/me. MUST be the
+      # in-network service hostname — NEXT_PUBLIC_API_BASE_URL is a
+      # browser URL (localhost:8080) and is unreachable from inside the
+      # container, which would make every admin session check 401.
+      GATEWAY_API_URL: http://backend:8080
       NEXT_PUBLIC_ADMIN_API_KEY: ${NEXT_PUBLIC_ADMIN_API_KEY:-}
       CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
       CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
