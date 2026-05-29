@@ -115,6 +115,63 @@ class AlertEvaluator:
 
         return fired
 
+    async def evaluate_all(self, session: "Session") -> list[str]:
+        """Evaluate every enabled rule against its own scope window.
+
+        Phase-1 B6: the periodic background-task entry point. The old
+        ``evaluate_after_request`` ran this analytical work (an enabled-
+        rules SELECT + a window aggregate per matching rule) on the
+        request hot path, on the event loop, once per completed request.
+        Every metric here is a *time-window aggregate* keyed on the
+        rule's own scope (``_compute_metric`` already filters by
+        ``scope_id``), so it does not need a per-request trigger — a
+        periodic sweep is functionally equivalent and keeps the request
+        path free. ``request_log`` / ``_scope_matches`` are therefore no
+        longer involved.
+
+        Returns the list of rule_ids that fired.
+        """
+        rows = (
+            session.execute(
+                select(AlertRuleORM).where(AlertRuleORM.enabled == True)  # noqa: E712
+            )
+            .scalars()
+            .all()
+        )
+
+        fired: list[str] = []
+        now = datetime.now(timezone.utc)
+
+        for rule in rows:
+            if rule.metric not in _METRIC_TO_TYPE:
+                continue
+            if self._in_cooldown(rule, now):
+                continue
+
+            value = self._compute_metric(session, rule, now)
+            if value < rule.threshold:
+                continue
+
+            alert = self._build_alert(rule, value)
+            try:
+                await self.alert_service.emit_and_deliver(
+                    alert,
+                    session=session,
+                    webhook_url=rule.webhook_url,
+                    rule_id=rule.id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "alert_emit_failed", rule_id=rule.id, error=str(exc)
+                )
+                continue
+
+            rule.last_fired_at = now
+            session.flush()
+            fired.append(rule.id)
+
+        return fired
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
