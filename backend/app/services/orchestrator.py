@@ -667,7 +667,7 @@ class GatewayOrchestrator:
         # reuse the same logic on DLP-masked messages. Mutates
         # payload.model in place when a router fires.
         with record_phase("routing"):
-            router_used, _matched_rule = self._apply_router_chain(
+            router_used, _matched_rule = await self._apply_router_chain(
                 ctx=ctx,
                 payload=payload,
                 dict_messages=dict_messages,
@@ -1907,7 +1907,7 @@ class GatewayOrchestrator:
 
         payload.reasoning = ReasoningConfig(mode="auto", show_summary=True)
 
-    def _apply_router_chain(
+    async def _apply_router_chain(
         self,
         ctx: RequestContext,
         payload: ChatCompletionsRequest,
@@ -2008,9 +2008,10 @@ class GatewayOrchestrator:
             hinted_model = project_hint
             payload.model = project_hint
         else:
-            # Step 2: semantic router (existing precedence).
+            # Step 2: semantic router (existing precedence). B4: the
+            # embedding encode runs off the event loop.
             sem_model, sem_intent, sem_confidence = (
-                self.semantic_router.get_model_hint(
+                await self.semantic_router.get_model_hint_async(
                     dict_messages, allowed_providers=allowed_providers
                 )
             )

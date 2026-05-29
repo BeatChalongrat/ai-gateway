@@ -519,7 +519,7 @@ async def chat_completions(
     # falls back to plain "service" routing so the stream never breaks.
     dict_messages = [m.model_dump() for m in messages_to_send]
     try:
-        router_used, _matched_rule = orchestrator._apply_router_chain(
+        router_used, _matched_rule = await orchestrator._apply_router_chain(
             ctx=ctx,
             payload=payload,
             dict_messages=dict_messages,
