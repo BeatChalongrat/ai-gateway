@@ -19,9 +19,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", width: "100%" }}>
-      {/* Mobile top bar — only below md (768px). Desktop is unchanged. */}
+      {/* Mobile top bar — only below md (768px). Desktop is unchanged.
+          NOTE: display lives in the `flex` class, NOT inline. An inline
+          `display: "flex"` would override the `md:hidden` utility
+          (inline styles beat classes), leaving the fixed bar visible on
+          desktop and overlapping the page header. Keeping display in
+          Tailwind lets `md:hidden` (emitted after `flex`, so it wins at
+          ≥768px) actually hide the bar on desktop. */}
       <header
-        className="md:hidden"
+        className="flex md:hidden"
         style={{
           position: "fixed",
           top: 0,
@@ -31,7 +37,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           zIndex: 30,
           background: "var(--bg-sidebar)",
           borderBottom: "1px solid rgba(80,130,220,0.12)",
-          display: "flex",
           alignItems: "center",
           gap: "0.75rem",
           padding: "0 1rem",
