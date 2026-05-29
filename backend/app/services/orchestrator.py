@@ -66,6 +66,7 @@ from app.services.policy.profile_service import get_runtime_profile
 from app.services.policy.profiles import get_profile as get_runtime_profile_fallback
 from app.services.project_service import ProjectService
 from app.services.provider_dispatcher import ProviderDispatcher
+from app.services.query_classifier import QueryComplexity, classify_query_complexity
 from app.services.routing_service import RoutingService
 from app.services.audit_service import AuditService
 from app.services.request_log_service import RequestLogService
@@ -671,6 +672,9 @@ class GatewayOrchestrator:
                 payload=payload,
                 policy_decision=input_enforcement,
             )
+            # Auto Thinking Mode: enable adaptive reasoning when the
+            # resolved model can think and the caller didn't opt out.
+            self._maybe_enable_adaptive_reasoning(payload, route.model_name)
         log.info(
             "route_selected",
             provider=route.provider_name,
@@ -1857,6 +1861,43 @@ class GatewayOrchestrator:
         if applied:
             log.info("project_routing_config_applied", fields=applied)
 
+    def _maybe_enable_adaptive_reasoning(
+        self, payload: ChatCompletionsRequest, model_name: str
+    ) -> None:
+        """Auto-enable adaptive reasoning when routing lands on a
+        reasoning-capable model and the caller did not specify a mode.
+
+        Auto Thinking Mode: the user no longer flips a Thinking toggle,
+        so when the (resolved) model can think we turn on adaptive
+        reasoning with a visible summary by default. ``mode='auto'``
+        lets the provider's own logic decide the effort.
+
+        No-op when:
+          * the model is not reasoning-capable (the adapter would
+            ignore the field anyway), or
+          * the caller already opted in/out explicitly (any
+            ``reasoning`` with a non-``off`` mode, or an explicit
+            ``off`` we must respect).
+
+        Call this AFTER ``select_route`` so ``model_name`` is the final
+        provider model, never the ``auto`` sentinel.
+        """
+        from app.services.providers.model_registry import get_candidate
+
+        cand = get_candidate(model_name)
+        if not (cand and cand.supports_reasoning):
+            return
+        existing = getattr(payload, "reasoning", None)
+        if existing is not None and existing.mode != "off":
+            # Caller already set a real mode — respect it.
+            return
+        if existing is not None and existing.mode == "off":
+            # Explicit opt-out — respect it (don't force thinking on).
+            return
+        from app.schemas.public import ReasoningConfig
+
+        payload.reasoning = ReasoningConfig(mode="auto", show_summary=True)
+
     def _apply_router_chain(
         self,
         ctx: RequestContext,
@@ -1875,6 +1916,41 @@ class GatewayOrchestrator:
         indexed tokens in place of raw PII — the semantic router's
         embedding call must never see unmasked sensitive content.
         """
+        # Auto Thinking Mode — an explicit model pick is authoritative.
+        # Skip the semantic/keyword override chain entirely so the
+        # caller's model (including a chat-edge auto-resolved reasoning
+        # model) is never silently rewritten to something else. The
+        # routers only ever shape the bare ``auto`` sentinel now. This
+        # closes the prior P0 where "What is 15*37?" matched the
+        # ``simple_tasks`` keyword rule and downgraded an explicit
+        # Claude reasoning request to gpt-4o-mini.
+        if payload.model != "auto":
+            log.info("routing_decision", router="explicit", model=payload.model)
+            return "explicit", None
+
+        # "auto": let query complexity steer the candidate pool. A
+        # COMPLEX query routes to the reasoning pool (use_case=
+        # 'reasoning' — handled by RoutingService._route_auto) so the
+        # selected model's native adaptive thinking can engage. Simple
+        # / moderate queries keep the existing semantic/keyword chain.
+        try:
+            complexity = classify_query_complexity(dict_messages)
+        except Exception as exc:  # never let classification break routing
+            log.warning("query_classify_failed", error=str(exc))
+            complexity = QueryComplexity.MODERATE
+        if complexity == QueryComplexity.COMPLEX:
+            if payload.metadata is None:
+                payload.metadata = {}
+            payload.metadata["use_case"] = "reasoning"
+            log.info(
+                "routing_decision",
+                router="complexity",
+                complexity=complexity,
+                use_case="reasoning",
+                model=payload.model,
+            )
+            return "complexity", None
+
         _meta_allowed = payload.metadata.get("allowed_providers")
         allowed_providers = (
             frozenset(_meta_allowed) if _meta_allowed else None
