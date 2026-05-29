@@ -828,7 +828,7 @@ export default function AuditLogPage() {
   // ---------------------------------------------------------------------
 
   return (
-    <div style={{ padding: "2rem 2.5rem", maxWidth: 1400, margin: "0 auto" }}>
+    <div className="p-4 sm:p-6 lg:p-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
       {/* Header */}
       <div
         className="sran-page-header"
