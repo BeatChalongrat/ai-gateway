@@ -132,6 +132,9 @@ export const en = {
   "model.auto.name": "Auto",
   "model.auto.description": "Selects the best model automatically",
   "model.selectModel": "Select model",
+  "model.searchPlaceholder": "Search models…",
+  "model.popular": "Popular",
+  "model.recent": "Recently used",
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
@@ -433,6 +436,9 @@ const th: Record<DictKey, string> = {
   "model.auto.name": "อัตโนมัติ",
   "model.auto.description": "เลือก model ให้อัตโนมัติ",
   "model.selectModel": "เลือกโมเดล",
+  "model.searchPlaceholder": "ค้นหาโมเดล…",
+  "model.popular": "ยอดนิยม",
+  "model.recent": "ใช้ล่าสุด",
 
   // Memory page
   "memory.back": "กลับไปแชท",
