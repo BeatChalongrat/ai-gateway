@@ -85,10 +85,8 @@ export default function ChatConversationsPage() {
         style={{ padding: "0.875rem 1rem", marginBottom: "0.875rem" }}
       >
         <div
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5"
           style={{
-            display: "grid",
-            gridTemplateColumns:
-              "minmax(180px, 2fr) minmax(140px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) auto",
             gap: "0.5rem",
             alignItems: "end",
           }}
@@ -260,6 +258,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputStyle: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
   padding: "0.375rem 0.55rem",
   background: "var(--color-bg)",
   border: "1px solid var(--color-border)",

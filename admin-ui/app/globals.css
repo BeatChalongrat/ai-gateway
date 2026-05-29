@@ -929,7 +929,11 @@
 
   /* ─── Responsive sidebar ─── */
 
-  @media (max-width: 1280px) {
+  /* Tablet band only (768–1280px): collapse to an icon rail. Below 768px the
+     sidebar becomes an off-canvas drawer (see the max-width:767px block), so
+     this rule must NOT apply there — otherwise the drawer would show as an
+     icon-only rail with hidden labels. */
+  @media (min-width: 768px) and (max-width: 1280px) {
     .sran-sidebar {
       width: 4rem;
     }
@@ -977,18 +981,55 @@
     }
   }
 
-  @media (max-width: 768px) {
+  /* Mobile (<768px): off-canvas drawer. Slides in from the left over a
+     backdrop (rendered by AppShell); full labels/section titles are shown
+     because the icon-rail rule above is gated to >=768px. */
+  @media (max-width: 767px) {
     .sran-sidebar {
-      width: 3.5rem;
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      height: 100dvh;
+      width: 85vw;
+      max-width: 280px;
+      z-index: 50;
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
     }
 
-    .sran-sidebar-brand {
-      padding: 0.75rem 0.375rem;
+    .sran-sidebar-open {
+      transform: translateX(0);
     }
+  }
 
-    .sran-sidebar-brand img {
-      width: 28px !important;
-      height: 28px !important;
+  /* Close (✕) button inside the drawer brand row — mobile only. */
+  .sran-sidebar-close {
+    display: none;
+    margin-left: auto;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid rgba(100, 140, 220, 0.2);
+    border-radius: 8px;
+    color: rgba(200, 220, 255, 0.85);
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0.375rem;
+  }
+
+  @media (max-width: 767px) {
+    .sran-sidebar-close {
+      display: flex;
+    }
+  }
+
+  /* Mobile tap-target helper (mirrors web-chat). Expands small icon buttons
+     to a 44×44 hit area on touch devices without affecting visual size. */
+  @media (pointer: coarse) {
+    .tap-44 {
+      min-width: 44px;
+      min-height: 44px;
     }
   }
 
@@ -996,7 +1037,19 @@
     .sran-table th,
     .sran-table td {
       padding: 0.5rem 0.625rem;
-      font-size: var(--font-size-xs);
+    }
+  }
+
+  /* Mobile readability floor (<=640px): the desktop design leans on 10–12px
+     labels/cells which are hard to read on a phone. Raise the smallest text
+     to ~13px without touching desktop. */
+  @media (max-width: 640px) {
+    .sran-table td,
+    .sran-table th,
+    .sran-badge,
+    .sran-badge-role,
+    .sran-stat-label {
+      font-size: max(var(--font-size-xs), 0.8125rem);
     }
   }
 

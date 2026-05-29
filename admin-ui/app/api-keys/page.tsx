@@ -231,7 +231,7 @@ export default function ApiKeysPage() {
                 {!isCollapsed && (
                   <div style={{
                     background: T.card, borderRadius: 10, border: `1px solid ${T.bl}`,
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.04)", overflow: "hidden",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.04)", overflowX: "auto",
                   }}>
                     {keys.map((k: any, ki: number) => {
                       const isActive = k.status === "active";
@@ -239,6 +239,7 @@ export default function ApiKeysPage() {
                         <div key={k.key_id} className="ak-row" style={{
                           display: "flex", alignItems: "center", gap: 14,
                           padding: "14px 20px",
+                          minWidth: 520,
                           borderBottom: ki < keys.length - 1 ? `1px solid ${T.bl}` : "none",
                           cursor: "pointer",
                         }} onClick={() => setSelected(k)}>
