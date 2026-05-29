@@ -63,7 +63,15 @@ const NAV_SECTIONS: { title: string; items: { label: string; href: string; icon:
 
 const Divider = () => <div style={{ height: "1px", background: "rgba(80,130,220,0.06)", margin: "0.125rem 0.875rem" }} />;
 
-export default function Sidebar() {
+export default function Sidebar({
+  mobileOpen = false,
+  onClose,
+}: {
+  // Mobile drawer state, driven by AppShell. On desktop (>=768px) these are
+  // inert — the sidebar is an in-flow sticky column regardless of `mobileOpen`.
+  mobileOpen?: boolean;
+  onClose?: () => void;
+} = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const [session, setSessionState] = useState<AdminSession | null>(null);
@@ -79,6 +87,7 @@ export default function Sidebar() {
   const allowedPaths = session ? ROLE_NAV[session.role] : [];
 
   async function handleLogout() {
+    onClose?.();
     await clearSession();
     router.push("/login");
   }
@@ -89,7 +98,7 @@ export default function Sidebar() {
   })).filter((section) => section.items.length > 0);
 
   return (
-    <aside className="sran-sidebar">
+    <aside className={`sran-sidebar${mobileOpen ? " sran-sidebar-open" : ""}`}>
       {/* Brand */}
       <div className="sran-sidebar-brand">
         <img
@@ -101,6 +110,16 @@ export default function Sidebar() {
           <div className="sran-sidebar-brand-name">SRAN</div>
           <div className="sran-sidebar-brand-sub">AI Gateway</div>
         </div>
+        {/* Mobile-only close button — backdrop also closes the drawer, but an
+            explicit control is more discoverable. Hidden >=768px via CSS. */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close menu"
+          className="sran-sidebar-close tap-44"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
 
       {/* Nav */}
@@ -126,6 +145,7 @@ export default function Sidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={onClose}
                     className={`sran-sidebar-link ${isActive ? "sran-sidebar-link-active" : ""}`}
                   >
                     <span className="sran-sidebar-icon">{item.icon}</span>
