@@ -28,14 +28,14 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
   },
   icons: {
-    // SVG first: ``icon.svg`` is a self-contained tile (its own
-    // dark-navy background + light glyph) so it stays visible on both
-    // light and dark browser tabs. The transparent ``sran-logo.png``
-    // disappeared on Chrome's dark tab strip. PNG kept as a fallback
-    // for browsers without SVG-favicon support.
+    // SRAN cat logo. The PNG is a white cat on its own dark-navy tile,
+    // so it stays visible on both light and dark browser tabs (no
+    // transparent background to disappear against Chrome's dark tab
+    // strip). Pre-sized favicons keep the tab icon crisp + light;
+    // full-res sran-logo.png backs the Apple touch icon.
     icon: [
-      { url: "/icons/icon.svg", type: "image/svg+xml" },
-      { url: "/sran-logo.png", type: "image/png" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-192.png", sizes: "192x192", type: "image/png" },
     ],
     apple: "/sran-logo.png",
   },
