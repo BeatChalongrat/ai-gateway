@@ -207,7 +207,7 @@ function CollapsedRail({
 // in light it's rgba(0,0,0,0.10) — so border-border + bg-bg-surface +
 // text-text-primary reproduce the subtle look in BOTH themes.
 const SUBTLE_TOPBAR_BTN =
-  "focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-full " +
+  "focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-xl " +
   "border border-border bg-bg-surface text-text-primary transition-colors " +
   "hover:bg-bg-elevated";
 
