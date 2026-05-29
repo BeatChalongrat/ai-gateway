@@ -147,9 +147,18 @@ type ModelEntry struct {
 // DefaultModels is the fallback list when “AVAILABLE_MODELS“ is
 // unset. Picked to match the providers the Gateway is already
 // configured for in this repo.
+//
+// Order matters for Auto Thinking Mode: ResolveAutoModelWithReasoning
+// returns the FIRST reasoning-capable id in this list for a complex
+// turn. ``o3-mini`` is listed ahead of ``claude-sonnet-4`` so Auto
+// prefers the OpenAI o-series (valid key in this deployment) over the
+// Claude row (placeholder Anthropic key) — picking Claude would route
+// to an unreachable provider and error the turn.
 var DefaultModels = []ModelEntry{
 	{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Capabilities: []string{"chat"}},
 	{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Provider: "openai", Capabilities: []string{"chat"}},
+	{ID: "o3-mini", Name: "OpenAI o3-mini", Provider: "openai", Capabilities: []string{"chat", "reasoning"}},
+	{ID: "o4-mini", Name: "OpenAI o4-mini", Provider: "openai", Capabilities: []string{"chat", "reasoning"}},
 	{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Provider: "anthropic", Capabilities: []string{"chat"}},
 }
 

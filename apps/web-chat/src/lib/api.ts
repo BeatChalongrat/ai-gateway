@@ -246,6 +246,35 @@ class ApiClient {
   downloadUrl(fileId: string): string {
     return `${API_BASE}/files/${fileId}/download`;
   }
+  /** Fetch a file's bytes WITH the Authorization header and return an
+   *  object URL. Unlike ``downloadUrl`` (which an <img>/<a download>
+   *  loads with cookie-only auth — the portal_access_token cookie
+   *  expires after ~1h and is dropped on cross-site subresource loads
+   *  in production), this rides the same Bearer token as every JSON
+   *  call, so it works regardless of cookie state. The caller owns the
+   *  returned URL and must URL.revokeObjectURL() it when done. */
+  async fileObjectUrl(fileId: string): Promise<string> {
+    const res = await this.raw(`/files/${fileId}/download`);
+    if (!res.ok) {
+      throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+    }
+    return URL.createObjectURL(await res.blob());
+  }
+  /** Authenticated download: fetch the blob with the Bearer header,
+   *  then trigger a browser save via a transient object URL. Replaces
+   *  the bare <a href download> which only worked while the cookie
+   *  was alive. */
+  async downloadFile(fileId: string, filename: string): Promise<void> {
+    const url = await this.fileObjectUrl(fileId);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke after the download has had time to start.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
 
   // ----- Excel Smart Workspace (Phase 4) --------------------
   /** Run the deep inspector against an xlsx upload. The structure

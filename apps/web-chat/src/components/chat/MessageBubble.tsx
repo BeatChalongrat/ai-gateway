@@ -222,6 +222,12 @@ function MessageBubbleImpl({
     return (
       <div className="group message-enter flex w-full justify-end">
         <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+          {/* Attachments render ABOVE the text bubble (matches Claude /
+              ChatGPT) so the image/file the user sent reads first. */}
+          {hasFiles ? (
+            <MessageAttachments files={message.files!} />
+          ) : null}
+
           {hasText ? (
             <div
               className="rounded-bubble bg-bubble-user px-4 py-2.5 text-[15px] leading-relaxed text-text-primary shadow-sm"
@@ -272,10 +278,6 @@ function MessageBubbleImpl({
                 </span>
               )}
             </div>
-          ) : null}
-
-          {hasFiles ? (
-            <MessageAttachments files={message.files!} />
           ) : null}
 
           {/* User message actions — copy + edit, revealed on hover.
