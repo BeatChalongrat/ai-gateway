@@ -133,6 +133,12 @@ async def lifespan(app: FastAPI):
     # Drain + stop the queue first so any in-flight records make it
     # to Postgres before the worker pool tears down.
     await request_log_queue.stop_worker()
+    # Phase-1 B1: close the pooled provider HTTP clients.
+    try:
+        from app.services.providers.http_client import close_all_clients
+        await close_all_clients()
+    except Exception:  # noqa: BLE001
+        pass
     _stop_model_discovery_scheduler()
     monitor_task.cancel()
     retention_task.cancel()
