@@ -8,12 +8,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
-import {
-  formatBytes,
-  iconEmojiFor,
-  iconKindFor,
-} from "@/lib/fileUtil";
+import { formatBytes, isImageMime } from "@/lib/fileUtil";
 import type { FileAttachment } from "@/lib/types";
+import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { AuthedImage } from "./AuthedImage";
 
 interface Props {
   conversationId: string;
@@ -92,43 +90,7 @@ export function ConversationFiles({ conversationId }: Props) {
                 Loading…
               </div>
             ) : files && files.length > 0 ? (
-              files.map((f) => (
-                <a
-                  key={f.id}
-                  href={api.downloadUrl(f.id)}
-                  download={f.filename}
-                  className="flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-bg-elevated"
-                  title={`Download ${f.filename}`}
-                >
-                  <span aria-hidden className="text-lg leading-none">
-                    {iconEmojiFor(iconKindFor(f.filename, f.content_type))}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-text-primary">
-                      {f.filename}
-                    </span>
-                    <span className="block text-[10px] text-text-muted">
-                      {formatBytes(f.file_size_bytes)}
-                    </span>
-                  </span>
-                  <svg
-                    width={12}
-                    height={12}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden
-                    className="shrink-0 text-text-muted"
-                  >
-                    <path
-                      d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </a>
-              ))
+              files.map((f) => <FileRow key={f.id} file={f} />)
             ) : (
               <div className="px-3 py-3 text-center text-[11px] text-text-muted">
                 No files attached.
@@ -138,5 +100,69 @@ export function ConversationFiles({ conversationId }: Props) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+// One row in the files popup. Images show a real (authenticated)
+// thumbnail; everything else shows the monochrome FileTypeBadge.
+// Download goes through api.downloadFile so it carries the Bearer
+// token (a bare <a download> only worked while the cookie was alive).
+function FileRow({ file }: { file: FileAttachment }) {
+  const [busy, setBusy] = useState(false);
+  const isImage = isImageMime(file.content_type);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await api.downloadFile(file.id, file.filename);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-bg-elevated disabled:opacity-60"
+      title={`Download ${file.filename}`}
+    >
+      {isImage ? (
+        <AuthedImage
+          fileId={file.id}
+          alt={file.filename}
+          className="h-9 w-9 shrink-0 rounded object-cover"
+        />
+      ) : (
+        <FileTypeBadge
+          filename={file.filename}
+          contentType={file.content_type}
+          size="md"
+          className="shrink-0"
+        />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-text-primary">
+          {file.filename}
+        </span>
+        <span className="block text-[10px] text-text-muted">
+          {formatBytes(file.file_size_bytes)}
+        </span>
+      </span>
+      <svg
+        width={12}
+        height={12}
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden
+        className="shrink-0 text-text-muted"
+      >
+        <path
+          d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
   );
 }
