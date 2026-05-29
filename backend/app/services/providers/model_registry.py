@@ -511,6 +511,7 @@ class ModelRegistry:
             model=row.model,
             supports_streaming=row.supports_streaming,
             supports_tools=row.supports_tools,
+            supports_vision=getattr(row, "supports_vision", False),
             max_context_tokens=row.max_context_tokens,
             cost_tier=row.cost_tier,
             latency_tier=row.latency_tier,
@@ -599,11 +600,24 @@ def filter_candidates(
     requires_streaming: bool = False,
     allowed_providers: frozenset[str] | None = None,
     blocked_models: frozenset[str] | None = None,
+    requires_vision: bool = False,
+    requires_tools: bool = False,
 ) -> list[ModelCandidate]:
-    """Filter candidates by capability requirements and constraints."""
+    """Filter candidates by capability requirements and constraints.
+
+    ``requires_vision`` / ``requires_tools`` are HARD gates for
+    capability-aware routing + fallback: a request carrying images (or
+    tools) must only ever be served by a model that supports them, or
+    the response is silently wrong. Both default False so existing
+    callers / tests are unaffected.
+    """
     result = []
     for c in candidates:
         if requires_streaming and not c.supports_streaming:
+            continue
+        if requires_vision and not c.supports_vision:
+            continue
+        if requires_tools and not c.supports_tools:
             continue
         if allowed_providers and c.provider not in allowed_providers:
             continue
