@@ -95,28 +95,6 @@ function trackRecentModel(id: string): void {
   writeJSON(RECENT_KEY, [id, ...recent.filter((x) => x !== id)].slice(0, RECENT_COUNT + 2));
 }
 
-// ─── Provider presentation ──────────────────────────────────────
-// Brand-ish accent dots so a glance distinguishes providers. Colours
-// read fine on both the dark and light surface (they're saturated dots,
-// not text), so no theme branching needed.
-const PROVIDER_COLORS: Record<string, string> = {
-  openai: "#10a37f",
-  anthropic: "#d4a27f",
-  openrouter: "#e44d8a",
-  google: "#4285f4",
-  deepseek: "#5b6ee1",
-  groq: "#f97316",
-  mistral: "#ff7000",
-  cohere: "#39594d",
-  xai: "#8b8b8b",
-  perplexity: "#20808d",
-  default: "#888888",
-};
-
-function providerColor(provider: string): string {
-  return PROVIDER_COLORS[provider.toLowerCase()] || PROVIDER_COLORS.default;
-}
-
 function filterModels(models: ModelEntry[], query: string): ModelEntry[] {
   const q = query.trim().toLowerCase();
   if (!q) return models;
@@ -389,7 +367,6 @@ function ModelPicker({
                 key={`pop-${m.id}`}
                 label={m.name}
                 sub={m.provider}
-                dotColor={providerColor(m.provider)}
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
               />
@@ -404,7 +381,6 @@ function ModelPicker({
                 key={`rec-${m.id}`}
                 label={m.name}
                 sub={m.provider}
-                dotColor={providerColor(m.provider)}
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
               />
@@ -421,7 +397,6 @@ function ModelPicker({
               key={provider}
               title={provider}
               count={group.length}
-              dotColor={providerColor(provider)}
             >
               {preview.map((m) => (
                 <ModelRow
@@ -456,25 +431,16 @@ function ModelPicker({
 function Section({
   title,
   count,
-  dotColor,
   children,
 }: {
   title: string;
   count?: number;
-  dotColor?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="border-t border-border first:border-t-0">
       <div className="flex items-center justify-between px-3 pb-1 pt-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {dotColor ? (
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ background: dotColor }}
-              aria-hidden
-            />
-          ) : null}
+        <div className="flex min-w-0 items-center">
           <span className="truncate text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
             {title}
           </span>
@@ -492,10 +458,9 @@ interface RowProps {
   selected: boolean;
   onClick: () => void;
   leading?: React.ReactNode;
-  dotColor?: string;
 }
 
-function ModelRow({ label, sub, selected, onClick, leading, dotColor }: RowProps) {
+function ModelRow({ label, sub, selected, onClick, leading }: RowProps) {
   return (
     <div
       role="option"
@@ -507,12 +472,6 @@ function ModelRow({ label, sub, selected, onClick, leading, dotColor }: RowProps
     >
       {leading ? (
         <span className="inline-flex shrink-0 items-center">{leading}</span>
-      ) : dotColor ? (
-        <span
-          className="h-1.5 w-1.5 shrink-0 rounded-full"
-          style={{ background: dotColor }}
-          aria-hidden
-        />
       ) : null}
       <div className="min-w-0 flex-1">
         <span className="text-sm font-medium text-text-primary">{label}</span>
