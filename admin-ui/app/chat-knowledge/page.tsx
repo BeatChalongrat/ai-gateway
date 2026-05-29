@@ -15,7 +15,6 @@ import Link from "next/link";
 import PageHeader from "../../components/ui/PageHeader";
 import Pagination from "../../components/ui/Pagination";
 import ErrorState from "../../components/ui/ErrorState";
-import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import {
   AdminKBListResponse,
@@ -60,6 +59,11 @@ export default function ChatKnowledgePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Drives the empty-state copy: a filtered-but-empty result invites
+  // clearing the filters, whereas a genuinely empty list explains where
+  // knowledge bases come from.
+  const hasActiveFilters = Boolean(filters.q || filters.tenant_id);
 
   function applyFilters() {
     setPage(1);
@@ -143,9 +147,26 @@ export default function ChatKnowledgePage() {
               <SkeletonTable rows={10} cols={7} />
             </div>
           ) : !data || data.knowledge_bases.length === 0 ? (
-            <div style={{ padding: "2rem 1rem" }}>
-              <EmptyState message="No knowledge bases match these filters" />
-            </div>
+            hasActiveFilters ? (
+              <KbEmptyState
+                title="No knowledge bases match these filters"
+                description="Try a broader search term or a different tenant id."
+                action={
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="sran-btn sran-btn-secondary sran-btn-sm"
+                  >
+                    Clear filters
+                  </button>
+                }
+              />
+            ) : (
+              <KbEmptyState
+                title="No knowledge bases yet"
+                description="Knowledge bases created by users in SRAN Chat will appear here, with their per-tenant documents and chunk counts."
+              />
+            )
           ) : (
             <>
               <div style={{ overflowX: "auto" }}>
@@ -240,6 +261,75 @@ export default function ChatKnowledgePage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Empty state local to this page so the icon can be a full-size inline
+// SVG. The shared <EmptyState> renders its icon inside a small (~44px)
+// circular chip, which makes a glyph look cramped; here we want a larger,
+// purpose-built knowledge icon. SVG follows the same Lucide-style stroke
+// convention used in the Sidebar (viewBox 0 0 24 24, currentColor).
+function KbEmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        textAlign: "center",
+        padding: "3.5rem 1.5rem",
+        gap: "0.625rem",
+      }}
+    >
+      <svg
+        width="56"
+        height="56"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ color: "var(--color-text-tertiary)", marginBottom: "0.25rem" }}
+        aria-hidden="true"
+      >
+        {/* Lucide "book-open" — represents the knowledge bases. */}
+        <path d="M12 7v14" />
+        <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />
+      </svg>
+      <h3
+        style={{
+          margin: 0,
+          fontSize: "0.95rem",
+          fontWeight: 600,
+          color: "var(--color-text-secondary)",
+        }}
+      >
+        {title}
+      </h3>
+      {description ? (
+        <p
+          style={{
+            margin: 0,
+            fontSize: "0.8rem",
+            color: "var(--color-text-muted)",
+            maxWidth: 380,
+            lineHeight: 1.5,
+          }}
+        >
+          {description}
+        </p>
+      ) : null}
+      {action ? <div style={{ marginTop: "0.75rem" }}>{action}</div> : null}
     </div>
   );
 }
