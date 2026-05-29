@@ -2197,6 +2197,8 @@ def create_keyword_rule(
     )
     session.add(row)
     session.flush()
+    from app.services.keyword_rule_service import clear_rules_cache
+    clear_rules_cache()  # B8: make the new rule visible without TTL lag
     return _keyword_rule_to_response(row)
 
 
@@ -2230,6 +2232,8 @@ def update_keyword_rule(
     if body.enabled is not None:
         row.enabled = body.enabled
     session.flush()
+    from app.services.keyword_rule_service import clear_rules_cache
+    clear_rules_cache()  # B8: edited rule takes effect without TTL lag
     return _keyword_rule_to_response(row)
 
 
@@ -2243,6 +2247,8 @@ def delete_keyword_rule(
         raise NotFoundError(f"Keyword rule '{rule_id}' not found.")
     session.delete(row)
     session.flush()
+    from app.services.keyword_rule_service import clear_rules_cache
+    clear_rules_cache()  # B8: deleted rule stops matching without TTL lag
 
 
 # ---------------------------------------------------------------------------

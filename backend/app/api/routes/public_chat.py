@@ -1541,14 +1541,11 @@ async def chat_completions(
             )
             log_session.commit()
 
-            persisted_row = orchestrator.request_log_service.get_by_id(
-                log_session, ctx.request_id or ""
-            )
-            if persisted_row is not None:
-                await orchestrator.alert_evaluator.evaluate_after_request(
-                    log_session, persisted_row
-                )
-                log_session.commit()
+            # Alert evaluation moved OFF the request path (Phase-1 B6) — a
+            # periodic background sweep (lifespan _alert_evaluation_sweep)
+            # runs AlertEvaluator.evaluate_all instead, so the streaming
+            # completion no longer pays the enabled-rules SELECT + the
+            # get_by_id read-back + window aggregates on the loop.
         except Exception:
             # Logging failures must never break the stream.
             log_session.rollback()
