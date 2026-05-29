@@ -197,10 +197,19 @@ function CollapsedRail({
 // linking to the routes the sidebar footer also exposes (Memory,
 // Knowledge). Desktop is untouched — the sidebar owns these there.
 //
-// The "+" uses blue-600 (not bg-accent): the project's --accent is a
-// monochrome foreground hint (near-white in dark, near-black in light),
-// so an accent-filled button would vanish against the bar. blue-600
-// pops in both themes — same reasoning as planCardUI's PrimaryButton.
+// Both buttons share a subtle, integrated circle style (Claude-like):
+// a faint surface fill + a hairline ring, NOT a bright CTA. Rendered
+// with theme tokens rather than literal white/15 + text-white/90: the
+// chat app has a reachable light theme (themeStore / [data-theme=
+// "light"]) where white-translucent fills + white icons would vanish
+// on the white top bar. In dark theme --border-default already IS
+// rgba(255,255,255,0.12) (the translucent ring the design calls for);
+// in light it's rgba(0,0,0,0.10) — so border-border + bg-bg-surface +
+// text-text-primary reproduce the subtle look in BOTH themes.
+const SUBTLE_TOPBAR_BTN =
+  "focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-full " +
+  "border border-border bg-bg-surface text-text-primary transition-colors " +
+  "hover:bg-bg-elevated";
 
 const MORE_MENU_ITEMS: { label: string; Icon: typeof Brain; href: string }[] = [
   { label: "Memory", Icon: Brain, href: "/chat/memory" },
@@ -225,7 +234,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
         aria-label="New chat"
         title="New chat"
         onClick={onNewChat}
-        className="focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-700 active:bg-blue-800"
+        className={SUBTLE_TOPBAR_BTN}
       >
         <Plus size={18} aria-hidden />
       </button>
@@ -236,9 +245,9 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen((v) => !v)}
-        className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+        className={SUBTLE_TOPBAR_BTN}
       >
-        <MoreHorizontal size={20} aria-hidden />
+        <MoreHorizontal size={18} aria-hidden />
       </button>
 
       {menuOpen ? (
