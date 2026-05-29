@@ -35,6 +35,7 @@ function smoothScrollTo(targetY: number, duration = SCROLL_DURATION) {
 
 export function MarketingNav() {
   const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const pathname = usePathname();
 
   useEffect(() => {
@@ -43,6 +44,22 @@ export function MarketingNav() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Close the mobile menu whenever the route changes (covers link taps that
+  // navigate to a different marketing page).
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  // Lock background scroll while the mobile menu is open.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [menuOpen]);
 
   // On landing: animate scroll to #features manually so re-clicks fire
   // and don't get cancelled. On other pages: let the default <a>
@@ -56,6 +73,8 @@ export function MarketingNav() {
     const targetY = el.getBoundingClientRect().top + window.scrollY - NAV_OFFSET;
     smoothScrollTo(targetY);
   }
+
+  const closeMenu = () => setMenuOpen(false);
 
   return (
     <nav className={`marketing-nav${scrolled ? " scrolled" : ""}`} aria-label="Primary">
@@ -102,6 +121,77 @@ export function MarketingNav() {
             href="/signup"
             className="btn brand-cta"
             style={{ fontWeight: 500, color: "#ffffff" }}
+          >
+            Get started <span className="arrow" aria-hidden="true">→</span>
+          </Link>
+        </div>
+
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          aria-controls="marketing-mobile-menu"
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          {menuOpen ? (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+          )}
+        </button>
+      </div>
+
+      {/* Mobile menu (<=900px) — backdrop + slide-down panel. */}
+      <div
+        className={`nav-backdrop${menuOpen ? " open" : ""}`}
+        onClick={closeMenu}
+        aria-hidden="true"
+      />
+      <div
+        id="marketing-mobile-menu"
+        className={`nav-mobile${menuOpen ? " open" : ""}`}
+      >
+        <a
+          href="/#features"
+          onClick={(e) => {
+            handleProductClick(e);
+            closeMenu();
+          }}
+          className={pathname === "/" ? "is-active" : undefined}
+        >
+          Product
+        </a>
+        <a
+          href="/security"
+          onClick={closeMenu}
+          className={pathname.startsWith("/security") ? "is-active" : undefined}
+        >
+          Security
+        </a>
+        <a
+          href="/pricing"
+          onClick={closeMenu}
+          className={pathname.startsWith("/pricing") ? "is-active" : undefined}
+        >
+          Pricing
+        </a>
+        <a
+          href="/docs"
+          onClick={closeMenu}
+          className={pathname.startsWith("/docs") ? "is-active" : undefined}
+        >
+          Docs
+        </a>
+        <div className="nav-mobile-cta">
+          <Link href="/login" className="btn btn-ghost" onClick={closeMenu}>
+            Sign in
+          </Link>
+          <Link
+            href="/signup"
+            className="btn brand-cta"
+            style={{ fontWeight: 500, color: "#ffffff" }}
+            onClick={closeMenu}
           >
             Get started <span className="arrow" aria-hidden="true">→</span>
           </Link>
