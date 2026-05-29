@@ -26,11 +26,17 @@ async function request(path: string, options: RequestInit = {}) {
     credentials: "include",
   });
   if (!res.ok) {
-    let body: unknown;
+    // Read the body exactly once. A Response stream can only be
+    // consumed a single time, so we take the text and *then* try to
+    // parse it as JSON — calling res.json() and res.text() on the
+    // same Response throws "body stream already read" (e.g. when an
+    // upstream 404 returns a plain-text body, not JSON).
+    const raw = await res.text();
+    let body: unknown = raw;
     try {
-      body = await res.json();
+      body = JSON.parse(raw);
     } catch {
-      body = await res.text();
+      // Non-JSON error body (plain text / HTML) — keep the raw string.
     }
     throw new ChatEdgeApiError(res.status, body);
   }
@@ -284,24 +290,27 @@ export function fetchAdminKnowledgeBases(q: AdminKBQuery = {}) {
     params.set(k, String(v));
   }
   const qs = params.toString();
+  // The /api/chat-edge proxy already prepends `/admin/`, so paths here
+  // are relative to it — `knowledge-bases`, not `admin/knowledge-bases`
+  // (the latter produced `/admin/admin/knowledge-bases` → 404).
   return chatEdge.get(
-    `admin/knowledge-bases${qs ? `?${qs}` : ""}`,
+    `knowledge-bases${qs ? `?${qs}` : ""}`,
   ) as Promise<AdminKBListResponse>;
 }
 
 export function fetchAdminKnowledgeBase(id: string) {
   return chatEdge.get(
-    `admin/knowledge-bases/${encodeURIComponent(id)}`,
+    `knowledge-bases/${encodeURIComponent(id)}`,
   ) as Promise<AdminKBDetailResponse>;
 }
 
 export function deleteAdminKnowledgeBase(id: string) {
-  return chatEdge.delete(`admin/knowledge-bases/${encodeURIComponent(id)}`);
+  return chatEdge.delete(`knowledge-bases/${encodeURIComponent(id)}`);
 }
 
 export function reindexAdminKnowledgeBase(id: string) {
   return chatEdge.post(
-    `admin/knowledge-bases/${encodeURIComponent(id)}/reindex`,
+    `knowledge-bases/${encodeURIComponent(id)}/reindex`,
     {},
   ) as Promise<{ reindexed: number; failed: number; total: number }>;
 }
