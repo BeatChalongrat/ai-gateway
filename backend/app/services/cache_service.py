@@ -12,7 +12,9 @@ a Redis outage just means we fall through to the provider as normal.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import json
 import orjson
 from typing import Any
@@ -66,7 +68,11 @@ class CacheService:
         if api_key_id:
             payload_obj["api_key_id"] = api_key_id
         payload = json.dumps(payload_obj, sort_keys=True, ensure_ascii=False)
-        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+        # Phase-1 B12: 32 hex chars (128-bit) instead of 16 (64-bit) to
+        # remove the birthday-collision risk at scale. Widening the digest
+        # changes every key → existing entries become unreachable (a
+        # one-time cold cache, no data loss — entries TTL out).
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
         if api_key_id:
             return f"cache:{project_id}:{api_key_id}:{digest}"
         return f"cache:{project_id}:{digest}"
@@ -87,13 +93,42 @@ class CacheService:
             raw = await _maybe_await(
                 client.get(self._key(model, messages, project_id, api_key_id))
             )
+            # B12: the hit/miss counter is pure stats — keep it off the hot
+            # path. Only the GET is awaited (1 round-trip); the INCR is
+            # fire-and-forget on the async client. (A single GET+INCR
+            # pipeline isn't possible here because the counter to bump
+            # depends on the GET result.)
+            counter = (
+                f"cache_misses:{project_id}"
+                if raw is None
+                else f"cache_hits:{project_id}"
+            )
+            self._incr_stat(client, counter)
             if raw is None:
-                await _maybe_await(client.incr(f"cache_misses:{project_id}"))
                 return None
-            await _maybe_await(client.incr(f"cache_hits:{project_id}"))
             return orjson.loads(raw)
         except Exception:
             return None
+
+    @staticmethod
+    def _incr_stat(client: Any, counter: str) -> None:
+        """Increment a stats counter without blocking the caller.
+
+        On the async client ``incr`` returns a coroutine — schedule it
+        fire-and-forget. On the fake/sync client it runs inline (and
+        returns an int), so test counter assertions stay deterministic.
+        """
+        try:
+            res = client.incr(counter)
+        except Exception:
+            return
+        if inspect.isawaitable(res):
+            try:
+                asyncio.ensure_future(res)
+            except RuntimeError:
+                # No running loop (shouldn't happen on the async path);
+                # drop the stat rather than raise.
+                res.close()
 
     async def set_async(
         self,
