@@ -230,13 +230,11 @@ export default function ChatAnalyticsPage() {
 
           {/* Charts */}
           <div
+            className="sran-chart-grid grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
             style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)",
               gap: "0.875rem",
               marginBottom: "1rem",
             }}
-            className="sran-chart-grid"
           >
             <div className="sran-card" style={{ padding: "1rem 1.125rem" }}>
               <div

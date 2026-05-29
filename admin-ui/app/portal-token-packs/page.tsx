@@ -187,7 +187,7 @@ export default function TokenPacksPage() {
   }
 
   return (
-    <div style={{ padding: "2rem 2.5rem", maxWidth: 1400, margin: "0 auto" }}>
+    <div className="p-4 sm:p-6 lg:p-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
       <div className="sran-page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
           <h1 className="sran-page-title">Token Packs</h1>
@@ -206,7 +206,7 @@ export default function TokenPacksPage() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 14, marginBottom: 20 }}>
         <StatCard label="Total Packs" value={stats.total} />
         <StatCard label="Active" value={stats.active} />
         <StatCard label="Price Range" value={stats.priceRange} />
@@ -224,6 +224,7 @@ export default function TokenPacksPage() {
             <button className="sran-btn sran-btn-primary" onClick={openCreate}>Create your first pack</button>
           } />
         ) : (
+          <div className="overflow-x-auto">
           <table className="sran-table">
             <thead>
               <tr>
@@ -277,6 +278,7 @@ export default function TokenPacksPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

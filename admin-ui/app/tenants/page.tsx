@@ -261,7 +261,7 @@ export default function TenantsPage() {
 
       {/* Stats */}
       {!loading && !error && items.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: 14, marginBottom: 20 }}>
           <StatCard value={stats.total} label="Total Tenants" icon={iconHouse} accent="#3b6cf6" delay={0} iconClass="tn-icon-pulse" />
           <StatCard value={stats.active} label="Active" icon={iconCheck} accent="#10b981" delay={50} iconClass="tn-icon-glow" />
           <StatCard value={stats.deleted} label="Deleted" icon={iconX} accent="#ef4444" delay={100} iconClass="tn-icon-swing" />
