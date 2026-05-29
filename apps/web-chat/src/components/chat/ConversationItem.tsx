@@ -118,7 +118,7 @@ export function ConversationItem({
             e.stopPropagation();
             setMenuOpen((v) => !v);
           }}
-          className={`focus-ring rounded p-1 text-text-muted transition-opacity hover:bg-bg-secondary hover:text-text-primary md:opacity-0 md:group-hover:opacity-100 ${
+          className={`focus-ring tap-44 rounded p-1 text-text-muted transition-opacity hover:bg-bg-secondary hover:text-text-primary md:opacity-0 md:group-hover:opacity-100 ${
             menuOpen || active ? "md:opacity-100" : ""
           }`}
         >

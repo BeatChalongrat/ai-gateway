@@ -297,7 +297,7 @@ export default function MemorySettingsPage() {
 
   return (
     <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 pt-8 pb-12">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pt-8 pb-12 md:px-6">
         <Link
           href="/chat"
           className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
