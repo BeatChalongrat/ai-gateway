@@ -303,7 +303,7 @@ func main() {
 		Auth:         handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Conversation: conversationHandler,
 		Message:      messageHandler,
-		Model:        handler.NewModelHandler(cfg),
+		Model:        handler.NewModelHandler(cfg, gateway),
 		Feedback:     handler.NewFeedbackHandler(feedbackSvc),
 		File:         handler.NewFileHandler(fileSvc),
 		Preferences:  handler.NewPreferencesHandler(prefsRepo),
