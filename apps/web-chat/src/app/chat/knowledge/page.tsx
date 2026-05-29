@@ -72,7 +72,7 @@ export default function KnowledgeBasePage() {
   const hasKBs = loaded && knowledgeBases.length > 0;
   return (
     <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 pt-8 pb-12">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pt-8 pb-12 md:px-6">
         {/* Subtle back link — text-only, no button chrome. Matches
             the rest of the muted-link affordances elsewhere. */}
         <Link
@@ -488,7 +488,7 @@ function DocumentRow({
           type="button"
           onClick={onReindex}
           title="Reindex"
-          className="rounded p-1.5 text-text-muted hover:bg-bg-elevated hover:text-text-primary"
+          className="tap-44 rounded p-1.5 text-text-muted hover:bg-bg-elevated hover:text-text-primary"
         >
           <RefreshIcon />
         </button>
@@ -496,7 +496,7 @@ function DocumentRow({
           type="button"
           onClick={onDelete}
           title="Delete"
-          className="rounded p-1.5 text-text-muted hover:bg-status-danger/10 hover:text-status-danger"
+          className="tap-44 rounded p-1.5 text-text-muted hover:bg-status-danger/10 hover:text-status-danger"
         >
           <TrashIcon />
         </button>
