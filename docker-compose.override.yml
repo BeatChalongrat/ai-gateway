@@ -34,6 +34,8 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
       NEXT_PUBLIC_ADMIN_API_KEY: ${NEXT_PUBLIC_ADMIN_API_KEY:-}
+      CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
+      CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
       WATCHPACK_POLLING: "true"
     # No build block in dev: we only use the node:20-alpine base.
     build: !reset null
