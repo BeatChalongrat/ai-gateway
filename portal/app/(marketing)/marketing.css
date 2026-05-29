@@ -157,6 +157,93 @@
   align-items: center;
 }
 
+/* ===== Mobile nav (hamburger + slide-down menu, <=900px) ===== */
+/* Hidden on desktop; the @media (max-width: 900px) block flips these on. */
+.nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-right: -8px; /* optical: pull the 44px hit area to the edge */
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-toggle:hover {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--line-2, var(--line));
+}
+
+.nav-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(10, 12, 24, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.nav-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav-mobile {
+  display: none; /* -> flex at <=900px */
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 95;
+  flex-direction: column;
+  padding: 8px 20px 20px;
+  background: rgba(247, 248, 252, 0.98);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 16px 36px rgba(10, 12, 24, 0.14);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s;
+}
+.nav-mobile.open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+}
+.nav-mobile a {
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 500;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--line);
+  transition: color 0.2s ease;
+}
+.nav-mobile a:hover,
+.nav-mobile a.is-active {
+  color: var(--text);
+}
+.nav-mobile-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+.nav-mobile-cta .btn {
+  width: 100%;
+  justify-content: center;
+}
+
 /* ========== BUTTONS ========== */
 .btn {
   font-family: var(--ff);
@@ -1249,7 +1336,15 @@ section.cta-section { padding: 120px 0; }
     90% { opacity: 1; }
     100% { top: 100%; opacity: 0; }
   }
-  .nav-links { display: none; }
+  /* Marketing nav: swap the inline links/CTAs for a hamburger + slide-down
+     menu. The inline rows are hidden (not removed) and replaced by .nav-mobile;
+     .nav-inner is raised above the backdrop so the brand + toggle stay tappable. */
+  .nav-links,
+  .nav-cta { display: none; }
+  .nav-toggle { display: inline-flex; }
+  .nav-mobile { display: flex; }
+  .nav-backdrop { display: block; }
+  .nav-inner { position: relative; z-index: 96; }
   .flow-stat:not(:last-child)::after { display: none; }
 }
 
@@ -1455,7 +1550,9 @@ section.cta-section { padding: 120px 0; }
   margin-bottom: 16px;
 }
 .page-title {
-  font-size: 48px;
+  /* clamp so long titles (/docs, /security) don't wrap to 4 lines on a phone
+     while staying 48px on desktop. */
+  font-size: clamp(1.75rem, 5vw, 3rem);
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.1;
