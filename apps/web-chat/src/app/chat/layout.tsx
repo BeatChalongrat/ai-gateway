@@ -1,7 +1,12 @@
 "use client";
 
-import { useSelectedLayoutSegments } from "next/navigation";
+import {
+  usePathname,
+  useRouter,
+  useSelectedLayoutSegments,
+} from "next/navigation";
 import { useEffect, useState } from "react";
+import { BookOpen, Brain, MoreHorizontal, Plus } from "lucide-react";
 
 import { Sidebar } from "@/components/chat/Sidebar";
 import { Spinner } from "@/components/ui/Spinner";
@@ -129,6 +134,15 @@ export default function ChatLayout({
             />
           ) : null}
           <OfflineIndicator />
+          {/* Mobile-only right actions (Claude-style): quick new-chat +
+              an overflow menu. Hidden on desktop, where the sidebar
+              owns these actions. */}
+          <MobileTopActions
+            onNewChat={() => {
+              setSidebarOpen(false);
+              void newChat();
+            }}
+          />
         </div>
 
         {children}
@@ -172,6 +186,92 @@ function CollapsedRail({
       >
         <NewChatIcon />
       </button>
+    </div>
+  );
+}
+
+// ─── Mobile top-bar actions ──────────────────────────────────
+// Right-aligned, mobile-only (md:hidden) group mirroring Claude's
+// mobile chrome: a prominent "+" that starts a new chat (reusing the
+// same dedup-aware handler the sidebar uses) and a "⋯" overflow menu
+// linking to the routes the sidebar footer also exposes (Memory,
+// Knowledge). Desktop is untouched — the sidebar owns these there.
+//
+// The "+" uses blue-600 (not bg-accent): the project's --accent is a
+// monochrome foreground hint (near-white in dark, near-black in light),
+// so an accent-filled button would vanish against the bar. blue-600
+// pops in both themes — same reasoning as planCardUI's PrimaryButton.
+
+const MORE_MENU_ITEMS: { label: string; Icon: typeof Brain; href: string }[] = [
+  { label: "Memory", Icon: Brain, href: "/chat/memory" },
+  { label: "Knowledge", Icon: BookOpen, href: "/chat/knowledge" },
+];
+
+function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Dismiss the menu on any navigation so it never lingers over a new
+  // route after a menu item (or anything else) changes the path.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  return (
+    <div className="relative ml-auto flex items-center gap-1 md:hidden">
+      <button
+        type="button"
+        aria-label="New chat"
+        title="New chat"
+        onClick={onNewChat}
+        className="focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-700 active:bg-blue-800"
+      >
+        <Plus size={18} aria-hidden />
+      </button>
+
+      <button
+        type="button"
+        aria-label="More options"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((v) => !v)}
+        className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+      >
+        <MoreHorizontal size={20} aria-hidden />
+      </button>
+
+      {menuOpen ? (
+        <>
+          {/* Backdrop — tap anywhere to dismiss. */}
+          <div
+            className="fixed inset-0 z-40"
+            aria-hidden
+            onClick={() => setMenuOpen(false)}
+          />
+          <div
+            role="menu"
+            aria-label="More options"
+            className="absolute right-0 top-12 z-50 w-48 overflow-hidden rounded-xl border border-border bg-bg-surface py-1 shadow-xl"
+          >
+            {MORE_MENU_ITEMS.map(({ label, Icon, href }) => (
+              <button
+                key={label}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  router.push(href);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+              >
+                <Icon size={16} aria-hidden />
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
