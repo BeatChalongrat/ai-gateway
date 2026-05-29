@@ -223,7 +223,7 @@ export default function PortalUsersPage() {
   const quickAmounts = [100000, 500000, 1000000];
 
   return (
-    <div style={{ padding: "2rem 2.5rem", maxWidth: 1400, margin: "0 auto" }}>
+    <div className="p-4 sm:p-6 lg:p-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
       <div className="sran-page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <h1 className="sran-page-title">Portal Users</h1>
@@ -234,7 +234,7 @@ export default function PortalUsersPage() {
         <ThemeToggle />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: 14, marginBottom: 20 }}>
         <StatCard label="Total Users" value={stats.total} trend="active" />
         <StatCard label="Active" value={stats.active} />
         <StatCard label="Suspended" value={stats.suspended} />
@@ -345,6 +345,7 @@ export default function PortalUsersPage() {
             message="No portal users yet. Share your signup link to get started."
           />
         ) : (
+          <div className="overflow-x-auto">
           <table className="sran-table">
             <thead>
               <tr>
@@ -419,6 +420,7 @@ export default function PortalUsersPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

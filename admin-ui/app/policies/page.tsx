@@ -219,7 +219,7 @@ export default function PoliciesPage() {
 
       {/* Stats */}
       {(detectorCount > 0 || profileCount > 0) && (
-        <div style={{ display: "flex", gap: "12px", marginBottom: "20px" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: "12px", marginBottom: "20px" }}>
           <StatCard value={detectorCount} label="Total Detectors" icon={iconShield} accent="#3b6cf6" delay={0} iconClass="dlp-icon-pulse" />
           <StatCard value={profileCount} label="Policy Profiles" icon={iconFileCheck} accent="#10b981" delay={80} iconClass="dlp-icon-swing" />
           <StatCard value={categoryCount} label="Categories" icon={iconTag} accent="#8b5cf6" delay={160} iconClass="dlp-icon-glow" />
@@ -270,7 +270,7 @@ function ProfilesTab() {
   if (!data?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No policy profiles configured" icon="◆" /></div>;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: "20px", padding: "20px" }}>
+    <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: "20px", padding: "20px" }}>
       {data.items.map((p, i) => <ProfCard key={p.profile_id} profile={p} idx={i} />)}
     </div>
   );
