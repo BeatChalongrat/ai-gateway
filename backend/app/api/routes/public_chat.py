@@ -217,7 +217,9 @@ async def chat_completions(
         # Presidio, one with the ``thai_name_no_prefix`` regex
         # fallback) and we pick by ``ctx.ner_enabled``.
         input_registry = orchestrator._select_registry(ctx.ner_enabled)
-        detection = input_registry.scan_messages(
+        # B2: full-message inbound scan runs off the event loop.
+        detection = await orchestrator._scan_messages_async(
+            input_registry,
             payload.messages,
             direction="input",
             scan_system_messages=profile.scan_system_messages,
