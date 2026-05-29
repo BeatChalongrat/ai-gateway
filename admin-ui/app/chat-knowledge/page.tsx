@@ -87,9 +87,8 @@ export default function ChatKnowledgePage() {
         style={{ padding: "0.875rem 1rem", marginBottom: "0.875rem" }}
       >
         <div
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
           style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(220px, 2fr) minmax(220px, 2fr) auto",
             gap: "0.5rem",
             alignItems: "end",
           }}

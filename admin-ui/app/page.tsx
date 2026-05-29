@@ -601,9 +601,8 @@ export default function DashboardPage() {
 
       {/* Row 1: 4 KPI cards */}
       <div
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
           gap: 10,
           marginBottom: 10,
           marginTop: 18,
@@ -671,9 +670,8 @@ export default function DashboardPage() {
 
       {/* Row 2: Volume chart + Top models */}
       <div
+        className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr]"
         style={{
-          display: "grid",
-          gridTemplateColumns: "1.7fr 1fr",
           gap: 10,
           marginBottom: 10,
         }}
@@ -1555,9 +1553,8 @@ function DataProtectionSection({
       ) : (
         <>
           <div
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
               gap: 10,
               marginBottom: 14,
             }}
@@ -1601,9 +1598,8 @@ function DataProtectionSection({
           </div>
 
           <div
+            className="grid grid-cols-1 md:grid-cols-2"
             style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
               gap: 12,
             }}
           >

@@ -203,14 +203,14 @@ export default function DlpCoveragePage() {
       </div>
 
       {/* ── Summary bar ── */}
-      <div className="dc-anim" style={{ animationDelay: "0.05s", background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: "22px 32px", marginBottom: 16, display: "flex", alignItems: "center", gap: 0 }}>
+      <div className="dc-anim" style={{ animationDelay: "0.05s", background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: "22px 32px", marginBottom: 16, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
         {/* Total */}
         <div style={{ paddingRight: 32, borderRight: `1px solid ${T.bl}`, marginRight: 28 }}>
           <div style={{ fontSize: "10.5px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.2px", color: T.th, marginBottom: 4 }}>Total Detectors</div>
           <div style={{ fontFamily: T.mono, fontSize: 32, fontWeight: 800, color: T.tp, lineHeight: 1, letterSpacing: "-0.02em" }}>{data.summary.total}</div>
         </div>
         {/* Per-category */}
-        <div style={{ display: "flex", gap: 4, flex: 1 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, flex: 1, minWidth: 0 }}>
           {sortedCats.map(([cat, info], i) => {
             const cs = catStyle(cat);
             return (
@@ -349,6 +349,7 @@ export default function DlpCoveragePage() {
             border: `1px solid ${T.bl}`, borderLeft: "3px solid #f59e0b",
             boxShadow: "0 1px 2px rgba(0,0,0,0.04)", overflow: "hidden",
           }}>
+            <div className="overflow-x-auto">
             <table className="dc-table">
               <thead><tr>
                 <th style={{ paddingLeft: 18 }}>Category</th>
@@ -371,6 +372,7 @@ export default function DlpCoveragePage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

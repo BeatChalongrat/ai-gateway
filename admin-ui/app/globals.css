@@ -1037,7 +1037,19 @@
     .sran-table th,
     .sran-table td {
       padding: 0.5rem 0.625rem;
-      font-size: var(--font-size-xs);
+    }
+  }
+
+  /* Mobile readability floor (<=640px): the desktop design leans on 10–12px
+     labels/cells which are hard to read on a phone. Raise the smallest text
+     to ~13px without touching desktop. */
+  @media (max-width: 640px) {
+    .sran-table td,
+    .sran-table th,
+    .sran-badge,
+    .sran-badge-role,
+    .sran-stat-label {
+      font-size: max(var(--font-size-xs), 0.8125rem);
     }
   }
 
