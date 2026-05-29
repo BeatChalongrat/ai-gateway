@@ -76,12 +76,43 @@ def _extract_xlsx(path: Path) -> str:
     return "\n".join(out)
 
 
+def _extract_pptx(path: Path) -> str:
+    try:
+        from pptx import Presentation
+    except ImportError as exc:
+        raise SystemExit(f"python-pptx not installed: {exc}")
+
+    prs = Presentation(str(path))
+    out: list[str] = []
+    for i, slide in enumerate(prs.slides, start=1):
+        lines: list[str] = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    txt = "".join(run.text for run in para.runs).strip()
+                    if txt:
+                        lines.append(txt)
+            # Tables: emit row-by-row, tab-separated, mirroring the docx
+            # path so the AI reads the structure.
+            if shape.has_table:
+                for row in shape.table.rows:
+                    cells = [c.text.strip().replace("\t", " ") for c in row.cells]
+                    if any(cells):
+                        lines.append("\t".join(cells))
+        if lines:
+            out.append(f"--- Slide {i} ---\n" + "\n".join(lines))
+    return "\n\n".join(out)
+
+
 PDF_CT = "application/pdf"
 DOCX_CT = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
 XLSX_CT = (
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+PPTX_CT = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
 
 
@@ -104,6 +135,8 @@ def main(argv: list[str]) -> int:
             _emit(_extract_docx(path))
         elif content_type == XLSX_CT or path.suffix.lower() == ".xlsx":
             _emit(_extract_xlsx(path))
+        elif content_type == PPTX_CT or path.suffix.lower() == ".pptx":
+            _emit(_extract_pptx(path))
         else:
             print(f"unsupported content type: {content_type}", file=sys.stderr)
             return 3
