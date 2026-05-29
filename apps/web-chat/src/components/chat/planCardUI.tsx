@@ -178,14 +178,14 @@ export function DownloadButton({
   label?: string;
 }) {
   return (
-    <a
-      href={api.downloadUrl(fileId)}
-      download={filename}
+    <button
+      type="button"
+      onClick={() => void api.downloadFile(fileId, filename)}
       className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface"
     >
       <Download className="h-4 w-4" />
       <span>{label}</span>
-    </a>
+    </button>
   );
 }
 

@@ -68,6 +68,62 @@ func isReasoningCapableID(id string) bool {
 	return false
 }
 
+// complexSignals are phrases that imply multi-step reasoning, math,
+// analysis, or code work — a hit pushes an Auto turn toward a
+// reasoning-capable model. Mirrors the gateway-side ``_COMPLEX_SIGNALS``
+// in backend/app/services/query_classifier.py; keep them roughly in
+// sync when tuning. Lower-cased for case-insensitive Contains checks.
+var complexSignals = []string{
+	"analyze", "analyse", "compare and contrast", "evaluate",
+	"pros and cons", "trade-off", "tradeoff", "step by step",
+	"think through", "reason about", "prove", "derive",
+	"debug", "review this code", "find the bug", "optimize",
+	"what would happen if", "design a system", "architect",
+	"calculate", "solve", "equation",
+	// Thai
+	"วิเคราะห์", "เปรียบเทียบ", "ข้อดีข้อเสีย", "อธิบายละเอียด",
+	"คิดทีละขั้น", "หาจุดบกพร่อง", "ออกแบบระบบ", "คำนวณ",
+}
+
+// isComplexQuery is the Auto Thinking Mode gate: it decides whether
+// THIS turn warrants a reasoning model. The user no longer flips a
+// Thinking toggle — the system infers it from the prompt. Signals:
+//
+//   - attached images / files → likely analysis
+//   - long message (>500 chars) or long conversation (>30 turns)
+//   - code blocks or 3+ questions
+//   - any complexSignals phrase (analyze / debug / calculate / Thai …)
+//
+// Deliberately a heuristic (not ML) so the slog decision line stays
+// reconstructable. When true AND the catalog has a reasoning model,
+// ResolveAutoModelWithReasoning routes there; otherwise it falls back
+// to the fast/flagship tiers and the turn simply doesn't think.
+func isComplexQuery(
+	message string,
+	hasFiles, hasImages bool,
+	conversationMessageCount int,
+) bool {
+	if hasImages || hasFiles {
+		return true
+	}
+	if len(message) > 500 || conversationMessageCount > 30 {
+		return true
+	}
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "```") {
+		return true
+	}
+	if strings.Count(lower, "?")+strings.Count(message, "？") >= 3 {
+		return true
+	}
+	for _, s := range complexSignals {
+		if strings.Contains(lower, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveAutoModel picks the concrete model id Auto should serve
 // this turn. Decision factors (in order; first match wins):
 //
