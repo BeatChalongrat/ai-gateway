@@ -209,14 +209,14 @@ function FileList({
                 ) : null}
               </div>
               <div className="mt-2 flex items-center gap-1.5">
-                <a
-                  href={api.downloadUrl(f.id)}
-                  download={f.filename}
+                <button
+                  type="button"
+                  onClick={() => void api.downloadFile(f.id, f.filename)}
                   className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
                 >
                   <Download className="h-3 w-3" />
                   Download
-                </a>
+                </button>
                 <button
                   type="button"
                   onClick={() => onPick(f)}
