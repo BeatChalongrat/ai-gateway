@@ -154,4 +154,8 @@ re-run gate → 100% → 7-day shadow soak → flip. See `DLP_PARITY_REPORT.md` 
   remediation tracked as a follow-up.
 - Deferred TODOs: log-worker `reasoning_tokens`/`reasoning_cost` proto fields (before reasoning goes
   live); rate-limiter Lua atomic (before high-concurrency); DLP-parity follow-up track.
-- Benchmark gate (`PHASE0_BENCHMARK.md`): pending — log-worker + rate-limiter before/after.
+- Benchmark gate (`PHASE0_BENCHMARK.md`): ✅ chat-path p50 flat at ~98ms A(python)↔B(go+rust),
+  0/50 errors both — flips are latency-neutral at this scale (expected; value is operational, not
+  p50). Baseline recorded for Phase 1. Real latency wins live in Phase 1 (httpx pool, async DB) +
+  the DLP track (Rust scan off the loop). A 50-RPS soak deferred (needs a multi-key load tool to
+  beat the 60/min per-key cap).
