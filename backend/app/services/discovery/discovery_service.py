@@ -308,6 +308,9 @@ class ModelDiscoveryService:
                             is_manual_override=False,
                             is_active=True,
                             last_synced_at=now,
+                            supports_reasoning=model.supports_reasoning,
+                            reasoning_strategy=model.reasoning_strategy,
+                            default_reasoning_mode="auto",
                         )
                     )
                     inserted += 1
@@ -330,6 +333,17 @@ class ModelDiscoveryService:
                 row.cost_tier = _derive_cost_tier(model.cost_per_input_token)
                 row.is_active = True
                 row.last_synced_at = now
+                # Reasoning: PROMOTE-ONLY. Discovery may turn a row's
+                # reasoning capability ON when the id implies it (e.g. a
+                # freshly-listed o3), but must never turn it OFF — an
+                # inference miss would otherwise clobber seed/manual
+                # reasoning rows (deepseek-reasoner, Groq R1-distill) on
+                # a routine sync. Demotion stays a manual admin action.
+                if model.supports_reasoning and not row.supports_reasoning:
+                    row.supports_reasoning = True
+                    row.reasoning_strategy = model.reasoning_strategy
+                    if not row.default_reasoning_mode:
+                        row.default_reasoning_mode = "auto"
                 # Promote 'seed' rows to 'auto' once the sync has
                 # confirmed them — keeps the source column meaningful.
                 if row.source == "seed":
