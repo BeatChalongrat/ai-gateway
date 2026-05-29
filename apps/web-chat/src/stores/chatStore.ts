@@ -1178,24 +1178,6 @@ export function hasMultipleModels(messages: Message[]): boolean {
   return false;
 }
 
-// getModelSwitchPoints returns the indices of messages where the
-// assistant's model_id flips relative to the previous assistant
-// message. Used by ChatThread to inject the model-switch divider
-// just BEFORE those indices.
-export function getModelSwitchPoints(messages: Message[]): number[] {
-  const out: number[] = [];
-  let prevModel: string | undefined;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role !== "assistant" || !m.model_id) continue;
-    if (prevModel !== undefined && m.model_id !== prevModel) {
-      out.push(i);
-    }
-    prevModel = m.model_id;
-  }
-  return out;
-}
-
 // Derive a sidebar-friendly title from the user's first prompt:
 // strip markdown formatting, collapse whitespace, truncate to 50
 // chars at the last word boundary, append an ellipsis when cut.
