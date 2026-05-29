@@ -1643,19 +1643,11 @@ class GatewayOrchestrator:
             except Exception as exc:
                 log.warning("request_log_enqueue_failed", error=str(exc))
 
-            # Alert evaluation — uses an in-memory ORM built from the
-            # record so the path does not depend on the queue having
-            # flushed yet. The evaluator only reads tenant_id /
-            # project_id from this object (see
-            # ``AlertEvaluator._scope_matches``); all analytical work
-            # runs against the live ``session`` and the persisted history.
-            try:
-                in_memory_row = request_log_queue.build_request_log_orm(record)
-                await self.alert_evaluator.evaluate_after_request(
-                    session, in_memory_row
-                )
-            except Exception as exc:
-                log.warning("alert_evaluator_failed", error=str(exc))
+            # Alert evaluation moved OFF the request path (Phase-1 B6).
+            # A periodic background sweep (lifespan _alert_evaluation_sweep)
+            # now runs AlertEvaluator.evaluate_all every few seconds, so the
+            # per-request enabled-rules SELECT + window aggregates no longer
+            # block the event loop on every completed request.
 
         log.info(
             "request_complete",
