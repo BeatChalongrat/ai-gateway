@@ -7,6 +7,7 @@ restore the full body before emitting it back to the client.
 """
 
 import json
+import orjson
 import time
 from datetime import datetime, timezone
 
@@ -53,6 +54,17 @@ from app.services.usage_service import _estimate_cost, _estimate_reasoning_cost
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+def _sse_dumps(obj, ensure_ascii: bool = False) -> str:
+    """Serialise an SSE frame with orjson (Phase-1 B9).
+
+    Drop-in for the prior ``json.dumps(obj, ensure_ascii=False)`` — orjson
+    always emits compact UTF-8 with non-ASCII unescaped, so ``ensure_ascii``
+    is accepted as a no-op for call-site compatibility. Returns ``str`` for
+    the ``"data: {}\\n\\n".format(...)`` SSE framing.
+    """
+    return orjson.dumps(obj).decode("utf-8")
 
 
 @router.post(
@@ -841,7 +853,7 @@ async def chat_completions(
             cleanly when piping the stream through ``curl``.
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "object": "chat.completion.chunk",
@@ -876,7 +888,7 @@ async def chat_completions(
             reason about. Argument-level DLP is a follow-up.
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "object": "chat.completion.chunk",
@@ -908,7 +920,7 @@ async def chat_completions(
             (their parser will skip lines whose ``type`` is unknown).
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "type": "reasoning_summary_delta",
@@ -931,7 +943,7 @@ async def chat_completions(
             without parsing every reasoning fragment.
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "type": "analysis_status",
@@ -1605,7 +1617,7 @@ async def chat_completions(
                 "reasoning_tokens": provider_reasoning_tok or estimated
             }
         yield "data: {}\n\n".format(
-            json.dumps(_final_frame, ensure_ascii=False)
+            _sse_dumps(_final_frame)
         )
         yield "data: [DONE]\n\n"
 
