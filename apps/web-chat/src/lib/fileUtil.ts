@@ -4,8 +4,12 @@ export const ALLOWED_FILE_MIMES: ReadonlySet<string> = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "text/csv",
   "text/plain",
+  "text/markdown",
+  "text/html",
+  "application/json",
   "image/png",
   "image/jpeg",
   "image/gif",
@@ -14,17 +18,19 @@ export const ALLOWED_FILE_MIMES: ReadonlySet<string> = new Set([
 
 // Some browsers report Office formats with empty type — we accept by
 // extension too. CSV from some platforms reports application/vnd.ms-excel.
+// Source-code / plain-text extensions are kept in sync with the
+// chat-edge-api `textLikeExtensions` map (file_service.go) — those are
+// read verbatim as context for the model.
 export const ALLOWED_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
-  "pdf",
-  "docx",
-  "xlsx",
-  "csv",
-  "txt",
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
+  "pdf", "docx", "xlsx", "pptx", "csv", "txt",
+  "png", "jpg", "jpeg", "gif", "webp",
+  // text / markup / data
+  "json", "md", "markdown", "html", "htm", "xml", "yaml", "yml",
+  "toml", "ini", "conf", "cfg", "env", "log",
+  // source code
+  "sql", "sh", "bash", "css", "scss", "py", "go", "js", "ts", "tsx",
+  "jsx", "java", "rs", "rb", "php", "c", "cpp", "h", "swift", "kt",
+  "r", "lua", "vue", "svelte",
 ]);
 
 export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MiB
@@ -91,6 +97,7 @@ export function iconEmojiFor(kind: FileIcon): string {
   }
 }
 
-export const FILE_PICKER_ACCEPT =
-  ".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp," +
-  Array.from(ALLOWED_FILE_MIMES).join(",");
+export const FILE_PICKER_ACCEPT = [
+  ...Array.from(ALLOWED_FILE_EXTENSIONS, (e) => `.${e}`),
+  ...Array.from(ALLOWED_FILE_MIMES),
+].join(",");
