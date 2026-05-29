@@ -159,12 +159,36 @@ var allowedContentTypes = map[string]bool{
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
-	"text/csv":   true,
-	"text/plain": true,
+	"text/csv":      true,
+	"text/plain":    true,
+	"text/markdown": true,
+	"text/html":     true,
+	"application/json": true,
 	"image/png":  true,
 	"image/jpeg": true,
 	"image/gif":  true,
 	"image/webp": true,
+}
+
+// textLikeExtensions are read verbatim as UTF-8 text. Browsers report
+// these with wildly inconsistent (or empty) MIME types, so the upload
+// allow-check and the extractor both fall back to the extension. Kept
+// in sync with the frontend ALLOWED_FILE_EXTENSIONS list.
+var textLikeExtensions = map[string]bool{
+	".txt": true, ".csv": true, ".json": true, ".md": true, ".markdown": true,
+	".html": true, ".htm": true, ".xml": true, ".yaml": true, ".yml": true,
+	".toml": true, ".ini": true, ".conf": true, ".cfg": true, ".env": true,
+	".log": true, ".sql": true, ".sh": true, ".bash": true, ".css": true,
+	".scss": true, ".py": true, ".go": true, ".js": true, ".ts": true,
+	".tsx": true, ".jsx": true, ".java": true, ".rs": true, ".rb": true,
+	".php": true, ".c": true, ".cpp": true, ".h": true, ".swift": true,
+	".kt": true, ".r": true, ".lua": true, ".vue": true, ".svelte": true,
+}
+
+// isTextLikeName reports whether a filename's extension is a plain-text
+// or source-code format we extract by reading the bytes directly.
+func isTextLikeName(name string) bool {
+	return textLikeExtensions[strings.ToLower(filepath.Ext(name))]
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +215,10 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	if in.Size > s.knobs.MaxFileSizeBytes {
 		return nil, fmt.Errorf("%w: %d > %d", ErrFileTooLarge, in.Size, s.knobs.MaxFileSizeBytes)
 	}
-	if !allowedContentTypes[strings.ToLower(in.ContentType)] {
+	// Accept by MIME allow-list, OR by a known text/code extension —
+	// browsers report .py/.md/.json/etc. with inconsistent or empty
+	// content types, so the extension is the reliable signal there.
+	if !allowedContentTypes[strings.ToLower(in.ContentType)] && !isTextLikeName(in.OriginalName) {
 		return nil, fmt.Errorf("%w: %s", ErrFileTypeNotAllowed, in.ContentType)
 	}
 
@@ -524,11 +551,13 @@ func (s *FileService) ExtractTextForStorageKey(
 ) (string, bool) {
 	ct := strings.ToLower(contentType)
 	switch {
-	case ct == "text/plain", ct == "text/csv":
+	case ct == "text/plain", ct == "text/csv", ct == "text/markdown",
+		ct == "application/json":
 		return s.readTextFromStorage(ctx, key)
 	case ct == "application/pdf",
 		ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		ct == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
 		return s.runPythonExtractorOnKey(ctx, key, ct)
 	default:
 		return "", false
@@ -546,20 +575,15 @@ const maxExtractedChars = 50_000
 // (Python extractor) so the same code works for local + S3.
 func (s *FileService) extract(ctx context.Context, f *model.ConversationFile) (string, *string) {
 	ct := strings.ToLower(f.ContentType)
+	ext := strings.ToLower(filepath.Ext(f.OriginalFilename))
 	switch {
-	case ct == "text/plain", ct == "text/csv":
-		text, ok := s.readTextFromStorage(ctx, f.StoragePath)
-		if !ok {
-			return "failed", nil
-		}
-		text = truncateChars(text, maxExtractedChars)
-		return "completed", &text
 	case strings.HasPrefix(ct, "image/"):
 		text := s.imageMetadataFromStorage(ctx, f.StoragePath, f.OriginalFilename, f.FileSizeBytes, ct)
 		return "completed", &text
 	case ct == "application/pdf",
 		ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		ct == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
 		text, ok := s.runPythonExtractorOnKey(ctx, f.StoragePath, ct)
 		if !ok {
 			placeholder := fmt.Sprintf("[File: %s, %s, %s. Content extraction not available.]",
@@ -568,11 +592,54 @@ func (s *FileService) extract(ctx context.Context, f *model.ConversationFile) (s
 		}
 		text = truncateChars(text, maxExtractedChars)
 		return "completed", &text
+	case ct == "text/html", ext == ".html", ext == ".htm":
+		// HTML: read raw then strip tags so the AI gets readable prose
+		// instead of markup noise.
+		raw, ok := s.readTextFromStorage(ctx, f.StoragePath)
+		if !ok {
+			return "failed", nil
+		}
+		text := truncateChars(stripHTMLTags(raw), maxExtractedChars)
+		return "completed", &text
+	case ct == "text/plain", ct == "text/csv", ct == "text/markdown",
+		ct == "application/json", isTextLikeName(f.OriginalFilename):
+		// Plain text, CSV, JSON, Markdown, and source code are read
+		// verbatim — the model handles their structure directly.
+		text, ok := s.readTextFromStorage(ctx, f.StoragePath)
+		if !ok {
+			return "failed", nil
+		}
+		text = truncateChars(text, maxExtractedChars)
+		return "completed", &text
 	default:
 		// Should never reach here — the allowlist gated us — but be
 		// defensive so a future content-type slip doesn't crash.
 		return "unsupported", nil
 	}
+}
+
+// stripHTMLTags removes tags and collapses runs of whitespace so an
+// uploaded .html file extracts as readable text rather than markup.
+// Deliberately dependency-free (no x/net/html): a simple in-tag /
+// out-of-tag scanner is enough for the "give the model the prose"
+// goal and can't pull in a new module.
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+			b.WriteByte(' ')
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	// Collapse whitespace runs to keep the extracted text compact.
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 // readTextFromStorage streams the object body and decodes as UTF-8.
