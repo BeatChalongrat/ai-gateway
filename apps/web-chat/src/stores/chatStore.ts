@@ -1162,22 +1162,6 @@ async function handleStreamPreError(
 
 // ─── Pure helpers used by selectors ───────────────────────────
 
-// hasMultipleModels reports whether the assistant messages in a
-// conversation use more than one distinct model_id. Used by the
-// MessageBubble to decide whether to clutter the timeline with
-// per-message model badges (skipped when every reply is the same
-// model).
-export function hasMultipleModels(messages: Message[]): boolean {
-  const seen = new Set<string>();
-  for (const m of messages) {
-    if (m.role !== "assistant") continue;
-    if (!m.model_id) continue;
-    seen.add(m.model_id);
-    if (seen.size > 1) return true;
-  }
-  return false;
-}
-
 // Derive a sidebar-friendly title from the user's first prompt:
 // strip markdown formatting, collapse whitespace, truncate to 50
 // chars at the last word boundary, append an ellipsis when cut.
