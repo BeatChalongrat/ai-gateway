@@ -27,6 +27,7 @@ Cooldown:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
@@ -130,14 +131,16 @@ class AlertEvaluator:
         longer involved.
 
         Returns the list of rule_ids that fired.
+
+        H15: this runs on a periodic background sweep. The enabled-rules
+        SELECT and the per-rule window aggregate (``_compute_metric``,
+        which scans ``request_logs`` over the rule window) are synchronous
+        SQLAlchemy calls — run them via ``asyncio.to_thread`` so the sweep
+        never blocks the event loop. The session is used sequentially
+        (never concurrently), so threading it is safe. Webhook delivery
+        stays awaited (it's async + bounded, so it yields the loop).
         """
-        rows = (
-            session.execute(
-                select(AlertRuleORM).where(AlertRuleORM.enabled == True)  # noqa: E712
-            )
-            .scalars()
-            .all()
-        )
+        rows = await asyncio.to_thread(self._fetch_enabled_rules, session)
 
         fired: list[str] = []
         now = datetime.now(timezone.utc)
@@ -148,7 +151,9 @@ class AlertEvaluator:
             if self._in_cooldown(rule, now):
                 continue
 
-            value = self._compute_metric(session, rule, now)
+            value = await asyncio.to_thread(
+                self._compute_metric, session, rule, now
+            )
             if value < rule.threshold:
                 continue
 
@@ -166,11 +171,27 @@ class AlertEvaluator:
                 )
                 continue
 
-            rule.last_fired_at = now
-            session.flush()
+            await asyncio.to_thread(self._mark_fired, session, rule, now)
             fired.append(rule.id)
 
         return fired
+
+    @staticmethod
+    def _fetch_enabled_rules(session: "Session") -> list[AlertRuleORM]:
+        return (
+            session.execute(
+                select(AlertRuleORM).where(AlertRuleORM.enabled == True)  # noqa: E712
+            )
+            .scalars()
+            .all()
+        )
+
+    @staticmethod
+    def _mark_fired(
+        session: "Session", rule: AlertRuleORM, now: datetime
+    ) -> None:
+        rule.last_fired_at = now
+        session.flush()
 
     # ------------------------------------------------------------------
     # Helpers
