@@ -1,12 +1,11 @@
 // Fetch wrapper that:
-//   • reads the Portal access token (cookie or URL ?token=)
-//   • injects ``Authorization: Bearer <jwt>`` on every call
-//   • redirects to the Portal /login on 401 (no client-side refresh —
-//     refresh is the Portal's job)
+//   • sends the HttpOnly Portal session cookies (credentials:"include")
+//   • on 401, silently refreshes via the gateway then retries ONCE
+//   • redirects to the Portal /login only when refresh itself fails
 //
-// Chat Edge no longer mints its own tokens, so the previous
-// register/login/logout helpers are removed. They were never called
-// from production code after the Phase 1.5 migration.
+// HttpOnly cookie migration: there is no token in JS. chat-edge reads
+// the ``portal_access_token`` cookie; the gateway rotates it. A single
+// transient 401 no longer logs the user out — we refresh and retry.
 
 import type {
   Conversation,
@@ -30,37 +29,54 @@ import type {
   ShareLink,
   UserPreferences,
 } from "./types";
-import { clearPortalToken, getPortalToken, redirectToPortalLogin } from "./auth";
+import { redirectToPortalLogin, refreshSession } from "./auth";
 
 const API_BASE =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
     ? process.env.NEXT_PUBLIC_API_URL
     : "http://localhost:4000/api/v1";
 
+// Single-flight refresh shared across all concurrent 401s (parallel
+// page-mount fetches + an in-flight stream must not stampede the gateway;
+// the backend has a 30s rotation grace window too, but coalescing keeps
+// it clean and avoids redundant rotations).
+let refreshInFlight: Promise<boolean> | null = null;
+export function sharedRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshSession().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 class ApiClient {
   // -----------------------------------------------------------
-  // Low-level fetch.
+  // Low-level fetch. Cookie-authenticated, with 401 → refresh → retry.
   // -----------------------------------------------------------
-  async raw(path: string, init: RequestInit = {}): Promise<Response> {
+  async raw(path: string, init: RequestInit = {}, _retried = false): Promise<Response> {
     const headers = new Headers(init.headers);
     if (!headers.has("Content-Type") && init.body) {
       headers.set("Content-Type", "application/json");
     }
-    const token = getPortalToken();
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
     const res = await fetch(`${API_BASE}${path}`, {
       ...init,
       headers,
-      // We don't need credentials: include — chat-edge cookies are
-      // not part of the contract any more.
+      // Send the HttpOnly portal_access_token cookie cross-origin to
+      // chat-edge. Host-only on localhost (shared across ports) /
+      // shared parent domain in prod; SameSite=Lax permits same-site
+      // sends. This also covers SSE streams (which open via raw()) —
+      // EventSource can't set headers, so cookie auth is the only way.
+      credentials: "include",
     });
-    if (res.status === 401) {
-      // The Portal's refresh flow lives on port 3001. Wipe the
-      // local token (so a stale cached value can't keep retrying)
-      // and bounce the user.
-      clearPortalToken();
+    if (res.status === 401 && !_retried) {
+      // Try a silent refresh before giving up — a single transient 401
+      // (access token just lapsed) must NOT log the user out.
+      const refreshed = await sharedRefresh();
+      if (refreshed) {
+        return this.raw(path, init, true);
+      }
+      // Refresh failed → the session is genuinely over. Bounce to login.
       redirectToPortalLogin();
     }
     return res;
@@ -649,12 +665,13 @@ class ApiClient {
       signal?: AbortSignal;
       onProgress?: (percent: number) => void;
     },
+    _retried = false,
   ): Promise<KnowledgeDocument> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${API_BASE}/knowledge-bases/${kbId}/documents`);
-      const token = getPortalToken();
-      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      // Send the HttpOnly session cookie; no Bearer header.
+      xhr.withCredentials = true;
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && opts?.onProgress) {
           opts.onProgress(Math.round((e.loaded / e.total) * 100));
@@ -662,7 +679,21 @@ class ApiClient {
       };
       xhr.onload = () => {
         if (xhr.status === 401) {
-          clearPortalToken();
+          // Silent refresh → retry once before bouncing to login.
+          if (!_retried) {
+            sharedRefresh().then((ok) => {
+              if (ok) {
+                this.uploadKBDocument(kbId, file, opts, true).then(
+                  resolve,
+                  reject,
+                );
+              } else {
+                redirectToPortalLogin();
+                reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
+              }
+            });
+            return;
+          }
           redirectToPortalLogin();
           reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
           return;
@@ -721,12 +752,13 @@ class ApiClient {
       signal?: AbortSignal;
       onProgress?: (percent: number) => void;
     },
+    _retried = false,
   ): Promise<FileAttachment> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${API_BASE}/conversations/${convId}/files`);
-      const token = getPortalToken();
-      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      // Send the HttpOnly session cookie; no Bearer header.
+      xhr.withCredentials = true;
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && opts?.onProgress) {
           opts.onProgress(Math.round((e.loaded / e.total) * 100));
@@ -734,8 +766,21 @@ class ApiClient {
       };
       xhr.onload = () => {
         if (xhr.status === 401) {
-          // Same redirect-to-portal contract as the JSON path.
-          clearPortalToken();
+          // Same refresh-then-retry contract as the JSON path.
+          if (!_retried) {
+            sharedRefresh().then((ok) => {
+              if (ok) {
+                this.uploadFile(convId, file, opts, true).then(
+                  resolve,
+                  reject,
+                );
+              } else {
+                redirectToPortalLogin();
+                reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
+              }
+            });
+            return;
+          }
           redirectToPortalLogin();
           reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
           return;

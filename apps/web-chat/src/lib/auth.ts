@@ -1,57 +1,21 @@
-// Token sourcing for Portal-integrated Web Chat.
+// Auth for the Portal-integrated Web Chat.
 //
-// Phase 1.5: chat-edge no longer mints its own user tokens. The
-// SRAN Portal (port 3001) is the identity authority. The portal
-// writes `portal_access_token` to localStorage and mirrors it to a cookie:
+// HttpOnly cookie migration: chat no longer reads or stores the token.
+// The SRAN Portal (and the gateway) set ``portal_access_token`` /
+// ``portal_refresh_token`` as HttpOnly cookies; the browser sends them
+// automatically on cross-origin calls once we pass
+// ``credentials: "include"``. JS can't read them — no token in URL,
+// localStorage, or JS cookies.
 //
-//     portal_access_token=<jwt>; Path=/; Max-Age=3600; SameSite=Lax
-//
-// Cross-port on the same hostname (localhost:3001 -> localhost:3002)
-// shares cookies; localStorage does not. We read from the cookie first,
-// then accept a `?token=...` query param as a fallback for cross-domain
-// redirect flows.
+// Two cross-origin calls go to the gateway (FastAPI) rather than
+// chat-edge: refresh and the session-user lookup. The gateway is the
+// identity authority; chat-edge only verifies the access cookie.
 
-export const PORTAL_TOKEN_COOKIE = "portal_access_token";
-
-export function getPortalToken(): string | null {
-  if (typeof window === "undefined") return null;
-
-  // 1. Cookie - shared across ports on localhost.
-  const cookieMatch = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith(`${PORTAL_TOKEN_COOKIE}=`));
-  if (cookieMatch) {
-    const value = cookieMatch.split("=").slice(1).join("=");
-    const token = decodeURIComponent(value);
-    if (token && token.length > 10) return token;
-  }
-
-  // 2. URL query - for the cross-domain redirect case.
-  const params = new URLSearchParams(window.location.search);
-  const tokenParam = params.get("token");
-  if (tokenParam && tokenParam.length > 10) {
-    document.cookie = [
-      `${PORTAL_TOKEN_COOKIE}=${encodeURIComponent(tokenParam)}`,
-      "Path=/",
-      "Max-Age=3600",
-      "SameSite=Lax",
-    ].join("; ");
-    window.history.replaceState({}, "", window.location.pathname);
-    return tokenParam;
-  }
-
-  return null;
-}
-
-export function isAuthenticated(): boolean {
-  return getPortalToken() !== null;
-}
-
-/** Drop the portal token cookie. Called when chat-edge returns 401. */
-export function clearPortalToken(): void {
-  if (typeof document === "undefined") return;
-  document.cookie = `${PORTAL_TOKEN_COOKIE}=; Path=/; Max-Age=0`;
-}
+// Gateway (FastAPI) origin — the identity authority that mints/rotates
+// the session cookies and serves /portal/me. Configurable for prod.
+const GATEWAY_URL =
+  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_GATEWAY_URL) ||
+  "http://localhost:8080";
 
 const PORTAL_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PORTAL_URL) ||
@@ -64,23 +28,90 @@ export function redirectToPortalLogin(): void {
   window.location.href = `${PORTAL_URL}/login?redirect=${ret}`;
 }
 
-interface JwtClaims {
-  sub?: string;
-  email?: string;
-  tenant_id?: string | null;
-  tenant_role?: "owner" | "member";
-  type?: string;
-  exp?: number;
+/** The session user as the chat app needs it (derived from /portal/me). */
+export interface SessionUser {
+  user_id: string;
+  tenant_id: string;
+  email: string | null;
+  role: string;
 }
 
-/** Best-effort decode of the JWT payload (no signature check; server verifies). */
-export function decodePortalJwt(token: string): JwtClaims | null {
+interface PortalMeResponse {
+  id: string;
+  email?: string | null;
+  tenant_id?: string | null;
+  tenant_role?: string | null;
+}
+
+/**
+ * Resolve the current session from the gateway's /portal/me using the
+ * HttpOnly cookie. Returns null when unauthenticated (401).
+ */
+export async function fetchSessionUser(): Promise<SessionUser | null> {
   try {
-    const [, payload] = token.split(".");
-    if (!payload) return null;
-    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    return JSON.parse(json) as JwtClaims;
+    const res = await fetch(`${GATEWAY_URL}/portal/me`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const me = (await res.json()) as PortalMeResponse;
+    if (!me?.id) return null;
+    return {
+      user_id: me.id,
+      // tenant_id may be null transiently; fall back to the user id so
+      // downstream filters still have a stable key.
+      tenant_id: me.tenant_id ?? me.id,
+      email: me.email ?? null,
+      role: me.tenant_role ?? "member",
+    };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Rotate the session via the gateway refresh endpoint. The refresh token
+ * rides the HttpOnly cookie; on success the gateway sets fresh access +
+ * refresh cookies. Returns true on success.
+ */
+export async function refreshSession(): Promise<boolean> {
+  try {
+    const res = await fetch(`${GATEWAY_URL}/portal/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+const LEGACY_COOKIE = "portal_access_token";
+
+/** Best-effort scrub of any legacy non-HttpOnly token a prior build wrote. */
+export function clearLegacyToken(): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${LEGACY_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
+/**
+ * Log out: revoke + clear the session cookies on the gateway, then bounce
+ * to the Portal login. Fire-and-forget on the network call — we redirect
+ * regardless so the UX is immediate.
+ */
+export async function logoutSession(): Promise<void> {
+  try {
+    await fetch(`${GATEWAY_URL}/portal/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  } catch {
+    /* ignore — redirect anyway */
+  }
+  clearLegacyToken();
+  if (typeof window !== "undefined") {
+    window.location.href = `${PORTAL_URL}/login`;
   }
 }

@@ -15,7 +15,7 @@ import {
   useNewChatHandler,
 } from "@/hooks/useKeyboardShortcuts";
 import { useMemoryPendingPoll } from "@/hooks/useMemoryPendingCount";
-import { getPortalToken, redirectToPortalLogin } from "@/lib/auth";
+import { redirectToPortalLogin } from "@/lib/auth";
 import { useAuthStore } from "@/stores/authStore";
 import { useModelStore } from "@/stores/modelStore";
 import { useSidebarStore } from "@/stores/sidebarStore";
@@ -40,22 +40,28 @@ export default function ChatLayout({
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    const token = getPortalToken();
-    if (!token) {
-      redirectToPortalLogin();
-      return;
-    }
-    useAuthStore.getState().checkAuth();
-    // Seed the model catalog as soon as we know the user is
-    // authenticated. The previous Sidebar component owned this
-    // call; the redesign dropped the binding, leaving the model
-    // picker permanently empty. Fetching here means the catalog
-    // is ready whether the user lands on /chat, /chat/[id], or
-    // somewhere else inside this layout.
-    if (!useModelStore.getState().loaded) {
-      void useModelStore.getState().loadModels();
-    }
-    setIsReady(true);
+    let alive = true;
+    // Cookie-based auth: we can't read the token in JS, so resolve the
+    // session via /portal/me (cookie-authenticated). No session →
+    // bounce to the Portal login.
+    void (async () => {
+      await useAuthStore.getState().checkAuth();
+      if (!alive) return;
+      if (!useAuthStore.getState().user) {
+        redirectToPortalLogin();
+        return;
+      }
+      // Seed the model catalog now that we know the user is
+      // authenticated, so the picker isn't empty wherever they land
+      // inside this layout.
+      if (!useModelStore.getState().loaded) {
+        void useModelStore.getState().loadModels();
+      }
+      setIsReady(true);
+    })();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // Lock body scroll while the mobile slide-over is open.
