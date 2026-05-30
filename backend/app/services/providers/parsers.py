@@ -99,6 +99,21 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
     ]
     reasoning_content = "".join(thinking_parts) or None
 
+    # T5 — preserve the thinking-block signature so a tool-loop client can
+    # replay the thinking verbatim on the next turn. Use the first signed
+    # thinking block's signature (Anthropic emits one per thinking block;
+    # tool-loop turns carry a single block). ``None`` when absent.
+    reasoning_signature = next(
+        (
+            block.get("signature")
+            for block in content_blocks
+            if isinstance(block, dict)
+            and block.get("type") == "thinking"
+            and block.get("signature")
+        ),
+        None,
+    )
+
     # Convert each ``tool_use`` block to the OpenAI tool_call shape.
     # Anthropic exposes arguments as a JSON object on ``input``; OpenAI
     # carries them as a JSON *string* on ``function.arguments`` — we
@@ -155,4 +170,5 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
         raw=data,
         tool_calls=tool_calls,
         reasoning_content=reasoning_content,
+        reasoning_signature=reasoning_signature,
     )
