@@ -300,6 +300,15 @@ def _mock_provider_key_service(monkeypatch):
         ProviderKeyService, "get_api_key", lambda self, session, provider: "test-stub-key"
     )
 
+    # Track A: the chat hot path now calls the async variant. Stub it too,
+    # or the flipped handler resolves None → ProviderUnavailableError (503).
+    async def _get_api_key_async_stub(self, session, provider_name):
+        return "test-stub-key"
+
+    monkeypatch.setattr(
+        ProviderKeyService, "get_api_key_async", _get_api_key_async_stub
+    )
+
 
 @pytest.fixture(autouse=True)
 def _mock_adapter_stream_chat(monkeypatch):
