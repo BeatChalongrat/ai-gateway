@@ -63,8 +63,8 @@ var requestLogColumns = []string{
 // The whole batch lives inside one transaction. A partial failure
 // (e.g. a unique-violation on one row) aborts the entire batch —
 // pq.CopyIn does not support row-level error handling. The caller
-// (worker.runFlusher) logs the abort + counts the records as
-// dropped; it does not retry.
+// (worker.writeBatch) logs the abort + counts the records as
+// dropped after exhausting its retry budget.
 func InsertBatch(database *sql.DB, batch []*pb.LogRecord) error {
 	if len(batch) == 0 {
 		return nil

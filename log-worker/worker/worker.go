@@ -17,6 +17,16 @@
 //     (request_log_queue._flush). Audit completeness on a Postgres
 //     outage is sacrificed for liveness; the alternative (block
 //     enqueue) would back-pressure the gateway request path.
+//
+//  4. Drain and write are SEPARATE goroutines (audit H12). The drainer
+//     continuously reads w.ch and assembles batches; the writer takes
+//     completed batches off an internal bounded channel and runs the
+//     COPY (with retry/backoff). The retry backoff therefore parks only
+//     the writer — the drainer never blocks on Postgres, so a DB outage
+//     no longer turns retry into extra drops. Memory stays bounded: the
+//     batch channel is capped, and when it fills during a sustained
+//     outage the drainer drops the oldest batch (same drop-oldest
+//     spirit as Enqueue) and counts those records as dropped.
 package worker
 
 import (
@@ -46,13 +56,33 @@ type Config struct {
 	BufferSize    int
 }
 
+// batchChanCap bounds how many completed batches can be in flight
+// between the drainer and the writer. Together with BufferSize and
+// BatchSize this caps total resident memory during a Postgres outage:
+// at most BufferSize records on w.ch plus batchChanCap*BatchSize
+// records sitting in batches waiting for the writer. When the writer
+// is parked on a sustained outage and this fills, the drainer drops the
+// oldest queued batch (mirroring Enqueue's drop-oldest policy) so the
+// retry feature can never grow memory without bound.
+const batchChanCap = 8
+
 // Worker is the in-memory queue + background flusher.
+//
+// Goroutine topology (after audit H12):
+//
+//	Enqueue (gRPC handlers) --> w.ch --> drainer --> w.batches --> writer --> COPY
+//
+// The drainer is the sole consumer of w.ch and never touches Postgres;
+// the writer is the sole consumer of w.batches and owns all DB I/O
+// (including retry/backoff). w.batches is closed by the drainer — its
+// only sender — on shutdown, which terminates the writer's range loop.
 type Worker struct {
-	cfg    Config
-	ch     chan *pb.LogRecord
-	stop   chan struct{}
-	wg     sync.WaitGroup
-	closed atomic.Bool
+	cfg     Config
+	ch      chan *pb.LogRecord
+	batches chan []*pb.LogRecord
+	stop    chan struct{}
+	wg      sync.WaitGroup
+	closed  atomic.Bool
 
 	queueDepth   atomic.Int64
 	droppedTotal atomic.Int64
@@ -98,6 +128,10 @@ var (
 		Name: "log_worker_retry_total",
 		Help: "COPY retries (post-failure re-attempts before drop).",
 	})
+	metricWriterBacklog = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "log_worker_writer_backlog",
+		Help: "Completed batches buffered between the drainer and the writer.",
+	})
 )
 
 // flushBackoffs is the per-attempt sleep between COPY retries.
@@ -123,16 +157,18 @@ func New(cfg Config) *Worker {
 		cfg.BufferSize = 50000
 	}
 	return &Worker{
-		cfg:  cfg,
-		ch:   make(chan *pb.LogRecord, cfg.BufferSize),
-		stop: make(chan struct{}),
+		cfg:     cfg,
+		ch:      make(chan *pb.LogRecord, cfg.BufferSize),
+		batches: make(chan []*pb.LogRecord, batchChanCap),
+		stop:    make(chan struct{}),
 	}
 }
 
-// Start launches the background flush goroutine.
+// Start launches the background drainer + writer goroutines.
 func (w *Worker) Start() {
-	w.wg.Add(1)
-	go w.runFlusher()
+	w.wg.Add(2)
+	go w.runDrainer()
+	go w.runWriter()
 }
 
 // Stop signals the flusher to drain and exit, then waits up to
@@ -203,64 +239,63 @@ func (w *Worker) Stats() (int64, int64, int64) {
 	return w.queueDepth.Load(), w.droppedTotal.Load(), w.flushedTotal.Load()
 }
 
-func (w *Worker) runFlusher() {
+// runDrainer is the sole consumer of w.ch. It assembles records into
+// batches (BatchSize records, or whatever has accrued by FlushInterval)
+// and hands each completed batch to the writer via w.batches. It never
+// touches Postgres, so it keeps draining w.ch at full speed even while
+// the writer is parked on a DB outage retry/backoff.
+//
+// On shutdown (w.stop closed) it drains whatever already landed on w.ch
+// (bounded 5s budget — same as before), emits a final partial batch,
+// then closes w.batches to terminate the writer.
+func (w *Worker) runDrainer() {
 	defer w.wg.Done()
+	defer close(w.batches) // the drainer is the only sender on w.batches
 
 	ticker := time.NewTicker(w.cfg.FlushInterval)
 	defer ticker.Stop()
 
 	batch := make([]*pb.LogRecord, 0, w.cfg.BatchSize)
-	flush := func() {
+
+	// hand passes the current batch to the writer and resets the buffer.
+	// If the writer is backed up (w.batches full — sustained outage), we
+	// drop the OLDEST queued batch to make room rather than block the
+	// drainer; this bounds resident memory and mirrors Enqueue's
+	// drop-oldest policy. Records stay accounted in queueDepth until the
+	// writer reports them flushed or we drop them here.
+	hand := func() {
 		if len(batch) == 0 {
 			return
 		}
-		size := len(batch)
-		metricBatchSize.Observe(float64(size))
-
-		// Retry the COPY a couple of times before dropping the batch.
-		// A short Postgres restart (graceful reload, primary-failover
-		// promotion, network blip) often falls inside the backoff
-		// budget, and audit completeness > liveness on a small
-		// recoverable outage.
-		start := time.Now()
-		var err error
-		for attempt := 0; attempt <= len(flushBackoffs); attempt++ {
-			if attempt > 0 {
-				metricRetryTotal.Inc()
-				time.Sleep(flushBackoffs[attempt-1])
+		out := batch
+		batch = make([]*pb.LogRecord, 0, w.cfg.BatchSize)
+		for {
+			select {
+			case w.batches <- out:
+				metricWriterBacklog.Set(float64(len(w.batches)))
+				return
+			default:
+				// Writer can't keep up. Evict the oldest queued batch.
+				select {
+				case old := <-w.batches:
+					n := int64(len(old))
+					w.droppedTotal.Add(n)
+					metricDroppedTotal.Add(float64(n))
+					w.queueDepth.Add(-n)
+					metricQueueDepth.Sub(float64(n))
+					log.Printf("writer backlog full — dropped oldest batch=%d records", n)
+				default:
+					// Writer drained it between the two selects; retry send.
+				}
 			}
-			err = insertFn(w.cfg.DB, batch)
-			if err == nil {
-				break
-			}
-			log.Printf(
-				"flush attempt %d/%d failed batch=%d err=%v",
-				attempt+1, len(flushBackoffs)+1, size, err,
-			)
 		}
-		elapsedMS := float64(time.Since(start).Milliseconds())
-		metricInsertLatency.Observe(elapsedMS)
-
-		if err != nil {
-			metricInsertErrors.Inc()
-			log.Printf(
-				"flush exhausted retries batch=%d dropping records last_err=%v",
-				size, err,
-			)
-		} else {
-			w.flushedTotal.Add(int64(size))
-			metricFlushedTotal.Add(float64(size))
-		}
-		w.queueDepth.Add(-int64(size))
-		metricQueueDepth.Sub(float64(size))
-		batch = batch[:0]
 	}
 
 	for {
 		select {
 		case rec, ok := <-w.ch:
 			if !ok {
-				flush()
+				hand()
 				return
 			}
 			batch = append(batch, rec)
@@ -270,46 +305,103 @@ func (w *Worker) runFlusher() {
 				select {
 				case more, more_ok := <-w.ch:
 					if !more_ok {
-						flush()
+						hand()
 						return
 					}
 					batch = append(batch, more)
 				default:
-					// channel empty for now — fall through to the
-					// outer select / ticker for the next event.
 					goto checkFlush
 				}
 			}
 		checkFlush:
 			if len(batch) >= w.cfg.BatchSize {
-				flush()
+				hand()
 			}
 		case <-ticker.C:
-			flush()
+			hand()
 		case <-w.stop:
 			// Drain remaining records before exit so a graceful
-			// shutdown loses zero records that already made it
-			// onto the channel.
+			// shutdown loses zero records that already made it onto
+			// the channel.
 			drainTimeout := time.After(5 * time.Second)
 			for {
 				select {
 				case rec, ok := <-w.ch:
 					if !ok {
-						flush()
+						hand()
 						return
 					}
 					batch = append(batch, rec)
 					if len(batch) >= w.cfg.BatchSize {
-						flush()
+						hand()
 					}
 				case <-drainTimeout:
-					flush()
+					hand()
 					return
 				default:
-					flush()
+					hand()
 					return
 				}
 			}
 		}
 	}
+}
+
+// runWriter is the sole consumer of w.batches and owns all Postgres
+// I/O. It runs the COPY with retry/backoff; the time.Sleep here parks
+// ONLY the writer, never the drainer (audit H12). It exits when the
+// drainer closes w.batches, after writing every batch already queued.
+func (w *Worker) runWriter() {
+	defer w.wg.Done()
+	for batch := range w.batches {
+		metricWriterBacklog.Set(float64(len(w.batches)))
+		w.writeBatch(batch)
+	}
+	metricWriterBacklog.Set(0)
+}
+
+// writeBatch COPYs a single batch into Postgres, retrying a couple of
+// times before dropping it. A short Postgres restart (graceful reload,
+// primary-failover promotion, network blip) often falls inside the
+// backoff budget, and audit completeness > liveness on a small
+// recoverable outage. Records are deducted from queueDepth here once
+// the batch is either written or given up on.
+func (w *Worker) writeBatch(batch []*pb.LogRecord) {
+	size := len(batch)
+	if size == 0 {
+		return
+	}
+	metricBatchSize.Observe(float64(size))
+
+	start := time.Now()
+	var err error
+	for attempt := 0; attempt <= len(flushBackoffs); attempt++ {
+		if attempt > 0 {
+			metricRetryTotal.Inc()
+			time.Sleep(flushBackoffs[attempt-1])
+		}
+		err = insertFn(w.cfg.DB, batch)
+		if err == nil {
+			break
+		}
+		log.Printf(
+			"flush attempt %d/%d failed batch=%d err=%v",
+			attempt+1, len(flushBackoffs)+1, size, err,
+		)
+	}
+	elapsedMS := float64(time.Since(start).Milliseconds())
+	metricInsertLatency.Observe(elapsedMS)
+
+	if err != nil {
+		metricInsertErrors.Inc()
+		log.Printf(
+			"flush exhausted retries batch=%d dropping records last_err=%v",
+			size, err,
+		)
+	} else {
+		w.flushedTotal.Add(int64(size))
+		metricFlushedTotal.Add(float64(size))
+	}
+	w.queueDepth.Add(-int64(size))
+	metricQueueDepth.Sub(float64(size))
 }
