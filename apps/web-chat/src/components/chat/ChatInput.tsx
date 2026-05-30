@@ -13,12 +13,16 @@ import { toast } from "@/components/ui/Toast";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useWhisperInput } from "@/hooks/useWhisperInput";
 import { useChatStore } from "@/stores/chatStore";
+import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
 import { FilePreviewCard } from "./FilePreviewCard";
 import { KBSelector } from "./KBSelector";
 import { ModelSelector } from "./ModelSelector";
+import { ReasoningToggle } from "./ReasoningToggle";
 import { RecordingBar } from "./RecordingBar";
+
+type ReasoningMode = "off" | "auto" | "low" | "medium" | "high";
 
 interface Props {
   /** Active conversation id. The input uses it as the key for the
@@ -158,13 +162,56 @@ export function ChatInput({
   const removePendingFile = useChatStore((s) => s.removePendingFile);
   const clearPendingFiles = useChatStore((s) => s.clearPendingFiles);
 
-  // Auto Thinking Mode: there are no user-facing reasoning controls.
-  // The system decides whether to think by picking the right model
-  // (chat-edge's Auto resolver routes complex queries to a reasoning
-  // model; that model's native adaptive thinking then engages). The
-  // ThinkingBlock in MessageBubble still renders the thinking output
-  // whenever the AI produces it — display is preserved, control is
-  // removed.
+  // Reasoning (Thinking Mode) controls — re-wired (P1). The toggle
+  // PATCHes the conversation's reasoning settings; Chat Edge forwards
+  // them to the gateway, whose reasoning-aware router (P0) now routes
+  // ``auto`` + reasoning to a reasoning-capable model. Shown when the
+  // selected model advertises reasoning OR when Auto is active (under
+  // Auto, enabling reasoning forces the reasoning pool server-side, so
+  // it is now meaningful — the prior "toggle does nothing on auto"
+  // gap is closed by the P0 routing fix).
+  const setConversationReasoning = useChatStore(
+    (s) => s.setConversationReasoning,
+  );
+  const conversation = useChatStore((s) =>
+    conversationId
+      ? s.conversations.find((c) => c.id === conversationId) ?? null
+      : null,
+  );
+  const modelsLoaded = useModelStore((s) => s.loaded);
+  const getModelById = useModelStore((s) => s.getModelById);
+  const loadModels = useModelStore((s) => s.loadModels);
+  // Ensure the catalog is loaded so we can read the active model's
+  // reasoning capability even when the user never opened the picker.
+  useEffect(() => {
+    if (!modelsLoaded) void loadModels();
+  }, [modelsLoaded, loadModels]);
+  const isAutoModel = !activeModelId || activeModelId === "auto";
+  const activeModel =
+    !isAutoModel && activeModelId ? getModelById(activeModelId) : undefined;
+  const reasoningSupported =
+    isAutoModel || Boolean(activeModel?.reasoning?.supported);
+  const reasoningEnabled = conversation?.reasoning_enabled ?? false;
+  const reasoningMode = (conversation?.reasoning_mode ?? "auto") as ReasoningMode;
+
+  // Apply a reasoning patch, lazily creating the conversation first when
+  // the composer is still on the landing page (no conversationId yet) —
+  // mirrors the eager-create used by the file-attach flow.
+  const applyReasoning = async (patch: {
+    reasoning_enabled?: boolean;
+    reasoning_mode?: ReasoningMode;
+  }) => {
+    let cid = conversationId;
+    if (!cid) {
+      cid = (await onRequestConversation?.()) ?? null;
+      if (!cid) return;
+    }
+    try {
+      await setConversationReasoning(cid, patch);
+    } catch {
+      toast(t("reasoning.error"));
+    }
+  };
 
   // Auto-grow up to the device's max line count.
   useEffect(() => {
@@ -627,6 +674,22 @@ export function ChatInput({
                   conversationId={conversationId}
                   activeKBId={activeKBId ?? null}
                   onPick={onKBPick}
+                  disabled={streaming}
+                />
+              ) : null}
+              {reasoningSupported ? (
+                <ReasoningToggle
+                  enabled={reasoningEnabled}
+                  mode={reasoningMode}
+                  onToggle={(next) =>
+                    void applyReasoning({ reasoning_enabled: next })
+                  }
+                  onModeChange={(m) =>
+                    void applyReasoning({
+                      reasoning_mode: m,
+                      reasoning_enabled: true,
+                    })
+                  }
                   disabled={streaming}
                 />
               ) : null}
