@@ -101,16 +101,22 @@ _async_session_factory = None
 def _to_async_url(url: str) -> str:
     """Map a sync DSN to its async-driver equivalent.
 
-    postgresql:// → postgresql+asyncpg://   (production)
-    sqlite://     → sqlite+aiosqlite://      (tests / dev)
-    Already-async URLs pass through unchanged.
+    The production DSN is ``postgresql+psycopg://`` — psycopg3 supports
+    async natively, so it passes through unchanged and the async engine
+    shares the SAME driver as the sync engine (no divergent param binding
+    / type adaptation). A bare ``postgresql://`` / ``postgres://`` is
+    mapped to ``postgresql+psycopg://`` — NOT ``asyncpg`` (that dependency
+    was removed in Track A; mapping to a second driver was the H3 footgun:
+    the async engine would silently use a different driver than the sync
+    one). ``sqlite://`` → ``sqlite+aiosqlite://`` (tests). Already-async
+    URLs pass through unchanged.
     """
-    if "+asyncpg" in url or "+aiosqlite" in url:
+    if "+asyncpg" in url or "+aiosqlite" in url or "+psycopg" in url:
         return url
     if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
     if url.startswith("sqlite://"):
         return url.replace("sqlite://", "sqlite+aiosqlite://", 1)
     return url
@@ -126,11 +132,10 @@ def get_async_engine():
         async_url = _to_async_url(settings.database_url)
         kwargs = {"future": True, "pool_pre_ping": True}
         if async_url.startswith("postgresql"):
-            # Mirror the sync pool sizing for ANY async Postgres driver.
-            # The project DSN is ``postgresql+psycopg://`` → psycopg3's
-            # async mode (already a dependency), so no separate driver is
-            # required; ``asyncpg`` (in requirements) is an optional faster
-            # alternative if the DSN is switched to ``+asyncpg``.
+            # Mirror the sync pool sizing. The project DSN is
+            # ``postgresql+psycopg://`` → psycopg3's async mode (the same
+            # driver the sync engine uses), so no separate async driver is
+            # needed. (asyncpg was removed in Track A — see _to_async_url.)
             kwargs.update(
                 pool_size=_pool_size,
                 max_overflow=_max_overflow,
