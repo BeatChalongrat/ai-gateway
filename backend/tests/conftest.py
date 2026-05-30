@@ -1,7 +1,11 @@
 """Shared test fixtures for the AI Gateway backend."""
 
+import os
+import tempfile
+
 import httpx
 import pytest
+import pytest_asyncio
 import respx
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
@@ -68,8 +72,21 @@ import app.models  # noqa: F401 — ensure all ORM models register with Base.met
 # Shared in-memory DB for integration tests using the main FastAPI app.
 # ---------------------------------------------------------------------------
 
+# Track A: the integration DB is now a per-run temp FILE (not :memory:) so
+# the sync engine AND a parallel async engine (aiosqlite) can share the same
+# data. After the AsyncSession flip, the chat hot path reads via the async
+# engine — it must see rows written by sync test setup + the seed below.
+# A file is the only reliable way to share one SQLite DB across the two
+# drivers (sync pysqlite + async aiosqlite each open their own connection;
+# committed writes are visible across connections). Per-run temp dir →
+# fresh DB each pytest invocation (matches the old :memory: semantics).
+_INTEGRATION_DB_FILE = os.path.join(
+    tempfile.mkdtemp(prefix="ai_gw_test_"), "integration.db"
+)
+_INTEGRATION_DB_URL = f"sqlite:///{_INTEGRATION_DB_FILE}"
+
 _integration_engine = create_engine(
-    "sqlite:///:memory:",
+    _INTEGRATION_DB_URL,
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
@@ -136,6 +153,68 @@ main_app.dependency_overrides[require_admin] = lambda: MOCK_AUTH
 # via MOCK_AUTH go through this override instead.
 main_app.dependency_overrides[require_admin_session] = lambda: MOCK_AUTH
 main_app.dependency_overrides[get_db_session] = _integration_db_session
+
+
+# ---------------------------------------------------------------------------
+# Track A — async integration engine (aiosqlite) on the SAME sqlite file.
+# After the AsyncSession flip the chat hot path depends on
+# ``app.core.db.get_async_db``; route it (and any code that opens its own
+# async session via ``get_async_session_factory`` — e.g. the streaming
+# generator's post-stream persist) at the shared integration file so it
+# sees the seed + any rows written by sync test setup. expire_on_commit=
+# False mirrors prod so ORM attrs stay readable after commit (the streaming
+# path reads them after the response starts).
+# ---------------------------------------------------------------------------
+
+from sqlalchemy.ext.asyncio import (  # noqa: E402
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+_async_integration_engine = create_async_engine(
+    f"sqlite+aiosqlite:///{_INTEGRATION_DB_FILE}",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+_AsyncIntegrationSession = async_sessionmaker(
+    _async_integration_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+)
+
+
+async def _integration_async_db_session():
+    """Async mirror of ``_integration_db_session`` — yields an AsyncSession
+    on the shared integration file, commit-on-success / rollback-on-error."""
+    async with _AsyncIntegrationSession() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+from app.core.db import get_async_db  # noqa: E402
+import app.core.db as _db_mod  # noqa: E402
+
+main_app.dependency_overrides[get_async_db] = _integration_async_db_session
+# Cover non-dependency async session opens (streaming generator post-stream
+# persist) — they call get_async_session_factory() directly.
+_db_mod.get_async_session_factory = lambda: _AsyncIntegrationSession
+
+
+@pytest_asyncio.fixture
+async def async_db():
+    """Provide an AsyncSession on the shared integration DB for unit tests
+    that exercise the new async service variants directly."""
+    async with _AsyncIntegrationSession() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
 
 
 # ---------------------------------------------------------------------------
