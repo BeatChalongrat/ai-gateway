@@ -131,6 +131,29 @@ class AnthropicAdapter(BaseProviderAdapter):
                 if body["max_tokens"] <= budget:
                     body["max_tokens"] = budget + 4096
 
+                # T5 context-budget guard. The thinking budget + the
+                # answer headroom must fit the model's context window
+                # ALONGSIDE the prompt — the unguarded bump above could
+                # push ``max_tokens`` past the window on a long
+                # conversation and Anthropic 400s the request. When the
+                # window is known, clamp ``max_tokens`` to what's left
+                # after the prompt and, if that squeezes the thinking
+                # budget, shrink the budget too (keeping it strictly below
+                # max_tokens and above a usable floor). Skips silently when
+                # the model's window is unknown (metadata absent).
+                ctx_window = getattr(candidate, "max_context_tokens", 0) or 0
+                if ctx_window > 0:
+                    prompt_est = self._estimate_prompt_tokens(messages)
+                    answer_reserve = 1024
+                    available = ctx_window - prompt_est
+                    if available < body["max_tokens"]:
+                        body["max_tokens"] = max(answer_reserve, available)
+                        if budget >= body["max_tokens"]:
+                            new_budget = max(
+                                1024, body["max_tokens"] - answer_reserve
+                            )
+                            body["thinking"]["budget_tokens"] = new_budget
+
         # Function-calling passthrough. Clients send the OpenAI
         # tools/tool_choice shape; this adapter translates to Anthropic
         # ``input_schema`` form and the ``{type: auto|any|tool|none}``
@@ -148,6 +171,30 @@ class AnthropicAdapter(BaseProviderAdapter):
                 body["tool_choice"] = translated_choice
 
         return body
+
+    @staticmethod
+    def _estimate_prompt_tokens(messages) -> int:
+        """Cheap ~4-chars/token estimate of the prompt size (T5).
+
+        Used only by the context-budget guard to decide how much window is
+        left for the thinking budget + answer. Deliberately conservative
+        and dependency-free — an over-estimate just trims the budget a bit,
+        never corrupts the request. Handles string and list (vision)
+        content; non-text blocks contribute a small fixed cost.
+        """
+        chars = 0
+        for m in messages:
+            c = getattr(m, "content", None)
+            if isinstance(c, str):
+                chars += len(c)
+            elif isinstance(c, list):
+                for block in c:
+                    if isinstance(block, dict):
+                        chars += len(block.get("text", "")) or 8
+            # tool_calls / thinking round-trip add some tokens too.
+            if getattr(m, "reasoning_content", None):
+                chars += len(m.reasoning_content)
+        return max(1, chars // 4)
 
     @staticmethod
     def _serialize_message(msg) -> dict:
@@ -186,6 +233,19 @@ class AnthropicAdapter(BaseProviderAdapter):
 
         if msg.role == "assistant" and msg.tool_calls:
             blocks: list[dict] = []
+            # T5 — extended-thinking round-trip. Anthropic requires the
+            # original ``thinking`` block (with its ``signature``) to lead
+            # the assistant turn when interleaved thinking is replayed
+            # alongside ``tool_use`` on a continuation. Reconstruct it from
+            # the canonical Message fields when both are present. Without
+            # this the prior-turn thinking is lost and Anthropic rejects /
+            # silently drops the interleaved-thinking continuation.
+            _think = getattr(msg, "reasoning_content", None)
+            _sig = getattr(msg, "reasoning_signature", None)
+            if _think and _sig:
+                blocks.append(
+                    {"type": "thinking", "thinking": _think, "signature": _sig}
+                )
             if msg.content:
                 blocks.append({"type": "text", "text": msg.content})
             for tc in msg.tool_calls:
@@ -475,13 +535,21 @@ class AnthropicAdapter(BaseProviderAdapter):
                             reasoning_delta=thought, model=final_model
                         )
                 elif delta_type == "signature_delta":
-                    # Cryptographic signature attached to a thinking
-                    # block — required when round-tripping thinking
-                    # back to Anthropic on a follow-up call but has no
-                    # user-facing text. Deliberately dropped here;
-                    # T4-or-later work can persist signatures if we
-                    # ever need to replay thinking back upstream.
-                    continue
+                    # Cryptographic signature attached to a thinking block
+                    # (T5). Required to round-trip thinking back to Anthropic
+                    # on a tool-loop continuation; has no user-facing text.
+                    # Surface it on ``reasoning_signature`` (gated to a known
+                    # thinking block) so the response layer can hand it to a
+                    # client that manages its own tool loop. The SSE emitter
+                    # never prints it as content.
+                    idx = data.get("index", 0)
+                    if idx not in thinking_indices:
+                        continue
+                    sig = delta.get("signature") or ""
+                    if sig:
+                        yield ProviderStreamChunk(
+                            reasoning_signature=sig, model=final_model
+                        )
                 elif delta_type == "input_json_delta":
                     # Tool-use arguments stream as raw partial JSON
                     # fragments. We forward each fragment under

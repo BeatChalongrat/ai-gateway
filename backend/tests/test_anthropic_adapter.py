@@ -276,3 +276,116 @@ class TestAnthropicEdgeCases:
             _make_payload(), [Message(role="user", content="Hi")]
         )
         assert result.content == ""
+
+
+# --- T5: extended-thinking round-trip + context budget ----------------------
+
+from app.domain.routing import ModelCandidate  # noqa: E402
+from app.schemas.public import ReasoningConfig  # noqa: E402
+from app.services.providers.parsers import parse_anthropic_response  # noqa: E402
+
+
+def test_serialize_message_replays_thinking_block_with_signature():
+    """Assistant turn carrying reasoning_content + signature reconstructs the
+    leading ``thinking`` block before the ``tool_use`` block (T5)."""
+    msg = Message(
+        role="assistant",
+        content="Let me check the weather.",
+        reasoning_content="The user asked about weather; call the tool.",
+        reasoning_signature="sig-abc123",
+        tool_calls=[{
+            "id": "call_1", "type": "function",
+            "function": {"name": "get_weather", "arguments": '{"city":"Paris"}'},
+        }],
+    )
+    from app.services.providers.anthropic_adapter import AnthropicAdapter
+    serialized = AnthropicAdapter._serialize_message(msg)
+    blocks = serialized["content"]
+    assert blocks[0]["type"] == "thinking"
+    assert blocks[0]["thinking"] == "The user asked about weather; call the tool."
+    assert blocks[0]["signature"] == "sig-abc123"
+    # text + tool_use follow the thinking block
+    assert any(b["type"] == "tool_use" for b in blocks)
+
+
+def test_serialize_message_no_thinking_block_without_signature():
+    """Without a signature we cannot replay (Anthropic would reject); the
+    thinking block is omitted rather than sent unsigned."""
+    from app.services.providers.anthropic_adapter import AnthropicAdapter
+    msg = Message(
+        role="assistant",
+        content="hi",
+        reasoning_content="some thoughts",  # no signature
+        tool_calls=[{"id": "c1", "type": "function",
+                     "function": {"name": "f", "arguments": "{}"}}],
+    )
+    blocks = AnthropicAdapter._serialize_message(msg)["content"]
+    assert all(b["type"] != "thinking" for b in blocks)
+
+
+def test_parse_anthropic_response_extracts_signature():
+    data = {
+        "model": "claude-sonnet-4-20250514",
+        "content": [
+            {"type": "thinking", "thinking": "deep thought",
+             "signature": "sig-xyz"},
+            {"type": "text", "text": "The answer is 42."},
+        ],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 10, "output_tokens": 20},
+    }
+    r = parse_anthropic_response(data)
+    assert r.reasoning_content == "deep thought"
+    assert r.reasoning_signature == "sig-xyz"
+    assert r.content == "The answer is 42."
+
+
+def test_context_budget_caps_max_tokens_and_shrinks_budget(monkeypatch):
+    """A high thinking budget on a small-window model is clamped so
+    max_tokens fits the window and budget stays below max_tokens (T5)."""
+    from app.services.providers import anthropic_adapter as aa
+
+    def fake_get_candidate(model):
+        return ModelCandidate(
+            provider="anthropic", model=model,
+            supports_reasoning=True, reasoning_strategy="anthropic_adaptive_thinking",
+            max_context_tokens=8000,
+        )
+
+    monkeypatch.setattr(
+        "app.services.providers.model_registry.get_candidate", fake_get_candidate
+    )
+    payload = _make_payload(model="claude-sonnet-4-20250514")
+    payload.reasoning = ReasoningConfig(mode="high", show_summary=True)
+    body = aa.AnthropicAdapter()._build_body(
+        payload, [Message(role="user", content="hello")]
+    )
+    assert "thinking" in body
+    # max_tokens must not exceed the window, and budget stays strictly below.
+    assert body["max_tokens"] <= 8000
+    assert body["thinking"]["budget_tokens"] < body["max_tokens"]
+
+
+def test_context_budget_noop_when_window_unknown(monkeypatch):
+    """When the model's window is unknown (0), the guard is skipped and the
+    original budget+headroom bump stands."""
+    from app.services.providers import anthropic_adapter as aa
+
+    def fake_get_candidate(model):
+        return ModelCandidate(
+            provider="anthropic", model=model,
+            supports_reasoning=True, reasoning_strategy="anthropic_adaptive_thinking",
+            max_context_tokens=0,
+        )
+
+    monkeypatch.setattr(
+        "app.services.providers.model_registry.get_candidate", fake_get_candidate
+    )
+    payload = _make_payload(model="claude-sonnet-4-20250514")
+    payload.reasoning = ReasoningConfig(mode="high", show_summary=True)
+    body = aa.AnthropicAdapter()._build_body(
+        payload, [Message(role="user", content="hello")]
+    )
+    # budget high = 8192, padded to 8192+4096 since default max_tokens < budget
+    assert body["thinking"]["budget_tokens"] == 8192
+    assert body["max_tokens"] == 8192 + 4096
