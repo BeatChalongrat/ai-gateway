@@ -75,6 +75,15 @@ impl Detector for PhoneDetector {
             {
                 continue;
             }
+            // Reject trivial all-same-digit numbers (000-000-0000, …) —
+            // mirrors phone.py _emit. Sample/example numbers pass through.
+            let digits_only: String =
+                span_text.chars().filter(|c| c.is_ascii_digit()).collect();
+            if !digits_only.is_empty()
+                && digits_only.bytes().all(|b| b == digits_only.as_bytes()[0])
+            {
+                continue;
+            }
             let s = byte_to_char(text, m.start());
             let e = byte_to_char(text, m.end());
             if seen.insert((s, e)) {
@@ -90,13 +99,21 @@ impl Detector for PhoneDetector {
 
         // Branch 1b — Thai landlines
         for m in THAI_LANDLINE_RE.find_iter(text).flatten() {
+            let span_text = m.as_str();
+            let digits_only: String =
+                span_text.chars().filter(|c| c.is_ascii_digit()).collect();
+            if !digits_only.is_empty()
+                && digits_only.bytes().all(|b| b == digits_only.as_bytes()[0])
+            {
+                continue;
+            }
             let s = byte_to_char(text, m.start());
             let e = byte_to_char(text, m.end());
             if seen.insert((s, e)) {
                 out.push(RawMatch {
                     start: s,
                     end: e,
-                    matched_text: m.as_str().to_string(),
+                    matched_text: span_text.to_string(),
                     confidence: 1.0,
                     priority: 5,
                 });
@@ -117,11 +134,19 @@ impl Detector for PhoneDetector {
             let hi_b = char_to_byte(text, hi);
             let window = &text[lo_b..hi_b];
             if PHONE_CONTEXT_RE.is_match(window).unwrap_or(false) {
+                let span_text = m.as_str();
+                let digits_only: String =
+                    span_text.chars().filter(|c| c.is_ascii_digit()).collect();
+                if !digits_only.is_empty()
+                    && digits_only.bytes().all(|b| b == digits_only.as_bytes()[0])
+                {
+                    continue;
+                }
                 seen.insert((s_char, e_char));
                 out.push(RawMatch {
                     start: s_char,
                     end: e_char,
-                    matched_text: m.as_str().to_string(),
+                    matched_text: span_text.to_string(),
                     confidence: 1.0,
                     priority: 5,
                 });

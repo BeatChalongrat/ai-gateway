@@ -89,6 +89,44 @@ EVASION_CASES = [
 ]
 
 
+# Gap-coverage cases — one per remediated detector gap (the original
+# fixtures didn't exercise these, which is why the report's 95.4% was a
+# ceiling). The runner compares Python vs Rust on each; after the fix
+# both engines must agree. Category "gap".
+_GHP = "ghp_" + "a" * 36
+_GH_FINE = "github_pat_" + "A" * 82
+GAP_CASES = [
+    {"detector": "gap", "id": "tax_leading_zero_corporate",
+     "input": "เลขประจำตัวผู้เสียภาษี 0105558123456 ครับ"},
+    {"detector": "gap", "id": "tax_strong_prefix_checksum_invalid",
+     "input": "เลขประจำตัวผู้เสียภาษีบริษัทคือ 0105558123999"},
+    {"detector": "gap", "id": "tax_keyword_vat_registration",
+     "input": "vat registration 0994000123456 on file"},
+    {"detector": "gap", "id": "password_thai_prose",
+     "input": "รหัสผ่านคือ Secur3P@ssw0rd"},
+    {"detector": "gap", "id": "password_english_nosep",
+     "input": "username admin password Hunter2024!"},
+    {"detector": "gap", "id": "github_classic_pat",
+     "input": f"export GH_TOKEN={_GHP}"},
+    {"detector": "gap", "id": "github_finegrained_pat",
+     "input": f"token: {_GH_FINE}"},
+    {"detector": "gap", "id": "income_wage_english",
+     "input": "his wage 45000 baht per month"},
+    {"detector": "gap", "id": "income_salary_pronoun",
+     "input": "salary my 50000"},
+    {"detector": "gap", "id": "income_thai_kha_jang",
+     "input": "ค่าจ้าง 30000 ต่อเดือน"},
+    {"detector": "gap", "id": "dob_role_noun",
+     "input": "ลูกค้าเกิดวันที่ 12/05/1998 ครับ"},
+    {"detector": "gap", "id": "national_id_dashed_keyword",
+     "input": "บัตรประชาชน 1-2345-67890-12-3"},
+    {"detector": "gap", "id": "health_allergy_personal",
+     "input": "ผมมีโรคภูมิแพ้รุนแรง"},
+    {"detector": "gap", "id": "phone_all_same_digit_reject",
+     "input": "call us at 000-000-0000 anytime"},
+]
+
+
 def py_scan(registry, text):
     return sorted((m.detector_name, m.start, m.end)
                   for m in registry.scan_text(text))
@@ -113,6 +151,8 @@ async def main() -> None:
             cases.append((grp, c["id"], c["input"]))
     for c in EVASION_CASES:
         cases.append((c["detector"], c["id"], c["input"]))
+    for c in GAP_CASES:
+        cases.append((c["detector"], c["id"], c["input"]))
 
     # Per-group tally + global lists.
     from collections import defaultdict
@@ -130,6 +170,7 @@ async def main() -> None:
         d = json.load(open(fp, encoding="utf-8"))
         grp_cat[d["detector"]] = d.get("category", "?")
     grp_cat["evasion"] = "evasion"
+    grp_cat["gap"] = "gap"
 
     for grp, cid, text in cases:
         t0 = time.perf_counter()
