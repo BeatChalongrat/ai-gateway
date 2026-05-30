@@ -270,10 +270,17 @@ def check_tenant_access(auth: ResolvedApiKey, target_tenant_id: str) -> None:
 
 
 def get_portal_user(
+    request: Request = None,
     authorization: str | None = Header(default=None),
     session: Session = Depends(get_db_session),
 ):
-    """Resolve the caller to a PortalUserORM from a Bearer portal JWT.
+    """Resolve the caller to a PortalUserORM from a portal JWT.
+
+    Token source priority:
+      1. The ``portal_access_token`` HttpOnly cookie (browsers — set by
+         the backend on login/refresh).
+      2. ``Authorization: Bearer <jwt>`` header (non-browser API clients
+         / mobile / backward compat).
 
     Only accepts tokens minted by ``auth_service.create_portal_token``
     (signed with ``portal_jwt_secret`` and carrying ``type="portal"``).
@@ -286,11 +293,15 @@ def get_portal_user(
     """
     from app.models.portal_user import PortalUserORM
     from app.services.portal.auth_service import verify_portal_token
+    from app.services.portal.cookies import ACCESS_COOKIE
 
-    if not authorization or not authorization.startswith("Bearer "):
-        raise AuthenticationError("Missing or invalid authorization header")
-
-    token = authorization.removeprefix("Bearer ").strip()
+    # request is None only when called directly (unit tests); FastAPI
+    # always injects it for HTTP requests.
+    token = request.cookies.get(ACCESS_COOKIE) if request is not None else None
+    if not token:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise AuthenticationError("Missing or invalid authorization header")
+        token = authorization.removeprefix("Bearer ").strip()
     if not token:
         raise AuthenticationError("Missing or invalid authorization header")
 

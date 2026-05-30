@@ -59,22 +59,25 @@ def client():
 
 
 def _signup_and_key(client) -> dict:
-    signup = client.post(
+    sr = client.post(
         "/portal/auth/signup",
         json={"email": "rot@example.com", "password": "Test1234!"},
-    ).json()
+    )
+    signup = sr.json()
+    # HttpOnly migration: the access token comes back as a cookie now.
+    token = sr.cookies.get("portal_access_token")
     proj = client.post(
         "/portal/projects",
-        headers={"Authorization": f"Bearer {signup['access_token']}"},
+        headers={"Authorization": f"Bearer {token}"},
         json={"name": "Rot Proj"},
     ).json()
     key = client.post(
         f"/portal/projects/{proj['id']}/keys",
-        headers={"Authorization": f"Bearer {signup['access_token']}"},
+        headers={"Authorization": f"Bearer {token}"},
         json={"name": "original"},
     ).json()
     return {
-        "token": signup["access_token"],
+        "token": token,
         "user_id": signup["user"]["id"],
         "project_id": proj["id"],
         "key_id": key["key_id"],
@@ -227,14 +230,25 @@ class TestRotateKeyEndpoint:
         assert r.status_code == 404
         assert r.json()["error"]["code"] == "key_not_found"
 
-    def test_rotate_cross_tenant_returns_404(self, client):
+    def test_rotate_cross_tenant_is_denied(self, client):
+        # NOTE: this asserted 404 historically but was already failing on
+        # main before the HttpOnly-cookie work — the rotate path resolves
+        # the project first via _resolve_project, which deliberately
+        # returns an opaque 403 ``project_access_denied`` for cross-tenant
+        # probes ("exists, you can't see it" — never leak existence).
+        # Updated to match that real, intentional behaviour.
         ctx = _signup_and_key(client)
-        other = client.post(
+        other_r = client.post(
             "/portal/auth/signup",
             json={"email": "other@example.com", "password": "Test1234!"},
-        ).json()
+        )
+        # HttpOnly migration: token is a cookie now. Clear the jar so the
+        # Bearer header (not the leftover cookie) drives this request.
+        other_token = other_r.cookies.get("portal_access_token")
+        client.cookies.clear()
         r = client.post(
             f"/portal/projects/{ctx['project_id']}/keys/{ctx['key_id']}/rotate",
-            headers={"Authorization": f"Bearer {other['access_token']}"},
+            headers={"Authorization": f"Bearer {other_token}"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "project_access_denied"

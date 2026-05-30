@@ -436,14 +436,134 @@ def verify_email(db: Session, token: str) -> dict:
     return {"ok": True, "email": user.email}
 
 
-def refresh(db: Session, refresh_token: str) -> dict:
-    """Issue a new access token from a valid refresh token."""
+# ---------------------------------------------------------------------------
+# Refresh-token rotation (Auth overhaul Session 1.2)
+# ---------------------------------------------------------------------------
+#
+# Every refresh mints a NEW refresh token and retires the old one, so an
+# actively-used session is effectively immortal (each renew pushes the
+# 90-day ceiling out) while a stolen-and-replayed refresh token is caught.
+# State lives in Redis (no schema change):
+#
+#   portal_refresh_used:<jti>   marker that <jti> was already rotated.
+#                               TTL = the token's own remaining lifetime,
+#                               so it self-cleans. Reuse after this ->
+#                               401 refresh_reuse.
+#   portal_refresh_grace:<jti>  the freshly-minted token pair, kept 30s.
+#                               A second refresh of the same token within
+#                               the window (two tabs racing) gets the SAME
+#                               new pair back instead of a reuse error.
+#
+# Redis is treated as best-effort: if it's down, rotation protection is
+# skipped rather than locking users out (availability > strict replay
+# defence for a refresh endpoint).
+
+_REFRESH_USED_PREFIX = "portal_refresh_used:"
+_REFRESH_GRACE_PREFIX = "portal_refresh_grace:"
+_REFRESH_GRACE_SECONDS = 30
+
+
+def _seconds_until_exp(payload: dict) -> int:
+    exp = int(payload.get("exp", 0))
+    now = int(datetime.now(timezone.utc).timestamp())
+    # Floor at 60s so even a near-expired token blacklists briefly.
+    return max(60, exp - now)
+
+
+def _refresh_grace_get(redis_client, jti: str) -> dict | None:
+    try:
+        raw = redis_client.get(_REFRESH_GRACE_PREFIX + jti)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    import json
+
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def _refresh_grace_set(redis_client, jti: str, tokens: dict) -> None:
+    import json
+
+    try:
+        redis_client.set(
+            _REFRESH_GRACE_PREFIX + jti,
+            json.dumps(tokens, default=str),
+            ex=_REFRESH_GRACE_SECONDS,
+        )
+    except Exception:
+        pass
+
+
+def _refresh_is_used(redis_client, jti: str) -> bool:
+    try:
+        return bool(redis_client.exists(_REFRESH_USED_PREFIX + jti))
+    except Exception:
+        return False  # fail-open
+
+
+def _refresh_mark_used(redis_client, jti: str, ttl: int) -> None:
+    try:
+        redis_client.set(_REFRESH_USED_PREFIX + jti, "1", ex=ttl)
+    except Exception:
+        pass
+
+
+def refresh(db: Session, refresh_token: str, *, redis_client=None) -> dict:
+    """Rotate a refresh token: issue a NEW access + refresh pair.
+
+    Returns ``{access_token, refresh_token, user}`` so the route can set
+    both cookies. The old refresh token is retired (replay -> 401).
+
+    Raises ``AuthenticationError`` on expired/invalid token, wrong token
+    type, unknown/disabled user, or detected reuse (code
+    ``refresh_reuse``).
+    """
     payload = verify_portal_token(refresh_token)
     if payload.get("token_use") != "refresh":
         raise AuthenticationError("Not a refresh token.")
     user = db.get(PortalUserORM, payload["sub"])
     if user is None or user.status != "active":
         raise AuthenticationError("User not found or disabled.")
-    return {
-        "access_token": _mint_for_user(user, "access"),
-    }
+
+    jti = payload.get("jti")
+    if redis_client is not None and jti:
+        grace = _refresh_grace_get(redis_client, jti)
+        if grace is not None:
+            # Concurrent refresh (e.g. two tabs): hand back the same
+            # freshly-minted pair we issued moments ago.
+            return grace
+        if _refresh_is_used(redis_client, jti):
+            raise AuthenticationError(
+                "Refresh token has already been used.",
+                code="refresh_reuse",
+            )
+
+    tokens = _issue_tokens(user)
+
+    if redis_client is not None and jti:
+        _refresh_mark_used(redis_client, jti, _seconds_until_exp(payload))
+        _refresh_grace_set(redis_client, jti, tokens)
+
+    return tokens
+
+
+def revoke_refresh_token(refresh_token: str, *, redis_client=None) -> None:
+    """Blacklist a refresh token so it can never rotate again (logout).
+
+    Best-effort: a missing token, an already-invalid token, or a Redis
+    outage are all silently ignored — logout still clears the cookies on
+    the client either way.
+    """
+    if not refresh_token or redis_client is None:
+        return
+    try:
+        payload = verify_portal_token(refresh_token)
+    except AuthenticationError:
+        return  # already expired/invalid — nothing to revoke
+    jti = payload.get("jti")
+    if jti:
+        _refresh_mark_used(redis_client, jti, _seconds_until_exp(payload))

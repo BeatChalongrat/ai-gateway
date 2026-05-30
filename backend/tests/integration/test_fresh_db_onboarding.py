@@ -164,7 +164,8 @@ def test_fresh_db_signup_then_create_project_does_not_500(fresh_db):
             timeout=10.0,
         )
         assert signup.status_code == 200, signup.text
-        token = signup.json()["access_token"]
+        # HttpOnly migration: token is a Set-Cookie now, not a body field.
+        token = signup.cookies.get("portal_access_token")
         hdr = {"Authorization": f"Bearer {token}"}
 
         # 5. Create first project — the exact path that 500'd pre-fix.

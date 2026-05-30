@@ -87,7 +87,13 @@ def _signup(client, email: str) -> dict:
         json={"email": email, "password": "Test1234!"},
     )
     assert r.status_code == 200, r.text
-    return r.json()
+    body = r.json()
+    # HttpOnly migration: tokens are cookies. Capture, then clear the
+    # shared jar so multi-user tests auth via the explicit Bearer header.
+    body["access_token"] = r.cookies.get("portal_access_token")
+    body["refresh_token"] = r.cookies.get("portal_refresh_token")
+    client.cookies.clear()
+    return body
 
 
 def _auth(token: str) -> dict:
@@ -246,14 +252,19 @@ class TestCrossTenantProjectIsolation:
         finally:
             db.close()
 
-        member = client.post(
+        member_r = client.post(
             "/portal/auth/signup",
             json={
                 "email": "member@t.com",
                 "password": "Test1234!",
                 "invite_code": code,
             },
-        ).json()
+        )
+        member = member_r.json()
+        # HttpOnly migration: token is a cookie now. Clear the jar so the
+        # later owner-token calls aren't shadowed by the member cookie.
+        member["access_token"] = member_r.cookies.get("portal_access_token")
+        client.cookies.clear()
 
         r = client.post(
             "/portal/projects",
