@@ -23,6 +23,12 @@ import os
 import time
 from typing import Any
 
+from app.observability.metrics import (
+    RATE_LIMIT_FAIL_OPEN_TOTAL,
+    RATE_LIMIT_LUA_FALLBACK_TOTAL,
+    SIDECAR_FALLBACK_TOTAL,
+    SIDECAR_REQUEST_TOTAL,
+)
 from app.services._redis_pool import get_async_redis, run_sync
 
 
@@ -130,6 +136,10 @@ class RateLimitService:
                 exec_result = await exec_result
             _, count_before, _, _ = exec_result
         except Exception:
+            # Redis unreachable → fail open (admit UNLIMITED). Audit H6:
+            # make this visible so a Redis outage that disables the
+            # limiter is alertable, not silent.
+            RATE_LIMIT_FAIL_OPEN_TOTAL.inc()
             return {
                 "allowed": True,
                 "remaining": limit,
@@ -191,11 +201,23 @@ class RateLimitService:
                     RateLimiterUnavailable,
                 )
             except Exception:  # noqa: BLE001
+                SIDECAR_FALLBACK_TOTAL.labels(
+                    engine="rate_limiter", reason="unavailable"
+                ).inc()
+                SIDECAR_REQUEST_TOTAL.labels(
+                    engine="rate_limiter", status="fallback"
+                ).inc()
                 return await self._check_all_atomic(key_id, project_id, tenant_id)
 
             try:
                 client = RateLimiterClient.instance()
             except RateLimiterUnavailable:
+                SIDECAR_FALLBACK_TOTAL.labels(
+                    engine="rate_limiter", reason="unavailable"
+                ).inc()
+                SIDECAR_REQUEST_TOTAL.labels(
+                    engine="rate_limiter", status="fallback"
+                ).inc()
                 return await self._check_all_atomic(key_id, project_id, tenant_id)
 
             try:
@@ -213,7 +235,7 @@ class RateLimitService:
                     override = _perf_tenant_limit_override()
                     if override is not None:
                         tenant_limit = override
-                return await client.check_all(
+                result = await client.check_all(
                     key_id=key_id,
                     project_id=project_id,
                     tenant_id=tenant_id,
@@ -222,9 +244,19 @@ class RateLimitService:
                     tenant_limit=tenant_limit,
                     window_seconds=DEFAULT_WINDOW_SECONDS,
                 )
+                SIDECAR_REQUEST_TOTAL.labels(
+                    engine="rate_limiter", status="success"
+                ).inc()
+                return result
             except Exception:  # noqa: BLE001
                 # RPC error / timeout — fall back to the local engine
                 # so a sidecar incident cannot block the request path.
+                SIDECAR_FALLBACK_TOTAL.labels(
+                    engine="rate_limiter", reason="error"
+                ).inc()
+                SIDECAR_REQUEST_TOTAL.labels(
+                    engine="rate_limiter", status="fallback"
+                ).inc()
                 return await self._check_all_atomic(key_id, project_id, tenant_id)
 
         return await self._check_all_atomic(key_id, project_id, tenant_id)
@@ -272,6 +304,10 @@ class RateLimitService:
         try:
             return await self._check_all_lua(key_id, project_id, tenant_id)
         except Exception:  # noqa: BLE001
+            # Audit H8: the atomic Lua path errored → we drop to the
+            # NON-atomic sequential path (over-admission race possible).
+            # Count it so this silent correctness degradation is visible.
+            RATE_LIMIT_LUA_FALLBACK_TOTAL.inc()
             return await self._check_all_python(key_id, project_id, tenant_id)
 
     async def _check_all_lua(
