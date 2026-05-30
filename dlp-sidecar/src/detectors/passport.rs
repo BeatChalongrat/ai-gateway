@@ -55,6 +55,7 @@ impl Detector for PassportDetector {
                 matched_text: g.as_str().to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out

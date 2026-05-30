@@ -87,6 +87,7 @@ impl Detector for ReligionBeliefDetector {
                 matched_text: m.as_str().to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
 
@@ -114,6 +115,7 @@ fn merge_adjacent(mut matches: Vec<RawMatch>, text: &str) -> Vec<RawMatch> {
                 matched_text: span,
                 confidence: 1.0,
                 priority: prev.priority.max(m.priority),
+                entity_type: None,
             };
         } else {
             merged.push(m);

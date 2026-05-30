@@ -52,6 +52,7 @@ impl Detector for MacAddressDetector {
                 matched_text: value.to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out

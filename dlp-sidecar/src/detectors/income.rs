@@ -82,6 +82,7 @@ impl Detector for IncomeDetector {
                 matched_text: trimmed.to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out
