@@ -97,12 +97,20 @@ def _resolve_jwt_token(token: str, session: Session) -> ResolvedApiKey:
 
 def get_resolved_api_key(
     authorization: str | None = Header(default=None),
-    session: Session = Depends(get_db_session),
 ) -> ResolvedApiKey:
     """Validate Bearer token and return resolved identity.
 
     Accepts both API keys (gw_xxxx) and JWT tokens (eyJ...).
     Raises AuthenticationError (maps to 401) on any failure.
+
+    Track A: verification runs on a SHORT-LIVED sync session that closes
+    (releasing the pooled connection) the moment auth finishes — it is NOT
+    a ``Depends(get_db_session)`` session held for the whole request. The
+    pre-flip dependency held a sync connection through the ~1-3s provider
+    call, so peak concurrency was capped at the sync pool size (the A.6
+    benchmark caught this: a small sync pool exhausted under a concurrent
+    burst). A short-lived session keeps the sync pool tiny and removes the
+    auth connection-hold ceiling, mirroring the chat session's release.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise AuthenticationError("Missing or invalid authorization header")
@@ -111,22 +119,27 @@ def get_resolved_api_key(
     if not raw_key:
         raise AuthenticationError("Missing or invalid authorization header")
 
-    # JWT tokens start with "eyJ" (base64-encoded JSON header)
-    if raw_key.startswith("eyJ"):
-        return _resolve_jwt_token(raw_key, session)
+    with SessionLocal() as session:
+        # JWT tokens start with "eyJ" (base64-encoded JSON header)
+        if raw_key.startswith("eyJ"):
+            resolved = _resolve_jwt_token(raw_key, session)
+            session.commit()
+            return resolved
 
-    # Otherwise treat as API key (gw_xxxx)
-    api_key: ApiKeyORM | None = _api_key_service.verify_key(session, raw_key)
-    if api_key is None:
-        raise AuthenticationError("Invalid, expired, or revoked API key")
+        # Otherwise treat as API key (gw_xxxx)
+        api_key: ApiKeyORM | None = _api_key_service.verify_key(session, raw_key)
+        if api_key is None:
+            raise AuthenticationError("Invalid, expired, or revoked API key")
 
-    return ResolvedApiKey(
-        key_id=api_key.key_id,
-        tenant_id=api_key.tenant_id,
-        project_id=api_key.project_id,
-        key_prefix=api_key.key_prefix,
-        role=getattr(api_key, "role", "user"),
-    )
+        resolved = ResolvedApiKey(
+            key_id=api_key.key_id,
+            tenant_id=api_key.tenant_id,
+            project_id=api_key.project_id,
+            key_prefix=api_key.key_prefix,
+            role=getattr(api_key, "role", "user"),
+        )
+        session.commit()
+        return resolved
 
 
 def require_admin(
