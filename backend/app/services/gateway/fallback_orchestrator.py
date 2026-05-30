@@ -293,7 +293,7 @@ class FallbackOrchestrator:
             # even if it sits further down the chain.
             api_key: str | None = None
             if session is not None:
-                api_key = self.key_service.get_api_key(session, provider)
+                api_key = await self.key_service.get_api_key_async(session, provider)
             if not api_key:
                 attempts.append(
                     FallbackAttempt(

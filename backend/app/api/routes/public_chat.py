@@ -17,7 +17,9 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import ResolvedApiKey, check_tenant_access, get_db_session, get_resolved_api_key
+from app.core.db import get_async_db
 from app.core.config import settings
 from app.core.exceptions import (
     DLPViolationError,
@@ -48,7 +50,10 @@ from app.schemas.public import (
     FeedbackResponse,
 )
 from app.services.orchestrator import GatewayOrchestrator
-from app.services.policy.profile_service import get_runtime_profile
+from app.services.policy.profile_service import (
+    get_runtime_profile,
+    get_runtime_profile_async,
+)
 from app.services.policy.profiles import get_profile as get_runtime_profile_fallback
 from app.services.usage_service import _estimate_cost, _estimate_reasoning_cost
 
@@ -92,7 +97,7 @@ async def chat_completions(
     payload: ChatCompletionsRequest,
     response: Response,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
-    session: Session = Depends(get_db_session),
+    session: AsyncSession = Depends(get_async_db),
 ):
     orchestrator = GatewayOrchestrator()
 
@@ -141,8 +146,7 @@ async def chat_completions(
     # doesn't block the loop under concurrency. The request session is
     # released before the stream body; the end-of-stream log persist runs
     # on its own short-lived session.
-    ctx = await asyncio.to_thread(
-        orchestrator.resolve_streaming_context,
+    ctx = await orchestrator.resolve_streaming_context(
         auth=auth, payload=payload, session=session,
     )
 
@@ -154,7 +158,7 @@ async def chat_completions(
 
     profile_id = ctx.policy_profile_id or settings.dlp_default_profile
     profile = (
-        get_runtime_profile(session, profile_id)
+        await get_runtime_profile_async(session, profile_id)
         if session is not None
         else get_runtime_profile_fallback(profile_id)
     )
@@ -252,7 +256,7 @@ async def chat_completions(
             # input_masked is intentionally None here.
             if session is not None:
                 try:
-                    orchestrator.request_log_service.persist(
+                    await orchestrator.request_log_service.persist_async(
                         session,
                         RequestRecord(
                             request_id=ctx.request_id or "",
@@ -276,10 +280,10 @@ async def chat_completions(
                             ),
                         ),
                     )
-                    session.commit()
+                    await session.commit()
                 except Exception as exc:
                     log.warning("dlp_block_log_persist_failed", error=str(exc))
-            orchestrator.audit_service.record_blocked_request(
+            await orchestrator.audit_service.record_blocked_request_async(
                 ctx=ctx, enforcement=input_enforcement, direction="input"
             )
             # Raising here (before returning StreamingResponse) lets the
@@ -405,7 +409,7 @@ async def chat_completions(
         )
         if session is not None:
             try:
-                orchestrator.request_log_service.persist(
+                await orchestrator.request_log_service.persist_async(
                     session,
                     RequestRecord(
                         request_id=ctx.request_id or "",
@@ -442,7 +446,7 @@ async def chat_completions(
                 # api/deps.py:33-43 calls session.rollback() in its
                 # except branch when the violation propagates,
                 # which would otherwise discard the row.
-                session.commit()
+                await session.commit()
             except Exception as exc:
                 log.warning("guardrail_log_persist_failed", error=str(exc))
         raise GuardrailViolationError(
@@ -461,7 +465,7 @@ async def chat_completions(
         )
         openai_key = None
         if session is not None:
-            openai_key = orchestrator.provider_key_service.get_api_key(
+            openai_key = await orchestrator.provider_key_service.get_api_key_async(
                 session, "openai"
             )
         openai_key = openai_key or settings.openai_api_key
@@ -481,7 +485,7 @@ async def chat_completions(
             if mod_result.flagged:
                 if session is not None:
                     try:
-                        orchestrator.request_log_service.persist(
+                        await orchestrator.request_log_service.persist_async(
                             session,
                             RequestRecord(
                                 request_id=ctx.request_id or "",
@@ -518,7 +522,7 @@ async def chat_completions(
                         # Commit now — the ModerationViolationError raised
                         # below propagates through the dependency's except
                         # branch, which would otherwise roll this row back.
-                        session.commit()
+                        await session.commit()
                     except Exception:
                         # Logging failures must never mask the block.
                         pass
@@ -569,7 +573,7 @@ async def chat_completions(
         )
 
     # 4. Resolve provider API key.
-    provider_api_key = orchestrator.provider_key_service.get_api_key(
+    provider_api_key = await orchestrator.provider_key_service.get_api_key_async(
         session, route.provider_name
     )
     if not provider_api_key:
@@ -604,6 +608,13 @@ async def chat_completions(
     #       a multi-tenant deployment would call ``pick_factory(ctx)``
     #       to pick a read replica, sharded engine, or async driver.
     # Closes known-issues #6.
+    # Track A: the in-generator post-stream persist runs AFTER the request
+    # dep (async) session has closed AND after the SSE response — there is
+    # no provider call to release a connection from at that point (the H1
+    # win is the dep session closing BEFORE the stream body). So this stays
+    # a short-lived SYNC SessionLocal: it avoids running an async engine
+    # inside the SSE generator (which executes outside the request's event-
+    # loop context) and preserves the original, well-tested persist path.
     from app.core.db import SessionLocal as _SessionLocal
     log_session_factory = _SessionLocal
 
@@ -1254,7 +1265,12 @@ async def chat_completions(
                 # the time the generator runs (FastAPI's
                 # ``get_db_session`` finally-block fires as soon as the
                 # route handler returns ``StreamingResponse``).
-                _lookup_session = log_session_factory()
+                # ``select_streaming_candidate`` is sync; use a short-lived
+                # SYNC session for this rare streaming-fallback key lookup
+                # (the sync engine is retained for admin/portal/background)
+                # rather than cascading async into the selector.
+                from app.core.db import SessionLocal as _SyncSessionLocal
+                _lookup_session = _SyncSessionLocal()
                 try:
                     fb_candidate = fb_runner.select_streaming_candidate(
                         original_provider=_stream_original_provider,
