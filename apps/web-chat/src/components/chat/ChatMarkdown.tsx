@@ -118,9 +118,9 @@ function CitationPill({ filename }: { filename: string }) {
 }
 
 // buildComponents returns the react-markdown component overrides.
-// ``streaming`` flips CodeBlock out of its collapse behaviour: a code
-// block that grows past the collapse threshold mid-stream must NOT
-// fold away and hide the tokens still arriving.
+// ``streaming`` is forwarded to CodeBlock, which uses it to (a) keep a
+// growing code block from collapsing mid-stream and (b) hold back
+// Mermaid diagram rendering until the source is complete.
 function buildComponents(streaming: boolean): Components {
   return {
     a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
@@ -132,7 +132,7 @@ function buildComponents(streaming: boolean): Components {
       return <a {...props} target="_blank" rel="noopener noreferrer" />;
     },
     pre: (props: { children?: React.ReactNode }) => (
-      <CodeBlock {...props} disableCollapse={streaming} />
+      <CodeBlock {...props} streaming={streaming} />
     ),
   };
 }

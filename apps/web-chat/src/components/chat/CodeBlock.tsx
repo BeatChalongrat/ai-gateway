@@ -16,6 +16,8 @@
 import { Children, isValidElement, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import { MermaidDiagram } from "./MermaidDiagram";
+
 interface CodeChildProps {
   className?: string;
   children?: ReactNode;
@@ -23,9 +25,12 @@ interface CodeChildProps {
 
 interface PreProps {
   children?: ReactNode;
-  /** Force-disable the >30-line collapse. Used while streaming so a
-   *  growing code block doesn't fold away and hide arriving tokens. */
-  disableCollapse?: boolean;
+  /** True while the owning message is still streaming. Two effects:
+   *  (1) disables the >30-line collapse so a growing block doesn't fold
+   *  away and hide arriving tokens; (2) holds back Mermaid rendering —
+   *  partial diagram source is invalid, so we show it as a normal code
+   *  block until the turn completes. */
+  streaming?: boolean;
 }
 
 const LANG_RE = /language-([a-zA-Z0-9_+-]+(?::[^\s]+)?)/;
@@ -37,7 +42,7 @@ const LANG_RE = /language-([a-zA-Z0-9_+-]+(?::[^\s]+)?)/;
 const COLLAPSE_THRESHOLD_LINES = 30;
 const COLLAPSE_VISIBLE_LINES = 20;
 
-export function CodeBlock({ children, disableCollapse }: PreProps) {
+export function CodeBlock({ children, streaming }: PreProps) {
   const codeChild = findCodeChild(children);
   const className = codeChild?.props.className ?? "";
   const langMatch = LANG_RE.exec(className);
@@ -45,8 +50,16 @@ export function CodeBlock({ children, disableCollapse }: PreProps) {
   const { label, lang } = parseLanguageTag(rawTag);
 
   const codeText = extractText(codeChild?.props.children);
+
+  // Mermaid: render the diagram once the message has completed. During
+  // streaming the source is incomplete/invalid, so fall through to the
+  // normal code-block render and only swap to the diagram on complete.
+  if (lang === "mermaid" && !streaming && codeText.trim()) {
+    return <MermaidDiagram code={codeText} />;
+  }
+
   const lineCount = codeText.replace(/\n$/, "").split("\n").length;
-  const canCollapse = !disableCollapse && lineCount > COLLAPSE_THRESHOLD_LINES;
+  const canCollapse = !streaming && lineCount > COLLAPSE_THRESHOLD_LINES;
 
   const [expanded, setExpanded] = useState(false);
   const collapsed = canCollapse && !expanded;
