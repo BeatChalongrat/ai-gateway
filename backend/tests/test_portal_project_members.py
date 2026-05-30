@@ -72,7 +72,13 @@ def _signup(client, email: str, invite: str | None = None) -> dict:
         body["invite_code"] = invite
     r = client.post("/portal/auth/signup", json=body)
     assert r.status_code == 200, r.text
-    return r.json()
+    out = r.json()
+    # HttpOnly migration: tokens are cookies. Capture, then clear the
+    # shared jar so multi-user tests auth via the explicit Bearer header.
+    out["access_token"] = r.cookies.get("portal_access_token")
+    out["refresh_token"] = r.cookies.get("portal_refresh_token")
+    client.cookies.clear()
+    return out
 
 
 def _auth(token: str) -> dict:

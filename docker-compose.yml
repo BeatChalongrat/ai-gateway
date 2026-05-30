@@ -265,7 +265,16 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+      # 3000=admin-ui, 3001=portal, 3002=web-chat. allow_credentials=True
+      # requires explicit origins (no "*"), and web-chat (:3002) now calls
+      # the gateway directly for silent refresh, so it must be listed.
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      # Portal auth cookies (HttpOnly migration). Empty domain = host-only
+      # (localhost shares across ports in dev). AUTH_COOKIE_SECURE unset =
+      # auto (off in dev, on in prod). docker-compose.prod.yml sets the
+      # parent domain + Secure=true.
+      AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
+      AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
       # The portal origin the user browses to. Verification links,
       # password-reset links, and invite-link emails are stamped with
       # this host — mismatched value = dead links in email.

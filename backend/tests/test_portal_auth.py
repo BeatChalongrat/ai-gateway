@@ -73,8 +73,11 @@ def test_signup_grants_free_trial_tokens_from_settings(client):
     assert body["user"]["email"] == "a@test.com"
     assert body["user"]["credit_balance"] == 100000
     assert body["user"]["plan"] == "free_trial"
-    assert body["access_token"]
-    assert body["refresh_token"]
+    # HttpOnly cookie migration: tokens travel in cookies, NOT the body.
+    assert "access_token" not in body
+    assert "refresh_token" not in body
+    assert r.cookies.get("portal_access_token")
+    assert r.cookies.get("portal_refresh_token")
 
 
 def test_signup_duplicate_email_returns_409(client):
@@ -110,7 +113,7 @@ def test_signup_disabled_returns_400(client):
     assert body["error"]["code"] == "signup_disabled"
 
 
-def test_login_success_returns_tokens(client):
+def test_login_success_sets_cookies(client):
     client.post(
         "/portal/auth/signup",
         json={"email": "l@test.com", "password": "Test1234!"},
@@ -121,9 +124,15 @@ def test_login_success_returns_tokens(client):
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["access_token"]
-    assert body["refresh_token"]
     assert body["user"]["email"] == "l@test.com"
+    # Tokens are HttpOnly cookies now, not body fields.
+    assert "access_token" not in body
+    assert r.cookies.get("portal_access_token")
+    assert r.cookies.get("portal_refresh_token")
+    # Cookie auth: the session cookie alone authenticates /portal/me.
+    me = client.get("/portal/me")
+    assert me.status_code == 200, me.text
+    assert me.json()["email"] == "l@test.com"
 
 
 def test_login_wrong_password_returns_401(client):
@@ -144,7 +153,7 @@ def test_portal_token_cannot_access_admin_routes(client):
         "/portal/auth/signup",
         json={"email": "pt@test.com", "password": "Test1234!"},
     )
-    portal_tok = r.json()["access_token"]
+    portal_tok = r.cookies.get("portal_access_token")
 
     # /admin/system-settings is gated by require_admin — which is
     # overridden to MOCK_AUTH in conftest. To actually test portal-token
@@ -184,3 +193,57 @@ def test_admin_token_cannot_access_portal_me(client):
         "/portal/me", headers={"Authorization": f"Bearer {admin_tok}"}
     )
     assert r.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Auth overhaul Session 1 — cookie / refresh-rotation / logout contract
+# ---------------------------------------------------------------------------
+
+
+def _signup(client, email):
+    r = client.post(
+        "/portal/auth/signup", json={"email": email, "password": "Test1234!"}
+    )
+    assert r.status_code == 200, r.text
+    return r
+
+
+def test_refresh_rotates_cookies_and_sets_new_pair(client):
+    _signup(client, "rot@test.com")
+    first_refresh = client.cookies.get("portal_refresh_token")
+
+    r = client.post("/portal/auth/refresh")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # No tokens in body; new cookies issued.
+    assert "access_token" not in body
+    assert r.cookies.get("portal_access_token")
+    new_refresh = r.cookies.get("portal_refresh_token")
+    assert new_refresh, "refresh must rotate (new refresh cookie set)"
+    # Rotation: the refresh token changed.
+    assert new_refresh != first_refresh
+    # The rotated session still authenticates /portal/me.
+    assert client.get("/portal/me").status_code == 200
+
+
+def test_refresh_without_cookie_returns_401_and_clears(client):
+    # Fresh client, no session cookie at all.
+    from fastapi.testclient import TestClient
+
+    bare = TestClient(app)
+    r = bare.post("/portal/auth/refresh")
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "missing_refresh_token"
+
+
+def test_logout_clears_cookies(client):
+    _signup(client, "out@test.com")
+    assert client.get("/portal/me").status_code == 200
+
+    r = client.post("/portal/auth/logout")
+    assert r.status_code == 200
+    # delete_cookie emits an expiring Set-Cookie; the client jar drops it.
+    assert not client.cookies.get("portal_access_token")
+    assert not client.cookies.get("portal_refresh_token")
+    # Without the cookie, /portal/me is unauthorized.
+    assert client.get("/portal/me").status_code == 401

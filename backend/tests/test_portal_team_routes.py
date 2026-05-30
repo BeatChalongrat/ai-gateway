@@ -77,7 +77,13 @@ def _signup(client, email: str, **kwargs) -> dict:
         json={"email": email, "password": "Test1234!", **kwargs},
     )
     assert r.status_code == 200, r.text
-    return r.json()
+    body = r.json()
+    # HttpOnly migration: tokens are cookies. Capture, then clear the
+    # shared jar so multi-user tests auth via the explicit Bearer header.
+    body["access_token"] = r.cookies.get("portal_access_token")
+    body["refresh_token"] = r.cookies.get("portal_refresh_token")
+    client.cookies.clear()
+    return body
 
 
 def _auth(token: str) -> dict:
@@ -319,10 +325,14 @@ class TestRedeemEndpoint:
         ).json()
         # Orphaned member's old token has a stale token_version now
         # (bumped by the removal). Log in fresh.
-        fresh = client.post(
+        fresh_r = client.post(
             "/portal/auth/login",
             json={"email": "m@t.com", "password": "Test1234!"},
-        ).json()
+        )
+        fresh = fresh_r.json()
+        # HttpOnly migration: token is a cookie now.
+        fresh["access_token"] = fresh_r.cookies.get("portal_access_token")
+        client.cookies.clear()
         r = client.post(
             "/portal/team/redeem",
             headers=_auth(fresh["access_token"]),

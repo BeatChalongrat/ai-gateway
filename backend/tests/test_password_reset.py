@@ -513,5 +513,5 @@ class TestFullFlowIntegration:
             json={"email": "e2e@example.com", "password": "ShinyNew1234"},
         )
         assert r_new.status_code == 200
-        tokens = r_new.json()
-        assert "access_token" in tokens
+        # HttpOnly migration: login issues the session as cookies, not body.
+        assert r_new.cookies.get("portal_access_token")
