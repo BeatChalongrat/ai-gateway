@@ -92,6 +92,68 @@ def _flatten_content(content: Any) -> str:
     return "" if content is None else str(content)
 
 
+# ---------------------------------------------------------------------------
+# NER post-pass (re-audit H11)
+# ---------------------------------------------------------------------------
+# The Rust sidecar ports only the regex/heuristic detectors; Presidio NER
+# (PERSON/LOCATION/ORGANIZATION/GPE/NRP) is Python-only and was being
+# silently dropped whenever DLP_ENGINE=rust. To keep the rust client a
+# faithful mirror of ``DetectorRegistry`` (its stated contract), we run a
+# presidio-ONLY registry as a post-pass and merge its findings. Reusing the
+# registry's ``scan_text`` / ``scan_messages`` means we inherit the exact
+# preprocessing, offset-remap, language handling, system-message filtering,
+# and the NER false-positive filters — no reimplementation, no drift.
+
+_NER_REGISTRY: Any | None = None
+
+
+def _ner_registry() -> Any:
+    """Lazily build a registry containing ONLY ``presidio_ner``."""
+    global _NER_REGISTRY
+    if _NER_REGISTRY is None:
+        from app.services.dlp.detectors.registry import DetectorRegistry
+        from app.services.dlp.detectors.presidio_ner import PresidioDetector
+
+        reg = DetectorRegistry()
+        reg.register(PresidioDetector())
+        _NER_REGISTRY = reg
+    return _NER_REGISTRY
+
+
+def _ner_scan_text_sync(
+    text: str, language: str, disabled: list[str]
+) -> list[DetectionMatch]:
+    """Run the NER-only registry over one text (blocking — call via
+    ``to_thread``). Returns [] if NER is disabled or the analyzer no-ops."""
+    if "presidio_ner" in disabled:
+        return []
+    try:
+        return list(_ner_registry().scan_text(text, language=language))
+    except Exception as exc:  # noqa: BLE001 — NER must never break the scan
+        logger.warning("dlp_rust_ner_postpass_failed", error=str(exc)[:200])
+        return []
+
+
+def _ner_scan_messages_sync(
+    messages: list["Message"],
+    *,
+    scan_system_messages: bool,
+    disabled: list[str],
+) -> list[DetectionMatch]:
+    """Run the NER-only registry over messages (blocking — call via
+    ``to_thread``). Mirrors ``DetectorRegistry.scan_messages`` semantics."""
+    if "presidio_ner" in disabled:
+        return []
+    try:
+        res = _ner_registry().scan_messages(
+            messages, scan_system_messages=scan_system_messages
+        )
+        return list(res.matches)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("dlp_rust_ner_postpass_failed", error=str(exc)[:200])
+        return []
+
+
 class RustDlpClient:
     """Process-singleton gRPC client. One channel per process."""
 
@@ -291,6 +353,18 @@ class RustDlpClient:
             logger.warning("dlp_rust_rpc_unexpected", error=str(exc)[:200])
             return None
 
+        # NER post-pass (H11) — see scan_text. Merged into the per-message
+        # regex findings; the NER registry applies the same per-message
+        # offsets + system-message filtering so the combined list matches
+        # what the Python registry would have produced.
+        if ner_enabled and settings.dlp_ner_on_rust_path:
+            all_matches = all_matches + await asyncio.to_thread(
+                _ner_scan_messages_sync,
+                messages,
+                scan_system_messages=scan_system_messages,
+                disabled=disabled,
+            )
+
         return DetectionResult(
             matches=sorted(all_matches, key=lambda m: (m.start, m.end)),
             scanned_direction=direction,
@@ -338,6 +412,16 @@ class RustDlpClient:
         except Exception as exc:  # noqa: BLE001
             logger.warning("dlp_rust_rpc_unexpected", error=str(exc)[:200])
             return None
+
+        # NER post-pass (H11): Rust has no NER port, so run the Python
+        # presidio_ner detector and merge — keeps DLP_ENGINE=rust from
+        # silently dropping PERSON/LOCATION/… coverage. Skipped when the
+        # caller turned NER off (e.g. the parity gate) or the operator
+        # disabled the post-pass.
+        if ner_enabled and settings.dlp_ner_on_rust_path:
+            matches = matches + await asyncio.to_thread(
+                _ner_scan_text_sync, text, language, list(disabled_detectors or [])
+            )
 
         return DetectionResult(
             matches=sorted(matches, key=lambda m: (m.start, m.end)),
