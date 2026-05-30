@@ -125,15 +125,20 @@ func RequireAuth(
 }
 
 func extractToken(r *http.Request) (string, error) {
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		return strings.TrimPrefix(h, "Bearer "), nil
-	}
-	// Browser-side fallback: the Portal mirrors the access token to
-	// a ``portal_access_token`` cookie (Path=/, SameSite=Lax) that
-	// shares across localhost ports. Server-rendered pages that hit
-	// chat-edge via SSR can rely on this without JS.
+	// Cookie-first, matching the FastAPI ``get_portal_user`` contract.
+	// Post-HttpOnly-migration the browser holds the access token in the
+	// ``portal_access_token`` HttpOnly cookie (Path=/, SameSite=Lax),
+	// shared across localhost ports; JS can't read it, so EventSource /
+	// fetch rely on the cookie travelling automatically. SSE in
+	// particular can't set an Authorization header, which is exactly why
+	// cookie auth is the primary path here.
 	if c, err := r.Cookie("portal_access_token"); err == nil && c.Value != "" {
 		return c.Value, nil
+	}
+	// Fallback: ``Authorization: Bearer <jwt>`` for non-browser API
+	// clients (mobile / server-to-server) that can't use cookies.
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer "), nil
 	}
 	return "", errors.New("no token")
 }

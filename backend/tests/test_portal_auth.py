@@ -236,6 +236,28 @@ def test_refresh_without_cookie_returns_401_and_clears(client):
     assert r.json()["error"]["code"] == "missing_refresh_token"
 
 
+def test_token_version_bump_invalidates_refresh(client):
+    """A token_version bump (e.g. password reset) must stop old sessions
+    from rotating — the security choke point lives in refresh()."""
+    _signup(client, "ver@test.com")
+    # Bump the user's token_version out from under the live refresh token.
+    db = _Session()
+    try:
+        u = db.query(PortalUserORM).filter(
+            PortalUserORM.email == "ver@test.com"
+        ).one()
+        u.token_version = (u.token_version or 1) + 1
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post("/portal/auth/refresh")
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "token_version_stale"
+    # Cookies cleared so the dead session stops re-sending.
+    assert not client.cookies.get("portal_refresh_token")
+
+
 def test_logout_clears_cookies(client):
     _signup(client, "out@test.com")
     assert client.get("/portal/me").status_code == 200

@@ -529,6 +529,22 @@ def refresh(db: Session, refresh_token: str, *, redis_client=None) -> dict:
     if user is None or user.status != "active":
         raise AuthenticationError("User not found or disabled.")
 
+    # token_version is enforced HERE, at the rotation choke point, so a
+    # password reset (which bumps the version) actually terminates every
+    # other session: their old refresh token can no longer mint a new
+    # access token, and their current access token expires within the
+    # hour. This keeps the Go chat-edge verifier stateless — it never
+    # needs to look up the live version (its access token is short-lived
+    # and rotation is gated here). Same absent-claim semantics as
+    # deps.get_portal_user: a token with no version claim is version 0.
+    observed_version = payload.get("token_version")
+    observed_version = observed_version if observed_version is not None else 0
+    if observed_version != (user.token_version or 1):
+        raise AuthenticationError(
+            "Session is no longer valid. Please log in again.",
+            code="token_version_stale",
+        )
+
     jti = payload.get("jti")
     if redis_client is not None and jti:
         grace = _refresh_grace_get(redis_client, jti)
