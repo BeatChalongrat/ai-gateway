@@ -33,6 +33,36 @@ pub const DEFAULT_PROJECT_LIMIT: i32 = 300;
 pub const DEFAULT_TENANT_LIMIT: i32 = 1000;
 pub const DEFAULT_WINDOW_SECONDS: i32 = 60;
 
+/// Atomic all-or-nothing sliding-window check across the 3 scopes in a
+/// single Redis EVAL — byte-identical to the Python
+/// ``_CHECK_ALL_LUA``. The decision is computed from the ZCARDs BEFORE
+/// any ZADD, and ZADD happens only when allowed, so concurrent bursts
+/// cannot over-admit (Redis runs the script single-threaded). KEYS are
+/// parameterised for Redis-Cluster compatibility.
+///   KEYS[1..3] = rl:key, rl:proj, rl:tenant
+///   ARGV       = now, cutoff, key_limit, proj_limit, tenant_limit, expire, member
+///   returns    = {denied(0|1|2|3), c1, c2, c3, rem1, rem2, rem3}
+const CHECK_ALL_LUA: &str = r#"
+local cutoff = ARGV[2]
+local l1 = tonumber(ARGV[3]); local l2 = tonumber(ARGV[4]); local l3 = tonumber(ARGV[5])
+local expire = tonumber(ARGV[6]); local member = ARGV[7]
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, cutoff); local c1 = redis.call('ZCARD', KEYS[1])
+redis.call('ZREMRANGEBYSCORE', KEYS[2], 0, cutoff); local c2 = redis.call('ZCARD', KEYS[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[3], 0, cutoff); local c3 = redis.call('ZCARD', KEYS[3])
+local denied = 0
+if c1 >= l1 then denied = 1 elseif c2 >= l2 then denied = 2 elseif c3 >= l3 then denied = 3 end
+if denied == 0 then
+  redis.call('ZADD', KEYS[1], ARGV[1], member); redis.call('EXPIRE', KEYS[1], expire)
+  redis.call('ZADD', KEYS[2], ARGV[1], member); redis.call('EXPIRE', KEYS[2], expire)
+  redis.call('ZADD', KEYS[3], ARGV[1], member); redis.call('EXPIRE', KEYS[3], expire)
+end
+local add = 0; if denied == 0 then add = 1 end
+local r1 = l1 - c1 - add; if r1 < 0 then r1 = 0 end
+local r2 = l2 - c2 - add; if r2 < 0 then r2 = 0 end
+local r3 = l3 - c3 - add; if r3 < 0 then r3 = 0 end
+return {denied, c1, c2, c3, r1, r2, r3}
+"#;
+
 /// Per-scope outcome of one check. Maps 1:1 to the proto
 /// ``ScopeResult`` — kept Rust-side to keep this module decoupled
 /// from the generated code.
@@ -167,11 +197,10 @@ impl SlidingWindow {
         matches!(r, Ok(ref s) if s == "PONG")
     }
 
-    /// Three-scope check — runs the per-scope ZSET pipelines in
-    /// parallel via ``tokio::join!`` and AND-aggregates the result.
-    ///
-    /// Scope labels match the Python service so the gateway's error
-    /// response shape (``details.scope``) stays identical.
+    /// Three-scope check — ATOMIC via a single Lua EVAL (all-or-nothing).
+    /// No over-admission race: the decision is made from the ZCARDs
+    /// before any ZADD, and ZADD only fires when allowed. Fail-open on
+    /// any Redis error. Scope labels match the Python service.
     pub async fn check_all(
         &self,
         key_id: &str,
@@ -182,30 +211,99 @@ impl SlidingWindow {
         tenant_limit: i32,
         window_sec: i32,
     ) -> (Vec<ScopeOutcome>, bool, String) {
+        let l1 = effective_limit("api_key", key_limit);
+        let l2 = effective_limit("project", project_limit);
+        let l3 = effective_limit("tenant", tenant_limit);
+        let window_sec = if window_sec <= 0 {
+            DEFAULT_WINDOW_SECONDS
+        } else {
+            window_sec
+        };
         let key_key = format!("rl:key:{}", key_id);
         let proj_key = format!("rl:proj:{}", project_id);
         let tenant_key = format!("rl:tenant:{}", tenant_id);
+        let scopes = ["api_key", "project", "tenant"];
+        let limits = [l1, l2, l3];
 
-        let (k, p, t) = tokio::join!(
-            self.check_scope("api_key", &key_key, key_limit, window_sec),
-            self.check_scope("project", &proj_key, project_limit, window_sec),
-            self.check_scope("tenant", &tenant_key, tenant_limit, window_sec),
-        );
-
-        let allowed = k.allowed && p.allowed && t.allowed;
-        // First-denied wins the ``denied_scope`` label — match the
-        // Python service's evaluation order (key → project → tenant).
-        let denied_scope = if !k.allowed {
-            "api_key".to_string()
-        } else if !p.allowed {
-            "project".to_string()
-        } else if !t.allowed {
-            "tenant".to_string()
-        } else {
-            String::new()
+        let fail_open = || {
+            (
+                vec![
+                    ScopeOutcome::fail_open("api_key", l1, window_sec),
+                    ScopeOutcome::fail_open("project", l2, window_sec),
+                    ScopeOutcome::fail_open("tenant", l3, window_sec),
+                ],
+                true,
+                String::new(),
+            )
         };
 
-        (vec![k, p, t], allowed, denied_scope)
+        let mut conn = match self.pool.get().await {
+            Ok(c) => c,
+            Err(e) => {
+                metrics::redis_errors_total().inc();
+                warn!(error = ?e, "redis pool get failed; failing open");
+                return fail_open();
+            }
+        };
+
+        let now_f = unix_now_f64();
+        let cutoff = now_f - window_sec as f64;
+        let member = format!("{:.6}:{}", now_f, monotonic_nanos());
+
+        let script = redis::Script::new(CHECK_ALL_LUA);
+        let res: redis::RedisResult<Vec<i64>> = script
+            .key(&key_key)
+            .key(&proj_key)
+            .key(&tenant_key)
+            .arg(format!("{:.6}", now_f))
+            .arg(format!("{:.6}", cutoff))
+            .arg(l1)
+            .arg(l2)
+            .arg(l3)
+            .arg(window_sec + 1)
+            .arg(&member)
+            .invoke_async(&mut *conn)
+            .await;
+
+        let out = match res {
+            Ok(v) if v.len() == 7 => v,
+            Ok(_) | Err(_) => {
+                metrics::redis_errors_total().inc();
+                warn!("rate-limit EVAL failed; failing open");
+                return fail_open();
+            }
+        };
+
+        let denied = out[0];
+        let counts = [out[1], out[2], out[3]];
+        let rems = [out[4], out[5], out[6]];
+        let reset_at = unix_now_seconds() + window_sec as i64;
+
+        let mut outcomes = Vec::with_capacity(3);
+        for i in 0..3 {
+            let scope_allowed = counts[i] < limits[i] as i64;
+            if scope_allowed {
+                metrics::allowed_total(scopes[i]).inc();
+            } else {
+                metrics::denied_total(scopes[i]).inc();
+            }
+            outcomes.push(ScopeOutcome {
+                allowed: scope_allowed,
+                remaining: rems[i] as i32,
+                reset_at,
+                limit: limits[i],
+                scope: scopes[i].to_string(),
+            });
+        }
+
+        let allowed = denied == 0;
+        let denied_scope = if denied == 0 {
+            String::new()
+        } else {
+            scopes[(denied - 1) as usize].to_string()
+        };
+
+        (outcomes, allowed, denied_scope)
     }
 }
 
