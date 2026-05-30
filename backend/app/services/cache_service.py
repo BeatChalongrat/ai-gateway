@@ -19,6 +19,7 @@ import json
 import orjson
 from typing import Any
 
+from app.core.serialization import orjson_default
 from app.services._redis_pool import get_async_redis, run_sync
 
 
@@ -145,7 +146,15 @@ class CacheService:
                 client.setex(
                     self._key(model, messages, project_id, api_key_id),
                     ttl or self.default_ttl,
-                    orjson.dumps(response).decode("utf-8"),
+                    # Re-audit L2: match the OPT_NON_STR_KEYS + default=
+                    # contract used by UTF8JSONResponse so a cached body
+                    # with int keys / Decimal / set / etc. round-trips
+                    # instead of raising at cache-write time.
+                    orjson.dumps(
+                        response,
+                        option=orjson.OPT_NON_STR_KEYS,
+                        default=orjson_default,
+                    ).decode("utf-8"),
                 )
             )
         except Exception:
@@ -243,7 +252,11 @@ class CacheService:
             self._fake_client.setex(
                 self._key(model, messages, project_id, api_key_id),
                 ttl or self.default_ttl,
-                orjson.dumps(response).decode("utf-8"),
+                orjson.dumps(
+                    response,
+                    option=orjson.OPT_NON_STR_KEYS,
+                    default=orjson_default,
+                ).decode("utf-8"),
             )
         except Exception:
             pass
