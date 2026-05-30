@@ -196,6 +196,18 @@ class ChatCompletionsResponse(BaseModel):
     reasoning_content: Optional[str] = None
     reasoning_tokens: Optional[int] = None
 
+    # Reasoning downgrade signal (P0). When the caller requested reasoning
+    # (``ReasoningConfig.mode != 'off'``) but the request resolved to a
+    # non-reasoning model — because no reasoning-capable model was available
+    # after routing/policy filtering — we DO NOT silently drop the intent:
+    # ``reasoning_downgraded=True`` plus a human-readable
+    # ``reasoning_downgrade_reason`` tell the caller the answer was produced
+    # without reasoning. Both default to None and are dropped from the wire
+    # (``response_model_exclude_none``) on the normal path, so existing
+    # callers see no new fields.
+    reasoning_downgraded: Optional[bool] = None
+    reasoning_downgrade_reason: Optional[str] = None
+
 
 class FeedbackRequest(BaseModel):
     """Rating for a prior response, linked by request_id."""

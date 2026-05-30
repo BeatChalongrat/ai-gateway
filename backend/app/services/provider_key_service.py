@@ -235,6 +235,29 @@ class ProviderKeyService:
         ).scalars().all()
         return set(rows)
 
+    async def providers_with_valid_keys_async(
+        self, session: AsyncSession
+    ) -> set[str]:
+        """Async variant of :meth:`providers_with_valid_keys`.
+
+        Used by the reasoning-aware router (P0) to prefer reasoning models
+        whose provider has a callable key, so ``auto`` + reasoning doesn't
+        elect a keyless reasoning model as the primary and dead-end on the
+        provider-key check. Returns the empty set on any error so the
+        caller can fall back to best-effort (unfiltered) reasoning routing.
+        """
+        rows = (
+            await session.execute(
+                select(ProviderKeyORM.provider_name)
+                .where(
+                    ProviderKeyORM.is_active.is_(True),
+                    ProviderKeyORM.last_test_status == "valid",
+                )
+                .distinct()
+            )
+        ).scalars().all()
+        return set(rows)
+
     # ------------------------------------------------------------------
     # Multi-key CRUD
     # ------------------------------------------------------------------

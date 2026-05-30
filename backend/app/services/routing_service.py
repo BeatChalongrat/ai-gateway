@@ -255,6 +255,21 @@ class RoutingService:
                 requires_vision=request.requires_vision,
                 requires_tools=request.requires_tools,
             )
+            # Prefer reasoning models on a provider that actually has a
+            # callable key (P0). Without this the pool's cost sort can elect
+            # a cheap reasoning model whose provider has no key (e.g. Groq
+            # R1-distill) as the primary, and the request dead-ends on the
+            # provider-key check with no fallback. Soft filter: only applied
+            # when it leaves a non-empty pool, so deployments that never
+            # validate keys (empty ``configured_providers``) keep best-effort
+            # behaviour and the downgrade signal still fires if nothing fits.
+            if reasoning_pool and request.configured_providers:
+                keyed = [
+                    c for c in reasoning_pool
+                    if c.provider in request.configured_providers
+                ]
+                if keyed:
+                    reasoning_pool = keyed
             if reasoning_pool:
                 reasoning_pool.sort(
                     key=lambda c: _score_candidate(
@@ -439,6 +454,14 @@ class RoutingService:
 
         caps = detect_required_capabilities(payload)
 
+        # Reasoning-aware key filter (P0). Populated by the orchestrator's
+        # router chain only when reasoning is requested; absent otherwise so
+        # general / mode=off routing is byte-for-byte unchanged.
+        _cfg_providers = payload.metadata.get("configured_providers")
+        configured_providers = (
+            frozenset(_cfg_providers) if _cfg_providers else None
+        )
+
         request = RoutingRequest(
             requested_model=payload.model,
             stream=getattr(payload, "stream", False),
@@ -446,6 +469,7 @@ class RoutingService:
             allowed_providers=allowed_providers,
             blocked_models=blocked_models,
             preferred_provider=preferred_provider,
+            configured_providers=configured_providers,
             requires_vision=caps.vision,
             requires_tools=caps.tools,
         )
