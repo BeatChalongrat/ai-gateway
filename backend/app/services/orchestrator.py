@@ -229,7 +229,13 @@ class GatewayOrchestrator:
         # on ChatCompletionsRequest; project_service applies it (or
         # raises 403 on escalation attempts) before any DLP runs.
         with record_phase("auth"):
-            ctx = self.project_service.resolve_project_context(
+            # Phase-2 (hybrid): the sync DB reads on the chat hot path run
+            # via asyncio.to_thread so the connection *checkout* happens on
+            # a worker thread, not the event loop. This is what removes the
+            # Phase-1 loop-block (40-concurrent sync checkout froze the loop
+            # for 9.5s on pool exhaustion). Full AsyncSession is a follow-up.
+            ctx = await asyncio.to_thread(
+                self.project_service.resolve_project_context,
                 session,
                 auth,
                 request_id=request_id,
@@ -248,7 +254,8 @@ class GatewayOrchestrator:
         # log so the logged ``model`` reflects the project default when
         # it has overridden the request's ``"auto"``.
         if session is not None:
-            self._inject_project_routing_config(
+            await asyncio.to_thread(
+                self._inject_project_routing_config,
                 session=session,
                 project_id=ctx.project_id,
                 payload=payload,
@@ -298,10 +305,14 @@ class GatewayOrchestrator:
                 headers={"Retry-After": str(retry_after)},
             )
 
-        # 1c. Quota + budget checks (DB-backed)
+        # 1c. Quota + budget checks (DB-backed). Grouped into one thread
+        # hop — both raise on breach, which propagates through to_thread.
         if session is not None:
-            self.quota_service.check_request_quota(session, ctx.project_id)
-            self.budget_service.check_budget(session, ctx.project_id)
+            def _quota_budget():
+                self.quota_service.check_request_quota(session, ctx.project_id)
+                self.budget_service.check_budget(session, ctx.project_id)
+
+            await asyncio.to_thread(_quota_budget)
 
         # 1d. Portal credit check — no-op for admin/tenant keys.
         # Runs BEFORE DLP so a suspended/zero-balance portal user doesn't
@@ -311,12 +322,14 @@ class GatewayOrchestrator:
             from app.services.gateway.portal_credit_check import (
                 check_portal_credit,
             )
-            check_portal_credit(session, str(auth.key_id))
+            await asyncio.to_thread(
+                check_portal_credit, session, str(auth.key_id)
+            )
 
         # Resolve policy profile: project-level → settings default → "default"
         profile_id = ctx.policy_profile_id or settings.dlp_default_profile
         profile = (
-            get_runtime_profile(session, profile_id)
+            await asyncio.to_thread(get_runtime_profile, session, profile_id)
             if session is not None
             else get_runtime_profile_fallback(profile_id)
         )
@@ -2143,7 +2156,9 @@ class GatewayOrchestrator:
         - ``shadow`` → run BOTH in parallel, use Python on the hot
           path, log ``dlp_shadow_diff`` events.
         """
-        engine = self._select_dlp_engine(ctx, session)
+        # _select_dlp_engine does a session.get(TenantORM); run it off the
+        # loop (Phase-2 hybrid). Called for both input + output scans.
+        engine = await asyncio.to_thread(self._select_dlp_engine, ctx, session)
 
         async def _python_scan():
             # B2: run the synchronous regex scan off the event loop so a
