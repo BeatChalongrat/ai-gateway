@@ -20,7 +20,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
-import { clearPortalToken } from "@/lib/auth";
+import { logoutSession } from "@/lib/auth";
 import { useI18nStore, useT } from "@/lib/i18n";
 import type { Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
@@ -32,10 +32,6 @@ import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 
 import { ConversationItem } from "./ConversationItem";
 import { VoiceSettingsModal } from "./VoiceSettingsModal";
-
-const PORTAL_URL =
-  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PORTAL_URL) ||
-  "http://localhost:3001";
 
 const VIRTUALIZE_THRESHOLD = 80;
 const LOAD_MORE_THRESHOLD_PX = 200;
@@ -143,8 +139,9 @@ export function Sidebar({
   }
 
   function handleLogout() {
-    clearPortalToken();
-    window.location.href = `${PORTAL_URL}/login`;
+    // Revoke + clear the HttpOnly session cookies on the gateway, then
+    // bounce to the Portal login.
+    void logoutSession();
   }
 
   const isHidden = collapsed;

@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 import { ToastViewport } from "@/components/ui/Toast";
+import { clearLegacyToken } from "@/lib/auth";
+import { startSilentRefresh, stopSilentRefresh } from "@/lib/auth-refresh";
 import { useHydrateI18n } from "@/lib/i18n";
 import { registerServiceWorker } from "@/lib/registerSW";
 import { useAuthStore } from "@/stores/authStore";
@@ -35,13 +37,18 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
-    // Read the Portal token (cookie or ?token=) and seed the auth
-    // store. No network call — chat-edge verifies the token on the
-    // first protected API hit.
-    checkAuth();
+    // Scrub any legacy non-HttpOnly token a prior build wrote.
+    clearLegacyToken();
+    // Resolve the session from the gateway (cookie-authenticated) and
+    // seed the auth store.
+    void checkAuth();
+    // Keep the access cookie fresh so an active user is never bounced
+    // to login mid-session.
+    startSilentRefresh();
     // Best-effort service-worker install for PWA support. Skipped in
     // dev to avoid breaking HMR.
     registerServiceWorker();
+    return () => stopSilentRefresh();
   }, [checkAuth]);
 
   // Auto-dismiss toast after 4s.
