@@ -25,6 +25,7 @@ import uuid
 import structlog
 
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ResolvedApiKey
 from app.core.config import settings
@@ -65,7 +66,10 @@ from app.services.dlp.classifier import SensitivityClassifier
 from app.services.dlp.detectors.registry import get_default_registry, DetectorRegistry
 from app.services.dlp.transformer import DLPTransformer
 from app.services.policy.evaluator import PolicyEvaluator
-from app.services.policy.profile_service import get_runtime_profile
+from app.services.policy.profile_service import (
+    get_runtime_profile,
+    get_runtime_profile_async,
+)
 from app.services.policy.profiles import get_profile as get_runtime_profile_fallback
 from app.services.project_service import ProjectService
 from app.services.provider_dispatcher import ProviderDispatcher
@@ -220,7 +224,7 @@ class GatewayOrchestrator:
         self,
         auth: ResolvedApiKey,
         payload: ChatCompletionsRequest,
-        session: Session | None = None,
+        session: "AsyncSession | None" = None,
         out_meta: dict | None = None,
     ) -> ChatCompletionsResponse:
         request_id = f"req_{uuid.uuid4().hex}"
@@ -231,13 +235,12 @@ class GatewayOrchestrator:
         # on ChatCompletionsRequest; project_service applies it (or
         # raises 403 on escalation attempts) before any DLP runs.
         with record_phase("auth"):
-            # Phase-2 (hybrid): the sync DB reads on the chat hot path run
-            # via asyncio.to_thread so the connection *checkout* happens on
-            # a worker thread, not the event loop. This is what removes the
-            # Phase-1 loop-block (40-concurrent sync checkout froze the loop
-            # for 9.5s on pool exhaustion). Full AsyncSession is a follow-up.
-            ctx = await asyncio.to_thread(
-                self.project_service.resolve_project_context,
+            # Track A: native AsyncSession on the chat hot path. The DB
+            # read awaits directly (no thread hop); the connection is
+            # checked out lazily and RELEASED at the commit before the
+            # provider dispatch (see below) so it is not held during the
+            # ~1-3s provider call (re-audit H1).
+            ctx = await self.project_service.resolve_project_context_async(
                 session,
                 auth,
                 request_id=request_id,
@@ -256,8 +259,7 @@ class GatewayOrchestrator:
         # log so the logged ``model`` reflects the project default when
         # it has overridden the request's ``"auto"``.
         if session is not None:
-            await asyncio.to_thread(
-                self._inject_project_routing_config,
+            await self._inject_project_routing_config_async(
                 session=session,
                 project_id=ctx.project_id,
                 payload=payload,
@@ -310,11 +312,10 @@ class GatewayOrchestrator:
         # 1c. Quota + budget checks (DB-backed). Grouped into one thread
         # hop — both raise on breach, which propagates through to_thread.
         if session is not None:
-            def _quota_budget():
-                self.quota_service.check_request_quota(session, ctx.project_id)
-                self.budget_service.check_budget(session, ctx.project_id)
-
-            await asyncio.to_thread(_quota_budget)
+            await self.quota_service.check_request_quota_async(
+                session, ctx.project_id
+            )
+            await self.budget_service.check_budget_async(session, ctx.project_id)
 
         # 1d. Portal credit check — no-op for admin/tenant keys.
         # Runs BEFORE DLP so a suspended/zero-balance portal user doesn't
@@ -322,16 +323,14 @@ class GatewayOrchestrator:
         # app.services.gateway.portal_credit_check for the policy.
         if session is not None:
             from app.services.gateway.portal_credit_check import (
-                check_portal_credit,
+                check_portal_credit_async,
             )
-            await asyncio.to_thread(
-                check_portal_credit, session, str(auth.key_id)
-            )
+            await check_portal_credit_async(session, str(auth.key_id))
 
         # Resolve policy profile: project-level → settings default → "default"
         profile_id = ctx.policy_profile_id or settings.dlp_default_profile
         profile = (
-            await asyncio.to_thread(get_runtime_profile, session, profile_id)
+            await get_runtime_profile_async(session, profile_id)
             if session is not None
             else get_runtime_profile_fallback(profile_id)
         )
@@ -403,7 +402,7 @@ class GatewayOrchestrator:
             if session is not None:
                 from app.domain.observability import RequestRecord, RequestStatus
                 try:
-                    self.request_log_service.persist(
+                    await self.request_log_service.persist_async(
                         session,
                         RequestRecord(
                             request_id=request_id,
@@ -427,10 +426,10 @@ class GatewayOrchestrator:
                             ),
                         ),
                     )
-                    session.commit()
+                    await session.commit()
                 except Exception as exc:
                     log.warning("dlp_block_log_persist_failed", error=str(exc))
-            self.audit_service.record_blocked_request(
+            await self.audit_service.record_blocked_request_async(
                 ctx=ctx,
                 enforcement=input_enforcement,
                 direction="input",
@@ -555,7 +554,7 @@ class GatewayOrchestrator:
             if session is not None:
                 from app.domain.observability import RequestRecord, RequestStatus
                 try:
-                    self.request_log_service.persist(
+                    await self.request_log_service.persist_async(
                         session,
                         RequestRecord(
                             request_id=request_id,
@@ -595,7 +594,7 @@ class GatewayOrchestrator:
                     # api/deps.py:33-43 calls session.rollback() in its
                     # except branch when the violation propagates,
                     # which would otherwise discard the row.
-                    session.commit()
+                    await session.commit()
                 except Exception as exc:
                     log.warning("guardrail_log_persist_failed", error=str(exc))
             raise GuardrailViolationError(
@@ -613,7 +612,9 @@ class GatewayOrchestrator:
             )
             openai_key = None
             if session is not None:
-                openai_key = self.provider_key_service.get_api_key(session, "openai")
+                openai_key = await self.provider_key_service.get_api_key_async(
+                    session, "openai"
+                )
             openai_key = openai_key or settings.openai_api_key
             if openai_key and moderation_input:
                 t_mod = time.perf_counter()
@@ -631,7 +632,7 @@ class GatewayOrchestrator:
                     if session is not None:
                         from app.domain.observability import RequestRecord, RequestStatus
                         try:
-                            self.request_log_service.persist(
+                            await self.request_log_service.persist_async(
                                 session,
                                 RequestRecord(
                                     request_id=request_id,
@@ -666,7 +667,7 @@ class GatewayOrchestrator:
                                 ),
                             )
                             # Commit BEFORE raise — see guardrail block.
-                            session.commit()
+                            await session.commit()
                         except Exception as exc:
                             log.warning("moderation_log_persist_failed", error=str(exc))
                     raise ModerationViolationError(
@@ -709,7 +710,9 @@ class GatewayOrchestrator:
         # 6. Resolve provider API key (DB → env var fallback)
         provider_api_key = None
         if session is not None:
-            provider_api_key = self.provider_key_service.get_api_key(session, route.provider_name)
+            provider_api_key = await self.provider_key_service.get_api_key_async(
+                session, route.provider_name
+            )
         if not provider_api_key:
             from app.core.exceptions import ProviderUnavailableError
             raise ProviderUnavailableError(
@@ -819,7 +822,7 @@ class GatewayOrchestrator:
             if session is not None:
                 from app.domain.observability import RequestRecord, RequestStatus
                 try:
-                    self.request_log_service.persist(
+                    await self.request_log_service.persist_async(
                         session,
                         RequestRecord(
                             request_id=request_id,
@@ -884,17 +887,25 @@ class GatewayOrchestrator:
         original_provider = route.provider_name
         original_model = route.model_name
         fallback_result = None
+        # H1 (connection release): commit the read-only pre-provider work so
+        # the async session's pooled connection returns to the pool and is
+        # NOT held during the ~1-3s provider dispatch below. Post-dispatch
+        # reads/writes (outbound DLP block persist, etc.) re-checkout lazily;
+        # the request dependency commits again at the end.
+        if session is not None:
+            await session.commit()
         t_provider = time.perf_counter()
         # Layer-1 fallback key resolver. ``dispatch_with_fallback``
-        # calls this for each fallback hop's provider (the primary
-        # key was already resolved above). Returns None when no key is
-        # configured so the hop is skipped without burning a slot.
+        # calls this (synchronously) for each fallback hop's provider.
+        # Kept SYNC to preserve the dispatcher's key_resolver contract: it
+        # opens a short-lived SYNC session (the sync engine is retained for
+        # admin/portal/background) so the async request session is not
+        # reused across the provider await. Fallback is rare and provider
+        # keys are cached, so this seldom touches the DB.
         def _resolve_fallback_key(provider_name: str) -> str | None:
-            if session is None:
-                return None
-            return self.provider_key_service.get_api_key(
-                session, provider_name
-            )
+            from app.core.db import SessionLocal as _SyncSession
+            with _SyncSession() as _s:
+                return self.provider_key_service.get_api_key(_s, provider_name)
 
         try:
             with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
@@ -1130,7 +1141,7 @@ class GatewayOrchestrator:
                 if session is not None:
                     from app.domain.observability import RequestRecord, RequestStatus
                     try:
-                        self.request_log_service.persist(
+                        await self.request_log_service.persist_async(
                             session,
                             RequestRecord(
                                 request_id=request_id,
@@ -1162,10 +1173,10 @@ class GatewayOrchestrator:
                                 ),
                             ),
                         )
-                        session.commit()
+                        await session.commit()
                     except Exception as exc:
                         log.warning("dlp_block_log_persist_failed", error=str(exc))
-                self.audit_service.record_blocked_request(
+                await self.audit_service.record_blocked_request_async(
                     ctx=ctx,
                     enforcement=response_enforcement,
                     direction="output",
@@ -1386,7 +1397,7 @@ class GatewayOrchestrator:
                 if session is not None:
                     from app.domain.observability import RequestRecord, RequestStatus
                     try:
-                        self.request_log_service.persist(
+                        await self.request_log_service.persist_async(
                             session,
                             RequestRecord(
                                 request_id=request_id,
@@ -1418,10 +1429,10 @@ class GatewayOrchestrator:
                                 ),
                             ),
                         )
-                        session.commit()
+                        await session.commit()
                     except Exception as exc:
                         log.warning("dlp_block_log_persist_failed", error=str(exc))
-                self.audit_service.record_blocked_request(
+                await self.audit_service.record_blocked_request_async(
                     ctx=ctx, enforcement=aggregated, direction="output",
                 )
                 raise DLPViolationError(
@@ -1547,7 +1558,7 @@ class GatewayOrchestrator:
 
         # 10. Audit success + persist request log
         total_ms = int((time.perf_counter() - t_start) * 1000)
-        self.audit_service.record_success(
+        await self.audit_service.record_success_async(
             ctx=ctx,
             route=route,
             enforcement=input_enforcement,
@@ -1561,9 +1572,9 @@ class GatewayOrchestrator:
         # the balance at 0.
         if session is not None and usage is not None:
             from app.services.gateway.portal_credit_check import (
-                deduct_portal_credit,
+                deduct_portal_credit_async,
             )
-            deduct_portal_credit(
+            await deduct_portal_credit_async(
                 session,
                 str(auth.key_id),
                 int(getattr(usage, "total_tokens", 0) or 0),
@@ -1650,11 +1661,15 @@ class GatewayOrchestrator:
             # running (production) the record is queued and inserted in
             # a batch by the worker on its own session. When the worker
             # is not running (pytest, pre-startup, post-shutdown) the
-            # queue falls back to a synchronous persist on the caller's
-            # session — preserving the legacy contract exactly.
+            # queue falls back to a synchronous persist on its OWN fresh
+            # sync SessionLocal. Track A: we no longer pass the request
+            # session as fallback_session — it is now an AsyncSession and
+            # the queue's fallback does synchronous add/flush, which an
+            # AsyncSession can't serve (the write would fail silently and
+            # the audit row would be lost).
             from app.services import request_log_queue
             try:
-                request_log_queue.enqueue(record, fallback_session=session)
+                request_log_queue.enqueue(record)
             except Exception as exc:
                 log.warning("request_log_enqueue_failed", error=str(exc))
 
@@ -1840,6 +1855,34 @@ class GatewayOrchestrator:
         except Exception as exc:
             log.warning("project_routing_config_load_failed", error=str(exc))
             return
+        self._apply_project_routing_config(project, payload, log)
+
+    async def _inject_project_routing_config_async(
+        self,
+        *,
+        session: "AsyncSession",
+        project_id: str,
+        payload: ChatCompletionsRequest,
+        log,
+    ) -> None:
+        """Async sibling of ``_inject_project_routing_config`` — see its
+        docstring. Only the project fetch differs (awaited); the mutation
+        logic is shared via ``_apply_project_routing_config``."""
+        if not project_id:
+            return
+        try:
+            from app.models.project import ProjectORM
+
+            project = await session.get(ProjectORM, project_id)
+        except Exception as exc:
+            log.warning("project_routing_config_load_failed", error=str(exc))
+            return
+        self._apply_project_routing_config(project, payload, log)
+
+    @staticmethod
+    def _apply_project_routing_config(project, payload, log) -> None:
+        """Merge a fetched project's routing config into payload.metadata
+        (pure, no DB). Shared by the sync + async inject variants."""
         if project is None:
             return
 
@@ -1980,7 +2023,7 @@ class GatewayOrchestrator:
         if session is not None:
             try:
                 db_rules = (
-                    self.keyword_rule_service.get_rules_for_request(
+                    await self.keyword_rule_service.get_rules_for_request_async(
                         session, ctx.tenant_id, ctx.project_id
                     )
                 )
@@ -2053,11 +2096,11 @@ class GatewayOrchestrator:
 
         return router_used, matched_rule
 
-    def resolve_streaming_context(
+    async def resolve_streaming_context(
         self,
         auth: ResolvedApiKey,
         payload: ChatCompletionsRequest,
-        session: Session | None = None,
+        session: "AsyncSession | None" = None,
     ) -> RequestContext:
         """Resolve project context for a streaming request.
 
@@ -2076,7 +2119,7 @@ class GatewayOrchestrator:
         streaming path does. Caller metadata still wins.
         """
         request_id = f"req_{uuid.uuid4().hex}"
-        ctx = self.project_service.resolve_project_context(
+        ctx = await self.project_service.resolve_project_context_async(
             session,
             auth,
             request_id=request_id,
@@ -2088,7 +2131,7 @@ class GatewayOrchestrator:
                 tenant_id=ctx.tenant_id,
                 project_id=ctx.project_id,
             )
-            self._inject_project_routing_config(
+            await self._inject_project_routing_config_async(
                 session=session,
                 project_id=ctx.project_id,
                 payload=payload,
@@ -2113,12 +2156,12 @@ class GatewayOrchestrator:
         pre-fix behaviour."""
         return self._registry_ner_on if ner_enabled else self._registry_ner_off
 
-    def _select_dlp_engine(
+    async def _select_dlp_engine_async(
         self,
         ctx: RequestContext,
-        session: Session | None,
+        session: "AsyncSession | None",
     ) -> str:
-        """Resolve the effective DLP engine for this request.
+        """Resolve the effective DLP engine for this request (async).
 
         Per-tenant ``tenants.dlp_engine`` override beats the global
         ``settings.dlp_engine`` when it isn't ``inherit``. Migration
@@ -2129,7 +2172,7 @@ class GatewayOrchestrator:
         try:
             from app.models.tenant import TenantORM
 
-            tenant = session.get(TenantORM, ctx.tenant_id)
+            tenant = await session.get(TenantORM, ctx.tenant_id)
             tenant_engine = (
                 getattr(tenant, "dlp_engine", "inherit") if tenant else "inherit"
             )
@@ -2158,9 +2201,8 @@ class GatewayOrchestrator:
         - ``shadow`` → run BOTH in parallel, use Python on the hot
           path, log ``dlp_shadow_diff`` events.
         """
-        # _select_dlp_engine does a session.get(TenantORM); run it off the
-        # loop (Phase-2 hybrid). Called for both input + output scans.
-        engine = await asyncio.to_thread(self._select_dlp_engine, ctx, session)
+        # Native async tenant lookup for the per-tenant DLP engine override.
+        engine = await self._select_dlp_engine_async(ctx, session)
 
         async def _python_scan():
             # B2: run the synchronous regex scan off the event loop so a
