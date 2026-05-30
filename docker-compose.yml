@@ -118,11 +118,12 @@ services:
   # (DLP_ENGINE=shadow runs both and logs dlp_shadow_diff).
   # Gated by DLP_ENGINE (default: python). Fail-open: any gRPC
   # error/timeout falls back to the Python registry.
-  # KNOWN GAP (pre-flip): the Rust path normalises with NFKC only and
-  # does NOT yet port the Python encoding-bypass preprocessing
-  # (zero-width strip + offset remap, homoglyph mapping, base64
-  # decode-and-scan — preprocessor.py / registry.py:106-137). Close
-  # or accept this before flipping DLP_ENGINE=rust. See Phase-0 notes.
+  # PARITY: remediated to 100% (211/211, 0 FN/0 FP) — all 4 blocking +
+  # 7 minor detector gaps fixed in Rust, and the encoding-bypass
+  # preprocessing (zero-width strip + offset remap, homoglyph, base64
+  # decode-and-scan) runs in a Python wrapper in rust_dlp_client before
+  # the gRPC call. Safe to flip DLP_ENGINE=rust (see DLP_BENCHMARK.md;
+  # rollback = python). Re-verify with backend/tests/dlp_parity_runner.py.
   dlp-sidecar:
     build:
       context: ./dlp-sidecar
