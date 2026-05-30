@@ -70,7 +70,7 @@ static THAI_ID_RE: Lazy<Regex> = Lazy::new(|| {
 
 static KEYWORD_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)(?:เลขประจำตัวประชาชน|เลขประจำตัว|บัตรประจำตัว|บัตรประชาชน|เลขบัตร|national\s*id|citizen\s*id|ID)\s*[:#]?\s*(\d{13})(?!\d)",
+        r"(?i)(?:เลขประจำตัวประชาชน|เลขประจำตัว|บัตรประจำตัว|บัตร\s*ประชาชน|บัตร\s*ปชช\.?|เลข\s*ปชช\.?|หมายเลข\s*บัตร|เลข\s*บัตร|เลข\s*13\s*หลัก|national\s*id|citizen\s*id|N\.?I\.?D\.?|ID)\s*[:#.]?\s*((?:\d[-\s]?){12}\d)(?!\d)",
     )
     .expect("thai id keyword")
 });

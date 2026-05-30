@@ -1,26 +1,21 @@
-//! Detector registry — all 4 batches (up to 30 detectors).
+//! Detector registry — all 4 batches (30 detectors).
 //!
-//! ``thai_name_no_prefix`` is the **only NER-gated detector**:
-//! Python's ``get_default_registry`` registers it solely when
-//! ``ner_enabled=False`` (the regex acts as a coarse fallback when
-//! Presidio's PERSON recognizer isn't running). When NER *is* on,
-//! the regex would just shadow Presidio and inflate the finding
-//! count with duplicates. We mirror that gate here so shadow-mode
-//! comparisons between Python and Rust don't see a constant
-//! ``only_rust`` delta on every request.
-//!
-//! The bool flag is threaded all the way from the gRPC request
-//! (``ScanRequest.ner_enabled`` / ``MessagesRequest.ner_enabled``)
-//! so the registry composition is per-request, not per-process.
+//! ``thai_name_no_prefix`` is registered **always** (30 detectors),
+//! matching Python's current ``get_default_registry`` (registry.py:323):
+//! the old ``not ner_enabled`` gate was removed because the backend
+//! image ships only ``en_core_web_sm`` (no Thai NER), so the regex
+//! fallback is needed even when NER is on. It runs at priority -5 so
+//! the overlap resolver still prefers Presidio on shared spans. The
+//! ``ner_enabled`` flag (threaded from the gRPC request) no longer
+//! affects the regex registry composition — Presidio NER lives in the
+//! Python ner-service, not the sidecar.
 
 use crate::detectors::base::{Detector, RawMatch};
 use crate::detectors::*;
 
-/// Build the registry for one request.
-///
-/// * ``ner_enabled = true``  → omit ``thai_name_no_prefix`` (29 detectors)
-/// * ``ner_enabled = false`` → include ``thai_name_no_prefix`` (30 detectors)
-pub fn default_detectors(ner_enabled: bool) -> Vec<Box<dyn Detector>> {
+/// Build the registry for one request. 30 detectors regardless of
+/// ``_ner_enabled`` (kept for API stability + future use).
+pub fn default_detectors(_ner_enabled: bool) -> Vec<Box<dyn Detector>> {
     let mut detectors: Vec<Box<dyn Detector>> = vec![
         // Batch 1 — simple regex
         Box::new(email::EmailDetector),
@@ -57,9 +52,8 @@ pub fn default_detectors(ner_enabled: bool) -> Vec<Box<dyn Detector>> {
         Box::new(credit_card::CreditCardDetector),
         Box::new(passport::PassportDetector),
     ];
-    if !ner_enabled {
-        detectors.push(Box::new(thai_name_no_prefix::ThaiNameNoPrefixDetector));
-    }
+    // Always registered (priority -5 floor) — matches Python registry.py:323.
+    detectors.push(Box::new(thai_name_no_prefix::ThaiNameNoPrefixDetector));
     detectors
 }
 

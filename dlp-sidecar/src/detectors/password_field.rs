@@ -8,6 +8,7 @@
 
 use fancy_regex::Regex;
 use once_cell::sync::Lazy;
+use std::collections::HashSet;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
 
@@ -19,6 +20,23 @@ static PASSWORD_RE: Lazy<Regex> = Lazy::new(|| {
         label = label_alts
     );
     Regex::new(&pat).expect("password regex")
+});
+
+// Thai prose form — ``รหัสผ่านคือ P@ssw0rd123!`` etc. No (?i), no \b
+// (Thai has no ASCII word boundary). Port of password_field.py _THAI_PASSWORD_RE.
+static THAI_PASSWORD_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?:รหัสผ่าน|พาสเวิร์ด)\s*(?:คือ|ว่า|=|:)?\s*(?P<value>\S{6,})")
+        .expect("thai password regex")
+});
+
+// English no-separator prose form — "... password admin123". Double
+// lookahead entropy gate: value >= 8 non-space chars AND >= 1 digit/special.
+// Port of password_field.py _PASSWORD_NOSEP_RE.
+static PASSWORD_NOSEP_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)\bpassword\s+(?P<value>(?=\S{8,})(?=\S*[\d!@#$%^&*+\-=_./\\<>?,;:])\S+)",
+    )
+    .expect("password nosep regex")
 });
 
 pub struct PasswordFieldDetector;
@@ -39,18 +57,27 @@ impl Detector for PasswordFieldDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for caps in PASSWORD_RE.captures_iter(text).flatten() {
-            let g = match caps.name("value") {
-                Some(g) => g,
-                None => continue,
-            };
-            out.push(RawMatch {
-                start: byte_to_char(text, g.start()),
-                end: byte_to_char(text, g.end()),
-                matched_text: g.as_str().to_string(),
-                confidence: 1.0,
-                priority: 0,
-            });
+        // Cross-pattern dedup on the value (start,end), first writer wins —
+        // mirrors Python password_field.py's ``seen`` set across all 3 patterns.
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        for re in [&*PASSWORD_RE, &*THAI_PASSWORD_RE, &*PASSWORD_NOSEP_RE] {
+            for caps in re.captures_iter(text).flatten() {
+                let g = match caps.name("value") {
+                    Some(g) => g,
+                    None => continue,
+                };
+                let s = byte_to_char(text, g.start());
+                let e = byte_to_char(text, g.end());
+                if seen.insert((s, e)) {
+                    out.push(RawMatch {
+                        start: s,
+                        end: e,
+                        matched_text: g.as_str().to_string(),
+                        confidence: 1.0,
+                        priority: 0,
+                    });
+                }
+            }
         }
         out
     }
