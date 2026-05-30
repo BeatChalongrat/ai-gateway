@@ -58,6 +58,39 @@ def _perf_tenant_limit_override() -> int | None:
     return _env_int("PERF_TEST_TENANT_LIMIT")
 
 
+# Atomic all-or-nothing sliding-window check across the 3 scopes, in a
+# single Redis EVAL. Fixes the over-admission race: the legacy path ran
+# 3 sequential pipelines and decided allow/deny CLIENT-side AFTER an
+# unconditional ZADD, so concurrent requests near the boundary could
+# read a stale count and all be admitted. Here the decision is computed
+# from the counts BEFORE any ZADD, and ZADD happens only when allowed —
+# atomic because Redis runs the script single-threaded. KEYS (not
+# hard-coded names) keep it Redis-Cluster-compatible.
+#   KEYS[1..3] = rl:key, rl:proj, rl:tenant
+#   ARGV       = now, cutoff, key_limit, proj_limit, tenant_limit, expire, member
+#   returns    = {denied(0|1|2|3), c1, c2, c3, rem1, rem2, rem3}
+_CHECK_ALL_LUA = """
+local cutoff = ARGV[2]
+local l1 = tonumber(ARGV[3]); local l2 = tonumber(ARGV[4]); local l3 = tonumber(ARGV[5])
+local expire = tonumber(ARGV[6]); local member = ARGV[7]
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, cutoff); local c1 = redis.call('ZCARD', KEYS[1])
+redis.call('ZREMRANGEBYSCORE', KEYS[2], 0, cutoff); local c2 = redis.call('ZCARD', KEYS[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[3], 0, cutoff); local c3 = redis.call('ZCARD', KEYS[3])
+local denied = 0
+if c1 >= l1 then denied = 1 elseif c2 >= l2 then denied = 2 elseif c3 >= l3 then denied = 3 end
+if denied == 0 then
+  redis.call('ZADD', KEYS[1], ARGV[1], member); redis.call('EXPIRE', KEYS[1], expire)
+  redis.call('ZADD', KEYS[2], ARGV[1], member); redis.call('EXPIRE', KEYS[2], expire)
+  redis.call('ZADD', KEYS[3], ARGV[1], member); redis.call('EXPIRE', KEYS[3], expire)
+end
+local add = 0; if denied == 0 then add = 1 end
+local r1 = l1 - c1 - add; if r1 < 0 then r1 = 0 end
+local r2 = l2 - c2 - add; if r2 < 0 then r2 = 0 end
+local r3 = l3 - c3 - add; if r3 < 0 then r3 = 0 end
+return {denied, c1, c2, c3, r1, r2, r3}
+"""
+
+
 class RateLimitService:
     """Sliding-window rate limiter keyed on API key / project / tenant."""
 
@@ -158,12 +191,12 @@ class RateLimitService:
                     RateLimiterUnavailable,
                 )
             except Exception:  # noqa: BLE001
-                return await self._check_all_python(key_id, project_id, tenant_id)
+                return await self._check_all_atomic(key_id, project_id, tenant_id)
 
             try:
                 client = RateLimiterClient.instance()
             except RateLimiterUnavailable:
-                return await self._check_all_python(key_id, project_id, tenant_id)
+                return await self._check_all_atomic(key_id, project_id, tenant_id)
 
             try:
                 # Per-project / per-tenant overrides — the Rust
@@ -192,9 +225,9 @@ class RateLimitService:
             except Exception:  # noqa: BLE001
                 # RPC error / timeout — fall back to the local engine
                 # so a sidecar incident cannot block the request path.
-                return await self._check_all_python(key_id, project_id, tenant_id)
+                return await self._check_all_atomic(key_id, project_id, tenant_id)
 
-        return await self._check_all_python(key_id, project_id, tenant_id)
+        return await self._check_all_atomic(key_id, project_id, tenant_id)
 
     async def _check_all_python(
         self,
@@ -225,6 +258,89 @@ class RateLimitService:
             "remaining": key_result["remaining"],
             "reset_at": key_result["reset_at"],
             "limit": key_result["limit"],
+        }
+
+    async def _check_all_atomic(
+        self,
+        key_id: str,
+        project_id: str,
+        tenant_id: str,
+    ) -> dict:
+        """Atomic 3-scope check via the Lua EVAL; falls back to the
+        sequential pipeline if EVAL is unavailable (e.g. a fakeredis
+        double without Lua) or errors. Fail-open preserved either way."""
+        try:
+            return await self._check_all_lua(key_id, project_id, tenant_id)
+        except Exception:  # noqa: BLE001
+            return await self._check_all_python(key_id, project_id, tenant_id)
+
+    async def _check_all_lua(
+        self,
+        key_id: str,
+        project_id: str,
+        tenant_id: str,
+    ) -> dict:
+        """All-or-nothing sliding-window check across the 3 scopes in a
+        single Redis EVAL — no over-admission race (decision computed
+        from counts BEFORE any ZADD; ZADD only when allowed)."""
+        now = time.time()
+        cutoff = now - DEFAULT_WINDOW_SECONDS
+        member = f"{now:.6f}:{time.perf_counter_ns()}"
+
+        project_limit = DEFAULT_PROJECT_LIMIT
+        if project_id == _PERF_PROJECT_ID:
+            override = _perf_project_limit_override()
+            if override is not None:
+                project_limit = override
+        tenant_limit = DEFAULT_TENANT_LIMIT
+        if tenant_id == _PERF_TENANT_ID:
+            override = _perf_tenant_limit_override()
+            if override is not None:
+                tenant_limit = override
+
+        keys = [
+            f"rl:key:{key_id}",
+            f"rl:proj:{project_id}",
+            f"rl:tenant:{tenant_id}",
+        ]
+        args = [
+            f"{now:.6f}",
+            f"{cutoff:.6f}",
+            DEFAULT_KEY_LIMIT,
+            project_limit,
+            tenant_limit,
+            DEFAULT_WINDOW_SECONDS + 1,
+            member,
+        ]
+
+        client = self._redis()
+        # redis caches the script by SHA after the first EVAL, so a plain
+        # EVAL gets EVALSHA performance server-side without us tracking the
+        # digest. Works on the async client and on a fakeredis double that
+        # implements Lua.
+        res = client.eval(_CHECK_ALL_LUA, len(keys), *keys, *args)
+        if inspect.isawaitable(res):
+            res = await res
+
+        denied = int(res[0])
+        reset_at = int(now + DEFAULT_WINDOW_SECONDS)
+        limits = [DEFAULT_KEY_LIMIT, project_limit, tenant_limit]
+        scopes = ["api_key", "project", "tenant"]
+        if denied == 0:
+            return {
+                "allowed": True,
+                "scope": None,
+                "remaining": int(res[4]),
+                "reset_at": reset_at,
+                "limit": DEFAULT_KEY_LIMIT,
+            }
+        idx = denied - 1
+        return {
+            "allowed": False,
+            "scope": scopes[idx],
+            "remaining": int(res[4 + idx]),
+            "reset_at": reset_at,
+            "limit": limits[idx],
         }
 
     # ------------------------------------------------------------------
