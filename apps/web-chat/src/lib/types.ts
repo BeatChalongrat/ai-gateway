@@ -24,9 +24,10 @@ export type ModelCategory =
 
 /** T4 — Thinking Mode capability block. Present only on models
  *  whose chat-edge entry advertises reasoning support. The frontend
- *  uses ``supported`` to gate the ReasoningToggle and ``modes`` to
- *  populate the mode picker. Absent (undefined) for non-reasoning
- *  models — the toggle stays hidden. */
+ *  uses ``supported`` to show the reasoning badge in the model picker.
+ *  Thinking itself is automatic (Auto Thinking Mode — no user toggle);
+ *  ``modes`` is retained for the API contract. Absent (undefined) for
+ *  non-reasoning models. */
 export interface ReasoningCapability {
   supported: boolean;
   modes: string[];

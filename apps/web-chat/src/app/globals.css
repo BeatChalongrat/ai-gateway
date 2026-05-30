@@ -589,6 +589,39 @@ input {
 }
 @keyframes skeletonShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
+/* Reasoning "Thinking…" shimmer. A bright highlight sweeps across the
+   dim base text while the model is reasoning — the ChatGPT-style wave.
+   ``background-clip: text`` paints the moving gradient onto the glyphs
+   only (pure CSS, no JS / repaint cost). Colours come from the theme
+   text vars so it reads in both dark and light mode (dim tertiary base,
+   bright primary highlight). */
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--text-tertiary) 0%,
+    var(--text-primary) 50%,
+    var(--text-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: shimmerText 1.6s linear infinite;
+}
+@keyframes shimmerText { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Respect reduced-motion: drop the sweep and render static, readable
+   text (no transparent fill, no animation). */
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: var(--text-secondary);
+    color: var(--text-secondary);
+  }
+}
+
 /* Accessible focus ring. */
 .focus-ring:focus-visible {
   outline: 2px solid var(--accent);
