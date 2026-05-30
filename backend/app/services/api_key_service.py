@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.security import generate_api_key, hash_api_key
@@ -100,6 +101,50 @@ class ApiKeyService:
         if mono - last_write >= _LAST_USED_WRITE_INTERVAL_S:
             api_key.last_used_at = datetime.now(timezone.utc)
             session.flush()
+            if len(_last_used_writes) >= _LAST_USED_MAX_TRACKED:
+                _last_used_writes.clear()
+            _last_used_writes[api_key.key_id] = mono
+        return api_key
+
+    async def verify_key_async(
+        self, session: AsyncSession, raw_key: str
+    ) -> ApiKeyORM | None:
+        """Async variant of :meth:`verify_key`.
+
+        Identical validity rules (hash match, ``status == "active"``,
+        not expired) and the SAME Phase-1 B7 ``last_used_at`` debounce —
+        the write only fires when the previous write for this key was
+        more than ``_LAST_USED_WRITE_INTERVAL_S`` ago. Only the DB calls
+        are awaited (SELECT + the debounced flush); the debounce dict and
+        time bookkeeping stay plain sync.
+        """
+        key_hash = hash_api_key(raw_key)
+        stmt = select(ApiKeyORM).where(ApiKeyORM.key_hash == key_hash)
+        result = await session.execute(stmt)
+        api_key = result.scalar_one_or_none()
+
+        if api_key is None:
+            return None
+
+        if api_key.status != "active":
+            return None
+
+        if api_key.expires_at is not None:
+            now = datetime.now(timezone.utc)
+            expires = api_key.expires_at
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if now >= expires:
+                return None
+
+        # B7: debounce the last_used_at write (same semantics as the sync
+        # path). Only persist (and flush) when the previous write for this
+        # key was more than the interval ago.
+        mono = time.monotonic()
+        last_write = _last_used_writes.get(api_key.key_id, 0.0)
+        if mono - last_write >= _LAST_USED_WRITE_INTERVAL_S:
+            api_key.last_used_at = datetime.now(timezone.utc)
+            await session.flush()
             if len(_last_used_writes) >= _LAST_USED_MAX_TRACKED:
                 _last_used_writes.clear()
             _last_used_writes[api_key.key_id] = mono

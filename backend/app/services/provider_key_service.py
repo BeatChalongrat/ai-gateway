@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -132,6 +133,86 @@ class ProviderKeyService:
     # Backward compat alias
     def get_api_key(self, session: Session, provider_name: str) -> str | None:
         return self.get_active_key(session, provider_name)
+
+    # ------------------------------------------------------------------
+    # Async variants (Track A) — additive; sync paths above unchanged.
+    # ------------------------------------------------------------------
+
+    async def get_active_key_async(
+        self, session: AsyncSession, provider_name: str
+    ) -> str | None:
+        """Async variant of :meth:`get_active_key`.
+
+        Identical cache + round-robin logic. The Phase-1 ``_keys_cache``
+        (TTL'd resolved-candidate list) sits in front exactly as the sync
+        path; only the cache-MISS DB read is awaited. Cache dict access and
+        the ``_rr_counters`` round-robin remain plain sync operations
+        (fine on the event loop — no I/O).
+        """
+        mono = time.monotonic()
+        cached = _keys_cache.get(provider_name)
+        if cached is not None and cached[0] > mono:
+            candidates = cached[1]
+        else:
+            candidates = await self._resolve_key_candidates_async(
+                session, provider_name
+            )
+            _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates)
+
+        if not candidates:
+            return None
+        idx = _rr_counters[provider_name] % len(candidates)
+        _rr_counters[provider_name] += 1
+        return candidates[idx]
+
+    async def _resolve_key_candidates_async(
+        self, session: AsyncSession, provider_name: str
+    ) -> list[str]:
+        """Async mirror of :meth:`_resolve_key_candidates`.
+
+        Resolves the ordered candidate key list (uncached) using awaited
+        DB reads. The repository is sync-only, so the ``provider_keys``
+        SELECT is issued directly here (same query as
+        ``ProviderKeyRepository.list_active_by_provider``).
+        Priority: provider_keys table → legacy providers.api_key_encrypted
+        → env var. Decoded to plain strings so the cache holds no ORM.
+        """
+        result = await session.execute(
+            select(ProviderKeyORM)
+            .where(
+                ProviderKeyORM.provider_name == provider_name,
+                ProviderKeyORM.is_active == True,  # noqa: E712
+            )
+            .order_by(ProviderKeyORM.created_at)
+        )
+        rows = result.scalars().all()
+        valid = [
+            _decode(r.api_key_encrypted)
+            for r in rows
+            if r.last_test_status != "invalid"
+        ]
+        if valid:
+            return valid
+
+        # Fallback: legacy single key on providers table
+        provider = (
+            await session.execute(
+                select(ProviderORM).where(ProviderORM.name == provider_name)
+            )
+        ).scalar_one_or_none()
+        if provider and provider.api_key_encrypted:
+            return [_decode(provider.api_key_encrypted)]
+
+        # Fallback: env var
+        env_fn = _ENV_KEYS.get(provider_name)
+        env_key = env_fn() if env_fn else None
+        return [env_key] if env_key else []
+
+    # Backward compat alias (async)
+    async def get_api_key_async(
+        self, session: AsyncSession, provider_name: str
+    ) -> str | None:
+        return await self.get_active_key_async(session, provider_name)
 
     def providers_with_valid_keys(self, session: Session) -> set[str]:
         """Providers that have at least one active, validated key.
