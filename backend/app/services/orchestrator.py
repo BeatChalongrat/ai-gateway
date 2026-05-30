@@ -57,6 +57,8 @@ from app.observability.metrics import (
     DLP_SCAN_DURATION,
     LLM_PROVIDER_LATENCY,
     REDIS_COMMAND_DURATION,
+    SIDECAR_FALLBACK_TOTAL,
+    SIDECAR_REQUEST_TOTAL,
 )
 from app.observability.phase_timer import record_phase
 from app.services.dlp.classifier import SensitivityClassifier
@@ -2181,13 +2183,24 @@ class GatewayOrchestrator:
                     scan_system_messages=scan_system_messages,
                     ner_enabled=getattr(ctx, "ner_enabled", True),
                 )
+                _rust_exc = False
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "dlp_rust_engine_exception", error=str(exc)[:200]
                 )
                 rust_result = None
+                _rust_exc = True
             if rust_result is not None:
+                SIDECAR_REQUEST_TOTAL.labels(
+                    engine="dlp", status="success"
+                ).inc()
                 return rust_result
+            # Fail-open to Python (audit H4: count it so a flapping DLP
+            # sidecar is visible, not just logged).
+            SIDECAR_FALLBACK_TOTAL.labels(
+                engine="dlp", reason="error" if _rust_exc else "unavailable"
+            ).inc()
+            SIDECAR_REQUEST_TOTAL.labels(engine="dlp", status="fallback").inc()
             logger.warning("dlp_rust_fallback_to_python")
             return await _python_scan()
 

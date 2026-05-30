@@ -13,6 +13,7 @@ from __future__ import annotations
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
+    Counter,
     Gauge,
     Histogram,
     generate_latest,
@@ -132,6 +133,91 @@ REDIS_COMMAND_DURATION = Histogram(
     "get_stats) are NOT wrapped — see perf/README.md 'coverage' section.",
     labelnames=("operation",),
     buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
+    registry=metrics_registry,
+)
+
+
+# ---------------------------------------------------------------------------
+# Re-audit Track O — the failure modes the polyglot design hinges on were
+# previously unobservable (audit H4/H5/H6/H8). These close that gap.
+# ---------------------------------------------------------------------------
+
+# DB pool saturation. ``db_pool_active`` (above) is checked-out count;
+# ``db_pool_overflow`` climbing toward ``db_pool_max`` is the leading
+# indicator of imminent pool-timeout 500s (the connection-per-request
+# ceiling the Phase-2 audit flagged). ``db_pool_checkout_timeouts_total``
+# counts requests that actually hit ``pool_timeout`` and 500'd.
+DB_POOL_OVERFLOW = Gauge(
+    "db_pool_overflow",
+    "SQLAlchemy overflow connections currently in use (beyond pool_size). "
+    "Approaching db_pool_max means imminent checkout timeouts.",
+    registry=metrics_registry,
+)
+
+DB_POOL_MAX = Gauge(
+    "db_pool_max",
+    "Configured maximum connections per worker (pool_size + max_overflow).",
+    registry=metrics_registry,
+)
+
+DB_POOL_CHECKOUT_TIMEOUTS = Counter(
+    "db_pool_checkout_timeouts_total",
+    "Count of DB-session checkouts that exceeded pool_timeout and failed "
+    "(measured at the request DB-session dependency).",
+    registry=metrics_registry,
+)
+
+# Sidecar fail-open / fallback visibility. A flapping sidecar previously
+# only showed up in logs; ``sidecar_fallback_total`` makes degradation
+# alertable. ``engine`` ∈ {dlp, rate_limiter, log_worker};
+# ``reason`` ∈ {timeout, error, unavailable, rejected}.
+SIDECAR_FALLBACK_TOTAL = Counter(
+    "sidecar_fallback_total",
+    "Times a polyglot sidecar call fell back to the in-process path.",
+    labelnames=("engine", "reason"),
+    registry=metrics_registry,
+)
+
+SIDECAR_REQUEST_TOTAL = Counter(
+    "sidecar_request_total",
+    "Sidecar dispatch outcomes. status ∈ {success, fallback}.",
+    labelnames=("engine", "status"),
+    registry=metrics_registry,
+)
+
+# Rate-limiter degradation (audit H6/H8). ``rate_limit_fail_open_total``:
+# Redis was unreachable so the request was admitted UNLIMITED (cost/DoS
+# exposure). ``rate_limit_lua_fallback_total``: the atomic Lua EVAL errored
+# and the limiter silently fell to the NON-atomic sequential path
+# (over-admission race returns).
+RATE_LIMIT_FAIL_OPEN_TOTAL = Counter(
+    "rate_limit_fail_open_total",
+    "Requests admitted because the rate-limiter's Redis backend was down "
+    "(fail-open — NOT rate limited).",
+    registry=metrics_registry,
+)
+
+RATE_LIMIT_LUA_FALLBACK_TOTAL = Counter(
+    "rate_limit_lua_fallback_total",
+    "Times the atomic Lua EVAL failed and the limiter fell back to the "
+    "non-atomic sequential path (over-admission race possible).",
+    registry=metrics_registry,
+)
+
+# Event-loop block monitor (audit H4). Previously print()-only; now an
+# alertable Prometheus signal. The histogram captures the lag
+# distribution; the counter tallies >100ms blocks.
+EVENT_LOOP_BLOCK_SECONDS = Histogram(
+    "event_loop_block_seconds",
+    "Measured event-loop lag from the 1s monitor tick (how long the loop "
+    "was blocked beyond the expected sleep).",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    registry=metrics_registry,
+)
+
+EVENT_LOOP_BLOCK_TOTAL = Counter(
+    "event_loop_block_total",
+    "Count of detected event-loop blocks exceeding 100ms.",
     registry=metrics_registry,
 )
 
