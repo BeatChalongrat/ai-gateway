@@ -16,6 +16,7 @@
 //! a Redis outage cannot block the gateway. The fault is recorded
 //! on the ``rate_limiter_redis_errors_total`` Prometheus counter.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use deadpool_redis::Pool;
@@ -132,7 +133,7 @@ impl SlidingWindow {
 
         let now_f = unix_now_f64();
         let cutoff = now_f - window_sec as f64;
-        let member = format!("{:.6}:{}", now_f, monotonic_nanos());
+        let member = format!("{:.6}:{}", now_f, member_suffix());
 
         // Pipeline mirrors the Python service's calls exactly.
         // ``zcard`` is the *only* call whose return value we care
@@ -248,7 +249,7 @@ impl SlidingWindow {
 
         let now_f = unix_now_f64();
         let cutoff = now_f - window_sec as f64;
-        let member = format!("{:.6}:{}", now_f, monotonic_nanos());
+        let member = format!("{:.6}:{}", now_f, member_suffix());
 
         let script = redis::Script::new(CHECK_ALL_LUA);
         let res: redis::RedisResult<Vec<i64>> = script
@@ -333,16 +334,23 @@ fn unix_now_f64() -> f64 {
         .unwrap_or(0.0)
 }
 
-fn monotonic_nanos() -> u128 {
-    // Same idea as Python's ``time.perf_counter_ns()``: a strictly
-    // monotonic source for uniquely keying entries inside the same
-    // millisecond. We sample at nanosecond granularity from the
-    // system clock here; in practice the combination of
-    // ``unix_now_f64`` + this value uniques even under 1M req/s.
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
+/// Process-global, ever-increasing counter used as the unique suffix of
+/// every ZSET member. The ZADD *score* stays the wall-clock ``now`` (the
+/// sliding-window prune does ZREMRANGEBYSCORE on a wall-clock cutoff, so
+/// the score must remain wall-clock), but the *member* must be unique per
+/// request or a second ZADD with the same member silently overwrites the
+/// first's score instead of adding a new entry — undercounting the window
+/// and over-admitting (re-audit finding H7).
+static MEMBER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Returns a strictly-increasing, process-unique suffix for the ZSET
+/// member string. Unlike a wall-clock sample, this is guaranteed unique
+/// regardless of clock resolution or NTP step-backs: every call returns a
+/// distinct value (until the u64 wraps after 2^64 calls, which is not a
+/// practical concern). Wrapping ``fetch_add`` so an overflow can never
+/// panic.
+fn member_suffix() -> u64 {
+    MEMBER_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +428,44 @@ mod tests {
         assert!(out.reset_at > 0);
     }
 
+    // --- Member uniqueness (H7 regression) ------------------------------
+
+    #[tokio::test]
+    async fn test_member_suffix_is_strictly_unique() {
+        // The H7 bug: a wall-clock-sampled "nanos" could repeat within a
+        // single clock tick (or step back under NTP), producing an
+        // identical ZSET member → the second ZADD overwrites the first's
+        // score instead of adding a new entry → window undercounts →
+        // over-admission. An ever-increasing counter must never repeat.
+        use std::collections::HashSet;
+        const N: usize = 100_000;
+        let mut seen = HashSet::with_capacity(N);
+        for _ in 0..N {
+            assert!(
+                seen.insert(member_suffix()),
+                "member_suffix() produced a duplicate value"
+            );
+        }
+        assert_eq!(seen.len(), N);
+    }
+
+    #[tokio::test]
+    async fn test_member_strings_are_distinct_within_same_tick() {
+        // Build full member strings the way ``check_scope`` /
+        // ``check_all`` do, holding ``now_f`` FIXED to simulate many
+        // requests landing in the same wall-clock instant. They must all
+        // be distinct thanks to the counter suffix.
+        use std::collections::HashSet;
+        const N: usize = 10_000;
+        let now_f = unix_now_f64();
+        let mut seen = HashSet::with_capacity(N);
+        for _ in 0..N {
+            let member = format!("{:.6}:{}", now_f, member_suffix());
+            assert!(seen.insert(member), "duplicate member within same tick");
+        }
+        assert_eq!(seen.len(), N);
+    }
+
     // --- Real-Redis happy path (gated on TEST_REDIS_URL env var) -------
 
     fn test_redis_url() -> Option<String> {
@@ -433,7 +479,7 @@ mod tests {
             return;
         };
         let pool = build_pool(&url);
-        let key = format!("rl:test:check_scope_allowed:{}", monotonic_nanos());
+        let key = format!("rl:test:check_scope_allowed:{}", member_suffix());
         let engine = SlidingWindow::new(pool.clone());
         let out = engine.check_scope("api_key", &key, 5, 60).await;
         assert!(out.allowed);
@@ -451,7 +497,7 @@ mod tests {
             return;
         };
         let pool = build_pool(&url);
-        let key = format!("rl:test:check_scope_denied:{}", monotonic_nanos());
+        let key = format!("rl:test:check_scope_denied:{}", member_suffix());
         let engine = SlidingWindow::new(pool.clone());
         // 3 hits under a 3-cap should be allowed; the 4th denied.
         for i in 0..3 {
@@ -473,7 +519,7 @@ mod tests {
             return;
         };
         let pool = build_pool(&url);
-        let suffix = monotonic_nanos();
+        let suffix = member_suffix();
         let kid = format!("test_key_{}", suffix);
         let pid = format!("test_proj_{}", suffix);
         let tid = format!("test_tenant_{}", suffix);
