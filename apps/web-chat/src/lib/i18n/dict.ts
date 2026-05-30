@@ -309,6 +309,7 @@ export const en = {
   "reasoning.mode.medium": "Balanced",
   "reasoning.mode.high": "Deep",
   "reasoning.showSummary": "Show analysis",
+  "reasoning.error": "Couldn't update reasoning mode",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -613,6 +614,7 @@ const th: Record<DictKey, string> = {
   "reasoning.mode.medium": "สมดุล",
   "reasoning.mode.high": "ละเอียด",
   "reasoning.showSummary": "แสดงการวิเคราะห์",
+  "reasoning.error": "อัปเดตโหมดวิเคราะห์ไม่สำเร็จ",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {
