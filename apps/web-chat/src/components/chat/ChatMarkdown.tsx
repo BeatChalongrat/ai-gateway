@@ -17,14 +17,60 @@
 // unclosed ** stays literal, a half-typed table shows its raw pipes
 // until the delimiter row arrives — nothing breaks the whole message.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { Components } from "react-markdown";
+import type { PluggableList } from "unified";
 
 import { CodeBlock } from "./CodeBlock";
+
+// ── Lazy math (KaTeX) ──────────────────────────────────────────
+// KaTeX (JS + CSS + fonts) is sizeable, so we load remark-math +
+// rehype-katex + the stylesheet ON DEMAND — only the first time a
+// message that actually contains math renders. Loaded once per
+// session and cached at module scope; subsequent math messages reuse
+// it synchronously. Until the chunk resolves, math shows as its raw
+// ``$...$`` source (one tick), then re-renders formatted.
+interface MathPlugins {
+  remark: PluggableList[number];
+  rehype: PluggableList[number];
+}
+let cachedMath: MathPlugins | null = null;
+let mathPromise: Promise<MathPlugins> | null = null;
+
+function loadMathPlugins(): Promise<MathPlugins> {
+  if (cachedMath) return Promise.resolve(cachedMath);
+  if (!mathPromise) {
+    mathPromise = Promise.all([
+      import("remark-math"),
+      import("rehype-katex"),
+      // Side-effect import — webpack code-splits the CSS into this
+      // async chunk so it isn't in the main/route bundle.
+      import("katex/dist/katex.min.css"),
+    ]).then(([rm, rk]) => {
+      cachedMath = {
+        remark: rm.default,
+        // throwOnError:false → invalid LaTeX renders as a red error
+        // span instead of blowing up the whole message render.
+        rehype: [rk.default, { throwOnError: false }],
+      };
+      return cachedMath;
+    });
+  }
+  return mathPromise;
+}
+
+// hasMath — cheap gate deciding whether to LOAD katex (not whether to
+// render math; remark-math itself decides that per CommonMark-math
+// rules). Over-approximates: a ``$$`` block or a ``$x…$`` pair. A
+// false positive on prose like "$5+$10" only wastes a one-time lazy
+// load; "$100 and $200" (spaces) won't render as math regardless.
+function hasMath(text: string): boolean {
+  return text.includes("$$") || /\$[^\s$][^$]*\$/.test(text);
+}
 
 // Citation marker — RAG context tells the model to cite sources using
 // the literal pattern ``[Source: <filename>]``. We post-process the
@@ -99,10 +145,40 @@ export function ChatMarkdown({
   streaming?: boolean;
 }) {
   const components = useMemo(() => buildComponents(streaming), [streaming]);
+
+  // Content-gated lazy math. wantMath gates the (cheap) import trigger;
+  // math holds the resolved plugins once loaded.
+  const wantMath = hasMath(text);
+  const [math, setMath] = useState<MathPlugins | null>(cachedMath);
+  useEffect(() => {
+    if (!wantMath || math) return;
+    let alive = true;
+    loadMathPlugins()
+      .then((m) => {
+        if (alive) setMath(m);
+      })
+      .catch(() => {
+        /* leave math literal if the chunk fails to load */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [wantMath, math]);
+
+  const useMath = wantMath && math !== null;
+  const remarkPlugins = useMemo<PluggableList>(
+    () => (useMath ? [remarkGfm, math!.remark] : [remarkGfm]),
+    [useMath, math],
+  );
+  const rehypePlugins = useMemo<PluggableList>(
+    () => (useMath ? [rehypeHighlight, math!.rehype] : [rehypeHighlight]),
+    [useMath, math],
+  );
+
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
       components={components}
     >
       {renderCitations(text)}
