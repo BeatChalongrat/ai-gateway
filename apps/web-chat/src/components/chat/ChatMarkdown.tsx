@@ -25,6 +25,9 @@ import rehypeHighlight from "rehype-highlight";
 import type { Components } from "react-markdown";
 import type { PluggableList } from "unified";
 
+import { ImageOff } from "lucide-react";
+
+import { openLightbox } from "@/components/ui/ImageLightbox";
 import { CodeBlock } from "./CodeBlock";
 
 // ── Lazy math (KaTeX) ──────────────────────────────────────────
@@ -117,6 +120,36 @@ function CitationPill({ filename }: { filename: string }) {
   );
 }
 
+// MarkdownImage renders an assistant ``![alt](url)`` image: clamped to
+// the column width, rounded, click-to-zoom via the shared lightbox.
+// A failed load (the URL doesn't resolve) degrades to a labeled
+// placeholder instead of a broken-image icon. These are PUBLIC URLs
+// (unlike uploaded files) so they load directly — no auth/proxy.
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src) return null;
+  if (failed) {
+    return (
+      <span className="my-1 inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-elevated px-2.5 py-1.5 text-xs text-text-tertiary">
+        <ImageOff className="h-4 w-4 shrink-0" aria-hidden />
+        {alt || "Image unavailable"}
+      </span>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={src}
+      alt={alt ?? ""}
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+      onClick={() => openLightbox(src, alt)}
+      className="my-2 max-w-full cursor-zoom-in rounded-lg border border-border"
+    />
+  );
+}
+
 // buildComponents returns the react-markdown component overrides.
 // ``streaming`` is forwarded to CodeBlock, which uses it to (a) keep a
 // growing code block from collapsing mid-stream and (b) hold back
@@ -133,6 +166,9 @@ function buildComponents(streaming: boolean): Components {
     },
     pre: (props: { children?: React.ReactNode }) => (
       <CodeBlock {...props} streaming={streaming} />
+    ),
+    img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+      <MarkdownImage src={props.src} alt={props.alt} />
     ),
   };
 }
