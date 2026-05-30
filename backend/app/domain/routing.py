@@ -54,6 +54,14 @@ class RoutingRequest:
     blocked_models: frozenset[str] | None = None
     preferred_provider: str | None = None
 
+    # Providers with a callable (active + validated) key. Used ONLY by the
+    # reasoning candidate pool (P0): when set, the pool prefers reasoning
+    # models on these providers so ``auto`` + reasoning doesn't elect a
+    # keyless reasoning model as primary and dead-end on the key check.
+    # None / empty => best-effort (unfiltered) reasoning routing — no
+    # effect on general or mode=off routing.
+    configured_providers: frozenset[str] | None = None
+
     # Hard capabilities the request needs — a model (primary OR
     # fallback) lacking these can't serve it, so candidate filtering
     # excludes them. Reasoning is intentionally NOT here (best-effort
