@@ -138,17 +138,25 @@ class RustDlpClient:
         language: str,
         disabled_detectors: list[str],
         ner_enabled: bool,
+        from_decoded: bool = False,
     ) -> list[DetectionMatch]:
         """Scan ONE already-cleaned text via the Rust ScanText RPC.
 
         Returns matches with offsets in *that text's* coordinates.
         Raises on RPC error / timeout (caller maps to fail-open None).
+
+        ``from_decoded`` is forwarded to the sidecar so context-gated
+        detectors relax identically to Python's ``from_decoded`` kwarg
+        (phone drops the keyword requirement; api_key_secret runs the
+        short-key decoded pattern). Set True only for base64-decoded
+        segments.
         """
         req = pb.ScanRequest(
             text=text,
             language=language,
             disabled_detectors=list(disabled_detectors),
             ner_enabled=ner_enabled,
+            from_decoded=from_decoded,
         )
         resp = await asyncio.wait_for(
             stub.ScanText(req), timeout=self.timeout_seconds
@@ -206,6 +214,7 @@ class RustDlpClient:
                 language=language,
                 disabled_detectors=disabled_detectors,
                 ner_enabled=ner_enabled,
+                from_decoded=True,
             )
             for sm in seg_matches:
                 matches.append(

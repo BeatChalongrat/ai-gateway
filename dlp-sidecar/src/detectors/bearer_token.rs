@@ -62,11 +62,10 @@ impl Detector for BearerTokenDetector {
         "bearer_token"
     }
     fn entity_type(&self) -> &'static str {
-        // The trait method returns the *default* entity_type;
-        // the engine that translates RawMatch → DetectionMatch in
-        // Batch 4 will overlay per-match entity_type for the cases
-        // where ``detect_with_types`` is used. For parity testing
-        // we only assert start/end/count so the placeholder is fine.
+        // Default/fallback only. Each match carries its real per-pattern
+        // entity_type via RawMatch.entity_type (Some(sub.entity_type)),
+        // which the server overlays over this — matching Python's
+        // per-tuple entity_type in _PATTERNS.
         "bearer_token"
     }
     fn category(&self) -> &'static str {
@@ -86,21 +85,10 @@ impl Detector for BearerTokenDetector {
                     matched_text: m.as_str().to_string(),
                     confidence: 1.0,
                     priority: 0,
+                    entity_type: Some(sub.entity_type),
                 });
             }
         }
         out
-    }
-}
-
-// Per-sub-pattern entity_type lookup is deferred until Batch 4
-// (the gRPC wire format needs to populate ``entity_type`` per
-// match). For Batch 1 parity testing the (start, end, count)
-// surface is sufficient and the entity_type field on each
-// ``SubPattern`` stays private + unread.
-#[allow(dead_code)]
-impl SubPattern {
-    pub(crate) fn entity_type_name(&self) -> &'static str {
-        self.entity_type
     }
 }

@@ -75,6 +75,7 @@ impl Detector for BiometricDataDetector {
                 matched_text: m.as_str().to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out

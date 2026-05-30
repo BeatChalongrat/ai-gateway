@@ -96,6 +96,7 @@ impl Detector for IbanDetector {
                 matched_text: raw.to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out

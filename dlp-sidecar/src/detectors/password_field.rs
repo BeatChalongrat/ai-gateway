@@ -60,7 +60,14 @@ impl Detector for PasswordFieldDetector {
         // Cross-pattern dedup on the value (start,end), first writer wins —
         // mirrors Python password_field.py's ``seen`` set across all 3 patterns.
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
-        for re in [&*PASSWORD_RE, &*THAI_PASSWORD_RE, &*PASSWORD_NOSEP_RE] {
+        // Per-pattern entity_type — the config label:value form emits
+        // ``password_in_config``; the two prose forms emit
+        // ``password_in_text`` (mirrors password_field.py's _emit calls).
+        for (re, et) in [
+            (&*PASSWORD_RE, "password_in_config"),
+            (&*THAI_PASSWORD_RE, "password_in_text"),
+            (&*PASSWORD_NOSEP_RE, "password_in_text"),
+        ] {
             for caps in re.captures_iter(text).flatten() {
                 let g = match caps.name("value") {
                     Some(g) => g,
@@ -75,6 +82,7 @@ impl Detector for PasswordFieldDetector {
                         matched_text: g.as_str().to_string(),
                         confidence: 1.0,
                         priority: 0,
+                        entity_type: Some(et),
                     });
                 }
             }

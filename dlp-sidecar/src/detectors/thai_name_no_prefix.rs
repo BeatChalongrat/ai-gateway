@@ -119,6 +119,7 @@ impl Detector for ThaiNameNoPrefixDetector {
                         matched_text: g1.as_str().to_string(),
                         confidence: 1.0,
                         priority: -5,
+                        entity_type: None,
                     });
                 }
                 pos_byte = abs_end_b;

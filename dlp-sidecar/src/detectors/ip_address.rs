@@ -57,6 +57,7 @@ impl Detector for Ipv4Detector {
                 matched_text: m.as_str().to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out
@@ -91,6 +92,7 @@ impl Detector for Ipv6Detector {
                 matched_text: value.to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out

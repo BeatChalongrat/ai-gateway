@@ -124,11 +124,70 @@ GAP_CASES = [
      "input": "ผมมีโรคภูมิแพ้รุนแรง"},
     {"detector": "gap", "id": "phone_all_same_digit_reject",
      "input": "call us at 000-000-0000 anytime"},
+    # ---- Re-audit remediation (Track D) ----
+    # C1 — base64 decode-and-scan must apply the relaxed (from_decoded)
+    # detectors on BOTH engines. The decoded payloads carry NO phone
+    # context keyword / use a SHORT key, so they only fire under the
+    # from_decoded relaxation (phone drops the keyword gate; api_key_secret
+    # runs the short sk-ant- pattern). Both engines must now agree.
+    {"detector": "gap", "id": "base64_bare_phone_no_keyword",
+     # decodes to "member 0812345678 archived data" (no phone keyword)
+     "input": f"row {_b64('member 0812345678 archived data')} end"},
+    {"detector": "gap", "id": "base64_short_anthropic_key",
+     # decodes to "cred sk-ant-abcd1234 saved" (8-char body, short form)
+     "input": f"blob {_b64('cred sk-ant-abcd1234 saved')} done"},
+    {"detector": "gap", "id": "base64_nested_not_recursed",
+     # double base64 — neither engine recurses into a decoded base64
+     # blob, so both correctly find nothing (documents the boundary;
+     # parity holds because both engines are silent).
+     "input": f"x {_b64(_b64('contact alice@example.com here'))} y"},
+    # H9 — labelled ภูมิแพ้ (allergy) must validate in the Rust Stage-1
+    # CONDITION_RE the same way Python's _CONDITION_VALUE_RE does. The
+    # existing health_allergy_personal case exercises the KEYWORD path;
+    # this one exercises the LABELLED path that was the actual gap.
+    {"detector": "gap", "id": "health_labelled_allergy",
+     "input": "อาการ: ภูมิแพ้อาหารทะเล"},
+    # H10 — ≥3 distinct credential entity_types from one detector
+    # (anthropic_api_key + github_pat + jwt_token). Exercises the
+    # classifier's len(entity_types) >= 3 escalation; with entity_type
+    # now in the comparison tuple, both engines must emit identical types.
+    {"detector": "gap", "id": "multi_entity_type_credentials",
+     "input": (
+         "creds sk-ant-api03-" + "A" * 20
+         + " and ghp_" + "a" * 36
+         + " and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+         "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c end"
+     )},
+]
+
+
+# Documentation-only cases (NON-GATED). These capture KNOWN shared or
+# divergent behaviour the re-audit flagged (M6 incomplete zero-width
+# strip set; M7 ASCII-only \d in Rust vs Unicode \d in Python). They are
+# reported separately and EXCLUDED from the pass/fail gate because they
+# are not part of this remediation's fix scope — they document the
+# current behaviour so a future fix has a baseline.
+DOC_CASES = [
+    # M7 — Thai-digit phone. Python's \d matches Thai numerals (๐-๙);
+    # Rust's \d is ASCII-only → Rust misses → only_python divergence.
+    {"detector": "doc", "id": "m7_thai_digit_phone",
+     "input": "โทร ๐๘๑๒๓๔๕๖๗๘"},
+    # M6 — U+200E (LTR mark) is NOT in the preprocessor strip set, so the
+    # email is split on both engines → both miss (shared gap, parity holds
+    # but the evasion succeeds).
+    {"detector": "doc", "id": "m6_u200e_split_email",
+     "input": "mail al‎ice@example.com now"},
 ]
 
 
 def py_scan(registry, text):
-    return sorted((m.detector_name, m.start, m.end)
+    # entity_type is now part of the comparison tuple (re-audit H10):
+    # the Rust path previously collapsed per-pattern entity_types to one
+    # per detector, diverging from Python on api_key_secret /
+    # password_field. The classifier escalates risk at
+    # ``len(entity_types) >= 3``, so an entity_type drift is a real
+    # behavioural gap the (detector, start, end)-only tuple hid.
+    return sorted((m.detector_name, m.entity_type, m.start, m.end)
                   for m in registry.scan_text(text))
 
 
@@ -136,7 +195,8 @@ async def rust_scan(client, text):
     res = await client.scan_text(text, ner_enabled=False)
     if res is None:
         return None
-    return sorted((m.detector_name, m.start, m.end) for m in res.matches)
+    return sorted((m.detector_name, m.entity_type, m.start, m.end)
+                  for m in res.matches)
 
 
 async def main() -> None:
@@ -252,6 +312,27 @@ async def main() -> None:
     print()
     gate = "PASS ✅" if (full == total) else "FAIL ❌ — do NOT flip DLP_ENGINE=rust"
     print(f"## Gate: {gate}")
+
+    # ---- Documentation-only cases (NON-GATED) -----------------------
+    # Reported for transparency; do NOT affect the gate above.
+    print()
+    print("## Documentation-only (non-gated) — known behaviour, not fixed here")
+    print()
+    print("| Case | Python spans | Rust spans | Note |")
+    print("|---|---|---|---|")
+    for c in DOC_CASES:
+        pm = py_scan(registry, c["input"])
+        rm = await rust_scan(client, c["input"])
+        if rm is None:
+            note = "rust unavailable"
+            rm_repr = "—"
+        elif set(pm) == set(rm):
+            note = "parity holds (both agree)"
+            rm_repr = str(len(rm))
+        else:
+            note = "DIVERGES (documented gap)"
+            rm_repr = str(len(rm))
+        print(f"| {c['id']} | {len(pm)} | {rm_repr} | {note} |")
 
 
 if __name__ == "__main__":
