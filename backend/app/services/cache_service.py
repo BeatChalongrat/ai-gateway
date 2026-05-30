@@ -55,6 +55,7 @@ class CacheService:
         messages: list,
         project_id: str,
         api_key_id: str | None = None,
+        reasoning_key: str | None = None,
     ) -> str:
         # When ``api_key_id`` is supplied (the orchestrator passes it for
         # DLP RESTORE profiles), the key is scoped per-caller so a
@@ -68,6 +69,15 @@ class CacheService:
         payload_obj: dict[str, Any] = {"model": model, "messages": messages}
         if api_key_id:
             payload_obj["api_key_id"] = api_key_id
+        # P1 reasoning isolation: a reasoning request (mode/show_summary)
+        # must not share a cache entry with a non-reasoning one for the
+        # same prompt — otherwise a cached no-reasoning body could satisfy
+        # a reasoning request (and vice versa). Mixed into the digest so a
+        # different reasoning config yields a different key. Absent (None)
+        # for non-reasoning callers → key is byte-identical to before, so
+        # existing entries stay reachable.
+        if reasoning_key:
+            payload_obj["reasoning"] = reasoning_key
         payload = json.dumps(payload_obj, sort_keys=True, ensure_ascii=False)
         # Phase-1 B12: 32 hex chars (128-bit) instead of 16 (64-bit) to
         # remove the birthday-collision risk at scale. Widening the digest
@@ -88,11 +98,16 @@ class CacheService:
         messages: list,
         project_id: str,
         api_key_id: str | None = None,
+        reasoning_key: str | None = None,
     ) -> dict | None:
         try:
             client = self._redis()
             raw = await _maybe_await(
-                client.get(self._key(model, messages, project_id, api_key_id))
+                client.get(
+                    self._key(
+                        model, messages, project_id, api_key_id, reasoning_key
+                    )
+                )
             )
             # B12: the hit/miss counter is pure stats — keep it off the hot
             # path. Only the GET is awaited (1 round-trip); the INCR is
@@ -139,12 +154,15 @@ class CacheService:
         response: dict,
         ttl: int | None = None,
         api_key_id: str | None = None,
+        reasoning_key: str | None = None,
     ) -> None:
         try:
             client = self._redis()
             await _maybe_await(
                 client.setex(
-                    self._key(model, messages, project_id, api_key_id),
+                    self._key(
+                        model, messages, project_id, api_key_id, reasoning_key
+                    ),
                     ttl or self.default_ttl,
                     # Re-audit L2: match the OPT_NON_STR_KEYS + default=
                     # contract used by UTF8JSONResponse so a cached body
