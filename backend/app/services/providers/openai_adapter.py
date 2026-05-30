@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk, ProviderUsage
 from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import resolve_base_url
-from app.services.providers.http_client import create_provider_client
+from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.parsers import parse_openai_response
 
@@ -121,20 +121,19 @@ class OpenAIAdapter(BaseProviderAdapter):
         body = self._build_body(payload, messages, resolved_model=resolved_model)
         key = api_key or settings.openai_api_key
 
-        client = create_provider_client(
+        client = await get_provider_client(
             base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
-            headers={"Authorization": f"Bearer {key}"},
         )
+        headers = {"Authorization": f"Bearer {key}"}
 
-        async with client:
-            resp = await call_with_retry(
-                lambda: client.post("/chat/completions", json=body),
-                provider_name=self.provider_name,
-                max_retries=settings.provider_max_retries,
-            )
-            data = resp.json()
+        resp = await call_with_retry(
+            lambda: client.post("/chat/completions", json=body, headers=headers),
+            provider_name=self.provider_name,
+            max_retries=settings.provider_max_retries,
+        )
+        data = resp.json()
 
         return parse_openai_response(data)
 
@@ -144,22 +143,21 @@ class OpenAIAdapter(BaseProviderAdapter):
         body = self._build_body(payload, messages, stream=True, resolved_model=resolved_model)
         key = api_key or settings.openai_api_key
 
-        client = create_provider_client(
+        client = await get_provider_client(
             base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
-            headers={"Authorization": f"Bearer {key}"},
         )
+        headers = {"Authorization": f"Bearer {key}"}
 
-        async with client:
-            async with client.stream(
-                "POST", "/chat/completions", json=body
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    chunk = _parse_sse_line(line)
-                    if chunk is not None:
-                        yield chunk
+        async with client.stream(
+            "POST", "/chat/completions", json=body, headers=headers
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                chunk = _parse_sse_line(line)
+                if chunk is not None:
+                    yield chunk
 
 
 def _parse_sse_line(line: str) -> ProviderStreamChunk | None:

@@ -45,6 +45,11 @@ class _FakeSemanticRouter:
     def get_model_hint(self, messages, allowed_providers=None):
         return self._result
 
+    async def get_model_hint_async(self, messages, allowed_providers=None):
+        # Phase-1 B4: orchestrator calls the async variant; delegate to
+        # the sync stub so the canned result still drives the test.
+        return self._result
+
 
 def _chat(content: str = "hello there") -> dict:
     resp = client.post(

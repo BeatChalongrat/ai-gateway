@@ -24,7 +24,7 @@ same encoding contract.
 
 from __future__ import annotations
 
-import json
+import orjson
 
 from fastapi.responses import JSONResponse
 
@@ -33,10 +33,11 @@ class UTF8JSONResponse(JSONResponse):
     media_type = "application/json; charset=utf-8"
 
     def render(self, content) -> bytes:
-        return json.dumps(
-            content,
-            ensure_ascii=False,
-            allow_nan=False,
-            indent=None,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        # Phase-1 B9: orjson is a Rust serializer ~3-10x faster than the
+        # stdlib (and it releases the GIL), which matters on large
+        # completion bodies. It already emits compact UTF-8 with non-ASCII
+        # unescaped (== the old ensure_ascii=False contract) and returns
+        # bytes directly (no .encode). OPT_NON_STR_KEYS matches stdlib's
+        # int-key coercion. NaN/Inf serialize to null (the old
+        # allow_nan=False raised; a chat response never contains them).
+        return orjson.dumps(content, option=orjson.OPT_NON_STR_KEYS)

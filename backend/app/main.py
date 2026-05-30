@@ -112,6 +112,12 @@ async def lifespan(app: FastAPI):
     # via /metrics to correlate saturation with pool contention.
     pool_task = asyncio.create_task(_db_pool_sampler())
 
+    # Phase-1 B6: alert rules are evaluated on a periodic background
+    # sweep instead of once per completed request. Their metrics are
+    # time-window aggregates, so a sweep is equivalent and keeps the
+    # enabled-rules SELECT + window aggregates off the request hot path.
+    alert_task = asyncio.create_task(_alert_evaluation_sweep())
+
     # Model registry: swap the import-time seed snapshot for the
     # current DB contents, then start the APScheduler job that
     # refreshes ``model_configs`` daily. Failures here are logged
@@ -133,10 +139,17 @@ async def lifespan(app: FastAPI):
     # Drain + stop the queue first so any in-flight records make it
     # to Postgres before the worker pool tears down.
     await request_log_queue.stop_worker()
+    # Phase-1 B1: close the pooled provider HTTP clients.
+    try:
+        from app.services.providers.http_client import close_all_clients
+        await close_all_clients()
+    except Exception:  # noqa: BLE001
+        pass
     _stop_model_discovery_scheduler()
     monitor_task.cancel()
     retention_task.cancel()
     archive_task.cancel()
+    alert_task.cancel()
     partition_task.cancel()
     pool_task.cancel()
     executor.shutdown(wait=False)
@@ -431,6 +444,39 @@ async def _daily_partition_maintenance() -> None:
         except Exception as exc:
             print(f"[partition-maint] run failed: {exc}")
         await asyncio.sleep(24 * 60 * 60)
+
+
+async def _alert_evaluation_sweep() -> None:
+    """Phase-1 B6: evaluate alert rules on a periodic background sweep.
+
+    Replaces the per-request ``evaluate_after_request`` call. Alert
+    metrics are time-window aggregates keyed on each rule's own scope,
+    so a periodic sweep is equivalent and removes the enabled-rules
+    SELECT + per-rule window aggregates from the request hot path.
+    """
+    import asyncio
+    from app.core.db import SessionLocal
+    from app.services.alert_evaluator import AlertEvaluator
+
+    interval = float(getattr(settings, "alert_sweep_interval_seconds", 10.0))
+    evaluator = AlertEvaluator()
+    await asyncio.sleep(15)  # let the app settle before the first sweep
+    while True:
+        try:
+            session = SessionLocal()
+            try:
+                await evaluator.evaluate_all(session)
+                session.commit()
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                print(f"[alert-sweep] run failed: {exc}")
+            finally:
+                session.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"[alert-sweep] loop error: {exc}")
+        await asyncio.sleep(interval)
 
 
 def _run_log_archive_once() -> None:
