@@ -313,6 +313,9 @@ export const en = {
   // ── File attachments ─────────────────────────────────────
   "file.unavailable": "File unavailable",
   "file.unavailableToast": "This file is no longer available.",
+
+  // ── Message actions ──────────────────────────────────────
+  "chat.retry": "Retry",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -621,6 +624,9 @@ const th: Record<DictKey, string> = {
   // File attachments
   "file.unavailable": "ไฟล์ไม่พร้อมใช้งาน",
   "file.unavailableToast": "ไฟล์นี้ไม่พร้อมใช้งานแล้ว",
+
+  // Message actions
+  "chat.retry": "ลองใหม่",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

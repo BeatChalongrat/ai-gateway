@@ -20,6 +20,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 
 import type { Message } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useVoiceStore } from "@/stores/voiceStore";
 
@@ -43,6 +44,7 @@ interface Props {
   showFeedback?: boolean;
   showRegenerate?: boolean;
   onRegenerate?: () => void;
+  onRetry?: () => void;
   onEdit?: (newContent: string) => void;
   onSwitchBranch?: (branchIndex: number) => void;
 }
@@ -116,11 +118,13 @@ function MessageBubbleImpl({
   showFeedback,
   showRegenerate,
   onRegenerate,
+  onRetry,
   onEdit,
   onSwitchBranch,
 }: Props) {
   const isUser = message.role === "user";
   const router = useRouter();
+  const t = useT();
 
   // Inline-edit state for user messages.
   const [editing, setEditing] = useState(false);
@@ -389,16 +393,30 @@ function MessageBubbleImpl({
               current={message.feedback ?? null}
             />
           ) : null}
-          {showRegenerate && onRegenerate ? (
+          {/* On an errored turn the labeled Retry button below replaces
+              the subtle regenerate icon, so we don't show both. */}
+          {showRegenerate && onRegenerate && message.status !== "error" ? (
             <ActionButton ariaLabel="Regenerate" onClick={onRegenerate}>
               <RegenerateIcon />
             </ActionButton>
           ) : null}
         </div>
         {message.status === "error" ? (
-          <span className="ml-2 text-[11px] text-status-danger">
-            AI service error
-          </span>
+          <div className="ml-2 flex items-center gap-2">
+            <span className="text-[11px] text-status-danger">
+              AI service error
+            </span>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="focus-ring inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] font-medium text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+              >
+                <RegenerateIcon />
+                {t("chat.retry")}
+              </button>
+            ) : null}
+          </div>
         ) : null}
         {message.status === "cancelled" ? (
           <span className="ml-2 text-[11px] text-text-muted">stopped</span>

@@ -20,6 +20,7 @@ interface Props {
   convId: string;
   messages: Message[];
   onRegenerate: (messageId: string) => void;
+  onRetry?: (messageId: string) => void;
   onPromptPick?: (text: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onSwitchBranch?: (messageId: string, branchIndex: number) => void;
@@ -40,6 +41,7 @@ export function ChatThread({
   convId,
   messages,
   onRegenerate,
+  onRetry,
   onPromptPick,
   onEditMessage,
   onSwitchBranch,
@@ -184,6 +186,7 @@ export function ChatThread({
                   lastAsstIdx={lastAsstIdx}
                   anyStreaming={anyStreaming}
                   onRegenerate={onRegenerate}
+                  onRetry={onRetry}
                   onEditMessage={onEditMessage}
                   onSwitchBranch={onSwitchBranch}
                 />
@@ -194,6 +197,7 @@ export function ChatThread({
                   lastAsstIdx={lastAsstIdx}
                   anyStreaming={anyStreaming}
                   onRegenerate={onRegenerate}
+                  onRetry={onRetry}
                   onEditMessage={onEditMessage}
                   onSwitchBranch={onSwitchBranch}
                 />
@@ -250,6 +254,7 @@ interface InnerProps {
   lastAsstIdx: number;
   anyStreaming: boolean;
   onRegenerate: (messageId: string) => void;
+  onRetry?: (messageId: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onSwitchBranch?: (messageId: string, branchIndex: number) => void;
 }
@@ -319,6 +324,7 @@ function renderRow(m: Message, i: number, props: InnerProps) {
     lastAsstIdx,
     anyStreaming,
     onRegenerate,
+    onRetry,
     onEditMessage,
     onSwitchBranch,
   } = props;
@@ -341,6 +347,11 @@ function renderRow(m: Message, i: number, props: InnerProps) {
           m.status !== "regenerated"
         }
         onRegenerate={() => onRegenerate(m.id)}
+        onRetry={
+          onRetry && m.role === "assistant" && m.status === "error" && !anyStreaming
+            ? () => onRetry(m.id)
+            : undefined
+        }
         onEdit={
           m.role === "user" && onEditMessage && !anyStreaming
             ? (text) => onEditMessage(m.id, text)

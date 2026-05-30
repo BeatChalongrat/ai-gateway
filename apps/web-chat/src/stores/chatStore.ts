@@ -135,6 +135,11 @@ interface ChatState {
   sendMessage: (convId: string, content: string, fileIds?: string[]) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   regenerate: (convId: string, messageId: string) => Promise<void>;
+  /** Retry a failed assistant turn. Re-runs generation off the same
+   *  context. Handles both a persisted error row (regenerate directly)
+   *  and a local-only placeholder from a pre-stream error (reload to
+   *  pick up the server-persisted row, then regenerate). */
+  retryMessage: (convId: string, messageId: string) => Promise<void>;
   editMessage: (convId: string, messageId: string, newContent: string) => Promise<void>;
   switchBranch: (convId: string, messageId: string, branchIndex: number) => Promise<void>;
   setFeedback: (
@@ -848,6 +853,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
         delete sids[convId];
         return { abortControllers: aborts, streamingAssistantId: sids };
       });
+    }
+  },
+
+  async retryMessage(convId, messageId) {
+    // The failed assistant turn is regenerated off its predecessor
+    // context. Two cases:
+    //   • Real (persisted) id — mid-stream error after message_start,
+    //     or a row already reloaded — regenerate it directly.
+    //   • Temp id ("tmp-…") — a pre-stream error (e.g. gateway down)
+    //     returned before message_start, so the client never learned
+    //     the real id. The server still persisted the assistant row as
+    //     status="error", so reload to pick it up, then regenerate the
+    //     latest assistant turn.
+    if (!messageId.startsWith("tmp-")) {
+      await get().regenerate(convId, messageId);
+      return;
+    }
+    await get().loadMessages(convId);
+    const list = get().messages[convId] ?? [];
+    const lastAsst = [...list].reverse().find((m) => m.role === "assistant");
+    if (lastAsst && !lastAsst.id.startsWith("tmp-")) {
+      await get().regenerate(convId, lastAsst.id);
+    } else {
+      // Nothing was persisted (e.g. a 429 rejected at the rate-limiter
+      // before the turn was created). Ask the user to resend.
+      get().setError("Couldn't retry automatically — please resend your message.");
     }
   },
 

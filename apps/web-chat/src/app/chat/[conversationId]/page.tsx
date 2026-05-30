@@ -51,6 +51,7 @@ export default function ConversationPage() {
   const sendMessage = useChatStore((s) => s.sendMessage);
   const cancelGeneration = useChatStore((s) => s.cancelGeneration);
   const regenerate = useChatStore((s) => s.regenerate);
+  const retryMessage = useChatStore((s) => s.retryMessage);
   const setConversationModel = useChatStore((s) => s.setConversationModel);
   const setConversationKB = useChatStore((s) => s.setConversationKB);
   const editMessage = useChatStore((s) => s.editMessage);
@@ -227,6 +228,7 @@ export default function ConversationPage() {
                 loadingOlder={loadingOlder ?? false}
                 onLoadEarlier={() => loadOlderMessages(convId)}
                 onRegenerate={(messageId) => void regenerate(convId, messageId)}
+                onRetry={(messageId) => void retryMessage(convId, messageId)}
                 onPromptPick={(text) => {
                   setInjectedText(text);
                 }}
