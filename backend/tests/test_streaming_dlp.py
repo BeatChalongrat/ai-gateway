@@ -156,10 +156,20 @@ class TestStreamingPiiRestoredInResponse:
 
 class TestStreamingBlockReturns403:
     def test_streaming_block_returns_403(self, monkeypatch):
-        # Force strict profile so credential → BLOCK.
+        # Force strict profile so credential → BLOCK. Track A: the
+        # streaming path now resolves the profile via the async variant,
+        # so patch both names (sync kept for any non-async caller).
         monkeypatch.setattr(
             "app.api.routes.public_chat.get_runtime_profile",
             lambda _session, _pid: STRICT_PROFILE,
+        )
+
+        async def _async_strict(_session, _pid):
+            return STRICT_PROFILE
+
+        monkeypatch.setattr(
+            "app.api.routes.public_chat.get_runtime_profile_async",
+            _async_strict,
         )
         captured = _install_stream_spy(monkeypatch, chunks=["should never run"])
 
