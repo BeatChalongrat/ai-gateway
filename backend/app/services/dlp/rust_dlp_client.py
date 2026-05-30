@@ -238,7 +238,12 @@ class RustDlpClient:
         """Mirror ``DetectorRegistry.scan_text``: normalize → Rust detect
         on the cleaned text → remap offsets to the original text → decode
         + scan base64 segments and map findings to the encoded span."""
-        normalized = normalize_for_scan(text)
+        # H13: normalize_for_scan does an O(n) per-char NFKC loop + a
+        # base64 finditer/decode — multi-ms on large Thai/CJK input. Run
+        # it off the event loop so it can't stall the gateway under a
+        # Thai/CJK burst (the rust path otherwise bypasses the Phase-2
+        # to_thread offload). Bounded by the default executor.
+        normalized = await asyncio.to_thread(normalize_for_scan, text)
 
         raw = await self._rust_scan_raw(
             stub,
