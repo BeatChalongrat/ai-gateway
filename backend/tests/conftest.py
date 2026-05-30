@@ -297,6 +297,34 @@ def _isolate_session_local_to_integration_engine(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_phase1_inmemory_caches():
+    """Clear the Phase-1 per-process hot-path caches between tests.
+
+    B5/B7/B8 added short-TTL in-memory caches (provider keys, keyword
+    rules, last_used_at debounce). Production busts them via the admin
+    endpoints, but tests insert rows directly through the ORM, so a stale
+    cached result would otherwise leak across — clear them per test.
+    """
+    import app.services.api_key_service as _aks
+    import app.services.keyword_rule_service as _krs
+    import app.services.provider_key_service as _pks
+
+    for mod, attr in (
+        (_krs, "_rules_cache"),
+        (_pks, "_keys_cache"),
+        (_aks, "_last_used_writes"),
+    ):
+        getattr(mod, attr).clear()
+    yield
+    for mod, attr in (
+        (_krs, "_rules_cache"),
+        (_pks, "_keys_cache"),
+        (_aks, "_last_used_writes"),
+    ):
+        getattr(mod, attr).clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_stateful_redis_services(request, monkeypatch):
     """Neutralize Redis-backed gateway services for tests.
 

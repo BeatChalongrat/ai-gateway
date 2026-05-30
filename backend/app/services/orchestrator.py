@@ -17,6 +17,7 @@ DLP can be disabled globally via DLP_ENABLED=false in settings.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import uuid
@@ -97,6 +98,14 @@ from app.services.gateway.fallback_orchestrator import (
 )
 
 logger = structlog.get_logger(__name__)
+
+# Phase-1 B2: bound the number of DLP regex scans running concurrently
+# in the threadpool so a burst of requests can't starve the worker's
+# 16-thread default executor (main.py). Created at module import; asyncio
+# binds it to the running loop lazily on first ``async with`` (3.10+),
+# so it is safe to define here. Batch input/output scans go through this;
+# the tiny per-chunk streaming scan stays inline (sub-ms 120-char window).
+_DLP_SCAN_SEMAPHORE = asyncio.Semaphore(8)
 
 # Categories whose tokens MUST NEVER be restored on outbound — even
 # if a (mis)configured policy profile maps them to RESTORE. This is
@@ -658,7 +667,7 @@ class GatewayOrchestrator:
         # reuse the same logic on DLP-masked messages. Mutates
         # payload.model in place when a router fires.
         with record_phase("routing"):
-            router_used, _matched_rule = self._apply_router_chain(
+            router_used, _matched_rule = await self._apply_router_chain(
                 ctx=ctx,
                 payload=payload,
                 dict_messages=dict_messages,
@@ -1088,7 +1097,7 @@ class GatewayOrchestrator:
                 # acceptable because outbound restore is regex-driven and
                 # the inbound NER already masked anything the AI is
                 # supposed to echo.
-                response_detection = self._scan_text_as_result(
+                response_detection = await self._scan_text_as_result_async(
                     response_content,
                     direction="output",
                     ner_enabled=False,
@@ -1241,7 +1250,7 @@ class GatewayOrchestrator:
             ).time():
                 # Section 8c — final outbound scan after restore. Same
                 # NER=False rationale as Section 8 above.
-                final_response_detection = self._scan_text_as_result(
+                final_response_detection = await self._scan_text_as_result_async(
                     response_content,
                     direction="output",
                     ner_enabled=False,
@@ -1301,7 +1310,7 @@ class GatewayOrchestrator:
                     new_tc["function"] = fn
                     final_tool_calls.append(new_tc)
                     continue
-                arg_detection = self._scan_text_as_result(
+                arg_detection = await self._scan_text_as_result_async(
                     args_str, direction="output", ner_enabled=False,
                 )
                 arg_enforcement = self._scan_and_evaluate(
@@ -1634,19 +1643,11 @@ class GatewayOrchestrator:
             except Exception as exc:
                 log.warning("request_log_enqueue_failed", error=str(exc))
 
-            # Alert evaluation — uses an in-memory ORM built from the
-            # record so the path does not depend on the queue having
-            # flushed yet. The evaluator only reads tenant_id /
-            # project_id from this object (see
-            # ``AlertEvaluator._scope_matches``); all analytical work
-            # runs against the live ``session`` and the persisted history.
-            try:
-                in_memory_row = request_log_queue.build_request_log_orm(record)
-                await self.alert_evaluator.evaluate_after_request(
-                    session, in_memory_row
-                )
-            except Exception as exc:
-                log.warning("alert_evaluator_failed", error=str(exc))
+            # Alert evaluation moved OFF the request path (Phase-1 B6).
+            # A periodic background sweep (lifespan _alert_evaluation_sweep)
+            # now runs AlertEvaluator.evaluate_all every few seconds, so the
+            # per-request enabled-rules SELECT + window aggregates no longer
+            # block the event loop on every completed request.
 
         log.info(
             "request_complete",
@@ -1898,7 +1899,7 @@ class GatewayOrchestrator:
 
         payload.reasoning = ReasoningConfig(mode="auto", show_summary=True)
 
-    def _apply_router_chain(
+    async def _apply_router_chain(
         self,
         ctx: RequestContext,
         payload: ChatCompletionsRequest,
@@ -1999,9 +2000,10 @@ class GatewayOrchestrator:
             hinted_model = project_hint
             payload.model = project_hint
         else:
-            # Step 2: semantic router (existing precedence).
+            # Step 2: semantic router (existing precedence). B4: the
+            # embedding encode runs off the event loop.
             sem_model, sem_intent, sem_confidence = (
-                self.semantic_router.get_model_hint(
+                await self.semantic_router.get_model_hint_async(
                     dict_messages, allowed_providers=allowed_providers
                 )
             )
@@ -2143,8 +2145,12 @@ class GatewayOrchestrator:
         """
         engine = self._select_dlp_engine(ctx, session)
 
-        def _python_scan():
-            return registry.scan_messages(
+        async def _python_scan():
+            # B2: run the synchronous regex scan off the event loop so a
+            # full-message scan (tens of ms with large bodies) does not
+            # block every other coroutine on the worker.
+            return await self._scan_messages_async(
+                registry,
                 messages,
                 direction=direction,
                 scan_system_messages=scan_system_messages,
@@ -2168,7 +2174,7 @@ class GatewayOrchestrator:
             if rust_result is not None:
                 return rust_result
             logger.warning("dlp_rust_fallback_to_python")
-            return _python_scan()
+            return await _python_scan()
 
         if engine == "shadow":
             import asyncio as _asyncio
@@ -2189,7 +2195,7 @@ class GatewayOrchestrator:
                     "dlp_shadow_rust_dispatch_failed", error=str(exc)[:200]
                 )
 
-            python_result = _python_scan()
+            python_result = await _python_scan()
 
             if rust_task is not None:
                 try:
@@ -2201,7 +2207,48 @@ class GatewayOrchestrator:
             return python_result
 
         # Default: python
-        return _python_scan()
+        return await _python_scan()
+
+    async def _scan_messages_async(
+        self,
+        registry,
+        messages,
+        *,
+        direction: str,
+        scan_system_messages: bool,
+    ) -> DetectionResult:
+        """Off-loop wrapper for ``registry.scan_messages`` (B2).
+
+        Bounded by ``_DLP_SCAN_SEMAPHORE`` so concurrent scans can't
+        exhaust the default executor. ``scan_messages`` is effectively
+        read-only over shared state (module-level compiled regex;
+        Presidio NER runs in the remote ner-service), so running it in
+        a thread is safe.
+        """
+        async with _DLP_SCAN_SEMAPHORE:
+            return await asyncio.to_thread(
+                registry.scan_messages,
+                messages,
+                direction=direction,
+                scan_system_messages=scan_system_messages,
+            )
+
+    async def _scan_text_as_result_async(
+        self,
+        text: str,
+        direction: str = "output",
+        *,
+        ner_enabled: bool = True,
+    ) -> DetectionResult:
+        """Off-loop wrapper for the synchronous ``_scan_text_as_result``
+        (B2) — used by the non-streaming outbound + tool-arg scans."""
+        async with _DLP_SCAN_SEMAPHORE:
+            return await asyncio.to_thread(
+                self._scan_text_as_result,
+                text,
+                direction,
+                ner_enabled=ner_enabled,
+            )
 
     def _log_shadow_diff(
         self,
