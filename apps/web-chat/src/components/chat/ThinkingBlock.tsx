@@ -82,40 +82,21 @@ export function ThinkingBlock({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
+        // During streaming the button is non-interactive in practice (the
+        // block is force-expanded) — it just hosts the shimmer label.
+        aria-label={isStreaming ? t("reasoning.thinking") : undefined}
         className="flex items-center gap-1.5 text-xs text-text-tertiary transition-colors hover:text-text-secondary"
       >
-        <BrainCircuit className="h-3.5 w-3.5" aria-hidden />
         {isStreaming ? (
-          <span className="flex items-center gap-1.5">
-            <span>{t("reasoning.analyzing")}</span>
-            {/* Three-dot bouncing indicator — Tailwind's built-in
-                ``animate-bounce`` with staggered delays. */}
-            <span className="flex gap-0.5">
-              <span
-                className="h-1 w-1 rounded-full bg-text-tertiary"
-                style={{
-                  animation: "bounce 1s infinite",
-                  animationDelay: "0ms",
-                }}
-              />
-              <span
-                className="h-1 w-1 rounded-full bg-text-tertiary"
-                style={{
-                  animation: "bounce 1s infinite",
-                  animationDelay: "150ms",
-                }}
-              />
-              <span
-                className="h-1 w-1 rounded-full bg-text-tertiary"
-                style={{
-                  animation: "bounce 1s infinite",
-                  animationDelay: "300ms",
-                }}
-              />
-            </span>
+          // ChatGPT-style "Thinking…" with a bright wave sweeping across
+          // the text (pure-CSS background-clip shimmer; static under
+          // prefers-reduced-motion). Replaces the old bouncing dots.
+          <span className="shimmer-text text-xs font-medium">
+            {t("reasoning.thinking")}
           </span>
         ) : (
           <span className="flex items-center gap-1.5">
+            <BrainCircuit className="h-3.5 w-3.5" aria-hidden />
             <span>{t("reasoning.analyzed")}</span>
             {durationText ? (
               <span className="text-text-muted">{durationText}</span>
