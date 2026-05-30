@@ -236,6 +236,13 @@ class Settings(BaseSettings):
     dlp_engine: str = "python"
     dlp_grpc_address: str = "dlp-sidecar:50051"
     dlp_grpc_timeout_seconds: float = 1.0
+    # Re-audit H11: the Rust sidecar ports only the regex/heuristic
+    # detectors — Presidio NER (PERSON/LOCATION/ORG/GPE/NRP) is Python-
+    # only. With this True (default), the rust DLP client runs the Python
+    # NER detector as a post-pass and merges its findings, so flipping
+    # DLP_ENGINE=rust does NOT silently drop NER coverage. Set False to
+    # accept the NER gap (rust regex only) — logged at startup.
+    dlp_ner_on_rust_path: bool = True
 
     # Semantic router (intent classification via sentence-transformers).
     # Off by default — flipping this to true requires the optional
