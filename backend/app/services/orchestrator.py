@@ -739,6 +739,16 @@ class GatewayOrchestrator:
             if (_profile_uses_restore(profile) and auth is not None)
             else None
         )
+        # P1 reasoning cache isolation — a reasoning request (mode +
+        # show_summary) must not share a cache entry with a non-reasoning
+        # one for the same prompt/model. None for non-reasoning callers so
+        # the key is unchanged and existing entries stay reachable.
+        _cache_rc = getattr(payload, "reasoning", None)
+        cache_reasoning_key = (
+            f"{_cache_rc.mode}:{int(bool(_cache_rc.show_summary))}"
+            if (_cache_rc is not None and _cache_rc.mode != "off")
+            else None
+        )
         cache_hit = None
         if not payload.stream:
             with record_phase("cache"), REDIS_COMMAND_DURATION.labels(
@@ -749,6 +759,7 @@ class GatewayOrchestrator:
                     messages=cache_messages,
                     project_id=ctx.project_id,
                     api_key_id=cache_api_key_id,
+                    reasoning_key=cache_reasoning_key,
                 )
         if cache_hit is not None:
             total_ms = int((time.perf_counter() - t_start) * 1000)
@@ -1814,12 +1825,21 @@ class GatewayOrchestrator:
                 # cache write outright. Cross-user safety is preserved
                 # by the orphan-redact pass on cache hit.
                 pass
+            # P1 reasoning isolation — never persist reasoning text into the
+            # shared cache. The reasoning channel bypasses the per-user DLP
+            # restore pass run on cache hit (that pass only re-restores
+            # ``choices[].message.content``), so a stored ``reasoning_content``
+            # would replay user A's thinking verbatim to user B in the same
+            # project. Drop it before write; the reasoning_tokens count is a
+            # non-sensitive integer and may stay for cost display.
+            cache_response.pop("reasoning_content", None)
             await self.cache_service.set_async(
                 model=route.model_name,
                 messages=cache_messages,
                 project_id=ctx.project_id,
                 response=cache_response,
                 api_key_id=cache_api_key_id,
+                reasoning_key=cache_reasoning_key,
             )
 
         # 13. Realtime AI review hook (fire-and-forget). Scans the raw
