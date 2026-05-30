@@ -25,6 +25,7 @@ import type {
   Message,
   MessageListResponse,
   ModelListResponse,
+  SearchResponse,
   ShareExpiry,
   ShareLink,
   UserPreferences,
@@ -200,6 +201,18 @@ class ApiClient {
     return this.json<ConversationListResponse>(
       `/conversations?${params.toString()}`,
     );
+  }
+  /** Full-text search across message bodies + conversation titles
+   *  (+ saved memories). Backed by the tsvector/GIN index (migration
+   *  016). scope "all" unions the sources; the caller filters out
+   *  memory hits. Thai-aware (the index uses the 'simple' dictionary
+   *  which preserves CJK/Thai code points). */
+  searchContent(q: string, limit = 20, scope = "all") {
+    const params = new URLSearchParams();
+    params.set("q", q);
+    params.set("scope", scope);
+    params.set("limit", String(limit));
+    return this.json<SearchResponse>(`/search?${params.toString()}`);
   }
   listConversationsPage(opts?: { limit?: number; cursor?: string }) {
     const params = new URLSearchParams();

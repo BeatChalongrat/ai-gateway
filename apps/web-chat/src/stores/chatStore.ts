@@ -20,6 +20,7 @@ import type {
   Conversation,
   FileAttachment,
   Message,
+  SearchHit,
   SSEAnalysisStatus,
   SSEContentDelta,
   SSEMessageComplete,
@@ -50,9 +51,11 @@ interface ChatState {
   conversationsCursor: string | null;
   hasMoreConversations: boolean;
   loadingMoreConversations: boolean;
-  /** Server-side search results. Populated by searchConversations;
+  /** Server-side search results — one hit per matching conversation,
+   *  carrying the best matching message snippet. Populated by
+   *  searchConversations (full-text, with a title-only fallback);
    *  empty array when no search is active. */
-  conversationsSearchResults: Conversation[];
+  conversationsSearchResults: SearchHit[];
   conversationsSearchActive: boolean;
   conversationsSearchLoading: boolean;
   activeConversationId: string | null;
@@ -293,13 +296,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     set({ conversationsSearchActive: true, conversationsSearchLoading: true });
     try {
-      const res = await api.listConversationsSearch(q, 50);
+      // Full-text path (migration 016): searches message BODIES +
+      // conversation titles, not just titles. Memory hits are dropped
+      // (no conversation to open). Dedup by conversation — message hits
+      // come first in the response, so the first hit per conversation
+      // carries the best snippet; a title-only match falls through with
+      // an empty snippet.
+      const res = await api.searchContent(q, 20, "all");
+      const hits: SearchHit[] = [];
+      const seen = new Set<string>();
+      for (const r of res.results) {
+        if (r.type === "memory") continue;
+        const id = r.conversation_id;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        hits.push({
+          conversationId: id,
+          title: r.conversation_title || "Untitled",
+          snippet: r.type === "message" ? r.content : "",
+          role: r.role,
+          date: r.date,
+        });
+      }
       set({
-        conversationsSearchResults: res.conversations,
+        conversationsSearchResults: hits,
         conversationsSearchLoading: false,
       });
     } catch {
-      set({ conversationsSearchLoading: false });
+      // Graceful degradation — if full-text search fails (endpoint
+      // down, index issue), fall back to the title-only conversation
+      // listing so search still returns *something* useful.
+      try {
+        const res = await api.listConversationsSearch(q, 50);
+        const hits: SearchHit[] = res.conversations.map((c) => ({
+          conversationId: c.id,
+          title: c.title,
+          snippet: "",
+          date: c.updated_at,
+        }));
+        set({
+          conversationsSearchResults: hits,
+          conversationsSearchLoading: false,
+        });
+      } catch {
+        set({ conversationsSearchResults: [], conversationsSearchLoading: false });
+      }
     }
   },
 

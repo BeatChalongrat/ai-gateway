@@ -89,6 +89,43 @@ export interface ConversationListResponse {
   next_cursor: string | null;
 }
 
+// ── Full-text search (GET /api/v1/search) ──────────────────────
+// One raw hit from the cross-conversation search endpoint. `type`
+// discriminates a message-body hit from a conversation-title hit from
+// a saved-memory hit; the sidebar consumes only message + conversation
+// hits (memories have no conversation to open).
+export interface SearchResult {
+  type: "message" | "conversation" | "memory";
+  conversation_id?: string;
+  conversation_title?: string;
+  content: string;
+  role?: string;
+  memory_type?: string;
+  date: string;
+  relevance: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  scope: string;
+  results: SearchResult[];
+  total: number;
+}
+
+// Normalised sidebar search hit — one row per conversation, carrying
+// the best matching snippet. Produced by chatStore from either the
+// full-text endpoint or the title-only fallback.
+export interface SearchHit {
+  conversationId: string;
+  title: string;
+  /** Matched message body snippet; empty when the match was on the
+   *  conversation title only (or via the title-only fallback). */
+  snippet: string;
+  /** "user" | "assistant" for a message-body hit; undefined otherwise. */
+  role?: string;
+  date: string;
+}
+
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageStatus =
   | "pending"

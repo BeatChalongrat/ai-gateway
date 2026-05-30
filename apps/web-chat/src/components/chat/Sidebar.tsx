@@ -22,7 +22,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { logoutSession } from "@/lib/auth";
 import { useI18nStore, useT } from "@/lib/i18n";
-import type { Conversation } from "@/lib/types";
+import type { Conversation, SearchHit } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
@@ -46,7 +46,8 @@ interface Props {
 
 type Row =
   | { kind: "header"; label: string; key: string }
-  | { kind: "conv"; conv: Conversation; key: string };
+  | { kind: "conv"; conv: Conversation; key: string }
+  | { kind: "search"; hit: SearchHit; query: string; key: string };
 
 export function Sidebar({
   activeId,
@@ -95,10 +96,11 @@ export function Sidebar({
 
   const rows = useMemo<Row[]>(() => {
     if (searchActive) {
-      return searchResults.map((c) => ({
-        kind: "conv" as const,
-        conv: c,
-        key: c.id,
+      return searchResults.map((hit) => ({
+        kind: "search" as const,
+        hit,
+        query: debouncedSearch.trim(),
+        key: hit.conversationId,
       }));
     }
     // Hide conversations with no messages — they're either legacy
@@ -126,7 +128,7 @@ export function Sidebar({
       }
     }
     return out;
-  }, [searchActive, searchResults, conversations, activeConversationId, messagesByConv]);
+  }, [searchActive, searchResults, debouncedSearch, conversations, activeConversationId, messagesByConv]);
 
   function handleNew() {
     newChat();
@@ -723,7 +725,12 @@ function ConversationsArea({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => (useVirtual ? ref.current : null),
-    estimateSize: (i) => (rows[i]?.kind === "header" ? 24 : 36),
+    estimateSize: (i) => {
+      const k = rows[i]?.kind;
+      if (k === "header") return 24;
+      if (k === "search") return 54; // title + snippet line
+      return 36;
+    },
     overscan: 8,
     measureElement(el) {
       return el?.getBoundingClientRect().height ?? 0;
@@ -792,7 +799,7 @@ function ConversationsArea({
               >
                 <SidebarRow
                   row={row}
-                  active={row.kind === "conv" ? row.conv.id === activeId : false}
+                  active={rowActive(row, activeId)}
                   onSelect={onSelect}
                   onRename={onRename}
                   onDelete={onDelete}
@@ -807,7 +814,7 @@ function ConversationsArea({
             <SidebarRow
               key={row.key}
               row={row}
-              active={row.kind === "conv" ? row.conv.id === activeId : false}
+              active={rowActive(row, activeId)}
               onSelect={onSelect}
               onRename={onRename}
               onDelete={onDelete}
@@ -860,6 +867,16 @@ function SidebarRow({
       </div>
     );
   }
+  if (row.kind === "search") {
+    return (
+      <SearchResultItem
+        hit={row.hit}
+        query={row.query}
+        active={active}
+        onSelect={() => onSelect(row.hit.conversationId)}
+      />
+    );
+  }
   return (
     <ConversationItem
       conv={row.conv}
@@ -868,6 +885,84 @@ function SidebarRow({
       onRename={(t) => onRename(row.conv.id, t)}
       onDelete={() => onDelete(row.conv.id)}
     />
+  );
+}
+
+// rowActive — is this row the open conversation? Covers both the
+// normal conversation row and a search-result row.
+function rowActive(row: Row, activeId: string | null): boolean {
+  if (row.kind === "conv") return row.conv.id === activeId;
+  if (row.kind === "search") return row.hit.conversationId === activeId;
+  return false;
+}
+
+// SearchResultItem — a content-search hit: conversation title on top,
+// matched message snippet beneath, query terms highlighted. Clicking
+// opens the conversation. Unlike ConversationItem this needs no full
+// Conversation object, so it renders hits in conversations that aren't
+// in the loaded sidebar page.
+function SearchResultItem({
+  hit,
+  query,
+  active,
+  onSelect,
+}: {
+  hit: SearchHit;
+  query: string;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`focus-ring flex w-full flex-col gap-0.5 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-bg-elevated ${
+        active ? "bg-bg-elevated" : ""
+      }`}
+      title={hit.title}
+    >
+      <span className="truncate text-sm text-text-primary">
+        <Highlight text={hit.title} query={query} />
+      </span>
+      {hit.snippet ? (
+        <span className="line-clamp-1 text-xs text-text-muted">
+          <Highlight text={hit.snippet} query={query} />
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+// Highlight — wraps case-insensitive occurrences of the query's words
+// in <mark>. Builds React nodes (never sets innerHTML) so user text
+// can't inject markup. Whole-string match is cheap for sidebar-sized
+// snippets; no regex on untrusted input beyond escaped literals.
+function Highlight({ text, query }: { text: string; query: string }) {
+  const terms = query
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length > 0);
+  if (terms.length === 0) return <>{text}</>;
+  const escaped = terms.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  // Capturing-group split: odd-index parts are the matched term text.
+  // A part is a hit iff its lowercase equals one of the search terms —
+  // avoids reusing a stateful /g regex for per-part .test() checks.
+  const re = new RegExp(`(${escaped.join("|")})`, "gi");
+  const termSet = new Set(terms.map((w) => w.toLowerCase()));
+  const parts = text.split(re);
+  return (
+    <>
+      {parts.map((part, i) =>
+        termSet.has(part.toLowerCase()) ? (
+          // eslint-disable-next-line react/no-array-index-key
+          <mark key={i} className="rounded bg-accent/25 text-text-primary">
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
+      )}
+    </>
   );
 }
 
