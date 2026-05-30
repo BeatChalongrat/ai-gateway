@@ -1,10 +1,20 @@
-"""gRPC client for the Rust ``dlp-sidecar``.
+"""gRPC client for the Rust ``dlp-sidecar`` — with the Python
+encoding-bypass preprocessing wrapper in front of it.
+
+The Rust sidecar runs the regex/heuristic detectors but does NOT
+implement the encoding-bypass preprocessing (zero-width strip +
+offset remap, homoglyph mapping, base64 decode-and-scan). So this
+client mirrors ``DetectorRegistry.scan_text`` exactly: it runs the
+Python ``normalize_for_scan`` first, sends the *cleaned* text to Rust
+for detection, then maps the returned offsets back to the ORIGINAL
+text — and decodes base64 segments, scanning each via Rust and mapping
+findings to the encoded span. Result: the Rust path catches the same
+evasion vectors the Python path does, with offsets in original coords.
 
 Falls back to ``None`` on **any** failure (import error, RPC error,
-timeout) so the orchestrator's ``_run_dlp_scan`` can route to the
-Python registry without try/except wrappers at every call site. The
-fallback contract is the safety net behind the engine switch — a
-crashed sidecar must NEVER block traffic.
+timeout, preprocessing error) so the orchestrator's ``_run_dlp_scan``
+routes straight to the Python registry (which does its own
+preprocessing) — the fail-open safety net behind the engine switch.
 
 Single-process channel singleton: the channel is built lazily on
 first call and reused. ``reset()`` exists for tests that mint a
@@ -15,12 +25,17 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from app.core.config import settings
 from app.domain.dlp import DetectionMatch, DetectionResult, SensitivityLevel
+from app.services.dlp.preprocessor import (
+    normalize_for_scan,
+    map_offset_to_original,
+)
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -63,6 +78,20 @@ def _proto_to_domain(m: Any) -> DetectionMatch:
     )
 
 
+def _flatten_content(content: Any) -> str:
+    """Flatten a message ``content`` to text (vision list-of-blocks →
+    text blocks only), matching ``DetectorRegistry.scan_messages``."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "")
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return "" if content is None else str(content)
+
+
 class RustDlpClient:
     """Process-singleton gRPC client. One channel per process."""
 
@@ -96,6 +125,108 @@ class RustDlpClient:
                     pass
             cls._instance = None
 
+    # ------------------------------------------------------------------
+    # Low-level RPC + preprocessing
+    # ------------------------------------------------------------------
+
+    async def _rust_scan_raw(
+        self,
+        stub: Any,
+        pb: Any,
+        text: str,
+        *,
+        language: str,
+        disabled_detectors: list[str],
+        ner_enabled: bool,
+    ) -> list[DetectionMatch]:
+        """Scan ONE already-cleaned text via the Rust ScanText RPC.
+
+        Returns matches with offsets in *that text's* coordinates.
+        Raises on RPC error / timeout (caller maps to fail-open None).
+        """
+        req = pb.ScanRequest(
+            text=text,
+            language=language,
+            disabled_detectors=list(disabled_detectors),
+            ner_enabled=ner_enabled,
+        )
+        resp = await asyncio.wait_for(
+            stub.ScanText(req), timeout=self.timeout_seconds
+        )
+        return [_proto_to_domain(m) for m in resp.matches]
+
+    async def _scan_text_preprocessed(
+        self,
+        stub: Any,
+        pb: Any,
+        text: str,
+        *,
+        language: str,
+        disabled_detectors: list[str],
+        ner_enabled: bool,
+    ) -> list[DetectionMatch]:
+        """Mirror ``DetectorRegistry.scan_text``: normalize → Rust detect
+        on the cleaned text → remap offsets to the original text → decode
+        + scan base64 segments and map findings to the encoded span."""
+        normalized = normalize_for_scan(text)
+
+        raw = await self._rust_scan_raw(
+            stub,
+            pb,
+            normalized.normalized,
+            language=language,
+            disabled_detectors=disabled_detectors,
+            ner_enabled=ner_enabled,
+        )
+
+        # Map offsets from cleaned-text coords back to the original text.
+        matches: list[DetectionMatch] = []
+        if normalized.offset_map is not None:
+            for m in raw:
+                orig_start = map_offset_to_original(m.start, normalized.offset_map)
+                orig_end = map_offset_to_original(m.end, normalized.offset_map)
+                matches.append(
+                    replace(
+                        m,
+                        start=orig_start,
+                        end=orig_end,
+                        matched_text=text[orig_start:orig_end],
+                    )
+                )
+        else:
+            matches.extend(raw)
+
+        # Base64 decode-and-scan: scan each decoded segment via Rust, map
+        # findings back to the encoded span in the original text.
+        for segment in normalized.base64_segments:
+            seg_matches = await self._rust_scan_raw(
+                stub,
+                pb,
+                segment.decoded_text,
+                language=language,
+                disabled_detectors=disabled_detectors,
+                ner_enabled=ner_enabled,
+            )
+            for sm in seg_matches:
+                matches.append(
+                    replace(
+                        sm,
+                        start=segment.original_start,
+                        end=segment.original_end,
+                        matched_text=segment.encoded_text,
+                        metadata={
+                            "detected_via": "base64_decode",
+                            "decoded_match": sm.matched_text,
+                        },
+                    )
+                )
+
+        return matches
+
+    # ------------------------------------------------------------------
+    # Public API (preprocessing wrapper in front of Rust detection)
+    # ------------------------------------------------------------------
+
     async def scan_messages(
         self,
         messages: list["Message"],
@@ -106,7 +237,11 @@ class RustDlpClient:
         ner_enabled: bool = True,
     ) -> DetectionResult | None:
         """Returns ``DetectionResult`` on success, ``None`` on any
-        failure. Caller falls back to Python registry on None."""
+        failure. Caller falls back to the Python registry on None.
+
+        Mirrors ``DetectorRegistry.scan_messages``: per-message flatten +
+        preprocess + Rust-detect, aggregated and sorted by (start, end).
+        """
         try:
             grpc, pb, pb_grpc = _import_stubs()
         except RustDlpUnavailable as exc:
@@ -114,37 +249,25 @@ class RustDlpClient:
             return None
 
         stub = self._ensure_stub(grpc, pb_grpc)
-
-        proto_messages = []
-        for m in messages:
-            role = getattr(m, "role", "user")
-            content = getattr(m, "content", "")
-            if not isinstance(content, str):
-                # Vision-format messages with list-of-blocks — flatten
-                # text blocks only, matching Python registry behaviour.
-                if isinstance(content, list):
-                    content = "\n".join(
-                        b.get("text", "")
-                        for b in content
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    )
-                else:
-                    content = str(content)
-            proto_messages.append(pb.Message(role=role, content=content))
-
-        req = pb.MessagesRequest(
-            messages=proto_messages,
-            direction=direction,
-            scan_system_messages=scan_system_messages,
-            disabled_detectors=list(disabled_detectors or []),
-            ner_enabled=ner_enabled,
-        )
+        disabled = list(disabled_detectors or [])
 
         try:
-            resp = await asyncio.wait_for(
-                stub.ScanMessages(req),
-                timeout=self.timeout_seconds,
-            )
+            all_matches: list[DetectionMatch] = []
+            for m in messages:
+                role = getattr(m, "role", "user")
+                if not scan_system_messages and role == "system":
+                    continue
+                content = _flatten_content(getattr(m, "content", ""))
+                all_matches.extend(
+                    await self._scan_text_preprocessed(
+                        stub,
+                        pb,
+                        content,
+                        language="en",
+                        disabled_detectors=disabled,
+                        ner_enabled=ner_enabled,
+                    )
+                )
         except grpc.RpcError as exc:  # type: ignore[union-attr]
             logger.warning(
                 "dlp_rust_rpc_failed",
@@ -159,9 +282,8 @@ class RustDlpClient:
             logger.warning("dlp_rust_rpc_unexpected", error=str(exc)[:200])
             return None
 
-        matches = [_proto_to_domain(m) for m in resp.matches]
         return DetectionResult(
-            matches=sorted(matches, key=lambda m: (m.start, m.end)),
+            matches=sorted(all_matches, key=lambda m: (m.start, m.end)),
             scanned_direction=direction,
             scan_target="messages",
         )
@@ -174,6 +296,9 @@ class RustDlpClient:
         disabled_detectors: list[str] | None = None,
         ner_enabled: bool = True,
     ) -> DetectionResult | None:
+        """Returns ``DetectionResult`` on success, ``None`` on any failure.
+        Mirrors ``DetectorRegistry.scan_text`` (preprocess + Rust detect +
+        offset remap + base64 decode-and-scan)."""
         try:
             grpc, pb, pb_grpc = _import_stubs()
         except RustDlpUnavailable as exc:
@@ -181,16 +306,15 @@ class RustDlpClient:
             return None
 
         stub = self._ensure_stub(grpc, pb_grpc)
-        req = pb.ScanRequest(
-            text=text,
-            language=language,
-            disabled_detectors=list(disabled_detectors or []),
-            ner_enabled=ner_enabled,
-        )
+
         try:
-            resp = await asyncio.wait_for(
-                stub.ScanText(req),
-                timeout=self.timeout_seconds,
+            matches = await self._scan_text_preprocessed(
+                stub,
+                pb,
+                text,
+                language=language,
+                disabled_detectors=list(disabled_detectors or []),
+                ner_enabled=ner_enabled,
             )
         except grpc.RpcError as exc:  # type: ignore[union-attr]
             logger.warning(
@@ -206,7 +330,6 @@ class RustDlpClient:
             logger.warning("dlp_rust_rpc_unexpected", error=str(exc)[:200])
             return None
 
-        matches = [_proto_to_domain(m) for m in resp.matches]
         return DetectionResult(
             matches=sorted(matches, key=lambda m: (m.start, m.end)),
             scanned_direction=language,
