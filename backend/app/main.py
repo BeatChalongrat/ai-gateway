@@ -149,6 +149,21 @@ async def lifespan(app: FastAPI):
     # the boot log (it would otherwise silently fail open per request).
     await asyncio.to_thread(_log_sidecar_status_at_boot)
 
+    # Track A: pre-warm the async engine + one pooled connection at startup.
+    # ``get_async_engine`` builds lazily on first use; without this, the
+    # FIRST burst of chat requests after a (re)start all race the lazy build
+    # + cold pool fill, which the A.6 benchmark caught as a thundering-herd
+    # (first tier: ~14s latency + timeouts). One warm connection here makes
+    # the engine + pool ready before the first request lands.
+    try:
+        from sqlalchemy import text as _text
+        from app.core.db import get_async_session_factory
+
+        async with get_async_session_factory()() as _warm:
+            await _warm.execute(_text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 — best-effort warm-up
+        print(f"async_engine_prewarm_skipped error={exc}", flush=True)
+
     yield
 
     # Drain + stop the queue first so any in-flight records make it
