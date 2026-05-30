@@ -265,3 +265,86 @@ class TestOpenAIEdgeCases:
             _make_payload(), [Message(role="user", content="Hi")]
         )
         assert result.content == ""
+
+
+# --- P2: Responses API parsers (o-series visible reasoning) -----------------
+# The live OpenAI org here is not verified for reasoning summaries, so these
+# exercise the parsers directly with synthetic Responses-API payloads to
+# prove the mapping is correct (output array -> content + reasoning_content,
+# input_tokens/output_tokens -> usage, SSE type dispatch).
+
+from app.services.providers.openai_adapter import (  # noqa: E402
+    _parse_responses_response,
+    _parse_responses_sse_line,
+)
+
+
+def test_parse_responses_response_splits_reasoning_and_text():
+    data = {
+        "model": "o4-mini",
+        "output": [
+            {"type": "reasoning", "summary": [
+                {"type": "summary_text", "text": "First I "},
+                {"type": "summary_text", "text": "considered the cases."},
+            ]},
+            {"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": "The answer is 9."},
+            ]},
+        ],
+        "usage": {
+            "input_tokens": 20,
+            "output_tokens": 200,
+            "output_tokens_details": {"reasoning_tokens": 150},
+        },
+    }
+    r = _parse_responses_response(data)
+    assert r.content == "The answer is 9."
+    assert r.reasoning_content == "First I considered the cases."
+    assert r.model == "o4-mini"
+    assert r.usage.prompt_tokens == 20
+    assert r.usage.completion_tokens == 200
+    assert r.usage.reasoning_tokens == 150
+    assert r.usage.total_tokens == 220  # derived when not provided
+
+
+def test_parse_responses_response_no_summary_when_org_unverified():
+    # Unverified org: reasoning item carries no summary parts. Reasoning
+    # text is None; the token count still surfaces via usage.
+    data = {
+        "model": "o3-mini",
+        "output": [
+            {"type": "reasoning", "summary": []},
+            {"type": "message", "content": [{"type": "output_text", "text": "Hi"}]},
+        ],
+        "usage": {"input_tokens": 5, "output_tokens": 40,
+                   "output_tokens_details": {"reasoning_tokens": 30}},
+    }
+    r = _parse_responses_response(data)
+    assert r.content == "Hi"
+    assert r.reasoning_content is None
+    assert r.usage.reasoning_tokens == 30
+
+
+def test_parse_responses_sse_line_dispatch():
+    text = _parse_responses_sse_line(
+        'data: {"type":"response.output_text.delta","delta":"Hel"}'
+    )
+    assert text is not None and text.delta == "Hel" and text.reasoning_delta is None
+
+    think = _parse_responses_sse_line(
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"because"}'
+    )
+    assert think is not None and think.reasoning_delta == "because" and think.delta == ""
+
+    done = _parse_responses_sse_line(
+        'data: {"type":"response.completed","response":{"model":"o4-mini",'
+        '"usage":{"input_tokens":3,"output_tokens":7,'
+        '"output_tokens_details":{"reasoning_tokens":4}}}}'
+    )
+    assert done is not None and done.finish_reason == "stop"
+    assert done.usage.reasoning_tokens == 4
+
+    # Lifecycle / unknown events are ignored.
+    assert _parse_responses_sse_line('data: {"type":"response.created"}') is None
+    assert _parse_responses_sse_line("event: response.completed") is None
+    assert _parse_responses_sse_line("data: [DONE]") is None
