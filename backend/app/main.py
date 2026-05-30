@@ -145,6 +145,12 @@ async def lifespan(app: FastAPI):
         await close_all_clients()
     except Exception:  # noqa: BLE001
         pass
+    # Phase-2: dispose the async DB engine if it was ever built.
+    try:
+        from app.core.db import dispose_async_engine
+        await dispose_async_engine()
+    except Exception:  # noqa: BLE001
+        pass
     _stop_model_discovery_scheduler()
     monitor_task.cancel()
     retention_task.cancel()
