@@ -236,6 +236,52 @@ def test_refresh_without_cookie_returns_401_and_clears(client):
     assert r.json()["error"]["code"] == "missing_refresh_token"
 
 
+def test_cookie_exchange_sets_cookies_from_valid_tokens(client):
+    """OAuth bootstrap: posting a valid token pair sets HttpOnly cookies."""
+    r = _signup(client, "oauth@test.com")
+    access = r.cookies.get("portal_access_token")
+    refresh = r.cookies.get("portal_refresh_token")
+    client.cookies.clear()  # simulate a fresh browser with no cookies yet
+
+    ex = client.post(
+        "/portal/auth/cookie-exchange",
+        json={"access_token": access, "refresh_token": refresh},
+    )
+    assert ex.status_code == 200, ex.text
+    assert ex.json() == {"ok": True}
+    assert ex.cookies.get("portal_access_token")
+    assert ex.cookies.get("portal_refresh_token")
+    # The established session authenticates /portal/me.
+    assert client.get("/portal/me").status_code == 200
+
+
+def test_cookie_exchange_rejects_forged_tokens(client):
+    r = client.post(
+        "/portal/auth/cookie-exchange",
+        json={
+            "access_token": "not-a-real-jwt-but-long-enough",
+            "refresh_token": "also-not-a-real-jwt-but-long",
+        },
+    )
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "invalid_tokens"
+
+
+def test_cookie_exchange_rejects_swapped_roles(client):
+    """access/refresh must be in the right slots."""
+    r = _signup(client, "swap@test.com")
+    access = r.cookies.get("portal_access_token")
+    refresh = r.cookies.get("portal_refresh_token")
+    client.cookies.clear()
+    # Put the refresh token in the access slot and vice-versa.
+    ex = client.post(
+        "/portal/auth/cookie-exchange",
+        json={"access_token": refresh, "refresh_token": access},
+    )
+    assert ex.status_code == 401
+    assert ex.json()["error"]["code"] == "invalid_tokens"
+
+
 def test_token_version_bump_invalidates_refresh(client):
     """A token_version bump (e.g. password reset) must stop old sessions
     from rotating — the security choke point lives in refresh()."""

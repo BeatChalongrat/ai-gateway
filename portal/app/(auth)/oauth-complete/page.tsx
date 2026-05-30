@@ -5,14 +5,14 @@ import { getSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 
 import { Spinner } from "@/components/Spinner";
-import { setTokens } from "@/lib/auth";
 
 // Landing page for a successful NextAuth OAuth sign-in. Reads the
 // portal tokens that the signIn/jwt/session callbacks stashed on the
-// NextAuth session, mirrors them to localStorage + cookie (the same
-// place password login writes), then forwards to ``?redirect=`` (if
-// safe) or /dashboard. From this point on the rest of the app is
-// agnostic to where the tokens came from.
+// NextAuth session and POSTs them once to the backend cookie-exchange
+// endpoint, which re-issues them as HttpOnly cookies (the same place
+// password login lands). After this the session is cookie-based and JS
+// never touches the tokens again. Then forwards to ``?redirect=`` (if
+// safe) or /dashboard.
 
 interface PortalSession {
   portal_access_token?: string;
@@ -54,26 +54,30 @@ export default function OAuthCompletePage() {
         );
         return;
       }
-      setTokens(session.portal_access_token, session.portal_refresh_token);
 
-      // Honour ?redirect=… so social-login Web Chat handoff matches
-      // the password-login flow (LoginForm.tsx does the same dance).
+      // Exchange the NextAuth-held tokens for HttpOnly cookies. After
+      // this the session is cookie-based — same as password login.
+      const exchange = await fetch("/api/portal/auth/cookie-exchange", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          access_token: session.portal_access_token,
+          refresh_token: session.portal_refresh_token,
+        }),
+      });
+      if (!exchange.ok) {
+        setError(
+          "We couldn't complete your sign-in. Please try again, or use email / password."
+        );
+        return;
+      }
+
+      // Honour ?redirect=… so social-login Web Chat handoff matches the
+      // password-login flow. No ?token= — the cookie is shared cross-port.
       const target = safeRedirectTarget(params?.get("redirect") ?? null);
       if (target) {
-        const webChatOrigin = new URL(
-          process.env.NEXT_PUBLIC_WEB_CHAT_URL || "http://localhost:3002",
-        ).origin;
-        let final = target;
-        try {
-          const tu = new URL(target, window.location.origin);
-          if (tu.origin === webChatOrigin) {
-            tu.searchParams.set("token", session.portal_access_token);
-            final = tu.toString();
-          }
-        } catch {
-          /* leave target as-is */
-        }
-        window.location.href = final;
+        window.location.href = target;
         return;
       }
       router.replace("/dashboard");
