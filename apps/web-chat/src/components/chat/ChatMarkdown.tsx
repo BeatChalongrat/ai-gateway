@@ -1,0 +1,111 @@
+"use client";
+
+// Shared assistant-markdown renderer used by BOTH the live-streaming
+// path (StreamingContent) and the completed-message path
+// (MessageBubble's AssistantContent). Keeping a single renderer means
+// streaming output and the final render are byte-for-byte identical —
+// no "snap" when the message completes (beyond plan-card extraction,
+// which is handled by the caller).
+//
+// Pipeline: remark-gfm (tables / task-lists / strikethrough /
+// autolinks / hr) + rehype-highlight (code syntax) + a small set of
+// component overrides (citation pills, CodeBlock). Styling comes from
+// the ``.prose-chat`` wrapper the caller mounts around us.
+//
+// Incomplete markdown is handled gracefully by CommonMark itself: an
+// unclosed ``` fence renders as a code block to end-of-buffer, an
+// unclosed ** stays literal, a half-typed table shows its raw pipes
+// until the delimiter row arrives — nothing breaks the whole message.
+
+import { useMemo } from "react";
+
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import type { Components } from "react-markdown";
+
+import { CodeBlock } from "./CodeBlock";
+
+// Citation marker — RAG context tells the model to cite sources using
+// the literal pattern ``[Source: <filename>]``. We post-process the
+// assistant text to convert that pattern into a markdown link with a
+// special internal href scheme; the custom anchor renderer below
+// detects that scheme and renders a pill instead of a regular link.
+const CITATION_PREFIX = "#__rag_citation:";
+const CITATION_PATTERN = /\[Source:\s*([^\]]+?)\]/g;
+
+// renderCitations rewrites ``[Source: x]`` into a hidden-scheme link
+// the anchor override turns into a pill. Exported so the completed
+// path can pre-process per plan-segment if it ever needs to; today
+// ChatMarkdown applies it internally.
+export function renderCitations(text: string): string {
+  return text.replace(CITATION_PATTERN, (_, raw: string) => {
+    const filename = raw.trim();
+    const safe = filename.replace(/\(/g, "%28").replace(/\)/g, "%29");
+    return `[__RAG_CITATION__${filename}](${CITATION_PREFIX}${safe})`;
+  });
+}
+
+function CitationPill({ filename }: { filename: string }) {
+  return (
+    <span
+      title={`From knowledge base: ${filename}`}
+      className="mx-0.5 inline-flex items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-0.5 align-baseline text-[11px] font-medium text-text-secondary"
+    >
+      <svg
+        width={10}
+        height={10}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+        <path d="M14 3v6h6" />
+      </svg>
+      {filename}
+    </span>
+  );
+}
+
+// buildComponents returns the react-markdown component overrides.
+// ``streaming`` flips CodeBlock out of its collapse behaviour: a code
+// block that grows past the collapse threshold mid-stream must NOT
+// fold away and hide the tokens still arriving.
+function buildComponents(streaming: boolean): Components {
+  return {
+    a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+      const href = props.href ?? "";
+      if (href.startsWith(CITATION_PREFIX)) {
+        const filename = decodeURIComponent(href.slice(CITATION_PREFIX.length));
+        return <CitationPill filename={filename} />;
+      }
+      return <a {...props} target="_blank" rel="noopener noreferrer" />;
+    },
+    pre: (props: { children?: React.ReactNode }) => (
+      <CodeBlock {...props} disableCollapse={streaming} />
+    ),
+  };
+}
+
+export function ChatMarkdown({
+  text,
+  streaming = false,
+}: {
+  text: string;
+  streaming?: boolean;
+}) {
+  const components = useMemo(() => buildComponents(streaming), [streaming]);
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeHighlight]}
+      components={components}
+    >
+      {renderCitations(text)}
+    </ReactMarkdown>
+  );
+}

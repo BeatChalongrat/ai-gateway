@@ -23,6 +23,9 @@ interface CodeChildProps {
 
 interface PreProps {
   children?: ReactNode;
+  /** Force-disable the >30-line collapse. Used while streaming so a
+   *  growing code block doesn't fold away and hide arriving tokens. */
+  disableCollapse?: boolean;
 }
 
 const LANG_RE = /language-([a-zA-Z0-9_+-]+(?::[^\s]+)?)/;
@@ -34,7 +37,7 @@ const LANG_RE = /language-([a-zA-Z0-9_+-]+(?::[^\s]+)?)/;
 const COLLAPSE_THRESHOLD_LINES = 30;
 const COLLAPSE_VISIBLE_LINES = 20;
 
-export function CodeBlock({ children }: PreProps) {
+export function CodeBlock({ children, disableCollapse }: PreProps) {
   const codeChild = findCodeChild(children);
   const className = codeChild?.props.className ?? "";
   const langMatch = LANG_RE.exec(className);
@@ -43,7 +46,7 @@ export function CodeBlock({ children }: PreProps) {
 
   const codeText = extractText(codeChild?.props.children);
   const lineCount = codeText.replace(/\n$/, "").split("\n").length;
-  const canCollapse = lineCount > COLLAPSE_THRESHOLD_LINES;
+  const canCollapse = !disableCollapse && lineCount > COLLAPSE_THRESHOLD_LINES;
 
   const [expanded, setExpanded] = useState(false);
   const collapsed = canCollapse && !expanded;

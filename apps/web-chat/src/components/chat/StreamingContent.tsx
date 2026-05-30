@@ -1,109 +1,79 @@
 "use client";
 
-// Lightweight content renderer used WHILE an assistant message is
-// still streaming. The full react-markdown pipeline re-parses the
-// entire string on every paint, which becomes O(n) per token for
-// long responses. During streaming we instead split on triple-
-// backtick fences so code blocks render in a styled <pre> while the
-// prose body renders as plain text with line breaks preserved.
+// Content renderer used WHILE an assistant message is still streaming.
 //
-// Once streaming completes the parent component swaps to the full
-// react-markdown renderer (with GFM tables, links, etc.).
+// We now render the SAME full markdown pipeline as the completed
+// message (ChatMarkdown), so tables, lists, headings, dividers, bold,
+// task-lists and code highlighting all appear LIVE as tokens arrive —
+// matching ChatGPT/Claude — instead of showing raw markdown until the
+// turn completes and snapping into shape.
+//
+// Performance: re-parsing the whole buffer on every RAF-batched delta
+// would be O(n) per frame → O(n²) over a long response. The store
+// already RAF-batches deltas; on top of that we THROTTLE the heavy
+// re-parse to at most once per RENDER_THROTTLE_MS (trailing-edge
+// scheduled), so even a multi-thousand-token answer re-parses ~12×/s
+// rather than 60×/s. The final, full content is rendered by the
+// completed pipeline the instant streaming ends (parent swaps us out),
+// so the throttle never drops the last tokens.
+//
+// Plan cards (:::excel-plan etc.) are intentionally NOT extracted here
+// — they mount only once the turn completes, so during streaming the
+// raw fence shows as text (unchanged from before).
 
-import { memo } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+
+import { ChatMarkdown } from "./ChatMarkdown";
 
 interface Props {
   content: string;
 }
 
-interface Segment {
-  kind: "text" | "code";
-  language?: string;
-  body: string;
-}
-
-// Parse the streaming buffer into alternating text + code segments.
-// Closes an open code block defensively when no terminating fence
-// has arrived yet so the user sees the in-flight code in monospace.
-function tokenize(content: string): Segment[] {
-  const segs: Segment[] = [];
-  let i = 0;
-  while (i < content.length) {
-    const fenceStart = content.indexOf("```", i);
-    if (fenceStart === -1) {
-      segs.push({ kind: "text", body: content.slice(i) });
-      break;
-    }
-    if (fenceStart > i) {
-      segs.push({ kind: "text", body: content.slice(i, fenceStart) });
-    }
-    // Read optional language tag up to the newline after the fence.
-    const afterFence = fenceStart + 3;
-    const nl = content.indexOf("\n", afterFence);
-    let language = "";
-    let bodyStart = afterFence;
-    if (nl !== -1) {
-      language = content.slice(afterFence, nl).trim();
-      bodyStart = nl + 1;
-    }
-    const fenceEnd = content.indexOf("```", bodyStart);
-    if (fenceEnd === -1) {
-      // Unterminated — code is still streaming.
-      segs.push({
-        kind: "code",
-        language,
-        body: content.slice(bodyStart),
-      });
-      i = content.length;
-      break;
-    }
-    segs.push({
-      kind: "code",
-      language,
-      body: content.slice(bodyStart, fenceEnd),
-    });
-    i = fenceEnd + 3;
-  }
-  return segs;
-}
+const RENDER_THROTTLE_MS = 80;
 
 function StreamingContentImpl({ content }: Props) {
+  // ``shown`` is the throttled snapshot of ``content`` we actually
+  // hand to the markdown parser.
+  const [shown, setShown] = useState(content);
+  const lastRenderRef = useRef(0);
+  const timerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    const now =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsed = now - lastRenderRef.current;
+    if (elapsed >= RENDER_THROTTLE_MS) {
+      lastRenderRef.current = now;
+      setShown(content);
+    } else {
+      // Trailing edge — schedule the update for the remainder of the
+      // window so the very latest buffer still lands ~80ms later.
+      if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => {
+        lastRenderRef.current =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
+        setShown(content);
+      }, RENDER_THROTTLE_MS - elapsed);
+    }
+    return () => {
+      if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
+    };
+  }, [content]);
+
   if (!content) {
     return null;
   }
-  const segments = tokenize(content);
+
   return (
     <div className="streaming-body">
-      {segments.map((seg, i) =>
-        seg.kind === "code" ? (
-          <pre
-            key={i}
-            className="code-block-inline"
-            data-lang={seg.language || undefined}
-          >
-            <code>{seg.body}</code>
-          </pre>
-        ) : (
-          <span
-            key={i}
-            className="streaming-text"
-            // ``white-space: pre-wrap`` preserves user newlines + any
-            // intermediate whitespace the LLM emits between tokens.
-            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-          >
-            {seg.body}
-          </span>
-        ),
-      )}
+      <ChatMarkdown text={shown} streaming />
       <span className="streaming-cursor-block" aria-hidden />
     </div>
   );
 }
 
-// Re-render only when the content actually changed. The wrapper
-// component still runs on every store update, but this saves the
-// tokenize() pass on identical re-renders (e.g. when a sibling
-// state field flips).
+// Re-render only when the content actually changed — saves a pass when
+// an unrelated store field flips.
 export const StreamingContent = memo(StreamingContentImpl, (prev, next) => {
   return prev.content === next.content;
 });
