@@ -68,7 +68,13 @@ def _signup(client, email: str) -> dict:
         json={"email": email, "password": "Test1234!"},
     )
     assert r.status_code == 200, r.text
-    return r.json()
+    body = r.json()
+    # HttpOnly migration: tokens are cookies. Capture, then clear the
+    # shared jar so multi-user tests auth via the explicit Bearer header.
+    body["access_token"] = r.cookies.get("portal_access_token")
+    body["refresh_token"] = r.cookies.get("portal_refresh_token")
+    client.cookies.clear()
+    return body
 
 
 def _seed_logs_for_tenant(

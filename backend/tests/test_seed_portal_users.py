@@ -108,8 +108,9 @@ def test_active_verified_users_can_log_in(_seeded_portal_users, client):
         assert body["user"]["email"] == email
         assert body["user"]["status"] == "active"
         assert body["user"]["email_verified"] is True
-        assert body["access_token"]
-        assert body["refresh_token"]
+        # HttpOnly migration: tokens are cookies on the response, not body.
+        assert r.cookies.get("portal_access_token")
+        assert r.cookies.get("portal_refresh_token")
 
 
 def test_suspended_user_is_rejected_distinctly(_seeded_portal_users, client):

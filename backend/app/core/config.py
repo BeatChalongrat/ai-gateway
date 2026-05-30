@@ -20,7 +20,13 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_port: int = 8080
     log_level: str = "INFO"
-    cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    # 3000 = admin-ui, 3001 = portal, 3002 = web-chat, 5173 = legacy vite.
+    # allow_credentials=True (main.py) requires explicit origins — "*" is
+    # rejected by browsers when credentials are included.
+    cors_origins: str = (
+        "http://localhost:3000,http://localhost:3001,"
+        "http://localhost:3002,http://localhost:5173"
+    )
 
     # Database
     postgres_host: str = "localhost"
@@ -47,7 +53,27 @@ class Settings(BaseSettings):
     # forge portal tokens (and vice versa). Payload carries type="portal".
     portal_jwt_secret: str = "change-me-portal-secret"
     portal_access_token_expire_minutes: int = 60
-    portal_refresh_token_expire_days: int = 7
+    # 90 days. Rotation (auth_service.refresh) re-issues the refresh
+    # token on every renew, so an actively-used session never hits this
+    # ceiling — it only bounds an account that's been idle for 3 months.
+    portal_refresh_token_expire_days: int = 90
+
+    # Portal auth cookies (HttpOnly cookie migration). The backend now
+    # sets the access + refresh tokens as HttpOnly cookies instead of
+    # returning them in the JSON body, so JS (and any XSS) can't read
+    # them. See app/services/portal/cookies.py.
+    #   * auth_cookie_domain: empty = host-only. On localhost a host-only
+    #     cookie is shared across ports (:3001/:3002/:4000/:8080), which
+    #     is exactly the cross-app sharing we want in dev. In production
+    #     set ".yourdomain.com" to share across sub-domains.
+    #   * auth_cookie_secure: None = auto (Secure outside dev/test). Set
+    #     explicitly to force on/off.
+    #   * auth_cookie_samesite: "lax" forwards cookies on same-site
+    #     navigation + fetch (all localhost ports are same-site) while
+    #     blocking cross-site programmatic POSTs.
+    auth_cookie_domain: str = ""
+    auth_cookie_secure: bool | None = None
+    auth_cookie_samesite: str = "lax"
 
     # Admin session (Phase 2A): Redis-backed sessions keyed by signed
     # HttpOnly cookie. SESSION_SIGNING_SECRETS is a comma-separated list;
@@ -335,6 +361,18 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def cookie_secure_effective(self) -> bool:
+        """Resolve whether auth cookies get the Secure flag.
+
+        ``auth_cookie_secure`` overrides when set explicitly; otherwise
+        Secure is on everywhere except dev/test (so localhost http works
+        but any real deployment gets Secure cookies automatically).
+        """
+        if self.auth_cookie_secure is not None:
+            return self.auth_cookie_secure
+        return self.app_env.lower() not in _DEV_ENVS
 
     @property
     def provider_base_url_overrides_map(self) -> dict[str, str]:
