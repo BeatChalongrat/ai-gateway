@@ -36,6 +36,10 @@ from app.middleware.timeout import TimeoutMiddleware
 from app.middleware.metrics import MetricsMiddleware, get_metrics
 from app.observability.metrics import (
     DB_POOL_ACTIVE,
+    DB_POOL_MAX,
+    DB_POOL_OVERFLOW,
+    EVENT_LOOP_BLOCK_SECONDS,
+    EVENT_LOOP_BLOCK_TOTAL,
     render_prometheus_exposition,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -138,6 +142,11 @@ async def lifespan(app: FastAPI):
     # during the startup window still get logged correctly.
     from app.services import request_log_queue
     await request_log_queue.start_worker()
+
+    # Re-audit H5: probe active sidecars at boot and log their status, so
+    # a misconfigured DLP_ENGINE=rust against a down sidecar is visible in
+    # the boot log (it would otherwise silently fail open per request).
+    await asyncio.to_thread(_log_sidecar_status_at_boot)
 
     yield
 
@@ -313,6 +322,46 @@ def _maybe_preload_ner() -> None:
         session.close()
 
 
+def _log_sidecar_status_at_boot() -> None:
+    """Probe active polyglot sidecars once at startup and log status.
+
+    Audit H5: an active engine flag (DLP_ENGINE=rust, RATE_LIMITER_ENGINE=
+    rust, LOG_WORKER_ENGINE=go) pointed at an unreachable sidecar otherwise
+    fails open silently on every request. Surfacing it at boot gives the
+    operator a clear signal. Best-effort — never blocks startup.
+    """
+    import structlog
+
+    from app.api.routes.health import _SIDECARS, _probe_sidecar
+    from app.core.config import settings as _s
+
+    log = structlog.get_logger("startup")
+    for kind, addr_attr, engine_attr, active_vals, _fallback in _SIDECARS:
+        engine_val = getattr(_s, engine_attr, "python")
+        if engine_val not in active_vals:
+            continue
+        addr = getattr(_s, addr_attr)
+        status = _probe_sidecar(kind, addr)
+        if status == "healthy":
+            log.info("sidecar_active", sidecar=kind, engine=engine_val, address=addr)
+        else:
+            log.warning(
+                "sidecar_unreachable_failing_open",
+                sidecar=kind,
+                engine=engine_val,
+                address=addr,
+                note="engine flag is active but sidecar is unreachable; "
+                "requests will fall back to the in-process path",
+            )
+    # H11: warn if NER coverage is intentionally dropped on the rust path.
+    if _s.dlp_engine in ("rust", "shadow") and not _s.dlp_ner_on_rust_path:
+        log.warning(
+            "dlp_ner_disabled_on_rust_path",
+            note="DLP_NER_ON_RUST_PATH=false with DLP_ENGINE=rust — "
+            "Presidio NER (PERSON/LOCATION/…) will NOT run; regex only.",
+        )
+
+
 async def _loop_monitor() -> None:
     """Background task that detects event loop blocking.
 
@@ -325,7 +374,11 @@ async def _loop_monitor() -> None:
         t = time.monotonic()
         await asyncio.sleep(1)
         lag = time.monotonic() - t - 1.0
+        # Always record the (non-negative) lag so the histogram carries a
+        # baseline distribution; count + log only real >100ms blocks.
+        EVENT_LOOP_BLOCK_SECONDS.observe(lag if lag > 0 else 0.0)
         if lag > 0.1:
+            EVENT_LOOP_BLOCK_TOTAL.inc()
             print(f"[loop-monitor] Event loop blocked for {lag:.3f}s")
 
 
@@ -351,6 +404,16 @@ async def _db_pool_sampler() -> None:
                 except Exception:
                     active = 0
             DB_POOL_ACTIVE.set(active)
+            # Overflow climbing toward (size+max_overflow) is the leading
+            # indicator of imminent pool-timeout 500s (audit H4).
+            try:
+                if hasattr(pool, "overflow"):
+                    DB_POOL_OVERFLOW.set(max(0, pool.overflow()))
+                size = pool.size() if hasattr(pool, "size") else 0
+                max_overflow = getattr(pool, "_max_overflow", 0) or 0
+                DB_POOL_MAX.set(size + max(0, max_overflow))
+            except Exception:
+                pass
         except asyncio.CancelledError:
             raise
         except Exception:

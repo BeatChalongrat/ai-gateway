@@ -57,7 +57,11 @@ import structlog
 from app.core.config import settings
 from app.domain.observability import RequestRecord
 from app.models.request_log import RequestLogORM
-from app.observability.metrics import REQUEST_LOG_QUEUE_SIZE
+from app.observability.metrics import (
+    REQUEST_LOG_QUEUE_SIZE,
+    SIDECAR_FALLBACK_TOTAL,
+    SIDECAR_REQUEST_TOTAL,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -333,7 +337,18 @@ class _RequestLogQueue:
             )
             ok = False
         if ok:
+            SIDECAR_REQUEST_TOTAL.labels(
+                engine="log_worker", status="success"
+            ).inc()
             return
+        # gRPC rejected/failed → re-route to the local queue (audit H4:
+        # count it so a flapping Go sidecar is visible, not just logged).
+        SIDECAR_FALLBACK_TOTAL.labels(
+            engine="log_worker", reason="rejected"
+        ).inc()
+        SIDECAR_REQUEST_TOTAL.labels(
+            engine="log_worker", status="fallback"
+        ).inc()
         logger.warning(
             "log_worker_grpc_fallback",
             request_id=record.request_id,

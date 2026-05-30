@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
 from app.core.exceptions import AuthenticationError, AuthorizationError
+from app.observability.metrics import DB_POOL_CHECKOUT_TIMEOUTS
 from app.models.api_key import ApiKeyORM
 from app.services.api_key_service import ApiKeyService
 
@@ -32,10 +33,19 @@ class ResolvedApiKey:
 
 def get_db_session() -> Generator[Session, None, None]:
     """Yield a transactional DB session, closed after the request."""
+    from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+
     session = SessionLocal()
     try:
         yield session
         session.commit()
+    except SQLAlchemyTimeoutError:
+        # Pool exhausted — a checkout exceeded pool_timeout and 500'd.
+        # Audit H4: count it so the connection-per-request ceiling is
+        # observable instead of only surfacing as opaque 500s.
+        DB_POOL_CHECKOUT_TIMEOUTS.inc()
+        session.rollback()
+        raise
     except Exception:
         session.rollback()
         raise

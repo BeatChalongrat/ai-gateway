@@ -74,6 +74,10 @@ class ErrorResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    status: str
+    status: str  # "ok" | "degraded" | "unhealthy"
     service: str
     version: str
+    # Component detail: database, db_pool, redis, and per-sidecar
+    # reachability (dlp_sidecar / rate_limiter / log_worker). Optional so
+    # older clients that only read ``status`` are unaffected.
+    checks: dict = {}
