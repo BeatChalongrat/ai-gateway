@@ -81,6 +81,7 @@ impl Detector for AddressDetector {
                 matched_text: stripped.to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out

@@ -118,6 +118,7 @@ impl Detector for ThaiNationalIdDetector {
                     matched_text: raw.to_string(),
                     confidence: 1.0,
                     priority: 10,
+                    entity_type: None,
                 });
             }
         }
@@ -137,6 +138,7 @@ impl Detector for ThaiNationalIdDetector {
                     matched_text: g.as_str().to_string(),
                     confidence: 1.0,
                     priority: 10,
+                    entity_type: None,
                 });
             }
         }

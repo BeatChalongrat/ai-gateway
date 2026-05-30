@@ -54,6 +54,10 @@ impl Detector for PhoneDetector {
     }
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
+        self.detect_ctx(text, false)
+    }
+
+    fn detect_ctx(&self, text: &str, from_decoded: bool) -> Vec<RawMatch> {
         let mut out: Vec<RawMatch> = Vec::new();
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
         let text_chars_count = text.chars().count();
@@ -93,6 +97,7 @@ impl Detector for PhoneDetector {
                     matched_text: span_text.to_string(),
                     confidence: 1.0,
                     priority: 5,
+                    entity_type: None,
                 });
             }
         }
@@ -116,24 +121,33 @@ impl Detector for PhoneDetector {
                     matched_text: span_text.to_string(),
                     confidence: 1.0,
                     priority: 5,
+                    entity_type: None,
                 });
             }
         }
 
-        // Branch 2 — bare digits with required context keyword.
+        // Branch 2 — bare digits. Require a phone-context keyword inside
+        // the ±CONTEXT_WINDOW window, UNLESS from_decoded: base64-decoded
+        // content is isolated, so the keyword gate is dropped — mirrors
+        // phone.py's ``if from_decoded: _emit(...)`` relaxation. The
+        // all-same-digit reject still applies in both modes.
         for m in BARE_RE.find_iter(text).flatten() {
             let s_char = byte_to_char(text, m.start());
             let e_char = byte_to_char(text, m.end());
             if seen.contains(&(s_char, e_char)) {
                 continue;
             }
-            // Compute ±CONTEXT_WINDOW char window
-            let lo = s_char.saturating_sub(CONTEXT_WINDOW);
-            let hi = (e_char + CONTEXT_WINDOW).min(text_chars_count);
-            let lo_b = char_to_byte(text, lo);
-            let hi_b = char_to_byte(text, hi);
-            let window = &text[lo_b..hi_b];
-            if PHONE_CONTEXT_RE.is_match(window).unwrap_or(false) {
+            let has_context = if from_decoded {
+                true
+            } else {
+                let lo = s_char.saturating_sub(CONTEXT_WINDOW);
+                let hi = (e_char + CONTEXT_WINDOW).min(text_chars_count);
+                let lo_b = char_to_byte(text, lo);
+                let hi_b = char_to_byte(text, hi);
+                let window = &text[lo_b..hi_b];
+                PHONE_CONTEXT_RE.is_match(window).unwrap_or(false)
+            };
+            if has_context {
                 let span_text = m.as_str();
                 let digits_only: String =
                     span_text.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -149,6 +163,7 @@ impl Detector for PhoneDetector {
                     matched_text: span_text.to_string(),
                     confidence: 1.0,
                     priority: 5,
+                    entity_type: None,
                 });
             }
         }

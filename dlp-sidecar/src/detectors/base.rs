@@ -20,6 +20,15 @@ pub struct RawMatch {
     pub matched_text: String,
     pub confidence: f32,
     pub priority: i32,
+    /// Per-match entity_type override. ``None`` → the server applies
+    /// the detector's uniform :fn:`Detector::entity_type`. ``Some`` →
+    /// this match carries a distinct entity_type, mirroring Python
+    /// detectors that emit per-pattern types (``api_key_secret`` →
+    /// anthropic_api_key/github_pat/…; ``password_field`` →
+    /// password_in_config/password_in_text). Load-bearing for the
+    /// classifier's ``len(entity_types) >= 3`` risk escalation.
+    #[serde(default)]
+    pub entity_type: Option<&'static str>,
 }
 
 pub trait Detector: Send + Sync {
@@ -32,6 +41,18 @@ pub trait Detector: Send + Sync {
         0
     }
     fn detect(&self, text: &str) -> Vec<RawMatch>;
+
+    /// Context-aware detect. Default ignores ``from_decoded`` and
+    /// delegates to :fn:`detect`. Detectors that relax thresholds on
+    /// base64-decoded content override this — mirrors the Python
+    /// ``from_decoded`` kwarg gated on ``ACCEPTS_DECODED`` (phone drops
+    /// the context-keyword requirement; api_key_secret runs the extra
+    /// short-key ``_DECODED_PATTERNS``). The gRPC server calls this with
+    /// ``ScanRequest.from_decoded`` so a decoded-segment scan relaxes
+    /// identically across engines.
+    fn detect_ctx(&self, text: &str, _from_decoded: bool) -> Vec<RawMatch> {
+        self.detect(text)
+    }
 }
 
 /// Convert a byte offset into a character (code-point) offset.
