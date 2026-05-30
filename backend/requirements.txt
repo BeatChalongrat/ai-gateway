@@ -3,10 +3,7 @@ uvicorn[standard]==0.30.6
 pydantic==2.9.2
 pydantic-settings==2.5.2
 sqlalchemy==2.0.35
-psycopg[binary]>=3.2.1
-# Phase-2: async Postgres driver for the chat hot-path AsyncSession.
-# The sync psycopg engine stays for admin/portal CRUD.
-asyncpg>=0.29.0
+psycopg[binary]>=3.2.1  # sync AND async engine (psycopg3 async mode) — see core/db.py
 alembic==1.13.2
 redis==5.0.8
 httpx==0.27.2
