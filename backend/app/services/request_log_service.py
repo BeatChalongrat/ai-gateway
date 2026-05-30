@@ -3,51 +3,81 @@
 from __future__ import annotations
 
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.domain.observability import RequestRecord
 from app.models.request_log import RequestLogORM
 
 
+def _build_request_log_orm(record: RequestRecord) -> RequestLogORM:
+    """Map a :class:`RequestRecord` to a :class:`RequestLogORM` row.
+
+    Shared by the sync (:meth:`RequestLogService.persist`) and async
+    (:meth:`RequestLogService.persist_async`) write paths so the column
+    mapping stays in exactly one place.
+    """
+    return RequestLogORM(
+        request_id=record.request_id,
+        tenant_id=record.tenant_id,
+        project_id=record.project_id,
+        provider=record.provider,
+        model=record.model,
+        status=record.status.value if hasattr(record.status, "value") else str(record.status),
+        policy_action=record.policy_action,
+        latency_ms=record.latency_ms,
+        prompt_tokens=record.prompt_tokens,
+        completion_tokens=record.completion_tokens,
+        total_tokens=record.total_tokens,
+        estimated_cost_usd=record.estimated_cost_usd,
+        reasoning_tokens=record.reasoning_tokens,
+        reasoning_cost=record.reasoning_cost,
+        error_code=record.error_code,
+        dlp_input_findings=record.dlp_input_findings,
+        dlp_input_action=record.dlp_input_action,
+        dlp_output_findings=record.dlp_output_findings,
+        dlp_categories=",".join(record.dlp_categories) if record.dlp_categories else None,
+        router_used=record.router_used,
+        policy_profile_id=record.policy_profile_id,
+        input_raw=record.input_raw,
+        input_masked=record.input_masked,
+        output_raw=record.output_raw,
+        output_final=record.output_final,
+        dlp_findings_json=record.dlp_findings_json,
+        input_raw_encrypted=record.input_raw_encrypted,
+        fallback_used=bool(record.fallback_used),
+        fallback_attempts=record.fallback_attempts,
+        original_provider=record.original_provider,
+        original_model=record.original_model,
+    )
+
+
 class RequestLogService:
 
     def persist(self, session: Session, record: RequestRecord) -> None:
-        """Write a RequestRecord to the database."""
-        log = RequestLogORM(
-            request_id=record.request_id,
-            tenant_id=record.tenant_id,
-            project_id=record.project_id,
-            provider=record.provider,
-            model=record.model,
-            status=record.status.value if hasattr(record.status, "value") else str(record.status),
-            policy_action=record.policy_action,
-            latency_ms=record.latency_ms,
-            prompt_tokens=record.prompt_tokens,
-            completion_tokens=record.completion_tokens,
-            total_tokens=record.total_tokens,
-            estimated_cost_usd=record.estimated_cost_usd,
-            reasoning_tokens=record.reasoning_tokens,
-            reasoning_cost=record.reasoning_cost,
-            error_code=record.error_code,
-            dlp_input_findings=record.dlp_input_findings,
-            dlp_input_action=record.dlp_input_action,
-            dlp_output_findings=record.dlp_output_findings,
-            dlp_categories=",".join(record.dlp_categories) if record.dlp_categories else None,
-            router_used=record.router_used,
-            policy_profile_id=record.policy_profile_id,
-            input_raw=record.input_raw,
-            input_masked=record.input_masked,
-            output_raw=record.output_raw,
-            output_final=record.output_final,
-            dlp_findings_json=record.dlp_findings_json,
-            input_raw_encrypted=record.input_raw_encrypted,
-            fallback_used=bool(record.fallback_used),
-            fallback_attempts=record.fallback_attempts,
-            original_provider=record.original_provider,
-            original_model=record.original_model,
-        )
+        """Write a RequestRecord to the database.
+
+        Flushes only — the CALLER owns the commit (the orchestrator /
+        public_chat session lifecycle commits the unit of work). This is
+        the contract the async variant mirrors.
+        """
+        log = _build_request_log_orm(record)
         session.add(log)
         session.flush()
+
+    async def persist_async(
+        self, session: AsyncSession, record: RequestRecord
+    ) -> None:
+        """Async variant of :meth:`persist`.
+
+        Identical logic on an :class:`~sqlalchemy.ext.asyncio.AsyncSession`:
+        build the ORM row, ``add`` it (sync), then ``await session.flush()``.
+        Flushes only — the CALLER owns the commit, exactly matching the sync
+        contract so the orchestrator's session unit-of-work is unchanged.
+        """
+        log = _build_request_log_orm(record)
+        session.add(log)
+        await session.flush()
 
     def list_recent(
         self, session: Session, limit: int = 100
