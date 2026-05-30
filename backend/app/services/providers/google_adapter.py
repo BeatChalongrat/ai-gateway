@@ -25,7 +25,7 @@ from app.domain.providers import ProviderResponse, ProviderStreamChunk, Provider
 from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.error_handler import call_with_retry
-from app.services.providers.http_client import create_provider_client
+from app.services.providers.http_client import get_provider_client
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -238,12 +238,13 @@ class GoogleAIAdapter(BaseProviderAdapter):
 
         return body
 
-    def _build_client(self):
-        return create_provider_client(
+    async def _get_client(self):
+        # Auth travels as the ``key`` query param (see call sites), so the
+        # pooled client needs no per-request headers.
+        return await get_provider_client(
             base_url=resolve_base_url(self.provider_name, GOOGLE_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
-            headers={},
         )
 
     async def chat(
@@ -258,17 +259,17 @@ class GoogleAIAdapter(BaseProviderAdapter):
         body = self._build_body(payload, messages, resolved_model=model)
         key = api_key or settings.google_api_key
 
-        async with self._build_client() as client:
-            resp = await call_with_retry(
-                lambda: client.post(
-                    f"/models/{model}:generateContent",
-                    json=body,
-                    params={"key": key},
-                ),
-                provider_name=self.provider_name,
-                max_retries=settings.provider_max_retries,
-            )
-            data = resp.json()
+        client = await self._get_client()
+        resp = await call_with_retry(
+            lambda: client.post(
+                f"/models/{model}:generateContent",
+                json=body,
+                params={"key": key},
+            ),
+            provider_name=self.provider_name,
+            max_retries=settings.provider_max_retries,
+        )
+        data = resp.json()
 
         return _parse_response(data)
 
@@ -284,24 +285,24 @@ class GoogleAIAdapter(BaseProviderAdapter):
         body = self._build_body(payload, messages, resolved_model=model)
         key = api_key or settings.google_api_key
 
-        async with self._build_client() as client:
-            async with client.stream(
-                "POST",
-                f"/models/{model}:streamGenerateContent",
-                json=body,
-                params={"key": key, "alt": "sse"},
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:].strip()
-                    if not data_str or data_str == "[DONE]":
-                        continue
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    chunk = _parse_stream_chunk(data)
-                    if chunk is not None:
-                        yield chunk
+        client = await self._get_client()
+        async with client.stream(
+            "POST",
+            f"/models/{model}:streamGenerateContent",
+            json=body,
+            params={"key": key, "alt": "sse"},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:].strip()
+                if not data_str or data_str == "[DONE]":
+                    continue
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                chunk = _parse_stream_chunk(data)
+                if chunk is not None:
+                    yield chunk

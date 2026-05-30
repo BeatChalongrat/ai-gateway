@@ -27,17 +27,25 @@ Design notes
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import random
+import threading
 import time
 from typing import Callable, Sequence
 
+import numpy as np
 import structlog
 
 from app.services.providers.model_registry import resolve_provider
 
 logger = structlog.get_logger(__name__)
+
+# Phase-1 B4: bound concurrent embedding encodes offloaded to the
+# threadpool. Separate from the DLP semaphore so the two together
+# (8 + 4) stay under the worker's 16-thread default executor.
+_SEMANTIC_ENCODE_SEMAPHORE = asyncio.Semaphore(4)
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +141,15 @@ class SemanticRouter:
         self._encoder = encoder
         self._model = None
         self._anchors: dict[str, list[float]] = {}
+        # B4: pre-normalised anchor matrix (N x dim) + names, for the
+        # vectorised numpy cosine used by the async hot path. Built once
+        # in ``_ensure_loaded``. Guarded by ``_load_lock`` because the
+        # async path triggers the one-time load from a worker thread.
+        self._anchor_matrix: np.ndarray | None = None
+        self._anchor_names: list[str] = []
+        # Serialises the one-time lazy load when the async path triggers
+        # it from a worker thread (so the model loads exactly once).
+        self._load_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -152,13 +169,27 @@ class SemanticRouter:
             return ("general", 0.0)
 
         vec = list(self._encode(text))
-        best_intent = "general"
-        best_score = -1.0
-        for intent, anchor in self._anchors.items():
-            score = _cosine(vec, anchor)
-            if score > best_score:
-                best_score = score
-                best_intent = intent
+        if self._anchor_matrix is not None:
+            # B4 fast path: one matmul against the pre-normalised anchor
+            # matrix. Used in production (matrix built by _ensure_loaded).
+            q = np.asarray(vec, dtype=np.float64)
+            norm = float(np.linalg.norm(q))
+            if norm == 0.0:
+                return ("general", 0.0)
+            scores = self._anchor_matrix @ (q / norm)
+            idx = int(np.argmax(scores))
+            best_score = float(scores[idx])
+            best_intent = self._anchor_names[idx]
+        else:
+            # Fallback (e.g. tests that set _anchors directly without the
+            # matrix): exact same result via the pure-Python cosine.
+            best_intent = "general"
+            best_score = -1.0
+            for intent, anchor in self._anchors.items():
+                score = _cosine(vec, anchor)
+                if score > best_score:
+                    best_score = score
+                    best_intent = intent
 
         if best_score < self.threshold:
             return ("general", best_score)
@@ -195,6 +226,16 @@ class SemanticRouter:
     # ------------------------------------------------------------------
 
     def _ensure_loaded(self) -> None:
+        # Double-checked locking: the async path (get_model_hint_async →
+        # to_thread(get_model_hint)) can trigger the one-time load from a
+        # worker thread, so concurrent first requests must not each build
+        # the encoder. threading.Lock (not asyncio) — we may be in a thread.
+        if self._anchors:
+            return
+        with self._load_lock:
+            self._load_unlocked()
+
+    def _load_unlocked(self) -> None:
         if self._anchors:
             return
 
@@ -239,8 +280,39 @@ class SemanticRouter:
                     "semantic_router_loaded", model=self.model_name
                 )
 
+        names: list[str] = []
+        rows: list[np.ndarray] = []
         for intent, description in _INTENT_DESCRIPTIONS.items():
-            self._anchors[intent] = list(self._encoder(description))
+            anchor = list(self._encoder(description))
+            self._anchors[intent] = anchor
+            # Pre-normalise each anchor to a unit vector so the hot-path
+            # cosine is a single matmul (anchor_matrix @ unit_query).
+            a = np.asarray(anchor, dtype=np.float64)
+            norm = float(np.linalg.norm(a))
+            rows.append(a / norm if norm else a)
+            names.append(intent)
+        self._anchor_names = names
+        self._anchor_matrix = np.stack(rows) if rows else None
+
+    async def get_model_hint_async(
+        self,
+        messages: list[dict],
+        allowed_providers: frozenset[str] | set[str] | None = None,
+    ) -> tuple[str | None, str, float]:
+        """B4 async variant: offload the synchronous ``get_model_hint``
+        (classify → embedding encode → cosine) to a worker thread so the
+        50–600 ms MiniLM encode never blocks the event loop.
+
+        Delegates to the sync method (rather than reimplementing the
+        chain) so test monkeypatches on ``get_model_hint`` still apply
+        and the numpy cosine in ``classify`` is reused. Bounded by
+        ``_SEMANTIC_ENCODE_SEMAPHORE`` so concurrent encodes can't starve
+        the shared executor.
+        """
+        async with _SEMANTIC_ENCODE_SEMAPHORE:
+            return await asyncio.to_thread(
+                self.get_model_hint, messages, allowed_providers
+            )
 
     def _encode(self, text: str) -> Sequence[float]:
         assert self._encoder is not None, "encoder not initialised"
@@ -272,6 +344,15 @@ class SemanticRouterDisabled:
         allowed_providers: frozenset[str] | set[str] | None = None,
     ) -> tuple[str | None, str, float]:
         return (None, "general", 0.0)
+
+    async def get_model_hint_async(
+        self,
+        messages: list[dict],
+        allowed_providers: frozenset[str] | set[str] | None = None,
+    ) -> tuple[str | None, str, float]:
+        # Delegate to the sync method (instant no-op) so tests that
+        # monkeypatch ``get_model_hint`` on this class still take effect.
+        return self.get_model_hint(messages, allowed_providers)
 
 
 # ---------------------------------------------------------------------------

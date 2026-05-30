@@ -5,6 +5,7 @@ Pure service logic — takes a SQLAlchemy session, no HTTP/FastAPI concerns.
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -18,6 +19,16 @@ from app.models.api_key import ApiKeyORM
 # 1-hour grace period between rotation and the old key hard-expiring.
 # Matches Beat's Phase 4 F2 spec: "Sets old key to expire in 1 hour".
 _ROTATION_GRACE_PERIOD = timedelta(hours=1)
+
+# Phase-1 B7: ``last_used_at`` used to be written + flushed on EVERY
+# authenticated request — turning a read-only auth lookup into a write on
+# the hot path. Debounce it to at most once per key per interval. The
+# field drives "last seen" displays, not security decisions, so coarse
+# resolution is fine. State is per-worker-process and best-effort (a
+# bounded dict); losing it on restart just means one extra write.
+_LAST_USED_WRITE_INTERVAL_S = 300.0  # 5 minutes
+_last_used_writes: dict[str, float] = {}
+_LAST_USED_MAX_TRACKED = 50_000  # cap the dict so it can't grow unbounded
 
 
 class ApiKeyService:
@@ -81,8 +92,17 @@ class ApiKeyService:
             if now >= expires:
                 return None
 
-        api_key.last_used_at = datetime.now(timezone.utc)
-        session.flush()
+        # B7: debounce the last_used_at write. Only persist (and flush)
+        # when the previous write for this key was more than the interval
+        # ago — removes a DB write from the vast majority of requests.
+        mono = time.monotonic()
+        last_write = _last_used_writes.get(api_key.key_id, 0.0)
+        if mono - last_write >= _LAST_USED_WRITE_INTERVAL_S:
+            api_key.last_used_at = datetime.now(timezone.utc)
+            session.flush()
+            if len(_last_used_writes) >= _LAST_USED_MAX_TRACKED:
+                _last_used_writes.clear()
+            _last_used_writes[api_key.key_id] = mono
         return api_key
 
     def revoke_key(self, session: Session, key_id: str) -> bool:

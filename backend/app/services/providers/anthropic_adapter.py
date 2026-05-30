@@ -22,7 +22,7 @@ from app.domain.providers import (
 )
 from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import resolve_base_url
-from app.services.providers.http_client import create_provider_client
+from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.parsers import parse_anthropic_response
 
@@ -267,23 +267,22 @@ class AnthropicAdapter(BaseProviderAdapter):
     ) -> ProviderResponse:
         body = self._build_body(payload, messages, resolved_model=resolved_model)
 
-        client = create_provider_client(
+        client = await get_provider_client(
             base_url=resolve_base_url(self.provider_name, ANTHROPIC_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
-            headers={
-                "x-api-key": api_key or settings.anthropic_api_key,
-                "anthropic-version": ANTHROPIC_VERSION,
-            },
         )
+        headers = {
+            "x-api-key": api_key or settings.anthropic_api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
 
-        async with client:
-            resp = await call_with_retry(
-                lambda: client.post("/messages", json=body),
-                provider_name=self.provider_name,
-                max_retries=settings.provider_max_retries,
-            )
-            data = resp.json()
+        resp = await call_with_retry(
+            lambda: client.post("/messages", json=body, headers=headers),
+            provider_name=self.provider_name,
+            max_retries=settings.provider_max_retries,
+        )
+        data = resp.json()
 
         return parse_anthropic_response(data)
 
@@ -308,23 +307,24 @@ class AnthropicAdapter(BaseProviderAdapter):
         key = api_key or settings.anthropic_api_key
         initial_model = resolved_model or payload.model
 
-        client = create_provider_client(
+        client = await get_provider_client(
             base_url=resolve_base_url(self.provider_name, ANTHROPIC_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
-            headers={
-                "x-api-key": key,
-                "anthropic-version": ANTHROPIC_VERSION,
-            },
         )
+        headers = {
+            "x-api-key": key,
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
 
-        async with client:
-            async with client.stream("POST", "/messages", json=body) as resp:
-                resp.raise_for_status()
-                async for chunk in self._process_sse_stream(
-                    resp.aiter_lines(), initial_model=initial_model
-                ):
-                    yield chunk
+        async with client.stream(
+            "POST", "/messages", json=body, headers=headers
+        ) as resp:
+            resp.raise_for_status()
+            async for chunk in self._process_sse_stream(
+                resp.aiter_lines(), initial_model=initial_model
+            ):
+                yield chunk
 
     async def _process_sse_stream(
         self,

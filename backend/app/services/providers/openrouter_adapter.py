@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk
 from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import resolve_base_url
-from app.services.providers.http_client import create_provider_client
+from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.openai_adapter import _parse_sse_line
 from app.services.providers.parsers import parse_openai_response
@@ -76,15 +76,17 @@ class OpenRouterAdapter(BaseProviderAdapter):
 
         return body
 
-    def _build_client(self, api_key: str | None):
-        return create_provider_client(
+    def _request_headers(self, api_key: str | None) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {api_key or settings.openrouter_api_key}",
+            "HTTP-Referer": settings.app_name,
+        }
+
+    async def _get_client(self):
+        return await get_provider_client(
             base_url=resolve_base_url(self.provider_name, OPENROUTER_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
-            headers={
-                "Authorization": f"Bearer {api_key or settings.openrouter_api_key}",
-                "HTTP-Referer": settings.app_name,
-            },
         )
 
     async def chat(
@@ -92,13 +94,14 @@ class OpenRouterAdapter(BaseProviderAdapter):
     ) -> ProviderResponse:
         body = self._build_body(payload, messages, resolved_model=resolved_model)
 
-        async with self._build_client(api_key) as client:
-            resp = await call_with_retry(
-                lambda: client.post("/chat/completions", json=body),
-                provider_name=self.provider_name,
-                max_retries=settings.provider_max_retries,
-            )
-            data = resp.json()
+        client = await self._get_client()
+        headers = self._request_headers(api_key)
+        resp = await call_with_retry(
+            lambda: client.post("/chat/completions", json=body, headers=headers),
+            provider_name=self.provider_name,
+            max_retries=settings.provider_max_retries,
+        )
+        data = resp.json()
 
         return parse_openai_response(data)
 
@@ -114,12 +117,13 @@ class OpenRouterAdapter(BaseProviderAdapter):
             payload, messages, stream=True, resolved_model=resolved_model
         )
 
-        async with self._build_client(api_key) as client:
-            async with client.stream(
-                "POST", "/chat/completions", json=body
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    chunk = _parse_sse_line(line)
-                    if chunk is not None:
-                        yield chunk
+        client = await self._get_client()
+        headers = self._request_headers(api_key)
+        async with client.stream(
+            "POST", "/chat/completions", json=body, headers=headers
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                chunk = _parse_sse_line(line)
+                if chunk is not None:
+                    yield chunk
