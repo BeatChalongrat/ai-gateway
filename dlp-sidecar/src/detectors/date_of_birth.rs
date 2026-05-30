@@ -15,6 +15,10 @@ static DOB_RE: Lazy<Regex> = Lazy::new(|| {
     let pat = concat!(
         r"(?i)(?:",
         r"born|d\.?o\.?b\.?|date\s*of\s*birth|birthday|birthdate",
+        // Person-role-noun + DOB compound branch (port of dob.py T15
+        // audit fix). Listed before the bare-เกิด lookbehind branch so
+        // role-noun forms recover without re-introducing event-noun FPs.
+        r"|(?:ลูกค้า|ผู้ป่วย|คนไข้|สมาชิก|พนักงาน|ผู้ใช้)\s*(?:วันเกิด|เกิดวันที่)",
         r"|(?<![฀-๿])(?:วันเกิด|เกิดวันที่|เกิด)",
         r")",
         r"(?:\s+(?:on|in|at|is|was|=|:))?",

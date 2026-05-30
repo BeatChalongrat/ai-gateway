@@ -1,6 +1,6 @@
 //! API key / generic secret detector — port of ``api_key_secret.py``.
 //!
-//! Six standalone patterns + one assignment pattern; duplicates
+//! Eight standalone patterns + one assignment pattern; duplicates
 //! (same start/end) are suppressed via ``seen_spans``. Patterns
 //! that overlap (e.g. the long-form Anthropic key and the shorter
 //! ``api03`` variant) emit in the Python order so the later
@@ -16,7 +16,7 @@ struct StandalonePattern {
     re: Lazy<Regex>,
 }
 
-static STANDALONE: [StandalonePattern; 6] = [
+static STANDALONE: [StandalonePattern; 8] = [
     StandalonePattern {
         re: Lazy::new(|| {
             Regex::new(r"\bsk-ant-(?:api\d+-)?[A-Za-z0-9_\-]{32,}\b").expect("ant long")
@@ -39,6 +39,20 @@ static STANDALONE: [StandalonePattern; 6] = [
     StandalonePattern {
         re: Lazy::new(|| {
             Regex::new(r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b").expect("jwt")
+        }),
+    },
+    StandalonePattern {
+        // GitHub classic PAT: ghp_ + exactly 36 alphanumerics.
+        re: Lazy::new(|| {
+            Regex::new(r"(?<![A-Za-z0-9])ghp_[A-Za-z0-9]{36}(?![A-Za-z0-9])")
+                .expect("github classic pat")
+        }),
+    },
+    StandalonePattern {
+        // GitHub fine-grained PAT: github_pat_ + 82 [A-Za-z0-9_].
+        re: Lazy::new(|| {
+            Regex::new(r"(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{82}(?![A-Za-z0-9])")
+                .expect("github fine-grained pat")
         }),
     },
 ];
