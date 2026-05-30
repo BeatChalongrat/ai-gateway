@@ -66,17 +66,25 @@ def _estimate_cost(
 
 
 def _estimate_reasoning_cost(model: str, reasoning_tokens: int) -> float:
-    """USD cost attributable to reasoning tokens (T3).
+    """USD already-included-in-total cost attributable to reasoning (T3).
 
-    Reasoning tokens bill at the model's *output* rate on every
-    provider we currently route to — OpenAI o-series, Anthropic
-    extended thinking, Gemini 2.5+ all fold reasoning into the
-    completion-side meter. This helper returns the reasoning-only
-    portion so the request_log row can attribute spend separately
-    from the visible completion cost (which is computed once for
-    the full ``completion_tokens`` count via ``_estimate_cost`` —
-    callers that want the *visible-only* cost should subtract the
-    reasoning portion themselves to avoid double-counting).
+    NON-ADDITIVE attribution. Reasoning tokens bill at the model's
+    *output* rate on every provider we route to — OpenAI o-series,
+    Anthropic extended thinking, Gemini 2.5+ all fold reasoning into
+    the provider's ``completion_tokens`` meter. ``estimated_cost_usd``
+    is therefore the authoritative ALL-IN total (it already prices the
+    reasoning tokens via the full ``completion_tokens`` count); this
+    helper returns the *portion* of that total attributable to
+    reasoning, so the admin dashboard can break spend down.
+
+    CRITICAL: never add ``reasoning_cost`` on top of
+    ``estimated_cost_usd`` — that double-counts. It is a sub-component,
+    not an extra charge. Budget/rollup queries must sum
+    ``estimated_cost_usd`` ALONE (see budget_service). To get the
+    visible-only completion cost, subtract this from the completion
+    cost. The caller guarantees ``reasoning_tokens <= completion_tokens``
+    (capped at the estimate sites) so this attribution can never exceed
+    the completion cost it is a part of.
 
     Falls back to the legacy flat rate when the candidate has no
     output rate set — same posture as ``_estimate_cost``.
