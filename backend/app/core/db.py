@@ -5,11 +5,23 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.config import settings
 
-# Defaults preserve the pre-Phase-2 production behaviour exactly
-# (10 / 20). Env overrides are opt-in; unset env → identical to the
-# previous hardcoded constants.
-_DEFAULT_POOL_SIZE = 10
-_DEFAULT_MAX_OVERFLOW = 20
+# Track A: TWO pools, sized for the post-flip pattern.
+#   * SYNC engine — admin/portal CRUD, background sweeps, and the 3 rare
+#     sync points the chat path keeps (dispatcher fallback key-resolver,
+#     streaming fallback-candidate lookup, post-stream success log). All
+#     low-volume → a SMALL pool suffices.
+#   * ASYNC engine — the chat hot path. Post-flip the pooled connection is
+#     RELEASED during the provider call (held ~10-30ms, not ~1-3s), so a
+#     small pool absorbs high concurrency (one connection serves many
+#     in-flight requests). pool_timeout tightened to 5s (fail fast).
+# Budget/worker: sync(5+5=10) + async(10+15=25) = 35; ×4 workers = 140
+# << Postgres max_connections 250 (closes M15: pre-flip both engines read
+# DB_POOL_SIZE=30 → 60+60=120/worker = 480 once async went live).
+_DEFAULT_SYNC_POOL_SIZE = 5
+_DEFAULT_SYNC_MAX_OVERFLOW = 5
+_DEFAULT_ASYNC_POOL_SIZE = 10
+_DEFAULT_ASYNC_MAX_OVERFLOW = 15
+_ASYNC_POOL_TIMEOUT = 5
 
 
 def _env_int(name: str, default: int) -> int:
@@ -28,9 +40,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-_pool_size = _env_int("DB_POOL_SIZE", _DEFAULT_POOL_SIZE)
-_max_overflow = _env_int("DB_MAX_OVERFLOW", _DEFAULT_MAX_OVERFLOW)
-_peak_per_worker = _pool_size + _max_overflow
+_sync_pool_size = _env_int("DB_SYNC_POOL_SIZE", _DEFAULT_SYNC_POOL_SIZE)
+_sync_max_overflow = _env_int("DB_SYNC_MAX_OVERFLOW", _DEFAULT_SYNC_MAX_OVERFLOW)
+_async_pool_size = _env_int("DB_ASYNC_POOL_SIZE", _DEFAULT_ASYNC_POOL_SIZE)
+_async_max_overflow = _env_int(
+    "DB_ASYNC_MAX_OVERFLOW", _DEFAULT_ASYNC_MAX_OVERFLOW
+)
+_peak_per_worker = (
+    (_sync_pool_size + _sync_max_overflow)
+    + (_async_pool_size + _async_max_overflow)
+)
 # Display the Postgres max_connections value we expect on the other end
 # of the wire so a misconfigured cap is obvious in the boot log.
 # ``POSTGRES_MAX_CONNECTIONS`` is informational only — the value is
@@ -44,10 +63,10 @@ _pg_max_connections = os.environ.get("POSTGRES_MAX_CONNECTIONS", "200")
 # stdout guarantees the operator sees the effective pool settings on
 # every boot. Tag matches the grep target documented in the runbook.
 print(
-    f"db_pool_configured pool_size={_pool_size} "
-    f"max_overflow={_max_overflow} peak_per_worker={_peak_per_worker} "
-    f"pg_max_connections={_pg_max_connections} "
-    f"(defaults={_DEFAULT_POOL_SIZE}/{_DEFAULT_MAX_OVERFLOW})",
+    f"db_pool_configured sync={_sync_pool_size}/{_sync_max_overflow} "
+    f"async={_async_pool_size}/{_async_max_overflow} "
+    f"peak_per_worker={_peak_per_worker} "
+    f"pg_max_connections={_pg_max_connections}",
     file=sys.stderr,
     flush=True,
 )
@@ -66,8 +85,8 @@ _connect_args = {"client_encoding": "utf8"} if _is_postgres else {}
 engine = create_engine(
     settings.database_url,
     future=True,
-    pool_size=_pool_size,
-    max_overflow=_max_overflow,
+    pool_size=_sync_pool_size,
+    max_overflow=_sync_max_overflow,
     pool_timeout=10,
     pool_recycle=300,
     pool_pre_ping=True,
@@ -130,16 +149,22 @@ def get_async_engine():
         from sqlalchemy.ext.asyncio import create_async_engine
 
         async_url = _to_async_url(settings.database_url)
+        # pool_pre_ping kept ON: it costs one async ``SELECT 1`` per
+        # checkout, but that round-trip is off the event loop's critical
+        # path (the whole point of the flip) and is cheap on a local
+        # Postgres; the resilience against a Postgres restart / network
+        # blip is worth more than the sub-ms cost (re-audit M16 decision).
         kwargs = {"future": True, "pool_pre_ping": True}
         if async_url.startswith("postgresql"):
-            # Mirror the sync pool sizing. The project DSN is
-            # ``postgresql+psycopg://`` → psycopg3's async mode (the same
-            # driver the sync engine uses), so no separate async driver is
-            # needed. (asyncpg was removed in Track A — see _to_async_url.)
+            # Async hot-path pool. The project DSN is ``postgresql+psycopg://``
+            # → psycopg3's async mode (the same driver the sync engine uses),
+            # so no separate async driver is needed (asyncpg removed in
+            # Track A — see _to_async_url). Connection-release means this
+            # small pool serves high concurrency; pool_timeout=5 fails fast.
             kwargs.update(
-                pool_size=_pool_size,
-                max_overflow=_max_overflow,
-                pool_timeout=10,
+                pool_size=_async_pool_size,
+                max_overflow=_async_max_overflow,
+                pool_timeout=_ASYNC_POOL_TIMEOUT,
                 pool_recycle=300,
             )
         # SQLite async (tests) uses a NullPool implicitly; no pool args.
