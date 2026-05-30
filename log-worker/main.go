@@ -111,7 +111,8 @@ func main() {
 		// partition; the gateway expects a fast Enqueue or fallback.
 		grpc.MaxConcurrentStreams(1024),
 	)
-	pb.RegisterLogWorkerServiceServer(grpcServer, &server{w: w, draining: 0})
+	srv := &server{w: w, draining: 0}
+	pb.RegisterLogWorkerServiceServer(grpcServer, srv)
 
 	// Start the worker AFTER the gRPC server is registered but BEFORE
 	// Serve() takes traffic — so the first record arrives at a running
@@ -135,6 +136,12 @@ func main() {
 	<-stop
 	log.Printf("shutdown signal received, draining…")
 
+	// Flip the draining flag first: new Enqueue RPCs are rejected with
+	// reason "draining" (the gateway treats this as a fallback signal)
+	// and Health reports "draining" for readiness probes. GracefulStop
+	// then closes the listener and waits for in-flight RPCs to finish,
+	// after which the worker drain runs against a quiescent channel.
+	atomic.StoreInt32(&srv.draining, 1)
 	grpcServer.GracefulStop()
 	w.Stop(30 * time.Second)
 	_ = db.Close()

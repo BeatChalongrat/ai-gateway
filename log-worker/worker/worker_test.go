@@ -295,6 +295,96 @@ func TestGracefulShutdownDrains(t *testing.T) {
 	}
 }
 
+// TestDrainContinuesDuringDBOutage is the audit H12 regression test.
+//
+// While the writer is stuck (insertFn blocks, simulating a Postgres
+// outage), the drainer must keep reading w.ch so newly enqueued records
+// are BUFFERED, not dropped — up to the combined capacity of the channel
+// (BufferSize) plus the in-flight batch channel (batchChanCap*BatchSize).
+// It also asserts resident memory is bounded: drops eventually begin
+// once that combined cap is exceeded (so the retry buffer can't grow
+// without bound during a sustained outage).
+func TestDrainContinuesDuringDBOutage(t *testing.T) {
+	// Block every insert until released — the writer parks on the first
+	// batch and never returns, modelling a hard Postgres outage.
+	release := make(chan struct{})
+	var insertCalls atomic.Int32
+	s := &insertStub{orig: insertFn}
+	insertFn = func(_ *sql.DB, batch []*pb.LogRecord) error {
+		insertCalls.Add(1)
+		<-release // block until the test releases the outage
+		return nil
+	}
+	defer s.restore()
+
+	const (
+		bufSize   = 20
+		batchSize = 5
+	)
+	w := newTestWorker(t, Config{
+		BufferSize:    bufSize,
+		BatchSize:     batchSize,
+		FlushInterval: time.Hour, // size-trigger only; no ticker noise
+	})
+	w.Start()
+	// Cleanup order matters: release the outage FIRST so the parked
+	// writer can finish its in-flight batch, THEN Stop() can drain and
+	// the WaitGroup completes without hitting the timeout.
+	defer w.Stop(2 * time.Second)
+	defer close(release)
+
+	// Combined capacity the pipeline can hold before it MUST drop:
+	//   - w.ch:           bufSize records
+	//   - w.batches:      batchChanCap batches * batchSize records
+	//   - writer in-hand: 1 batch * batchSize, blocked on insertFn
+	//   - drainer local:  a partial batch (< batchSize) not yet handed
+	// We enqueue well past that to force the bounded-memory drop path.
+	combinedCap := bufSize + batchChanCap*batchSize + batchSize + batchSize
+	total := combinedCap + 5*batchSize
+
+	accepted := 0
+	for i := 0; i < total; i++ {
+		if w.Enqueue(&pb.LogRecord{RequestId: "outage"}) {
+			accepted++
+		}
+		// Yield so the drainer can move records off w.ch into w.batches;
+		// without this the producer can outrun the drainer and Enqueue
+		// drops at the channel before the pipeline is actually full.
+		time.Sleep(200 * time.Microsecond)
+	}
+
+	// The writer must have started (drainer handed it a batch) and be
+	// parked inside insertFn — proving the drainer ran while the DB was
+	// "down".
+	if insertCalls.Load() < 1 {
+		t.Fatalf("writer never attempted an insert; drainer/writer not wired")
+	}
+
+	depth, dropped, flushed := w.Stats()
+
+	// Memory bound: records still resident must not exceed the combined
+	// pipeline capacity. This is the anti-unbounded-growth assertion.
+	if depth > int64(combinedCap) {
+		t.Errorf("queueDepth=%d exceeds combined cap=%d — memory not bounded", depth, combinedCap)
+	}
+	// Buffering happened: with a blocked writer we should hold roughly a
+	// full pipeline, far more than a single batch (the old single-goroutine
+	// design would have stalled on the very first flush and dropped the rest).
+	if depth < int64(bufSize) {
+		t.Errorf("queueDepth=%d too low — drainer did not buffer during outage", depth)
+	}
+	// Nothing can have been flushed while the writer is blocked.
+	if flushed != 0 {
+		t.Errorf("flushed=%d, want 0 while writer is blocked", flushed)
+	}
+	// We pushed past capacity, so the bounded-memory drop path must have fired.
+	if dropped == 0 {
+		t.Errorf("expected drops once combined capacity exceeded, got 0")
+	}
+	t.Logf("outage: accepted=%d depth=%d dropped=%d flushed=%d insertCalls=%d",
+		accepted, depth, dropped, flushed, insertCalls.Load())
+}
+
 // ---------------------------------------------------------------------------
 // Internal: stub the db.InsertBatch call via the package-level hook.
 // ---------------------------------------------------------------------------
