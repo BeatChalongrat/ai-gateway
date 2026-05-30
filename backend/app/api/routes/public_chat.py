@@ -563,6 +563,15 @@ async def chat_completions(
     # forward reasoning frames.
     orchestrator._maybe_enable_adaptive_reasoning(payload, route.model_name)
 
+    # P0 downgrade signal — reasoning requested but the resolved model
+    # can't reason. Computed once here (after the final route + adaptive-
+    # reasoning auto-enable) and emitted as the first SSE frame inside the
+    # generator so the client can warn the user instead of seeing a plain
+    # answer with no thinking. None on the normal path.
+    _stream_downgrade_reason = orchestrator._reasoning_downgrade_reason(
+        payload, route.model_name
+    )
+
     # 3. Supports-streaming check — fall back to the non-streaming path
     # if the selected adapter can't stream (e.g. router picked a
     # non-streaming model).
@@ -747,6 +756,30 @@ async def chat_completions(
         final_finish_reason: str | None = None
         final_model: str = route.model_name
         provider_usage = None
+
+        # P0 downgrade notice — first frame on the wire when reasoning was
+        # requested but the resolved model can't reason. ``reasoning_notice``
+        # is a sibling of ``reasoning_summary_delta`` / ``analysis_status``;
+        # unknown-type frames are safely ignored by older clients.
+        if _stream_downgrade_reason:
+            log.info(
+                "reasoning_downgraded",
+                requested_mode=getattr(payload.reasoning, "mode", None),
+                resolved_model=route.model_name,
+            )
+            yield "data: {}\n\n".format(
+                _sse_dumps(
+                    {
+                        "id": ctx.request_id,
+                        "type": "reasoning_notice",
+                        "created": int(time.time()),
+                        "model": route.model_name,
+                        "reasoning_downgraded": True,
+                        "reason": _stream_downgrade_reason,
+                    },
+                    ensure_ascii=False,
+                )
+            )
 
         # Per-request tool_call argument accumulator. Keyed by the
         # tool_call index we forward to the client. Each entry tracks
