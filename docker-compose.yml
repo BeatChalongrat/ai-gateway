@@ -17,7 +17,7 @@ services:
     # on production hardware via a compose override.
     command: >
       postgres
-      -c max_connections=200
+      -c max_connections=250
       -c shared_buffers=256MB
       -c synchronous_commit=off
       -c wal_writer_delay=200ms
@@ -235,12 +235,15 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # Phase-1 explicit pool sizing. 4 backend workers × (20+10) = 120
-      # peak connections, well under Postgres max_connections=200 set
-      # on the postgres service. db.py reads these at import time;
-      # missing values fall back to 10/20 (the legacy default).
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
-      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      # Phase-2 pool sizing. The chat hot path now holds a sync connection
+      # for the request's duration (incl. the provider call) but does its
+      # checkout/queries off the event loop (to_thread), so the pool must
+      # cover peak concurrent requests per worker. 4 workers × (30+30) = 240
+      # peak, under the Postgres max_connections=250 set on the postgres
+      # service. db.py reads these at import time; missing → 10/20 legacy.
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-30}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-30}
+      POSTGRES_MAX_CONNECTIONS: "250"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       # Empty in dev (redis runs unauthenticated on the compose
