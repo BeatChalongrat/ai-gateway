@@ -6,6 +6,7 @@ inbound DLP mask, stream from the provider adapter, then buffer +
 restore the full body before emitting it back to the client.
 """
 
+import asyncio
 import json
 import orjson
 import time
@@ -135,8 +136,14 @@ async def chat_completions(
     #   6. select_route (now respects the router's model choice)
     #   7. supports_streaming check → fall back to non-stream if needed
     #   8. Stream → buffer → DLP restore → log with router_used
-    ctx = orchestrator.resolve_streaming_context(
-        auth=auth, payload=payload, session=session
+    # Phase-2 (hybrid): the streaming pre-phase DB reads (project context,
+    # tenant lookups) run off the event loop so the connection checkout
+    # doesn't block the loop under concurrency. The request session is
+    # released before the stream body; the end-of-stream log persist runs
+    # on its own short-lived session.
+    ctx = await asyncio.to_thread(
+        orchestrator.resolve_streaming_context,
+        auth=auth, payload=payload, session=session,
     )
 
     log = logger.bind(
