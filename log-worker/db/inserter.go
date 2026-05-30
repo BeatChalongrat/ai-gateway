@@ -54,6 +54,8 @@ var requestLogColumns = []string{
 	"output_final",
 	"dlp_findings_json",
 	"input_raw_encrypted",
+	"reasoning_tokens",
+	"reasoning_cost",
 }
 
 // InsertBatch streams ``batch`` into ``request_logs`` via COPY.
@@ -141,6 +143,8 @@ func rowArgs(r *pb.LogRecord) []any {
 		emptyToNil(r.GetOutputFinal()),
 		emptyToNil(r.GetDlpFindingsJson()),
 		emptyToNil(r.GetInputRawEncrypted()),
+		r.GetReasoningTokens(),
+		r.GetReasoningCost(),
 	}
 }
 

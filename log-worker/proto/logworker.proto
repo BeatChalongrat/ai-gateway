@@ -59,6 +59,12 @@ message LogRecord {
   // (server_default fills created_at on the row) but kept here so
   // the worker can compute end-to-end enqueue→insert latency.
   int64 created_at_unix_ms = 30;
+  // Reasoning-model accounting. 0 for non-reasoning requests (the
+  // request_logs columns are NOT NULL DEFAULT 0, so COPY omitting them
+  // already wrote 0 — these fields close the gap so the Go path
+  // persists the real values once reasoning models are provisioned).
+  int32 reasoning_tokens = 31;
+  double reasoning_cost = 32;
 }
 
 message EnqueueResponse {
