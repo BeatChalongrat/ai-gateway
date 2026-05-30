@@ -32,6 +32,23 @@ _REASONING_EFFORT_MAP: dict[str, str] = {
     "high": "high",
 }
 
+# Reasoning-summary verbosity passed to the Responses API. ``auto`` lets
+# OpenAI pick the granularity; ``detailed`` for the highest effort. (Org
+# must be verified for reasoning summaries — when it isn't, OpenAI returns
+# no summary items and we transparently surface only the token count, same
+# as the Chat Completions path.)
+_RESPONSES_SUMMARY_MAP: dict[str, str] = {
+    "auto": "auto",
+    "low": "auto",
+    "medium": "auto",
+    "high": "detailed",
+}
+
+# Responses API endpoint (vs. /chat/completions). Only the OpenAI o-series
+# (reasoning_strategy == "openai_responses_reasoning") routes here, and only
+# when the caller wants the visible summary.
+_RESPONSES_PATH = "/responses"
+
 
 class OpenAIAdapter(BaseProviderAdapter):
     provider_name = "openai"
@@ -115,10 +132,81 @@ class OpenAIAdapter(BaseProviderAdapter):
 
         return body
 
+    @staticmethod
+    def _responses_eligible(payload, resolved_model: str | None) -> bool:
+        """True when this request should use the Responses API.
+
+        Tightly gated so the default path is untouched:
+          * the resolved model is an o-series reasoning model
+            (``reasoning_strategy == "openai_responses_reasoning"``),
+          * the caller asked for reasoning (``mode != off``) AND wants the
+            visible summary (``show_summary``) — the only reason to pay the
+            Responses API; token-count-only requests stay on
+            /chat/completions, and
+          * the request carries NO tools (the Responses API models tool
+            calls as ``function_call`` items, a different shape; tool turns
+            keep the well-tested Chat Completions path).
+        """
+        rc = getattr(payload, "reasoning", None)
+        if rc is None or rc.mode == "off" or not getattr(rc, "show_summary", False):
+            return False
+        if getattr(payload, "tools", None):
+            return False
+        model = resolved_model or payload.model
+        from app.services.providers.model_registry import get_candidate
+
+        cand = get_candidate(model)
+        return bool(
+            cand
+            and cand.supports_reasoning
+            and cand.reasoning_strategy == "openai_responses_reasoning"
+        )
+
+    def _build_responses_body(
+        self, payload, messages, *, stream: bool = False, resolved_model: str | None = None
+    ) -> dict:
+        """Build a Responses API request body (``input`` + ``reasoning``).
+
+        Differs from the Chat Completions body: messages become ``input``
+        role/content items, reasoning carries ``effort`` + ``summary``, and
+        the token budget is ``max_output_tokens``.
+        """
+        model = resolved_model or payload.model
+        rc = payload.reasoning
+        input_items = [
+            {"role": m.role, "content": (m.content if m.content is not None else "")}
+            for m in messages
+        ]
+        body: dict = {
+            "model": model,
+            "input": input_items,
+            "reasoning": {
+                "effort": _REASONING_EFFORT_MAP.get(rc.mode, "medium"),
+                "summary": _RESPONSES_SUMMARY_MAP.get(rc.mode, "auto"),
+            },
+        }
+        if stream:
+            body["stream"] = True
+        mt = getattr(payload, "max_tokens", None) or payload.metadata.get("max_tokens")
+        if mt is not None:
+            body["max_output_tokens"] = mt
+        return body
+
+    async def _chat_responses(
+        self, payload, messages, *, resolved_model, key, client, headers
+    ) -> ProviderResponse:
+        body = self._build_responses_body(payload, messages, resolved_model=resolved_model)
+        resp = await call_with_retry(
+            lambda: client.post(_RESPONSES_PATH, json=body, headers=headers),
+            provider_name=self.provider_name,
+            max_retries=settings.provider_max_retries,
+        )
+        resp.raise_for_status()
+        return _parse_responses_response(resp.json())
+
     async def chat(
         self, payload, messages: list[Message], *, resolved_model: str | None = None, api_key: str | None = None
     ) -> ProviderResponse:
-        body = self._build_body(payload, messages, resolved_model=resolved_model)
         key = api_key or settings.openai_api_key
 
         client = await get_provider_client(
@@ -128,6 +216,25 @@ class OpenAIAdapter(BaseProviderAdapter):
         )
         headers = {"Authorization": f"Bearer {key}"}
 
+        # Responses API for o-series visible reasoning summaries (P2). On any
+        # failure we transparently fall back to /chat/completions (token
+        # count only) so a Responses outage / unverified-org never breaks the
+        # request — the model still answers, just without the summary text.
+        if self._responses_eligible(payload, resolved_model):
+            try:
+                return await self._chat_responses(
+                    payload, messages,
+                    resolved_model=resolved_model, key=key,
+                    client=client, headers=headers,
+                )
+            except Exception:
+                import structlog
+                structlog.get_logger(__name__).warning(
+                    "openai_responses_fallback_to_chat",
+                    model=resolved_model or payload.model,
+                )
+
+        body = self._build_body(payload, messages, resolved_model=resolved_model)
         resp = await call_with_retry(
             lambda: client.post("/chat/completions", json=body, headers=headers),
             provider_name=self.provider_name,
@@ -140,7 +247,6 @@ class OpenAIAdapter(BaseProviderAdapter):
     async def stream_chat(
         self, payload, messages: list[Message], *, resolved_model: str | None = None, api_key: str | None = None
     ) -> AsyncIterator[ProviderStreamChunk]:
-        body = self._build_body(payload, messages, stream=True, resolved_model=resolved_model)
         key = api_key or settings.openai_api_key
 
         client = await get_provider_client(
@@ -150,6 +256,38 @@ class OpenAIAdapter(BaseProviderAdapter):
         )
         headers = {"Authorization": f"Bearer {key}"}
 
+        # Responses API streaming for o-series visible reasoning (P2). Emits
+        # ``response.reasoning_summary_text.delta`` (→ reasoning_delta) and
+        # ``response.output_text.delta`` (→ content). Falls back to
+        # /chat/completions ONLY if the Responses stream fails BEFORE the
+        # first chunk — once bytes are on the wire we must not switch bodies
+        # mid-stream (the route layer's own fallback handles later errors).
+        if self._responses_eligible(payload, resolved_model):
+            r_body = self._build_responses_body(
+                payload, messages, stream=True, resolved_model=resolved_model
+            )
+            yielded = False
+            try:
+                async with client.stream(
+                    "POST", _RESPONSES_PATH, json=r_body, headers=headers
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        chunk = _parse_responses_sse_line(line)
+                        if chunk is not None:
+                            yielded = True
+                            yield chunk
+                return
+            except Exception:
+                if yielded:
+                    raise
+                import structlog
+                structlog.get_logger(__name__).warning(
+                    "openai_responses_stream_fallback_to_chat",
+                    model=resolved_model or payload.model,
+                )
+
+        body = self._build_body(payload, messages, stream=True, resolved_model=resolved_model)
         async with client.stream(
             "POST", "/chat/completions", json=body, headers=headers
         ) as resp:
@@ -238,3 +376,111 @@ def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
         tool_calls=tool_calls,
         reasoning_delta=reasoning_delta,
     )
+
+
+def _responses_usage(usage_dict: dict | None) -> ProviderUsage | None:
+    """Map a Responses API ``usage`` block to ProviderUsage.
+
+    Responses uses ``input_tokens`` / ``output_tokens`` (vs prompt/
+    completion) and nests the reasoning count under
+    ``output_tokens_details.reasoning_tokens``.
+    """
+    if not isinstance(usage_dict, dict):
+        return None
+    details = usage_dict.get("output_tokens_details") or {}
+    reasoning_tok = (
+        int(details.get("reasoning_tokens", 0) or 0)
+        if isinstance(details, dict) else 0
+    )
+    inp = int(usage_dict.get("input_tokens", 0) or 0)
+    out = int(usage_dict.get("output_tokens", 0) or 0)
+    total = int(usage_dict.get("total_tokens", 0) or 0) or (inp + out)
+    return ProviderUsage(
+        prompt_tokens=inp,
+        completion_tokens=out,
+        total_tokens=total,
+        reasoning_tokens=reasoning_tok,
+    )
+
+
+def _parse_responses_response(data: dict) -> ProviderResponse:
+    """Parse a non-streaming Responses API body into ProviderResponse.
+
+    The ``output`` array carries ``reasoning`` items (with ``summary``
+    parts) and ``message`` items (with ``output_text`` parts). Reasoning
+    summary text is concatenated into ``reasoning_content``; visible text
+    into ``content``. When the org isn't verified for summaries the
+    reasoning items carry no summary parts → ``reasoning_content`` is None
+    (token count still surfaces via usage), matching the Chat Completions
+    behaviour.
+    """
+    text_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    for item in data.get("output", []) or []:
+        if not isinstance(item, dict):
+            continue
+        itype = item.get("type")
+        if itype == "message":
+            for c in item.get("content", []) or []:
+                if isinstance(c, dict) and c.get("type") == "output_text":
+                    text_parts.append(c.get("text", "") or "")
+        elif itype == "reasoning":
+            for s in item.get("summary", []) or []:
+                if isinstance(s, dict) and s.get("type") == "summary_text":
+                    reasoning_parts.append(s.get("text", "") or "")
+    reasoning_text = "".join(reasoning_parts) or None
+    return ProviderResponse(
+        content="".join(text_parts),
+        model=data.get("model", ""),
+        finish_reason="stop",
+        usage=_responses_usage(data.get("usage")),
+        raw=data,
+        reasoning_content=reasoning_text,
+    )
+
+
+def _parse_responses_sse_line(line: str) -> ProviderStreamChunk | None:
+    """Parse one Responses API streaming SSE line.
+
+    Responses streams emit ``event:`` + ``data:`` line pairs; the ``data``
+    JSON itself carries a ``type`` discriminator, so we dispatch on that
+    and ignore the ``event:`` line. Handled types:
+      * ``response.output_text.delta``            → content delta
+      * ``response.reasoning_summary_text.delta`` → reasoning delta
+      * ``response.completed``                    → final usage
+    All other lifecycle events (created / in_progress / *.added / *.done)
+    are ignored.
+    """
+    if not line.startswith("data: "):
+        return None
+    data_str = line[6:]
+    if data_str.strip() == "[DONE]":
+        return None
+    try:
+        data = json.loads(data_str)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    t = data.get("type")
+    if t == "response.output_text.delta":
+        return ProviderStreamChunk(
+            delta=data.get("delta", "") or "", finish_reason=None, model=""
+        )
+    if t == "response.reasoning_summary_text.delta":
+        rd = data.get("delta", "") or ""
+        return ProviderStreamChunk(
+            delta="", finish_reason=None, model="",
+            reasoning_delta=rd or None,
+        )
+    if t == "response.completed":
+        resp_obj = data.get("response") or {}
+        return ProviderStreamChunk(
+            delta="",
+            finish_reason="stop",
+            model=resp_obj.get("model", "") if isinstance(resp_obj, dict) else "",
+            usage=_responses_usage(
+                resp_obj.get("usage") if isinstance(resp_obj, dict) else None
+            ),
+        )
+    return None
