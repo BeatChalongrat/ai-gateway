@@ -1753,6 +1753,12 @@ class GatewayOrchestrator:
             # response field and ``usage.reasoning_tokens`` agree.
             response_reasoning_tokens = usage.reasoning_tokens
 
+            # P0 downgrade signal — reasoning requested but resolved model
+            # can't reason. None on the normal path (dropped from wire).
+            _downgrade_reason = self._reasoning_downgrade_reason(
+                payload, route.model_name
+            )
+
             response = ChatCompletionsResponse(
                 id=request_id,
                 model=route.model_name,
@@ -1777,7 +1783,15 @@ class GatewayOrchestrator:
                 policy_reasons=all_reasons,
                 reasoning_content=response_reasoning_content,
                 reasoning_tokens=response_reasoning_tokens,
+                reasoning_downgraded=True if _downgrade_reason else None,
+                reasoning_downgrade_reason=_downgrade_reason,
             )
+            if _downgrade_reason:
+                log.info(
+                    "reasoning_downgraded",
+                    requested_mode=payload.reasoning.mode,
+                    resolved_model=route.model_name,
+                )
 
         # 12. Response cache store — store the MASKED response (the
         # ``ai_to_service_masked`` snapshot captured before section 8b).
@@ -1957,6 +1971,61 @@ class GatewayOrchestrator:
 
         payload.reasoning = ReasoningConfig(mode="auto", show_summary=True)
 
+    def _reasoning_downgrade_reason(
+        self, payload: ChatCompletionsRequest, model_name: str
+    ) -> str | None:
+        """Return a downgrade message when reasoning was requested but the
+        resolved model can't reason, else None.
+
+        The caller asked for reasoning (``reasoning.mode != 'off'``) yet
+        routing/policy landed on a model whose ``supports_reasoning`` is
+        False (no reasoning-capable model survived the candidate filters).
+        Rather than silently dropping the intent, both the blocking and
+        streaming paths surface this string so the client knows the answer
+        was produced without reasoning.
+
+        Returns None on the normal path (no reasoning requested, or the
+        resolved model is reasoning-capable), so the wire is unchanged.
+        Call AFTER the final route is resolved so ``model_name`` is the
+        concrete provider model, never ``auto``.
+        """
+        rc = getattr(payload, "reasoning", None)
+        if rc is None or rc.mode == "off":
+            return None
+        from app.services.providers.model_registry import get_candidate
+
+        cand = get_candidate(model_name)
+        if cand and cand.supports_reasoning:
+            return None
+        return (
+            f"Reasoning was requested (mode='{rc.mode}') but the resolved "
+            f"model '{model_name}' is not reasoning-capable; the answer was "
+            "produced without reasoning. No reasoning-capable model was "
+            "available for this request after routing and policy filtering."
+        )
+
+    async def _stash_configured_providers(
+        self, payload: ChatCompletionsRequest, session, log
+    ) -> None:
+        """Record providers with a callable key into request metadata so the
+        reasoning candidate pool can prefer reachable models (P0).
+
+        Best-effort: any failure (no session, DB error) leaves the metadata
+        absent and routing falls back to unfiltered reasoning selection —
+        never breaks the request. Only ever called on the reasoning path, so
+        general / mode=off routing never pays this query.
+        """
+        if session is None:
+            return
+        try:
+            providers = await self.provider_key_service.providers_with_valid_keys_async(
+                session
+            )
+            if providers:
+                payload.metadata["configured_providers"] = list(providers)
+        except Exception as exc:  # never let key lookup break routing
+            log.warning("configured_providers_lookup_failed", error=str(exc))
+
     async def _apply_router_chain(
         self,
         ctx: RequestContext,
@@ -1987,6 +2056,34 @@ class GatewayOrchestrator:
             log.info("routing_decision", router="explicit", model=payload.model)
             return "explicit", None
 
+        # Explicit reasoning intent on an ``auto`` request forces the
+        # reasoning candidate pool (P0 unlock). Without this, ``auto`` +
+        # ``reasoning.mode != off`` fell through to the semantic/keyword
+        # chain and was silently served by a non-reasoning model
+        # (gpt-4o-mini), discarding the reasoning request with no signal —
+        # the headline blocker from REASONING_SUPPORT_AUDIT.md. We mark
+        # ``use_case='reasoning'`` and return early so ``select_route`` ->
+        # ``RoutingService._route_auto`` restricts the pool to
+        # ``supports_reasoning=True`` models. If that pool is empty the
+        # router still resolves a non-reasoning model, but the downgrade is
+        # now surfaced (see ``_reasoning_downgrade_reason``) instead of
+        # dropped. ``mode='off'`` is untouched — non-reasoning routing is
+        # byte-for-byte unchanged.
+        _reasoning_cfg = getattr(payload, "reasoning", None)
+        if _reasoning_cfg is not None and _reasoning_cfg.mode != "off":
+            if payload.metadata is None:
+                payload.metadata = {}
+            payload.metadata["use_case"] = "reasoning"
+            await self._stash_configured_providers(payload, session, log)
+            log.info(
+                "routing_decision",
+                router="reasoning_explicit",
+                use_case="reasoning",
+                mode=_reasoning_cfg.mode,
+                model=payload.model,
+            )
+            return "reasoning_explicit", None
+
         # "auto": let query complexity steer the candidate pool. A
         # COMPLEX query routes to the reasoning pool (use_case=
         # 'reasoning' — handled by RoutingService._route_auto) so the
@@ -2001,6 +2098,7 @@ class GatewayOrchestrator:
             if payload.metadata is None:
                 payload.metadata = {}
             payload.metadata["use_case"] = "reasoning"
+            await self._stash_configured_providers(payload, session, log)
             log.info(
                 "routing_decision",
                 router="complexity",
