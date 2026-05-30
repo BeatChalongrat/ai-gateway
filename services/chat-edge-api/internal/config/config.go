@@ -23,6 +23,11 @@ import (
 // are required — missing required fields cause Load() to return an
 // error and the service refuses to start.
 type Config struct {
+	// Deployment environment. Anything outside {development, dev, test,
+	// testing} is treated as production by Validate(), which then refuses
+	// to boot on dev-default secrets / non-Secure cookies.
+	AppEnv string `env:"APP_ENV" envDefault:"development"`
+
 	// HTTP listener.
 	Port string `env:"PORT" envDefault:"4000"`
 
@@ -170,6 +175,55 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return cfg, nil
+}
+
+// _devEnvs are the environments where insecure defaults are tolerated.
+var _devEnvs = map[string]struct{}{
+	"": {}, "development": {}, "dev": {}, "test": {}, "testing": {},
+}
+
+// _insecureSecretMarkers flags the shipped dev-default secret values.
+var _insecureSecretMarkers = []string{"change-in-prod", "change-me"}
+
+// _minSecretLen — 32 bytes = 256 bits, the floor for HMAC-SHA256.
+const _minSecretLen = 32
+
+// Validate refuses to boot a production deployment that still carries the
+// dev-default secrets or non-Secure cookies. Mirrors the Python backend's
+// config.validate_secrets() so both ends of the shared PORTAL_JWT_SECRET
+// fail loudly rather than silently running on a public dev key. No-op in
+// dev/test.
+func (c *Config) Validate() error {
+	if _, dev := _devEnvs[strings.ToLower(strings.TrimSpace(c.AppEnv))]; dev {
+		return nil
+	}
+	var issues []string
+	check := func(name, val string) {
+		low := strings.ToLower(val)
+		for _, m := range _insecureSecretMarkers {
+			if strings.Contains(low, m) {
+				issues = append(issues, name+" is set to an insecure dev default")
+				return
+			}
+		}
+		if len([]byte(val)) < _minSecretLen {
+			issues = append(issues, fmt.Sprintf(
+				"%s is too short (need >=%d bytes, got %d)",
+				name, _minSecretLen, len([]byte(val)),
+			))
+		}
+	}
+	// PortalJWTSecret is the load-bearing user-auth secret (must match
+	// FastAPI). ServiceJWTSecret signs outbound gateway calls.
+	check("PORTAL_JWT_SECRET", c.PortalJWTSecret)
+	check("SERVICE_JWT_SECRET", c.ServiceJWTSecret)
+	if !c.CookieSecure {
+		issues = append(issues, "COOKIE_SECURE must be true outside dev")
+	}
+	if len(issues) > 0 {
+		return fmt.Errorf("insecure production config: %s", strings.Join(issues, "; "))
+	}
+	return nil
 }
 
 // Models returns the configured model list, falling back to

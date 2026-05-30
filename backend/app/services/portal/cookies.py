@@ -26,6 +26,17 @@ Path:
 Domain / Secure / SameSite come from settings (see config.py) so a
 production deploy flips Secure on and can set a shared parent domain
 without code changes.
+
+CSRF posture: the portal/chat session relies on ``SameSite=Lax`` rather
+than the double-submit token the admin domain uses. Lax withholds the
+cookie on cross-SITE state-changing requests (programmatic POST/PUT/
+DELETE from another registrable domain), which is the CSRF vector. The
+same-site cross-port calls in this stack (portal/chat -> gateway) are
+trusted and DO carry the cookie. A dedicated double-submit token would be
+strictly additive; it's intentionally omitted here to keep the portal
+flow simple, with Lax as the load-bearing defence. If portal and api ever
+move to a cross-SITE topology (different registrable domains, requiring
+``SameSite=None``), a CSRF token MUST be reintroduced.
 """
 
 from __future__ import annotations
