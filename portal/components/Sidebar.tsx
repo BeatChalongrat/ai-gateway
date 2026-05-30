@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
-import { clearTokens } from "@/lib/auth";
+import { clearLegacyTokens } from "@/lib/auth";
+import { stopSilentRefresh } from "@/lib/auth-refresh";
 import { formatTokens } from "@/lib/format";
 import type { PortalUser } from "@/lib/types";
 import { Avatar } from "./Avatar";
@@ -62,8 +63,11 @@ export function Sidebar() {
   }, [pathname]); // refresh on route change so post-topup reflects in sidebar
 
   function handleLogout() {
+    // Logout revokes the refresh token + clears the HttpOnly cookies
+    // server-side. Stop the refresh loop and scrub any legacy tokens.
     api.post("/portal/auth/logout").catch(() => {});
-    clearTokens();
+    stopSilentRefresh();
+    clearLegacyTokens();
     router.push("/login");
   }
 
