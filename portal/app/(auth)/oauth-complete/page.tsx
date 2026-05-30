@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSession } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { Spinner } from "@/components/Spinner";
 
@@ -40,7 +40,26 @@ function safeRedirectTarget(raw: string | null): string | null {
   return null;
 }
 
+// useSearchParams() requires a Suspense boundary so Next can prerender
+// the static shell without bailing the whole route during build.
 export default function OAuthCompletePage() {
+  return (
+    <Suspense fallback={<OAuthCompleteFallback />}>
+      <OAuthCompleteInner />
+    </Suspense>
+  );
+}
+
+function OAuthCompleteFallback() {
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-10 bg-bg-page text-gray-500">
+      <Spinner size={28} />
+      <p className="mt-3 text-sm">Signing you in…</p>
+    </main>
+  );
+}
+
+function OAuthCompleteInner() {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);

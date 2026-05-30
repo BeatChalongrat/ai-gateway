@@ -11,11 +11,21 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 
 import { api, PortalApiError } from "@/lib/api";
 
+// useSearchParams() requires a Suspense boundary so Next can prerender
+// the static shell without bailing the whole route during build.
 export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ResetPasswordInner />
+    </Suspense>
+  );
+}
+
+function ResetPasswordInner() {
   const router = useRouter();
   const params = useSearchParams();
   const token = useMemo(() => params.get("token") || "", [params]);
