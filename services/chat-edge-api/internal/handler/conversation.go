@@ -127,6 +127,11 @@ type conversationResponse struct {
 	ReasoningEnabled     bool   `json:"reasoning_enabled"`
 	ReasoningMode        string `json:"reasoning_mode"`
 	ShowReasoningSummary bool   `json:"show_reasoning_summary"`
+	// B2.2 — Pin / favorite. IsPinned drives the sidebar's "Pinned"
+	// section; PinnedAt (null when unpinned) drives that section's
+	// recency sort.
+	IsPinned bool    `json:"is_pinned"`
+	PinnedAt *string `json:"pinned_at"`
 }
 
 func toResponse(c *model.Conversation) conversationResponse {
@@ -141,10 +146,15 @@ func toResponse(c *model.Conversation) conversationResponse {
 		ReasoningEnabled:     c.ReasoningEnabled,
 		ReasoningMode:        c.ReasoningMode,
 		ShowReasoningSummary: c.ShowReasoningSummary,
+		IsPinned:             c.IsPinned,
 	}
 	if c.KnowledgeBaseID != nil {
 		s := c.KnowledgeBaseID.String()
 		r.KnowledgeBaseID = &s
+	}
+	if c.PinnedAt != nil {
+		s := c.PinnedAt.UTC().Format("2006-01-02T15:04:05Z")
+		r.PinnedAt = &s
 	}
 	return r
 }
@@ -284,6 +294,8 @@ type updateRequest struct {
 	ReasoningEnabled     *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningMode        *string `json:"reasoning_mode,omitempty"`
 	ShowReasoningSummary *bool   `json:"show_reasoning_summary,omitempty"`
+	// B2.2 — pin/unpin. Pointer so "omitted" is distinct from "false".
+	IsPinned *bool `json:"is_pinned,omitempty"`
 }
 
 // validReasoningModes mirrors the Gateway's ReasoningConfig.mode
@@ -311,7 +323,8 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 &&
 		req.MemoryEnabled == nil && req.ReasoningEnabled == nil &&
-		req.ReasoningMode == nil && req.ShowReasoningSummary == nil {
+		req.ReasoningMode == nil && req.ShowReasoningSummary == nil &&
+		req.IsPinned == nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
 	}
@@ -372,6 +385,12 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 			r.Context(), caller.TenantUUID, caller.UserID, convID,
 			req.ReasoningEnabled, req.ReasoningMode, req.ShowReasoningSummary,
 		); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if req.IsPinned != nil {
+		if err := h.conversations.SetPinned(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.IsPinned); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
@@ -557,16 +576,16 @@ func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Requ
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"conversation_id":       convID.String(),
-		"total_budget":          compiled.Budget.TotalBudget,
-		"system_prompt_tokens":  compiled.Budget.SystemPromptTokens,
-		"output_reserve":        compiled.Budget.OutputReserve,
-		"tool_reserve":          compiled.Budget.ToolReserve,
-		"messages_budget":       compiled.Budget.MessagesRemaining,
-		"messages_total":        compiled.MessagesTotal,
-		"messages_would_send":   compiled.MessagesSent,
-		"compacted":             compiled.Compacted,
-		"extraction_triggered":  compiled.ExtractionTriggered,
+		"conversation_id":      convID.String(),
+		"total_budget":         compiled.Budget.TotalBudget,
+		"system_prompt_tokens": compiled.Budget.SystemPromptTokens,
+		"output_reserve":       compiled.Budget.OutputReserve,
+		"tool_reserve":         compiled.Budget.ToolReserve,
+		"messages_budget":      compiled.Budget.MessagesRemaining,
+		"messages_total":       compiled.MessagesTotal,
+		"messages_would_send":  compiled.MessagesSent,
+		"compacted":            compiled.Compacted,
+		"extraction_triggered": compiled.ExtractionTriggered,
 	})
 }
 

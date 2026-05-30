@@ -105,6 +105,8 @@ interface ChatState {
     opts?: { temporary?: boolean },
   ) => Promise<Conversation>;
   renameConversation: (id: string, title: string) => Promise<void>;
+  /** B2.2 — pin/unpin a conversation. Optimistic; reverts on failure. */
+  setConversationPinned: (id: string, pinned: boolean) => Promise<void>;
   setConversationModel: (id: string, modelId: string) => Promise<void>;
   setConversationKB: (id: string, kbId: string | null) => Promise<void>;
   /** S1 — flip the per-conversation memory layer. Optimistic
@@ -398,6 +400,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
         c.id === id ? { ...c, ...updated } : c,
       ),
     }));
+  },
+
+  async setConversationPinned(id, pinned) {
+    // Optimistic: flip is_pinned + stamp pinned_at locally so the
+    // sidebar re-groups immediately. pinned_at uses the client clock
+    // for the optimistic sort; the server's authoritative value
+    // replaces it from the PATCH response below.
+    const prev = get().conversations.find((c) => c.id === id);
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              is_pinned: pinned,
+              pinned_at: pinned ? new Date().toISOString() : null,
+            }
+          : c,
+      ),
+    }));
+    try {
+      const updated = await api.setConversationPinned(id, pinned);
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, ...updated } : c,
+        ),
+      }));
+    } catch {
+      // Revert to the pre-toggle state.
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id && prev
+            ? { ...c, is_pinned: prev.is_pinned, pinned_at: prev.pinned_at }
+            : c,
+        ),
+      }));
+      get().setError("Couldn't update pin. Try again.");
+    }
   },
 
   async setConversationModel(id, modelId) {

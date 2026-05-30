@@ -59,4 +59,11 @@ type Conversation struct {
 	ReasoningEnabled     bool
 	ReasoningMode        string
 	ShowReasoningSummary bool
+
+	// B2.2 — Pin / favorite (migration 020). IsPinned surfaces the
+	// conversation in the sidebar's "Pinned" section; PinnedAt drives
+	// that section's recency sort and is nil when not pinned. Pinning
+	// deliberately does NOT bump UpdatedAt.
+	IsPinned bool
+	PinnedAt *time.Time
 }

@@ -13,6 +13,7 @@ interface Props {
   onSelect: () => void;
   onRename: (title: string) => void | Promise<void>;
   onDelete: () => void | Promise<void>;
+  onTogglePin: (pinned: boolean) => void | Promise<void>;
 }
 
 export function ConversationItem({
@@ -21,6 +22,7 @@ export function ConversationItem({
   onSelect,
   onRename,
   onDelete,
+  onTogglePin,
 }: Props) {
   const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -100,6 +102,9 @@ export function ConversationItem({
                 : conv.title
             }
           >
+            {conv.is_pinned ? (
+              <PinIcon className="shrink-0 text-text-muted" />
+            ) : null}
             {conv.memory_enabled === false ? (
               <BrainCircuit
                 width={12}
@@ -134,6 +139,17 @@ export function ConversationItem({
             className="popover-appear absolute right-1 top-9 z-10 w-32 overflow-hidden rounded-md border border-border bg-bg-surface text-xs shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                void onTogglePin(!conv.is_pinned);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+            >
+              <PinIcon />
+              {conv.is_pinned ? t("conv.unpin") : t("conv.pin")}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -215,5 +231,28 @@ export function ConversationItem({
         </div>
       ) : null}
     </div>
+  );
+}
+
+// Small pin glyph used both as the pinned-state marker next to the
+// title and inside the Pin/Unpin menu row. Inline SVG (not a lucide
+// import) so it doesn't depend on a specific icon-set export.
+function PinIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width={13}
+      height={13}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className={className}
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.76V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v5.76a2 2 0 0 0 .59 1.41l1.12 1.12A1 1 0 0 1 17 15H7a1 1 0 0 1-.71-1.71l1.12-1.12A2 2 0 0 0 9 10.76Z" />
+    </svg>
   );
 }

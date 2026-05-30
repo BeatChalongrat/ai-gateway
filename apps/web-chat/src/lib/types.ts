@@ -81,6 +81,11 @@ export interface Conversation {
   reasoning_enabled?: boolean;
   reasoning_mode?: string;
   show_reasoning_summary?: boolean;
+  /** B2.2 — pin/favorite. When true the conversation shows in the
+   *  sidebar's "Pinned" section; pinned_at drives that section's
+   *  recency sort (null when not pinned). */
+  is_pinned?: boolean;
+  pinned_at?: string | null;
 }
 
 export interface ConversationListResponse {

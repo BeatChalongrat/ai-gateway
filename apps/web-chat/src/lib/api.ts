@@ -150,6 +150,14 @@ class ApiClient {
       body: JSON.stringify({ knowledge_base_id }),
     });
   }
+  /** B2.2 — pin/unpin a conversation. Returns the updated row
+   *  (is_pinned + pinned_at). Ownership-checked server-side. */
+  setConversationPinned(id: string, is_pinned: boolean) {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_pinned }),
+    });
+  }
   /** S1 — toggle the cross-conversation memory layer for THIS
    *  conversation. False = "temporary chat" (no memory injection,
    *  no save/list tools). Returns the updated conversation. */

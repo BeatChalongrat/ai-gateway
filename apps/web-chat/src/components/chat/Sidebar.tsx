@@ -71,6 +71,7 @@ export function Sidebar({
   const clearSearch = useChatStore((s) => s.clearConversationsSearch);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
+  const setConversationPinned = useChatStore((s) => s.setConversationPinned);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const messagesByConv = useChatStore((s) => s.messages);
   const newChat = useNewChatHandler();
@@ -114,12 +115,32 @@ export function Sidebar({
       if (c.id !== activeConversationId) return false;
       return (messagesByConv[c.id]?.length ?? 0) > 0;
     });
-    const sorted = filtered.sort(
+    const out: Row[] = [];
+
+    // Pinned section first, sorted by pinned_at DESC (most recently
+    // pinned on top). Pinned chats are pulled OUT of the time groups so
+    // they don't appear twice.
+    const pinned = filtered
+      .filter((c) => c.is_pinned)
+      .sort(
+        (a, b) =>
+          new Date(b.pinned_at ?? 0).getTime() -
+          new Date(a.pinned_at ?? 0).getTime(),
+      );
+    if (pinned.length > 0) {
+      out.push({ kind: "header", label: "sidebar.group.pinned", key: "h-pinned" });
+      for (const c of pinned) {
+        out.push({ kind: "conv", conv: c, key: c.id });
+      }
+    }
+
+    // Everything else stays in the existing updated_at time buckets.
+    const rest = filtered.filter((c) => !c.is_pinned);
+    const sorted = rest.sort(
       (a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     );
     const groups = groupByTime(sorted);
-    const out: Row[] = [];
     for (const g of groups) {
       if (g.items.length === 0) continue;
       out.push({ kind: "header", label: g.label, key: `h-${g.label}` });
@@ -317,6 +338,7 @@ export function Sidebar({
             await deleteConversation(id);
             if (id === activeId) router.replace("/chat");
           }}
+          onTogglePin={(id, pinned) => setConversationPinned(id, pinned)}
         />
 
         {/* Footer — single user row that opens the popup menu. */}
@@ -704,6 +726,7 @@ interface AreaProps {
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
+  onTogglePin: (id: string, pinned: boolean) => Promise<void> | void;
 }
 
 function ConversationsArea({
@@ -718,6 +741,7 @@ function ConversationsArea({
   onSelect,
   onRename,
   onDelete,
+  onTogglePin,
 }: AreaProps) {
   const ref = useRef<HTMLDivElement>(null);
   const useVirtual = rows.length >= VIRTUALIZE_THRESHOLD;
@@ -803,6 +827,7 @@ function ConversationsArea({
                   onSelect={onSelect}
                   onRename={onRename}
                   onDelete={onDelete}
+                  onTogglePin={onTogglePin}
                 />
               </div>
             );
@@ -818,6 +843,7 @@ function ConversationsArea({
               onSelect={onSelect}
               onRename={onRename}
               onDelete={onDelete}
+              onTogglePin={onTogglePin}
             />
           ))}
         </div>
@@ -850,12 +876,14 @@ function SidebarRow({
   onSelect,
   onRename,
   onDelete,
+  onTogglePin,
 }: {
   row: Row;
   active: boolean;
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
+  onTogglePin: (id: string, pinned: boolean) => Promise<void> | void;
 }) {
   const t = useT();
   if (row.kind === "header") {
@@ -884,6 +912,7 @@ function SidebarRow({
       onSelect={() => onSelect(row.conv.id)}
       onRename={(t) => onRename(row.conv.id, t)}
       onDelete={() => onDelete(row.conv.id)}
+      onTogglePin={(pinned) => onTogglePin(row.conv.id, pinned)}
     />
   );
 }

@@ -245,6 +245,24 @@ func (s *ConversationService) SetMemoryEnabled(
 	return nil
 }
 
+// SetPinned pins/unpins a conversation (B2.2 — migration 020).
+// Ownership-gated so a member can't pin another user's chat in the
+// same tenant.
+func (s *ConversationService) SetPinned(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, pinned bool,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
+	if err := s.conversations.SetPinned(ctx, tenantID, convID, pinned); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // SetReasoning persists the per-conversation thinking-mode settings
 // (T4 — migration 019). All three params are pointer-typed so the
 // handler can patch any subset. User-scope gate first so a

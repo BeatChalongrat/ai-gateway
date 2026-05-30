@@ -35,12 +35,14 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
 		VALUES ($1, $2, $3)
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary,
+		       is_pinned, pinned_at
 	`
 	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
 		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
 		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+		&c.IsPinned, &c.PinnedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -56,7 +58,8 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary,
+		       is_pinned, pinned_at
 		FROM chat.conversations
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
@@ -66,6 +69,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
 		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+		&c.IsPinned, &c.PinnedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -124,7 +128,8 @@ func (r *ConversationRepo) ListByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary,
+		       is_pinned, pinned_at
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -150,6 +155,7 @@ func (r *ConversationRepo) ListByUser(
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
 			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+			&c.IsPinned, &c.PinnedAt,
 		); err != nil {
 			return nil, uuid.Nil, fmt.Errorf("list scan: %w", err)
 		}
@@ -188,7 +194,8 @@ func (r *ConversationRepo) SearchByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary,
+		       is_pinned, pinned_at
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -210,6 +217,7 @@ func (r *ConversationRepo) SearchByUser(
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
 			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+			&c.IsPinned, &c.PinnedAt,
 		); err != nil {
 			return nil, fmt.Errorf("search scan: %w", err)
 		}
@@ -395,6 +403,32 @@ func (r *ConversationRepo) UpdateReasoningSettings(
 	tag, err := r.db.Exec(ctx, q, convID, tenantID, enabled, mode, showSummary)
 	if err != nil {
 		return fmt.Errorf("update reasoning settings: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetPinned pins or unpins a conversation. Pin → is_pinned=true +
+// pinned_at=NOW(); unpin → is_pinned=false + pinned_at=NULL.
+//
+// Deliberately does NOT bump updated_at: pinning must not reshuffle the
+// time-based sidebar groups for the non-pinned view, and the pinned
+// section sorts by pinned_at. Tenant-scoped via WHERE; ownership is
+// asserted at the service layer.
+func (r *ConversationRepo) SetPinned(
+	ctx context.Context, tenantID, convID uuid.UUID, pinned bool,
+) error {
+	const q = `
+		UPDATE chat.conversations
+		SET is_pinned = $3,
+		    pinned_at = CASE WHEN $3 THEN NOW() ELSE NULL END
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
+	`
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, pinned)
+	if err != nil {
+		return fmt.Errorf("set pinned: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound

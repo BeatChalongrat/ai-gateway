@@ -19,6 +19,7 @@ export const en = {
   "sidebar.newChat": "New chat",
   "sidebar.searchChats": "Search chats",
   "sidebar.empty": "No conversations yet.",
+  "sidebar.group.pinned": "Pinned",
   "sidebar.group.today": "Today",
   "sidebar.group.yesterday": "Yesterday",
   "sidebar.group.last7": "Previous 7 days",
@@ -62,6 +63,8 @@ export const en = {
   // ── Conversation item ────────────────────────────────────
   "conv.rename": "Rename",
   "conv.delete": "Delete",
+  "conv.pin": "Pin",
+  "conv.unpin": "Unpin",
 
   // ── Export menu ──────────────────────────────────────────
   "export.markdown": "Export as Markdown",
@@ -329,6 +332,7 @@ const th: Record<DictKey, string> = {
   "sidebar.newChat": "แชทใหม่",
   "sidebar.searchChats": "ค้นหาแชท",
   "sidebar.empty": "ยังไม่มีบทสนทนา",
+  "sidebar.group.pinned": "ปักหมุด",
   "sidebar.group.today": "วันนี้",
   "sidebar.group.yesterday": "เมื่อวาน",
   "sidebar.group.last7": "7 วันที่ผ่านมา",
@@ -372,6 +376,8 @@ const th: Record<DictKey, string> = {
   // Conv item
   "conv.rename": "เปลี่ยนชื่อ",
   "conv.delete": "ลบ",
+  "conv.pin": "ปักหมุด",
+  "conv.unpin": "เลิกปักหมุด",
 
   // Export
   "export.markdown": "ส่งออกเป็น Markdown",
