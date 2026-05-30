@@ -1496,6 +1496,14 @@ async def chat_completions(
             _stream_reasoning_tok = provider_usage.reasoning_tokens
         elif _reasoning_text_total:
             _stream_reasoning_tok = max(1, len(_reasoning_text_total) // 4)
+        # Cap at completion_tokens so the reasoning_cost attribution can
+        # never exceed the completion cost it is a subset of (non-additive
+        # — estimated_cost_usd is the all-in total). Mirrors the
+        # non-streaming orchestrator path.
+        if provider_usage is not None and provider_usage.completion_tokens:
+            _stream_reasoning_tok = min(
+                _stream_reasoning_tok, provider_usage.completion_tokens
+            )
 
         if provider_usage is not None:
             from app.services.currency_service import currency_service
