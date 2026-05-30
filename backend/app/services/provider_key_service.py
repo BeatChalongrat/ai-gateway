@@ -56,6 +56,22 @@ _ENV_KEYS = {
 # In-memory round-robin counters (per worker process)
 _rr_counters: dict[str, int] = defaultdict(int)
 
+# Phase-1 B5: ``get_active_key`` ran a DB SELECT (provider_keys, + a
+# legacy providers query on the env-key path) on every provider
+# dispatch. Cache the *resolved* candidate key list per provider for a
+# short TTL — values are plain decoded strings (already transient in
+# process memory). Round-robin still rotates across the cached list via
+# ``_rr_counters``. Per-worker; self-heals within the TTL.
+# ``clear_keys_cache()`` is exposed for explicit invalidation after an
+# admin key add / rotate / test-status change.
+_KEYS_CACHE_TTL_S = 30.0
+_keys_cache: dict[str, tuple[float, list[str]]] = {}
+
+
+def clear_keys_cache() -> None:
+    """Drop all cached provider keys (call after an admin key edit)."""
+    _keys_cache.clear()
+
 
 class ProviderKeyService:
 
@@ -69,27 +85,49 @@ class ProviderKeyService:
         Priority: provider_keys table → legacy providers.api_key_encrypted → env var.
         Skips keys where last_test_status = 'invalid'.
         """
+        mono = time.monotonic()
+        cached = _keys_cache.get(provider_name)
+        if cached is not None and cached[0] > mono:
+            candidates = cached[1]
+        else:
+            candidates = self._resolve_key_candidates(session, provider_name)
+            _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates)
+
+        if not candidates:
+            return None
+        idx = _rr_counters[provider_name] % len(candidates)
+        _rr_counters[provider_name] += 1
+        return candidates[idx]
+
+    def _resolve_key_candidates(
+        self, session: Session, provider_name: str
+    ) -> list[str]:
+        """Resolve the ordered candidate key list (uncached).
+
+        Priority: provider_keys table → legacy providers.api_key_encrypted
+        → env var. Decoded to plain strings so the cache holds no ORM.
+        """
         repo = ProviderKeyRepository(session)
         rows = repo.list_active_by_provider(provider_name)
-
-        # Filter out keys known to be invalid
-        valid_rows = [r for r in rows if r.last_test_status != "invalid"]
-
-        if valid_rows:
-            idx = _rr_counters[provider_name] % len(valid_rows)
-            _rr_counters[provider_name] += 1
-            return _decode(valid_rows[idx].api_key_encrypted)
+        valid = [
+            _decode(r.api_key_encrypted)
+            for r in rows
+            if r.last_test_status != "invalid"
+        ]
+        if valid:
+            return valid
 
         # Fallback: legacy single key on providers table
         provider = session.execute(
             select(ProviderORM).where(ProviderORM.name == provider_name)
         ).scalar_one_or_none()
         if provider and provider.api_key_encrypted:
-            return _decode(provider.api_key_encrypted)
+            return [_decode(provider.api_key_encrypted)]
 
         # Fallback: env var
         env_fn = _ENV_KEYS.get(provider_name)
-        return env_fn() if env_fn else None
+        env_key = env_fn() if env_fn else None
+        return [env_key] if env_key else []
 
     # Backward compat alias
     def get_api_key(self, session: Session, provider_name: str) -> str | None:
@@ -147,11 +185,13 @@ class ProviderKeyService:
         """Insert a new provider key."""
         repo = ProviderKeyRepository(session)
         final_label = label or f"Key {self._next_label_num(session, provider_name)}"
-        return repo.create(
+        row = repo.create(
             provider_name=provider_name,
             label=final_label,
             api_key_encrypted=_encode(api_key),
         )
+        clear_keys_cache()  # B5: bust the resolved-key cache
+        return row
 
     def delete_key(self, session: Session, key_id: str) -> None:
         """Soft-delete a key (set is_active=false).
@@ -164,6 +204,7 @@ class ProviderKeyService:
         row = repo.get_by_id(key_id)
         if row:
             repo.update(row, is_active=False)
+            clear_keys_cache()  # B5: bust the resolved-key cache
 
     def update_test_result(
         self, session: Session, key_id: str, status: str, latency_ms: int | None = None
@@ -171,6 +212,7 @@ class ProviderKeyService:
         """Update the test result for a key."""
         repo = ProviderKeyRepository(session)
         repo.record_test_result(key_id, status, latency_ms)
+        clear_keys_cache()  # B5: a key flipping to/from "invalid" changes candidates
 
     def _next_label_num(self, session: Session, provider_name: str) -> int:
         repo = ProviderKeyRepository(session)
@@ -281,4 +323,5 @@ class ProviderKeyService:
         provider.api_key_encrypted = _encode(api_key)
         provider.api_key_set_at = datetime.now(timezone.utc)
         session.flush()
+        clear_keys_cache()  # B5: legacy key is a resolved-key candidate
         return provider

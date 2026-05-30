@@ -7,6 +7,7 @@ restore the full body before emitting it back to the client.
 """
 
 import json
+import orjson
 import time
 from datetime import datetime, timezone
 
@@ -53,6 +54,17 @@ from app.services.usage_service import _estimate_cost, _estimate_reasoning_cost
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+def _sse_dumps(obj, ensure_ascii: bool = False) -> str:
+    """Serialise an SSE frame with orjson (Phase-1 B9).
+
+    Drop-in for the prior ``json.dumps(obj, ensure_ascii=False)`` — orjson
+    always emits compact UTF-8 with non-ASCII unescaped, so ``ensure_ascii``
+    is accepted as a no-op for call-site compatibility. Returns ``str`` for
+    the ``"data: {}\\n\\n".format(...)`` SSE framing.
+    """
+    return orjson.dumps(obj).decode("utf-8")
 
 
 @router.post(
@@ -217,7 +229,9 @@ async def chat_completions(
         # Presidio, one with the ``thai_name_no_prefix`` regex
         # fallback) and we pick by ``ctx.ner_enabled``.
         input_registry = orchestrator._select_registry(ctx.ner_enabled)
-        detection = input_registry.scan_messages(
+        # B2: full-message inbound scan runs off the event loop.
+        detection = await orchestrator._scan_messages_async(
+            input_registry,
             payload.messages,
             direction="input",
             scan_system_messages=profile.scan_system_messages,
@@ -517,7 +531,7 @@ async def chat_completions(
     # falls back to plain "service" routing so the stream never breaks.
     dict_messages = [m.model_dump() for m in messages_to_send]
     try:
-        router_used, _matched_rule = orchestrator._apply_router_chain(
+        router_used, _matched_rule = await orchestrator._apply_router_chain(
             ctx=ctx,
             payload=payload,
             dict_messages=dict_messages,
@@ -839,7 +853,7 @@ async def chat_completions(
             cleanly when piping the stream through ``curl``.
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "object": "chat.completion.chunk",
@@ -874,7 +888,7 @@ async def chat_completions(
             reason about. Argument-level DLP is a follow-up.
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "object": "chat.completion.chunk",
@@ -906,7 +920,7 @@ async def chat_completions(
             (their parser will skip lines whose ``type`` is unknown).
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "type": "reasoning_summary_delta",
@@ -929,7 +943,7 @@ async def chat_completions(
             without parsing every reasoning fragment.
             """
             return "data: {}\n\n".format(
-                json.dumps(
+                _sse_dumps(
                     {
                         "id": ctx.request_id,
                         "type": "analysis_status",
@@ -1527,14 +1541,11 @@ async def chat_completions(
             )
             log_session.commit()
 
-            persisted_row = orchestrator.request_log_service.get_by_id(
-                log_session, ctx.request_id or ""
-            )
-            if persisted_row is not None:
-                await orchestrator.alert_evaluator.evaluate_after_request(
-                    log_session, persisted_row
-                )
-                log_session.commit()
+            # Alert evaluation moved OFF the request path (Phase-1 B6) — a
+            # periodic background sweep (lifespan _alert_evaluation_sweep)
+            # runs AlertEvaluator.evaluate_all instead, so the streaming
+            # completion no longer pays the enabled-rules SELECT + the
+            # get_by_id read-back + window aggregates on the loop.
         except Exception:
             # Logging failures must never break the stream.
             log_session.rollback()
@@ -1603,7 +1614,7 @@ async def chat_completions(
                 "reasoning_tokens": provider_reasoning_tok or estimated
             }
         yield "data: {}\n\n".format(
-            json.dumps(_final_frame, ensure_ascii=False)
+            _sse_dumps(_final_frame)
         )
         yield "data: [DONE]\n\n"
 
