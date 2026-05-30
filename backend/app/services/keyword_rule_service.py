@@ -23,6 +23,7 @@ from app.models.keyword_rule import KeywordRuleORM
 from app.services.keyword_router import KeywordRule
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.orm import Session
 
 
@@ -87,6 +88,42 @@ class KeywordRuleService:
         if cached is not None and cached[0] > mono:
             return cached[1]
 
+        stmt = self._rules_stmt(tenant_id, project_id)
+        rows = session.execute(stmt).scalars().all()
+        rules = [_row_to_rule(r) for r in rows]
+        _rules_cache[cache_key] = (mono + _RULES_CACHE_TTL_S, rules)
+        return rules
+
+    async def get_rules_for_request_async(
+        self,
+        session: "AsyncSession",
+        tenant_id: str | None,
+        project_id: str | None,
+    ) -> list[KeywordRule]:
+        """Async variant of :meth:`get_rules_for_request`.
+
+        Identical scope/priority logic. The Phase-1 ``_rules_cache``
+        (TTL'd resolved ``list[KeywordRule]`` per tenant/project) sits in
+        front exactly as the sync path; only the cache-MISS DB SELECT is
+        awaited. Cache dict access stays plain sync (no I/O).
+        """
+        cache_key = (tenant_id, project_id)
+        mono = time.monotonic()
+        cached = _rules_cache.get(cache_key)
+        if cached is not None and cached[0] > mono:
+            return cached[1]
+
+        stmt = self._rules_stmt(tenant_id, project_id)
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+        rules = [_row_to_rule(r) for r in rows]
+        _rules_cache[cache_key] = (mono + _RULES_CACHE_TTL_S, rules)
+        return rules
+
+    @staticmethod
+    def _rules_stmt(tenant_id: str | None, project_id: str | None):
+        """Build the enabled-rules-by-scope SELECT shared by the sync and
+        async ``get_rules_for_request`` variants."""
         conditions = [KeywordRuleORM.scope == "global"]
         if tenant_id:
             conditions.append(
@@ -99,15 +136,11 @@ class KeywordRuleService:
                 & (KeywordRuleORM.scope_id == project_id)
             )
 
-        stmt = (
+        return (
             select(KeywordRuleORM)
             .where(KeywordRuleORM.enabled == True)  # noqa: E712
             .where(or_(*conditions))
         )
-        rows = session.execute(stmt).scalars().all()
-        rules = [_row_to_rule(r) for r in rows]
-        _rules_cache[cache_key] = (mono + _RULES_CACHE_TTL_S, rules)
-        return rules
 
     # ------------------------------------------------------------------
     # Admin CRUD helpers

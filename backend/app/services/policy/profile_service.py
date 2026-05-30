@@ -17,6 +17,7 @@ import json
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.domain.dlp import EnforcementAction, SensitivityLevel
@@ -205,6 +206,65 @@ def list_profiles(session: Session) -> list[ProfileView]:
     return views
 
 
+async def list_profiles_async(session: AsyncSession) -> list[ProfileView]:
+    """Async sibling of :func:`list_profiles`.
+
+    Identical logic; only the single ``session.execute`` DB call is awaited.
+    ``PolicyProfileORM`` has no relationships (all scalar columns), so no
+    eager loading is required.
+    """
+    builtins = _builtin_map()
+    result = await session.execute(
+        select(PolicyProfileORM).order_by(PolicyProfileORM.created_at)
+    )
+    rows = result.scalars().all()
+
+    db_overrides: dict[str, dict[str, str]] = {}
+    db_names: dict[str, str] = {}
+    for row in rows:
+        try:
+            data = json.loads(row.category_actions_json or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        db_overrides[row.profile_id] = {
+            str(k): str(v) for k, v in data.items() if isinstance(v, str)
+        }
+        db_names[row.profile_id] = row.name
+
+    views: list[ProfileView] = []
+    seen: set[str] = set()
+    for profile_id, (name, actions, outbound_actions, threshold, _scan_responses, _moderation) in builtins.items():
+        merged = _merge(actions, db_overrides.get(profile_id, {}))
+        views.append(
+            ProfileView(
+                profile_id=profile_id,
+                name=db_names.get(profile_id, name),
+                category_actions=merged,
+                category_actions_output=_actions_to_str(outbound_actions),
+                severity_threshold_block=(
+                    threshold.name.lower() if threshold is not None else None
+                ),
+            )
+        )
+        seen.add(profile_id)
+
+    # Custom DB-only profiles (not shipped with the app). They have no
+    # outbound override channel yet, so outbound inherits inbound (None).
+    for profile_id, overrides in db_overrides.items():
+        if profile_id in seen:
+            continue
+        views.append(
+            ProfileView(
+                profile_id=profile_id,
+                name=db_names.get(profile_id, profile_id),
+                category_actions=_merge({}, overrides),
+                category_actions_output=None,
+                severity_threshold_block=None,
+            )
+        )
+    return views
+
+
 def _actions_to_enum(actions: dict[str, str]) -> dict[str, EnforcementAction]:
     return {
         cat: _ACTION_STR_TO_ENUM[action]
@@ -243,6 +303,51 @@ def get_runtime_profile(session: Session, profile_id: str) -> PolicyProfile:
 
 def get_profile_view(session: Session, profile_id: str) -> ProfileView | None:
     for view in list_profiles(session):
+        if view.profile_id == profile_id:
+            return view
+    return None
+
+
+async def get_runtime_profile_async(
+    session: AsyncSession, profile_id: str
+) -> PolicyProfile:
+    """Async sibling of :func:`get_runtime_profile`.
+
+    Identical merge logic; the only difference is that the DB-backed
+    profile-view lookup is awaited. The built-in fallback path
+    (``get_profile``) is pure in-memory and reused as-is.
+    """
+    builtins = _builtin_map()
+    base = builtins.get(profile_id)
+    view = await get_profile_view_async(session, profile_id)
+    if view is None:
+        from app.services.policy.profiles import get_profile
+
+        return get_profile(profile_id)
+
+    threshold = base[3] if base is not None else None
+    scan_responses = base[4] if base is not None else True
+    moderation_enabled = base[5] if base is not None else False
+    return PolicyProfile(
+        profile_id=view.profile_id,
+        name=view.name,
+        category_actions=_actions_to_enum(view.category_actions),
+        category_actions_output=(
+            _actions_to_enum(view.category_actions_output)
+            if view.category_actions_output is not None
+            else None
+        ),
+        severity_threshold_block=threshold,
+        scan_responses=scan_responses,
+        moderation_enabled=moderation_enabled,
+    )
+
+
+async def get_profile_view_async(
+    session: AsyncSession, profile_id: str
+) -> ProfileView | None:
+    """Async sibling of :func:`get_profile_view`."""
+    for view in await list_profiles_async(session):
         if view.profile_id == profile_id:
             return view
     return None
