@@ -2064,26 +2064,47 @@ func (s *MessageService) compileAndBuildRequest(
 	return req
 }
 
-// attachReasoning always advertises adaptive reasoning to the Gateway
-// (Auto Thinking Mode). Called from compileAndBuildRequest after the
-// request is built so every send path (Send, Regenerate, EditMessage)
-// opts in consistently.
+// attachReasoning forwards the conversation's reasoning preferences to
+// the Gateway. Called from compileAndBuildRequest after the request is
+// built so every send path (Send, Regenerate, EditMessage) honors the
+// same settings consistently.
 //
-// There is no user-facing Thinking toggle anymore: the system decides
-// whether to think by picking the RIGHT model (resolveAutoIfNeeded
-// routes complex turns to a reasoning model). We therefore forward
-// ``mode=auto, show_summary=true`` unconditionally and let the Gateway
-// enable the provider's native thinking ONLY when the resolved model
-// supports it — on a fast / non-reasoning model the Gateway's
-// per-adapter gate silently ignores the field, so forwarding it always
-// is safe and never alters a non-reasoning turn.
+// P1 — the per-conversation settings are now honored instead of being
+// hardcoded. The composer's ReasoningToggle PATCHes these onto the
+// conversation row; this is where they take effect on the wire:
 //
-// ``conv`` is retained in the signature for call-site symmetry and
-// future per-conversation overrides, but is intentionally unused.
+//   - ReasoningEnabled == true  -> forward the user's chosen effort
+//     (ReasoningMode: auto / low / medium / high). This is an explicit
+//     "think at this depth" request.
+//   - ReasoningEnabled == false -> forward mode="auto" (Auto Thinking
+//     Mode, the established default). The Gateway's per-adapter gate +
+//     reasoning-aware router still engage native thinking ONLY on a
+//     model that supports it, so this never alters a non-reasoning turn.
+//     We deliberately do NOT send "off" here: "toggle off" returns to
+//     automatic behaviour, it does not suppress thinking on a model the
+//     router already picked for its reasoning. (A literal off would
+//     require the composer to persist ReasoningMode="off".)
+//   - ShowReasoningSummary controls whether the reasoning channel is
+//     surfaced to the browser; honored as stored (default true).
+//
+// conv == nil (defensive) falls back to the prior unconditional
+// auto / show_summary=true default.
 func attachReasoning(req *GatewayChatRequest, conv *model.Conversation) {
+	mode := "auto"
+	showSummary := true
+	if conv != nil {
+		if conv.ReasoningEnabled && conv.ReasoningMode != "" {
+			mode = conv.ReasoningMode
+		} else if conv.ReasoningMode == "off" {
+			// Explicit persisted opt-out (not currently set by the
+			// composer, but honor it if a future client does).
+			mode = "off"
+		}
+		showSummary = conv.ShowReasoningSummary
+	}
 	req.Reasoning = &GatewayReasoningConfig{
-		Mode:        "auto",
-		ShowSummary: true,
+		Mode:        mode,
+		ShowSummary: showSummary,
 	}
 }
 
