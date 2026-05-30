@@ -17,9 +17,12 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-MAX_RETRIES = 3
+# H15: bounded so a single dead webhook can't stall the alert sweep for
+# ~33s (was 3 retries × 10s timeout + backoff). Worst case is now
+# 5s + 1s backoff + 5s ≈ 11s, and the await yields the loop throughout.
+MAX_RETRIES = 2
 BASE_DELAY = 1.0
-TIMEOUT = 10.0
+TIMEOUT = 5.0
 
 
 class DeliveryStatus(str, Enum):
