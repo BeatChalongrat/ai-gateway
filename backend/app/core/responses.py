@@ -28,6 +28,8 @@ import orjson
 
 from fastapi.responses import JSONResponse
 
+from app.core.serialization import orjson_default
+
 
 class UTF8JSONResponse(JSONResponse):
     media_type = "application/json; charset=utf-8"
@@ -38,6 +40,23 @@ class UTF8JSONResponse(JSONResponse):
         # completion bodies. It already emits compact UTF-8 with non-ASCII
         # unescaped (== the old ensure_ascii=False contract) and returns
         # bytes directly (no .encode). OPT_NON_STR_KEYS matches stdlib's
-        # int-key coercion. NaN/Inf serialize to null (the old
-        # allow_nan=False raised; a chat response never contains them).
-        return orjson.dumps(content, option=orjson.OPT_NON_STR_KEYS)
+        # int-key coercion.
+        #
+        # Re-audit H16: ``default=orjson_default`` coerces Decimal / set /
+        # datetime / UUID / bytes / Enum / Pydantic-v2 models so a route
+        # returning a raw dict with one of those no longer 500s at render
+        # time. See app.core.serialization for the full contract.
+        #
+        # Re-audit M17 (NaN/Inf): orjson serializes floats natively and
+        # emits ``null`` for NaN/Inf *before* ``default=`` runs — the
+        # callback can NOT intercept them, and orjson 3.10.x has no option
+        # to raise on non-finite floats (verified against this build's
+        # OPT_* set). The old stdlib ``allow_nan=False`` would have raised;
+        # orjson silently yields null. The correct fix is to guard the
+        # cost/latency math upstream so a NaN never reaches here (out of
+        # scope for this response class).
+        return orjson.dumps(
+            content,
+            option=orjson.OPT_NON_STR_KEYS,
+            default=orjson_default,
+        )
