@@ -58,6 +58,12 @@ func main() {
 		slog.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
+	// Fail closed on a production deploy still carrying dev-default
+	// secrets / non-Secure cookies (parity with the Python backend).
+	if err := cfg.Validate(); err != nil {
+		slog.Error("config validation failed", "err", err)
+		os.Exit(1)
+	}
 
 	// PostgreSQL — bounded pool sized for the expected concurrent
 	// SSE streams plus headroom for short-lived auth/CRUD calls.
