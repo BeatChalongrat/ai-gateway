@@ -279,6 +279,7 @@ func main() {
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	messageHandler.SetFileRepo(filesRepo)
 	messageHandler.SetSourceRepo(sourcesRepo)
+	messageHandler.SetFeedbackRepo(feedbackRepo)
 
 	adminHandler := handler.NewAdminHandler(pool)
 	// S9 — wire the aggregate stats lookup as a closure so the

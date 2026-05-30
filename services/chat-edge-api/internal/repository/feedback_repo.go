@@ -48,6 +48,45 @@ func (r *FeedbackRepo) Upsert(ctx context.Context, f *model.Feedback) (*model.Fe
 	return f, nil
 }
 
+// ListRatingsByMessages returns the caller's rating for each of the
+// given message ids, as a map[messageID]rating. Messages the user
+// hasn't rated are simply absent from the map. Batched (one query
+// via ANY($2)) so the message-list endpoint can render persisted
+// thumbs state without a per-message round-trip. user-scoped: a
+// different user's vote on the same message never leaks here.
+func (r *FeedbackRepo) ListRatingsByMessages(
+	ctx context.Context, userID uuid.UUID, msgIDs []uuid.UUID,
+) (map[uuid.UUID]string, error) {
+	out := make(map[uuid.UUID]string, len(msgIDs))
+	if len(msgIDs) == 0 {
+		return out, nil
+	}
+	const q = `
+		SELECT message_id, rating
+		FROM chat.feedback
+		WHERE user_id = $1 AND message_id = ANY($2)
+	`
+	rows, err := r.db.Query(ctx, q, userID, msgIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list feedback by messages: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			mid    uuid.UUID
+			rating string
+		)
+		if err := rows.Scan(&mid, &rating); err != nil {
+			return nil, fmt.Errorf("scan feedback row: %w", err)
+		}
+		out[mid] = rating
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate feedback rows: %w", err)
+	}
+	return out, nil
+}
+
 // GetForMessage returns the caller's feedback on a specific
 // message, or “ErrNotFound“. Used by message-list / detail views
 // to render the current thumbs state in the UI.

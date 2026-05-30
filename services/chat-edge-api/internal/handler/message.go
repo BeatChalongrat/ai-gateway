@@ -37,7 +37,8 @@ type MessageHandler struct {
 	// Optional. When set, the list endpoint joins S7 context-source
 	// attribution onto each assistant message via a single batched
 	// query (no N+1).
-	sources *repository.ResponseContextSourceRepo
+	sources  *repository.ResponseContextSourceRepo
+	feedback *repository.FeedbackRepo
 }
 
 func NewMessageHandler(m *service.MessageService) *MessageHandler {
@@ -56,6 +57,14 @@ func (h *MessageHandler) SetFileRepo(fr *repository.FileRepo) {
 // card without a per-message round-trip.
 func (h *MessageHandler) SetSourceRepo(sr *repository.ResponseContextSourceRepo) {
 	h.sources = sr
+}
+
+// SetFeedbackRepo wires the feedback repo so the list endpoint can
+// embed the caller's persisted thumbs rating per message. Optional —
+// when nil the "feedback" field is simply omitted (the write path
+// still works; the vote just won't survive a reload).
+func (h *MessageHandler) SetFeedbackRepo(fr *repository.FeedbackRepo) {
+	h.feedback = fr
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +96,11 @@ type messageResponse struct {
 	// state, search, compaction). omitempty keeps the wire size
 	// honest.
 	ContextSources []contextSourceResponse `json:"context_sources,omitempty"`
+	// The caller's persisted thumbs rating ("thumbs_up"/"thumbs_down"),
+	// or nil when the user hasn't rated this message. User-scoped —
+	// never another user's vote. Lets FeedbackButtons render the
+	// selected state after a page reload.
+	Feedback *string `json:"feedback,omitempty"`
 }
 
 // contextSourceResponse mirrors model.ResponseContextSource on the
@@ -253,6 +267,26 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 						out = append(out, FileToWire(&attached[j]))
 					}
 					items[i].Files = out
+				}
+			}
+		}
+	}
+
+	// Join the caller's persisted thumbs feedback. One batched query
+	// for every message id; user-scoped inside the repo so a vote
+	// never leaks across users. Skipped silently when the feedback
+	// repo isn't wired (unit tests / older deployments).
+	if h.feedback != nil && len(msgs) > 0 {
+		ids := make([]uuid.UUID, 0, len(msgs))
+		for i := range msgs {
+			ids = append(ids, msgs[i].ID)
+		}
+		byMsg, err := h.feedback.ListRatingsByMessages(r.Context(), caller.UserID, ids)
+		if err == nil {
+			for i := range items {
+				if rating, ok := byMsg[msgs[i].ID]; ok && rating != "" {
+					ratingCopy := rating
+					items[i].Feedback = &ratingCopy
 				}
 			}
 		}

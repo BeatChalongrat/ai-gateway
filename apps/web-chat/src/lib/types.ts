@@ -317,7 +317,9 @@ export interface Message {
   context_sources?: ContextSource[];
   /** local-only — true while content is being streamed in. */
   isStreaming?: boolean;
-  /** local-only — current feedback rating for this message. */
+  /** The caller's thumbs rating for this message. Set optimistically
+   *  by setFeedback and now also hydrated from the message-list wire
+   *  response (per-user), so the selected state survives a reload. */
   feedback?: "thumbs_up" | "thumbs_down" | null;
   /** T4 — Thinking Mode. ``reasoning_content`` is the accumulated
    *  thinking text (persisted on the server); ``is_thinking`` is
