@@ -221,11 +221,19 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, err := h.files.OpenForDownload(r.Context(), caller.TenantUUID, caller.UserID, fileID)
 	if err != nil {
-		if errors.Is(err, service.ErrFileNotFound) {
+		switch {
+		case errors.Is(err, service.ErrFileBlobMissing):
+			// Row exists, blob is gone. 410 Gone + a distinct code so
+			// the client renders "file unavailable" rather than a
+			// broken-image / generic 404. We deliberately do NOT delete
+			// the row here.
+			WriteError(w, http.StatusGone, CodeFileUnavailable,
+				"file is no longer available")
+		case errors.Is(err, service.ErrFileNotFound):
 			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
-			return
+		default:
+			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		}
-		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
 	// Presigned URL path: send the browser straight to the object

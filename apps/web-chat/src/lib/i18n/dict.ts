@@ -309,6 +309,10 @@ export const en = {
   "reasoning.mode.medium": "Balanced",
   "reasoning.mode.high": "Deep",
   "reasoning.showSummary": "Show analysis",
+
+  // ── File attachments ─────────────────────────────────────
+  "file.unavailable": "File unavailable",
+  "file.unavailableToast": "This file is no longer available.",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -613,6 +617,10 @@ const th: Record<DictKey, string> = {
   "reasoning.mode.medium": "สมดุล",
   "reasoning.mode.high": "ละเอียด",
   "reasoning.showSummary": "แสดงการวิเคราะห์",
+
+  // File attachments
+  "file.unavailable": "ไฟล์ไม่พร้อมใช้งาน",
+  "file.unavailableToast": "ไฟล์นี้ไม่พร้อมใช้งานแล้ว",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

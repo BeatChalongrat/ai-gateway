@@ -14,7 +14,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { ImageOff } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   fileId: string;
@@ -26,8 +27,13 @@ interface Props {
 }
 
 export function AuthedImage({ fileId, alt, className, onReady }: Props) {
+  const t = useT();
   const [url, setUrl] = useState<string | null>(null);
+  // "failed" = generic load error; "gone" = blob no longer in storage
+  // (HTTP 410). We surface "gone" with an explicit label so an expired
+  // upload reads as "File unavailable" instead of a mute broken icon.
   const [failed, setFailed] = useState(false);
+  const [gone, setGone] = useState(false);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
 
@@ -36,6 +42,7 @@ export function AuthedImage({ fileId, alt, className, onReady }: Props) {
     let objectUrl: string | null = null;
     setUrl(null);
     setFailed(false);
+    setGone(false);
     api
       .fileObjectUrl(fileId)
       .then((u) => {
@@ -47,8 +54,13 @@ export function AuthedImage({ fileId, alt, className, onReady }: Props) {
         setUrl(u);
         onReadyRef.current?.(u);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 410) {
+          setGone(true);
+        } else {
+          setFailed(true);
+        }
       });
     return () => {
       cancelled = true;
@@ -56,6 +68,19 @@ export function AuthedImage({ fileId, alt, className, onReady }: Props) {
     };
   }, [fileId]);
 
+  if (gone) {
+    const label = t("file.unavailable");
+    return (
+      <div
+        className={`flex flex-col items-center justify-center gap-1 bg-bg-elevated px-2 text-center text-text-tertiary ${className ?? ""}`}
+        title={label}
+        aria-label={label}
+      >
+        <ImageOff className="h-5 w-5" aria-hidden />
+        <span className="text-[10px] leading-tight">{label}</span>
+      </div>
+    );
+  }
   if (failed) {
     return (
       <div

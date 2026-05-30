@@ -13,10 +13,12 @@ import { useRef, useState } from "react";
 
 import { Download } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { formatBytes, isImageMime } from "@/lib/fileUtil";
 import type { FileAttachment } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 import { openLightbox } from "@/components/ui/ImageLightbox";
+import { toast } from "@/components/ui/Toast";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { AuthedImage } from "./AuthedImage";
 
@@ -77,6 +79,7 @@ function ImageThumb({ file }: { file: FileAttachment }) {
 // download affordance). Download rides the authenticated blob fetch
 // (api.downloadFile), so it survives portal_access_token cookie expiry.
 function FileCard({ file }: { file: FileAttachment }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   return (
     <button
@@ -86,6 +89,14 @@ function FileCard({ file }: { file: FileAttachment }) {
         setBusy(true);
         try {
           await api.downloadFile(file.id, file.filename);
+        } catch (err) {
+          // 410 → blob gone from storage; tell the user plainly rather
+          // than letting the rejection surface as a silent no-op.
+          if (err instanceof ApiError && err.status === 410) {
+            toast(t("file.unavailableToast"));
+          } else {
+            throw err;
+          }
         } finally {
           setBusy(false);
         }

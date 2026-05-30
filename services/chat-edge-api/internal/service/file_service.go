@@ -57,6 +57,13 @@ const conversationFilesKeyPrefix = "conversation-files"
 
 var (
 	ErrFileNotFound          = errors.New("file: not found")
+	// ErrFileBlobMissing means the metadata row exists and the caller
+	// owns it, but the underlying blob is gone from storage (e.g. an
+	// ephemeral local store wiped on redeploy, or an object deleted out
+	// of band). Distinct from ErrFileNotFound so the handler can return
+	// a clear "file unavailable" state instead of a generic 404 that
+	// reads as "this file never existed". We never auto-delete the row.
+	ErrFileBlobMissing       = errors.New("file: blob missing from storage")
 	ErrFileEmpty             = errors.New("file: empty upload")
 	ErrFileTooLarge          = errors.New("file: too large")
 	ErrFileTypeNotAllowed    = errors.New("file: type not allowed")
@@ -405,6 +412,16 @@ func (s *FileService) OpenForDownload(
 	if err != nil {
 		return nil, err
 	}
+	// Confirm the blob still exists before we hand back a presigned URL
+	// or stream. A missing blob is a distinct, user-meaningful state
+	// (ErrFileBlobMissing) — surface it rather than redirecting the
+	// browser to an object that 404s, or returning a generic "not
+	// found". Exists is a cheap HEAD/stat; on the local backend it's a
+	// single os.Stat. If the check itself errors we don't assume
+	// missing — fall through to the download attempt below.
+	if exists, exErr := s.storage.Exists(ctx, f.StoragePath); exErr == nil && !exists {
+		return nil, ErrFileBlobMissing
+	}
 	// Best-effort presigned URL — empty + nil error means "this
 	// backend doesn't support it, stream instead".
 	url, _ := s.storage.GeneratePresignedURL(ctx, f.StoragePath, s.knobs.PresignedURLExpiry)
@@ -414,7 +431,7 @@ func (s *FileService) OpenForDownload(
 	body, _, _, err := s.storage.Download(ctx, f.StoragePath)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return nil, ErrFileNotFound
+			return nil, ErrFileBlobMissing
 		}
 		return nil, fmt.Errorf("open file: %w", err)
 	}

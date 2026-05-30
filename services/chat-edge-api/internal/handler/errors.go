@@ -36,4 +36,9 @@ const (
 	CodeNotFound        = "NOT_FOUND"
 	CodeInternalError   = "INTERNAL_ERROR"
 	CodeBadRequest      = "BAD_REQUEST"
+	// CodeFileUnavailable signals the file's metadata exists but its
+	// blob is gone from storage (returned with HTTP 410 Gone). Distinct
+	// from NOT_FOUND so the frontend can show "file expired/unavailable"
+	// instead of a generic broken state.
+	CodeFileUnavailable = "FILE_UNAVAILABLE"
 )
