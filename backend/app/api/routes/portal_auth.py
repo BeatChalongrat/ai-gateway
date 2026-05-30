@@ -9,20 +9,26 @@ response is constant.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session
 from app.api.portal_scope import public_portal_route
-from app.core.exceptions import ValidationError
+from app.core.exceptions import AuthenticationError, ValidationError
 from app.services.admin.session_service import _build_redis_client
 from app.services.portal import (
     auth_service,
     oauth_flow_service,
     oauth_service,
     password_reset_service,
+)
+from app.services.portal.cookies import (
+    ACCESS_COOKIE,
+    REFRESH_COOKIE,
+    clear_auth_cookies,
+    set_auth_cookies,
 )
 from app.services.portal.oauth_flow_service import (
     IdTokenVerificationFailed,
@@ -40,6 +46,44 @@ router = APIRouter()
 
 
 OAUTH_PROVIDERS = {"google", "github"}
+
+
+def _portal_redis_client():
+    """FastAPI dep: reuse the admin session module's Redis factory.
+
+    Refresh-token rotation state + password-reset tokens share this
+    Redis instance under distinct key prefixes. Defined here (above the
+    routes) so login/refresh/logout can depend on it.
+    """
+    return _build_redis_client()
+
+
+def _auth_fail_response(request: Request, message: str, code: str) -> JSONResponse:
+    """401 envelope that also clears both auth cookies.
+
+    Matches the body shape produced by ``error_handler._build_body`` so
+    clients see a consistent error contract, while expiring the stale
+    cookies so the browser stops re-sending a dead session.
+    """
+    request_id = getattr(request.state, "request_id", None)
+    resp = JSONResponse(
+        status_code=401,
+        content={
+            "error": {"code": code, "message": message},
+            "request_id": request_id,
+        },
+    )
+    clear_auth_cookies(resp)
+    return resp
+
+
+def _session_body(tokens: dict) -> dict:
+    """Strip tokens from a service result — only user info goes in the body.
+
+    Tokens now travel exclusively in HttpOnly cookies (set by the route);
+    the JSON body never carries them.
+    """
+    return {"user": tokens.get("user")}
 
 
 class SignupRequest(BaseModel):
@@ -60,16 +104,20 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    # Optional now — browsers send the refresh token via the HttpOnly
+    # cookie. The body field is kept for non-browser API clients (mobile)
+    # that can't use cookies.
+    refresh_token: str | None = None
 
 
 @router.post("/signup")
 @public_portal_route
 def signup(
     body: SignupRequest,
+    response: Response,
     session: Session = Depends(get_db_session),
 ):
-    return auth_service.signup(
+    tokens = auth_service.signup(
         session,
         email=body.email,
         password=body.password,
@@ -77,24 +125,68 @@ def signup(
         invite_code=body.invite_code,
         tenant_name=body.tenant_name,
     )
+    # Auto-login after signup (preserves prior behaviour) — set cookies.
+    set_auth_cookies(
+        response,
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+    )
+    return _session_body(tokens)
 
 
 @router.post("/login")
 @public_portal_route
 def login(
     body: LoginRequest,
+    response: Response,
     session: Session = Depends(get_db_session),
 ):
-    return auth_service.login(session, email=body.email, password=body.password)
+    tokens = auth_service.login(session, email=body.email, password=body.password)
+    set_auth_cookies(
+        response,
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+    )
+    return _session_body(tokens)
 
 
 @router.post("/refresh")
 @public_portal_route
 def refresh(
-    body: RefreshRequest,
+    request: Request,
+    response: Response,
+    body: RefreshRequest | None = None,
     session: Session = Depends(get_db_session),
+    redis_client=Depends(_portal_redis_client),
 ):
-    return auth_service.refresh(session, refresh_token=body.refresh_token)
+    """Rotate the session: mint a new access + refresh pair, set cookies.
+
+    Reads the refresh token from the HttpOnly cookie (browsers) and falls
+    back to the request body (non-browser API clients). On any failure the
+    response clears both cookies so the client stops re-sending a dead
+    session and bounces to login.
+    """
+    token = request.cookies.get(REFRESH_COOKIE)
+    if not token and body is not None:
+        token = body.refresh_token
+    if not token:
+        return _auth_fail_response(
+            request, "Missing refresh token.", "missing_refresh_token"
+        )
+    try:
+        tokens = auth_service.refresh(
+            session, refresh_token=token, redis_client=redis_client
+        )
+    except AuthenticationError as exc:
+        return _auth_fail_response(
+            request, exc.message, getattr(exc, "code", "authentication_error")
+        )
+    set_auth_cookies(
+        response,
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+    )
+    return _session_body(tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -150,16 +242,6 @@ class PasswordResetConfirmRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=200)
 
 
-def _portal_redis_client():
-    """FastAPI dep: reuse the admin session module's Redis factory.
-
-    Passwordless-reset tokens share no state with admin sessions —
-    they just live in the same Redis instance under a different key
-    prefix — so the factory is fine.
-    """
-    return _build_redis_client()
-
-
 @router.post("/password-reset/request")
 @public_portal_route
 def password_reset_request(
@@ -200,9 +282,21 @@ def password_reset_confirm(
 
 @router.post("/logout")
 @public_portal_route
-def logout():
-    # Portal tokens are stateless JWTs — server-side revocation is not
-    # implemented in the MVP. Clients must drop the token on their end.
+def logout(
+    request: Request,
+    response: Response,
+    redis_client=Depends(_portal_redis_client),
+):
+    """Real logout: blacklist the refresh token's jti + clear cookies.
+
+    The refresh token's ``jti`` is added to the Redis rotation blacklist
+    so it can never mint another access token, then both HttpOnly cookies
+    are expired. Idempotent — a missing cookie still returns 200.
+    """
+    token = request.cookies.get(REFRESH_COOKIE)
+    if token:
+        auth_service.revoke_refresh_token(token, redis_client=redis_client)
+    clear_auth_cookies(response)
     return {"message": "ok"}
 
 

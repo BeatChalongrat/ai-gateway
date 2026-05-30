@@ -74,11 +74,28 @@ def _signup_owner(client, email: str = "owner@t.com") -> dict:
         json={"email": email, "password": "Test1234!"},
     )
     assert r.status_code == 200, r.text
-    return r.json()
+    body = r.json()
+    # HttpOnly migration: tokens are cookies. Capture, then clear the
+    # shared jar so multi-user tests auth via the explicit Bearer header.
+    body["access_token"] = r.cookies.get("portal_access_token")
+    body["refresh_token"] = r.cookies.get("portal_refresh_token")
+    client.cookies.clear()
+    return body
 
 
 def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _capture(client, response) -> dict:
+    """HttpOnly migration: lift tokens off the response cookies into the
+    body dict, then clear the shared jar so explicit Bearer headers stay
+    authoritative across multi-user tests."""
+    body = response.json()
+    body["access_token"] = response.cookies.get("portal_access_token")
+    body["refresh_token"] = response.cookies.get("portal_refresh_token")
+    client.cookies.clear()
+    return body
 
 
 class TestGetActiveInvite:
@@ -184,7 +201,8 @@ class TestOwnerOnlyGates:
                 "password": "Test1234!",
                 "invite_code": inv["invite"]["code"],
             },
-        ).json()
+        )
+        member = _capture(client, member)
         r = client.get(
             "/portal/team/invite", headers=_auth(member["access_token"])
         )
@@ -322,7 +340,8 @@ class TestSendInviteEmail:
                 "password": "Test1234!",
                 "invite_code": inv["invite"]["code"],
             },
-        ).json()
+        )
+        member = _capture(client, member)
         r = client.post(
             "/portal/team/invite/send-email",
             headers=_auth(member["access_token"]),
