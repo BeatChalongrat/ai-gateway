@@ -196,6 +196,14 @@ class ChatCompletionsResponse(BaseModel):
     reasoning_content: Optional[str] = None
     reasoning_tokens: Optional[int] = None
 
+    # T5 — Anthropic extended-thinking signature. Surfaced so a client
+    # running its OWN tool loop can replay the thinking block verbatim (text
+    # + this signature) on the continuation turn, which Anthropic requires
+    # for interleaved thinking + tool use. Only populated for Anthropic
+    # reasoning responses that carry a signed thinking block; dropped from
+    # the wire otherwise (response_model_exclude_none).
+    reasoning_signature: Optional[str] = None
+
     # Reasoning downgrade signal (P0). When the caller requested reasoning
     # (``ReasoningConfig.mode != 'off'``) but the request resolved to a
     # non-reasoning model — because no reasoning-capable model was available

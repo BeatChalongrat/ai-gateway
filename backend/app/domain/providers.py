@@ -71,6 +71,11 @@ class ProviderResponse:
     # per-provider parsing lands; defaults to None so every existing
     # adapter (which does not set it) stays byte-identical.
     reasoning_content: str | None = None
+    # T5 — Anthropic extended-thinking signature. The opaque token that
+    # accompanies a thinking block; must be replayed verbatim with the
+    # thinking text on a tool-loop continuation. None for every other
+    # provider / non-reasoning response.
+    reasoning_signature: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,3 +119,8 @@ class ProviderStreamChunk:
     # ``delta`` (final-answer text) and ``reasoning_delta`` (thought
     # text); T2's SSE emitter forwards each independently.
     reasoning_delta: str | None = None
+    # T5 — Anthropic extended-thinking signature fragment. Emitted on the
+    # ``signature_delta`` event that closes a thinking block. Carried so the
+    # response layer can surface it for a tool-loop round-trip. None on
+    # every other chunk.
+    reasoning_signature: str | None = None

@@ -1802,6 +1802,13 @@ class GatewayOrchestrator:
                 policy_reasons=all_reasons,
                 reasoning_content=response_reasoning_content,
                 reasoning_tokens=response_reasoning_tokens,
+                # T5 — surface the thinking signature for client-driven
+                # tool-loop round-trips. Independent of show_summary: a
+                # client needs the signature to replay even when it doesn't
+                # display the thinking text.
+                reasoning_signature=getattr(
+                    provider_response, "reasoning_signature", None
+                ),
                 reasoning_downgraded=True if _downgrade_reason else None,
                 reasoning_downgrade_reason=_downgrade_reason,
             )
