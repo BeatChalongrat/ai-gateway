@@ -636,6 +636,13 @@ function areEqual(prev: Props, next: Props): boolean {
     a.branch_count === b.branch_count &&
     a.has_branches === b.has_branches &&
     a.token_usage === b.token_usage &&
+    // T4 — re-render while reasoning text streams in. Without these,
+    // a turn that updates ONLY reasoning_content / is_thinking /
+    // thinking_duration_ms (no content delta or status flip) would be
+    // memoized stale and the ThinkingBlock would freeze mid-stream.
+    a.reasoning_content === b.reasoning_content &&
+    a.is_thinking === b.is_thinking &&
+    a.thinking_duration_ms === b.thinking_duration_ms &&
     a.files === b.files &&
     // S7 — re-render when the per-turn context_sources array
     // arrives or changes. The first render after a stream
