@@ -110,6 +110,15 @@ class RefreshRequest(BaseModel):
     refresh_token: str | None = None
 
 
+class CookieExchangeRequest(BaseModel):
+    # Used by the OAuth completion page to convert the tokens it holds
+    # (from the NextAuth session) into HttpOnly cookies the browser can't
+    # read. The tokens are proof in themselves — only the backend mints
+    # valid portal tokens — so no extra auth is needed.
+    access_token: str = Field(..., min_length=10, max_length=8192)
+    refresh_token: str = Field(..., min_length=10, max_length=8192)
+
+
 @router.post("/signup")
 @public_portal_route
 def signup(
@@ -187,6 +196,48 @@ def refresh(
         refresh_token=tokens["refresh_token"],
     )
     return _session_body(tokens)
+
+
+@router.post("/cookie-exchange")
+@public_portal_route
+def cookie_exchange(
+    body: CookieExchangeRequest,
+    request: Request,
+    response: Response,
+):
+    """Convert a portal token pair into HttpOnly cookies (OAuth bootstrap).
+
+    The portal's NextAuth OAuth flow ends with the access + refresh tokens
+    held in the NextAuth session (server-issued). The browser posts them
+    here once so we can re-issue them as HttpOnly cookies — after this the
+    OAuth session is indistinguishable from a password login and JS never
+    needs to touch the tokens again.
+
+    The tokens are self-authenticating: we verify both signatures + types
+    (only the backend's secret can mint a valid portal token), so a
+    forged body can't establish a session.
+    """
+    try:
+        acc = auth_service.verify_portal_token(body.access_token)
+        ref = auth_service.verify_portal_token(body.refresh_token)
+    except Exception:
+        return _auth_fail_response(
+            request, "Invalid tokens.", "invalid_tokens"
+        )
+    if acc.get("token_use") not in (None, "access") or ref.get("token_use") != "refresh":
+        return _auth_fail_response(
+            request, "Token role mismatch.", "invalid_tokens"
+        )
+    if acc.get("sub") != ref.get("sub") or not acc.get("sub"):
+        return _auth_fail_response(
+            request, "Token subject mismatch.", "invalid_tokens"
+        )
+    set_auth_cookies(
+        response,
+        access_token=body.access_token,
+        refresh_token=body.refresh_token,
+    )
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

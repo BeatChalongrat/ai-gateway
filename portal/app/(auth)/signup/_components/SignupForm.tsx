@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
 
 import { api, PortalApiError } from "@/lib/api";
-import { setTokens } from "@/lib/auth";
 import type { AuthResponse } from "@/lib/types";
 
 type Strength = 0 | 1 | 2 | 3;
@@ -77,7 +76,9 @@ export default function SignupForm({
     }
     setLoading(true);
     try {
-      const data = await api.post<AuthResponse>(
+      // Signup auto-logs-in via HttpOnly cookies (backend Set-Cookie);
+      // the body carries only user info.
+      await api.post<AuthResponse>(
         "/portal/auth/signup",
         {
           email,
@@ -87,7 +88,6 @@ export default function SignupForm({
         },
         { auth: false }
       );
-      setTokens(data.access_token, data.refresh_token);
       router.push("/dashboard");
     } catch (err) {
       if (err instanceof PortalApiError) {

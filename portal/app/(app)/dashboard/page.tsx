@@ -527,44 +527,15 @@ function ChatLaunchPanel() {
   const baseChatUrl =
     process.env.NEXT_PUBLIC_WEB_CHAT_URL || "http://localhost:3002/chat";
 
-  // Materialise the href to the localStorage token AFTER hydration.
-  // SSR can't read localStorage, so the initial render carries the
-  // bare URL — that's fine because we always preventDefault in the
-  // onClick handler anyway, AND the onClick re-reads localStorage
-  // at click-time (always fresh, never stale).
-  const [tokenHref, setTokenHref] = useState<string>(baseChatUrl);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const tok = window.localStorage.getItem("portal_access_token");
-    if (!tok) return;
-    const sep = baseChatUrl.includes("?") ? "&" : "?";
-    setTokenHref(`${baseChatUrl}${sep}token=${encodeURIComponent(tok)}`);
-  }, [baseChatUrl]);
-
-  // preventDefault + window.open is load-bearing — without it the
-  // anchor's default navigation can race the onClick or fire first
-  // in some browsers and the new tab opens with the bare URL
-  // instead of the token-bearing one.
-  const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault();
-    if (typeof window === "undefined") return;
-    // Re-read at click-time so a token refreshed after this
-    // component first mounted is still picked up.
-    const tok = window.localStorage.getItem("portal_access_token");
-    const sep = baseChatUrl.includes("?") ? "&" : "?";
-    const href = tok
-      ? `${baseChatUrl}${sep}token=${encodeURIComponent(tok)}`
-      : baseChatUrl;
-    // ``noopener,noreferrer`` because the new tab carries the JWT
-    // in its URL — we don't want a child window holding a reference
-    // back to ``opener`` for an XSS pivot.
-    window.open(href, "_blank", "noopener,noreferrer");
-  };
+  // No more token-in-URL handoff. The portal access token is an HttpOnly
+  // cookie, host-only on localhost (shared across :3001/:3002) and set on
+  // the shared parent domain in prod, so Web Chat already holds the
+  // session when it opens. Plain link — no JS token plumbing, no JWT in
+  // the URL / history / Referer.
 
   return (
     <a
-      href={tokenHref}
-      onClick={onClick}
+      href={baseChatUrl}
       // ``target="_blank"`` so the new tab is sandboxed; ``rel`` per
       // OWASP guidance for off-origin new-tab links.
       target="_blank"

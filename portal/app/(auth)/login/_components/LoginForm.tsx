@@ -6,7 +6,6 @@ import { signIn } from "next-auth/react";
 import { FormEvent, useState } from "react";
 
 import { api, PortalApiError } from "@/lib/api";
-import { setTokens } from "@/lib/auth";
 import type { AuthResponse } from "@/lib/types";
 
 // Mirrors the backend OAuth provider whitelist. When the
@@ -80,32 +79,21 @@ export default function LoginForm() {
     setError(null);
     setLoading(true);
     try {
-      const data = await api.post<AuthResponse>(
+      // Login sets the HttpOnly auth cookies (backend Set-Cookie); the
+      // response body carries only user info now.
+      await api.post<AuthResponse>(
         "/portal/auth/login",
         { email, password },
         { auth: false }
       );
-      setTokens(data.access_token, data.refresh_token);
 
-      // Honor ?redirect=… for the Web Chat cross-port handoff.
-      // If the target is the web-chat origin we additionally append
-      // ?token= so the cookie-less browser path still works.
+      // Honor ?redirect=… for the Web Chat cross-port handoff. No more
+      // ?token= in the URL — the portal cookie is host-only on localhost
+      // (shared across ports) / set on the shared parent domain in prod,
+      // so Web Chat already has the session when it loads.
       const target = safeRedirectTarget(params?.get("redirect") ?? null);
       if (target) {
-        const webChatOrigin = new URL(
-          process.env.NEXT_PUBLIC_WEB_CHAT_URL || "http://localhost:3002",
-        ).origin;
-        let final = target;
-        try {
-          const tu = new URL(target, window.location.origin);
-          if (tu.origin === webChatOrigin) {
-            tu.searchParams.set("token", data.access_token);
-            final = tu.toString();
-          }
-        } catch {
-          /* leave ``target`` as-is */
-        }
-        window.location.href = final;
+        window.location.href = target;
         return;
       }
       router.push("/dashboard");
