@@ -1,3 +1,6 @@
 -r requirements.txt
 
 respx
+# Phase-2: async SQLite driver so the test suite can exercise the async
+# (AsyncSession) hot path against the in-memory integration engine.
+aiosqlite>=0.19.0

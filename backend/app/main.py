@@ -59,7 +59,12 @@ async def lifespan(app: FastAPI):
 
     # Set explicit thread pool — prevents exhaustion from asyncio.to_thread() calls.
     # Default is min(32, cpu+4) which can be as low as 5 on small machines.
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=16)
+    # Phase-2 (hybrid): the chat hot-path DB reads now run via to_thread too
+    # (on top of DLP/semantic/log-flush), so raise the pool to keep ~50
+    # concurrent requests' short DB calls from queuing behind each other.
+    # CPU-bound offloads stay semaphore-bounded (DLP 8, semantic 4); the rest
+    # are I/O (DB / log) and release the GIL.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=48)
     asyncio.get_event_loop().set_default_executor(executor)
 
     # Seed admin user (runs blocking bcrypt in thread)
@@ -143,6 +148,12 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.providers.http_client import close_all_clients
         await close_all_clients()
+    except Exception:  # noqa: BLE001
+        pass
+    # Phase-2: dispose the async DB engine if it was ever built.
+    try:
+        from app.core.db import dispose_async_engine
+        await dispose_async_engine()
     except Exception:  # noqa: BLE001
         pass
     _stop_model_discovery_scheduler()
