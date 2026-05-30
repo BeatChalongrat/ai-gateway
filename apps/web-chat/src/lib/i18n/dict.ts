@@ -135,6 +135,7 @@ export const en = {
   "model.searchPlaceholder": "Search models…",
   "model.popular": "Popular",
   "model.recent": "Recently used",
+  "model.reasoningBadge": "Thinks",
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
@@ -440,6 +441,7 @@ const th: Record<DictKey, string> = {
   "model.searchPlaceholder": "ค้นหาโมเดล…",
   "model.popular": "ยอดนิยม",
   "model.recent": "ใช้ล่าสุด",
+  "model.reasoningBadge": "คิดวิเคราะห์",
 
   // Memory page
   "memory.back": "กลับไปแชท",

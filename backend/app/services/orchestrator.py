@@ -1023,6 +1023,14 @@ class GatewayOrchestrator:
             _provider_rtok = provider_response.usage.reasoning_tokens or 0
             if _provider_rtok == 0 and provider_response.reasoning_content:
                 _provider_rtok = max(1, len(provider_response.reasoning_content) // 4)
+            # Cap at completion_tokens — reasoning is a SUBSET of the
+            # completion meter on every provider we route to, so the
+            # attribution (reasoning_cost) must never exceed the
+            # completion cost it is part of. Guards against a length
+            # over-estimate inflating the breakdown past the total.
+            _provider_rtok = min(
+                _provider_rtok, provider_response.usage.completion_tokens
+            )
             _reasoning_tok_for_usage = _provider_rtok or None
             usage = UsageInfo(
                 prompt_tokens=provider_response.usage.prompt_tokens,

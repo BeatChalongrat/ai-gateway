@@ -14,7 +14,7 @@
 // tokens) is unchanged from the previous flat-list version.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Sparkles, X } from "lucide-react";
+import { BrainCircuit, Search, Sparkles, X } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
@@ -369,6 +369,7 @@ function ModelPicker({
                 sub={m.provider}
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
+                reasoning={Boolean(m.reasoning?.supported)}
               />
             ))}
           </Section>
@@ -383,6 +384,7 @@ function ModelPicker({
                 sub={m.provider}
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
+                reasoning={Boolean(m.reasoning?.supported)}
               />
             ))}
           </Section>
@@ -404,6 +406,7 @@ function ModelPicker({
                   label={m.name}
                   selected={!isAuto && m.id === activeId}
                   onClick={() => onPickModel(m)}
+                  reasoning={Boolean(m.reasoning?.supported)}
                 />
               ))}
               {hiddenCount > 0 ? (
@@ -458,9 +461,12 @@ interface RowProps {
   selected: boolean;
   onClick: () => void;
   leading?: React.ReactNode;
+  /** T4 — show a "thinks" badge when the model advertises reasoning. */
+  reasoning?: boolean;
 }
 
-function ModelRow({ label, sub, selected, onClick, leading }: RowProps) {
+function ModelRow({ label, sub, selected, onClick, leading, reasoning }: RowProps) {
+  const t = useT();
   return (
     <div
       role="option"
@@ -477,6 +483,16 @@ function ModelRow({ label, sub, selected, onClick, leading }: RowProps) {
         <span className="text-sm font-medium text-text-primary">{label}</span>
         {sub ? <span className="ml-1.5 text-[11px] text-text-muted">{sub}</span> : null}
       </div>
+      {reasoning ? (
+        <span
+          title={t("model.reasoningBadge")}
+          aria-label={t("model.reasoningBadge")}
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400"
+        >
+          <BrainCircuit className="h-3 w-3" aria-hidden />
+          {t("model.reasoningBadge")}
+        </span>
+      ) : null}
       {selected ? (
         <svg
           width={13}
