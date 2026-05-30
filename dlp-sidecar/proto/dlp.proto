@@ -25,6 +25,12 @@ message ScanRequest {
   string language                   = 2;   // "en" | "th"
   repeated string disabled_detectors = 3;
   bool   ner_enabled                = 4;
+  // True when ``text`` is the decoded payload of a base64 segment.
+  // Relaxes context-gated detectors the same way Python's
+  // ``from_decoded`` kwarg does (phone drops the keyword requirement;
+  // api_key_secret runs the short-key ``_DECODED_PATTERNS``). The
+  // gateway wrapper sets this on the per-segment decode-and-scan call.
+  bool   from_decoded               = 5;
 }
 
 message MessagesRequest {

@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tdlp.proto\x12\x03\x64lp\"^\n\x0bScanRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x1a\n\x12\x64isabled_detectors\x18\x03 \x03(\t\x12\x13\n\x0bner_enabled\x18\x04 \x01(\x08\"\x93\x01\n\x0fMessagesRequest\x12\x1e\n\x08messages\x18\x01 \x03(\x0b\x32\x0c.dlp.Message\x12\x11\n\tdirection\x18\x02 \x01(\t\x12\x1c\n\x14scan_system_messages\x18\x03 \x01(\x08\x12\x1a\n\x12\x64isabled_detectors\x18\x04 \x03(\t\x12\x13\n\x0bner_enabled\x18\x05 \x01(\x08\"(\n\x07Message\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"\xcf\x01\n\x0e\x44\x65tectionMatch\x12\x15\n\rdetector_name\x18\x01 \x01(\t\x12\x13\n\x0b\x65ntity_type\x18\x02 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x03 \x01(\t\x12\r\n\x05start\x18\x04 \x01(\x05\x12\x0b\n\x03\x65nd\x18\x05 \x01(\x05\x12\x14\n\x0cmatched_text\x18\x06 \x01(\t\x12\x10\n\x08severity\x18\x07 \x01(\x05\x12\x12\n\nconfidence\x18\x08 \x01(\x02\x12\x10\n\x08priority\x18\t \x01(\x05\x12\x15\n\rmetadata_json\x18\n \x01(\t\"x\n\x0cScanResponse\x12$\n\x07matches\x18\x01 \x03(\x0b\x32\x13.dlp.DetectionMatch\x12\x19\n\x11scanned_direction\x18\x02 \x01(\t\x12\x13\n\x0bscan_target\x18\x03 \x01(\t\x12\x12\n\nlatency_ms\x18\x04 \x01(\x01\"\x0f\n\rHealthRequest\"8\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x16\n\x0e\x64\x65tector_count\x18\x02 \x01(\x05\x32\xa9\x01\n\nDlpService\x12/\n\x08ScanText\x12\x10.dlp.ScanRequest\x1a\x11.dlp.ScanResponse\x12\x37\n\x0cScanMessages\x12\x14.dlp.MessagesRequest\x1a\x11.dlp.ScanResponse\x12\x31\n\x06Health\x12\x12.dlp.HealthRequest\x1a\x13.dlp.HealthResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tdlp.proto\x12\x03\x64lp\"t\n\x0bScanRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x1a\n\x12\x64isabled_detectors\x18\x03 \x03(\t\x12\x13\n\x0bner_enabled\x18\x04 \x01(\x08\x12\x14\n\x0c\x66rom_decoded\x18\x05 \x01(\x08\"\x93\x01\n\x0fMessagesRequest\x12\x1e\n\x08messages\x18\x01 \x03(\x0b\x32\x0c.dlp.Message\x12\x11\n\tdirection\x18\x02 \x01(\t\x12\x1c\n\x14scan_system_messages\x18\x03 \x01(\x08\x12\x1a\n\x12\x64isabled_detectors\x18\x04 \x03(\t\x12\x13\n\x0bner_enabled\x18\x05 \x01(\x08\"(\n\x07Message\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"\xcf\x01\n\x0e\x44\x65tectionMatch\x12\x15\n\rdetector_name\x18\x01 \x01(\t\x12\x13\n\x0b\x65ntity_type\x18\x02 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x03 \x01(\t\x12\r\n\x05start\x18\x04 \x01(\x05\x12\x0b\n\x03\x65nd\x18\x05 \x01(\x05\x12\x14\n\x0cmatched_text\x18\x06 \x01(\t\x12\x10\n\x08severity\x18\x07 \x01(\x05\x12\x12\n\nconfidence\x18\x08 \x01(\x02\x12\x10\n\x08priority\x18\t \x01(\x05\x12\x15\n\rmetadata_json\x18\n \x01(\t\"x\n\x0cScanResponse\x12$\n\x07matches\x18\x01 \x03(\x0b\x32\x13.dlp.DetectionMatch\x12\x19\n\x11scanned_direction\x18\x02 \x01(\t\x12\x13\n\x0bscan_target\x18\x03 \x01(\t\x12\x12\n\nlatency_ms\x18\x04 \x01(\x01\"\x0f\n\rHealthRequest\"8\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x16\n\x0e\x64\x65tector_count\x18\x02 \x01(\x05\x32\xa9\x01\n\nDlpService\x12/\n\x08ScanText\x12\x10.dlp.ScanRequest\x1a\x11.dlp.ScanResponse\x12\x37\n\x0cScanMessages\x12\x14.dlp.MessagesRequest\x1a\x11.dlp.ScanResponse\x12\x31\n\x06Health\x12\x12.dlp.HealthRequest\x1a\x13.dlp.HealthResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -22,19 +22,19 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'dlp_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_SCANREQUEST']._serialized_start=18
-  _globals['_SCANREQUEST']._serialized_end=112
-  _globals['_MESSAGESREQUEST']._serialized_start=115
-  _globals['_MESSAGESREQUEST']._serialized_end=262
-  _globals['_MESSAGE']._serialized_start=264
-  _globals['_MESSAGE']._serialized_end=304
-  _globals['_DETECTIONMATCH']._serialized_start=307
-  _globals['_DETECTIONMATCH']._serialized_end=514
-  _globals['_SCANRESPONSE']._serialized_start=516
-  _globals['_SCANRESPONSE']._serialized_end=636
-  _globals['_HEALTHREQUEST']._serialized_start=638
-  _globals['_HEALTHREQUEST']._serialized_end=653
-  _globals['_HEALTHRESPONSE']._serialized_start=655
-  _globals['_HEALTHRESPONSE']._serialized_end=711
-  _globals['_DLPSERVICE']._serialized_start=714
-  _globals['_DLPSERVICE']._serialized_end=883
+  _globals['_SCANREQUEST']._serialized_end=134
+  _globals['_MESSAGESREQUEST']._serialized_start=137
+  _globals['_MESSAGESREQUEST']._serialized_end=284
+  _globals['_MESSAGE']._serialized_start=286
+  _globals['_MESSAGE']._serialized_end=326
+  _globals['_DETECTIONMATCH']._serialized_start=329
+  _globals['_DETECTIONMATCH']._serialized_end=536
+  _globals['_SCANRESPONSE']._serialized_start=538
+  _globals['_SCANRESPONSE']._serialized_end=658
+  _globals['_HEALTHREQUEST']._serialized_start=660
+  _globals['_HEALTHREQUEST']._serialized_end=675
+  _globals['_HEALTHRESPONSE']._serialized_start=677
+  _globals['_HEALTHRESPONSE']._serialized_end=733
+  _globals['_DLPSERVICE']._serialized_start=736
+  _globals['_DLPSERVICE']._serialized_end=905
 # @@protoc_insertion_point(module_scope)

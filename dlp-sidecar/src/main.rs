@@ -58,6 +58,7 @@ fn run_registry(
     text: &str,
     detectors: &[Box<dyn Detector>],
     disabled: &[String],
+    from_decoded: bool,
 ) -> Vec<(String, &'static str, &'static str, u32, RawMatch)> {
     let mut out = Vec::new();
     for det in detectors {
@@ -66,7 +67,7 @@ fn run_registry(
             continue;
         }
         let raw_matches = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            det.detect(text)
+            det.detect_ctx(text, from_decoded)
         }));
         match raw_matches {
             Ok(matches) => {
@@ -74,7 +75,11 @@ fn run_registry(
                 let category = det.category();
                 let severity = det.severity();
                 for m in matches {
-                    out.push((name.to_string(), entity, category, severity, m));
+                    // Per-match entity_type override — api_key_secret /
+                    // password_field emit a distinct type per pattern;
+                    // ``None`` falls back to the detector's uniform type.
+                    let et = m.entity_type.unwrap_or(entity);
+                    out.push((name.to_string(), et, category, severity, m));
                 }
             }
             Err(_) => {
@@ -119,7 +124,12 @@ impl DlpService for DlpServer {
         // Per-request registry composition so ``thai_name_no_prefix``
         // is registered iff NER is *off* — same gate Python uses.
         let detectors = registry::default_detectors(req.ner_enabled);
-        let raw = run_registry(&normalized, &detectors, &req.disabled_detectors);
+        let raw = run_registry(
+            &normalized,
+            &detectors,
+            &req.disabled_detectors,
+            req.from_decoded,
+        );
         let matches: Vec<ProtoMatch> = raw
             .into_iter()
             .map(|(n, e, c, s, m)| to_proto(n, e, c, s, m))
@@ -133,6 +143,15 @@ impl DlpService for DlpServer {
         }))
     }
 
+    // NOTE (re-audit M5): the gateway does NOT call this RPC. The Python
+    // wrapper (rust_dlp_client.scan_messages) flattens + preprocesses each
+    // message (zero-width strip, homoglyph map, base64 decode-and-scan)
+    // itself and re-scans via ScanText per message + per decoded segment —
+    // because that preprocessing has no Rust port. This handler only nfkc-
+    // normalises, so wiring the client to it would LOSE the encoding-bypass
+    // coverage. It is retained for protocol completeness / ad-hoc callers
+    // but is intentionally off the production path. Do not "optimise" the
+    // gateway onto it without porting the preprocessor first.
     async fn scan_messages(
         &self,
         request: RpcRequest<MessagesRequest>,
@@ -157,7 +176,11 @@ impl DlpService for DlpServer {
                 continue;
             }
             let normalized = nfkc(&msg.content);
-            let per_msg = run_registry(&normalized, &detectors, &req.disabled_detectors);
+            // ScanMessages never carries decoded segments — the gateway
+            // wrapper decodes base64 per-message and re-scans each segment
+            // via ScanText with from_decoded=true. So from_decoded=false here.
+            let per_msg =
+                run_registry(&normalized, &detectors, &req.disabled_detectors, false);
             all.extend(per_msg);
         }
 

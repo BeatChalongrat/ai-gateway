@@ -68,6 +68,7 @@ static CONDITION_RE: Lazy<Regex> = Lazy::new(|| {
         r"(?i)(?:",
         r"diabetes|blood\s+pressure|hypertension|asthma|cancer|depression|",
         r"HIV|covid|heart\s+disease|kidney\s+disease|pregnan|allerg|",
+        r"\u{0e20}\u{0e39}\u{0e21}\u{0e34}\u{0e41}\u{0e1e}\u{0e49}|",  // ภูมิแพ้ (allergy) — parity with health_condition.py _CONDITION_VALUE_RE
         r"\u{0e40}\u{0e1a}\u{0e32}\u{0e2b}\u{0e27}\u{0e32}\u{0e19}|",
         r"\u{0e04}\u{0e27}\u{0e32}\u{0e21}\u{0e14}\u{0e31}\u{0e19}|",
         r"\u{0e04}\u{0e27}\u{0e32}\u{0e21}\u{0e14}\u{0e31}\u{0e19}\u{0e2a}\u{0e39}\u{0e07}|",
@@ -121,6 +122,7 @@ impl Detector for HealthConditionDetector {
                 matched_text: trimmed.to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
 
@@ -145,6 +147,7 @@ impl Detector for HealthConditionDetector {
                 matched_text: m.as_str().to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
 

@@ -54,6 +54,7 @@ impl Detector for ThaiAddressDetector {
                 matched_text: matched.to_string(),
                 confidence: 1.0,
                 priority: 0,
+                entity_type: None,
             });
         }
         out
