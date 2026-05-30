@@ -63,12 +63,13 @@ async def lifespan(app: FastAPI):
 
     # Set explicit thread pool — prevents exhaustion from asyncio.to_thread() calls.
     # Default is min(32, cpu+4) which can be as low as 5 on small machines.
-    # Phase-2 (hybrid): the chat hot-path DB reads now run via to_thread too
-    # (on top of DLP/semantic/log-flush), so raise the pool to keep ~50
-    # concurrent requests' short DB calls from queuing behind each other.
-    # CPU-bound offloads stay semaphore-bounded (DLP 8, semantic 4); the rest
-    # are I/O (DB / log) and release the GIL.
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=48)
+    # Track A: the chat hot-path DB reads are now NATIVE async (the flip
+    # removed the Phase-2 DB to_thread hops), so the executor no longer needs
+    # to absorb ~50 concurrent DB calls. What still uses to_thread:
+    # DLP preprocessing (H13) + semantic embed (B4) — both semaphore-bounded
+    # (DLP 8, semantic 4) — plus a few one-off startup/bcrypt offloads. 20
+    # threads comfortably covers those (down from the Phase-2 hybrid's 48).
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
     asyncio.get_event_loop().set_default_executor(executor)
 
     # Seed admin user (runs blocking bcrypt in thread)

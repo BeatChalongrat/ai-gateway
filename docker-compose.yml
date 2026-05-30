@@ -236,14 +236,18 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # Phase-2 pool sizing. The chat hot path now holds a sync connection
-      # for the request's duration (incl. the provider call) but does its
-      # checkout/queries off the event loop (to_thread), so the pool must
-      # cover peak concurrent requests per worker. 4 workers × (30+30) = 240
-      # peak, under the Postgres max_connections=250 set on the postgres
-      # service. db.py reads these at import time; missing → 10/20 legacy.
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-30}
-      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-30}
+      # Track A pool sizing — TWO pools (see backend/app/core/db.py):
+      #  * ASYNC (chat hot path): connection RELEASED during the provider
+      #    call, so a small pool serves high concurrency.
+      #  * SYNC (admin/portal/background + 3 rare chat sync points): small.
+      # Budget/worker: sync(5+5) + async(10+15) = 35; ×4 workers = 140,
+      # well under Postgres max_connections=250 (leaves headroom for
+      # migrations / psql / background sessions). db.py reads these at
+      # import; missing → the same defaults shown here.
+      DB_SYNC_POOL_SIZE: ${DB_SYNC_POOL_SIZE:-5}
+      DB_SYNC_MAX_OVERFLOW: ${DB_SYNC_MAX_OVERFLOW:-5}
+      DB_ASYNC_POOL_SIZE: ${DB_ASYNC_POOL_SIZE:-10}
+      DB_ASYNC_MAX_OVERFLOW: ${DB_ASYNC_MAX_OVERFLOW:-15}
       POSTGRES_MAX_CONNECTIONS: "250"
       REDIS_HOST: redis
       REDIS_PORT: 6379
