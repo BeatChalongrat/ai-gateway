@@ -920,13 +920,20 @@ class DLPTransformer:
         if not word_to_token:
             return messages
 
-        from app.schemas.common import Message as _Msg
         out: list = []
         for msg in messages:
+            # Vision / list-content messages have no scannable spans and
+            # _replace_bare_word expects str — pass them through intact.
+            if not isinstance(msg.content, str):
+                out.append(msg)
+                continue
             text = msg.content
             for word, token in word_to_token.items():
                 text = _replace_bare_word(text, word, token)
-            out.append(_Msg(role=msg.role, content=text))
+            # model_copy preserves tool_calls / tool_call_id / name /
+            # reasoning_* — rebuilding as Message(role, content) would drop
+            # them and orphan a following role="tool" message (OpenAI 400).
+            out.append(msg.model_copy(update={"content": text}))
 
         # Bookkeeping: tell the caller's reverse_map about the
         # bare-word bindings so any subsequent within-call dedup
@@ -1050,8 +1057,10 @@ class DLPTransformer:
 
             result = self.transform_text(msg.content, msg_actions)
             results.append(result)
+            # model_copy preserves tool_calls / tool_call_id / name /
+            # reasoning_* (rebuilding as Message(role, content) drops them).
             new_messages.append(
-                MessageModel(role=msg.role, content=result.transformed_text)
+                msg.model_copy(update={"content": result.transformed_text})
             )
 
         return new_messages, results
@@ -1158,9 +1167,11 @@ class DLPTransformer:
             ]
 
             if not actionable:
-                new_messages.append(
-                    MessageModel(role=msg.role, content=msg.content)
-                )
+                # Nothing to mask — copy to preserve tool_calls /
+                # tool_call_id / name / reasoning_* (a bare
+                # Message(role, content) would drop them and orphan a
+                # following role="tool" message → OpenAI 400).
+                new_messages.append(msg.model_copy())
                 continue
 
             resolved = _resolve_overlaps(actionable)
@@ -1212,9 +1223,9 @@ class DLPTransformer:
             ):
                 result_text = result_text[:start] + replacement + result_text[end:]
 
-            new_messages.append(
-                MessageModel(role=msg.role, content=result_text)
-            )
+            # model_copy preserves tool_calls / tool_call_id / name /
+            # reasoning_* (rebuilding as Message(role, content) drops them).
+            new_messages.append(msg.model_copy(update={"content": result_text}))
 
         # Second pass — bare-name substring expansion (pseudonym mode).
         # No-op when the flag is off or when no PERSON multi-word
