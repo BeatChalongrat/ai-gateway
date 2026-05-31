@@ -468,34 +468,14 @@ func (s *MemoryService) CountByStatus(
 }
 
 // ---------------------------------------------------------------------------
-// BuildMemoryPolicyBlock — always-on persona snippet
-// ---------------------------------------------------------------------------
-
-// MemoryPolicyBlock is the persona-level instruction that teaches
-// the model to save memories proactively. Returned verbatim from
-// the helper below so the message-service can prepend it to the
-// system prefix whenever conv.MemoryEnabled is true — even when
-// the user has zero saved memories yet. Without this, a brand-new
-// user never sees the proactive-save directive and the assistant
-// reverts to its passive default of waiting for "remember".
-const MemoryPolicyBlock = "<memory_policy>\n" +
-	"When the user shares personal information, preferences, or standing " +
-	"instructions during normal conversation, call the save_memory tool to " +
-	"persist them. Do NOT wait for them to say 'remember' or 'จำไว้' — save " +
-	"naturally when:\n" +
-	"- they share personal info (name, role, location, team)\n" +
-	"- they state a preference (tone, length, language, level of detail)\n" +
-	"- they give a standing instruction (always / never / from now on)\n" +
-	"- they correct you about themselves\n" +
-	"- they mention an ongoing project or interest\n\n" +
-	"Save silently — do not announce the save. Just call the tool and " +
-	"continue the conversation as normal. Skip transient context (weather, " +
-	"mood, one-off tasks) and never save secrets (passwords, API keys, IDs).\n" +
-	"</memory_policy>\n"
-
-// ---------------------------------------------------------------------------
 // BuildMemoryContext — system-prompt injection block
 // ---------------------------------------------------------------------------
+//
+// NOTE: the proactive-save policy that used to live here as
+// MemoryPolicyBlock now lives in the PromptCompiler's Tool Policy layer
+// (prompt_compiler.go, Layer 7) — the save_memory tool's paragraph
+// carries the "save naturally, don't wait for 'remember'" directive so
+// the policy is gated on the tool actually being active.
 
 // BuildMemoryContext is the legacy wrapper retained for callers
 // that don't need source attribution (tests, the
