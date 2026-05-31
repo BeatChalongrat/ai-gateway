@@ -2043,7 +2043,7 @@ func (s *MessageService) compileAndBuildRequest(
 	// keeps the heuristic responsive to the CURRENT turn's signals
 	// (images / files / message length / code markers) rather than
 	// being locked in at conversation create.
-	modelID := s.resolveAutoIfNeeded(ctx, conv, tenantID, ragQuery, imageURLs, len(history))
+	modelID, routingHints := s.resolveAutoIfNeeded(ctx, conv, tenantID, ragQuery, imageURLs, len(history))
 
 	// Source-aware closure: the same call site can run multiple
 	// times inside Compile (initial + post-extraction rebuild),
@@ -2061,6 +2061,7 @@ func (s *MessageService) compileAndBuildRequest(
 		prefix, srcs := build()
 		sources.Add(srcs...)
 		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
+		req.RoutingHints = routingHints
 		attachReasoning(&req, conv)
 		return req
 	}
@@ -2083,6 +2084,7 @@ func (s *MessageService) compileAndBuildRequest(
 		prefix, srcs := build()
 		sources.Add(srcs...)
 		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs)
+		req.RoutingHints = routingHints
 		attachReasoning(&req, conv)
 		return req
 	}
@@ -2092,6 +2094,7 @@ func (s *MessageService) compileAndBuildRequest(
 	// tool hits the model adds during the turn.
 	sources.Add(compiled.Sources...)
 	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imageURLs)
+	req.RoutingHints = routingHints
 	attachReasoning(&req, conv)
 	return req
 }
@@ -2140,19 +2143,26 @@ func attachReasoning(req *GatewayChatRequest, conv *model.Conversation) {
 	}
 }
 
-// resolveAutoIfNeeded returns the model id to ship to the gateway
-// this turn. Pass-through for explicit picks; runs the heuristic
-// ResolveAutoModel for the "auto" sentinel (and treats empty as
-// auto so a migration row without a model_id still resolves).
+// resolveAutoIfNeeded decides what to ship to the gateway this turn and
+// returns (modelID, hints):
 //
-// Per-turn signals used by the resolver:
-//   - hasImages: the LAST user turn carries at least one image.
-//   - hasFiles : the conversation has any extracted file context.
-//   - len(message) / history length: complexity proxies.
+//   - Explicit pick (user chose a concrete model): returns
+//     (conv.ModelID, nil). Unchanged behaviour — no hints, gateway's
+//     explicit path serves the exact model. Still honours conv.LockedModel
+//     if a prior turn locked one (legacy convs), but never writes a new
+//     lock here.
+//   - Auto ("auto" sentinel or empty): returns ("auto", hints). chat-edge
+//     no longer resolves a concrete model client-side (that bypassed the
+//     gateway's provider-agnostic smart router and pinned every turn to one
+//     provider, so a dead key meant an empty reply). Instead it forwards
+//     capability hints and lets the gateway pick the best model among
+//     providers that hold a valid key RIGHT NOW. No model lock on the auto
+//     path — every turn re-hints so routing adapts to the current turn
+//     AND so a key rotation immediately changes the served model.
 //
-// Logs the decision once per turn so an operator reading the slog
-// stream can always reconstruct WHY a given turn was upgraded to
-// flagship (or stayed fast).
+// Per-turn signals (images / files / length / turn count / code / language)
+// are folded into the hints by BuildRoutingHints. The decision is logged
+// once per turn so an operator can reconstruct what was requested.
 func (s *MessageService) resolveAutoIfNeeded(
 	ctx context.Context,
 	conv *model.Conversation,
@@ -2160,56 +2170,24 @@ func (s *MessageService) resolveAutoIfNeeded(
 	message string,
 	imageURLs []string,
 	historyLen int,
-) string {
+) (string, *RoutingHints) {
 	if !IsAutoModel(conv.ModelID) {
-		return conv.ModelID
-	}
-	// Fix 5 — model lock. Once an auto conversation has resolved a
-	// concrete model, reuse it for every later turn so the model can't
-	// swap mid-chat (which made follow-ups behave inconsistently). The
-	// lock is cleared when the user changes the picker (see
-	// ConversationRepo.UpdateModel), so a switch back to auto re-resolves.
-	if locked := strings.TrimSpace(conv.LockedModel); locked != "" {
-		return locked
+		return conv.ModelID, nil
 	}
 	hasFiles := strings.TrimSpace(s.fileContext(ctx, tenantID, conv.ID)) != ""
 	hasImages := len(imageURLs) > 0
-	available := []string{}
-	if s.models != nil {
-		available = s.models.ModelIDs()
-	}
-	// Auto Thinking Mode: query complexity — not a user toggle —
-	// decides whether to prefer a reasoning-capable model. When the
-	// turn looks complex AND the catalog has a reasoning model, that
-	// model wins; otherwise we fall through to the fast/flagship
-	// heuristic (the Gateway silently ignores the reasoning param on a
-	// non-capable model so the request still succeeds, just without
-	// thinking output).
-	preferReasoning := isComplexQuery(message, hasFiles, hasImages, historyLen)
-	resolved := ResolveAutoModelWithReasoning(
-		message, hasFiles, hasImages, historyLen, available, preferReasoning,
-	)
-	// Fix 5 — persist the lock so later turns skip re-routing. Best-
-	// effort: on a write failure we simply re-resolve next turn (same
-	// model, given a stable catalog), so never fail the user's send.
-	if resolved != "" {
-		if err := s.conversations.SetLockedModel(ctx, tenantID, conv.ID, resolved); err != nil {
-			slog.Warn("model_lock_persist_failed",
-				"conversation_id", conv.ID.String(), "err", err)
-		} else {
-			conv.LockedModel = resolved
-		}
-	}
-	slog.Info("auto_model_resolved",
+	hints := BuildRoutingHints(message, hasFiles, hasImages, historyLen, conv.ReasoningEnabled)
+	slog.Info("auto_routing_hints",
 		"conversation_id", conv.ID.String(),
-		"resolved_model", resolved,
-		"message_length", len(message),
-		"has_files", hasFiles,
-		"has_images", hasImages,
-		"message_count", historyLen,
-		"reasoning_preferred", preferReasoning,
+		"needs_vision", hints.NeedsVision,
+		"needs_reasoning", hints.NeedsReasoning,
+		"has_code", hints.HasCode,
+		"has_files", hints.HasFiles,
+		"complexity", hints.Complexity,
+		"conv_turn_count", hints.ConvTurnCount,
+		"language", hints.Language,
 	)
-	return resolved
+	return AutoModelID, &hints
 }
 
 // InspectContext is the public dry-run entry point — runs the

@@ -159,6 +159,24 @@ type GatewayReasoningConfig struct {
 	ShowSummary bool   `json:"show_summary"`
 }
 
+// RoutingHints mirrors the Gateway's public ``RoutingHints``
+// (backend/app/schemas/public.py). Sent ONLY alongside model="auto":
+// chat-edge describes what the turn NEEDS (capabilities + complexity)
+// and the gateway's provider-agnostic smart router picks the best model
+// from whatever providers currently hold a valid key. This replaces the
+// old client-side hardcode (which resolved "auto" -> a concrete model
+// and bypassed gateway routing). Every field is omitempty so an explicit
+// model pick sends no hints and the gateway's explicit path is unchanged.
+type RoutingHints struct {
+	NeedsVision    bool   `json:"needs_vision,omitempty"`
+	NeedsReasoning bool   `json:"needs_reasoning,omitempty"`
+	HasCode        bool   `json:"has_code,omitempty"`
+	HasFiles       bool   `json:"has_files,omitempty"`
+	Complexity     string `json:"complexity,omitempty"`      // "low" | "medium" | "high"
+	ConvTurnCount  int    `json:"conv_turn_count,omitempty"`
+	Language       string `json:"language,omitempty"`        // "th" | "en" | "zh" | ...
+}
+
 type GatewayChatRequest struct {
 	Model         string           `json:"model"`
 	Messages      []GatewayMessage `json:"messages"`
@@ -183,6 +201,10 @@ type GatewayChatRequest struct {
 	// silently ignores reasoning on non-capable models, so it is
 	// safe to forward whenever the user-facing toggle is on.
 	Reasoning *GatewayReasoningConfig `json:"reasoning,omitempty"`
+	// Provider-agnostic smart routing. Non-nil ONLY when the user
+	// picked "Auto" (Model is then the "auto" sentinel). The gateway
+	// reads these to select a concrete model from key-valid providers.
+	RoutingHints *RoutingHints `json:"routing_hints,omitempty"`
 }
 
 // GatewayCallContext carries the per-request identity headers we

@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, AsyncIterator
 
+import httpx
+
 from app.core.config import settings
 from app.domain.providers import (
     ProviderResponse,
@@ -23,7 +25,7 @@ from app.domain.providers import (
 from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.http_client import get_provider_client
-from app.services.providers.error_handler import call_with_retry
+from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.parsers import parse_anthropic_response
 
 if TYPE_CHECKING:
@@ -380,7 +382,19 @@ class AnthropicAdapter(BaseProviderAdapter):
         async with client.stream(
             "POST", "/messages", json=body, headers=headers
         ) as resp:
-            resp.raise_for_status()
+            # Map an HTTP error to a domain exception BEFORE any chunk
+            # is yielded so the route layer's streaming-fallback loop
+            # (public_chat.event_generator) sees a GatewayError it can
+            # classify — a raw httpx.HTTPStatusError fails its
+            # isinstance(_, GatewayError) gate and would re-raise
+            # immediately, skipping fallback. aread() loads the body so
+            # map_provider_error can parse the error payload.
+            if resp.status_code >= 400:
+                await resp.aread()
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise map_provider_error(exc, self.provider_name) from exc
             async for chunk in self._process_sse_stream(
                 resp.aiter_lines(), initial_model=initial_model
             ):
