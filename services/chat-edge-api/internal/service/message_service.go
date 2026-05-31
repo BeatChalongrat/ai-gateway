@@ -1280,6 +1280,29 @@ func (s *MessageService) ragContext(ctx context.Context, conv *model.Conversatio
 //
 // Any subset may be empty. “ragQuery“ is the most-recent user
 // message content used as the retrieval query; pass "" to skip RAG.
+// bangkokZone is a fixed UTC+7 location used for the system-prompt
+// date block. A fixed zone (not time.LoadLocation) keeps the binary
+// independent of the OS tzdata package — Thailand has no DST so the
+// offset is constant.
+var bangkokZone = time.FixedZone("Asia/Bangkok", 7*60*60)
+
+// currentDateBlock renders the "what is today" line prepended to the
+// system prompt on every request. Both an ISO date (machine-clear)
+// and a human-readable form are included so the model parses it
+// unambiguously. Time is included so "this morning"/"tonight" style
+// questions also anchor correctly.
+func currentDateBlock() string {
+	now := time.Now().In(bangkokZone)
+	return fmt.Sprintf(
+		"Current date and time: %s (%s) %s, Asia/Bangkok (UTC+7). "+
+			"Treat this as the present moment when answering anything "+
+			"time-relative (today, this year, recent, latest, etc.).",
+		now.Format("2006-01-02"),
+		now.Format("Monday"),
+		now.Format("15:04"),
+	)
+}
+
 func (s *MessageService) buildSystemPrefix(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
@@ -1305,8 +1328,17 @@ func (s *MessageService) buildSystemPrefixWithSources(
 	conv *model.Conversation,
 	ragQuery string,
 ) (string, []ContextSource) {
-	parts := make([]string, 0, 5)
+	parts := make([]string, 0, 6)
 	sources := make([]ContextSource, 0, 8)
+
+	// Current date/time — injected on EVERY request (never cached) so
+	// the model anchors time-relative answers ("today", "this year",
+	// "latest") to the real present instead of its training cutoff.
+	// Without this the model defaults to its cutoff and answers e.g.
+	// "2024" in 2026. Bangkok is the product's home timezone; we use a
+	// fixed UTC+7 zone rather than time.LoadLocation so the build
+	// doesn't depend on tzdata being present in the container image.
+	parts = append(parts, currentDateBlock())
 
 	if s.prefsSvc != nil {
 		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
