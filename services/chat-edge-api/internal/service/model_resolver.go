@@ -16,6 +16,7 @@ package service
 
 import (
 	"strings"
+	"unicode"
 )
 
 // AutoModelID is the sentinel the frontend persists when the user
@@ -275,4 +276,85 @@ func ResolveAutoModelWithReasoning(
 	}
 
 	return fast
+}
+
+// codeMarkers are substrings that strongly imply the turn involves
+// code. Shared by hasCodeMarkers (hint building) and the flagship
+// upgrade rule above — kept here so both stay in sync.
+var codeMarkers = []string{
+	"```", "func ", "def ", "class ", "import ", "select ", "create table",
+	"function ", "const ", "var ", "public ", "private ", "#include", "</",
+}
+
+// hasCodeMarkers reports whether the message looks like it contains or
+// asks about code. Pure string match (no parsing) so an operator can
+// reconstruct the has_code hint from the prompt.
+func hasCodeMarkers(message string) bool {
+	lower := strings.ToLower(message)
+	for _, marker := range codeMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// detectLanguage returns a coarse language tag for routing hints based
+// on the dominant script in the message. Heuristic, not a full language
+// detector — enough for the gateway to prefer a translation/locale-
+// strong model. Returns "th" when any Thai script is present, "zh" for
+// CJK, "ja" for Hiragana/Katakana, "ko" for Hangul, else "en".
+func detectLanguage(message string) string {
+	for _, r := range message {
+		switch {
+		case r >= 0x0E00 && r <= 0x0E7F:
+			return "th"
+		case unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r):
+			return "ja"
+		case unicode.Is(unicode.Hangul, r):
+			return "ko"
+		case unicode.Is(unicode.Han, r):
+			return "zh"
+		}
+	}
+	return "en"
+}
+
+// BuildRoutingHints derives the provider-agnostic capability hints
+// chat-edge sends to the gateway for an "Auto" turn. It reuses the same
+// per-turn signals the legacy ResolveAutoModelWithReasoning heuristic
+// used (images / files / length / turn count / code markers / complex-
+// signal phrases) — but instead of collapsing them into one concrete
+// model id (which bypassed gateway routing), it forwards the raw needs
+// so the gateway can pick the best key-valid model.
+//
+// reasoningEnabled is the conversation's user-facing reasoning toggle;
+// it OR's with the inferred complexity so an explicit "think harder"
+// request always sets needs_reasoning even on a short prompt.
+func BuildRoutingHints(
+	message string,
+	hasFiles, hasImages bool,
+	conversationMessageCount int,
+	reasoningEnabled bool,
+) RoutingHints {
+	hasCode := hasCodeMarkers(message)
+	complex := isComplexQuery(message, hasFiles, hasImages, conversationMessageCount)
+
+	complexity := "medium"
+	switch {
+	case complex || hasCode || hasImages || hasFiles:
+		complexity = "high"
+	case len(message) <= 80 && conversationMessageCount <= 4 && !strings.Contains(message, "?"):
+		complexity = "low"
+	}
+
+	return RoutingHints{
+		NeedsVision:    hasImages,
+		NeedsReasoning: reasoningEnabled || complex,
+		HasCode:        hasCode,
+		HasFiles:       hasFiles,
+		Complexity:     complexity,
+		ConvTurnCount:  conversationMessageCount,
+		Language:       detectLanguage(message),
+	}
 }

@@ -83,11 +83,33 @@ class TestMapProviderError:
         assert isinstance(result, UpstreamBadResponseError)
 
     def test_401_auth_error(self):
+        # A provider 401 is OUR key being rejected, not a client error.
+        # It maps to ProviderError (fallback-eligible) so the gateway can
+        # route around a bad/expired key to a provider whose key works.
         resp = httpx.Response(401, json={"error": "invalid key"})
         req = httpx.Request("POST", "https://x.com")
         exc = httpx.HTTPStatusError("401", request=req, response=resp)
         result = map_provider_error(exc, "openai")
-        assert isinstance(result, UpstreamBadResponseError)
+        assert isinstance(result, ProviderError)
+        assert result.code == "provider_error"
+
+    def test_403_forbidden_is_fallback_eligible(self):
+        resp = httpx.Response(403, json={"error": "forbidden"})
+        req = httpx.Request("POST", "https://x.com")
+        exc = httpx.HTTPStatusError("403", request=req, response=resp)
+        result = map_provider_error(exc, "anthropic")
+        assert isinstance(result, ProviderError)
+        assert result.code == "provider_error"
+
+    def test_404_model_not_found_is_fallback_eligible(self):
+        # An aggregator that doesn't serve the requested model id returns
+        # 404 — fallback-eligible so routing can try another candidate.
+        resp = httpx.Response(404, json={"error": "No endpoints found"})
+        req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+        exc = httpx.HTTPStatusError("404", request=req, response=resp)
+        result = map_provider_error(exc, "openrouter")
+        assert isinstance(result, ProviderError)
+        assert result.code == "provider_error"
 
     def test_unknown_exception(self):
         exc = RuntimeError("unexpected")

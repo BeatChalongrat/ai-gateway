@@ -14,7 +14,21 @@ a single inbound failure cannot fan out into a wide rescue sweep.
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
+
+# Providers ship dated/versioned model ids (Anthropic ``-YYYYMMDD``,
+# OpenAI ``-YYYY-MM-DD``) while the tier table is keyed by the stable
+# short alias (``claude-sonnet-4``, ``gpt-4o``). Strip a trailing date
+# stamp so a concrete id like ``claude-sonnet-4-20250514`` resolves to
+# its tier. Only an 8-digit run or a ``YYYY-MM-DD`` triplet is removed,
+# so non-date version suffixes (``claude-sonnet-4-5``) are preserved.
+_MODEL_DATE_SUFFIX = re.compile(r"-(?:\d{8}|\d{4}-\d{2}-\d{2})$")
+
+
+def canonical_model(model: str) -> str:
+    """Strip a trailing date stamp from a provider model id."""
+    return _MODEL_DATE_SUFFIX.sub("", model)
 
 # ---------------------------------------------------------------------------
 # Tier table — premium / standard / fast.
@@ -180,12 +194,15 @@ TIERS: dict[str, dict] = {
 def get_tier(model: str) -> str | None:
     """Return the tier name for ``model``, or ``None`` if unknown.
 
-    Lookup is exact (no aliasing). Callers that pass ``"auto"`` or a
-    provider-prefixed name will get ``None`` — that's intentional;
-    fallback only applies to concrete, registered models.
+    Matches the exact id first, then a date-stripped form (so a dated
+    provider id like ``claude-sonnet-4-20250514`` resolves to the
+    ``claude-sonnet-4`` tier). Callers that pass ``"auto"`` or a
+    provider-prefixed name still get ``None`` — fallback only applies to
+    concrete, registered models.
     """
+    canon = canonical_model(model)
     for tier_name, tier in TIERS.items():
-        if model in tier["models"]:
+        if model in tier["models"] or canon in tier["models"]:
             return tier_name
     return None
 
@@ -212,7 +229,13 @@ def get_fallback_chain(
         return []
 
     tier = TIERS[tier_name]
-    model_map: dict[str, str] = tier["model_map"].get(model, {})
+    # Match the model_map by exact id first, then date-stripped alias,
+    # so dated provider ids share the alias's wired fallbacks.
+    model_map: dict[str, str] = (
+        tier["model_map"].get(model)
+        or tier["model_map"].get(canonical_model(model))
+        or {}
+    )
     if not model_map:
         return []
 

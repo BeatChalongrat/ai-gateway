@@ -64,6 +64,32 @@ def map_provider_error(exc: Exception, provider_name: str) -> Exception:
                 details={"provider": provider_name, "status": status, "body": body},
             )
 
+        if status in (401, 403):
+            # The provider rejected OUR credentials — a gateway-side
+            # key problem, not a client error. Map to ProviderError
+            # (code "provider_error", which IS fallback-eligible) so
+            # the fallback chain can route around a bad/expired key to
+            # a provider whose key works, instead of surfacing an empty
+            # response. Distinct from a generic 4xx (bad request) below,
+            # which is NOT retried elsewhere because it would fail on
+            # every provider.
+            return ProviderError(
+                f"Provider '{provider_name}' rejected credentials ({status}).",
+                details={"provider": provider_name, "status": status, "body": body},
+            )
+
+        if status == 404:
+            # Model / endpoint not found at this provider (e.g. an
+            # aggregator that doesn't actually serve the requested model
+            # id). Fallback-eligible so routing can try another candidate
+            # rather than dead-ending — this is a "wrong place" error, not
+            # a malformed request.
+            return ProviderError(
+                f"Provider '{provider_name}' has no endpoint for the "
+                f"requested model (404).",
+                details={"provider": provider_name, "status": status, "body": body},
+            )
+
         if status >= 400:
             return UpstreamBadResponseError(
                 f"Provider '{provider_name}' rejected request ({status}).",

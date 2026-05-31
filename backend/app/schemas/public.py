@@ -88,6 +88,27 @@ class ModelListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RoutingHints(BaseModel):
+    """Provider-agnostic capability hints sent by the caller alongside
+    ``model="auto"`` (T-smart-routing).
+
+    The caller (chat-edge) describes what the turn NEEDS rather than
+    naming a model; the gateway's smart router (``smart_router.py``)
+    picks the cheapest capable model among providers that currently
+    hold a valid API key. Ignored when ``model`` is a concrete id — the
+    explicit path is unchanged. All fields optional so a partial hint
+    object (or none) still routes.
+    """
+
+    needs_vision: bool = False
+    needs_reasoning: bool = False
+    has_code: bool = False
+    has_files: bool = False
+    complexity: Optional[str] = None      # "low" | "medium" | "high"
+    conv_turn_count: int = 0
+    language: Optional[str] = None        # "th" | "en" | "zh" | ...
+
+
 class ChatCompletionsRequest(BaseModel):
     """Public request for POST /v1/chat/completions.
 
@@ -130,6 +151,13 @@ class ChatCompletionsRequest(BaseModel):
     # adapters translate to provider-specific params and surface
     # reasoning deltas back to the client.
     reasoning: Optional[ReasoningConfig] = None
+
+    # Provider-agnostic smart-routing hints. Present ONLY when ``model``
+    # == "auto"; the gateway selects a concrete model from key-valid
+    # providers using these. None / omitted keeps the existing routing
+    # behaviour (semantic → keyword → service chain or explicit pick),
+    # so every existing caller stays byte-identical.
+    routing_hints: Optional[RoutingHints] = None
 
     @field_validator("policy_profile_id")
     @classmethod
