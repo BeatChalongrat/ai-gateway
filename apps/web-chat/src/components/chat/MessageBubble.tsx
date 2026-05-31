@@ -34,7 +34,6 @@ import { SourcesCard } from "./SourcesCard";
 import { MessageAttachments } from "./MessageAttachments";
 import { PptxPlanCard } from "./PptxPlanCard";
 import type { PptxPlan } from "./PptxPlanCard";
-import { StreamingContent } from "./StreamingContent";
 import { ThinkingBlock } from "./ThinkingBlock";
 
 interface Props {
@@ -508,6 +507,39 @@ function RegenerateIcon() {
     </svg>
   );
 }
+// StreamingMarkdown renders an in-flight assistant message through the
+// SAME ReactMarkdown pipeline (and same markdownComponents) as completed
+// messages (Fix 2) so bullets / lists / headings / tables format live as
+// tokens arrive instead of showing raw "-", "#", "**", "|" that only snap
+// into elements — reflowing the whole block — when the stream ends.
+// remark-gfm tolerates incomplete syntax (an unclosed ** stays literal,
+// an unterminated ``` is an in-progress code block, a half table stays
+// text until the delimiter row arrives). memo() skips the re-parse when a
+// sibling state change re-renders the bubble without changing the text.
+//
+// Plan cards (:::excel-plan etc.) are intentionally NOT segmented while
+// streaming — they only mount on the terminal "complete" event so the
+// user doesn't see a half-parsed plan flicker into a card; until then the
+// fence shows as text.
+const StreamingMarkdown = memo(function StreamingMarkdown({
+  content,
+}: {
+  content: string;
+}) {
+  return (
+    <div className="streaming-body">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={markdownComponents}
+      >
+        {renderCitations(content)}
+      </ReactMarkdown>
+      <span className="streaming-cursor-block" aria-hidden />
+    </div>
+  );
+});
+
 function AssistantContent({ message, convId }: { message: Message; convId: string }) {
   const hasContent = message.content.length > 0;
   const isStreaming = message.isStreaming;
@@ -523,11 +555,13 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
   }
 
   if (isStreaming) {
-    // During streaming we render plain text + simple code-fence
-    // splitting. The :::excel-plan card only mounts once the
-    // assistant's terminal "complete" event arrives so the user
-    // doesn't see a half-parsed plan flicker into a card.
-    return <StreamingContent content={message.content} />;
+    // Render markdown incrementally with the SAME pipeline as the
+    // completed path (Fix 2) so lists/headings/tables format live and
+    // don't reflow when the stream ends. Plan cards (:::excel-plan etc.)
+    // are intentionally NOT segmented here — they only mount on the
+    // terminal "complete" event so the user doesn't see a half-parsed
+    // plan flicker into a card; until then the fence shows as text.
+    return <StreamingMarkdown content={message.content} />;
   }
 
   // Split the completed content into prose / plan segments. Each
