@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	// Side-effect imports so the stdlib image package decodes these
 	// formats. Used by the image-metadata extractor for thumbnails /
@@ -518,14 +519,12 @@ func (s *FileService) BuildContextBlock(
 			body = "[Content extraction still in progress.]"
 		}
 
-		entry := header + body + "\n\n"
-		remaining := fileContextBudget - used
-		if remaining <= len(header)+len("[content omitted]\n\n") {
+		entry, ok := truncatedFileEntry(header, body, fileContextBudget-used)
+		if !ok {
+			// Budget exhausted — no room for even a header + truncation
+			// marker. Stop here so the remaining (older) files are simply
+			// omitted rather than risking a negative slice bound.
 			break
-		}
-		if len(entry) > remaining {
-			body = body[:remaining-len(header)-len("\n\n[content truncated]\n\n")]
-			entry = header + body + "\n\n[content truncated]\n\n"
 		}
 		b.WriteString(entry)
 		used += len(entry)
@@ -534,6 +533,51 @@ func (s *FileService) BuildContextBlock(
 		"'the spreadsheet', 'the image', etc., use the file contents " +
 		"provided above.\n")
 	return b.String(), nil
+}
+
+// fileTruncationMarker is appended to a file body that had to be cut to
+// fit the context budget.
+const fileTruncationMarker = "\n\n[content truncated]\n\n"
+
+// truncatedFileEntry renders one "### File ..." entry so that it fits
+// within `remaining` bytes of the file-context budget.
+//
+//   - When header+body+separator already fits, it is returned verbatim.
+//   - Otherwise the body is truncated ON A RUNE BOUNDARY (so the prompt
+//     never carries an invalid half-rune — important for the bilingual
+//     Thai/CJK product) and the truncation marker appended.
+//   - Returns ok=false when there isn't even room for the header plus the
+//     marker; the caller stops adding files (older ones are omitted).
+//
+// Pulling this out of BuildContextBlock as a pure function does two
+// things: it makes the boundary arithmetic unit-testable without a DB,
+// and it fixes the prior bug where the budget guard subtracted a shorter
+// marker length than the slice expression did — a filename long enough to
+// land `remaining` in that gap drove the slice high-bound negative and
+// panicked ("slice bounds out of range").
+func truncatedFileEntry(header, body string, remaining int) (string, bool) {
+	const sep = "\n\n"
+	full := header + body + sep
+	if len(full) <= remaining {
+		return full, true
+	}
+	// Bytes left for the body once the header AND the truncation marker
+	// are accounted for. Guard and slice now use the SAME marker length,
+	// so this can never be computed inconsistently again.
+	end := remaining - len(header) - len(fileTruncationMarker)
+	if end <= 0 {
+		return "", false
+	}
+	if end > len(body) {
+		end = len(body)
+	}
+	// Back up to the start of a rune so a multibyte character is never
+	// split. (utf8.RuneStart reports whether body[end] begins a rune;
+	// the end<len(body) guard avoids indexing one past the end.)
+	for end > 0 && end < len(body) && !utf8.RuneStart(body[end]) {
+		end--
+	}
+	return header + body[:end] + fileTruncationMarker, true
 }
 
 // ---------------------------------------------------------------------------

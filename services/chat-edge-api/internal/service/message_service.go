@@ -1876,13 +1876,13 @@ func (s *MessageService) maybeUpdateConversationState(
 	}
 
 	convID, userID, tenantID := conv.ID, conv.UserID, conv.TenantID
-	go func() {
+	safeGo("conversation-state-extraction", func() {
 		bg := context.Background()
 		if _, err := s.stateSvc.GenerateOrUpdateState(bg, convID, userID, tenantID); err != nil {
 			slog.Warn("conversation state: auto-extraction failed",
 				"conv", convID.String(), "err", err)
 		}
-	}()
+	})
 }
 
 // preferenceExtractAtMessages — minimum conversation size before
@@ -1939,13 +1939,13 @@ func (s *MessageService) maybeExtractPreferences(
 	}
 
 	convID, userID, tenantID := conv.ID, conv.UserID, conv.TenantID
-	go func() {
+	safeGo("preference-extraction", func() {
 		bg := context.Background()
 		if _, err := s.prefExtractor.ExtractPreferences(bg, convID, userID, tenantID); err != nil {
 			slog.Warn("preference extraction failed",
 				"conv", convID.String(), "err", err)
 		}
-	}()
+	})
 }
 
 // persistError saves a placeholder assistant row with status=error

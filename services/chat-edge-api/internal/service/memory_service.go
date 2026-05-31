@@ -552,7 +552,7 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 	for i := range memories {
 		ids[i] = memories[i].ID
 	}
-	go func(ids []uuid.UUID) {
+	safeGo("memory-use-count-bump", func() {
 		bg := context.Background()
 		for _, id := range ids {
 			if err := s.repo.IncrementUseCount(bg, id); err != nil {
@@ -560,7 +560,7 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 					"memory_id", id.String(), "err", err)
 			}
 		}
-	}(ids)
+	})
 
 	return sb.String(), sources
 }
