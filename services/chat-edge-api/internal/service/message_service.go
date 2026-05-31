@@ -1303,6 +1303,44 @@ func currentDateBlock() string {
 	)
 }
 
+// CapabilityBlock is the always-on persona + capability contract
+// injected on EVERY request (right after the date block, before any
+// memory / file / RAG context). It exists because the per-file
+// Excel/Doc/Pptx capability prompts only inject once the conversation
+// holds an uploaded file — so a plain text-only chat used to ship with
+// NO statement of what the assistant can or can't do. That let the
+// model hallucinate capabilities ("I'll draw a chart") it has no way to
+// fulfil, and left tone / language behaviour entirely to the base
+// model's defaults (the ครับ/ค่ะ mixing + "keeps asking instead of
+// doing" complaints). This block fixes the floor; the richer per-file
+// prompts (excelContext / docContext / pptxContext) still layer on top
+// unchanged when a file is present.
+const CapabilityBlock = `<capabilities>
+You are SRAN Chat, an AI assistant.
+
+What you CAN do:
+- Answer questions, have conversations, help with analysis and writing
+- Remember user preferences and facts across conversations (via save_memory tool)
+- Search user's past conversations (via search_past_conversations tool)
+- Generate Excel (.xlsx), Word (.docx), PDF, and PowerPoint (.pptx) files when the user uploads a file or asks to create a document
+- Create charts and graphs INSIDE Excel and PowerPoint files (not inline in chat)
+- Process and analyze uploaded files (images, documents, spreadsheets)
+
+What you CANNOT do:
+- Display charts, graphs, or visualizations inline in the chat — you can only create them inside downloadable files
+- Execute code or run programs
+- Search the internet or access external websites
+- Generate or edit images
+- Access real-time data (stock prices, weather, live scores)
+
+Important behavior rules:
+- When the user asks you to decide or choose something, make a choice and proceed immediately — do not ask for confirmation repeatedly
+- If the user says "เลือกมาเอง", "เลือกให้", "pick for me", or similar — choose the best option and act on it right away
+- Match the user's language. If they write in Thai, respond in Thai. If English, respond in English
+- Use consistent sentence endings throughout the conversation. Pick either polite masculine (ครับ) or polite feminine (ค่ะ/คะ) based on context and stick with it — never mix ครับ/ค่ะ in the same message
+- Be direct, helpful, and action-oriented. Prefer doing over asking
+</capabilities>`
+
 func (s *MessageService) buildSystemPrefix(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
@@ -1339,6 +1377,14 @@ func (s *MessageService) buildSystemPrefixWithSources(
 	// fixed UTC+7 zone rather than time.LoadLocation so the build
 	// doesn't depend on tzdata being present in the container image.
 	parts = append(parts, currentDateBlock())
+
+	// Always-on persona + capability contract. Injected on EVERY
+	// request (no condition) right after the date block so the model
+	// always knows its identity, what it can/can't produce, and the
+	// core behaviour rules — even in a brand-new text-only chat with
+	// no file, no memory, and no custom instructions. The per-file
+	// Excel/Doc/Pptx prompts still append below when a file exists.
+	parts = append(parts, CapabilityBlock)
 
 	if s.prefsSvc != nil {
 		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
