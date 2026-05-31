@@ -1280,153 +1280,70 @@ func (s *MessageService) ragContext(ctx context.Context, conv *model.Conversatio
 //
 // Any subset may be empty. “ragQuery“ is the most-recent user
 // message content used as the retrieval query; pass "" to skip RAG.
-// bangkokZone is a fixed UTC+7 location used for the system-prompt
-// date block. A fixed zone (not time.LoadLocation) keeps the binary
-// independent of the OS tzdata package — Thailand has no DST so the
-// offset is constant.
-var bangkokZone = time.FixedZone("Asia/Bangkok", 7*60*60)
-
-// currentDateBlock renders the "what is today" line prepended to the
-// system prompt on every request. Both an ISO date (machine-clear)
-// and a human-readable form are included so the model parses it
-// unambiguously. Time is included so "this morning"/"tonight" style
-// questions also anchor correctly.
-func currentDateBlock() string {
-	now := time.Now().In(bangkokZone)
-	return fmt.Sprintf(
-		"Current date and time: %s (%s) %s, Asia/Bangkok (UTC+7). "+
-			"Treat this as the present moment when answering anything "+
-			"time-relative (today, this year, recent, latest, etc.).",
-		now.Format("2006-01-02"),
-		now.Format("Monday"),
-		now.Format("15:04"),
-	)
-}
-
-// CapabilityBlock is the always-on persona + capability contract
-// injected on EVERY request (right after the date block, before any
-// memory / file / RAG context). It exists because the per-file
-// Excel/Doc/Pptx capability prompts only inject once the conversation
-// holds an uploaded file — so a plain text-only chat used to ship with
-// NO statement of what the assistant can or can't do. That let the
-// model hallucinate capabilities ("I'll draw a chart") it has no way to
-// fulfil, and left tone / language behaviour entirely to the base
-// model's defaults (the ครับ/ค่ะ mixing + "keeps asking instead of
-// doing" complaints). This block fixes the floor; the richer per-file
-// prompts (excelContext / docContext / pptxContext) still layer on top
-// unchanged when a file is present.
-const CapabilityBlock = `<capabilities>
-You are SRAN Chat, an AI assistant.
-
-What you CAN do:
-- Answer questions, have conversations, help with analysis and writing
-- Remember user preferences and facts across conversations (via save_memory tool)
-- Search user's past conversations (via search_past_conversations tool)
-- Generate Excel (.xlsx), Word (.docx), PDF, and PowerPoint (.pptx) files when the user uploads a file or asks to create a document
-- Create charts and graphs INSIDE Excel and PowerPoint files (not inline in chat)
-- Process and analyze uploaded files (images, documents, spreadsheets)
-
-What you CANNOT do:
-- Display charts, graphs, or visualizations inline in the chat — you can only create them inside downloadable files
-- Execute code or run programs
-- Search the internet or access external websites
-- Generate or edit images
-- Access real-time data (stock prices, weather, live scores)
-
-Important behavior rules:
-- When the user asks you to decide or choose something, make a choice and proceed immediately — do not ask for confirmation repeatedly
-- If the user says "เลือกมาเอง", "เลือกให้", "pick for me", or similar — choose the best option and act on it right away
-- Match the user's language. If they write in Thai, respond in Thai. If English, respond in English
-- Use consistent sentence endings throughout the conversation. Pick either polite masculine (ครับ) or polite feminine (ค่ะ/คะ) based on context and stick with it — never mix ครับ/ค่ะ in the same message
-- Be direct, helpful, and action-oriented. Prefer doing over asking
-</capabilities>`
-
 func (s *MessageService) buildSystemPrefix(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
 	conv *model.Conversation,
 	ragQuery string,
+	resolvedModel string,
 ) string {
-	text, _ := s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery)
+	text, _ := s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, resolvedModel)
 	return text
 }
 
-// buildSystemPrefixWithSources is the S7 variant: assembles the
-// same prefix as buildSystemPrefix AND returns the ContextSource
-// list each block contributed (memory entries, state goal).
+// buildSystemPrefixWithSources assembles the system prompt through the
+// 13-layer PromptCompiler and returns the ContextSource list the memory
+// + state layers contributed (S7 attribution: "how did the AI know X?").
 //
-// File / RAG / Excel / Doc / Pptx blocks DO NOT emit sources yet
-// — wiring them is a separate session (each context builder needs
-// its own *WithSources variant). For S7 the attribution covers
-// memory + state + compaction + search-tool which captures the
-// primary "how did the AI know X?" stories.
+// The compiler owns the persona / identity / behaviour / tool-policy /
+// per-model layers (1–12). The file / RAG / Excel / Doc / Pptx context
+// (layer 13) is pre-rendered HERE because it needs the file + KB repos
+// the compiler deliberately doesn't hold, then handed in as strings.
+//
+// resolvedModel is the concrete model id chosen for this turn (after
+// auto-resolution); it drives the per-model adapter layer.
 func (s *MessageService) buildSystemPrefixWithSources(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
 	conv *model.Conversation,
 	ragQuery string,
+	resolvedModel string,
 ) (string, []ContextSource) {
-	parts := make([]string, 0, 6)
-	sources := make([]ContextSource, 0, 8)
-
-	// Current date/time — injected on EVERY request (never cached) so
-	// the model anchors time-relative answers ("today", "this year",
-	// "latest") to the real present instead of its training cutoff.
-	// Without this the model defaults to its cutoff and answers e.g.
-	// "2024" in 2026. Bangkok is the product's home timezone; we use a
-	// fixed UTC+7 zone rather than time.LoadLocation so the build
-	// doesn't depend on tzdata being present in the container image.
-	parts = append(parts, currentDateBlock())
-
-	// Always-on persona + capability contract. Injected on EVERY
-	// request (no condition) right after the date block so the model
-	// always knows its identity, what it can/can't produce, and the
-	// core behaviour rules — even in a brand-new text-only chat with
-	// no file, no memory, and no custom instructions. The per-file
-	// Excel/Doc/Pptx prompts still append below when a file exists.
-	parts = append(parts, CapabilityBlock)
-
-	if s.prefsSvc != nil {
-		if p := s.prefsSvc.BuildInstructionsBlock(ctx, tenantID, userID); p != "" {
-			parts = append(parts, p)
-		}
+	in := CompileContext{
+		Model:       resolvedModel,
+		Conv:        conv,
+		TenantID:    tenantID,
+		UserID:      userID,
+		CurrentTime: time.Now(),
+		ActiveTools: s.activeToolNames(conv),
 	}
-	if s.memorySvc != nil && conv != nil && conv.MemoryEnabled {
-		// Policy block fires whenever memory is enabled — even for a
-		// brand-new user with zero saved memories — so the model
-		// always knows it should save proactively. The saved-facts
-		// block (if any) is appended right after so the model sees
-		// the directive first and then what's already on file.
-		parts = append(parts, MemoryPolicyBlock)
-		if mem, srcs := s.memorySvc.BuildMemoryContextWithSources(ctx, userID, tenantID); mem != "" {
-			parts = append(parts, mem)
-			sources = append(sources, srcs...)
-		}
-	}
-	if s.stateSvc != nil && conv != nil {
-		if st, srcs := s.stateSvc.BuildStateContextWithSources(ctx, conv.ID, userID, tenantID); st != "" {
-			parts = append(parts, st)
-			sources = append(sources, srcs...)
-		}
-	}
+	// Layer 13 inputs — built with the file/KB repos and gated exactly
+	// as before (each returns "" when its precondition isn't met).
 	if conv != nil {
-		if rag := s.ragContext(ctx, conv, ragQuery); rag != "" {
-			parts = append(parts, rag)
-		}
-		if f := s.fileContext(ctx, tenantID, conv.ID); f != "" {
-			parts = append(parts, f)
-		}
-		if x := s.excelContext(ctx, tenantID, conv.ID); x != "" {
-			parts = append(parts, x)
-		}
-		if d := s.docContext(ctx, tenantID, conv.ID); d != "" {
-			parts = append(parts, d)
-		}
-		if p := s.pptxContext(ctx, tenantID, conv.ID); p != "" {
-			parts = append(parts, p)
-		}
+		in.RAGContext = s.ragContext(ctx, conv, ragQuery)
+		in.FileContext = s.fileContext(ctx, tenantID, conv.ID)
+		in.ExcelContext = s.excelContext(ctx, tenantID, conv.ID)
+		in.DocContext = s.docContext(ctx, tenantID, conv.ID)
+		in.PptxContext = s.pptxContext(ctx, tenantID, conv.ID)
 	}
-	return strings.Join(parts, "\n\n"), sources
+	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc)
+	return pc.Build(ctx, in)
+}
+
+// activeToolNames returns the names of the tools active for this
+// conversation — the same set ToolDefs attaches to the gateway request
+// — so the Tool Policy layer advertises only tools the model can
+// actually call (e.g. no save_memory when memory is disabled).
+func (s *MessageService) activeToolNames(conv *model.Conversation) []string {
+	if s.toolExec == nil {
+		return nil
+	}
+	defs := s.toolExec.ToolDefs(conv)
+	names := make([]string, 0, len(defs))
+	for i := range defs {
+		names = append(names, defs[i].Function.Name)
+	}
+	return names
 }
 
 // excelContext renders the Phase-4 Excel system block when the
@@ -2097,7 +2014,7 @@ func (s *MessageService) compileAndBuildRequest(
 	// ContextSource list each block contributed. Compile uses the
 	// MOST RECENT call's sources via CompiledContext.Sources.
 	build := func() (string, []ContextSource) {
-		return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery)
+		return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, modelID)
 	}
 
 	if s.compiler == nil {
@@ -2273,7 +2190,7 @@ func (s *MessageService) InspectContext(
 		// Synthesize a CompiledContext so callers see the same
 		// shape they'd get with the compiler wired — just with no
 		// compaction ever applied.
-		prefix := s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery)
+		prefix := s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery, conv.ModelID)
 		budget := CalculateBudget(conv.ModelID, EstimateTokens(prefix)+4, 0, 0, 0, numTools*perToolTokens)
 		return &CompiledContext{
 			SystemPrefix:  prefix,
@@ -2290,7 +2207,7 @@ func (s *MessageService) InspectContext(
 		History:  history,
 		ImageURLs: imageURLs,
 		BuildPrefix: func() (string, []ContextSource) {
-			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery)
+			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, conv.ModelID)
 		},
 		NumTools: numTools,
 	})
