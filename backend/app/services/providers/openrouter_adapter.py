@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, AsyncIterator
 
+import httpx
+
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk
 from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.http_client import get_provider_client
-from app.services.providers.error_handler import call_with_retry
+from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.openai_adapter import _parse_sse_line
 from app.services.providers.parsers import parse_openai_response
 
@@ -122,7 +124,18 @@ class OpenRouterAdapter(BaseProviderAdapter):
         async with client.stream(
             "POST", "/chat/completions", json=body, headers=headers
         ) as resp:
-            resp.raise_for_status()
+            # Map an HTTP error to a domain exception BEFORE any chunk is
+            # yielded so the route layer's streaming-fallback loop sees a
+            # GatewayError it can classify — a raw httpx.HTTPStatusError
+            # fails its isinstance(_, GatewayError) gate and would skip
+            # fallback. aread() loads the body so map_provider_error can
+            # parse the error payload. Mirrors the openai/anthropic path.
+            if resp.status_code >= 400:
+                await resp.aread()
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise map_provider_error(exc, self.provider_name) from exc
             async for line in resp.aiter_lines():
                 chunk = _parse_sse_line(line)
                 if chunk is not None:
