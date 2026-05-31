@@ -59,4 +59,12 @@ type Conversation struct {
 	ReasoningEnabled     bool
 	ReasoningMode        string
 	ShowReasoningSummary bool
+
+	// LockedModel pins the concrete model an "auto" conversation
+	// resolved to on its first turn (Fix 5 — migration 020). Once set,
+	// resolveAutoIfNeeded reuses it instead of re-running the per-turn
+	// heuristic, so the model can't swap mid-conversation. Empty = not
+	// locked yet (or the conversation uses an explicit model_id, which
+	// is inherently stable). Cleared when the user changes the picker.
+	LockedModel string
 }
