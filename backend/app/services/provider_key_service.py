@@ -44,6 +44,36 @@ def _mask(raw_key: str) -> str:
     return raw_key[:4] + "••••" + raw_key[-4:]
 
 
+# Markers that flag an env var as a dev placeholder rather than a real
+# API key. A non-empty placeholder (e.g. "sk-ant-...") would otherwise be
+# handed to the provider and 401; the dispatch/fallback chains only kick
+# in when a key is MISSING, so we treat placeholders as missing. Real keys
+# are long (OpenAI ~164, Gemini ~39, Anthropic ~100+) with none of these
+# markers, so this never rejects a live key.
+_KEY_PLACEHOLDER_MARKERS = (
+    "...",
+    "changeme",
+    "change-me",
+    "placeholder",
+    "your-",
+    "your_",
+    "example",
+    "dummy",
+    "xxxx",
+)
+
+
+def _looks_like_placeholder_key(key: str | None) -> bool:
+    """True when ``key`` is empty or an obvious dev placeholder."""
+    if not key:
+        return True
+    k = key.strip()
+    if len(k) < 20:
+        return True
+    low = k.lower()
+    return any(marker in low for marker in _KEY_PLACEHOLDER_MARKERS)
+
+
 _ENV_KEYS = {
     "openai": lambda: settings.openai_api_key,
     "anthropic": lambda: settings.anthropic_api_key,
@@ -125,10 +155,15 @@ class ProviderKeyService:
         if provider and provider.api_key_encrypted:
             return [_decode(provider.api_key_encrypted)]
 
-        # Fallback: env var
+        # Fallback: env var. Skip dev placeholders (e.g. "sk-ant-...") so
+        # the dispatch/fallback chain moves to a keyed provider instead of
+        # 401-ing — makes default->Claude (Fix 4) safe when
+        # ANTHROPIC_API_KEY is still a placeholder. No-op for real keys.
         env_fn = _ENV_KEYS.get(provider_name)
         env_key = env_fn() if env_fn else None
-        return [env_key] if env_key else []
+        if _looks_like_placeholder_key(env_key):
+            return []
+        return [env_key]
 
     # Backward compat alias
     def get_api_key(self, session: Session, provider_name: str) -> str | None:
@@ -203,10 +238,15 @@ class ProviderKeyService:
         if provider and provider.api_key_encrypted:
             return [_decode(provider.api_key_encrypted)]
 
-        # Fallback: env var
+        # Fallback: env var. Skip dev placeholders (e.g. "sk-ant-...") so
+        # the dispatch/fallback chain moves to a keyed provider instead of
+        # 401-ing — makes default->Claude (Fix 4) safe when
+        # ANTHROPIC_API_KEY is still a placeholder. No-op for real keys.
         env_fn = _ENV_KEYS.get(provider_name)
         env_key = env_fn() if env_fn else None
-        return [env_key] if env_key else []
+        if _looks_like_placeholder_key(env_key):
+            return []
+        return [env_key]
 
     # Backward compat alias (async)
     async def get_api_key_async(
