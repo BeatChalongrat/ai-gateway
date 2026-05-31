@@ -2164,6 +2164,14 @@ func (s *MessageService) resolveAutoIfNeeded(
 	if !IsAutoModel(conv.ModelID) {
 		return conv.ModelID
 	}
+	// Fix 5 — model lock. Once an auto conversation has resolved a
+	// concrete model, reuse it for every later turn so the model can't
+	// swap mid-chat (which made follow-ups behave inconsistently). The
+	// lock is cleared when the user changes the picker (see
+	// ConversationRepo.UpdateModel), so a switch back to auto re-resolves.
+	if locked := strings.TrimSpace(conv.LockedModel); locked != "" {
+		return locked
+	}
 	hasFiles := strings.TrimSpace(s.fileContext(ctx, tenantID, conv.ID)) != ""
 	hasImages := len(imageURLs) > 0
 	available := []string{}
@@ -2181,6 +2189,17 @@ func (s *MessageService) resolveAutoIfNeeded(
 	resolved := ResolveAutoModelWithReasoning(
 		message, hasFiles, hasImages, historyLen, available, preferReasoning,
 	)
+	// Fix 5 — persist the lock so later turns skip re-routing. Best-
+	// effort: on a write failure we simply re-resolve next turn (same
+	// model, given a stable catalog), so never fail the user's send.
+	if resolved != "" {
+		if err := s.conversations.SetLockedModel(ctx, tenantID, conv.ID, resolved); err != nil {
+			slog.Warn("model_lock_persist_failed",
+				"conversation_id", conv.ID.String(), "err", err)
+		} else {
+			conv.LockedModel = resolved
+		}
+	}
 	slog.Info("auto_model_resolved",
 		"conversation_id", conv.ID.String(),
 		"resolved_model", resolved,
