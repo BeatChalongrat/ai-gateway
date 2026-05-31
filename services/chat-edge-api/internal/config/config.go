@@ -83,9 +83,13 @@ type Config struct {
 	GatewayAPIKey string `env:"GATEWAY_API_KEY" envDefault:""`
 
 	// Max conversation messages threaded into a Gateway call. The
-	// model has its own context window; we cap at the service layer
-	// to keep latency + cost bounded.
-	MaxContextMessages int `env:"MAX_CONTEXT_MESSAGES" envDefault:"50"`
+	// model has its own context window. The S4 ContextCompiler trims
+	// history by TOKEN budget (per-model, see context_budget.go), so
+	// this message count is now just a generous safety ceiling on how
+	// many rows we load — not the real context limit. Kept high so the
+	// token budget is the sole decider (matches Claude.ai behaviour);
+	// the repo layer still hard-caps the DB load (see message_repo.go).
+	MaxContextMessages int `env:"MAX_CONTEXT_MESSAGES" envDefault:"1000"`
 
 	// JSON-encoded list of models exposed to the chat UI. Phase 1
 	// keeps this list flat (no per-tenant restriction; admin features
