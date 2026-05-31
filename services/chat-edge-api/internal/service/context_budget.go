@@ -73,11 +73,13 @@ var ModelContextLimits = map[string]int{
 	"claude-3-sonnet":   190000,
 	"claude-3-haiku":    190000,
 
-	// Google — Gemini 1.5 Pro is 1M but bill model rate-limits + our
-	// extractor cost balance favours a saner cap.
-	"gemini-1.5-pro":   190000,
-	"gemini-1.5-flash": 190000,
-	"gemini-2.0-flash": 190000,
+	// Google — Gemini 1.5/2.0 advertise a 1M window. We budget against
+	// 500K: half the hard cap leaves generous headroom for the
+	// conservative estimator's overshoot while still letting long
+	// documents ride along (far above the OpenAI/Anthropic tiers).
+	"gemini-1.5-pro":   500000,
+	"gemini-1.5-flash": 500000,
+	"gemini-2.0-flash": 500000,
 }
 
 // defaultContextLimit is the fallback for models we haven't pinned
