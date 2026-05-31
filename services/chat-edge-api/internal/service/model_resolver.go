@@ -149,6 +149,36 @@ func ResolveAutoModel(
 	)
 }
 
+// defaultModelPreference is the ordered set of models Auto prefers as a
+// conversation's non-reasoning workhorse (Fix 4), best-first. The first
+// id present in the catalog wins. Claude 3.5 Sonnet leads: 190K context
+// + strong instruction-following make it a better default than the
+// gpt-4o-mini fast tier the resolver used before. Claude Sonnet 4 and
+// Claude 3.5 Haiku follow for catalogs that carry them instead.
+//
+// Reasoning turns are NOT affected — they resolve to a reasoning-capable
+// model earlier in ResolveAutoModelWithReasoning. This preference only
+// changes the non-reasoning default/flagship target.
+var defaultModelPreference = []string{
+	"claude-sonnet-4-20250514",
+	"claude-3-5-sonnet-20241022",
+	"claude-3-5-haiku-20241022",
+}
+
+// preferredDefaultModel returns the first defaultModelPreference entry
+// present in availableIDs, or "" when none are in the catalog (so the
+// caller keeps the legacy fast/flagship behaviour).
+func preferredDefaultModel(availableIDs []string) string {
+	for _, want := range defaultModelPreference {
+		for _, id := range availableIDs {
+			if id == want {
+				return want
+			}
+		}
+	}
+	return ""
+}
+
 // ResolveAutoModelWithReasoning extends ResolveAutoModel with the
 // T4 reasoning preference: when ``reasoningEnabled`` is true and
 // the catalog has at least one reasoning-capable id, that id wins
@@ -210,6 +240,18 @@ func ResolveAutoModelWithReasoning(
 	}
 	if flagship == "" {
 		return availableIDs[0]
+	}
+
+	// Fix 4 — prefer Claude Sonnet as the non-reasoning default. When a
+	// preferred Claude model is in the catalog it becomes BOTH the
+	// simple-turn default and the flagship target (190K context + strong
+	// follow-up handling). If the Anthropic key is invalid the gateway
+	// falls back to a working provider at dispatch time, so this is safe
+	// even without a live Claude key. No-op when no preferred model is
+	// present (keeps the gpt fast/flagship tiers).
+	if preferred := preferredDefaultModel(availableIDs); preferred != "" {
+		fast = preferred
+		flagship = preferred
 	}
 
 	if hasImages {
