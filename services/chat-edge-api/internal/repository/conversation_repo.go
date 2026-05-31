@@ -35,12 +35,12 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
 		VALUES ($1, $2, $3)
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
 	`
 	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
 		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -56,7 +56,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
 		FROM chat.conversations
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
@@ -65,7 +65,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -124,7 +124,7 @@ func (r *ConversationRepo) ListByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -149,7 +149,7 @@ func (r *ConversationRepo) ListByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
 		); err != nil {
 			return nil, uuid.Nil, fmt.Errorf("list scan: %w", err)
 		}
@@ -188,7 +188,7 @@ func (r *ConversationRepo) SearchByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -209,7 +209,7 @@ func (r *ConversationRepo) SearchByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
 		); err != nil {
 			return nil, fmt.Errorf("search scan: %w", err)
 		}
@@ -305,14 +305,39 @@ func (r *ConversationRepo) UpdateTitle(ctx context.Context, tenantID, convID uui
 // bumps “updated_at“. Tenant-scoped via the WHERE clause so a
 // wrong tenant_id can't reassign someone else's conversation.
 func (r *ConversationRepo) UpdateModel(ctx context.Context, tenantID, convID uuid.UUID, modelID string) error {
+	// Clearing locked_model here is the "user override" half of Fix 5:
+	// when the user changes the picker we drop any auto-lock so a switch
+	// back to "auto" re-resolves fresh, and an explicit pick is stable on
+	// its own (model_id is concrete).
 	const q = `
 		UPDATE chat.conversations
-		SET model_id = $3, updated_at = NOW()
+		SET model_id = $3, locked_model = '', updated_at = NOW()
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
 	tag, err := r.db.Exec(ctx, q, convID, tenantID, modelID)
 	if err != nil {
 		return fmt.Errorf("update model: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetLockedModel pins the concrete model an "auto" conversation resolved
+// to on its first turn (Fix 5). Best-effort from the send path: a failed
+// write just means the next turn re-resolves (to the same model anyway,
+// given a stable catalog), so the caller logs and continues rather than
+// failing the user's message. Tenant-scoped via the WHERE clause.
+func (r *ConversationRepo) SetLockedModel(ctx context.Context, tenantID, convID uuid.UUID, modelID string) error {
+	const q = `
+		UPDATE chat.conversations
+		SET locked_model = $3
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
+	`
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, modelID)
+	if err != nil {
+		return fmt.Errorf("set locked model: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
