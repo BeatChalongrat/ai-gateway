@@ -52,7 +52,8 @@ func TestIsComplexQuery(t *testing.T) {
 // TestAutoThinkingPrefersWorkingReasoningModel is the core Auto
 // Thinking Mode contract: a complex turn resolves to a reasoning model
 // (o3-mini — the first reasoning-capable id in the catalog and the one
-// with a valid key here), while a simple turn stays on the fast tier.
+// with a valid key here), while a simple turn defaults to Claude Sonnet
+// (Fix 4) rather than the gpt-4o-mini fast tier.
 func TestAutoThinkingPrefersWorkingReasoningModel(t *testing.T) {
 	ids := catalogIDs()
 
@@ -74,11 +75,29 @@ func TestAutoThinkingPrefersWorkingReasoningModel(t *testing.T) {
 	if preferSimple {
 		t.Fatal("expected simple query NOT to be flagged complex")
 	}
+	// Fix 4 — the non-reasoning default is now Claude Sonnet 4 (200K
+	// context + strong follow-up handling) instead of the gpt-4o-mini
+	// fast tier, since claude-sonnet-4-20250514 is the catalog's Claude.
+	// It happens to be reasoning-capable, but reasoning stays OFF for a
+	// simple turn — the reasoning param is gated by the conversation's
+	// reasoning setting (preferReasoning here is false), not by the
+	// model id, so the default model being capable doesn't make it think.
 	gotSimple := ResolveAutoModelWithReasoning(simpleMsg, false, false, 1, ids, preferSimple)
-	if isReasoningCapableID(gotSimple) {
-		t.Fatalf("simple auto turn resolved to reasoning model %q, want a fast model", gotSimple)
+	if gotSimple != "claude-sonnet-4-20250514" {
+		t.Fatalf("simple auto turn resolved to %q, want claude-sonnet-4-20250514", gotSimple)
 	}
-	if gotSimple != "gpt-4o-mini" {
-		t.Fatalf("simple auto turn resolved to %q, want gpt-4o-mini", gotSimple)
+}
+
+// TestPreferredDefaultModel checks the Fix 4 preference: Claude Sonnet
+// wins when present; otherwise the resolver falls back to the gpt fast
+// tier so catalogs without Claude keep the legacy behaviour.
+func TestPreferredDefaultModel(t *testing.T) {
+	withClaude := []string{"gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022"}
+	if got := ResolveAutoModelWithReasoning("hi", false, false, 1, withClaude, false); got != "claude-3-5-sonnet-20241022" {
+		t.Fatalf("with Claude in catalog, simple turn = %q, want claude-3-5-sonnet-20241022", got)
+	}
+	noClaude := []string{"gpt-4o", "gpt-4o-mini"}
+	if got := ResolveAutoModelWithReasoning("hi", false, false, 1, noClaude, false); got != "gpt-4o-mini" {
+		t.Fatalf("without Claude, simple turn = %q, want gpt-4o-mini (legacy fast tier)", got)
 	}
 }
