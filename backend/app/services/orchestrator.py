@@ -2061,6 +2061,73 @@ class GatewayOrchestrator:
         except Exception as exc:  # never let key lookup break routing
             log.warning("configured_providers_lookup_failed", error=str(exc))
 
+    async def _smart_select(self, payload, session, log):
+        """Provider-agnostic model selection for ``auto`` + routing_hints.
+
+        Builds the candidate pool from the DB-backed model registry
+        (all providers), keeps only models whose provider resolves a
+        valid key right now (proactive filter — provider_keys
+        valid/untested, legacy, or a non-placeholder env var), then
+        delegates the capability/cost ranking to ``smart_router``.
+
+        Returns a ``SmartSelection`` or ``None`` when no provider holds a
+        usable key (caller raises a clear error). Never raises on a
+        per-provider key lookup failure — that provider is just skipped.
+        """
+        from app.services import smart_router
+        from app.services.providers.model_registry import (
+            get_all_candidates,
+            get_all_providers,
+        )
+
+        registry_providers = get_all_providers()
+        usable: set[str] = set()
+        if session is not None:
+            for provider in registry_providers:
+                try:
+                    key = await self.provider_key_service.get_api_key_async(
+                        session, provider
+                    )
+                except Exception as exc:  # never let one provider break routing
+                    log.warning(
+                        "smart_routing_key_lookup_failed",
+                        provider=provider,
+                        error=str(exc),
+                    )
+                    key = None
+                if key:
+                    usable.add(provider)
+        else:
+            # No session (defensive / test path): can't verify keys, so
+            # offer the whole registry and lean on reactive dispatch
+            # fallback if a key turns out bad.
+            usable = set(registry_providers)
+
+        if not usable:
+            return None
+
+        # Tested-valid subset → tie-break preference (a proven key beats an
+        # untested one at equal cost, avoiding a dispatch-time 401 hop).
+        proven: frozenset[str] = frozenset()
+        if session is not None:
+            try:
+                proven = frozenset(
+                    await self.provider_key_service.providers_with_valid_keys_async(
+                        session
+                    )
+                ) & usable
+            except Exception as exc:  # tie-break only — never fatal
+                log.warning("smart_routing_proven_lookup_failed", error=str(exc))
+
+        candidates = [
+            c
+            for c in get_all_candidates()
+            if c.provider in usable and getattr(c, "supports_streaming", True)
+        ]
+        return smart_router.select_model(
+            payload.routing_hints, candidates, proven_providers=proven
+        )
+
     async def _apply_router_chain(
         self,
         ctx: RequestContext,
@@ -2090,6 +2157,41 @@ class GatewayOrchestrator:
         if payload.model != "auto":
             log.info("routing_decision", router="explicit", model=payload.model)
             return "explicit", None
+
+        # Provider-agnostic smart routing (T-smart-routing). When the
+        # caller sends ``routing_hints`` alongside ``model="auto"``, pick a
+        # concrete model from providers that hold a valid key NOW — no
+        # hardcoded default provider, and a dead / rotated key never yields
+        # an empty reply because a keyless provider simply never enters the
+        # pool. This sets ``payload.model`` to a concrete id and returns, so
+        # ``select_route`` then resolves it on the explicit path. Older
+        # clients that send no hints fall through to the legacy
+        # semantic → keyword → service chain below, unchanged.
+        hints = getattr(payload, "routing_hints", None)
+        if hints is not None:
+            selection = await self._smart_select(payload, session, log)
+            if selection is not None:
+                payload.model = selection.candidate.model
+                log.info(
+                    "smart_routing",
+                    selected_model=selection.candidate.model,
+                    provider=selection.candidate.provider,
+                    reason=selection.reason,
+                    hints=hints.model_dump(exclude_defaults=True),
+                    candidates_count=selection.candidates_count,
+                    filtered_count=selection.filtered_count,
+                )
+                return "smart", None
+            # No candidate ⇒ no provider holds a usable key. Surface a
+            # clear error instead of an empty stream (Fix Priority #2).
+            from app.core.exceptions import ProviderUnavailableError
+
+            log.warning("smart_routing_no_usable_provider")
+            raise ProviderUnavailableError(
+                "No provider with a valid API key is available for auto "
+                "routing. Configure at least one provider key.",
+                details={"reason": "no_usable_providers"},
+            )
 
         # Explicit reasoning intent on an ``auto`` request forces the
         # reasoning candidate pool (P0 unlock). Without this, ``auto`` +

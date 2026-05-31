@@ -6,9 +6,37 @@ import pytest
 
 from app.services.providers.model_tiers import (
     TIERS,
+    canonical_model,
     get_fallback_chain,
     get_tier,
 )
+
+
+# ---------------------------------------------------------------------------
+# dated / versioned model id canonicalization (fallback regression)
+# ---------------------------------------------------------------------------
+
+def test_canonical_model_strips_anthropic_date():
+    assert canonical_model("claude-sonnet-4-20250514") == "claude-sonnet-4"
+
+
+def test_canonical_model_strips_openai_date():
+    assert canonical_model("gpt-4o-2024-08-06") == "gpt-4o"
+
+
+def test_canonical_model_keeps_non_date_version_suffix():
+    # ``-5`` is a model version, not a date — must NOT be stripped.
+    assert canonical_model("claude-sonnet-4-5") == "claude-sonnet-4-5"
+
+
+def test_dated_anthropic_id_resolves_tier_and_chain():
+    # Regression: the auto-router emits the dated id; without
+    # canonicalization the tier lookup missed and fallback died with
+    # "No fallback chain registered", surfacing an empty response.
+    assert get_tier("claude-sonnet-4-20250514") == "standard"
+    chain = get_fallback_chain("claude-sonnet-4-20250514", "anthropic")
+    pairs = {(c["provider"], c["model"]) for c in chain}
+    assert ("openai", "gpt-4o-mini") in pairs
 
 
 # ---------------------------------------------------------------------------
