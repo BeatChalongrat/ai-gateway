@@ -339,11 +339,19 @@ def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
             int(details.get("reasoning_tokens", 0) or 0)
             if isinstance(details, dict) else 0
         )
+        # Cached-prompt hit under ``prompt_tokens_details.cached_tokens``
+        # on the trailing usage chunk (OpenAI). 0 when absent.
+        prompt_details = usage_dict.get("prompt_tokens_details") or {}
+        cached_tok = (
+            int(prompt_details.get("cached_tokens", 0) or 0)
+            if isinstance(prompt_details, dict) else 0
+        )
         usage = ProviderUsage(
             prompt_tokens=int(usage_dict.get("prompt_tokens", 0) or 0),
             completion_tokens=int(usage_dict.get("completion_tokens", 0) or 0),
             total_tokens=int(usage_dict.get("total_tokens", 0) or 0),
             reasoning_tokens=reasoning_tok,
+            cached_prompt_tokens=cached_tok,
         )
 
     choices = data.get("choices", [])

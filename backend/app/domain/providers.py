@@ -28,6 +28,12 @@ class ProviderUsage:
     completion_tokens: int = 0
     total_tokens: int = 0
     reasoning_tokens: int = 0
+    # Subset of ``prompt_tokens`` that the provider served from its prompt
+    # cache. OpenAI returns this for free under
+    # ``usage.prompt_tokens_details.cached_tokens`` (cached input bills at a
+    # reduced rate). 0 = no cache hit, or the provider doesn't report it —
+    # so the cost path is byte-identical for every non-OpenAI provider.
+    cached_prompt_tokens: int = 0
 
 
 @dataclass(frozen=True)
