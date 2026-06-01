@@ -183,7 +183,15 @@ class TestAnthropicRequestMapping:
         ]
         await adapter.chat(_make_payload(), msgs)
         body = json.loads(route.calls[0].request.content)
-        assert body["system"] == "You are helpful"
+        # P1 Item 4 — system is now a content-block array carrying a
+        # cache_control breakpoint (prompt caching), not a plain string.
+        assert body["system"] == [
+            {
+                "type": "text",
+                "text": "You are helpful",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
         assert len(body["messages"]) == 1
         assert body["messages"][0]["role"] == "user"
 

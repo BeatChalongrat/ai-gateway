@@ -87,7 +87,24 @@ class AnthropicAdapter(BaseProviderAdapter):
             "messages": [self._serialize_message(m) for m in user_messages],
         }
         if system_text:
-            body["system"] = system_text
+            # P1 Item 4 — prompt caching. Send ``system`` as a content-block
+            # array with a ``cache_control`` breakpoint so Claude caches the
+            # large, stable SRAN persona prefix (cached reads bill ~10% of
+            # input). A plain string (the legacy shape) cannot carry
+            # cache_control. GA on anthropic-version 2023-06-01 — no beta
+            # header required. Falls back to the plain string when disabled.
+            from app.core.config import settings
+
+            if getattr(settings, "anthropic_prompt_caching_enabled", True):
+                body["system"] = [
+                    {
+                        "type": "text",
+                        "text": system_text,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                body["system"] = system_text
         if stream:
             body["stream"] = True
 
@@ -441,6 +458,9 @@ class AnthropicAdapter(BaseProviderAdapter):
         current_event: str | None = None
         input_tokens = 0
         output_tokens = 0
+        # P1 Item 4 — prompt-cache token counters from message_start.usage.
+        cache_read = 0
+        cache_creation = 0
         final_model = initial_model
         final_stop: str | None = None
         # Per-response set of content-block indices we've seen
@@ -474,6 +494,11 @@ class AnthropicAdapter(BaseProviderAdapter):
                 msg = data.get("message") or {}
                 usage = msg.get("usage") or {}
                 input_tokens = int(usage.get("input_tokens", 0) or 0)
+                # P1 Item 4 — cache read/write counts ride on message_start.
+                cache_read = int(usage.get("cache_read_input_tokens", 0) or 0)
+                cache_creation = int(
+                    usage.get("cache_creation_input_tokens", 0) or 0
+                )
                 # message_start sometimes includes an initial
                 # output_tokens=1 counter — capture it as a baseline
                 # but message_delta will override with the final value.
@@ -603,14 +628,20 @@ class AnthropicAdapter(BaseProviderAdapter):
                 # Final chunk: finish_reason + usage. Emitted even
                 # when text / tool_use deltas already yielded so
                 # downstream can attach token counts to this request.
+                # P1 Item 4 — fold cache reads/writes into the prompt total
+                # and surface them so the streaming cost path bills cached
+                # input at the reduced Anthropic rate.
+                full_prompt = input_tokens + cache_read + cache_creation
                 yield ProviderStreamChunk(
                     delta="",
                     finish_reason=final_stop or "stop",
                     model=final_model,
                     usage=ProviderUsage(
-                        prompt_tokens=input_tokens,
+                        prompt_tokens=full_prompt,
                         completion_tokens=output_tokens,
-                        total_tokens=input_tokens + output_tokens,
+                        total_tokens=full_prompt + output_tokens,
+                        cached_prompt_tokens=cache_read,
+                        cache_creation_prompt_tokens=cache_creation,
                     ),
                 )
 
