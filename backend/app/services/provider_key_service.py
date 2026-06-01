@@ -20,6 +20,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import httpx
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -28,6 +29,8 @@ from app.core.config import settings
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
 from app.repositories.provider_key_repository import ProviderKeyRepository
+
+logger = structlog.get_logger(__name__)
 
 
 def _encode(key: str) -> str:
@@ -72,6 +75,59 @@ def _looks_like_placeholder_key(key: str | None) -> bool:
         return True
     low = k.lower()
     return any(marker in low for marker in _KEY_PLACEHOLDER_MARKERS)
+
+
+def _is_placeholder_table_key(key: str | None) -> bool:
+    """Placeholder detection for keys persisted in ``provider_keys``.
+
+    Unlike :func:`_looks_like_placeholder_key` (the env-var gate) this does
+    NOT apply the ``len < 20`` heuristic: a stored key short enough to trip
+    that could still be a real, if unusual, credential, and the 401 auto-
+    invalidation path (B3) quarantines genuinely-bad stored keys at dispatch
+    time. We only reject the unmistakable dev stubs — empty values and the
+    known placeholder markers (``...``, ``changeme``, ``your-`` …), which is
+    exactly what an imported ``OPENROUTER_API_KEY=sk-or-...`` stub trips.
+    """
+    if not key or not key.strip():
+        return True
+    low = key.strip().lower()
+    return any(marker in low for marker in _KEY_PLACEHOLDER_MARKERS)
+
+
+def _filter_table_candidates(rows, provider_name: str) -> list[str]:
+    """Decode the active ``provider_keys`` rows into dispatchable keys.
+
+    Drops two classes of unusable key so they never enter the round-robin
+    pool:
+
+    * ``last_test_status == 'invalid'`` — a key a live test (or the 401
+      auto-invalidation path) has already proven bad.
+    * placeholder values (``sk-or-...``, ``changeme`` …) — a dev stub that
+      got imported into the table from a placeholder env var. Without this
+      the stub would 401 on ~1/N dispatches (N = pool size) and the user
+      would see an empty response on those turns. Previously the placeholder
+      gate only covered the env-var fallback path, NOT keys already
+      persisted in the table.
+
+    Each skipped placeholder is logged at WARNING so an admin can see why
+    a key they added is being ignored.
+    """
+    valid: list[str] = []
+    for r in rows:
+        if r.last_test_status == "invalid":
+            continue
+        decoded = _decode(r.api_key_encrypted)
+        if _is_placeholder_table_key(decoded):
+            logger.warning(
+                "provider_key_placeholder_skipped",
+                provider=provider_name,
+                key_id=str(r.id),
+                label=r.label,
+                reason="key value looks like a dev placeholder",
+            )
+            continue
+        valid.append(decoded)
+    return valid
 
 
 _ENV_KEYS = {
@@ -140,11 +196,7 @@ class ProviderKeyService:
         """
         repo = ProviderKeyRepository(session)
         rows = repo.list_active_by_provider(provider_name)
-        valid = [
-            _decode(r.api_key_encrypted)
-            for r in rows
-            if r.last_test_status != "invalid"
-        ]
+        valid = _filter_table_candidates(rows, provider_name)
         if valid:
             return valid
 
@@ -153,7 +205,9 @@ class ProviderKeyService:
             select(ProviderORM).where(ProviderORM.name == provider_name)
         ).scalar_one_or_none()
         if provider and provider.api_key_encrypted:
-            return [_decode(provider.api_key_encrypted)]
+            legacy = _decode(provider.api_key_encrypted)
+            if not _is_placeholder_table_key(legacy):
+                return [legacy]
 
         # Fallback: env var. Skip dev placeholders (e.g. "sk-ant-...") so
         # the dispatch/fallback chain moves to a keyed provider instead of
@@ -221,11 +275,7 @@ class ProviderKeyService:
             .order_by(ProviderKeyORM.created_at)
         )
         rows = result.scalars().all()
-        valid = [
-            _decode(r.api_key_encrypted)
-            for r in rows
-            if r.last_test_status != "invalid"
-        ]
+        valid = _filter_table_candidates(rows, provider_name)
         if valid:
             return valid
 
@@ -236,7 +286,9 @@ class ProviderKeyService:
             )
         ).scalar_one_or_none()
         if provider and provider.api_key_encrypted:
-            return [_decode(provider.api_key_encrypted)]
+            legacy = _decode(provider.api_key_encrypted)
+            if not _is_placeholder_table_key(legacy):
+                return [legacy]
 
         # Fallback: env var. Skip dev placeholders (e.g. "sk-ant-...") so
         # the dispatch/fallback chain moves to a keyed provider instead of
@@ -253,6 +305,67 @@ class ProviderKeyService:
         self, session: AsyncSession, provider_name: str
     ) -> str | None:
         return await self.get_active_key_async(session, provider_name)
+
+    # ------------------------------------------------------------------
+    # Auto-invalidation (B3) — quarantine a key the provider just rejected
+    # ------------------------------------------------------------------
+
+    def mark_invalid_by_value(
+        self, session: Session, provider_name: str, api_key: str
+    ) -> bool:
+        """Flag the active key whose value is ``api_key`` as ``invalid``.
+
+        Called from the dispatch path when a provider returns 401/403 for
+        a key we handed it: the credential is bad, so quarantine it out of
+        the round-robin pool (``_resolve_key_candidates`` skips
+        ``last_test_status == 'invalid'``) instead of letting it keep
+        burning ~1/N dispatches on auth failures. Idempotent; returns True
+        when a matching active row was flipped. Busts the resolved-key
+        cache so the change takes effect on the next dispatch.
+        """
+        repo = ProviderKeyRepository(session)
+        for r in repo.list_active_by_provider(provider_name):
+            if _decode(r.api_key_encrypted) == api_key:
+                repo.record_test_result(str(r.id), "invalid", None)
+                clear_keys_cache()
+                logger.warning(
+                    "provider_key_auto_invalidated",
+                    provider=provider_name,
+                    key_id=str(r.id),
+                    label=r.label,
+                    reason="provider rejected credential (401/403)",
+                )
+                return True
+        return False
+
+    async def mark_invalid_by_value_async(
+        self, session: AsyncSession, provider_name: str, api_key: str
+    ) -> bool:
+        """Async variant of :meth:`mark_invalid_by_value`."""
+        rows = (
+            await session.execute(
+                select(ProviderKeyORM).where(
+                    ProviderKeyORM.provider_name == provider_name,
+                    ProviderKeyORM.is_active == True,  # noqa: E712
+                )
+            )
+        ).scalars().all()
+        for r in rows:
+            if _decode(r.api_key_encrypted) == api_key:
+                r.last_tested_at = datetime.now(timezone.utc)
+                r.last_test_status = "invalid"
+                r.last_test_latency_ms = None
+                await session.flush()
+                clear_keys_cache()
+                logger.warning(
+                    "provider_key_auto_invalidated",
+                    provider=provider_name,
+                    key_id=str(r.id),
+                    label=r.label,
+                    reason="provider rejected credential (401/403)",
+                )
+                return True
+        return False
 
     def providers_with_valid_keys(self, session: Session) -> set[str]:
         """Providers that have at least one active, validated key.
@@ -415,13 +528,27 @@ class ProviderKeyService:
     async def _test_openrouter(self, api_key: str) -> dict:
         t0 = time.perf_counter()
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # IMPORTANT: hit ``/api/v1/key`` (auth-REQUIRED — returns the
+            # caller key's rate-limit / credit info) NOT ``/api/v1/models``.
+            # ``/models`` is a PUBLIC catalog endpoint that returns 200 for
+            # ANY bearer (even a bogus / placeholder key), so testing
+            # against it reports every key "valid" and gives operators
+            # false confidence. ``/key`` returns 401 for a bad credential,
+            # which is what a key test must actually verify. It costs no
+            # tokens.
             resp = await client.get(
-                "https://openrouter.ai/api/v1/models",
+                "https://openrouter.ai/api/v1/key",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             ms = round((time.perf_counter() - t0) * 1000)
             if resp.status_code == 200:
                 return {"valid": True, "latency_ms": ms, "error": None}
+            if resp.status_code in (401, 403):
+                return {
+                    "valid": False,
+                    "latency_ms": ms,
+                    "error": "Invalid API key (HTTP 401)",
+                }
             return {"valid": False, "latency_ms": ms, "error": f"HTTP {resp.status_code}"}
 
     # ------------------------------------------------------------------

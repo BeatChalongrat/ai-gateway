@@ -55,6 +55,22 @@ _FALLBACK_ERRORS = (ProviderError,)
 _MAX_LAYER1_HOPS = 2
 
 
+def _provider_status(exc: Exception) -> int | None:
+    """Extract the upstream HTTP status from a mapped provider error.
+
+    ``map_provider_error`` stuffs the provider's status code into
+    ``exc.details['status']``. Returns it (e.g. 401/403/404/500) or None
+    when the error carries no status (transport error, unmapped). Used to
+    single out auth failures for the B3 key-quarantine retry.
+    """
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        status = details.get("status")
+        if isinstance(status, int):
+            return status
+    return None
+
+
 class ProviderDispatcher:
     def __init__(self) -> None:
         self.adapters = {
@@ -105,6 +121,7 @@ class ProviderDispatcher:
         *,
         api_key: str | None = None,
         key_resolver: Callable[[str], str | None] | None = None,
+        on_auth_failure: Callable[[str, str], str | None] | None = None,
         max_hops: int = _MAX_LAYER1_HOPS,
     ) -> tuple[ProviderResponse, str, str]:
         """Dispatch the primary route with up to ``max_hops`` Layer-1
@@ -125,6 +142,15 @@ class ProviderDispatcher:
         Raises the last fallback-eligible error if every candidate
         fails. NON-eligible errors (4xx auth, invalid request, etc.)
         propagate immediately — no retry.
+
+        ``on_auth_failure`` (B3): invoked as ``on_auth_failure(provider,
+        failed_key)`` when a candidate's call returns 401/403. The caller
+        uses it to quarantine the bad key (mark ``invalid``) and return the
+        NEXT active key for that same provider, or ``None`` if no other key
+        exists. When it returns a fresh key, the SAME provider/model is
+        retried with it before walking to cross-provider fallbacks — so a
+        single bad key in a multi-key pool self-heals within the request
+        instead of surfacing an empty response.
         """
         # Local import to avoid a circular import at module load
         # (fallback_orchestrator → routing types → dispatcher).
@@ -176,7 +202,6 @@ class ProviderDispatcher:
                     )
                     continue
 
-            t0 = time.perf_counter()
             # Per-hop route. Built fresh each iteration so the primary's
             # ``fallbacks`` list isn't carried forward (the dispatcher's
             # own retry logic owns hop progression). Delegating through
@@ -184,45 +209,74 @@ class ProviderDispatcher:
             # inline) keeps every spy / monkeypatch on ``dispatch`` —
             # of which the integration tests have several — intact.
             hop_route = type(route)(provider_name=provider, model_name=model)
-            try:
-                response = await self.dispatch(
-                    route=hop_route,
-                    payload=payload,
-                    messages=messages,
-                    api_key=attempt_key,
-                )
-                if hop_index > 0:
-                    logger.info(
-                        "dispatch_fallback_succeeded",
+            # Keys already tried for THIS provider — guards the auth-retry
+            # loop against re-trying a rotated-back key (round-robin can
+            # return a key we just quarantined if the cache is warm).
+            tried_keys: set[str] = {attempt_key} if attempt_key else set()
+            advance_hop = False
+            while True:
+                t0 = time.perf_counter()
+                try:
+                    response = await self.dispatch(
+                        route=hop_route,
+                        payload=payload,
+                        messages=messages,
+                        api_key=attempt_key,
+                    )
+                    if hop_index > 0:
+                        logger.info(
+                            "dispatch_fallback_succeeded",
+                            provider=provider,
+                            model=model,
+                            hop=hop_index,
+                            latency_ms=int((time.perf_counter() - t0) * 1000),
+                        )
+                    return response, provider, model
+                except _FALLBACK_ERRORS as exc:
+                    latency_ms = int((time.perf_counter() - t0) * 1000)
+                    last_error = exc
+                    # B3 — auth failure: quarantine the bad key and, if the
+                    # pool has another key for this provider, retry the same
+                    # provider/model with it before falling back elsewhere.
+                    if (
+                        _provider_status(exc) in (401, 403)
+                        and on_auth_failure is not None
+                        and attempt_key
+                    ):
+                        next_key = on_auth_failure(provider, attempt_key)
+                        if next_key and next_key not in tried_keys:
+                            tried_keys.add(next_key)
+                            attempt_key = next_key
+                            logger.warning(
+                                "dispatch_auth_retry_next_key",
+                                provider=provider,
+                                model=model,
+                                hop=hop_index,
+                            )
+                            continue
+                    eligible = (
+                        isinstance(exc, GatewayError) and is_fallback_eligible(exc)
+                    )
+                    logger.warning(
+                        "dispatch_attempt_failed",
                         provider=provider,
                         model=model,
                         hop=hop_index,
-                        latency_ms=int((time.perf_counter() - t0) * 1000),
+                        latency_ms=latency_ms,
+                        error_code=getattr(exc, "code", None),
+                        error=str(exc)[:200],
+                        eligible_for_fallback=eligible,
                     )
-                return response, provider, model
-            except _FALLBACK_ERRORS as exc:
-                latency_ms = int((time.perf_counter() - t0) * 1000)
-                last_error = exc
-                eligible = (
-                    isinstance(exc, GatewayError) and is_fallback_eligible(exc)
-                )
-                logger.warning(
-                    "dispatch_attempt_failed",
-                    provider=provider,
-                    model=model,
-                    hop=hop_index,
-                    latency_ms=latency_ms,
-                    error_code=getattr(exc, "code", None),
-                    error=str(exc)[:200],
-                    eligible_for_fallback=eligible,
-                )
-                if not eligible:
-                    # Non-transient (auth / bad request / etc.) —
-                    # re-raise immediately; retrying would just burn
-                    # quota on the next provider with the same bad
-                    # input. The caller (orchestrator) can still hand
-                    # off to Layer 2 if it wants a tier-based rescue.
-                    raise
+                    if not eligible:
+                        # Non-transient (bad request / etc.) — re-raise
+                        # immediately; retrying would just burn quota on the
+                        # next provider with the same bad input. The caller
+                        # (orchestrator) can still hand off to Layer 2 if it
+                        # wants a tier-based rescue.
+                        raise
+                    advance_hop = True
+                    break
+            if advance_hop:
                 hop_index += 1
                 continue
 

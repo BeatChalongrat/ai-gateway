@@ -918,6 +918,22 @@ class GatewayOrchestrator:
             with _SyncSession() as _s:
                 return self.provider_key_service.get_api_key(_s, provider_name)
 
+        # B3 — on a provider 401/403, quarantine the rejected key and hand
+        # the dispatcher the next active key for that provider so it can
+        # retry the same model instead of dead-ending on a bad credential.
+        def _on_auth_failure(provider_name: str, failed_key: str) -> str | None:
+            from app.core.db import SessionLocal as _SyncSession
+            with _SyncSession() as _s:
+                self.provider_key_service.mark_invalid_by_value(
+                    _s, provider_name, failed_key
+                )
+                _s.commit()
+                # Cache was busted by the mark; this re-resolves fresh and
+                # therefore never returns the just-quarantined key.
+                return self.provider_key_service.get_active_key(
+                    _s, provider_name
+                )
+
         try:
             with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
                 provider=route.provider_name
@@ -932,6 +948,7 @@ class GatewayOrchestrator:
                     messages=messages_to_send,
                     api_key=provider_api_key,
                     key_resolver=_resolve_fallback_key,
+                    on_auth_failure=_on_auth_failure,
                 )
             # If Layer-1 fallback fired, rewrite the route so the rest
             # of the pipeline (DLP scan, request_log row, response
