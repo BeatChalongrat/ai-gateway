@@ -918,6 +918,25 @@ class GatewayOrchestrator:
             with _SyncSession() as _s:
                 return self.provider_key_service.get_api_key(_s, provider_name)
 
+        # A2: when a provider rejects a key with 401/403 mid-dispatch, flip
+        # that key's row to invalid so the round-robin pool stops handing it
+        # out; the dispatcher then re-resolves the next key via
+        # ``_resolve_fallback_key`` and retries within this same request.
+        def _invalidate_key(provider_name: str, bad_key: str) -> None:
+            from app.core.db import SessionLocal as _SyncSession
+            try:
+                with _SyncSession() as _s:
+                    self.provider_key_service.invalidate_key_by_value(
+                        _s, provider_name, bad_key
+                    )
+                    _s.commit()
+            except Exception as _exc:  # never let bookkeeping break dispatch
+                log.warning(
+                    "auto_invalidate_key_failed",
+                    provider=provider_name,
+                    error=str(_exc),
+                )
+
         try:
             with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
                 provider=route.provider_name
@@ -932,6 +951,7 @@ class GatewayOrchestrator:
                     messages=messages_to_send,
                     api_key=provider_api_key,
                     key_resolver=_resolve_fallback_key,
+                    invalidate_key=_invalidate_key,
                 )
             # If Layer-1 fallback fired, rewrite the route so the rest
             # of the pipeline (DLP scan, request_log row, response
