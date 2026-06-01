@@ -297,6 +297,18 @@ export interface Message {
   reasoning_content?: string | null;
   is_thinking?: boolean;
   thinking_duration_ms?: number;
+  /** B1 — local-only. Set when the stream failed; drives the error
+   *  bubble styling + localized message in MessageBubble. */
+  error_code?: string;
+  error_message?: string;
+  error_attempts?: FallbackAttempt[];
+  /** B2 — local-only. Set when a fallback model answered, so the UI
+   *  can show a small "answered by X" notice under the message. */
+  fallback_info?: {
+    requested_model: string;
+    actual_model: string;
+    reason?: string;
+  };
 }
 
 /** S7 — one source the AI drew on while producing an assistant
@@ -496,7 +508,28 @@ export interface SSEMessageComplete {
   token_usage?: TokenUsage & { reasoning?: number };
 }
 
+/** One attempted model in a fallback chain (B2/B3). */
+export interface FallbackAttempt {
+  model?: string;
+  provider?: string;
+  error?: string;
+  error_code?: string;
+  status?: string;
+}
+
 export interface SSEError {
   code: string;
   message: string;
+  /** Structured payload (provider / upstream status). */
+  details?: Record<string, unknown>;
+  /** Per-model failure log when the whole chain failed (B3). */
+  attempts?: FallbackAttempt[];
+}
+
+/** B2 — emitted before content when a fallback model answered. */
+export interface SSEFallbackInfo {
+  requested_model: string;
+  actual_model: string;
+  reason?: string;
+  attempts?: FallbackAttempt[];
 }
