@@ -124,6 +124,10 @@ interface ChatState {
    *  memory_enabled=false. */
   nextConversationTemporary: boolean;
   setNextConversationTemporary: (v: boolean) => void;
+  /** Pin / unpin a conversation (migration 021). Optimistic update —
+   *  the sidebar re-buckets into / out of the PINNED section
+   *  immediately; rolls back on failure. */
+  togglePinConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
 
   // ── message ops ──────────────────────────────────────────
@@ -352,6 +356,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
         c.id === id ? { ...c, ...updated } : c,
       ),
     }));
+  },
+
+  async togglePinConversation(id) {
+    const existing = get().conversations.find((c) => c.id === id);
+    const prevPinned = existing?.is_pinned ?? false;
+    const nextPinned = !prevPinned;
+    // Optimistic flip so the sidebar re-buckets immediately.
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, is_pinned: nextPinned } : c,
+      ),
+    }));
+    try {
+      const updated = await api.setConversationPinned(id, nextPinned);
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, ...updated } : c,
+        ),
+      }));
+    } catch {
+      // Roll back the optimistic flip.
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, is_pinned: prevPinned } : c,
+        ),
+      }));
+      get().setError("Couldn't update pin. Please try again.");
+    }
   },
 
   async setConversationModel(id, modelId) {

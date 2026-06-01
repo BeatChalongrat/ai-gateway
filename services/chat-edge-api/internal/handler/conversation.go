@@ -127,6 +127,9 @@ type conversationResponse struct {
 	ReasoningEnabled     bool   `json:"reasoning_enabled"`
 	ReasoningMode        string `json:"reasoning_mode"`
 	ShowReasoningSummary bool   `json:"show_reasoning_summary"`
+	// IsPinned surfaces the sidebar pin flag (migration 021) so the
+	// frontend can render the "PINNED" section + the pin/unpin toggle.
+	IsPinned bool `json:"is_pinned"`
 }
 
 func toResponse(c *model.Conversation) conversationResponse {
@@ -141,6 +144,7 @@ func toResponse(c *model.Conversation) conversationResponse {
 		ReasoningEnabled:     c.ReasoningEnabled,
 		ReasoningMode:        c.ReasoningMode,
 		ShowReasoningSummary: c.ShowReasoningSummary,
+		IsPinned:             c.IsPinned,
 	}
 	if c.KnowledgeBaseID != nil {
 		s := c.KnowledgeBaseID.String()
@@ -284,6 +288,9 @@ type updateRequest struct {
 	ReasoningEnabled     *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningMode        *string `json:"reasoning_mode,omitempty"`
 	ShowReasoningSummary *bool   `json:"show_reasoning_summary,omitempty"`
+	// IsPinned toggles the sidebar pin (migration 021). Pointer so the
+	// handler can distinguish "field omitted" from "set to false".
+	IsPinned *bool `json:"is_pinned,omitempty"`
 }
 
 // validReasoningModes mirrors the Gateway's ReasoningConfig.mode
@@ -311,7 +318,8 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 &&
 		req.MemoryEnabled == nil && req.ReasoningEnabled == nil &&
-		req.ReasoningMode == nil && req.ShowReasoningSummary == nil {
+		req.ReasoningMode == nil && req.ShowReasoningSummary == nil &&
+		req.IsPinned == nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
 	}
@@ -372,6 +380,12 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 			r.Context(), caller.TenantUUID, caller.UserID, convID,
 			req.ReasoningEnabled, req.ReasoningMode, req.ShowReasoningSummary,
 		); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if req.IsPinned != nil {
+		if err := h.conversations.SetPinned(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.IsPinned); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}
