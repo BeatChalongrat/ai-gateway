@@ -2,8 +2,13 @@
 
 Covers reading ``usage.prompt_tokens_details.cached_tokens`` (which OpenAI
 returns for free) into ``ProviderUsage.cached_prompt_tokens`` and billing
-the cached subset at 50% of the input rate. Every other provider / cache
-miss leaves the field at 0, so the cost stays byte-identical.
+the cached subset at a discounted rate. Cache miss leaves the field at 0,
+so the cost stays byte-identical.
+
+P1 Item 4 made the cached-read rate provider-aware: OpenAI bills cached
+reads at 50%, Anthropic at 10%. The cost section below uses a Claude model
+(known rates), so it asserts the Anthropic 10% rate; the OpenAI 50% path is
+covered in ``test_prompt_caching_item4.py``.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ import pytest
 from app.services.providers.openai_adapter import _parse_sse_line
 from app.services.providers.parsers import parse_openai_response
 from app.services.usage_service import (
-    _CACHED_INPUT_RATE_MULTIPLIER,
+    _ANTHROPIC_CACHE_READ_MULTIPLIER,
     _estimate_cost,
 )
 
@@ -113,11 +118,11 @@ _R_IN = 0.000003
 _R_OUT = 0.000015
 
 
-def test_cost_with_cache_applies_half_rate():
+def test_cost_with_cache_applies_cached_rate():
     # prompt=2000 (1500 cached), completion=0 → isolate the input side.
-    # uncached 500 × full + cached 1500 × half.
+    # uncached 500 × full + cached 1500 × Anthropic read rate (10%).
     cost = _estimate_cost(_MODEL, 2000, 0, 1500)
-    expected = 500 * _R_IN + 1500 * _R_IN * _CACHED_INPUT_RATE_MULTIPLIER
+    expected = 500 * _R_IN + 1500 * _R_IN * _ANTHROPIC_CACHE_READ_MULTIPLIER
     assert cost == pytest.approx(expected)
 
 
@@ -125,7 +130,7 @@ def test_cost_with_cache_includes_completion():
     cost = _estimate_cost(_MODEL, 2000, 100, 1500)
     expected = (
         500 * _R_IN
-        + 1500 * _R_IN * _CACHED_INPUT_RATE_MULTIPLIER
+        + 1500 * _R_IN * _ANTHROPIC_CACHE_READ_MULTIPLIER
         + 100 * _R_OUT
     )
     assert cost == pytest.approx(expected)
@@ -148,7 +153,9 @@ def test_cost_cache_is_cheaper_by_exact_discount():
     rate_from_delta = (
         _estimate_cost(_MODEL, 2000, 0) - _estimate_cost(_MODEL, 1000, 0)
     ) / 1000
-    expected_saving = 1500 * rate_from_delta * (1 - _CACHED_INPUT_RATE_MULTIPLIER)
+    expected_saving = (
+        1500 * rate_from_delta * (1 - _ANTHROPIC_CACHE_READ_MULTIPLIER)
+    )
     assert (full - cached) == pytest.approx(expected_saving)
 
 
@@ -156,5 +163,5 @@ def test_cost_cached_clamped_to_prompt_tokens():
     # cached > prompt must not produce a negative uncached count; clamp to
     # prompt so the whole prompt bills at the cached rate, never below 0.
     cost = _estimate_cost(_MODEL, 1000, 0, 5000)
-    expected = 1000 * _R_IN * _CACHED_INPUT_RATE_MULTIPLIER
+    expected = 1000 * _R_IN * _ANTHROPIC_CACHE_READ_MULTIPLIER
     assert cost == pytest.approx(expected)

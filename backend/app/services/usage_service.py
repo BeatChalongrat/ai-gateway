@@ -29,6 +29,29 @@ _LEGACY_DEFAULT_RATE = 0.000001
 # different cache discounts are added later.
 _CACHED_INPUT_RATE_MULTIPLIER = 0.5
 
+# P1 Item 4 — Anthropic prompt-cache economics differ from OpenAI:
+#   * cache READ  bills at ~10% of the input rate (vs OpenAI's 50%),
+#   * cache WRITE (cache_creation) bills at a 25% markup (1.25× input).
+# OpenAI has no separate write charge, so its creation multiplier is 1.0
+# (and cache_creation_prompt_tokens is always 0 for it anyway).
+_ANTHROPIC_CACHE_READ_MULTIPLIER = 0.1
+_ANTHROPIC_CACHE_CREATION_MULTIPLIER = 1.25
+_OPENAI_CACHE_CREATION_MULTIPLIER = 1.0
+
+
+def _cache_multipliers(model: str) -> tuple[float, float]:
+    """Return ``(read_multiplier, creation_multiplier)`` for ``model``.
+
+    Detection is by model id: Anthropic models are addressed either as
+    ``anthropic/claude-…`` (OpenRouter) or ``claude-…`` (native), so a
+    ``claude`` substring catches both. Everything else uses the OpenAI
+    posture (50% read, no write charge).
+    """
+    m = (model or "").lower()
+    if "claude" in m or m.startswith("anthropic/"):
+        return _ANTHROPIC_CACHE_READ_MULTIPLIER, _ANTHROPIC_CACHE_CREATION_MULTIPLIER
+    return _CACHED_INPUT_RATE_MULTIPLIER, _OPENAI_CACHE_CREATION_MULTIPLIER
+
 
 def _legacy_flat_rate(model: str) -> float:
     """Pick the per-token rate for ``model`` from the legacy prefix table.
@@ -47,6 +70,7 @@ def _estimate_cost(
     prompt_tokens: int,
     completion_tokens: int,
     cached_prompt_tokens: int = 0,
+    cache_creation_prompt_tokens: int = 0,
 ) -> float:
     """Estimate request cost in USD.
 
@@ -64,22 +88,26 @@ def _estimate_cost(
     """
     from app.services.providers.model_registry import get_candidate
 
-    # Clamp defensively so a malformed ``cached > prompt`` never produces a
-    # negative uncached count (which would understate the bill).
+    # Clamp defensively so a malformed cache count never produces a negative
+    # uncached count (which would understate the bill). Reads and writes are
+    # disjoint subsets of ``prompt_tokens``; cap creation at what's left
+    # after reads so the three buckets never overlap.
+    read_mult, creation_mult = _cache_multipliers(model)
     cached = max(0, min(cached_prompt_tokens, prompt_tokens))
+    creation = max(0, min(cache_creation_prompt_tokens, prompt_tokens - cached))
+    uncached = prompt_tokens - cached - creation
 
     candidate = get_candidate(model)
     if candidate and (
         candidate.cost_per_input_token > 0.0
         or candidate.cost_per_output_token > 0.0
     ):
-        if cached > 0:
-            uncached = prompt_tokens - cached
+        if cached > 0 or creation > 0:
+            in_rate = candidate.cost_per_input_token
             return round(
-                uncached * candidate.cost_per_input_token
-                + cached
-                * candidate.cost_per_input_token
-                * _CACHED_INPUT_RATE_MULTIPLIER
+                uncached * in_rate
+                + cached * in_rate * read_mult
+                + creation * in_rate * creation_mult
                 + completion_tokens * candidate.cost_per_output_token,
                 8,
             )
@@ -90,12 +118,12 @@ def _estimate_cost(
         )
 
     rate = _legacy_flat_rate(model)
-    if cached > 0:
-        uncached = prompt_tokens - cached
+    if cached > 0 or creation > 0:
         return round(
             (
                 uncached
-                + cached * _CACHED_INPUT_RATE_MULTIPLIER
+                + cached * read_mult
+                + creation * creation_mult
                 + completion_tokens
             )
             * rate,

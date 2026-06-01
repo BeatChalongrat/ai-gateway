@@ -34,6 +34,12 @@ class ProviderUsage:
     # reduced rate). 0 = no cache hit, or the provider doesn't report it —
     # so the cost path is byte-identical for every non-OpenAI provider.
     cached_prompt_tokens: int = 0
+    # P1 Item 4 — Anthropic prompt-cache WRITE tokens
+    # (``usage.cache_creation_input_tokens``). Distinct from
+    # ``cached_prompt_tokens`` (cache READS): writes bill at a 25% markup
+    # (1.25× input) while reads bill at ~10%. 0 for OpenAI (no separate
+    # write counter) and every non-caching call, so cost stays unchanged.
+    cache_creation_prompt_tokens: int = 0
 
 
 @dataclass(frozen=True)
