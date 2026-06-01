@@ -245,6 +245,23 @@ func (s *ConversationService) SetMemoryEnabled(
 	return nil
 }
 
+// SetPinned flips the sidebar pin flag (migration 021). User-scope gate
+// first so a same-tenant caller can't pin another user's conversation.
+func (s *ConversationService) SetPinned(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, pinned bool,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
+	if err := s.conversations.UpdatePinned(ctx, tenantID, convID, pinned); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // SetReasoning persists the per-conversation thinking-mode settings
 // (T4 — migration 019). All three params are pointer-typed so the
 // handler can patch any subset. User-scope gate first so a

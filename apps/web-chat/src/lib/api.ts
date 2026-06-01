@@ -174,6 +174,15 @@ class ApiClient {
       body: JSON.stringify(patch),
     });
   }
+  /** Pin / unpin a conversation (migration 021). Pinned conversations
+   *  render in the sidebar's "PINNED" section. Returns the updated
+   *  conversation so the caller can reconcile state. */
+  setConversationPinned(id: string, pinned: boolean) {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_pinned: pinned }),
+    });
+  }
   deleteConversation(id: string) {
     return this.raw(`/conversations/${id}`, { method: "DELETE" });
   }

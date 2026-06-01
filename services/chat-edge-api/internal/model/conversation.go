@@ -67,4 +67,10 @@ type Conversation struct {
 	// locked yet (or the conversation uses an explicit model_id, which
 	// is inherently stable). Cleared when the user changes the picker.
 	LockedModel string
+
+	// IsPinned floats the conversation to the sidebar's "PINNED"
+	// section (migration 021), independent of the time buckets. Default
+	// false. ListByUser orders is_pinned-first so pinned rows always
+	// appear on the first page regardless of their updated_at.
+	IsPinned bool
 }
