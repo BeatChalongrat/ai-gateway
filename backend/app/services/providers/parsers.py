@@ -54,7 +54,9 @@ def parse_openai_response(data: dict) -> ProviderResponse:
     # response (OpenAI o-series via /chat/completions doesn't return
     # reasoning text, only the token count). ``None`` when absent so
     # the response stays byte-identical for plain OpenAI calls.
-    reasoning_raw = message.get("reasoning_content")
+    # Same dual-spelling as the streaming parser (P1 Item 3): DeepSeek /
+    # Groq use ``reasoning_content``; OpenRouter normalises to ``reasoning``.
+    reasoning_raw = message.get("reasoning_content") or message.get("reasoning")
     reasoning_content = (
         reasoning_raw if isinstance(reasoning_raw, str) and reasoning_raw else None
     )
@@ -164,12 +166,25 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
     usage = None
     if "usage" in data:
         u = data["usage"]
-        input_tokens = u.get("input_tokens", 0)
-        output_tokens = u.get("output_tokens", 0)
+        # P1 Item 4 — Anthropic splits prompt tokens three ways:
+        #   input_tokens             = fresh (uncached) input
+        #   cache_read_input_tokens  = served from cache (bills ~10%)
+        #   cache_creation_input_tokens = written to cache (bills 1.25×)
+        # ``input_tokens`` EXCLUDES the cached counts, so the full prompt
+        # size is the sum. We surface reads as ``cached_prompt_tokens`` and
+        # writes as ``cache_creation_prompt_tokens`` so the cost path can
+        # bill each at its own rate.
+        input_tokens = u.get("input_tokens", 0) or 0
+        output_tokens = u.get("output_tokens", 0) or 0
+        cache_read = u.get("cache_read_input_tokens", 0) or 0
+        cache_creation = u.get("cache_creation_input_tokens", 0) or 0
+        full_prompt = input_tokens + cache_read + cache_creation
         usage = ProviderUsage(
-            prompt_tokens=input_tokens,
+            prompt_tokens=full_prompt,
             completion_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
+            total_tokens=full_prompt + output_tokens,
+            cached_prompt_tokens=cache_read,
+            cache_creation_prompt_tokens=cache_creation,
         )
 
     return ProviderResponse(
