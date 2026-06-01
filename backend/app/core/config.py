@@ -162,6 +162,18 @@ class Settings(BaseSettings):
     # longer than the live table did.
     log_archive_days: int = 90
 
+    # C2 — model discovery sync behaviour.
+    # ``model_discovery_auto_add`` False (default) makes the daily sync
+    # LOG newly-listed upstream models for admin review instead of
+    # auto-inserting them into the routable pool with un-vetted
+    # pricing/capabilities. Flip True to restore eager auto-add.
+    # ``model_discovery_health_check`` gates an optional 1-token live
+    # probe per model during sync (off by default — a daily probe of
+    # every model is a paid request per model). The admin "Test" button
+    # runs the same probe on demand regardless of this flag.
+    model_discovery_auto_add: bool = False
+    model_discovery_health_check: bool = False
+
     # Phase-1 async request-log queue (``app.services.request_log_queue``).
     # The orchestrator's success path enqueues records instead of
     # synchronously persisting; a background worker started by the

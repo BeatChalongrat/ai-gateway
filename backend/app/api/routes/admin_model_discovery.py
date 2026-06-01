@@ -183,6 +183,39 @@ async def discovery_sync(
 
 
 # ---------------------------------------------------------------------------
+# POST /admin/models/{model_id}/test  — live model health probe (C2)
+# ---------------------------------------------------------------------------
+
+@router.post("/{model_id}/test")
+async def test_model(
+    model_id: int,
+    session: Session = Depends(get_db_session),
+):
+    """Fire a 1-token completion at the model and report health.
+
+    Backs the admin UI "Test" button. Unlike the provider-key test
+    (which only validates the credential), this proves the specific
+    model id is actually servable right now. Never 500s on an upstream
+    failure — the failure is the result.
+    """
+    row = session.get(ModelConfigORM, model_id)
+    if row is None:
+        raise NotFoundError(
+            f"Model config #{model_id} not found.",
+            details={"model_id": model_id},
+        )
+    from app.services.model_health import check_model_health
+
+    result = await check_model_health(session, row.provider, row.model)
+    return {
+        "model_id": model_id,
+        "provider": row.provider,
+        "model": row.model,
+        **result,
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /admin/models
 # ---------------------------------------------------------------------------
 
