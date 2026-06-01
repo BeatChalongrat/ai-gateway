@@ -35,12 +35,12 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
 		VALUES ($1, $2, $3)
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
 	`
 	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
 		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -56,7 +56,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
 		FROM chat.conversations
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
@@ -65,7 +65,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -99,12 +99,14 @@ func (r *ConversationRepo) ListByUser(
 	// recently-updated row.
 	var cursorTs *string
 	var cursorID *string
+	var cursorPinned *bool
 	if cursor != uuid.Nil {
 		var ts string
+		var pinned bool
 		err := r.db.QueryRow(ctx,
-			`SELECT updated_at::text FROM chat.conversations WHERE id = $1 AND tenant_id = $2`,
+			`SELECT updated_at::text, is_pinned FROM chat.conversations WHERE id = $1 AND tenant_id = $2`,
 			cursor, tenantID,
-		).Scan(&ts)
+		).Scan(&ts, &pinned)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Unknown cursor → start from top.
@@ -116,6 +118,7 @@ func (r *ConversationRepo) ListByUser(
 			cursorTs = &ts
 			cid := cursor.String()
 			cursorID = &cid
+			cursorPinned = &pinned
 		}
 	}
 
@@ -124,19 +127,19 @@ func (r *ConversationRepo) ListByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
 		  AND is_deleted = false
 		  AND (
 		    $3::timestamptz IS NULL
-		    OR (updated_at, id) < ($3::timestamptz, $4::uuid)
+		    OR (is_pinned, updated_at, id) < ($6::bool, $3::timestamptz, $4::uuid)
 		  )
-		ORDER BY updated_at DESC, id DESC
+		ORDER BY is_pinned DESC, updated_at DESC, id DESC
 		LIMIT $5
 	`
-	rows, err := r.db.Query(ctx, q, tenantID, userID, cursorTs, cursorID, limit+1)
+	rows, err := r.db.Query(ctx, q, tenantID, userID, cursorTs, cursorID, limit+1, cursorPinned)
 	if err != nil {
 		return nil, uuid.Nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -149,7 +152,7 @@ func (r *ConversationRepo) ListByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
 		); err != nil {
 			return nil, uuid.Nil, fmt.Errorf("list scan: %w", err)
 		}
@@ -188,7 +191,7 @@ func (r *ConversationRepo) SearchByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -209,7 +212,7 @@ func (r *ConversationRepo) SearchByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
 		); err != nil {
 			return nil, fmt.Errorf("search scan: %w", err)
 		}
@@ -390,6 +393,30 @@ func (r *ConversationRepo) UpdateMemoryEnabled(
 	tag, err := r.db.Exec(ctx, q, convID, tenantID, enabled)
 	if err != nil {
 		return fmt.Errorf("update memory_enabled: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdatePinned flips the sidebar pin flag (migration 021). Tenant-scoped
+// via the WHERE clause; the service layer asserts caller ownership first.
+// Deliberately does NOT touch updated_at — ListByUser orders pinned rows
+// first regardless of their timestamp, and within the PINNED section the
+// frontend sorts by the TRUE last-activity updated_at, so a pin/unpin must
+// not masquerade as fresh activity.
+func (r *ConversationRepo) UpdatePinned(
+	ctx context.Context, tenantID, convID uuid.UUID, pinned bool,
+) error {
+	const q = `
+		UPDATE chat.conversations
+		SET is_pinned = $3
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
+	`
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, pinned)
+	if err != nil {
+		return fmt.Errorf("update is_pinned: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound

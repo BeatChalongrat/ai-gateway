@@ -82,6 +82,11 @@ export interface Conversation {
   reasoning_enabled?: boolean;
   reasoning_mode?: string;
   show_reasoning_summary?: boolean;
+  /** Sidebar pin (migration 021). When true the conversation appears
+   *  in the dedicated "PINNED" section at the top of the sidebar,
+   *  above the time buckets. Defaults false server-side; older
+   *  payloads flow through as `undefined` (treated as unpinned). */
+  is_pinned?: boolean;
 }
 
 export interface ConversationListResponse {
