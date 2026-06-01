@@ -1,4 +1,4 @@
-.PHONY: up prod down logs seed clean clean-portal-users fresh test shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate
+.PHONY: up prod down logs seed clean clean-portal-users fresh test test-unit test-all typecheck go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -64,6 +64,20 @@ test: ## Run the backend test suite inside the backend container
 	  -u CORS_ORIGINS -u LOG_LEVEL \
 	  -u PROVIDER_BASE_URL_OVERRIDES -u DLP_DISABLED_DETECTORS \
 	  pytest
+
+test-unit: ## Backend UNIT lane only (excludes integration) — the CI gate
+	docker compose exec backend pytest -m "not integration"
+
+test-all: ## Full backend suite (includes integration — needs the live stack)
+	docker compose exec backend pytest
+
+typecheck: ## TypeScript typecheck for the web-chat frontend
+	cd apps/web-chat && npx tsc --noEmit
+
+go-test: ## Vet + test the chat-edge-api Go service
+	cd services/chat-edge-api && go vet ./... && go test ./...
+
+ci: test-unit typecheck go-test ## Run the full local CI gate before pushing (mirrors .github/workflows/ci.yml)
 
 build: ## Build all images without starting
 	docker compose build

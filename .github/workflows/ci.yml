@@ -1,0 +1,74 @@
+name: CI
+
+# Test gate only — no build / deploy. Runs on every push to main and on
+# every PR targeting main so a broken change is caught before it lands.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same ref cancels the in-flight run — saves minutes
+# on rapid iteration.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: backend (pytest, unit lane)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install dependencies
+        # requirements-dev.txt pulls requirements.txt + the test extras
+        # (respx, aiosqlite). The NER (presidio/spaCy) and semantic
+        # extras are intentionally NOT installed — those tests live in
+        # the integration lane and are excluded below, so CI stays fast.
+        run: pip install -r requirements-dev.txt
+      - name: Run unit lane
+        # The integration lane (DLP engine/sidecar, NER, real Postgres,
+        # gRPC limiter, live/e2e, container .env) is excluded — see the
+        # `integration` marker + conftest auto-tag. This gate must be green.
+        env:
+          APP_ENV: test
+        run: pytest -m "not integration" --tb=short
+
+  frontend-typecheck:
+    name: web-chat (tsc --noEmit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web-chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web-chat/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  go-test:
+    name: chat-edge-api (go vet + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/chat-edge-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/chat-edge-api/go.sum
+      - run: go vet ./...
+      - run: go test ./...
