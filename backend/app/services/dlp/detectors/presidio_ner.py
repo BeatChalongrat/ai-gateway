@@ -337,6 +337,24 @@ class PresidioDetector(BaseDetector):
     def detect(
         self, text: str, language: str = "en"
     ) -> list[DetectionMatch]:
+        # P1 Item 1 — Thai false-positive root-cause guard. The deployed
+        # image ships an English-only spaCy model, so Presidio NER on Thai
+        # prose mis-tags everyday words (greetings, verbs, nouns) as
+        # PERSON/NRP and the pseudonymizer turns them into <<PERSON_A>> —
+        # corrupting the context the model sees. When NER has no Thai model
+        # (``dlp_ner_thai_enabled`` off) we skip it for predominantly-Thai
+        # text and lean on the regex Thai detectors for real Thai PII.
+        # Applies before BOTH the service and in-process paths, so it holds
+        # under the Rust engine's Presidio post-pass too.
+        from app.core.config import settings
+
+        if not getattr(settings, "dlp_ner_thai_enabled", False):
+            n = len(text)
+            if n and (_thai_char_count(text) / n) >= getattr(
+                settings, "dlp_ner_thai_min_ratio", 0.30
+            ):
+                return []
+
         # Prefer the dedicated NER microservice when configured. The
         # service hosts the spaCy model once per pod (vs once per
         # worker) and returns identically-shaped findings, so the rest

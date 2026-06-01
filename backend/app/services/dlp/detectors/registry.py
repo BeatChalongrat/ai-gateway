@@ -145,6 +145,7 @@ class DetectorRegistry:
         *,
         direction: str = "input",
         scan_system_messages: bool = False,
+        ner_skip_roles: frozenset[str] = frozenset(),
     ) -> DetectionResult:
         """Scan all message contents and return an aggregated DetectionResult.
 
@@ -164,6 +165,15 @@ class DetectorRegistry:
             back, causing restore() to splice the system-prompt fragment
             into the user-facing reply. Tenants who legitimately place
             PII in system prompts can opt back in via PolicyProfile.
+        ner_skip_roles : frozenset[str]
+            Roles for which the Presidio NER detector's findings are
+            dropped (regex detectors still run). P1 Item 1: pass
+            ``{"assistant"}`` on inbound scans so prior AI turns in the
+            conversation history don't get NER-scanned — that content is
+            model-generated (already covered by outbound scanning when it
+            was produced), and English-only NER on it is a pure
+            false-positive source. Empty (the default) preserves the
+            existing all-detectors-on-every-message behavior.
         """
         # Filter out system messages up-front when the profile says so.
         # This is the single chokepoint for the system-message exclusion;
@@ -197,7 +207,14 @@ class DetectorRegistry:
                 )
             elif not isinstance(content, str):
                 content = "" if content is None else str(content)
-            all_matches.extend(self.scan_text(content, language=language))
+            msg_matches = self.scan_text(content, language=language)
+            # P1 Item 1 (option 2): drop NER findings for roles the caller
+            # excluded (assistant history) — regex PII detectors stay.
+            if ner_skip_roles and getattr(msg, "role", None) in ner_skip_roles:
+                msg_matches = [
+                    m for m in msg_matches if m.detector_name != "presidio_ner"
+                ]
+            all_matches.extend(msg_matches)
         return DetectionResult(
             matches=sorted(all_matches, key=lambda m: (m.start, m.end)),
             scanned_direction=direction,
