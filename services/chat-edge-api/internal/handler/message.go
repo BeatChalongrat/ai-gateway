@@ -352,6 +352,27 @@ func (h *MessageHandler) sendNonStream(w http.ResponseWriter, r *http.Request, i
 // The handler MUST flush after every event so the browser sees
 // incremental output; chi's default ResponseWriter implements
 // http.Flusher.
+// streamErrorPayload builds the ``event: error`` data frame for a stream
+// failure. A gateway Phase-C ``error`` frame arrives as a
+// ``*service.GatewayStreamError`` carrying the gateway's own error code
+// (e.g. ``provider_auth_failed``) + a user-facing message; forward those
+// verbatim so the web client can show a precise reason. Any other error
+// (transport / decode) falls back to the generic internal-error code.
+func streamErrorPayload(err error) map[string]any {
+	var se *service.GatewayStreamError
+	if errors.As(err, &se) {
+		code := se.Code
+		if code == "" {
+			code = CodeInternalError
+		}
+		return map[string]any{"code": code, "message": se.Message}
+	}
+	return map[string]any{
+		"code":    CodeInternalError,
+		"message": fmt.Sprintf("stream error: %v", err),
+	}
+}
+
 func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in service.SendInput) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -400,10 +421,7 @@ Loop:
 			}
 			if ev.Err != nil {
 				gotErr = ev.Err
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":    CodeInternalError,
-					"message": fmt.Sprintf("stream error: %v", ev.Err),
-				})
+				writeSSEEvent(w, flusher, "error", streamErrorPayload(ev.Err))
 				break Loop
 			}
 			if ev.Delta != "" {
@@ -606,10 +624,7 @@ Loop:
 			}
 			if ev.Err != nil {
 				gotErr = ev.Err
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":    CodeInternalError,
-					"message": fmt.Sprintf("stream error: %v", ev.Err),
-				})
+				writeSSEEvent(w, flusher, "error", streamErrorPayload(ev.Err))
 				break Loop
 			}
 			if ev.Delta != "" {
@@ -734,10 +749,7 @@ Loop:
 			}
 			if ev.Err != nil {
 				gotErr = ev.Err
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":    CodeInternalError,
-					"message": fmt.Sprintf("stream error: %v", ev.Err),
-				})
+				writeSSEEvent(w, flusher, "error", streamErrorPayload(ev.Err))
 				break Loop
 			}
 			if ev.Delta != "" {

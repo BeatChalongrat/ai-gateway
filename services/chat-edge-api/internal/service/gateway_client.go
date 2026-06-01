@@ -41,6 +41,25 @@ func (e *GatewayUnavailableError) Error() string {
 	return fmt.Sprintf("gateway unavailable: status=%d body=%s", e.Status, truncate(e.Body, 200))
 }
 
+// GatewayStreamError marks an ``error`` SSE frame the gateway emitted
+// MID-stream (after it had already committed a 200 status line, so it
+// could no longer return a JSON error). The pump turns this into a
+// ``StreamUpdate{Err}`` which the handler renders as an ``event: error``
+// SSE frame — the web client then shows the assistant bubble in its
+// error state instead of leaving it blank. Code mirrors the gateway's
+// ``error.code`` (e.g. ``provider_auth_failed``).
+type GatewayStreamError struct {
+	Code    string
+	Message string
+}
+
+func (e *GatewayStreamError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("%s: %s", e.Code, e.Message)
+	}
+	return e.Message
+}
+
 // GatewayClient is the typed HTTP client used by every chat-edge
 // service that needs DLP / LLM access.
 type GatewayClient struct {
@@ -306,6 +325,18 @@ type StreamEvent struct {
 	// populated — the pump distinguishes by checking which is set.
 	ReasoningDelta string
 	AnalysisStatus string
+	// Error is set when the gateway emitted a Phase-C ``error`` SSE
+	// frame (provider failure after the 200 status line). Next()
+	// converts a populated Error into a returned ``*GatewayStreamError``
+	// so the pump's error path fires; it is never both set AND returned
+	// as a normal event.
+	Error *StreamError
+}
+
+// StreamError carries the gateway's ``error`` frame payload.
+type StreamError struct {
+	Code    string
+	Message string
 }
 
 // StreamToolCallDelta is one fragment from a tool_calls[] stream
@@ -388,6 +419,16 @@ func (s *StreamReader) Next() (*StreamEvent, error) {
 			// don't decode as chat-chunk JSON.
 			continue
 		}
+		if ev.Error != nil {
+			// Phase C — gateway surfaced a mid-stream provider error.
+			// Return it as a Go error so the pump emits an SSE
+			// ``error`` event to the web client instead of a silent
+			// empty completion.
+			return nil, &GatewayStreamError{
+				Code:    ev.Error.Code,
+				Message: ev.Error.Message,
+			}
+		}
 		return ev, nil
 	}
 	if err := s.scanner.Err(); err != nil {
@@ -453,6 +494,26 @@ type reasoningEnvelope struct {
 }
 
 func parseStreamChunk(raw string) (*StreamEvent, error) {
+	// Phase C — gateway ``error`` frame. Shape:
+	// ``{"object":"error","error":{"code":"...","message":"..."}}``.
+	// Sniff before everything else: a frame carrying a top-level
+	// ``error`` object must never be mistaken for an (empty) content
+	// chunk, which would silently swallow the failure.
+	var errEnv struct {
+		Error *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &errEnv); err == nil && errEnv.Error != nil {
+		return &StreamEvent{
+			Error: &StreamError{
+				Code:    errEnv.Error.Code,
+				Message: errEnv.Error.Message,
+			},
+		}, nil
+	}
+
 	// Reasoning-channel frames (T2/T3) carry ``type`` at the top
 	// level. Sniff first so we never accidentally swallow a
 	// reasoning frame into the OpenAI-shape decoder.

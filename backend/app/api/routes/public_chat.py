@@ -73,6 +73,53 @@ def _sse_dumps(obj, ensure_ascii: bool = False) -> str:
     return orjson.dumps(obj).decode("utf-8")
 
 
+def _classify_stream_error(exc: Exception) -> tuple[str, str]:
+    """Map a provider exception to a (code, user-facing message) pair for
+    the SSE ``error`` frame.
+
+    Phase C: a provider failure that happens AFTER the streaming response
+    has committed its 200 headers cannot become a JSON error response — the
+    status line is already on the wire. Emitting a typed ``error`` frame is
+    the only way the client learns the turn failed instead of rendering an
+    empty bubble. The message is intentionally generic (no provider name /
+    raw upstream body) so we don't leak operational detail to end users.
+    """
+    from app.core.exceptions import (
+        ProviderTimeoutError,
+        ProviderUnavailableError,
+        RateLimitExceededError,
+    )
+
+    details = getattr(exc, "details", None)
+    status = details.get("status") if isinstance(details, dict) else None
+    if status in (401, 403):
+        return (
+            "provider_auth_failed",
+            "The AI provider rejected the gateway's credentials for this "
+            "model. An administrator needs to check the provider key.",
+        )
+    if isinstance(exc, RateLimitExceededError):
+        return (
+            "rate_limited",
+            "The AI provider is rate-limiting requests right now. Please "
+            "try again in a moment.",
+        )
+    if isinstance(exc, ProviderTimeoutError):
+        return (
+            "provider_timeout",
+            "The AI provider timed out before responding. Please try again.",
+        )
+    if isinstance(exc, ProviderUnavailableError):
+        return (
+            "provider_unavailable",
+            "The AI provider is temporarily unavailable. Please try again.",
+        )
+    return (
+        "provider_error",
+        "The AI provider returned an error while generating the response.",
+    )
+
+
 @router.post(
     "/chat/completions",
     response_model=ChatCompletionsResponse,
@@ -1005,6 +1052,30 @@ async def chat_completions(
                 )
             )
 
+        def _emit_error(code: str, message: str) -> str:
+            """Serialise an SSE ``error`` frame (Phase C).
+
+            Shape: ``{"object":"error","error":{"code","message"}}``. The
+            chat-edge SSE reader (gateway_client.go) treats a frame with a
+            top-level ``error`` key as a stream error and surfaces it to the
+            web client as an ``event: error``, which renders the assistant
+            bubble in its error state instead of leaving it blank. Older
+            clients that don't understand the frame simply ignore it (no
+            ``choices``), then see ``[DONE]`` and close cleanly.
+            """
+            return "data: {}\n\n".format(
+                _sse_dumps(
+                    {
+                        "id": ctx.request_id,
+                        "object": "error",
+                        "created": int(time.time()),
+                        "model": final_model,
+                        "error": {"code": code, "message": message},
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
         from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
         # Mutable state for the in-generator fallback retry. The outer
@@ -1250,10 +1321,17 @@ async def chat_completions(
             except Exception as stream_exc:  # noqa: BLE001
                 from app.core.exceptions import GatewayError as _GwErr
 
-                # Mid-stream errors cannot be recovered — headers and
-                # part of the body are already on the wire. Log and
-                # close the SSE gracefully; the client sees the partial
-                # response with no extra error frame.
+                _exc_details = getattr(stream_exc, "details", None)
+                _exc_status = (
+                    _exc_details.get("status")
+                    if isinstance(_exc_details, dict)
+                    else None
+                )
+
+                # Mid-stream errors cannot be recovered — headers and part
+                # of the body are already on the wire AND content has been
+                # emitted. Surface a typed ``error`` frame so the client can
+                # flag the partial answer, then close gracefully (Phase C).
                 if first_chunk_yielded:
                     log.warning(
                         "stream_mid_stream_error",
@@ -1265,74 +1343,127 @@ async def chat_completions(
                         stream_exc
                     ):
                         await _mark_unhealthy(route.provider_name)
+                    _err_code, _err_msg = _classify_stream_error(stream_exc)
+                    yield _emit_error(_err_code, _err_msg)
+                    yield "data: [DONE]\n\n"
                     return
 
-                # Pre-yield error → eligible for body-level fallback.
-                if not isinstance(stream_exc, _GwErr) or not _is_fallback_eligible(
+                # --- Pre-yield error: nothing on the wire yet, so we can
+                # still recover the BODY (next key / another provider)
+                # before surfacing an error frame. ---
+
+                # B3 — auth failure (401/403): quarantine the rejected key
+                # and retry the SAME provider/model with the next key in the
+                # pool, if any. This is the in-stream analogue of the
+                # dispatcher's ``on_auth_failure`` path and is what makes a
+                # single bad key in a multi-key pool self-heal instead of
+                # surfacing an empty stream.
+                if _exc_status in (401, 403) and stream_api_key:
+                    from app.core.db import SessionLocal as _AuthSessionLocal
+                    _replacement_key = None
+                    _auth_session = _AuthSessionLocal()
+                    try:
+                        orchestrator.provider_key_service.mark_invalid_by_value(
+                            _auth_session, route.provider_name, stream_api_key
+                        )
+                        _auth_session.commit()
+                        # Cache was busted by the mark; re-resolve fresh so
+                        # we never get the just-quarantined key back.
+                        _replacement_key = (
+                            orchestrator.provider_key_service.get_active_key(
+                                _auth_session, route.provider_name
+                            )
+                        )
+                    finally:
+                        _auth_session.close()
+                    if _replacement_key and _replacement_key != stream_api_key:
+                        log.warning(
+                            "stream_auth_retry_next_key",
+                            provider=route.provider_name,
+                            model=route.model_name,
+                        )
+                        stream_api_key = _replacement_key
+                        continue
+
+                # Cross-provider body fallback — only for fallback-eligible
+                # errors. A non-eligible error (e.g. a 400 bad request) and
+                # an exhausted/empty fallback chain both fall through to the
+                # error-frame emit below instead of a bare ``raise`` (which
+                # would leave the client with an empty 200 body).
+                if isinstance(stream_exc, _GwErr) and _is_fallback_eligible(
                     stream_exc
                 ):
-                    raise
-
-                failed_provider = route.provider_name
-                _stream_fallback_attempts.append(
-                    {
-                        "provider": failed_provider,
-                        "model": route.model_name,
-                        "error_code": getattr(
-                            stream_exc, "code", "provider_error"
-                        ),
-                        "error_message": str(stream_exc)[:200],
-                        "latency_ms": 0.0,
-                        "attempted_at": _dt.now(_tz.utc).isoformat(),
-                    }
-                )
-                await _mark_unhealthy(failed_provider)
-                skip_providers.add(failed_provider)
-
-                if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
-                    raise
-
-                fb_runner = orchestrator._get_fallback_orchestrator()
-                # Mint a fresh session for the key lookup — the
-                # dependency-injected ``session`` is already closed by
-                # the time the generator runs (FastAPI's
-                # ``get_db_session`` finally-block fires as soon as the
-                # route handler returns ``StreamingResponse``).
-                # ``select_streaming_candidate`` is sync; use a short-lived
-                # SYNC session for this rare streaming-fallback key lookup
-                # (the sync engine is retained for admin/portal/background)
-                # rather than cascading async into the selector.
-                from app.core.db import SessionLocal as _SyncSessionLocal
-                _lookup_session = _SyncSessionLocal()
-                try:
-                    fb_candidate = fb_runner.select_streaming_candidate(
-                        original_provider=_stream_original_provider,
-                        original_model=_stream_original_model,
-                        session=_lookup_session,
-                        skip_providers=skip_providers,
-                        required=_stream_required_caps,
+                    failed_provider = route.provider_name
+                    _stream_fallback_attempts.append(
+                        {
+                            "provider": failed_provider,
+                            "model": route.model_name,
+                            "error_code": getattr(
+                                stream_exc, "code", "provider_error"
+                            ),
+                            "error_message": str(stream_exc)[:200],
+                            "latency_ms": 0.0,
+                            "attempted_at": _dt.now(_tz.utc).isoformat(),
+                        }
                     )
-                finally:
-                    _lookup_session.close()
+                    await _mark_unhealthy(failed_provider)
+                    skip_providers.add(failed_provider)
 
-                if fb_candidate is None:
-                    raise
+                    if len(_stream_fallback_attempts) <= MAX_STREAMING_FALLBACKS:
+                        fb_runner = orchestrator._get_fallback_orchestrator()
+                        # Mint a fresh session for the key lookup — the
+                        # dependency-injected ``session`` is already closed
+                        # by the time the generator runs (FastAPI's
+                        # ``get_db_session`` finally-block fires as soon as
+                        # the route handler returns ``StreamingResponse``).
+                        # ``select_streaming_candidate`` is sync; use a
+                        # short-lived SYNC session for this rare streaming-
+                        # fallback key lookup rather than cascading async
+                        # into the selector.
+                        from app.core.db import SessionLocal as _SyncSessionLocal
+                        _lookup_session = _SyncSessionLocal()
+                        try:
+                            fb_candidate = fb_runner.select_streaming_candidate(
+                                original_provider=_stream_original_provider,
+                                original_model=_stream_original_model,
+                                session=_lookup_session,
+                                skip_providers=skip_providers,
+                                required=_stream_required_caps,
+                            )
+                        finally:
+                            _lookup_session.close()
 
-                log.info(
-                    "stream_in_generator_fallback",
-                    from_provider=failed_provider,
-                    to_provider=fb_candidate["provider"],
-                    to_model=fb_candidate["model"],
+                        if fb_candidate is not None:
+                            log.info(
+                                "stream_in_generator_fallback",
+                                from_provider=failed_provider,
+                                to_provider=fb_candidate["provider"],
+                                to_model=fb_candidate["model"],
+                            )
+                            route.provider_name = fb_candidate["provider"]
+                            route.model_name = fb_candidate["model"]
+                            stream_adapter = orchestrator.provider_dispatcher.adapters[
+                                fb_candidate["provider"]
+                            ]
+                            stream_api_key = fb_candidate["api_key"]
+                            _stream_fallback_used = True
+                            _stream_attempt_number += 1
+                            continue
+
+                # Every recovery path exhausted — surface a typed error
+                # frame (Phase C) so the web client renders an error state
+                # instead of a silent empty bubble, then close the stream.
+                _err_code, _err_msg = _classify_stream_error(stream_exc)
+                log.warning(
+                    "stream_pre_yield_error_surfaced",
+                    provider=route.provider_name,
+                    model=route.model_name,
+                    code=_err_code,
+                    error=str(stream_exc)[:200],
                 )
-                route.provider_name = fb_candidate["provider"]
-                route.model_name = fb_candidate["model"]
-                stream_adapter = orchestrator.provider_dispatcher.adapters[
-                    fb_candidate["provider"]
-                ]
-                stream_api_key = fb_candidate["api_key"]
-                _stream_fallback_used = True
-                _stream_attempt_number += 1
-                continue
+                yield _emit_error(_err_code, _err_msg)
+                yield "data: [DONE]\n\n"
+                return
 
         # Flush the remaining tail. The tail already went through a
         # DLP scan in its most recent iteration; no need to re-mask.

@@ -22,6 +22,7 @@ import type {
   Message,
   SSEAnalysisStatus,
   SSEContentDelta,
+  SSEError,
   SSEMessageComplete,
   SSEMessageStart,
   SSEReasoningDelta,
@@ -1120,7 +1121,13 @@ async function consumeStream(
         flush();
         const id = realAssistantId ?? tempAsstId;
         finalizeMessage(set, get, convId, id, "error");
-        get().setError("AI service error during streaming.");
+        // Prefer the gateway-supplied reason (Phase C error frame, e.g.
+        // "provider rejected credentials") over the generic fallback so
+        // the user sees WHY the turn failed instead of a blank bubble.
+        const errData = evt.data as SSEError | undefined;
+        get().setError(
+          errData?.message || "AI service error during streaming.",
+        );
       }
     }
   } finally {
