@@ -1,0 +1,77 @@
+# GitLab CI — mirror of .github/workflows/ci.yml.
+#
+# Test gate only (no build / deploy): three independent jobs run on every
+# push to main and every merge request targeting main. Versions match the
+# GitHub Actions workflow exactly (Python 3.11, Node 20, Go 1.24) so a green
+# run on one host means a green run on the other.
+
+stages:
+  - test
+
+# Pipeline-level gate (equivalent to GitHub's `on: push:[main] / PR:[main]`).
+# Runs for: a push to main, OR a merge request targeting main. Limiting it
+# here keeps job `rules` empty and avoids duplicate branch+MR pipelines.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+
+# backend (pytest, unit lane)
+backend-test:
+  stage: test
+  image: python:3.11
+  # requirements-dev.txt pulls requirements.txt + the test extras (respx,
+  # aiosqlite). The NER (presidio/spaCy) and semantic extras are NOT
+  # installed — those tests live in the integration lane and are excluded
+  # below, so CI stays fast. Mirrors the GitHub Actions backend job.
+  variables:
+    APP_ENV: test
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  cache:
+    key:
+      files:
+        - backend/requirements-dev.txt
+    paths:
+      - .cache/pip
+  before_script:
+    - cd backend
+    - pip install -r requirements-dev.txt
+  script:
+    # The integration lane (DLP engine/sidecar, NER, real Postgres, gRPC
+    # limiter, live/e2e, container .env) is excluded via the `integration`
+    # marker + conftest auto-tag. This gate must stay green.
+    - pytest -m "not integration" --tb=short
+
+# web-chat (tsc --noEmit)
+frontend-typecheck:
+  stage: test
+  image: node:20
+  cache:
+    key:
+      files:
+        - apps/web-chat/package-lock.json
+    paths:
+      - apps/web-chat/node_modules
+  before_script:
+    - cd apps/web-chat
+    - npm ci
+  script:
+    - npx tsc --noEmit
+
+# chat-edge-api (go vet + test)
+go-test:
+  stage: test
+  image: golang:1.24
+  variables:
+    GOPATH: "$CI_PROJECT_DIR/.cache/go"
+  cache:
+    key:
+      files:
+        - services/chat-edge-api/go.sum
+    paths:
+      - .cache/go/pkg/mod
+  before_script:
+    - cd services/chat-edge-api
+  script:
+    - go vet ./...
+    - go test ./...
