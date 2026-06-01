@@ -47,6 +47,29 @@ class OpenRouterAdapter(BaseProviderAdapter):
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
         }
+        # P1 Item 4 — prompt caching for Anthropic models routed via
+        # OpenRouter. OpenRouter passes ``cache_control`` through to
+        # Anthropic when the system message content is a block array, so we
+        # mark the (large, stable) system prompt as an ephemeral cache
+        # breakpoint. Only for ``anthropic/*`` models — other providers
+        # don't honour cache_control and a block-array system could confuse
+        # their adapters, so they keep the plain-string content.
+        if (
+            model.startswith("anthropic/")
+            and getattr(settings, "anthropic_prompt_caching_enabled", True)
+        ):
+            for msg in body["messages"]:
+                if msg.get("role") == "system" and isinstance(
+                    msg.get("content"), str
+                ):
+                    msg["content"] = [
+                        {
+                            "type": "text",
+                            "text": msg["content"],
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                    break  # one breakpoint on the first system message
         if stream:
             body["stream"] = True
 
