@@ -97,6 +97,78 @@ class ProviderDispatcher:
             api_key=api_key,
         )
 
+    @staticmethod
+    def _is_auth_error(exc: Exception) -> bool:
+        """True when ``exc`` is a provider auth rejection (401/403).
+
+        The adapter error mapper turns a 401/403 into a ``ProviderError``
+        with ``details['status']`` set, so the dispatcher can tell an auth
+        failure (rotate the key) apart from a generic transient error
+        (just fall back).
+        """
+        if not isinstance(exc, ProviderError):
+            return False
+        status = (getattr(exc, "details", None) or {}).get("status")
+        return status in (401, 403)
+
+    async def _dispatch_one(
+        self,
+        route,
+        provider: str,
+        model: str,
+        payload,
+        messages: list[Message],
+        first_key: str | None,
+        key_resolver: Callable[[str], str | None] | None,
+        invalidate_key: Callable[[str, str], None] | None,
+    ) -> ProviderResponse:
+        """Dispatch to a single (provider, model), rotating keys on 401/403.
+
+        Group A / A2 — auto-invalidate on 401 + retry next key. When the
+        provider rejects the credential, ``invalidate_key`` marks that row
+        invalid and we re-resolve via ``key_resolver`` to get the next key
+        in the pool, retrying within the same request. Bounded by the
+        number of DISTINCT keys (a re-resolve that returns an already-tried
+        or empty key ends the loop), so an all-401 pool can't spin.
+        Non-auth errors propagate unchanged for the fallback chain.
+        """
+        tried: set[str] = set()
+        key = first_key
+        while True:
+            hop_route = type(route)(provider_name=provider, model_name=model)
+            try:
+                return await self.dispatch(
+                    route=hop_route,
+                    payload=payload,
+                    messages=messages,
+                    api_key=key,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if not (
+                    self._is_auth_error(exc)
+                    and invalidate_key is not None
+                    and key is not None
+                ):
+                    raise
+                tried.add(key)
+                invalidate_key(provider, key)
+                next_key = key_resolver(provider) if key_resolver else None
+                if not next_key or next_key in tried:
+                    logger.warning(
+                        "dispatch_auth_pool_exhausted",
+                        provider=provider,
+                        model=model,
+                        keys_tried=len(tried),
+                    )
+                    raise
+                logger.warning(
+                    "dispatch_auth_key_rotated",
+                    provider=provider,
+                    model=model,
+                    keys_tried=len(tried),
+                )
+                key = next_key
+
     async def dispatch_with_fallback(
         self,
         route,
@@ -105,6 +177,7 @@ class ProviderDispatcher:
         *,
         api_key: str | None = None,
         key_resolver: Callable[[str], str | None] | None = None,
+        invalidate_key: Callable[[str, str], None] | None = None,
         max_hops: int = _MAX_LAYER1_HOPS,
     ) -> tuple[ProviderResponse, str, str]:
         """Dispatch the primary route with up to ``max_hops`` Layer-1
@@ -177,19 +250,23 @@ class ProviderDispatcher:
                     continue
 
             t0 = time.perf_counter()
-            # Per-hop route. Built fresh each iteration so the primary's
-            # ``fallbacks`` list isn't carried forward (the dispatcher's
-            # own retry logic owns hop progression). Delegating through
-            # ``self.dispatch`` (rather than calling ``adapter.chat``
-            # inline) keeps every spy / monkeypatch on ``dispatch`` —
-            # of which the integration tests have several — intact.
-            hop_route = type(route)(provider_name=provider, model_name=model)
+            # Per-hop dispatch with same-provider key rotation on 401/403
+            # (A2). ``_dispatch_one`` delegates through ``self.dispatch``
+            # (rather than calling ``adapter.chat`` inline) so every spy /
+            # monkeypatch on ``dispatch`` — of which the integration tests
+            # have several — stays intact. A fresh per-hop route is built
+            # inside so the primary's ``fallbacks`` list isn't carried
+            # forward (the dispatcher's own retry logic owns hop progression).
             try:
-                response = await self.dispatch(
-                    route=hop_route,
+                response = await self._dispatch_one(
+                    route=route,
+                    provider=provider,
+                    model=model,
                     payload=payload,
                     messages=messages,
-                    api_key=attempt_key,
+                    first_key=attempt_key,
+                    key_resolver=key_resolver,
+                    invalidate_key=invalidate_key,
                 )
                 if hop_index > 0:
                     logger.info(
