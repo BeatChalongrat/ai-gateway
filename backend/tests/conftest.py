@@ -22,6 +22,82 @@ def pytest_configure(config):
         "Python version — the marker is for CI selection, not a "
         "presidio install gate.",
     )
+    config.addinivalue_line(
+        "markers",
+        "integration: tests that need a live environment the bare unit "
+        "run doesn't provide — the configured DLP engine / Rust DLP "
+        "sidecar, the NER sidecar, a real Postgres schema (vs the test "
+        "sqlite), a gRPC rate-limiter, live provider keys, or the "
+        "container's runtime .env. They are excluded from the unit lane: "
+        "`pytest -m 'not integration'` is the gate that must stay green; "
+        "`pytest -m integration` runs them against a full stack.",
+    )
+
+
+# C3 — modules that require a live environment (see the ``integration``
+# marker doc above). Every test in these modules is auto-tagged
+# ``integration`` by ``pytest_collection_modifyitems`` so the unit lane
+# (`pytest -m "not integration"`) stays green. Kept as an explicit,
+# reviewable all-list rather than a heuristic so adding a module to the
+# integration lane is a deliberate, visible decision.
+_INTEGRATION_MODULES = {
+    # Live / end-to-end (need real keys or the full request pipeline)
+    "test_api_e2e",
+    "test_e2e_dlp_flow",
+    "test_e2e_gateway_dlp",
+    "test_error_contracts",
+    "test_response_contracts",
+    # DLP behavior — depends on the configured DLP engine (DLP_ENGINE=rust
+    # in the container) / Rust sidecar, not the bare-python detector path.
+    "test_admin_secure_trace",
+    "test_block_path_persistence",
+    "test_dlp_all_detectors",
+    "test_dlp_config",
+    "test_dlp_domain",
+    "test_dlp_integration",
+    "test_dlp_p0_fixes",
+    "test_dlp_p0_live",
+    "test_dlp_pipeline",
+    "test_dlp_policy_runtime_privacy",
+    "test_dlp_trace",
+    "test_new_detectors",
+    "test_privacy_rbac",
+    # NER sidecar / Presidio
+    "test_ner_detector",
+    # Real Postgres schema vs the test sqlite
+    "test_migrations",
+    # gRPC rate-limiter sidecar
+    "test_rate_limiter_client",
+    # Container runtime .env overrides the asserted defaults
+    "test_config",
+    "test_secret_validation",
+    # Streaming + model-registry integration (DB-backed registry / SSE)
+    "test_streaming_moderation",
+    "test_streaming_routing",
+    "test_models_endpoint",
+    "test_auth_dependency",
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-tag environment-dependent modules + the ``tests/integration/``
+    directory with the ``integration`` marker so the unit lane excludes
+    them. See ``_INTEGRATION_MODULES`` for the rationale per module."""
+    import pytest as _pytest
+
+    for item in items:
+        fspath = str(getattr(item, "fspath", "")).replace("\\", "/")
+        module_name = item.module.__name__.rsplit(".", 1)[-1] if getattr(
+            item, "module", None
+        ) else ""
+        if (
+            "/tests/integration/" in fspath
+            # The DLP pipeline suite exercises the configured DLP engine
+            # (Rust sidecar in the container) end-to-end.
+            or "/test_dlp_pipeline_suite/" in fspath
+            or module_name in _INTEGRATION_MODULES
+        ):
+            item.add_marker(_pytest.mark.integration)
 
 
 @pytest.fixture(autouse=True)
@@ -256,6 +332,7 @@ async def _stub_dispatch_with_fallback(
     *,
     api_key=None,
     key_resolver=None,
+    invalidate_key=None,
     max_hops=2,
 ):
     """Stub for ``dispatch_with_fallback`` matching the production
@@ -292,9 +369,19 @@ def _mock_provider_dispatch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _mock_provider_key_service(monkeypatch):
+def _mock_provider_key_service(request, monkeypatch):
     """Auto-stub ProviderKeyService.get_api_key so integration tests
-    never fail with 'No API key configured'."""
+    never fail with 'No API key configured'.
+
+    Exempt the dedicated key-service unit tests — they exercise the REAL
+    ``get_api_key`` / ``get_api_key_async`` (round-robin, cache,
+    placeholder filtering), so the stub would shadow exactly what they
+    assert. Same nodeid-exemption pattern the cache / rate-limiter
+    autouse fixtures use."""
+    if "test_async_provider_key_service" in request.node.nodeid or (
+        "test_provider_key" in request.node.nodeid
+    ):
+        return
     from app.services.provider_key_service import ProviderKeyService
     monkeypatch.setattr(
         ProviderKeyService, "get_api_key", lambda self, session, provider: "test-stub-key"

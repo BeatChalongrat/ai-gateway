@@ -325,7 +325,24 @@ async def test_sync_deactivates_missing_models(fresh_db_session, monkeypatch):
     async def _stub_empty(_api_key):
         return []
 
+    # openai must report a NON-EMPTY list that omits ``old-model-xyz`` —
+    # the soft-deactivate guard only fires for providers that successfully
+    # returned models this run (a provider that returns [] is treated as a
+    # transient outage and its rows are left intact). With the old all-empty
+    # stub, openai was never "synced", so the vanished model was never
+    # deactivated and this test could not pass.
+    async def _stub_openai(_api_key):
+        return [
+            provider_discovery.DiscoveredModel(
+                provider="openai",
+                model="gpt-4o",
+                cost_per_input_token=0.0000025,
+                cost_per_output_token=0.000010,
+            )
+        ]
+
     patched = {key: _stub_empty for key in provider_discovery.PROVIDER_DISCOVERY}
+    patched["openai"] = _stub_openai
     monkeypatch.setattr(provider_discovery, "PROVIDER_DISCOVERY", patched)
     monkeypatch.setattr(ds_mod, "PROVIDER_DISCOVERY", patched)
 

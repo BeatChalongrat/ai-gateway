@@ -40,7 +40,10 @@ async def test_get_api_key_async_resolves_db_key(async_db):
             id=str(uuid.uuid4()),
             provider_name=provider,
             label="k1",
-            api_key_encrypted=_enc("sk-secret-123"),
+            # Realistic-length key: the resolve path now filters dev
+            # placeholders (Group A / A2), which rejects keys shorter than
+            # 20 chars. A real provider key is long, so use one here.
+            api_key_encrypted=_enc("sk-secret-1234567890abcdef"),
             is_active=True,
             last_test_status="valid",
         )
@@ -48,7 +51,7 @@ async def test_get_api_key_async_resolves_db_key(async_db):
     await async_db.flush()
 
     result = await ProviderKeyService().get_api_key_async(async_db, provider)
-    assert result == "sk-secret-123"
+    assert result == "sk-secret-1234567890abcdef"
 
 
 @pytest.mark.asyncio

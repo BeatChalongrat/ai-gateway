@@ -70,6 +70,11 @@ class _FakeKeyService:
     def get_api_key(self, session, provider: str) -> str | None:
         return f"sk-{provider}" if provider in self.keys_for else None
 
+    async def get_api_key_async(self, session, provider: str) -> str | None:
+        # The FallbackOrchestrator.run() hot path was refactored to the
+        # async key lookup; mirror the sync stub so the fake satisfies it.
+        return self.get_api_key(session, provider)
+
 
 # ---------------------------------------------------------------------------
 # is_fallback_eligible
