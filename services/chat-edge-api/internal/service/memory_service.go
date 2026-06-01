@@ -519,7 +519,7 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 		sb.WriteString(memories[i].Content)
 		sb.WriteString("\n")
 	}
-	sb.WriteString("\nUse this information naturally in your responses.\n")
+	sb.WriteString("\nUse this information naturally when relevant — do not force it into every response.\n")
 	sb.WriteString("Do not say 'according to my memory' or mention the memory system.\n")
 	sb.WriteString("</saved_user_memory>\n")
 
