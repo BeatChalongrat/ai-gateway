@@ -1640,6 +1640,8 @@ async def chat_completions(
                 provider_usage.prompt_tokens,
                 provider_usage.completion_tokens,
                 provider_usage.cached_prompt_tokens,
+                # P1 Item 4 — Anthropic cache-write tokens (1.25× input).
+                getattr(provider_usage, "cache_creation_prompt_tokens", 0),
             )
             _cost_info = currency_service.format_cost(_usd)
             usage = UsageInfo(
