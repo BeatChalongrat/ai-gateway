@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { BrainCircuit } from "lucide-react";
+import { BrainCircuit, Pin, PinOff } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
 import type { Conversation } from "@/lib/types";
@@ -13,6 +13,7 @@ interface Props {
   onSelect: () => void;
   onRename: (title: string) => void | Promise<void>;
   onDelete: () => void | Promise<void>;
+  onTogglePin: () => void | Promise<void>;
 }
 
 export function ConversationItem({
@@ -21,6 +22,7 @@ export function ConversationItem({
   onSelect,
   onRename,
   onDelete,
+  onTogglePin,
 }: Props) {
   const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -100,6 +102,14 @@ export function ConversationItem({
                 : conv.title
             }
           >
+            {conv.is_pinned ? (
+              <Pin
+                width={12}
+                height={12}
+                aria-hidden
+                className="shrink-0 text-text-muted opacity-70"
+              />
+            ) : null}
             {conv.memory_enabled === false ? (
               <BrainCircuit
                 width={12}
@@ -134,6 +144,21 @@ export function ConversationItem({
             className="popover-appear absolute right-1 top-9 z-10 w-32 overflow-hidden rounded-md border border-border bg-bg-surface text-xs shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                void onTogglePin();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+            >
+              {conv.is_pinned ? (
+                <PinOff width={14} height={14} aria-hidden />
+              ) : (
+                <Pin width={14} height={14} aria-hidden />
+              )}
+              {conv.is_pinned ? t("conv.unpin") : t("conv.pin")}
+            </button>
             <button
               type="button"
               onClick={() => {
