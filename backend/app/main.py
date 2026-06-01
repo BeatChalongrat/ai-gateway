@@ -264,11 +264,22 @@ def _import_env_provider_keys() -> None:
     the operator soft-deletes our imported key, the soft-deleted row keeps
     us from re-creating it on the next boot — the deletion stands.
 
+    Placeholder safety (Group A / A1): if an env var still holds a dev
+    placeholder (e.g. ``sk-ant-...``), we never insert it — a placeholder
+    in the pool would 401 silently on dispatch. We also retroactively
+    deactivate any matching placeholder row a PRIOR boot imported before
+    this guard existed, so an upgrade self-heals the pool.
+
     Keys are inserted with no test status; the admin UI's Test button
     populates ``last_test_status`` on demand.
     """
     from app.core.db import SessionLocal
-    from app.services.provider_key_service import ProviderKeyService
+    from app.repositories.provider_key_repository import ProviderKeyRepository
+    from app.services.provider_key_service import (
+        ProviderKeyService,
+        _decode,
+        _looks_like_placeholder_key,
+    )
 
     env_keys = {
         "openai": settings.openai_api_key,
@@ -279,10 +290,26 @@ def _import_env_provider_keys() -> None:
     session = SessionLocal()
     try:
         svc = ProviderKeyService()
+        repo = ProviderKeyRepository(session)
         imported: list[str] = []
+        skipped: list[str] = []
+        deactivated: list[str] = []
         for provider, raw_key in env_keys.items():
             raw_key = (raw_key or "").strip()
             if not raw_key:
+                continue
+            if _looks_like_placeholder_key(raw_key):
+                # Never import a placeholder. Also deactivate any active row
+                # whose decoded key equals this placeholder — i.e. one a
+                # pre-guard boot imported — so the pool self-heals.
+                for row in repo.list_active_by_provider(provider):
+                    try:
+                        if _decode(row.api_key_encrypted) == raw_key:
+                            repo.update(row, is_active=False)
+                            deactivated.append(provider)
+                    except Exception:
+                        continue
+                skipped.append(provider)
                 continue
             if svc.list_keys(session, provider):
                 # Provider already has at least one row (active or
@@ -296,10 +323,22 @@ def _import_env_provider_keys() -> None:
             )
             imported.append(provider)
         session.commit()
+        from app.services.provider_key_service import clear_keys_cache
+        if deactivated:
+            clear_keys_cache()
         if imported:
             print(
                 "[startup] Imported env API keys into provider_keys: "
                 + ", ".join(imported)
+            )
+        for provider in skipped:
+            print(
+                f"[startup] Skipping placeholder key for {provider} from env"
+            )
+        if deactivated:
+            print(
+                "[startup] Deactivated previously-imported placeholder keys: "
+                + ", ".join(sorted(set(deactivated)))
             )
     except Exception as exc:
         session.rollback()
