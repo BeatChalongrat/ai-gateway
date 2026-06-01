@@ -46,6 +46,13 @@ interface Props {
   onSwitchBranch?: (branchIndex: number) => void;
 }
 
+// Issue 1 — the "Sources (N)" attribution rail is hidden from end users.
+// The backend still attaches ``context_sources`` to each assistant turn
+// (useful for internal/debugging use), so we gate ONLY the UI render
+// here rather than dropping the data. Flip to ``true`` to bring the rail
+// back without touching the SourcesCard wiring below.
+const SHOW_SOURCES_RAIL = false;
+
 // Citation marker — RAG context tells the model to cite sources using
 // the literal pattern ``[Source: <filename>]``. We post-process the
 // assistant text to convert that pattern into a markdown link with a
@@ -351,8 +358,11 @@ function MessageBubbleImpl({
       {/* S7 — "Sources used" rail. Renders only when the
           assistant turn drew on saved memory / state / search /
           compaction. Skipped during streaming so the card doesn't
-          flash in before all sources are persisted server-side. */}
-      {!message.isStreaming &&
+          flash in before all sources are persisted server-side.
+          Issue 1 — gated off (SHOW_SOURCES_RAIL) so end users don't
+          see it; the underlying data is still delivered. */}
+      {SHOW_SOURCES_RAIL &&
+      !message.isStreaming &&
       message.context_sources &&
       message.context_sources.length > 0 ? (
         <SourcesCard
