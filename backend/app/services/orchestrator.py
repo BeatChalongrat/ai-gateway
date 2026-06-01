@@ -1004,6 +1004,13 @@ class GatewayOrchestrator:
             fallback_attempt=(
                 fallback_result.attempt_number if fallback_result else 1
             ),
+            # OpenAI prompt-cache hit (0 for every other provider / cache
+            # miss). Observability only — no request_log column yet, so
+            # this stays in the structured log line.
+            cached_prompt_tokens=(
+                provider_response.usage.cached_prompt_tokens
+                if provider_response.usage else 0
+            ),
         )
 
         # 7. Estimate usage (falls back to heuristic when provider doesn't report usage)
@@ -1013,6 +1020,7 @@ class GatewayOrchestrator:
                 route.model_name,
                 provider_response.usage.prompt_tokens,
                 provider_response.usage.completion_tokens,
+                provider_response.usage.cached_prompt_tokens,
             )
             _cost_info = currency_service.format_cost(_usd)
             # T3: surface ``reasoning_tokens`` on UsageInfo when the

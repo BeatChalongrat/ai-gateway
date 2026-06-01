@@ -1511,6 +1511,7 @@ async def chat_completions(
                 route.model_name,
                 provider_usage.prompt_tokens,
                 provider_usage.completion_tokens,
+                provider_usage.cached_prompt_tokens,
             )
             _cost_info = currency_service.format_cost(_usd)
             usage = UsageInfo(
