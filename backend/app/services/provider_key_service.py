@@ -14,6 +14,7 @@ touches a different ORM model).
 from __future__ import annotations
 
 import base64
+import logging
 import time
 import uuid
 from collections import defaultdict
@@ -28,6 +29,34 @@ from app.core.config import settings
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
 from app.repositories.provider_key_repository import ProviderKeyRepository
+
+logger = logging.getLogger(__name__)
+
+
+def _filter_placeholder_candidates(
+    rows: list[ProviderKeyORM], provider_name: str
+) -> list[str]:
+    """Decode active rows, dropping any whose key is a dev placeholder.
+
+    Group A / A2: a placeholder stored in ``provider_keys`` (e.g. one a
+    pre-guard boot imported) would 401 silently on dispatch. We filter it
+    out of the resolved candidate list — not just the env fallback — so the
+    pool only ever yields keys that look real. Each drop is logged.
+    """
+    out: list[str] = []
+    for r in rows:
+        if r.last_test_status == "invalid":
+            continue
+        key = _decode(r.api_key_encrypted)
+        if _looks_like_placeholder_key(key):
+            logger.warning(
+                "Filtering placeholder key %s for provider %s from pool",
+                r.id,
+                provider_name,
+            )
+            continue
+        out.append(key)
+    return out
 
 
 def _encode(key: str) -> str:
@@ -140,11 +169,7 @@ class ProviderKeyService:
         """
         repo = ProviderKeyRepository(session)
         rows = repo.list_active_by_provider(provider_name)
-        valid = [
-            _decode(r.api_key_encrypted)
-            for r in rows
-            if r.last_test_status != "invalid"
-        ]
+        valid = _filter_placeholder_candidates(rows, provider_name)
         if valid:
             return valid
 
@@ -220,12 +245,8 @@ class ProviderKeyService:
             )
             .order_by(ProviderKeyORM.created_at)
         )
-        rows = result.scalars().all()
-        valid = [
-            _decode(r.api_key_encrypted)
-            for r in rows
-            if r.last_test_status != "invalid"
-        ]
+        rows = list(result.scalars().all())
+        valid = _filter_placeholder_candidates(rows, provider_name)
         if valid:
             return valid
 
@@ -358,6 +379,41 @@ class ProviderKeyService:
         repo.record_test_result(key_id, status, latency_ms)
         clear_keys_cache()  # B5: a key flipping to/from "invalid" changes candidates
 
+    def invalidate_key_by_value(
+        self, session: Session, provider_name: str, api_key: str
+    ) -> str | None:
+        """Mark the key whose decoded value matches ``api_key`` invalid.
+
+        Group A / A2 — auto-invalidate on 401. When the provider rejects a
+        key at dispatch time, flip its row to ``last_test_status='invalid'``
+        and ``is_active=False`` so the round-robin pool stops handing it
+        out, then bust the resolved-key cache so the next resolve re-reads.
+
+        Matches on the *active* rows for the provider (the pool the
+        round-robin draws from) and decodes each to compare — keys are
+        stored encrypted, and the dispatch path only has the plaintext.
+        Returns the invalidated key id, or None if no active row matched
+        (e.g. the key came from the env/legacy fallback, which has no row).
+        """
+        repo = ProviderKeyRepository(session)
+        for row in repo.list_active_by_provider(provider_name):
+            try:
+                if _decode(row.api_key_encrypted) != api_key:
+                    continue
+            except Exception:
+                continue
+            repo.update(row, is_active=False, last_test_status="invalid")
+            row.last_tested_at = datetime.now(timezone.utc)
+            session.flush()
+            clear_keys_cache()
+            logger.warning(
+                "Auto-invalidated provider key %s for %s after auth failure",
+                row.id,
+                provider_name,
+            )
+            return row.id
+        return None
+
     def _next_label_num(self, session: Session, provider_name: str) -> int:
         repo = ProviderKeyRepository(session)
         return repo.count_by_provider(provider_name) + 1
@@ -413,16 +469,28 @@ class ProviderKeyService:
             return {"valid": False, "latency_ms": ms, "error": err}
 
     async def _test_openrouter(self, api_key: str) -> dict:
+        # A3: ``GET /api/v1/models`` is PUBLIC on OpenRouter — it returns 200
+        # for any key (even a placeholder / garbage), so it can't validate a
+        # credential. ``GET /api/v1/auth/key`` requires auth and returns the
+        # key's own metadata, so it 401s on a bad key — the correct probe.
         t0 = time.perf_counter()
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                "https://openrouter.ai/api/v1/models",
+                "https://openrouter.ai/api/v1/auth/key",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             ms = round((time.perf_counter() - t0) * 1000)
             if resp.status_code == 200:
                 return {"valid": True, "latency_ms": ms, "error": None}
-            return {"valid": False, "latency_ms": ms, "error": f"HTTP {resp.status_code}"}
+            body = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith(
+                    "application/json"
+                )
+                else {}
+            )
+            err = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+            return {"valid": False, "latency_ms": ms, "error": err}
 
     # ------------------------------------------------------------------
     # Legacy compat — key status summary
