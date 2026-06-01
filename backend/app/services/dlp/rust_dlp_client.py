@@ -139,6 +139,7 @@ def _ner_scan_messages_sync(
     *,
     scan_system_messages: bool,
     disabled: list[str],
+    ner_skip_roles: frozenset[str] = frozenset(),
 ) -> list[DetectionMatch]:
     """Run the NER-only registry over messages (blocking — call via
     ``to_thread``). Mirrors ``DetectorRegistry.scan_messages`` semantics."""
@@ -146,7 +147,9 @@ def _ner_scan_messages_sync(
         return []
     try:
         res = _ner_registry().scan_messages(
-            messages, scan_system_messages=scan_system_messages
+            messages,
+            scan_system_messages=scan_system_messages,
+            ner_skip_roles=ner_skip_roles,
         )
         return list(res.matches)
     except Exception as exc:  # noqa: BLE001
@@ -311,6 +314,7 @@ class RustDlpClient:
         scan_system_messages: bool = False,
         disabled_detectors: list[str] | None = None,
         ner_enabled: bool = True,
+        ner_skip_roles: frozenset[str] = frozenset(),
     ) -> DetectionResult | None:
         """Returns ``DetectionResult`` on success, ``None`` on any
         failure. Caller falls back to the Python registry on None.
@@ -368,6 +372,7 @@ class RustDlpClient:
                 messages,
                 scan_system_messages=scan_system_messages,
                 disabled=disabled,
+                ner_skip_roles=ner_skip_roles,
             )
 
         return DetectionResult(
