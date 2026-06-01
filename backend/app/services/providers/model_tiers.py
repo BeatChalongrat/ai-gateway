@@ -30,6 +30,88 @@ def canonical_model(model: str) -> str:
     """Strip a trailing date stamp from a provider model id."""
     return _MODEL_DATE_SUFFIX.sub("", model)
 
+
+def _strip_vendor_prefix(model: str) -> str:
+    """Reduce an OpenRouter ``vendor/model`` id to the bare model alias.
+
+    OpenRouter routes by ``vendor/model`` (``anthropic/claude-sonnet-4``)
+    while direct providers use the bare alias (``claude-sonnet-4``).
+    Dropping the leading ``vendor/`` segment lets a single chain table be
+    keyed by one alias and resolve regardless of how the caller addressed
+    the model. ``openrouter/auto`` reduces to ``auto`` (no tier — fine).
+    """
+    return model.split("/", 1)[1] if "/" in model else model
+
+
+def _alias(model: str) -> str:
+    """Normalised lookup key: vendor-prefix-stripped + date-stripped."""
+    return canonical_model(_strip_vendor_prefix(model))
+
+
+# ---------------------------------------------------------------------------
+# B2 — explicit, tier-matched fallback chains for the curated chat catalog.
+#
+# Keyed by the bare model alias (see ``_alias``) so BOTH the direct
+# provider id (``claude-sonnet-4``) and the OpenRouter ``vendor/model`` id
+# (``anthropic/claude-sonnet-4``) resolve to the same chain. Every
+# candidate targets the OpenRouter adapter because that is the provider
+# holding a live key in this deployment — so each hop actually dispatches
+# instead of being skipped for a missing key. Each hop is a DIFFERENT
+# underlying vendor model (or a same-vendor newer revision) and never a
+# more expensive tier, satisfying the cross-provider + no-silent-upgrade
+# rules. Chains are 2 deep (3 total attempts including the primary).
+# ---------------------------------------------------------------------------
+_OR = "openrouter"
+
+
+def _orc(*models: str) -> list[dict[str, str]]:
+    """Build an OpenRouter-adapter candidate list from model ids."""
+    return [{"provider": _OR, "model": m} for m in models]
+
+
+CURATED_FALLBACKS: dict[str, list[dict[str, str]]] = {
+    # Standard / flagship tier — peers stay standard.
+    "claude-sonnet-4": _orc(
+        "anthropic/claude-sonnet-4.5", "openai/gpt-4o"
+    ),
+    "claude-sonnet-4.5": _orc(
+        "anthropic/claude-sonnet-4", "openai/gpt-4o"
+    ),
+    "gpt-4o": _orc(
+        "anthropic/claude-sonnet-4", "deepseek/deepseek-chat"
+    ),
+    "gemini-2.5-pro": _orc(
+        "anthropic/claude-sonnet-4", "openai/gpt-4o"
+    ),
+    "deepseek-r1": _orc("openai/gpt-4o", "anthropic/claude-sonnet-4"),
+    # Premium → premium/standard (down, never up).
+    "claude-opus-4.1": _orc(
+        "anthropic/claude-sonnet-4.5", "openai/gpt-4o"
+    ),
+    "claude-opus-4": _orc(
+        "anthropic/claude-sonnet-4.5", "openai/gpt-4o"
+    ),
+    # Reasoning peers fall back to other reasoning models first.
+    "o3-mini": _orc("deepseek/deepseek-r1", "openai/gpt-4o"),
+    "o4-mini": _orc("deepseek/deepseek-r1", "openai/gpt-4o"),
+    # Budget / fast tier — peers stay budget/fast (no upgrade).
+    "claude-3.5-haiku": _orc(
+        "openai/gpt-4o-mini", "deepseek/deepseek-chat"
+    ),
+    "gpt-4o-mini": _orc(
+        "anthropic/claude-3.5-haiku", "deepseek/deepseek-chat"
+    ),
+    "gemini-2.5-flash": _orc(
+        "openai/gpt-4o-mini", "deepseek/deepseek-chat"
+    ),
+    "deepseek-chat": _orc(
+        "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"
+    ),
+    "llama-3.3-70b-instruct": _orc(
+        "deepseek/deepseek-chat", "openai/gpt-4o-mini"
+    ),
+}
+
 # ---------------------------------------------------------------------------
 # Tier table — premium / standard / fast.
 #
@@ -224,6 +306,28 @@ def get_fallback_chain(
       * ``model`` has no ``model_map`` entries (the tier knows about it
         but no fallbacks have been wired yet).
     """
+    # B2: curated chains apply ONLY to models the legacy tier table does
+    # not already own — the OpenRouter ``vendor/model`` chat ids and newer
+    # models (deepseek-r1, gemini-2.5-*, claude-3.5-haiku, o-mini, …).
+    # Legacy bare names (``gpt-4o``, ``claude-sonnet-4``) keep their
+    # generic tier behavior so the existing tier contract is unchanged.
+    # A self-hop (same provider + same alias) is dropped so the curated
+    # chain stays a pure alternative list.
+    if get_tier(model) is None:
+        alias = _alias(model)
+        curated = CURATED_FALLBACKS.get(alias)
+        if curated:
+            out = [
+                dict(c)
+                for c in curated
+                if not (
+                    c["provider"] == original_provider
+                    and _alias(c["model"]) == alias
+                )
+            ]
+            if out:
+                return out
+
     tier_name = get_tier(model)
     if tier_name is None:
         return []

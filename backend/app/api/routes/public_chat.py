@@ -1005,6 +1005,75 @@ async def chat_completions(
                 )
             )
 
+        def _emit_error(
+            *,
+            code: str = "provider_error",
+            message: str = "Model unavailable, please try again",
+            details: dict | None = None,
+            attempts: list | None = None,
+        ) -> str:
+            """Serialise an error SSE frame (B1 — error visibility).
+
+            Emitted when the stream fails terminally — either before any
+            content reached the wire (pre-stream) or after a partial body
+            (mid-stream). Without this frame the generator would just raise
+            (or silently return) AFTER the 200 + headers were committed, so
+            the client saw a blank / truncated stream. The frame carries a
+            machine-readable ``code`` (the frontend maps it to a localized
+            message) plus optional ``details`` (provider/status) and, when
+            the whole fallback chain is exhausted, the per-model ``attempts``
+            log (B3 ``all_models_failed``).
+            """
+            err: dict = {"code": code, "message": message}
+            if details:
+                err["details"] = details
+            if attempts:
+                err["attempts"] = attempts
+            return "data: {}\n\n".format(
+                _sse_dumps({"error": err}, ensure_ascii=False)
+            )
+
+        _fallback_notice_emitted = False
+
+        def _emit_fallback_info() -> str:
+            """Serialise a ``fallback_info`` metadata SSE frame (B2).
+
+            Sent once, before the answering model's content, when the
+            request was served by a fallback rather than the model the
+            caller asked for. The client renders a small notice ("answered
+            by X — Y temporarily unavailable") so a silent model swap is
+            visible. Carries the per-attempt log already accumulated in
+            ``_stream_fallback_attempts`` plus the success entry.
+            """
+            last = (
+                _stream_fallback_attempts[-1]
+                if _stream_fallback_attempts
+                else {}
+            )
+            return "data: {}\n\n".format(
+                _sse_dumps(
+                    {
+                        "type": "fallback_info",
+                        "fallback_info": {
+                            "requested_model": _stream_original_model,
+                            "actual_model": route.model_name,
+                            "reason": (
+                                f"Primary model unavailable "
+                                f"({last.get('error_code', 'error')})"
+                            ),
+                            "attempts": list(_stream_fallback_attempts)
+                            + [
+                                {
+                                    "model": route.model_name,
+                                    "status": "success",
+                                }
+                            ],
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
         from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
         # Mutable state for the in-generator fallback retry. The outer
@@ -1023,6 +1092,12 @@ async def chat_completions(
         # point ``stream_chat`` at the new candidate.
         stream_adapter = adapter
         stream_api_key = provider_api_key
+
+        # B2: a pre-check (Redis health marker) swap already redirected this
+        # request to a fallback before the loop. Announce it before content.
+        if _stream_fallback_used and not _fallback_notice_emitted:
+            yield _emit_fallback_info()
+            _fallback_notice_emitted = True
 
         while True:
             try:
@@ -1265,13 +1340,32 @@ async def chat_completions(
                         stream_exc
                     ):
                         await _mark_unhealthy(route.provider_name)
+                    # B1: surface a mid-stream failure as an error frame so
+                    # the client can append an error notice to the partial
+                    # message instead of silently truncating.
+                    yield _emit_error(
+                        code=getattr(stream_exc, "code", "provider_error"),
+                        message="The response was interrupted, please try again",
+                        details=(dict(getattr(stream_exc, "details", None) or {})
+                                 or None),
+                    )
                     return
 
                 # Pre-yield error → eligible for body-level fallback.
+                # A non-eligible error (bad request, auth that the chain
+                # can't route around, etc.) is terminal; emit an error
+                # frame instead of raising (which, post-headers, would just
+                # truncate the stream into a blank screen). B1.
                 if not isinstance(stream_exc, _GwErr) or not _is_fallback_eligible(
                     stream_exc
                 ):
-                    raise
+                    yield _emit_error(
+                        code=getattr(stream_exc, "code", "provider_error"),
+                        message="Model unavailable, please try again",
+                        details=(dict(getattr(stream_exc, "details", None) or {})
+                                 or None),
+                    )
+                    return
 
                 failed_provider = route.provider_name
                 _stream_fallback_attempts.append(
@@ -1290,7 +1384,22 @@ async def chat_completions(
                 skip_providers.add(failed_provider)
 
                 if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
-                    raise
+                    # B3: the fallback chain is exhausted. Emit an
+                    # ``all_models_failed`` frame carrying the per-model
+                    # attempt log so the client can render a real error
+                    # bubble (which model was tried, why each failed)
+                    # instead of a blank screen.
+                    log.warning(
+                        "stream_all_models_failed",
+                        attempts=len(_stream_fallback_attempts),
+                        reason="max_streaming_fallbacks_exceeded",
+                    )
+                    yield _emit_error(
+                        code="all_models_failed",
+                        message="Unable to get a response right now",
+                        attempts=list(_stream_fallback_attempts),
+                    )
+                    return
 
                 fb_runner = orchestrator._get_fallback_orchestrator()
                 # Mint a fresh session for the key lookup — the
@@ -1316,7 +1425,19 @@ async def chat_completions(
                     _lookup_session.close()
 
                 if fb_candidate is None:
-                    raise
+                    # No further cross-provider candidate — chain exhausted.
+                    # B3: emit ``all_models_failed`` with the attempt log.
+                    log.warning(
+                        "stream_all_models_failed",
+                        attempts=len(_stream_fallback_attempts),
+                        reason="no_fallback_candidate",
+                    )
+                    yield _emit_error(
+                        code="all_models_failed",
+                        message="Unable to get a response right now",
+                        attempts=list(_stream_fallback_attempts),
+                    )
+                    return
 
                 log.info(
                     "stream_in_generator_fallback",
@@ -1332,6 +1453,13 @@ async def chat_completions(
                 stream_api_key = fb_candidate["api_key"]
                 _stream_fallback_used = True
                 _stream_attempt_number += 1
+                # B2: announce the swap before the fallback model's content.
+                # Safe to emit here — the in-generator fallback only fires
+                # while ``first_chunk_yielded`` is False, so no content has
+                # reached the wire yet for this answer.
+                if not _fallback_notice_emitted:
+                    yield _emit_fallback_info()
+                    _fallback_notice_emitted = True
                 continue
 
         # Flush the remaining tail. The tail already went through a
