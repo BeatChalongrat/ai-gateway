@@ -386,7 +386,13 @@ def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
     # reading the field here surfaces reasoning for those providers
     # without a parallel parser. ``None`` when absent so plain OpenAI
     # gpt-4o streams are unchanged on the wire.
-    reasoning_raw = delta.get("reasoning_content")
+    # Two field names in the wild: DeepSeek-native / Groq R1-distill emit
+    # ``delta.reasoning_content``; OpenRouter normalises the SAME models'
+    # thinking into ``delta.reasoning`` (P1 Item 3 — this mismatch was why
+    # ``openrouter/deepseek/deepseek-r1`` thinking never reached the UI).
+    # Read both so reasoning streams regardless of which spelling the
+    # upstream uses; ``reasoning_content`` wins when both are present.
+    reasoning_raw = delta.get("reasoning_content") or delta.get("reasoning")
     reasoning_delta = reasoning_raw if isinstance(reasoning_raw, str) and reasoning_raw else None
     return ProviderStreamChunk(
         delta=delta.get("content") or "",
