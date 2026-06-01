@@ -32,11 +32,21 @@ def parse_openai_response(data: dict) -> ProviderResponse:
             int(details.get("reasoning_tokens", 0) or 0)
             if isinstance(details, dict) else 0
         )
+        # OpenAI reports the prompt-cache hit under
+        # ``usage.prompt_tokens_details.cached_tokens`` (free to read,
+        # cached input bills at a reduced rate). Absent on non-OpenAI
+        # providers / older responses → 0.
+        prompt_details = u.get("prompt_tokens_details") or {}
+        cached_tok = (
+            int(prompt_details.get("cached_tokens", 0) or 0)
+            if isinstance(prompt_details, dict) else 0
+        )
         usage = ProviderUsage(
             prompt_tokens=u.get("prompt_tokens", 0),
             completion_tokens=u.get("completion_tokens", 0),
             total_tokens=u.get("total_tokens", 0),
             reasoning_tokens=reasoning_tok,
+            cached_prompt_tokens=cached_tok,
         )
 
     # Reasoning text — only DeepSeek-R1 / Groq R1-distill / OpenRouter

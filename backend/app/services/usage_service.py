@@ -22,6 +22,13 @@ _COST_PER_TOKEN: dict[str, float] = {
 
 _LEGACY_DEFAULT_RATE = 0.000001
 
+# OpenAI prompt-cache discount: cached input tokens bill at 50% of the
+# normal input rate. Hard-coded as a ratio (rather than a per-model
+# ``cost_per_cached_input_token`` column) — Level-1 scope keeps the rate
+# in code; promote to the model_config table if other providers with
+# different cache discounts are added later.
+_CACHED_INPUT_RATE_MULTIPLIER = 0.5
+
 
 def _legacy_flat_rate(model: str) -> float:
     """Pick the per-token rate for ``model`` from the legacy prefix table.
@@ -39,6 +46,7 @@ def _estimate_cost(
     model: str,
     prompt_tokens: int,
     completion_tokens: int,
+    cached_prompt_tokens: int = 0,
 ) -> float:
     """Estimate request cost in USD.
 
@@ -47,14 +55,34 @@ def _estimate_cost(
     back to the legacy flat rate table for unknown models — multiplied
     by total tokens so existing prefix entries keep their historical
     numbers within float precision.
+
+    ``cached_prompt_tokens`` (OpenAI prompt-cache hits, a subset of
+    ``prompt_tokens``) bill at ``_CACHED_INPUT_RATE_MULTIPLIER`` of the
+    input rate. When 0 (every non-OpenAI provider, cache miss, older
+    response) the formula is byte-identical to the pre-cache version.
+    Mirrors the conditional sub-cost posture of ``_estimate_reasoning_cost``.
     """
     from app.services.providers.model_registry import get_candidate
+
+    # Clamp defensively so a malformed ``cached > prompt`` never produces a
+    # negative uncached count (which would understate the bill).
+    cached = max(0, min(cached_prompt_tokens, prompt_tokens))
 
     candidate = get_candidate(model)
     if candidate and (
         candidate.cost_per_input_token > 0.0
         or candidate.cost_per_output_token > 0.0
     ):
+        if cached > 0:
+            uncached = prompt_tokens - cached
+            return round(
+                uncached * candidate.cost_per_input_token
+                + cached
+                * candidate.cost_per_input_token
+                * _CACHED_INPUT_RATE_MULTIPLIER
+                + completion_tokens * candidate.cost_per_output_token,
+                8,
+            )
         return round(
             prompt_tokens * candidate.cost_per_input_token
             + completion_tokens * candidate.cost_per_output_token,
@@ -62,6 +90,17 @@ def _estimate_cost(
         )
 
     rate = _legacy_flat_rate(model)
+    if cached > 0:
+        uncached = prompt_tokens - cached
+        return round(
+            (
+                uncached
+                + cached * _CACHED_INPUT_RATE_MULTIPLIER
+                + completion_tokens
+            )
+            * rate,
+            8,
+        )
     return round((prompt_tokens + completion_tokens) * rate, 8)
 
 
@@ -145,7 +184,10 @@ class UsageService:
                 completion_tokens=u.completion_tokens,
                 total_tokens=u.total_tokens,
                 estimated_cost_usd=_estimate_cost(
-                    model, u.prompt_tokens, u.completion_tokens
+                    model,
+                    u.prompt_tokens,
+                    u.completion_tokens,
+                    u.cached_prompt_tokens,
                 ),
                 is_estimate=False,
             )
