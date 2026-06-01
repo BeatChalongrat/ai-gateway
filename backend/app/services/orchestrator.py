@@ -370,6 +370,11 @@ class GatewayOrchestrator:
                     scan_system_messages=profile.scan_system_messages,
                     ctx=ctx,
                     session=session,
+                    # P1 Item 1: don't NER-scan prior assistant turns in the
+                    # history — model-generated content already covered by
+                    # outbound scanning; English-only NER on it only yields
+                    # false positives. Regex PII detectors still run on them.
+                    ner_skip_roles=frozenset({"assistant"}),
                 )
             if "presidio_ner" in active_registry:
                 # The registry combines detectors in a single pass, so we
@@ -1041,6 +1046,12 @@ class GatewayOrchestrator:
                 provider_response.usage.prompt_tokens,
                 provider_response.usage.completion_tokens,
                 provider_response.usage.cached_prompt_tokens,
+                # P1 Item 4 — Anthropic cache-write tokens (1.25× input).
+                getattr(
+                    provider_response.usage,
+                    "cache_creation_prompt_tokens",
+                    0,
+                ),
             )
             _cost_info = currency_service.format_cost(_usd)
             # T3: surface ``reasoning_tokens`` on UsageInfo when the
@@ -2454,6 +2465,7 @@ class GatewayOrchestrator:
         scan_system_messages: bool,
         ctx: RequestContext,
         session: Session | None,
+        ner_skip_roles: frozenset[str] = frozenset(),
     ):
         """Route the DLP scan through the selected engine.
 
@@ -2476,6 +2488,7 @@ class GatewayOrchestrator:
                 messages,
                 direction=direction,
                 scan_system_messages=scan_system_messages,
+                ner_skip_roles=ner_skip_roles,
             )
 
         if engine == "rust":
@@ -2487,6 +2500,7 @@ class GatewayOrchestrator:
                     direction=direction,
                     scan_system_messages=scan_system_messages,
                     ner_enabled=getattr(ctx, "ner_enabled", True),
+                    ner_skip_roles=ner_skip_roles,
                 )
                 _rust_exc = False
             except Exception as exc:  # noqa: BLE001
@@ -2521,6 +2535,7 @@ class GatewayOrchestrator:
                         direction=direction,
                         scan_system_messages=scan_system_messages,
                         ner_enabled=getattr(ctx, "ner_enabled", True),
+                        ner_skip_roles=ner_skip_roles,
                     )
                 )
             except Exception as exc:  # noqa: BLE001
@@ -2549,6 +2564,7 @@ class GatewayOrchestrator:
         *,
         direction: str,
         scan_system_messages: bool,
+        ner_skip_roles: frozenset[str] = frozenset(),
     ) -> DetectionResult:
         """Off-loop wrapper for ``registry.scan_messages`` (B2).
 
@@ -2564,6 +2580,7 @@ class GatewayOrchestrator:
                 messages,
                 direction=direction,
                 scan_system_messages=scan_system_messages,
+                ner_skip_roles=ner_skip_roles,
             )
 
     async def _scan_text_as_result_async(
