@@ -131,6 +131,25 @@ class Settings(BaseSettings):
     dlp_default_profile: str = "default"
     dlp_disabled_detectors: str = ""
     dlp_scan_responses: bool = True
+    # P1 Item 1 — Thai NER false-positive guard. The shipped image has an
+    # English-only spaCy model (no th_core_news_*), so Presidio NER run on
+    # Thai prose mis-tags common words ("สวัสดีครับ", "อัตราแลกเปลี่ยน") as
+    # PERSON/NRP. When ``dlp_ner_thai_enabled`` is False (default) we skip
+    # Presidio NER for text that is predominantly Thai (≥
+    # ``dlp_ner_thai_min_ratio`` Thai chars) — the regex Thai detectors
+    # (thai_name, thai_national_id, phone, …) still cover real Thai PII.
+    # Flip to True once a Thai spaCy model / Thai-capable NER service is
+    # deployed.
+    dlp_ner_thai_enabled: bool = False
+    dlp_ner_thai_min_ratio: float = 0.30
+
+    # P1 Item 4 — Anthropic prompt caching. When True (default) the
+    # Anthropic adapter sends the system prompt as a content-block array
+    # with ``cache_control: {type: ephemeral}`` so Claude caches the large,
+    # stable SRAN persona across turns (cached reads bill at ~10% of the
+    # input rate). The OpenRouter adapter applies the same breakpoint for
+    # ``anthropic/*`` models. No-op for non-Anthropic providers.
+    anthropic_prompt_caching_enabled: bool = True
     # Days to retain raw PII content (input_raw / output_raw / matched_text
     # in dlp_findings_json) on request_logs rows. After this window,
     # scripts/dlp_retention_cleanup.py NULL-ifies the raw columns and
