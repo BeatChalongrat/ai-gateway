@@ -45,6 +45,11 @@ class SyncResult:
     updated: int = 0
     skipped_override: int = 0
     deactivated: int = 0
+    # C2: models seen upstream that are NOT in the catalog. When
+    # auto-add is off (the default), these are logged for admin review
+    # rather than inserted, and counted here.
+    discovered_new: int = 0
+    new_models: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     duration_seconds: float = 0.0
     synced_at: datetime = field(
@@ -58,6 +63,8 @@ class SyncResult:
             "updated": self.updated,
             "skipped_override": self.skipped_override,
             "deactivated": self.deactivated,
+            "discovered_new": self.discovered_new,
+            "new_models": list(self.new_models),
             "errors": list(self.errors),
             "duration_seconds": round(self.duration_seconds, 3),
             "synced_at": self.synced_at.isoformat(),
@@ -226,7 +233,7 @@ class ModelDiscoveryService:
 
         # 4. Upsert + soft-deactivate in a single thread hop so the
         #    event loop doesn't block on psycopg I/O.
-        def _persist() -> tuple[int, int, int, int]:
+        def _persist() -> tuple[int, int, int, int, int, list[str]]:
             return self._persist_results(
                 db,
                 discovered=all_discovered,
@@ -235,11 +242,20 @@ class ModelDiscoveryService:
                 provider_filter=provider_filter,
             )
 
-        inserted, updated, skipped, deactivated = await asyncio.to_thread(_persist)
+        (
+            inserted,
+            updated,
+            skipped,
+            deactivated,
+            discovered_new,
+            new_models,
+        ) = await asyncio.to_thread(_persist)
         result.inserted = inserted
         result.updated = updated
         result.skipped_override = skipped
         result.deactivated = deactivated
+        result.discovered_new = discovered_new
+        result.new_models = new_models
 
         # 5. Refresh the in-memory registry so the new rows are live
         #    without waiting for the next process restart. The import
@@ -267,16 +283,29 @@ class ModelDiscoveryService:
         seen_keys: set[tuple[str, str]],
         synced_providers: set[str],
         provider_filter: str | None,
-    ) -> tuple[int, int, int, int]:
+    ) -> tuple[int, int, int, int, int, list[str]]:
         """Apply the upsert + soft-deactivate logic.
 
-        Returns ``(inserted, updated, skipped_override, deactivated)``.
-        Commits at the end; rolls back on any unexpected error.
+        Returns ``(inserted, updated, skipped_override, deactivated,
+        discovered_new, new_models)``. Commits at the end; rolls back on
+        any unexpected error.
+
+        C2: new models (seen upstream, absent from the catalog) are
+        auto-inserted only when ``settings.model_discovery_auto_add`` is
+        True. The default is log-only — a model new to the upstream
+        catalog is recorded ("New model available: …") for an admin to
+        review and curate, rather than silently entering the routable
+        pool with un-vetted pricing/capabilities.
         """
+        from app.core.config import settings
+
+        auto_add = bool(getattr(settings, "model_discovery_auto_add", False))
         inserted = 0
         updated = 0
         skipped_override = 0
         deactivated = 0
+        discovered_new = 0
+        new_models: list[str] = []
         now = datetime.now(timezone.utc)
 
         try:
@@ -290,6 +319,19 @@ class ModelDiscoveryService:
                 key = (model.provider, model.model)
                 row = existing.get(key)
                 if row is None:
+                    if not auto_add:
+                        # Log-only (C2): surface the new model for admin
+                        # review; don't add it to the routable pool.
+                        slug = f"{model.provider}/{model.model}"
+                        discovered_new += 1
+                        new_models.append(slug)
+                        logger.info(
+                            "model_discovery_new_model_available",
+                            provider=model.provider,
+                            model=model.model,
+                            note="not auto-added; set model_discovery_auto_add to enable",
+                        )
+                        continue
                     db.add(
                         ModelConfigORM(
                             provider=model.provider,
@@ -381,4 +423,11 @@ class ModelDiscoveryService:
             db.rollback()
             raise
 
-        return inserted, updated, skipped_override, deactivated
+        return (
+            inserted,
+            updated,
+            skipped_override,
+            deactivated,
+            discovered_new,
+            new_models,
+        )
