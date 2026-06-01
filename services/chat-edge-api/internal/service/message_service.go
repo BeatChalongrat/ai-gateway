@@ -517,6 +517,14 @@ type StreamUpdate struct {
 
 	ReasoningDelta string
 	AnalysisStatus string
+
+	// B1 — a provider error frame forwarded from the Gateway. The
+	// handler emits it as an ``error`` SSE event (distinct styling on
+	// the frontend) instead of letting the stream end blank.
+	ProviderError *StreamProviderError
+	// B2 — a fallback notice forwarded from the Gateway. The handler
+	// emits it as a ``fallback_info`` SSE event.
+	FallbackInfo map[string]any
 }
 
 // Cancel terminates the upstream gateway connection. Used by the
@@ -2511,6 +2519,15 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			}
 			if ev.AnalysisStatus != "" {
 				in.out <- StreamUpdate{AnalysisStatus: ev.AnalysisStatus}
+			}
+			// B1 / B2 — forward provider-error + fallback frames straight
+			// through. Never swallow: an error frame the pump drops is a
+			// blank screen on the client.
+			if ev.ProviderError != nil {
+				in.out <- StreamUpdate{ProviderError: ev.ProviderError}
+			}
+			if ev.FallbackInfo != nil {
+				in.out <- StreamUpdate{FallbackInfo: ev.FallbackInfo}
 			}
 			if ev.Done {
 				// finish_reason="tool_calls" means another round.

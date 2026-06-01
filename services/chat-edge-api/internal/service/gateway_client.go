@@ -306,6 +306,27 @@ type StreamEvent struct {
 	// populated — the pump distinguishes by checking which is set.
 	ReasoningDelta string
 	AnalysisStatus string
+	// B1 — provider error frame. The Gateway emits
+	//   data: {"error":{"code":"...","message":"...","details":{...},"attempts":[...]}}
+	// when a stream fails terminally (pre-stream or mid-stream). The
+	// pump must FORWARD this to the frontend, never swallow it — a
+	// swallowed error frame is the blank-screen bug.
+	ProviderError *StreamProviderError
+	// B2 — fallback notice frame. The Gateway emits
+	//   data: {"type":"fallback_info","fallback_info":{...}}
+	// before the answering model's content when a fallback rescued
+	// the request, so the client can show which model actually replied.
+	FallbackInfo map[string]any
+}
+
+// StreamProviderError is the payload of a Gateway ``error`` SSE frame
+// (B1). ``Attempts`` is populated on the ``all_models_failed`` case so
+// the client can show which models were tried and why each failed.
+type StreamProviderError struct {
+	Code     string         `json:"code"`
+	Message  string         `json:"message"`
+	Details  map[string]any `json:"details,omitempty"`
+	Attempts []any          `json:"attempts,omitempty"`
 }
 
 // StreamToolCallDelta is one fragment from a tool_calls[] stream
@@ -440,6 +461,10 @@ type reasoningEnvelope struct {
 	Type   string `json:"type"`
 	Text   string `json:"text"`
 	Status string `json:"status"`
+	// B1 / B2 — error + fallback frames carried on the same top-level
+	// envelope so we sniff them before the OpenAI-shape decoder.
+	Error        *StreamProviderError `json:"error"`
+	FallbackInfo map[string]any       `json:"fallback_info"`
 	// Usage hint — the Gateway's final SSE frame includes a
 	// ``usage`` block when reasoning happened so the chat-edge can
 	// surface reasoning_tokens to the message_complete event. The
@@ -457,7 +482,17 @@ func parseStreamChunk(raw string) (*StreamEvent, error) {
 	// level. Sniff first so we never accidentally swallow a
 	// reasoning frame into the OpenAI-shape decoder.
 	var env reasoningEnvelope
-	if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
+	if err := json.Unmarshal([]byte(raw), &env); err == nil {
+		// B1: provider error frame — forward as a typed error event so
+		// the handler surfaces it instead of the client hanging on a
+		// truncated stream.
+		if env.Error != nil {
+			return &StreamEvent{ProviderError: env.Error}, nil
+		}
+		// B2: fallback notice frame.
+		if env.Type == "fallback_info" {
+			return &StreamEvent{FallbackInfo: env.FallbackInfo}, nil
+		}
 		switch env.Type {
 		case "reasoning_summary_delta":
 			return &StreamEvent{ReasoningDelta: env.Text}, nil

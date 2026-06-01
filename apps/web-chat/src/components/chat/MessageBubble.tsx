@@ -19,7 +19,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 
-import type { Message } from "@/lib/types";
+import type { FallbackAttempt, Message } from "@/lib/types";
+import { fallbackNotice } from "@/lib/errorMessages";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useVoiceStore } from "@/stores/voiceStore";
 
@@ -351,6 +352,26 @@ function MessageBubbleImpl({
         <AssistantContent message={message} convId={convId} />
       </div>
 
+      {/* B1 — error bubble. Renders a distinct, red-tinted notice when
+          the stream failed terminally (instead of leaving a blank
+          reply). The localized Thai message + optional attempt log come
+          from the SSE ``error`` frame via the chat store. */}
+      {message.error_message ? (
+        <ErrorNotice
+          message={message.error_message}
+          attempts={message.error_attempts}
+        />
+      ) : null}
+
+      {/* B2 — fallback notice. A small line under the reply when a
+          different model answered than the one requested. */}
+      {message.fallback_info ? (
+        <FallbackNotice
+          requestedModel={message.fallback_info.requested_model}
+          actualModel={message.fallback_info.actual_model}
+        />
+      ) : null}
+
       {message.files && message.files.length > 0 ? (
         <MessageAttachments files={message.files} />
       ) : null}
@@ -414,6 +435,86 @@ function MessageBubbleImpl({
         ) : null}
       </div>
     </div>
+  );
+}
+
+// B1 — terminal error notice. Red-tinted card distinct from normal
+// message text so a failed turn reads unambiguously as an error. When
+// the whole fallback chain failed, the per-model attempt log is shown
+// in a collapsible list so the user (and support) can see what was
+// tried and why each failed.
+function ErrorNotice({
+  message,
+  attempts,
+}: {
+  message: string;
+  attempts?: FallbackAttempt[];
+}) {
+  const hasAttempts = Array.isArray(attempts) && attempts.length > 0;
+  return (
+    <div
+      role="alert"
+      className="mt-1 rounded-lg border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-sm text-status-danger"
+    >
+      <div className="flex items-start gap-2">
+        <WarningIcon />
+        <span className="leading-snug">{message}</span>
+      </div>
+      {hasAttempts ? (
+        <details className="mt-1.5 pl-6 text-[11px] text-status-danger/80">
+          <summary className="cursor-pointer select-none">
+            รายละเอียดการลองเชื่อมต่อ ({attempts!.length})
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {attempts!.map((a, i) => (
+              <li key={i}>
+                {a.model ?? a.provider ?? "model"}
+                {a.status === "success"
+                  ? " — สำเร็จ"
+                  : ` — ${a.error ?? a.error_code ?? "ล้มเหลว"}`}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+// B2 — fallback notice. Small muted line under a reply that was served
+// by a different model than requested (ChatGPT-style attribution).
+function FallbackNotice({
+  requestedModel,
+  actualModel,
+}: {
+  requestedModel: string;
+  actualModel: string;
+}) {
+  return (
+    <div className="mt-0.5 text-[11px] text-text-muted">
+      {fallbackNotice(requestedModel, actualModel)}
+    </div>
+  );
+}
+
+function WarningIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="mt-0.5 shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
   );
 }
 
@@ -694,6 +795,12 @@ function areEqual(prev: Props, next: Props): boolean {
     // message-list refresh hydrates them and we want the
     // SourcesCard to appear.
     a.context_sources === b.context_sources &&
+    // B1/B2 — re-render when a terminal error or a fallback notice
+    // lands on the message (both arrive as their own SSE frame after
+    // content, so a stale memo would hide them).
+    a.error_message === b.error_message &&
+    a.error_attempts === b.error_attempts &&
+    a.fallback_info === b.fallback_info &&
     prev.showFeedback === next.showFeedback &&
     prev.showRegenerate === next.showRegenerate
   );

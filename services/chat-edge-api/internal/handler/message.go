@@ -426,6 +426,24 @@ Loop:
 					"status": ev.AnalysisStatus,
 				})
 			}
+			// B1: a provider error frame from the Gateway. Forward it as
+			// an ``error`` event so the client renders an error bubble
+			// rather than ending blank. Not a ``break`` — the Gateway
+			// closes the stream after, which yields the synthetic Done +
+			// message_complete terminator below.
+			if ev.ProviderError != nil {
+				gotErr = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
+				writeSSEEvent(w, flusher, "error", map[string]any{
+					"code":     ev.ProviderError.Code,
+					"message":  ev.ProviderError.Message,
+					"details":  ev.ProviderError.Details,
+					"attempts": ev.ProviderError.Attempts,
+				})
+			}
+			// B2: a fallback notice — which model actually answered.
+			if ev.FallbackInfo != nil {
+				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
+			}
 			if ev.FinishReason != "" {
 				finishReason = ev.FinishReason
 			}
@@ -625,6 +643,21 @@ Loop:
 			if ev.AnalysisStatus != "" {
 				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
 			}
+			// B1: forward a Gateway provider-error frame as an ``error``
+			// event (see sendStream above for the full rationale).
+			if ev.ProviderError != nil {
+				gotErr = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
+				writeSSEEvent(w, flusher, "error", map[string]any{
+					"code":     ev.ProviderError.Code,
+					"message":  ev.ProviderError.Message,
+					"details":  ev.ProviderError.Details,
+					"attempts": ev.ProviderError.Attempts,
+				})
+			}
+			// B2: forward a fallback notice.
+			if ev.FallbackInfo != nil {
+				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
+			}
 			if ev.FinishReason != "" {
 				finishReason = ev.FinishReason
 			}
@@ -752,6 +785,21 @@ Loop:
 			}
 			if ev.AnalysisStatus != "" {
 				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
+			}
+			// B1: forward a Gateway provider-error frame as an ``error``
+			// event (see sendStream above for the full rationale).
+			if ev.ProviderError != nil {
+				gotErr = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
+				writeSSEEvent(w, flusher, "error", map[string]any{
+					"code":     ev.ProviderError.Code,
+					"message":  ev.ProviderError.Message,
+					"details":  ev.ProviderError.Details,
+					"attempts": ev.ProviderError.Attempts,
+				})
+			}
+			// B2: forward a fallback notice.
+			if ev.FallbackInfo != nil {
+				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
 			}
 			if ev.FinishReason != "" {
 				finishReason = ev.FinishReason
