@@ -15,6 +15,7 @@
 import { create } from "zustand";
 
 import { api, ApiError } from "@/lib/api";
+import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
 import type {
   Conversation,
@@ -22,6 +23,8 @@ import type {
   Message,
   SSEAnalysisStatus,
   SSEContentDelta,
+  SSEError,
+  SSEFallbackInfo,
   SSEMessageComplete,
   SSEMessageStart,
   SSEReasoningDelta,
@@ -1144,15 +1147,64 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "fallback_info") {
+        // B2 — a fallback model answered. Stash the requested/actual
+        // model pair on the message so MessageBubble can show a small
+        // notice under the reply ("answered by X — Y unavailable").
+        const data = evt.data as SSEFallbackInfo;
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      fallback_info: {
+                        requested_model: data.requested_model,
+                        actual_model: data.actual_model,
+                        reason: data.reason,
+                      },
+                    }
+                  : m,
+              ),
+            },
+          };
+        });
       } else if (evt.event === "error") {
+        // B1 — terminal stream error. Attach the code + localized
+        // message + per-model attempts to the message so the bubble
+        // renders a styled error (red) instead of a blank reply.
         if (rafHandle != null) {
           cancelRaf(rafHandle);
           rafHandle = null;
         }
         flush();
+        const data = evt.data as SSEError;
+        const localized = localizeErrorCode(data?.code, data?.message);
         const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      error_code: data?.code,
+                      error_message: localized,
+                      error_attempts: data?.attempts,
+                    }
+                  : m,
+              ),
+            },
+          };
+        });
         finalizeMessage(set, get, convId, id, "error");
-        get().setError("AI service error during streaming.");
+        get().setError(localized);
       }
     }
   } finally {
