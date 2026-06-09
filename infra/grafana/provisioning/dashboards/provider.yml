@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: "ai-gateway"
+    orgId: 1
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      # Grafana scans this path for *.json dashboards; the provider .yml
+      # itself is ignored as a dashboard.
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

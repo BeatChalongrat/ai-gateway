@@ -1,0 +1,50 @@
+# Prometheus scrape config — Phase 3 observability (Commit 4).
+#
+# Only targets that actually exist in the BASE compose stack are active.
+# Anything depending on infra not yet deployed (nginx, pgbouncer, the
+# chat-edge webchat overlay, Rust sidecar HTTP metrics) is left commented
+# with a note so a target is never permanently DOWN.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alerts.yml"
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Go gateway exposes its metrics under the namespaced path so it never
+  # shadows a proxied Python route.
+  - job_name: "go-gateway"
+    metrics_path: "/__gw/metrics"
+    static_configs:
+      - targets: ["gateway:8080"]
+
+  # Python backend already mounts GET /metrics (app/main.py).
+  - job_name: "python-backend"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["backend:8080"]
+
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  # ---- Optional targets — enable once the backing infra is deployed ----
+  # chat-edge lives in docker-compose.webchat.yml; the service name is
+  # `chat-edge-api` (host 4000) and it must share this network + expose
+  # /metrics before this scrape is meaningful.
+  # - job_name: "chat-edge"
+  #   metrics_path: "/metrics"
+  #   static_configs:
+  #     - targets: ["chat-edge-api:4000"]
+  #
+  # Rust DLP sidecar / rate-limiter + Go log-worker — enable if/when they
+  # expose an HTTP /metrics endpoint (today the backend surfaces sidecar
+  # outcomes via sidecar_* counters on python-backend).
+  #
+  # nginx + pgbouncer — each needs a dedicated exporter (nginx stub_status
+  # is NOT Prometheus format); enable when those services land.
