@@ -72,3 +72,35 @@ jobs:
           cache-dependency-path: services/chat-edge-api/go.sum
       - run: go vet ./...
       - run: go test ./...
+
+  gateway-test:
+    name: gateway (go vet + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/gateway/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
+  secret-leak-guard:
+    name: No NEXT_PUBLIC secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject NEXT_PUBLIC_ secrets in tracked files
+        run: |
+          # NEXT_PUBLIC_ vars are compiled into client JS by Next.js, so a
+          # NEXT_PUBLIC_*API_KEY / *SECRET would ship a credential to the
+          # browser (the P0-2 leak). Markdown docs and this workflow file
+          # (which necessarily contains the pattern) are excluded.
+          if git grep -lP 'NEXT_PUBLIC_\w*(SECRET|API_KEY)' -- ':!.github/workflows/ci.yml' ':!*.md'; then
+            echo "::error::Found NEXT_PUBLIC_ secret references in tracked files — these get bundled into client-side JS."
+            exit 1
+          fi
+          echo "OK: no NEXT_PUBLIC_ secret leaks in tracked files."
