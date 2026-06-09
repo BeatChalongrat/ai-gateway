@@ -37,7 +37,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 GATEWAY = "http://localhost:8080"
-ADMIN_KEY_ENV = "NEXT_PUBLIC_ADMIN_API_KEY"
+ADMIN_KEY_ENV = "ADMIN_API_KEY"
 
 # A formatting task — much higher AI compliance than "please confirm".
 # The model sees the inbound-masked form ([DETECTOR_N]) so even if it does

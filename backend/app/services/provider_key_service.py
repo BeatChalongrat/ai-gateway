@@ -13,7 +13,6 @@ touches a different ORM model).
 
 from __future__ import annotations
 
-import base64
 import logging
 import time
 import uuid
@@ -26,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import decrypt_provider_key, encrypt_provider_key
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
 from app.repositories.provider_key_repository import ProviderKeyRepository
@@ -60,17 +60,23 @@ def _filter_placeholder_candidates(
 
 
 def _encode(key: str) -> str:
-    return base64.b64encode(key.encode()).decode()
+    # AES-256-GCM at rest (was plain Base64). All provider-key reads/writes
+    # in this module route through _encode/_decode, so this single swap
+    # covers both the provider_keys and legacy providers tables.
+    return encrypt_provider_key(key, settings.effective_master_key)
 
 
 def _decode(encoded: str) -> str:
-    return base64.b64decode(encoded.encode()).decode()
+    return decrypt_provider_key(encoded, settings.effective_master_key)
 
 
 def _mask(raw_key: str) -> str:
-    if len(raw_key) <= 8:
+    # Suffix-only. Provider key PREFIXES are predictable (sk-ant-, sk-proj-,
+    # gw_), so exposing them leaks structure for no benefit — show last 4
+    # only, matching Stripe/AWS/etc.
+    if len(raw_key) <= 4:
         return "••••"
-    return raw_key[:4] + "••••" + raw_key[-4:]
+    return "••••" + raw_key[-4:]
 
 
 # Markers that flag an env var as a dev placeholder rather than a real

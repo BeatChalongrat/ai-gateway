@@ -19,7 +19,7 @@ services:
       # watchfiles polls on the Windows-to-container bridge — docker
       # inotify events don't always propagate through the Hyper-V layer.
       WATCHFILES_FORCE_POLLING: "true"
-      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
 
   admin-ui:
     # Run next dev out of a plain node image against the bind-mounted
@@ -36,7 +36,6 @@ services:
       # In-network gateway hostname for the chat-edge proxy's server-side
       # session check (see docker-compose.yml for the full rationale).
       GATEWAY_API_URL: http://backend:8080
-      NEXT_PUBLIC_ADMIN_API_KEY: ${NEXT_PUBLIC_ADMIN_API_KEY:-}
       CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
       CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
       WATCHPACK_POLLING: "true"

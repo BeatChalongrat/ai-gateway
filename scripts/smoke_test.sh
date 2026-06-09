@@ -13,9 +13,9 @@ PY="python"
 if python3 -c "pass" 2>/dev/null; then PY="python3"; fi
 
 # Read admin key from .env.local or environment
-ADMIN_KEY="${NEXT_PUBLIC_ADMIN_API_KEY:-}"
+ADMIN_KEY="${ADMIN_API_KEY:-}"
 if [ -z "$ADMIN_KEY" ] && [ -f admin-ui/.env.local ]; then
-  ADMIN_KEY=$(grep "^NEXT_PUBLIC_ADMIN_API_KEY=" admin-ui/.env.local 2>/dev/null | cut -d'=' -f2 | tr -d '\r\n')
+  ADMIN_KEY=$(grep "^ADMIN_API_KEY=" admin-ui/.env.local 2>/dev/null | cut -d'=' -f2 | tr -d '\r\n')
 fi
 
 check() {

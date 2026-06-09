@@ -204,6 +204,13 @@ RATE_LIMIT_LUA_FALLBACK_TOTAL = Counter(
     registry=metrics_registry,
 )
 
+RATE_LIMIT_CONSERVATIVE_DENY_TOTAL = Counter(
+    "rate_limit_conservative_deny_total",
+    "Requests denied by the in-process conservative limiter during a Redis "
+    "outage (only active when RATE_LIMIT_REDIS_OUTAGE_MODE=conservative).",
+    registry=metrics_registry,
+)
+
 # Event-loop block monitor (audit H4). Previously print()-only; now an
 # alertable Prometheus signal. The histogram captures the lag
 # distribution; the counter tallies >100ms blocks.

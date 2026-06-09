@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     master_encryption_key: str = "change-me"
     access_token_expire_minutes: int = 1440  # 24 hours
 
+    # AES-256-GCM master key for provider API keys at rest (64 hex chars
+    # = 32 bytes). Empty in dev/test (effective_master_key falls back to a
+    # deterministic dev key); REQUIRED in production — validate_secrets()
+    # blocks startup when it's missing or not 32 bytes of hex.
+    provider_key_master_key: str = ""
+
+    # Rate-limit behaviour when Redis is unreachable. "fail_open" (default)
+    # admits unlimited — rate limiting is a safety net, not an auth gate.
+    # "conservative" applies a small in-process per-key limit instead, for
+    # deployments where cost control outweighs availability during an outage.
+    rate_limit_redis_outage_mode: str = "fail_open"
+
     # Portal JWT — separate secret so leaking the admin secret does not
     # forge portal tokens (and vice versa). Payload carries type="portal".
     portal_jwt_secret: str = "change-me-portal-secret"
@@ -447,6 +459,22 @@ class Settings(BaseSettings):
     def dlp_disabled_detectors_list(self) -> list[str]:
         return [d.strip() for d in self.dlp_disabled_detectors.split(",") if d.strip()]
 
+    @property
+    def effective_master_key(self) -> str:
+        """The AES-256-GCM master key for provider-key encryption.
+
+        Uses ``provider_key_master_key`` when set. In dev/test ONLY it
+        falls back to a deterministic all-zero key so a fresh checkout
+        works without ceremony. In production an empty key is rejected by
+        ``validate_secrets`` at startup, so this never returns the dev key
+        there.
+        """
+        if self.provider_key_master_key:
+            return self.provider_key_master_key
+        if self.app_env.lower() in _DEV_ENVS:
+            return "0" * 64
+        raise RuntimeError("PROVIDER_KEY_MASTER_KEY is not configured")
+
     def validate_secrets(self) -> None:
         """Reject insecure default / too-short secrets outside dev/test.
 
@@ -500,6 +528,24 @@ class Settings(BaseSettings):
                 "(required in production — set a Resend API key or "
                 "switch APP_ENV=development to use the console sender)"
             )
+
+        # Provider API keys are encrypted at rest with AES-256-GCM
+        # (app.core.security.encrypt_provider_key). Without the master key
+        # the service can't decrypt stored keys; the dev all-zero fallback
+        # is not acceptable in production.
+        if not (self.provider_key_master_key or "").strip():
+            issues.append(
+                "PROVIDER_KEY_MASTER_KEY is empty — set a 32-byte hex value "
+                "(generate with `python3 -c \"import secrets; print(secrets.token_hex(32))\"`)"
+            )
+        else:
+            try:
+                if len(bytes.fromhex(self.provider_key_master_key)) != 32:
+                    issues.append(
+                        "PROVIDER_KEY_MASTER_KEY must be 32 bytes (64 hex chars)"
+                    )
+            except ValueError:
+                issues.append("PROVIDER_KEY_MASTER_KEY must be valid hex (64 hex chars)")
 
         if issues:
             raise RuntimeError(
