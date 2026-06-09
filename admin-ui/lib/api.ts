@@ -6,8 +6,8 @@
 // by POST /auth/session/logout on the backend.
 //
 // Critically: no API key is bundled in the browser any more. The legacy
-// ``NEXT_PUBLIC_ADMIN_API_KEY`` env var is removed — anyone can verify by
-// grepping the built bundle (``admin-ui/.next/static``) for gw_ prefixes.
+// public admin-API-key env var is removed — anyone can verify by grepping
+// the built bundle (``admin-ui/.next/static``) for gw_ prefixes.
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 const SESSION_CACHE_KEY = "admin_session_cache";

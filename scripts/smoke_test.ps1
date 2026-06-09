@@ -5,11 +5,11 @@ $Pass = 0
 $Fail = 0
 
 # Read admin key
-$AdminKey = $env:NEXT_PUBLIC_ADMIN_API_KEY
+$AdminKey = $env:ADMIN_API_KEY
 if (-not $AdminKey) {
     $envFile = Join-Path $PSScriptRoot "..\admin-ui\.env.local"
     if (Test-Path $envFile) {
-        $line = Get-Content $envFile | Where-Object { $_ -match "^NEXT_PUBLIC_ADMIN_API_KEY=" }
+        $line = Get-Content $envFile | Where-Object { $_ -match "^ADMIN_API_KEY=" }
         if ($line) { $AdminKey = ($line -split "=", 2)[1] }
     }
 }
