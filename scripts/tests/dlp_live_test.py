@@ -9,7 +9,7 @@ Flow per case:
 
 Prereqs:
     - gateway running at localhost:8080
-    - admin bearer token in NEXT_PUBLIC_ADMIN_API_KEY env var
+    - admin bearer token in ADMIN_API_KEY env var
       (falls back to admin-ui/.env.local)
     - at least one project with policy_profile_id='default' (mask policy)
 """
@@ -31,7 +31,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 GATEWAY = "http://localhost:8080"
-ADMIN_KEY_ENV = "NEXT_PUBLIC_ADMIN_API_KEY"
+ADMIN_KEY_ENV = "ADMIN_API_KEY"
 
 # Any bracketed ALL-CAPS token with a trailing index is a mask emitted by the
 # transformer: [EMAIL_0], [IP_ADDRESS_1], [CREDIT_CARD_0], etc.

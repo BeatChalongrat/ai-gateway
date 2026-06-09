@@ -8,13 +8,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import http.client
 import json
 
-# Read admin key
-ADMIN_KEY = os.environ.get("NEXT_PUBLIC_ADMIN_API_KEY", "")
+# Read admin key (set ADMIN_API_KEY in the env, or fall back to a local file)
+ADMIN_KEY = os.environ.get("ADMIN_API_KEY", "")
 if not ADMIN_KEY:
     env_path = os.path.join(os.path.dirname(__file__), "..", "admin-ui", ".env.local")
     if os.path.exists(env_path):
         for line in open(env_path):
-            if line.startswith("NEXT_PUBLIC_ADMIN_API_KEY="):
+            if line.startswith("ADMIN_API_KEY="):
                 ADMIN_KEY = line.split("=", 1)[1].strip()
 
 HOST = "127.0.0.1"

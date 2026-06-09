@@ -21,9 +21,11 @@ from __future__ import annotations
 import inspect
 import os
 import time
+from collections import defaultdict
 from typing import Any
 
 from app.observability.metrics import (
+    RATE_LIMIT_CONSERVATIVE_DENY_TOTAL,
     RATE_LIMIT_FAIL_OPEN_TOTAL,
     RATE_LIMIT_LUA_FALLBACK_TOTAL,
     SIDECAR_FALLBACK_TOTAL,
@@ -36,6 +38,59 @@ DEFAULT_KEY_LIMIT = 60
 DEFAULT_PROJECT_LIMIT = 300
 DEFAULT_TENANT_LIMIT = 1000
 DEFAULT_WINDOW_SECONDS = 60
+
+# --- Conservative in-process limiter (Redis-outage fallback) ----------
+# Used ONLY when Redis is unreachable AND
+# settings.rate_limit_redis_outage_mode == "conservative". Per-worker
+# (not shared across workers/pods), best-effort: the goal is a cheap cost
+# cap during an outage, not exact global enforcement. Default = fail-open
+# (historical behaviour) when the mode is anything else.
+_CONSERVATIVE_LIMIT = 10  # admits per window, per scope key
+_CONSERVATIVE_WINDOW = 60  # seconds
+_conservative_hits: dict[str, list[float]] = defaultdict(list)
+
+
+def _conservative_allow(scope_key: str) -> bool:
+    """Per-worker sliding-window admit check for the Redis-outage path."""
+    now = time.monotonic()
+    cutoff = now - _CONSERVATIVE_WINDOW
+    hits = _conservative_hits[scope_key]
+    hits[:] = [t for t in hits if t > cutoff]
+    if len(hits) >= _CONSERVATIVE_LIMIT:
+        return False
+    hits.append(now)
+    return True
+
+
+def _outage_result(scope_key: str, limit: int, now: float, window_sec: int) -> dict:
+    """Limiter response when the Redis backend is unreachable.
+
+    ``fail_open`` (default) admits unlimited and increments the fail-open
+    counter. ``conservative`` applies the in-process per-key cap and
+    increments the deny counter on a rejection. Either way the outage is
+    metered, never silent.
+    """
+    from app.core.config import settings
+
+    if settings.rate_limit_redis_outage_mode == "conservative":
+        allowed = _conservative_allow(scope_key)
+        if not allowed:
+            RATE_LIMIT_CONSERVATIVE_DENY_TOTAL.inc()
+        return {
+            "allowed": allowed,
+            "remaining": max(0, _CONSERVATIVE_LIMIT - len(_conservative_hits[scope_key])),
+            "reset_at": int(now + window_sec),
+            "limit": _CONSERVATIVE_LIMIT,
+        }
+
+    RATE_LIMIT_FAIL_OPEN_TOTAL.inc()
+    return {
+        "allowed": True,
+        "remaining": limit,
+        "reset_at": int(now + window_sec),
+        "limit": limit,
+    }
+
 
 # Perf-test-only override knobs. Setting
 # ``PERF_TEST_PROJECT_LIMIT=120000`` in the environment raises the
@@ -136,16 +191,12 @@ class RateLimitService:
                 exec_result = await exec_result
             _, count_before, _, _ = exec_result
         except Exception:
-            # Redis unreachable → fail open (admit UNLIMITED). Audit H6:
-            # make this visible so a Redis outage that disables the
-            # limiter is alertable, not silent.
-            RATE_LIMIT_FAIL_OPEN_TOTAL.inc()
-            return {
-                "allowed": True,
-                "remaining": limit,
-                "reset_at": int(now + window_sec),
-                "limit": limit,
-            }
+            # Redis unreachable. Default = fail open (admit unlimited; the
+            # limiter is a safety net, not an auth gate). When
+            # RATE_LIMIT_REDIS_OUTAGE_MODE=conservative, apply a small
+            # in-process per-key cap instead. Both branches are metered
+            # (Audit H6 — a Redis outage must be alertable, not silent).
+            return _outage_result(key, limit, now, window_sec)
 
         allowed = count_before < limit
         remaining = max(0, limit - count_before - 1)
@@ -463,12 +514,7 @@ class RateLimitService:
             pipe.expire(key, window_sec + 1)
             _, count_before, _, _ = pipe.execute()
         except Exception:
-            return {
-                "allowed": True,
-                "remaining": limit,
-                "reset_at": int(now + window_sec),
-                "limit": limit,
-            }
+            return _outage_result(key, limit, now, window_sec)
         allowed = count_before < limit
         remaining = max(0, limit - count_before - 1)
         return {
