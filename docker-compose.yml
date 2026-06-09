@@ -44,6 +44,11 @@ services:
 
   redis:
     image: redis:7
+    # Cap memory + LRU eviction so an unbounded key set can't OOM the box.
+    # The image default is maxmemory=0 (unlimited) / noeviction, under which
+    # an OOM makes writes fail; allkeys-lru evicts cold keys instead. Tune
+    # the ceiling via REDIS_MAXMEMORY.
+    command: redis-server --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     healthcheck:
