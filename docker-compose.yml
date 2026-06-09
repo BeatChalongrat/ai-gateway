@@ -217,6 +217,43 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Go API gateway (Phase 1 strangler-fig) — the public entry point on
+  # :8080. Transparent reverse proxy in front of the Python backend:
+  # coarse API-key auth on /v1/*, Prometheus metrics, request-ID
+  # propagation. Forwards EVERY request (streaming included) to
+  # backend:8080 unchanged — Python stays authoritative for routing,
+  # DLP, full auth, dispatch, and logging. See services/gateway/README.md.
+  gateway:
+    build:
+      context: ./services/gateway
+    environment:
+      PORT: "8080"
+      # Python's container bind is unchanged (gunicorn -b 0.0.0.0:8080);
+      # only its host publish moved to 8081. The gateway reaches it on
+      # the compose network at the container port.
+      PYTHON_SERVICE_URL: http://backend:8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ai_gateway}
+      REDIS_URL: redis://redis:6379/0
+      GATEWAY_AUTH_CACHE_TTL: ${GATEWAY_AUTH_CACHE_TTL:-30s}
+      GATEWAY_MAX_BODY_BYTES: ${GATEWAY_MAX_BODY_BYTES:-26214400}
+      APP_ENV: ${APP_ENV:-development}
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/__gw/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -322,7 +359,11 @@ services:
       # tiny (<10kB) — purely a test-time convenience.
       - ./dlp-sidecar/tests/parity/fixtures:/work/dlp-sidecar/tests/parity/fixtures:ro
     ports:
-      - "8080:8080"
+      # Python is now an internal service behind the Go gateway. Its
+      # container bind stays 8080; the host publish moved to 8081 so you
+      # can still curl Python directly for debugging during the
+      # migration. External clients should hit the gateway on :8080.
+      - "8081:8080"
     depends_on:
       postgres:
         condition: service_healthy
