@@ -426,5 +426,51 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # --- Observability (Phase 3, Commit 4) ----------------------------------
+  # Prometheus scrapes the Go gateway (/__gw/metrics), Python backend
+  # (/metrics), and Redis (via redis-exporter). Host port 9091 — 9090 is
+  # already taken by mock-provider.
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./infra/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "9091:9090"
+    depends_on:
+      - gateway
+      - backend
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      # 3100 on the host — 3000/3001 are admin-ui/portal.
+      - "3100:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.61.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    expose:
+      - "9121"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:
