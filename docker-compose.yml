@@ -252,7 +252,9 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/__gw/health"]
+      # GET (not --spider/HEAD): the gateway's chi router serves /__gw/health
+      # on GET only, and wget --spider sends HEAD -> 404 -> false "unhealthy".
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/__gw/health"]
       interval: 10s
       timeout: 3s
       retries: 3
