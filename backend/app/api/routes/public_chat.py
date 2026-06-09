@@ -1,9 +1,15 @@
 """Public chat completions route — thin transport layer.
 
 Non-streaming requests delegate to GatewayOrchestrator.
+
 Streaming requests resolve context via the orchestrator, run the same
-inbound DLP mask, stream from the provider adapter, then buffer +
-restore the full body before emitting it back to the client.
+inbound DLP mask, then stream from the provider adapter INCREMENTALLY:
+each chunk is DLP-scanned and restored against a rolling masked tail
+(MIN_TAIL_CHARS = 120) so token boundaries are never split across SSE
+frames, and emitted to the client as it arrives. The client sees tokens
+in real time — this is NOT full-response buffering (an earlier Phase-2C
+build buffered the whole body; that was replaced by the incremental
+generator below — see event_generator).
 """
 
 import asyncio
