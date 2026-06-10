@@ -364,7 +364,21 @@ class TestBiometricDataDetector:
 # ===========================================================================
 
 
-class TestDefaultPolicyBlockCritical:
+class TestDefaultPolicyCriticalCredentials:
+    """Critical credentials/secrets under the built-in profiles.
+
+    DEFAULT *masks* them: the secret is replaced with a placeholder and never
+    egresses raw, but the request still proceeds so the user gets a response
+    (see DEFAULT_PROFILE's credential/secret note + evaluator._decide, where an
+    explicit category_action wins over severity_threshold_block). STRICT
+    *blocks* them (hard refusal). Lower-severity PII (email/phone) is masked
+    under DEFAULT regardless.
+
+    NOTE: these previously asserted BLOCK under DEFAULT — that was the pre-mask
+    Fix-3 behavior, intentionally superseded. Secrets are still protected
+    (masked, not sent raw); the choice is mask-and-proceed vs hard-refuse.
+    """
+
     evaluator = PolicyEvaluator()
 
     def _make_result(self, detector_name: str, category: str, severity: SensitivityLevel) -> DetectionResult:
@@ -383,30 +397,31 @@ class TestDefaultPolicyBlockCritical:
             scanned_direction="input",
         )
 
-    def test_api_key_blocked_inbound(self):
-        """CRITICAL api_key_secret is BLOCKED (not just masked) on inbound."""
-        result = self._make_result("api_key_secret", "credential", SensitivityLevel.CRITICAL)
-        decision = self.evaluator.evaluate(result, DEFAULT_PROFILE)
-        assert decision.is_blocked
-        assert decision.overall_action == EnforcementAction.BLOCK
+    def _assert_masked_default_blocked_strict(self, detector: str, category: str):
+        """DEFAULT masks (not raw, not blocked); STRICT hard-blocks."""
+        default = self.evaluator.evaluate(
+            self._make_result(detector, category, SensitivityLevel.CRITICAL),
+            DEFAULT_PROFILE,
+        )
+        assert not default.is_blocked
+        assert default.overall_action == EnforcementAction.MASK
+        strict = self.evaluator.evaluate(
+            self._make_result(detector, category, SensitivityLevel.CRITICAL),
+            STRICT_PROFILE,
+        )
+        assert strict.is_blocked
 
-    def test_bearer_token_blocked_inbound(self):
-        """CRITICAL bearer_token is BLOCKED on inbound."""
-        result = self._make_result("bearer_token", "secret", SensitivityLevel.CRITICAL)
-        decision = self.evaluator.evaluate(result, DEFAULT_PROFILE)
-        assert decision.is_blocked
+    def test_api_key_masked_default_blocked_strict(self):
+        self._assert_masked_default_blocked_strict("api_key_secret", "credential")
 
-    def test_private_key_blocked_inbound(self):
-        """CRITICAL private_key is BLOCKED on inbound."""
-        result = self._make_result("private_key", "secret", SensitivityLevel.CRITICAL)
-        decision = self.evaluator.evaluate(result, DEFAULT_PROFILE)
-        assert decision.is_blocked
+    def test_bearer_token_masked_default_blocked_strict(self):
+        self._assert_masked_default_blocked_strict("bearer_token", "secret")
 
-    def test_db_connection_blocked_inbound(self):
-        """CRITICAL db_connection_string is BLOCKED on inbound."""
-        result = self._make_result("db_connection_string", "credential", SensitivityLevel.CRITICAL)
-        decision = self.evaluator.evaluate(result, DEFAULT_PROFILE)
-        assert decision.is_blocked
+    def test_private_key_masked_default_blocked_strict(self):
+        self._assert_masked_default_blocked_strict("private_key", "secret")
+
+    def test_db_connection_masked_default_blocked_strict(self):
+        self._assert_masked_default_blocked_strict("db_connection_string", "credential")
 
     def test_email_still_masked_not_blocked(self):
         """MEDIUM/HIGH PII (email) is still MASKED, not BLOCKED."""
