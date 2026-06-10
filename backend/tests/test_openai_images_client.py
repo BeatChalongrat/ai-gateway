@@ -57,7 +57,8 @@ async def test_generate_image_request_and_parse(monkeypatch):
     assert sent["prompt"] == "a cat"
     assert sent["n"] == 1  # dall-e-3 is forced to n=1
     assert sent["quality"] == "hd"
-    assert sent["style"] == "natural"
+    assert "style" not in sent  # OpenAI's images API rejects style for dall-e-3
+    assert "response_format" not in sent  # ...and response_format
     assert route.calls[0].request.headers.get("authorization") == "Bearer sk-test-key"
 
     assert result.data[0]["url"] == "https://img/x.png"
