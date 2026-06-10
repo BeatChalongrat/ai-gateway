@@ -1,20 +1,18 @@
 package service
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-// Phase D — smart image routing.
+// Phase D — image-generation intent detection + capability gating.
 //
-// Detect an explicit image-GENERATION intent in a chat message, and decide
-// whether to override the turn's model to a tool-capable one. Keyword-based:
-// image requests are explicit, so no ML is needed. Kept deliberately
-// SPECIFIC (action phrases, not bare "draw"/"create"/"design") — a false
-// positive forces a one-turn model override to ImageFallbackModel, which
-// costs a worse answer if the user actually wanted their reasoning model.
-
-// ImageFallbackModel is the cheap, fast, tool-capable model a non-tool
-// model is swapped to for an image-generation turn. Per-turn only — the
-// conversation's model is never changed, so the next turn reverts.
-const ImageFallbackModel = "gpt-4o-mini"
+// Detect an explicit image-GENERATION intent in a chat message. When the
+// turn wants an image but the selected model can't call tools, the send
+// path REJECTS with a helpful message (telling the user to pick a 🎨 model)
+// rather than silently swapping models — so the user keeps control of which
+// model answers. Keyword-based: image requests are explicit, no ML needed.
+// Kept deliberately SPECIFIC (action phrases) to limit false positives.
 
 var thaiImageKeywords = []string{
 	"สร้างรูป", "วาดรูป", "ทำรูป", "สร้างภาพ", "วาดภาพ",
@@ -48,18 +46,25 @@ func DetectImageIntent(message string) bool {
 	return false
 }
 
-// decideImageRoute is the pure per-turn routing decision. When the turn
-// wants an image (explicit 🎨 mode OR detected intent) and the current
-// model can't call tools, it returns the tool-capable fallback. Otherwise
-// it keeps the current model. Never mutates conversation state.
-func decideImageRoute(
-	currentModel string, toolCapable, hasIntent, isImageMode bool,
-) (model string, overridden bool) {
+// shouldRejectImageTurn is the pure per-turn decision. When the turn wants
+// an image (explicit 🎨 mode OR detected intent) and the model is NOT
+// tool-capable, return true → the caller replies with a helpful "pick a 🎨
+// model" message instead of calling the gateway. Otherwise false → the
+// normal flow proceeds (a tool-capable model calls generate_image itself).
+func shouldRejectImageTurn(toolCapable, hasIntent, isImageMode bool) bool {
 	if !hasIntent && !isImageMode {
-		return currentModel, false
+		return false // not an image turn
 	}
-	if toolCapable {
-		return currentModel, false // model can call generate_image itself
-	}
-	return ImageFallbackModel, true
+	return !toolCapable
+}
+
+// imageUnsupportedMessage is the assistant reply shown when an image turn
+// lands on a model that can't generate images. Names the model + points the
+// user at the 🎨-capable models.
+func imageUnsupportedMessage(modelName string) string {
+	return fmt.Sprintf(
+		"โมเดล %s ไม่รองรับการสร้างรูปภาพครับ "+
+			"กรุณาเลือกโมเดลที่มีไอคอน 🎨 เช่น GPT-4o หรือ Claude",
+		modelName,
+	)
 }
