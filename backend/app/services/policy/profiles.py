@@ -83,10 +83,16 @@ DEFAULT_PROFILE = PolicyProfile(
         # right treatment without another profile edit.
         "thai_name":  EnforcementAction.RESTORE,
     },
-    # BLOCK inbound CRITICAL severity items (api_key_secret, private_key,
-    # bearer_token, db_connection_string). These should never reach an LLM
-    # even in masked form — the presence and context of a credential in the
-    # prompt is itself a risk signal.
+    # Fallback block threshold for a CRITICAL finding whose category has NO
+    # explicit entry in category_actions above. NOTE: credential/secret DO
+    # have explicit MASK entries, and evaluator._decide lets an explicit
+    # category_action win over this threshold — so in THIS default profile
+    # api keys / bearer tokens / private keys / DB strings are MASKED, not
+    # blocked (the secret is replaced with a placeholder and never egresses
+    # raw, but the request still proceeds so the user gets a response). This
+    # threshold therefore only escalates to BLOCK for some future CRITICAL
+    # category left unmapped above. Tenants who want a HARD REFUSAL on
+    # credentials use STRICT_PROFILE (credential/secret -> BLOCK).
     severity_threshold_block=SensitivityLevel.CRITICAL,
     scan_responses=True,
 )
