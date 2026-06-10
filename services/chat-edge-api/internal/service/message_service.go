@@ -609,19 +609,18 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs, sourcesAcc)
 	toolsAttached := s.attachTools(&gwReq, conv)
 	// Phase C + D — image routing. When the turn wants an image (the 🎨
-	// toggle OR a detected "generate an image" intent), apply the
-	// generate_image hint and, if the selected model can't call tools,
-	// override THIS turn's model to a tool-capable fallback so the tool can
-	// run. conv.ModelID is never changed, so the next turn reverts.
+	// toggle OR a detected "generate an image" intent): if the selected model
+	// can call tools, apply the generate_image hint and proceed; if it
+	// CANNOT, reject with a helpful "pick a 🎨 model" message — no gateway
+	// call, no silent model swap — so the user keeps control of their model.
 	if intent := DetectImageIntent(in.Content); (in.ImageMode || intent) && toolsAttached {
-		if s.toolCapable != nil {
-			toolCapable := s.toolCapable(ctx, gwReq.Model)
-			if newModel, overridden := decideImageRoute(gwReq.Model, toolCapable, intent, in.ImageMode); overridden {
-				slog.Info("phase-d: image-route model override",
-					"conv_model", conv.ModelID, "override_to", newModel,
-					"intent", intent, "image_mode", in.ImageMode)
-				gwReq.Model = newModel
-			}
+		// Unknown capability (checker not wired) -> treat as capable so we
+		// never wrongly reject; only reject when we KNOW the model can't.
+		toolCapable := s.toolCapable == nil || s.toolCapable(ctx, gwReq.Model)
+		if shouldRejectImageTurn(toolCapable, intent, in.ImageMode) {
+			slog.Info("phase-d: image request rejected (model lacks tools)",
+				"conv_model", conv.ModelID, "intent", intent, "image_mode", in.ImageMode)
+			return s.rejectImageStream(conv, userMsg, asstMsg, cancel), nil
 		}
 		applyImageModeHint(&gwReq)
 	}
@@ -2482,6 +2481,39 @@ func applyImageModeHint(req *GatewayChatRequest) {
 		[]GatewayMessage{{Role: "system", Content: strings.TrimSpace(hint)}},
 		req.Messages...,
 	)
+}
+
+// rejectImageStream (Phase D) returns a StreamHandle that emits a canned
+// "this model can't generate images" message WITHOUT calling the gateway,
+// and persists it as a normal assistant message so it lands in the
+// conversation timeline. Used when an image turn (intent or 🎨 mode) hits a
+// model that can't call tools. ``cancel`` is the unused gateway stream
+// context, released in finish.
+func (s *MessageService) rejectImageStream(
+	conv *model.Conversation, userMsg, asstMsg *model.Message, cancel context.CancelFunc,
+) *StreamHandle {
+	ch := make(chan StreamUpdate, 2)
+	go func() {
+		ch <- StreamUpdate{Delta: imageUnsupportedMessage(conv.ModelID)}
+		close(ch) // channel close is the stream terminator the handler reads
+	}()
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+		cancel() // release the unused gateway stream context
+		persistCtx := context.Background()
+		_ = s.messages.UpdateContent(persistCtx, asstMsg.ID, content, "completed", nil, nil)
+		final := *asstMsg
+		final.ContentMasked = content
+		final.Status = "completed"
+		s.finalizeConversation(persistCtx, conv, userMsg, &final)
+	}
+	return &StreamHandle{
+		UserMessage:    userMsg,
+		AssistantID:    asstMsg.ID,
+		ConversationID: conv.ID,
+		Events:         ch,
+		finish:         finish,
+		cancel:         cancel,
+	}
 }
 
 // accumulateToolCallDeltas merges a partial tool_calls delta into
