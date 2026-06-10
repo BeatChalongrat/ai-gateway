@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDetectImageIntentThai(t *testing.T) {
 	yes := []string{"สร้างรูปแมวส้มให้หน่อย", "ช่วยวาดภาพบ้านริมทะเล", "วาดรูปแมว", "ทำภาพพระอาทิตย์ตก"}
@@ -39,25 +42,48 @@ func TestDetectImageIntentEnglish(t *testing.T) {
 	}
 }
 
-func TestDecideImageRoute(t *testing.T) {
-	// tool-capable model + intent -> keep model
-	if m, ov := decideImageRoute("gpt-4o", true, true, false); ov || m != "gpt-4o" {
-		t.Errorf("tool-capable should not override: got %q overridden=%v", m, ov)
+// --- Phase D: reject (not override) when the model can't generate images ---
+
+func TestNonToolModel_ImageIntent_Rejects(t *testing.T) {
+	// non-tool model + image intent -> REJECT (helpful message, no override)
+	if !shouldRejectImageTurn(false /*toolCapable*/, true /*intent*/, false /*mode*/) {
+		t.Error("non-tool model + image intent should be rejected")
 	}
-	// non-tool model + intent -> override to fallback
-	if m, ov := decideImageRoute("deepseek-r1", false, true, false); !ov || m != ImageFallbackModel {
-		t.Errorf("non-tool should override to %s: got %q overridden=%v", ImageFallbackModel, m, ov)
+}
+
+func TestToolModel_ImageIntent_Proceeds(t *testing.T) {
+	// tool-capable model + image intent -> proceed (it calls the tool itself)
+	if shouldRejectImageTurn(true, true, false) {
+		t.Error("tool-capable model should NOT be rejected on image intent")
 	}
-	// no intent + no mode -> keep model (normal chat)
-	if m, ov := decideImageRoute("deepseek-r1", false, false, false); ov || m != "deepseek-r1" {
-		t.Errorf("no intent should not override: got %q overridden=%v", m, ov)
+}
+
+func TestNonToolModel_NoImageIntent_Proceeds(t *testing.T) {
+	// non-tool model + no image intent -> normal chat, proceed
+	if shouldRejectImageTurn(false, false, false) {
+		t.Error("non-image turn should never be rejected")
 	}
-	// 🎨 image mode on non-tool model -> override
-	if m, ov := decideImageRoute("deepseek-r1", false, false, true); !ov || m != ImageFallbackModel {
-		t.Errorf("image mode should override: got %q overridden=%v", m, ov)
+}
+
+func TestNonToolModel_ImageMode_Rejects(t *testing.T) {
+	// 🎨 mode on a non-tool model (safety net — 🎨 is hidden for these) -> reject
+	if !shouldRejectImageTurn(false, false, true) {
+		t.Error("image mode on a non-tool model should be rejected")
 	}
-	// 🎨 image mode on tool-capable model -> keep (it can call the tool)
-	if m, ov := decideImageRoute("claude-sonnet-4", true, false, true); ov || m != "claude-sonnet-4" {
-		t.Errorf("tool-capable image mode should not override: got %q overridden=%v", m, ov)
+}
+
+func TestToolModel_ImageMode_Proceeds(t *testing.T) {
+	if shouldRejectImageTurn(true, false, true) {
+		t.Error("tool-capable model in image mode should NOT be rejected")
+	}
+}
+
+func TestImageUnsupportedMessage(t *testing.T) {
+	msg := imageUnsupportedMessage("deepseek/deepseek-r1")
+	if !strings.Contains(msg, "deepseek/deepseek-r1") {
+		t.Errorf("message should name the model, got %q", msg)
+	}
+	if !strings.Contains(msg, "🎨") {
+		t.Errorf("message should point at 🎨 models, got %q", msg)
 	}
 }
