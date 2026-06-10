@@ -699,9 +699,24 @@ func (g *GatewayClient) GenerateImages(
 // reasoning block for reasoning-capable models); chat-edge enriches it
 // with display metadata before serving to the frontend.
 type GatewayModelInfo struct {
-	ID        string                  `json:"id"`
-	Provider  string                  `json:"provider"`
-	Reasoning *GatewayReasoningCapability `json:"reasoning,omitempty"`
+	ID           string                      `json:"id"`
+	Provider     string                      `json:"provider"`
+	Reasoning    *GatewayReasoningCapability `json:"reasoning,omitempty"`
+	Capabilities *GatewayModelCapabilities   `json:"capabilities,omitempty"`
+}
+
+// GatewayModelCapabilities mirrors the Gateway's ModelCapabilities block
+// (Phase A). Only TRUE flags are sent, so a false bool means "absent".
+// image_generation marks a DEDICATED image model (gpt-image-1) — not a
+// chat model; image_generation_via_tools marks a chat model that can emit
+// images by calling the generate_image tool.
+type GatewayModelCapabilities struct {
+	Streaming               bool `json:"streaming"`
+	Vision                  bool `json:"vision"`
+	Tools                   bool `json:"tools"`
+	Reasoning               bool `json:"reasoning"`
+	ImageGeneration         bool `json:"image_generation"`
+	ImageGenerationViaTools bool `json:"image_generation_via_tools"`
 }
 
 // GatewayReasoningCapability mirrors the Gateway's ReasoningCapability

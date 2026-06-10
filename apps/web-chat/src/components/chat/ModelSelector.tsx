@@ -14,7 +14,7 @@
 // tokens) is unchanged from the previous flat-list version.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, Search, Sparkles, X } from "lucide-react";
+import { BrainCircuit, ImagePlus, Search, Sparkles, X } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
@@ -370,6 +370,7 @@ function ModelPicker({
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
+                imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
               />
             ))}
           </Section>
@@ -385,6 +386,7 @@ function ModelPicker({
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
+                imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
               />
             ))}
           </Section>
@@ -407,6 +409,7 @@ function ModelPicker({
                   selected={!isAuto && m.id === activeId}
                   onClick={() => onPickModel(m)}
                   reasoning={Boolean(m.reasoning?.supported)}
+                  imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
                 />
               ))}
               {hiddenCount > 0 ? (
@@ -463,9 +466,11 @@ interface RowProps {
   leading?: React.ReactNode;
   /** T4 — show a "thinks" badge when the model advertises reasoning. */
   reasoning?: boolean;
+  /** Phase C — show an image badge when the model can generate images. */
+  imageGen?: boolean;
 }
 
-function ModelRow({ label, sub, selected, onClick, leading, reasoning }: RowProps) {
+function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen }: RowProps) {
   const t = useT();
   return (
     <div
@@ -491,6 +496,16 @@ function ModelRow({ label, sub, selected, onClick, leading, reasoning }: RowProp
         >
           <BrainCircuit className="h-3 w-3" aria-hidden />
           {t("model.reasoningBadge")}
+        </span>
+      ) : null}
+      {imageGen ? (
+        <span
+          title={t("model.imageBadge")}
+          aria-label={t("model.imageBadge")}
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-400"
+        >
+          <ImagePlus className="h-3 w-3" aria-hidden />
+          {t("model.imageBadge")}
         </span>
       ) : null}
       {selected ? (

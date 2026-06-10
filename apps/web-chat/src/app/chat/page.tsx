@@ -87,7 +87,7 @@ export default function ChatLanding() {
     return promise;
   }, [createConversation, selectedModelId]);
 
-  async function handleSend(text: string, fileIds: string[]) {
+  async function handleSend(text: string, fileIds: string[], imageMode?: boolean) {
     if (!selectedModelId) {
       toast("Pick a model first.");
       return;
@@ -102,7 +102,7 @@ export default function ChatLanding() {
     // placeholder mounts inside chatStore by the time the
     // conversation page renders. The page sees messages already
     // streaming via the store; no extra hand-off needed.
-    void sendMessage(id, text, fileIds);
+    void sendMessage(id, text, fileIds, imageMode);
     router.push(`/chat/${id}`);
   }
 
