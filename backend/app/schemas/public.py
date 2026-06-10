@@ -64,11 +64,33 @@ class ReasoningCapability(BaseModel):
     summary_supported: bool = True
 
 
+class ModelCapabilities(BaseModel):
+    """Capability flags on a ``ModelInfo`` for client model-selectors (vision
+    picker, the image-gen button, etc.). Built from the ``model_configs``
+    booleans; None fields are dropped from the wire by
+    ``response_model_exclude_none`` on the route, so a model only advertises
+    capabilities it actually has."""
+
+    streaming: Optional[bool] = None
+    vision: Optional[bool] = None
+    tools: Optional[bool] = None
+    reasoning: Optional[bool] = None
+    image_generation: Optional[bool] = None
+    # Chat models that CAN emit images by calling an image model as a tool.
+    # The actual tool wiring is a later phase; this flag just lets the UI
+    # light up the image affordance for these models now.
+    image_generation_via_tools: Optional[bool] = None
+
+
 class ModelInfo(BaseModel):
     """Single model entry in the /v1/models response (OpenAI-compatible)."""
 
     id: str
     provider: str
+    # Capability flags (vision/tools/streaming/reasoning/image_generation).
+    # Optional + None-excluded so the synthetic ``auto`` entry and models
+    # with no flags serialise unchanged.
+    capabilities: Optional[ModelCapabilities] = None
     # Reasoning capability metadata (migration 045 / T1). Optional so
     # the synthetic ``id="auto"`` gateway entry — which has no backing
     # ``model_configs`` row — serialises without a default-filled
@@ -81,6 +103,50 @@ class ModelListResponse(BaseModel):
     """Response for GET /v1/models (OpenAI-compatible ``data`` key)."""
 
     data: List[ModelInfo]
+
+
+# ---------------------------------------------------------------------------
+# Image generation (DALL-E)
+# ---------------------------------------------------------------------------
+
+
+class ImageGenerationRequest(BaseModel):
+    """Public request for POST /v1/images/generations (OpenAI-compatible)."""
+
+    model: str = "dall-e-3"
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    n: int = Field(1, ge=1, le=10)  # dall-e-3 is forced to 1 in the client
+    size: Literal[
+        "256x256", "512x512", "1024x1024", "1024x1792", "1792x1024"
+    ] = "1024x1024"
+    quality: Literal["standard", "hd"] = "standard"
+    style: Literal["vivid", "natural"] = "vivid"
+    response_format: Literal["url", "b64_json"] = "url"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ImageData(BaseModel):
+    url: Optional[str] = None
+    b64_json: Optional[str] = None
+    revised_prompt: Optional[str] = None
+
+
+class ImageUsage(BaseModel):
+    """SRAN extension — per-image cost (image gen is priced per image, not
+    per token)."""
+
+    cost_usd: float = 0.0
+
+
+class ImageGenerationResponse(BaseModel):
+    """Public response for POST /v1/images/generations (OpenAI-compatible
+    ``created`` + ``data``, plus the SRAN ``usage.cost_usd`` extension)."""
+
+    created: int = Field(default_factory=lambda: int(time.time()))
+    data: List[ImageData]
+    model: str
+    provider: str = "openai"
+    usage: ImageUsage
 
 
 # ---------------------------------------------------------------------------
