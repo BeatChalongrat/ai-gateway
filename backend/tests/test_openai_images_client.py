@@ -86,3 +86,46 @@ async def test_generate_image_dalle2_n_and_no_quality(monkeypatch):
     assert "quality" not in sent  # dall-e-2: no quality/style fields
     assert "style" not in sent
     assert result.cost_usd == round(0.018 * 3, 6)
+
+
+def test_cost_gpt_image():
+    assert image_cost_usd("gpt-image-1", "1024x1024", "low", 1) == 0.011
+    assert image_cost_usd("gpt-image-1", "1024x1024", "medium", 1) == 0.042
+    assert image_cost_usd("gpt-image-1", "1024x1024", "high", 1) == 0.167
+    # standard/hd are mapped into gpt-image qualities
+    assert image_cost_usd("gpt-image-1", "1024x1024", "standard", 1) == 0.042  # -> medium
+    assert image_cost_usd("gpt-image-1", "1024x1024", "hd", 1) == 0.167  # -> high
+    # auto / unknown -> medium estimate (don't under-bill)
+    assert image_cost_usd("gpt-image-1", "1024x1024", "auto", 1) == 0.042
+
+
+@pytest.mark.asyncio
+async def test_generate_gpt_image_b64_and_quality(monkeypatch):
+    async def _fake_key(self, session, provider):
+        return "sk-test-key"
+
+    monkeypatch.setattr(_KEY_PATH, _fake_key)
+
+    with respx.mock:
+        route = respx.post("https://api.openai.com/v1/images/generations").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "created": 1,
+                    "data": [{"b64_json": "AAAA"}],  # gpt-image returns b64, no url
+                    "usage": {"total_tokens": 1500},
+                },
+            )
+        )
+        result = await generate_image(
+            None, model="gpt-image-1", prompt="a cat", size="1024x1024", quality="high"
+        )
+
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["model"] == "gpt-image-1"
+    assert sent["quality"] == "high"  # gpt-image quality enum
+    assert "style" not in sent
+    assert "response_format" not in sent
+    assert result.data[0]["b64_json"] == "AAAA"
+    assert result.data[0].get("url") is None
+    assert result.cost_usd == 0.167  # high 1024x1024

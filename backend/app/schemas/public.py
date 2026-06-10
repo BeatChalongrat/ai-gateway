@@ -113,13 +113,17 @@ class ModelListResponse(BaseModel):
 class ImageGenerationRequest(BaseModel):
     """Public request for POST /v1/images/generations (OpenAI-compatible)."""
 
-    model: str = "dall-e-3"
+    model: str = "gpt-image-1"
     prompt: str = Field(..., min_length=1, max_length=4000)
     n: int = Field(1, ge=1, le=10)  # dall-e-3 is forced to 1 in the client
+    # Union of gpt-image-1 (auto / 1024x1536 / 1536x1024) and DALL-E sizes.
     size: Literal[
-        "256x256", "512x512", "1024x1024", "1024x1792", "1792x1024"
+        "auto", "256x256", "512x512", "1024x1024",
+        "1024x1536", "1536x1024", "1024x1792", "1792x1024",
     ] = "1024x1024"
-    quality: Literal["standard", "hd"] = "standard"
+    # Union of gpt-image-1 (auto/low/medium/high) and dall-e-3 (standard/hd);
+    # the client maps it to whatever the chosen model accepts.
+    quality: Literal["auto", "low", "medium", "high", "standard", "hd"] = "auto"
     style: Literal["vivid", "natural"] = "vivid"
     response_format: Literal["url", "b64_json"] = "url"
     metadata: Dict[str, Any] = Field(default_factory=dict)
