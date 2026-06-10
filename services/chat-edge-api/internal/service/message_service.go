@@ -78,6 +78,11 @@ type MessageService struct {
 	// hides the tools from the gateway request when the toggle is
 	// off so the model doesn't try to call them.
 	toolExec *ToolExecutor
+	// Phase D — optional model-id -> tool-capable lookup, backed by the
+	// gateway model catalog (handler.ModelHandler). Used by SendStream's
+	// image routing to decide whether to override a non-tool model for an
+	// image-generation turn. nil => no override (capability unknown).
+	toolCapable func(ctx context.Context, modelID string) bool
 	// Optional. Builds the <conversation_state> system-prompt block
 	// (S3 — Structured Conversation State) AND backs the
 	// update_conversation_state AI tool. Auto-extraction kicks in
@@ -278,6 +283,14 @@ func (s *MessageService) SetImageGeneration(gen imageGenerator, files generatedI
 	if s.toolExec != nil {
 		s.toolExec.SetImageGeneration(gen, files, model)
 	}
+}
+
+// SetToolCapabilityChecker wires a model-id -> tool-capable lookup used by
+// Phase D image routing to decide whether to override a non-tool model for
+// an image-generation turn. Optional — when unset, no override happens.
+// Backed by handler.ModelHandler's cached catalog.
+func (s *MessageService) SetToolCapabilityChecker(fn func(ctx context.Context, modelID string) bool) {
+	s.toolCapable = fn
 }
 
 // SetContextCompiler wires the S4 token-budgeted compiler. Without
@@ -595,7 +608,21 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs, sourcesAcc)
 	toolsAttached := s.attachTools(&gwReq, conv)
-	if in.ImageMode {
+	// Phase C + D — image routing. When the turn wants an image (the 🎨
+	// toggle OR a detected "generate an image" intent), apply the
+	// generate_image hint and, if the selected model can't call tools,
+	// override THIS turn's model to a tool-capable fallback so the tool can
+	// run. conv.ModelID is never changed, so the next turn reverts.
+	if intent := DetectImageIntent(in.Content); (in.ImageMode || intent) && toolsAttached {
+		if s.toolCapable != nil {
+			toolCapable := s.toolCapable(ctx, gwReq.Model)
+			if newModel, overridden := decideImageRoute(gwReq.Model, toolCapable, intent, in.ImageMode); overridden {
+				slog.Info("phase-d: image-route model override",
+					"conv_model", conv.ModelID, "override_to", newModel,
+					"intent", intent, "image_mode", in.ImageMode)
+				gwReq.Model = newModel
+			}
+		}
 		applyImageModeHint(&gwReq)
 	}
 	stream, err := s.gateway.SendChatCompletionStream(
