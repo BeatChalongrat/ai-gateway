@@ -136,6 +136,13 @@ def normalize_for_scan(text: str) -> NormalizedText:
 
     Returns a NormalizedText with the cleaned text and metadata.
     """
+    # A tool-call assistant response carries content=None (OpenAI sets
+    # content to null when tool_calls are present), and the non-streaming
+    # outbound DLP scan passes that straight here. Coerce None -> "" so it
+    # scans as empty (no findings) instead of crashing
+    # unicodedata.normalize("NFKC", None).
+    if text is None:
+        text = ""
     transformations: list[str] = []
     original = text
 
