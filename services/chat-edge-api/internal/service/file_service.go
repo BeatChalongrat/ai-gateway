@@ -20,6 +20,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -339,6 +340,103 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 		}
 	}
 	return row, nil
+}
+
+// ---------------------------------------------------------------------------
+// Generated images (Phase B — image-generation tool)
+// ---------------------------------------------------------------------------
+
+// GeneratedImageInput carries a decoded AI-generated image to persist as
+// a ConversationFile attached to an assistant message. Unlike Upload it
+// skips the multipart + extraction pipeline — the bytes are already in
+// hand and an image has no text to extract.
+type GeneratedImageInput struct {
+	TenantID       uuid.UUID
+	UserID         uuid.UUID
+	ConversationID uuid.UUID
+	MessageID      uuid.UUID
+	Data           []byte
+	ContentType    string // image/png (default), image/jpeg, image/webp
+	Prompt         string // used for the display filename
+}
+
+// SaveGeneratedImage stores a generated image blob via the storage
+// backend and creates a ConversationFile row linked to the assistant
+// message, flagged IsGenerated. The image then renders in web-chat via
+// the existing message.files[] attachment pipeline (served through
+// GET /files/{id}/download with the same ownership auth as uploads) —
+// no markdown URL needed.
+func (s *FileService) SaveGeneratedImage(
+	ctx context.Context, in GeneratedImageInput,
+) (*model.ConversationFile, error) {
+	if len(in.Data) == 0 {
+		return nil, ErrFileEmpty
+	}
+	ct := strings.ToLower(strings.TrimSpace(in.ContentType))
+	if ct == "" {
+		ct = "image/png"
+	}
+	ext := "png"
+	switch ct {
+	case "image/jpeg":
+		ext = "jpg"
+	case "image/webp":
+		ext = "webp"
+	}
+
+	// UUID-prefixed storage name (same collision-proofing as Upload);
+	// the row's own ID is assigned by the repo Create.
+	storageName := fmt.Sprintf("%s_generated.%s", uuid.New().String(), ext)
+	key := storage.JoinKey(
+		conversationFilesKeyPrefix,
+		in.TenantID.String(),
+		in.ConversationID.String(),
+		storageName,
+	)
+	if err := s.storage.Upload(ctx, key, bytes.NewReader(in.Data), ct, int64(len(in.Data))); err != nil {
+		return nil, fmt.Errorf("storage upload: %w", err)
+	}
+
+	var msgID *uuid.UUID
+	if in.MessageID != uuid.Nil {
+		m := in.MessageID
+		msgID = &m
+	}
+	row, err := s.files.Create(ctx, &model.ConversationFile{
+		ConversationID:   in.ConversationID,
+		MessageID:        msgID,
+		TenantID:         in.TenantID,
+		UserID:           in.UserID,
+		Filename:         storageName,
+		OriginalFilename: generatedImageFilename(in.Prompt, ext),
+		ContentType:      ct,
+		FileSizeBytes:    int64(len(in.Data)),
+		StoragePath:      key,
+		ExtractionStatus: "completed", // images carry no extractable text
+		IsGenerated:      true,
+		Version:          1,
+	})
+	if err != nil {
+		_ = s.storage.Delete(ctx, key)
+		return nil, err
+	}
+	return row, nil
+}
+
+// generatedImageFilename builds a friendly download label from the
+// prompt. The on-disk name is the UUID-prefixed storageName; this is
+// only the display filename. Rune-sliced so multibyte (Thai) prompts
+// aren't cut mid-character.
+func generatedImageFilename(prompt, ext string) string {
+	p := strings.TrimSpace(prompt)
+	if r := []rune(p); len(r) > 40 {
+		p = string(r[:40])
+	}
+	clean := sanitizeFilename(p)
+	if clean == "" {
+		return "generated-image." + ext
+	}
+	return clean + "." + ext
 }
 
 // ---------------------------------------------------------------------------
