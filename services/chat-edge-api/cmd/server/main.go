@@ -312,11 +312,18 @@ func main() {
 		DeleteKB: knowledgeSvc.DeleteKB,
 	})
 
+	// Phase D — the model handler also backs the image-route capability
+	// check; wire it into the message service so SendStream can tell whether
+	// the selected model can call tools (and override a non-tool model for
+	// an image-generation turn).
+	modelHandler := handler.NewModelHandler(cfg, gateway)
+	messageSvc.SetToolCapabilityChecker(modelHandler.SupportsImageTools)
+
 	handlers := router.Handlers{
 		Auth:         handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Conversation: conversationHandler,
 		Message:      messageHandler,
-		Model:        handler.NewModelHandler(cfg, gateway),
+		Model:        modelHandler,
 		Feedback:     handler.NewFeedbackHandler(feedbackSvc),
 		File:         handler.NewFileHandler(fileSvc),
 		Preferences:  handler.NewPreferencesHandler(prefsRepo),
