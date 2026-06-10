@@ -73,6 +73,14 @@ _TOOL_KEYWORDS = (
 _NON_CHAT_KEYWORDS = (
     "embed", "moderat", "whisper", "tts", "dall-e",
     "text-similarity", "search",
+    # Non-chat families that auto-sync otherwise leaks into the chat
+    # catalog: audio transcription + audio/realtime (voice) APIs, legacy
+    # completion/base models, and dedicated image models. NOTE:
+    # ``turbo-instruct`` (NOT bare ``instruct``) so instruction-tuned CHAT
+    # models like ``llama-3.3-70b-instruct`` / ``mistral-…-instruct`` are
+    # NOT filtered. ``gpt-image`` matches ``chatgpt-image-latest`` too.
+    "transcribe", "turbo-instruct", "davinci", "babbage", "gpt-image",
+    "audio", "realtime",
 )
 
 
