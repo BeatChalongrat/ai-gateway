@@ -1,22 +1,22 @@
-"""OpenAI Images API client (DALL-E 3 / DALL-E 2) — a STANDALONE client, NOT
-a chat adapter.
+"""OpenAI Images API client — a STANDALONE client, NOT a chat adapter.
 
-The chat ``BaseProviderAdapter`` is messages/streaming-shaped and the
-``provider_dispatcher`` calls ``adapter.chat()`` only, so a one-shot
-prompt -> image operation doesn't fit it. This client reuses the SAME infra
-the chat adapters use — the shared pooled async httpx client, base-URL
-override, provider-key resolution (round-robin + cache), and retry/error
-mapping — without pretending an image request is a chat turn.
+Supports the current **gpt-image-1** family (OpenAI's image model now that
+DALL-E is being retired) and DALL-E 3/2 for accounts that still have them.
+Reuses the same infra the chat adapters use — the shared pooled async httpx
+client, base-URL override, provider-key resolution, and retry/error mapping —
+without pretending an image request is a chat turn.
 
-Image models are intentionally NOT registered in the chat routing candidate
-pool: their per-token cost is 0, so the auto-router would otherwise rank them
-"cheapest" and route a chat request to dall-e-3.
+Image models are intentionally NOT in the chat routing candidate pool: their
+per-token cost is 0, so the auto-router would otherwise route a CHAT request
+to an image model.
 
-Endpoint: POST {base}/images/generations
-Docs: https://platform.openai.com/docs/api-reference/images/create
-
-Note: DALL-E ``url`` results expire (~1h). Phase A returns the URL directly;
-persistent storage is a later phase.
+Per-family differences this client normalises:
+  * gpt-image-1: quality ∈ {auto,low,medium,high}; returns ``b64_json`` (no
+    URL); no ``style``/``response_format``. Token-priced -> cost is APPROX.
+  * dall-e-3: quality ∈ {standard,hd}; returns a (temporary ~1h) ``url``.
+  * dall-e-2: no quality; returns a URL.
+The current OpenAI images API rejects ``response_format`` and ``style`` for
+all of them, so neither is ever sent.
 """
 
 from __future__ import annotations
@@ -35,11 +35,18 @@ from app.services.providers.http_client import get_provider_client
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 
-# Image models surfaced in /v1/models (decoupled from chat routing).
-IMAGE_MODELS = ("dall-e-3", "dall-e-2")
-DEFAULT_IMAGE_MODEL = "dall-e-3"
+# Image models advertised in /v1/models + accepted by the route. gpt-image-1
+# is the current OpenAI image model; DALL-E is retiring (and absent on many
+# accounts). The client still understands dall-e-* by id if they're re-added.
+IMAGE_MODELS = ("gpt-image-1", "gpt-image-1-mini")
+DEFAULT_IMAGE_MODEL = "gpt-image-1"
 
-# Per-image USD. DALL-E 3 keyed by (size, quality); DALL-E 2 by size.
+
+def _is_gpt_image(model: str) -> bool:
+    return model.startswith("gpt-image") or model == "chatgpt-image-latest"
+
+
+# Per-image USD.
 _DALLE3_COSTS = {
     ("1024x1024", "standard"): 0.040,
     ("1024x1024", "hd"): 0.080,
@@ -49,22 +56,55 @@ _DALLE3_COSTS = {
     ("1792x1024", "hd"): 0.120,
 }
 _DALLE2_COSTS = {"1024x1024": 0.020, "512x512": 0.018, "256x256": 0.016}
+# gpt-image-1 is token-priced; these are APPROXIMATE per-image USD by
+# (size, quality) from OpenAI's published rates. Real cost varies with the
+# prompt's token count; the response ``usage`` (captured in raw) has the
+# exact tokens if you need to reconcile later.
+_GPT_IMAGE_COSTS = {
+    ("1024x1024", "low"): 0.011,
+    ("1024x1024", "medium"): 0.042,
+    ("1024x1024", "high"): 0.167,
+    ("1024x1536", "low"): 0.016,
+    ("1024x1536", "medium"): 0.063,
+    ("1024x1536", "high"): 0.250,
+    ("1536x1024", "low"): 0.016,
+    ("1536x1024", "medium"): 0.063,
+    ("1536x1024", "high"): 0.250,
+}
+
+
+def normalize_quality(model: str, quality: str) -> str:
+    """Map the request's quality into the value the model accepts."""
+    if _is_gpt_image(model):
+        if quality in ("auto", "low", "medium", "high"):
+            return quality
+        return {"standard": "medium", "hd": "high"}.get(quality, "auto")
+    # dall-e-3
+    if quality in ("standard", "hd"):
+        return quality
+    return {"low": "standard", "medium": "standard", "high": "hd"}.get(
+        quality, "standard"
+    )
 
 
 def image_cost_usd(model: str, size: str, quality: str, n: int) -> float:
-    """Per-request image cost. Unknown size/quality falls back to the base
-    1024x1024 standard rate for that model rather than 0 (don't under-bill)."""
-    if model == "dall-e-2":
+    """Per-request image cost. Unknown size/quality falls back to a sane base
+    rate (don't under-bill), never 0."""
+    if _is_gpt_image(model):
+        q = normalize_quality(model, quality)
+        per = _GPT_IMAGE_COSTS.get((size, q), _GPT_IMAGE_COSTS[("1024x1024", "medium")])
+    elif model == "dall-e-2":
         per = _DALLE2_COSTS.get(size, _DALLE2_COSTS["1024x1024"])
-    else:
-        per = _DALLE3_COSTS.get((size, quality), _DALLE3_COSTS[("1024x1024", "standard")])
+    else:  # dall-e-3
+        q = normalize_quality(model, quality)
+        per = _DALLE3_COSTS.get((size, q), _DALLE3_COSTS[("1024x1024", "standard")])
     return round(per * max(1, n), 6)
 
 
 @dataclass
 class ImageResult:
     created: int
-    data: list[dict]  # [{url|b64_json, revised_prompt}]
+    data: list[dict]  # [{url|b64_json, revised_prompt?}]
     model: str
     cost_usd: float
     raw: dict = field(default_factory=dict)
@@ -77,13 +117,12 @@ async def generate_image(
     prompt: str,
     n: int = 1,
     size: str = "1024x1024",
-    quality: str = "standard",
+    quality: str = "auto",
     style: str = "vivid",
     response_format: str = "url",
 ) -> ImageResult:
-    """Call POST /images/generations. ``prompt`` is the already-DLP-masked
-    text. Returns the provider payload + the computed cost. Provider/HTTP
-    errors are raised as the gateway's domain exceptions (via
+    """POST /images/generations. ``prompt`` is the already-DLP-masked text.
+    Provider/HTTP errors are raised as the gateway's domain exceptions (via
     ``call_with_retry``) for the central handler to map."""
     key = await ProviderKeyService().get_active_key_async(session, "openai")
     if not key:
@@ -93,19 +132,13 @@ async def generate_image(
         )
 
     n_eff = 1 if model == "dall-e-3" else max(1, n)  # dall-e-3 only supports n=1
-    body: dict = {
-        "model": model,
-        "prompt": prompt,
-        "n": n_eff,
-        "size": size,
-    }
-    if model == "dall-e-3":
-        body["quality"] = quality
-    # NOTE: the current OpenAI images API rejects `response_format` and `style`
-    # for dall-e-3 ("unknown_parameter") and returns a URL by default. We keep
-    # those request fields (for cost calc / forward-compat) but do NOT forward
-    # them. Only model/prompt/n/size/quality are sent.
-    _ = (response_format, style)
+    body: dict = {"model": model, "prompt": prompt, "n": n_eff, "size": size}
+    # quality: gpt-image-1 (auto/low/medium/high) and dall-e-3 (standard/hd)
+    # take it; dall-e-2 has no quality. NEVER send response_format or style —
+    # the current OpenAI images API rejects both ("unknown_parameter").
+    if _is_gpt_image(model) or model == "dall-e-3":
+        body["quality"] = normalize_quality(model, quality)
+    _ = (response_format, style)  # accepted for forward-compat, not forwarded
 
     client = await get_provider_client(
         base_url=resolve_base_url("openai", OPENAI_BASE_URL),
