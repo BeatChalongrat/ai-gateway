@@ -119,6 +119,10 @@ type Config struct {
 	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
 	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`
 
+	// Phase B — the gateway image model the generate_image tool calls.
+	// gpt-image-1 is OpenAI's current image model (DALL-E is retiring).
+	ImageGenModel string `env:"IMAGE_GEN_MODEL" envDefault:"gpt-image-1"`
+
 	// Blob-storage backend selection.
 	//
 	//   STORAGE_BACKEND=local  → write to the filesystem under
