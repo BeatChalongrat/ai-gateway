@@ -79,9 +79,10 @@ func TestToolModel_ImageMode_Proceeds(t *testing.T) {
 }
 
 func TestImageUnsupportedMessage(t *testing.T) {
-	msg := imageUnsupportedMessage("deepseek/deepseek-r1")
-	if !strings.Contains(msg, "deepseek/deepseek-r1") {
-		t.Errorf("message should name the model, got %q", msg)
+	msg := imageUnsupportedMessage()
+	// Generic — must NOT leak a model id, and must point at 🎨 models.
+	if strings.Contains(msg, "deepseek") || strings.Contains(msg, "/") {
+		t.Errorf("message should be generic (no model id), got %q", msg)
 	}
 	if !strings.Contains(msg, "🎨") {
 		t.Errorf("message should point at 🎨 models, got %q", msg)

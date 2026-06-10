@@ -2494,7 +2494,7 @@ func (s *MessageService) rejectImageStream(
 ) *StreamHandle {
 	ch := make(chan StreamUpdate, 2)
 	go func() {
-		ch <- StreamUpdate{Delta: imageUnsupportedMessage(conv.ModelID)}
+		ch <- StreamUpdate{Delta: imageUnsupportedMessage()}
 		close(ch) // channel close is the stream terminator the handler reads
 	}()
 	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {

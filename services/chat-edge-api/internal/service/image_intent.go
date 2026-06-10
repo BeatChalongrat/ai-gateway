@@ -1,9 +1,6 @@
 package service
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 // Phase D — image-generation intent detection + capability gating.
 //
@@ -59,12 +56,9 @@ func shouldRejectImageTurn(toolCapable, hasIntent, isImageMode bool) bool {
 }
 
 // imageUnsupportedMessage is the assistant reply shown when an image turn
-// lands on a model that can't generate images. Names the model + points the
-// user at the 🎨-capable models.
-func imageUnsupportedMessage(modelName string) string {
-	return fmt.Sprintf(
-		"โมเดล %s ไม่รองรับการสร้างรูปภาพครับ "+
-			"กรุณาเลือกโมเดลที่มีไอคอน 🎨 เช่น GPT-4o หรือ Claude",
-		modelName,
-	)
+// lands on a model that can't generate images. Generic + friendly — the
+// model id stays in the server log (not the user-facing text).
+func imageUnsupportedMessage() string {
+	return "โมเดลที่คุณเลือกไม่สามารถสร้างรูปได้ครับ " +
+		"กรุณาเลือกโมเดลที่มีไอคอน 🎨 เช่น GPT-4o หรือ Claude"
 }
