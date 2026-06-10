@@ -3,9 +3,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session
 from app.schemas.common import ErrorResponse
-from app.schemas.public import ModelInfo, ModelListResponse, ReasoningCapability
+from app.schemas.public import (
+    ModelCapabilities,
+    ModelInfo,
+    ModelListResponse,
+    ReasoningCapability,
+)
 from app.services.provider_key_service import ProviderKeyService
 from app.services.providers.model_registry import get_all_candidates
+from app.services.providers.openai_images_client import IMAGE_MODELS
 
 router = APIRouter()
 
@@ -51,11 +57,42 @@ async def get_models(
                 default_mode=c.default_reasoning_mode or "auto",
                 summary_supported=True,
             )
+        # Capability flags for client model-selectors. Only TRUE flags are
+        # set (None ones are dropped from the wire). image_generation_via_tools
+        # is derived: an OpenAI chat model with tool support can emit images by
+        # calling an image model as a tool (wiring is a later phase; the flag
+        # readies the UI now).
+        cap_flags: dict[str, bool] = {}
+        if c.supports_streaming:
+            cap_flags["streaming"] = True
+        if c.supports_vision:
+            cap_flags["vision"] = True
+        if c.supports_tools:
+            cap_flags["tools"] = True
+        if c.supports_reasoning:
+            cap_flags["reasoning"] = True
+        if c.provider == "openai" and c.supports_tools:
+            cap_flags["image_generation_via_tools"] = True
         entries.append(
             ModelInfo(
                 id=c.model,
                 provider=c.provider,
                 reasoning=reasoning_block,
+                capabilities=ModelCapabilities(**cap_flags) if cap_flags else None,
             )
         )
+
+    # Image models (DALL-E) — decoupled from the chat routing candidate pool
+    # so ``model:auto`` never sends a chat request to an image model. Listed
+    # only when OpenAI has a usable key (same gate as chat models).
+    if "openai" in valid_providers:
+        for m in IMAGE_MODELS:
+            entries.append(
+                ModelInfo(
+                    id=m,
+                    provider="openai",
+                    capabilities=ModelCapabilities(image_generation=True),
+                )
+            )
+
     return ModelListResponse(data=entries)
