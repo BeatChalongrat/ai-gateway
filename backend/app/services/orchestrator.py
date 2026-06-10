@@ -2749,6 +2749,14 @@ class GatewayOrchestrator:
         """
         from app.services.dlp_prompt import _MASK_TOKEN_RE
 
+        # A tool-call assistant response carries content=None (OpenAI sets
+        # content null when tool_calls are present), and the non-streaming
+        # outbound scan passes that straight here. Coerce None -> "" so it
+        # scans as empty (no findings) instead of crashing
+        # registry.scan_text / _MASK_TOKEN_RE.finditer on NoneType.
+        if text is None:
+            text = ""
+
         registry = self._select_registry(ner_enabled)
         matches = registry.scan_text(text)
         if direction == "output":
