@@ -58,6 +58,15 @@ class TestUnicodeNormalization:
         assert result.normalized == "hello world"
         assert result.transformations == []
 
+    def test_none_content_scans_as_empty(self):
+        """A tool-call assistant response carries content=None; it must scan
+        as empty rather than crash unicodedata.normalize("NFKC", None).
+        Regression for the non-streaming tool-calling 500."""
+        result = normalize_for_scan(None)
+        assert result.normalized == ""
+        assert result.original == ""
+        assert result.transformations == []
+
 
 class TestZeroWidthStripping:
     def test_zero_width_space(self):
