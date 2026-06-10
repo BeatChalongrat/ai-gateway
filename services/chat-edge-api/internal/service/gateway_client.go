@@ -603,6 +603,97 @@ func (g *GatewayClient) bearer() (string, error) {
 	return tok, nil
 }
 
+// ---------------------------------------------------------------------------
+// Image generation (Phase B) — POST /images/generations
+// ---------------------------------------------------------------------------
+
+// GatewayImagesRequest mirrors the gateway's public ImageGenerationRequest
+// (backend/app/schemas/public.py). Only the fields chat-edge sets are
+// included; the gateway applies defaults for the rest.
+type GatewayImagesRequest struct {
+	Model   string `json:"model"`
+	Prompt  string `json:"prompt"`
+	N       int    `json:"n,omitempty"`
+	Size    string `json:"size,omitempty"`
+	Quality string `json:"quality,omitempty"`
+}
+
+// GatewayImageDatum is one entry in the images response. gpt-image-1
+// returns B64JSON (no URL); DALL-E returns a URL. RevisedPrompt is
+// dall-e-3 only.
+type GatewayImageDatum struct {
+	URL           string `json:"url,omitempty"`
+	B64JSON       string `json:"b64_json,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
+type GatewayImagesResponse struct {
+	Created  int                 `json:"created"`
+	Model    string              `json:"model"`
+	Provider string              `json:"provider"`
+	Data     []GatewayImageDatum `json:"data"`
+	Usage    *struct {
+		CostUSD float64 `json:"cost_usd"`
+	} `json:"usage"`
+}
+
+// GenerateImages issues a non-streaming image-generation call to the
+// gateway's /images/generations endpoint. Mirrors do()'s auth + audit
+// headers but targets a different path (do() is hardwired to
+// /chat/completions). Returns GatewayUnavailableError on any non-2xx so
+// the caller maps cleanly.
+func (g *GatewayClient) GenerateImages(
+	ctx context.Context,
+	callCtx GatewayCallContext,
+	req GatewayImagesRequest,
+) (*GatewayImagesResponse, error) {
+	buf, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: marshal image request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost,
+		g.BaseURL+"/images/generations",
+		bytes.NewReader(buf),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build image request: %w", err)
+	}
+
+	bearer, err := g.bearer()
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+bearer)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-Tenant-ID", callCtx.TenantID.String())
+	httpReq.Header.Set("X-User-ID", callCtx.UserID.String())
+	if callCtx.ConversationID != uuid.Nil {
+		httpReq.Header.Set("X-Conversation-ID", callCtx.ConversationID.String())
+	}
+	if callCtx.RequestID != "" {
+		httpReq.Header.Set("X-Request-Id", callCtx.RequestID)
+	}
+
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
+	}
+
+	out := &GatewayImagesResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return nil, fmt.Errorf("gateway: decode image response: %w", err)
+	}
+	return out, nil
+}
+
 // GatewayModelInfo is one entry from the Gateway's GET /v1/models.
 // The Gateway returns a minimal shape (id + provider, plus an optional
 // reasoning block for reasoning-capable models); chat-edge enriches it

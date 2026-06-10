@@ -270,6 +270,16 @@ func (s *MessageService) SetConversationStateService(svc *ConversationStateServi
 	}
 }
 
+// SetImageGeneration wires the Phase-B generate_image tool onto the
+// ToolExecutor (gen = GatewayClient, files = FileService, passed as
+// interfaces). Optional — when unset, generate_image is hidden. Must run
+// after SetMemoryService because the executor is created there.
+func (s *MessageService) SetImageGeneration(gen imageGenerator, files generatedImageSaver, model string) {
+	if s.toolExec != nil {
+		s.toolExec.SetImageGeneration(gen, files, model)
+	}
+}
+
 // SetContextCompiler wires the S4 token-budgeted compiler. Without
 // it the send paths fall through to the legacy "ship everything
 // prepareSend loaded" behaviour — useful for tests + a graceful
