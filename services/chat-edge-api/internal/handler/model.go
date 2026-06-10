@@ -339,10 +339,12 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 				SummarySupported: m.Reasoning.SummarySupported,
 			}
 		}
-		// Phase C — hide DEDICATED image models (gpt-image-1) from the
-		// chat picker: they aren't chat-selectable, they're only the
-		// generate_image tool target.
-		if m.Capabilities != nil && m.Capabilities.ImageGeneration {
+		// Phase C — hide DEDICATED image models from the chat picker:
+		// they're the generate_image tool target, not chat-selectable.
+		// Match by id too, not just the capability flag — the
+		// discovered-openai candidate pool surfaces gpt-image-1.5 /
+		// gpt-image-2 / chatgpt-image-latest WITHOUT image_generation set.
+		if isImageOnlyModel(m.ID, m.Capabilities) {
 			continue
 		}
 		resp := h.buildModelResponse(m.ID, name, m.Provider, rb)
@@ -354,6 +356,20 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 		out = append(out, resp)
 	}
 	return out
+}
+
+// isImageOnlyModel reports whether a model is a DEDICATED image-generation
+// model (gpt-image-*, chatgpt-image-*, dall-e-*) — the generate_image tool
+// target, not a chat model. Matches by id because the discovered-openai
+// candidate pool can surface these without the gateway's image_generation
+// capability flag. Hidden from the chat picker.
+func isImageOnlyModel(id string, caps *service.GatewayModelCapabilities) bool {
+	if caps != nil && caps.ImageGeneration {
+		return true
+	}
+	return strings.HasPrefix(id, "gpt-image") ||
+		strings.HasPrefix(id, "chatgpt-image") ||
+		strings.HasPrefix(id, "dall-e")
 }
 
 // configCatalog is the static fallback path (Gateway unreachable). It
