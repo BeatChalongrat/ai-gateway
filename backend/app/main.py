@@ -10,6 +10,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.health import router as health_router
 from app.api.routes.public_chat import router as public_chat_router
 from app.api.routes.public_models import router as public_models_router
+from app.api.routes.public_images import router as public_images_router
 from app.api.routes.admin import router as admin_router
 from app.api.routes.portal_auth import router as portal_auth_router
 from app.api.routes.portal_me import router as portal_me_router
@@ -710,6 +711,7 @@ from app.api.routes.admin_session import router as admin_session_router
 app.include_router(admin_session_router)  # /auth/session/{login,logout,me}
 app.include_router(public_chat_router, prefix="/v1")
 app.include_router(public_models_router, prefix="/v1")
+app.include_router(public_images_router, prefix="/v1")
 app.include_router(admin_router, prefix="/admin")
 
 # Portal (self-service) — separate JWT secret; see portal_auth.py
