@@ -273,6 +273,10 @@ type sendRequest struct {
 	Content string   `json:"content"`
 	Stream  bool     `json:"stream"`
 	FileIDs []string `json:"file_ids,omitempty"`
+	// ImageMode (Phase C) — set by the web-chat 🎨 composer toggle.
+	// Biases a tool-capable model to call generate_image instead of
+	// replying in text. Ignored when the model has no tools.
+	ImageMode bool `json:"image_mode,omitempty"`
 }
 
 func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
@@ -293,6 +297,7 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		ConversationID: convID,
 		Content:        req.Content,
 		RequestID:      r.Header.Get("X-Request-Id"),
+		ImageMode:      req.ImageMode,
 	}
 	if len(req.FileIDs) > 0 {
 		in.FileIDs = make([]uuid.UUID, 0, len(req.FileIDs))
