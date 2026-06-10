@@ -230,6 +230,13 @@ func main() {
 	// the queries.
 	searchSvc := service.NewSearchService(messages, conversations, memoriesRepo)
 	messageSvc.SetSearchService(searchSvc)
+	// Phase B — image generation tool. Wires the gateway image endpoint
+	// + the file service onto the ToolExecutor so generate_image can
+	// produce an image and attach it to the assistant message. Same
+	// ordering rule as SetSearchService (executor created in
+	// SetMemoryService). gateway + fileSvc satisfy the executor's
+	// imageGenerator / generatedImageSaver interfaces.
+	messageSvc.SetImageGeneration(gateway, fileSvc, cfg.ImageGenModel)
 	// S7 — wire the source-attribution repo so per-turn sources
 	// (memory + state + compaction + search) get persisted to
 	// chat.response_context_sources after each assistant turn

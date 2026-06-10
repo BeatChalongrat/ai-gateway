@@ -30,6 +30,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -255,10 +256,43 @@ type ToolExecutor struct {
 	// search_past_conversations (the only tool that stays
 	// available in temporary chats since it's read-only).
 	search *SearchService
+	// Phase B — optional. When both are wired, the executor exposes
+	// generate_image: call the gateway image endpoint, decode the
+	// b64 result, and save it as a ConversationFile attached to the
+	// assistant message. Interfaces (not concrete *GatewayClient /
+	// *FileService) so the handler is unit-testable without a live
+	// gateway or storage backend.
+	imageGen   imageGenerator
+	imageFiles generatedImageSaver
+	imageModel string
+}
+
+// imageGenerator is the subset of *GatewayClient the image tool needs.
+type imageGenerator interface {
+	GenerateImages(ctx context.Context, callCtx GatewayCallContext, req GatewayImagesRequest) (*GatewayImagesResponse, error)
+}
+
+// generatedImageSaver is the subset of *FileService the image tool needs.
+type generatedImageSaver interface {
+	SaveGeneratedImage(ctx context.Context, in GeneratedImageInput) (*model.ConversationFile, error)
 }
 
 func NewToolExecutor(memories *MemoryService) *ToolExecutor {
 	return &ToolExecutor{memories: memories}
+}
+
+// SetImageGeneration wires the Phase-B image tool. Optional — when
+// either dependency is nil, generate_image is hidden from the tool
+// list. Must run after the executor exists (created inside
+// MessageService.SetMemoryService). An empty model defaults to
+// gpt-image-1 (OpenAI's current image model).
+func (e *ToolExecutor) SetImageGeneration(gen imageGenerator, files generatedImageSaver, model string) {
+	e.imageGen = gen
+	e.imageFiles = files
+	if model == "" {
+		model = "gpt-image-1"
+	}
+	e.imageModel = model
 }
 
 // SetConversationStateService wires the S3 state layer. Optional
@@ -295,6 +329,12 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	if e.search != nil {
 		defs = append(defs, searchPastConversationsToolDef())
 	}
+	// Phase B — image generation. Not gated on MemoryEnabled (generating
+	// an image doesn't write user memory), so it's available in every
+	// conversation where the tool is wired.
+	if e.imageGen != nil && e.imageFiles != nil {
+		defs = append(defs, generateImageToolDef())
+	}
 	return defs
 }
 
@@ -315,6 +355,8 @@ func (e *ToolExecutor) Execute(
 		return e.execUpdateConversationState(ctx, call.Function.Arguments, ec)
 	case "search_past_conversations":
 		return e.execSearchPastConversations(ctx, call.Function.Arguments, ec)
+	case "generate_image":
+		return e.execGenerateImage(ctx, call.Function.Arguments, ec)
 	default:
 		return fmt.Sprintf("Unknown tool %q.", call.Function.Name)
 	}
@@ -591,6 +633,127 @@ func (e *ToolExecutor) execListMemories(
 		len(memories), pluralize(len(memories), "memory", "memories")))
 	sb.WriteString("You can manage them in Settings → Memory.")
 	return sb.String()
+}
+
+// ---------------------------------------------------------------------------
+// generate_image (Phase B)
+// ---------------------------------------------------------------------------
+
+// generateImageToolDef is the Phase-B image-generation tool. The
+// description steers the model to translate + enhance the user's request
+// into an English prompt and to NOT fabricate a URL — the image attaches
+// to the reply automatically (message.files[]).
+func generateImageToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "generate_image",
+			Description: "Generate an image from a text description. Use this when the user asks to " +
+				"create, draw, generate, or make an image / picture / รูป / ภาพ. ALWAYS translate and " +
+				"enhance the user's request into a detailed, vivid ENGLISH prompt (subject, style, mood, " +
+				"composition, lighting) for the best result. The generated image is attached to your " +
+				"reply automatically — after calling this tool, just tell the user their image is ready " +
+				"in a short friendly sentence. Do NOT invent a URL or a markdown image link.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "Detailed image description in English. Translate + enhance the user's request into a vivid, specific prompt.",
+					},
+					"size": map[string]any{
+						"type":        "string",
+						"enum":        []string{"1024x1024", "1024x1536", "1536x1024"},
+						"description": "Square (1024x1024, default) for most; portrait (1024x1536) for tall subjects; landscape (1536x1024) for wide scenes.",
+					},
+					"quality": map[string]any{
+						"type":        "string",
+						"enum":        []string{"auto", "low", "medium", "high"},
+						"description": "auto (default) for general use; high for detailed images.",
+					},
+				},
+				"required": []string{"prompt"},
+			},
+		},
+	}
+}
+
+type generateImageArgs struct {
+	Prompt  string `json:"prompt"`
+	Size    string `json:"size"`
+	Quality string `json:"quality"`
+}
+
+func (e *ToolExecutor) execGenerateImage(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if e.imageGen == nil || e.imageFiles == nil {
+		return "Image generation isn't available right now."
+	}
+	var args generateImageArgs
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return "I couldn't parse the generate_image arguments."
+	}
+	if strings.TrimSpace(args.Prompt) == "" {
+		return "I need a description of the image to generate."
+	}
+	// The image attaches to the assistant message via message_id. The
+	// streaming send paths set ec.MessageID; the non-streaming path does
+	// not, so degrade gracefully there rather than orphan a file.
+	if ec.MessageID == uuid.Nil {
+		return "I can only generate images on the streaming chat path right now. Please try again."
+	}
+
+	size := args.Size
+	if size == "" {
+		size = "1024x1024"
+	}
+	quality := args.Quality
+	if quality == "" {
+		quality = "auto"
+	}
+
+	resp, err := e.imageGen.GenerateImages(ctx, GatewayCallContext{
+		TenantID:       ec.TenantID,
+		UserID:         ec.UserID,
+		ConversationID: ec.ConversationID,
+	}, GatewayImagesRequest{
+		Model:   e.imageModel,
+		Prompt:  args.Prompt,
+		Size:    size,
+		Quality: quality,
+	})
+	if err != nil {
+		return "I couldn't generate the image right now. Please try again in a moment."
+	}
+	if len(resp.Data) == 0 || resp.Data[0].B64JSON == "" {
+		return "The image service returned no image. Please try again."
+	}
+	raw, err := base64.StdEncoding.DecodeString(resp.Data[0].B64JSON)
+	if err != nil {
+		return "The generated image was malformed. Please try again."
+	}
+
+	if _, err := e.imageFiles.SaveGeneratedImage(ctx, GeneratedImageInput{
+		TenantID:       ec.TenantID,
+		UserID:         ec.UserID,
+		ConversationID: ec.ConversationID,
+		MessageID:      ec.MessageID,
+		Data:           raw,
+		ContentType:    "image/png",
+		Prompt:         args.Prompt,
+	}); err != nil {
+		return "I generated the image but couldn't save it. Please try again."
+	}
+
+	// Result fed back to the model. The image is ALREADY attached to this
+	// reply, so the model must acknowledge it without fabricating a link.
+	return fmt.Sprintf(
+		"Image generated successfully (%s, %s) and attached to your reply. "+
+			"Tell the user their image is ready in a short, friendly sentence. "+
+			"Do NOT include a URL or a markdown image — the image displays automatically.",
+		size, quality,
+	)
 }
 
 // ---------------------------------------------------------------------------
