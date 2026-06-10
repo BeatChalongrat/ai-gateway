@@ -372,6 +372,30 @@ func isImageOnlyModel(id string, caps *service.GatewayModelCapabilities) bool {
 		strings.HasPrefix(id, "dall-e")
 }
 
+// SupportsImageTools reports whether the model can call the generate_image
+// tool — i.e. its catalog entry advertises function_calling or
+// image_generation_via_tools. Phase D wires this into MessageService to
+// decide whether to override a non-tool model for an image-generation turn.
+// Auto / unknown ids return false so the router falls back to a known
+// tool-capable model.
+func (h *ModelHandler) SupportsImageTools(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, m := range h.catalog(ctx) {
+		if m.ID != id {
+			continue
+		}
+		for _, c := range m.Capabilities {
+			if c == "image_generation_via_tools" || c == "function_calling" {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 // configCatalog is the static fallback path (Gateway unreachable). It
 // preserves the pre-dynamic behaviour: the operator's curated catalog
 // enriched with local metadata + the static reasoning-capable set.
