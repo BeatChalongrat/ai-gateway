@@ -160,7 +160,7 @@ export default function ConversationPage() {
           toast("Couldn't change knowledge base.");
         }
       }}
-      onSend={(t, fileIds) => void sendMessage(convId, t, fileIds)}
+      onSend={(t, fileIds, imageMode) => void sendMessage(convId, t, fileIds, imageMode)}
       onStop={() => void cancelGeneration(convId)}
       injectedText={injectedText}
       onInjectedTextConsumed={() => setInjectedText(null)}

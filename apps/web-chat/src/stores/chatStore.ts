@@ -136,7 +136,7 @@ interface ChatState {
   // ── message ops ──────────────────────────────────────────
   loadMessages: (convId: string) => Promise<void>;
   loadOlderMessages: (convId: string) => Promise<void>;
-  sendMessage: (convId: string, content: string, fileIds?: string[]) => Promise<void>;
+  sendMessage: (convId: string, content: string, fileIds?: string[], imageMode?: boolean) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   regenerate: (convId: string, messageId: string) => Promise<void>;
   editMessage: (convId: string, messageId: string, newContent: string) => Promise<void>;
@@ -612,7 +612,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // ────────────────────────────────────────────────────────
-  async sendMessage(convId, content, fileIds) {
+  async sendMessage(convId, content, fileIds, imageMode) {
     const trimmed = content.trim();
     if (!trimmed && (!fileIds || fileIds.length === 0)) return;
     // Offline guard. SSE streams need a live socket — bail early
@@ -713,6 +713,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         trimmed,
         ctrl.signal,
         fileIds,
+        imageMode,
       );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);

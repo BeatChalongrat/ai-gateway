@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { ImagePlus } from "lucide-react";
+
 import { api, ApiError } from "@/lib/api";
 import {
   FILE_PICKER_ACCEPT,
@@ -13,6 +15,7 @@ import { toast } from "@/components/ui/Toast";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useWhisperInput } from "@/hooks/useWhisperInput";
 import { useChatStore } from "@/stores/chatStore";
+import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
 import { FilePreviewCard } from "./FilePreviewCard";
@@ -36,7 +39,7 @@ interface Props {
    *  next to the model picker. */
   activeKBId?: string | null;
   onKBPick?: (kbId: string | null) => Promise<void>;
-  onSend: (text: string, fileIds: string[]) => void;
+  onSend: (text: string, fileIds: string[], imageMode?: boolean) => void;
   onStop: () => void;
   injectedText?: string | null;
   onInjectedTextConsumed?: () => void;
@@ -79,6 +82,23 @@ export function ChatInput({
 }: Props) {
   const t = useT();
   const [text, setText] = useState("");
+  // Phase C — 🎨 image mode. Gated on the selected model's capability:
+  // visible for image_generation_via_tools models + Auto, hidden otherwise.
+  const [imageMode, setImageMode] = useState(false);
+  const models = useModelStore((s) => s.models);
+  const activeModel =
+    activeModelId && activeModelId !== AUTO_MODEL_ID
+      ? models.find((m) => m.id === activeModelId)
+      : undefined;
+  const canGenerateImages =
+    activeModelId === AUTO_MODEL_ID ||
+    Boolean(activeModel?.capabilities?.includes("image_generation_via_tools")) ||
+    Boolean(activeModel?.capabilities?.includes("image_generation"));
+  // Drop image mode when the model can no longer generate images (e.g. the
+  // user switched from GPT-4o to a non-tool model).
+  useEffect(() => {
+    if (!canGenerateImages && imageMode) setImageMode(false);
+  }, [canGenerateImages, imageMode]);
   const [isMobile, setIsMobile] = useState(false);
   // Distance (px) the on-screen keyboard is occluding the bottom of
   // the layout viewport. Updated from visualViewport.resize so the
@@ -279,7 +299,7 @@ export function ChatInput({
   function submit() {
     if (!canSend) return;
     const t = text.trim();
-    onSend(t, readyFileIds);
+    onSend(t, readyFileIds, imageMode);
     setText("");
     // Clear whichever bucket the visible chips were rendering from —
     // covers both the conv-page case (real id) and the landing
@@ -577,7 +597,9 @@ export function ChatInput({
                   ? t("input.placeholder.streaming")
                   : isUploading
                     ? t("input.placeholder.uploading")
-                    : t("input.placeholder")
+                    : imageMode
+                      ? t("input.placeholder.image")
+                      : t("input.placeholder")
               }
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKeyDown}
@@ -630,6 +652,23 @@ export function ChatInput({
                   onPick={onKBPick}
                   disabled={streaming}
                 />
+              ) : null}
+              {canGenerateImages && !streaming ? (
+                <button
+                  type="button"
+                  onClick={() => setImageMode((v) => !v)}
+                  aria-label={t("input.imageMode")}
+                  title={t("input.imageMode")}
+                  aria-pressed={imageMode}
+                  disabled={disabled}
+                  className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    imageMode
+                      ? "bg-violet-500/15 text-violet-400"
+                      : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
+                  }`}
+                >
+                  <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
+                </button>
               ) : null}
               <ModelSelector
                 activeModelId={activeModelId}

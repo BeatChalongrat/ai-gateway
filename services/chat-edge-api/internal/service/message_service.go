@@ -391,6 +391,10 @@ type SendInput struct {
 	// new user message + their extracted text is folded into the
 	// gateway request's system context.
 	FileIDs []uuid.UUID
+	// ImageMode (Phase C) — the web-chat 🎨 toggle. When set, a
+	// generate_image directive is appended to the system prompt so a
+	// tool-capable model produces an image rather than a text reply.
+	ImageMode bool
 }
 
 // SendResult is what the non-stream handler returns to the client.
@@ -591,6 +595,9 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs, sourcesAcc)
 	toolsAttached := s.attachTools(&gwReq, conv)
+	if in.ImageMode {
+		applyImageModeHint(&gwReq)
+	}
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -2423,6 +2430,31 @@ func (s *MessageService) attachTools(req *GatewayChatRequest, conv *model.Conver
 	// the model invent tool calls for vanilla chat.
 	req.ToolChoice = "auto"
 	return true
+}
+
+// applyImageModeHint appends a generate_image directive to the request's
+// system context when the user enabled image mode (the web-chat 🎨
+// toggle). It biases a tool-capable model to call generate_image with an
+// enhanced English prompt instead of replying in text. No-op for models
+// without tools (the gateway ignores the hint + tools). Mutates the
+// existing system message in place, or prepends one if absent.
+func applyImageModeHint(req *GatewayChatRequest) {
+	const hint = "\n\n[IMAGE MODE] The user wants an IMAGE. Treat their message as an image " +
+		"description and call the generate_image tool with a detailed, vivid ENGLISH prompt " +
+		"(translate + enhance as needed). Do not ask clarifying questions unless the description " +
+		"is empty. After the tool runs, reply with one short friendly sentence and no URL."
+	for i := range req.Messages {
+		if req.Messages[i].Role == "system" {
+			if c, ok := req.Messages[i].Content.(string); ok {
+				req.Messages[i].Content = c + hint
+				return
+			}
+		}
+	}
+	req.Messages = append(
+		[]GatewayMessage{{Role: "system", Content: strings.TrimSpace(hint)}},
+		req.Messages...,
+	)
 }
 
 // accumulateToolCallDeltas merges a partial tool_calls delta into
