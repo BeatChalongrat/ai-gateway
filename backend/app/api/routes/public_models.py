@@ -59,9 +59,10 @@ async def get_models(
             )
         # Capability flags for client model-selectors. Only TRUE flags are
         # set (None ones are dropped from the wire). image_generation_via_tools
-        # is derived: an OpenAI chat model with tool support can emit images by
-        # calling an image model as a tool (wiring is a later phase; the flag
-        # readies the UI now).
+        # is derived: ANY tool-capable chat model can emit images by calling the
+        # generate_image tool, which routes to the image model (gpt-image-1)
+        # regardless of the chat model's own provider — so this is gated on tool
+        # support, not provider.
         cap_flags: dict[str, bool] = {}
         if c.supports_streaming:
             cap_flags["streaming"] = True
@@ -71,7 +72,7 @@ async def get_models(
             cap_flags["tools"] = True
         if c.supports_reasoning:
             cap_flags["reasoning"] = True
-        if c.provider == "openai" and c.supports_tools:
+        if c.supports_tools:
             cap_flags["image_generation_via_tools"] = True
         entries.append(
             ModelInfo(
