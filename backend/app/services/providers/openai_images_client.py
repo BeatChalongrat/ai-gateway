@@ -98,11 +98,14 @@ async def generate_image(
         "prompt": prompt,
         "n": n_eff,
         "size": size,
-        "response_format": response_format,
     }
     if model == "dall-e-3":
         body["quality"] = quality
-        body["style"] = style
+    # NOTE: the current OpenAI images API rejects `response_format` and `style`
+    # for dall-e-3 ("unknown_parameter") and returns a URL by default. We keep
+    # those request fields (for cost calc / forward-compat) but do NOT forward
+    # them. Only model/prompt/n/size/quality are sent.
+    _ = (response_format, style)
 
     client = await get_provider_client(
         base_url=resolve_base_url("openai", OPENAI_BASE_URL),
