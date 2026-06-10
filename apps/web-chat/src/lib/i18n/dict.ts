@@ -56,6 +56,8 @@ export const en = {
   "input.placeholder.uploading": "Uploading…",
   "input.attach": "Attach files",
   "input.voice": "Voice input",
+  "input.imageMode": "Generate an image",
+  "input.placeholder.image": "Describe the image to generate…",
   "input.send": "Send",
   "input.stop": "Stop generation",
   "input.footer": "SRAN Chat can make mistakes. Check important info.",
@@ -139,6 +141,7 @@ export const en = {
   "model.popular": "Popular",
   "model.recent": "Recently used",
   "model.reasoningBadge": "Thinks",
+  "model.imageBadge": "Image",
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
@@ -365,6 +368,8 @@ const th: Record<DictKey, string> = {
   "input.placeholder.uploading": "กำลังอัปโหลด…",
   "input.attach": "แนบไฟล์",
   "input.voice": "ป้อนเสียง",
+  "input.imageMode": "สร้างรูปภาพ",
+  "input.placeholder.image": "อธิบายรูปที่ต้องการสร้าง…",
   "input.send": "ส่ง",
   "input.stop": "หยุด",
   "input.footer": "SRAN Chat อาจตอบผิดได้ ตรวจสอบข้อมูลสำคัญด้วย",
@@ -449,6 +454,7 @@ const th: Record<DictKey, string> = {
   "model.popular": "ยอดนิยม",
   "model.recent": "ใช้ล่าสุด",
   "model.reasoningBadge": "คิดวิเคราะห์",
+  "model.imageBadge": "สร้างรูป",
 
   // Memory page
   "memory.back": "กลับไปแชท",

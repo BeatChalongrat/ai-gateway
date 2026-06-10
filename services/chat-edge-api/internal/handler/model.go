@@ -339,7 +339,19 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 				SummarySupported: m.Reasoning.SummarySupported,
 			}
 		}
-		out = append(out, h.buildModelResponse(m.ID, name, m.Provider, rb))
+		// Phase C — hide DEDICATED image models (gpt-image-1) from the
+		// chat picker: they aren't chat-selectable, they're only the
+		// generate_image tool target.
+		if m.Capabilities != nil && m.Capabilities.ImageGeneration {
+			continue
+		}
+		resp := h.buildModelResponse(m.ID, name, m.Provider, rb)
+		// Surface the image-via-tools flag so the frontend can gate the
+		// image (🎨) composer button + show the image badge.
+		if m.Capabilities != nil && m.Capabilities.ImageGenerationViaTools {
+			resp.Capabilities = append(resp.Capabilities, "image_generation_via_tools")
+		}
+		out = append(out, resp)
 	}
 	return out
 }
