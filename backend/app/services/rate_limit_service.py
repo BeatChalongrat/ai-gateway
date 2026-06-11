@@ -34,10 +34,46 @@ from app.observability.metrics import (
 from app.services._redis_pool import get_async_redis, run_sync
 
 
+# Fallback ceilings used when settings can't be read (import-time edge
+# cases, tests that bypass settings). The LIVE values come from the
+# env-overridable ``settings.rate_limit_*_per_minute`` via the resolver
+# helpers below, so an operator can retune without a code change.
 DEFAULT_KEY_LIMIT = 60
-DEFAULT_PROJECT_LIMIT = 300
-DEFAULT_TENANT_LIMIT = 1000
+DEFAULT_PROJECT_LIMIT = 3000
+DEFAULT_TENANT_LIMIT = 10000
 DEFAULT_WINDOW_SECONDS = 60
+
+
+def _limit_from_settings(attr: str, fallback: int) -> int:
+    """Read a positive int rate-limit ceiling from settings.
+
+    Resolved on every call (not cached) so a test that monkeypatches the
+    setting — or a config reload — takes effect immediately. Any failure
+    (settings unavailable, non-int, non-positive) yields ``fallback``.
+    """
+    try:
+        from app.core.config import settings
+
+        value = int(getattr(settings, attr))
+    except Exception:  # noqa: BLE001
+        return fallback
+    return value if value > 0 else fallback
+
+
+def key_limit() -> int:
+    return _limit_from_settings("rate_limit_key_per_minute", DEFAULT_KEY_LIMIT)
+
+
+def project_limit_default() -> int:
+    return _limit_from_settings(
+        "rate_limit_project_per_minute", DEFAULT_PROJECT_LIMIT
+    )
+
+
+def tenant_limit_default() -> int:
+    return _limit_from_settings(
+        "rate_limit_tenant_per_minute", DEFAULT_TENANT_LIMIT
+    )
 
 # --- Conservative in-process limiter (Redis-outage fallback) ----------
 # Used ONLY when Redis is unreachable AND
@@ -276,12 +312,12 @@ class RateLimitService:
                 # service receives the same effective limits the
                 # Python path would compute (perf-test overrides
                 # included).
-                project_limit = DEFAULT_PROJECT_LIMIT
+                project_limit = project_limit_default()
                 if project_id == _PERF_PROJECT_ID:
                     override = _perf_project_limit_override()
                     if override is not None:
                         project_limit = override
-                tenant_limit = DEFAULT_TENANT_LIMIT
+                tenant_limit = tenant_limit_default()
                 if tenant_id == _PERF_TENANT_ID:
                     override = _perf_tenant_limit_override()
                     if override is not None:
@@ -290,7 +326,7 @@ class RateLimitService:
                     key_id=key_id,
                     project_id=project_id,
                     tenant_id=tenant_id,
-                    key_limit=DEFAULT_KEY_LIMIT,
+                    key_limit=key_limit(),
                     project_limit=project_limit,
                     tenant_limit=tenant_limit,
                     window_seconds=DEFAULT_WINDOW_SECONDS,
@@ -312,6 +348,24 @@ class RateLimitService:
 
         return await self._check_all_atomic(key_id, project_id, tenant_id)
 
+    async def check_window_async(
+        self,
+        scope_key: str,
+        limit: int,
+        window_sec: int,
+    ) -> dict:
+        """Sliding-window check on an ARBITRARY scope key + window length.
+
+        The per-key/project/tenant helpers above are hard-wired to the
+        60s request window. Cost-capped endpoints (image generation) need
+        hour / day windows instead, so they call this directly with their
+        own ``rl:img:...`` scope key. Reuses the exact same Redis ZSET
+        backend + fail-open contract — no separate counter store, and no
+        Rust-sidecar involvement (the sidecar only owns the 3-scope
+        per-minute request limiter).
+        """
+        return await self._sliding_window_async(scope_key, limit, window_sec)
+
     async def _check_all_python(
         self,
         key_id: str,
@@ -323,15 +377,19 @@ class RateLimitService:
         Pulled out of ``check_all_async`` so the Rust engine branch
         can call back here on any failure without duplicating logic.
         """
-        key_result = await self.check_key_async(key_id)
+        key_result = await self.check_key_async(key_id, key_limit())
         if not key_result["allowed"]:
             return {**key_result, "scope": "api_key"}
 
-        project_result = await self.check_project_async(project_id)
+        project_result = await self.check_project_async(
+            project_id, project_limit_default()
+        )
         if not project_result["allowed"]:
             return {**project_result, "scope": "project"}
 
-        tenant_result = await self.check_tenant_async(tenant_id)
+        tenant_result = await self.check_tenant_async(
+            tenant_id, tenant_limit_default()
+        )
         if not tenant_result["allowed"]:
             return {**tenant_result, "scope": "tenant"}
 
@@ -374,12 +432,13 @@ class RateLimitService:
         cutoff = now - DEFAULT_WINDOW_SECONDS
         member = f"{now:.6f}:{time.perf_counter_ns()}"
 
-        project_limit = DEFAULT_PROJECT_LIMIT
+        key_lim = key_limit()
+        project_limit = project_limit_default()
         if project_id == _PERF_PROJECT_ID:
             override = _perf_project_limit_override()
             if override is not None:
                 project_limit = override
-        tenant_limit = DEFAULT_TENANT_LIMIT
+        tenant_limit = tenant_limit_default()
         if tenant_id == _PERF_TENANT_ID:
             override = _perf_tenant_limit_override()
             if override is not None:
@@ -393,7 +452,7 @@ class RateLimitService:
         args = [
             f"{now:.6f}",
             f"{cutoff:.6f}",
-            DEFAULT_KEY_LIMIT,
+            key_lim,
             project_limit,
             tenant_limit,
             DEFAULT_WINDOW_SECONDS + 1,
@@ -411,7 +470,7 @@ class RateLimitService:
 
         denied = int(res[0])
         reset_at = int(now + DEFAULT_WINDOW_SECONDS)
-        limits = [DEFAULT_KEY_LIMIT, project_limit, tenant_limit]
+        limits = [key_lim, project_limit, tenant_limit]
         scopes = ["api_key", "project", "tenant"]
         if denied == 0:
             return {
@@ -419,7 +478,7 @@ class RateLimitService:
                 "scope": None,
                 "remaining": int(res[4]),
                 "reset_at": reset_at,
-                "limit": DEFAULT_KEY_LIMIT,
+                "limit": key_lim,
             }
         idx = denied - 1
         return {
@@ -473,15 +532,15 @@ class RateLimitService:
         project_id: str,
         tenant_id: str,
     ) -> dict:
-        key_result = self.check_key(key_id)
+        key_result = self.check_key(key_id, key_limit())
         if not key_result["allowed"]:
             return {**key_result, "scope": "api_key"}
 
-        project_result = self.check_project(project_id)
+        project_result = self.check_project(project_id, project_limit_default())
         if not project_result["allowed"]:
             return {**project_result, "scope": "project"}
 
-        tenant_result = self.check_tenant(tenant_id)
+        tenant_result = self.check_tenant(tenant_id, tenant_limit_default())
         if not tenant_result["allowed"]:
             return {**tenant_result, "scope": "tenant"}
 

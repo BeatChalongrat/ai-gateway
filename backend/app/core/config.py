@@ -61,6 +61,32 @@ class Settings(BaseSettings):
     # deployments where cost control outweighs availability during an outage.
     rate_limit_redis_outage_mode: str = "fail_open"
 
+    # --- Rate-limit ceilings (env-overridable; Growth-tier defaults) -----
+    # The per-API-key / per-end-user window stays at 60/min. The project +
+    # tenant ceilings were raised from the legacy 300 / 1000 because a
+    # SHARED web-chat API key fans MANY end-users through ONE key_id: the
+    # per-end-user keying (see app.api.deps.resolve_rate_limit_key_id) now
+    # gives each trusted web-chat user their own 60/min bucket, so the
+    # project/tenant caps act only as the aggregate backstop. Override per
+    # deployment via the RATE_LIMIT_*_PER_MINUTE env vars.
+    rate_limit_key_per_minute: int = 60
+    rate_limit_project_per_minute: int = 3000
+    rate_limit_tenant_per_minute: int = 10000
+
+    # Trusted internal-service signal. When chat-edge (or any internal
+    # caller) presents ``X-Internal-Service-Secret`` matching this value,
+    # the gateway HONOURS its ``X-User-ID`` header for per-end-user rate
+    # limiting. Empty (default) => X-User-ID is NEVER trusted, so an
+    # external API-key client cannot forge its own per-user bucket.
+    internal_service_secret: str = ""
+
+    # Image-generation cost-control ceilings (gpt-image-1 has direct $
+    # exposure, so the endpoint must never be unthrottled). Per-end-user
+    # hourly + per-tenant daily windows, enforced via the same Redis
+    # sliding-window backend the request limiter uses.
+    image_rate_limit_user_per_hour: int = 10
+    image_rate_limit_tenant_per_day: int = 100
+
     # Portal JWT — separate secret so leaking the admin secret does not
     # forge portal tokens (and vice versa). Payload carries type="portal".
     portal_jwt_secret: str = "change-me-portal-secret"

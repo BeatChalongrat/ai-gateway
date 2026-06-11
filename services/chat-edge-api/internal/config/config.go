@@ -82,6 +82,15 @@ type Config struct {
 	// 502 PROVIDER_UNAVAILABLE at the chat-edge boundary).
 	GatewayAPIKey string `env:"GATEWAY_API_KEY" envDefault:""`
 
+	// Shared secret proving this is a TRUSTED internal caller, so the
+	// gateway honours the per-request ``X-User-ID`` header for per-end-
+	// user rate limiting (instead of treating all web-chat traffic as one
+	// shared ``api_key.key_id`` bucket). Must match the gateway's
+	// ``INTERNAL_SERVICE_SECRET``. Empty (default) → header is not sent,
+	// the gateway ignores X-User-ID, and limiting stays collective —
+	// safe, backward-compatible rollout: set it on BOTH sides to enable.
+	InternalServiceSecret string `env:"INTERNAL_SERVICE_SECRET" envDefault:""`
+
 	// Max conversation messages threaded into a Gateway call. The
 	// model has its own context window. The S4 ContextCompiler trims
 	// history by TOKEN budget (per-model, see context_budget.go), so
