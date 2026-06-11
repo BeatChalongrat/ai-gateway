@@ -36,6 +36,9 @@ from app.middleware.request_timing import RequestTimingMiddleware
 from app.middleware.timeout import TimeoutMiddleware
 from app.middleware.metrics import MetricsMiddleware, get_metrics
 from app.observability.metrics import (
+    ASYNC_DB_POOL_CHECKED_OUT,
+    ASYNC_DB_POOL_MAX,
+    ASYNC_DB_POOL_OVERFLOW,
     DB_POOL_ACTIVE,
     DB_POOL_MAX,
     DB_POOL_OVERFLOW,
@@ -480,6 +483,26 @@ async def _db_pool_sampler() -> None:
                 size = pool.size() if hasattr(pool, "size") else 0
                 max_overflow = getattr(pool, "_max_overflow", 0) or 0
                 DB_POOL_MAX.set(size + max(0, max_overflow))
+            except Exception:
+                pass
+
+            # ASYNC pool — the chat hot path's separate engine. Sampling
+            # only its introspection counters (no I/O), and only if the
+            # async engine has already been built (it is prewarmed in the
+            # lifespan startup). Mirrors the sync gauges above so a
+            # checkout-timeout 500 storm (the 150-concurrent failure) is
+            # visible BEFORE it happens, via overflow approaching max.
+            try:
+                from app.core.db import get_async_engine
+
+                apool = get_async_engine().pool
+                if hasattr(apool, "checkedout"):
+                    ASYNC_DB_POOL_CHECKED_OUT.set(apool.checkedout())
+                if hasattr(apool, "overflow"):
+                    ASYNC_DB_POOL_OVERFLOW.set(max(0, apool.overflow()))
+                asize = apool.size() if hasattr(apool, "size") else 0
+                amax_overflow = getattr(apool, "_max_overflow", 0) or 0
+                ASYNC_DB_POOL_MAX.set(asize + max(0, amax_overflow))
             except Exception:
                 pass
         except asyncio.CancelledError:
