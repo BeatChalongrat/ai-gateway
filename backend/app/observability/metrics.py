@@ -167,6 +167,37 @@ DB_POOL_CHECKOUT_TIMEOUTS = Counter(
     registry=metrics_registry,
 )
 
+# ASYNC pool saturation — the chat hot path (``/v1/chat/completions``)
+# uses a SEPARATE async engine/pool from the sync gauges above. The load
+# baseline at 150 concurrent exhausted THIS pool ("QueuePool limit of size
+# 10 overflow 15 reached, timeout 5.00" -> 500), which the sync
+# ``db_pool_*`` series did not reflect. These close that observability gap.
+ASYNC_DB_POOL_CHECKED_OUT = Gauge(
+    "async_db_pool_checked_out",
+    "Async-engine connections currently checked out (chat hot path).",
+    registry=metrics_registry,
+)
+
+ASYNC_DB_POOL_OVERFLOW = Gauge(
+    "async_db_pool_overflow",
+    "Async-engine overflow connections in use beyond pool_size. "
+    "Approaching async_db_pool_max means imminent checkout-timeout 500s.",
+    registry=metrics_registry,
+)
+
+ASYNC_DB_POOL_MAX = Gauge(
+    "async_db_pool_max",
+    "Configured async max connections per worker (pool_size + max_overflow).",
+    registry=metrics_registry,
+)
+
+ASYNC_DB_POOL_CHECKOUT_TIMEOUTS = Counter(
+    "async_db_pool_checkout_timeouts_total",
+    "Async DB-session checkouts that exceeded pool_timeout and 500'd "
+    "(measured at the chat hot-path async DB dependency).",
+    registry=metrics_registry,
+)
+
 # Sidecar fail-open / fallback visibility. A flapping sidecar previously
 # only showed up in logs; ``sidecar_fallback_total`` makes degradation
 # alertable. ``engine`` ∈ {dlp, rate_limiter, log_worker};
