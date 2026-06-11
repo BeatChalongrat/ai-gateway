@@ -35,12 +35,12 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
 		VALUES ($1, $2, $3)
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id
 	`
 	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
 		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -56,7 +56,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id
 		FROM chat.conversations
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
@@ -65,7 +65,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -127,7 +127,7 @@ func (r *ConversationRepo) ListByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -152,7 +152,7 @@ func (r *ConversationRepo) ListByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID,
 		); err != nil {
 			return nil, uuid.Nil, fmt.Errorf("list scan: %w", err)
 		}
@@ -191,7 +191,7 @@ func (r *ConversationRepo) SearchByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -212,7 +212,7 @@ func (r *ConversationRepo) SearchByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID,
 		); err != nil {
 			return nil, fmt.Errorf("search scan: %w", err)
 		}
@@ -422,6 +422,59 @@ func (r *ConversationRepo) UpdatePinned(
 		return ErrNotFound
 	}
 	return nil
+}
+
+// MoveToFolder sets (or clears, with folderID = nil) a conversation's
+// folder membership (migration 022). Tenant-scoped via the WHERE clause;
+// the service asserts caller ownership AND folder ownership first. nil →
+// NULL = "unfiled". Bumps updated_at so the move surfaces as fresh activity
+// in the destination group.
+func (r *ConversationRepo) MoveToFolder(
+	ctx context.Context, tenantID, convID uuid.UUID, folderID *uuid.UUID,
+) error {
+	const q = `
+		UPDATE chat.conversations
+		SET folder_id = $3, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
+	`
+	// *uuid.UUID nil → NULL so the same entry point files and unfiles.
+	var arg any
+	if folderID != nil {
+		arg = *folderID
+	}
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, arg)
+	if err != nil {
+		return fmt.Errorf("move conversation to folder: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MoveMultipleToFolder files (or unfiles, with folderID = nil) several
+// conversations at once. Owner-scoped to the tenant; ids the tenant doesn't
+// own simply match nothing. Returns the number of rows actually moved.
+func (r *ConversationRepo) MoveMultipleToFolder(
+	ctx context.Context, tenantID uuid.UUID, convIDs []uuid.UUID, folderID *uuid.UUID,
+) (int64, error) {
+	if len(convIDs) == 0 {
+		return 0, nil
+	}
+	const q = `
+		UPDATE chat.conversations
+		SET folder_id = $3, updated_at = NOW()
+		WHERE id = ANY($1) AND tenant_id = $2 AND is_deleted = false
+	`
+	var arg any
+	if folderID != nil {
+		arg = *folderID
+	}
+	tag, err := r.db.Exec(ctx, q, convIDs, tenantID, arg)
+	if err != nil {
+		return 0, fmt.Errorf("move conversations to folder: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // UpdateReasoningSettings persists T4 thinking-mode preferences for
