@@ -67,6 +67,14 @@ export const en = {
   "conv.delete": "Delete",
   "conv.pin": "Pin",
   "conv.unpin": "Unpin",
+  "conv.moveToFolder": "Move to folder",
+  "conv.removeFromFolder": "Remove from folder",
+  "folder.new": "New folder",
+  "folder.rename": "Rename",
+  "folder.delete": "Delete folder",
+  "folder.deleteConfirm": "Chats in this folder will be moved out. Delete?",
+  "folder.defaultName": "New folder",
+  "common.cancel": "Cancel",
 
   // ── Export menu ──────────────────────────────────────────
   "export.markdown": "Export as Markdown",
@@ -379,6 +387,14 @@ const th: Record<DictKey, string> = {
   "conv.delete": "ลบ",
   "conv.pin": "ปักหมุด",
   "conv.unpin": "เลิกปักหมุด",
+  "conv.moveToFolder": "ย้ายไปโฟลเดอร์",
+  "conv.removeFromFolder": "เอาออกจากโฟลเดอร์",
+  "folder.new": "สร้างโฟลเดอร์ใหม่",
+  "folder.rename": "เปลี่ยนชื่อ",
+  "folder.delete": "ลบโฟลเดอร์",
+  "folder.deleteConfirm": "แชทในโฟลเดอร์นี้จะถูกย้ายออกมา ต้องการลบหรือไม่?",
+  "folder.defaultName": "โฟลเดอร์ใหม่",
+  "common.cancel": "ยกเลิก",
 
   // Export
   "export.markdown": "ส่งออกเป็น Markdown",

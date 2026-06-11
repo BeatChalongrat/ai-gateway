@@ -13,6 +13,7 @@ import type {
   ErrorEnvelope,
   FeedbackResponse,
   FileAttachment,
+  Folder,
   FileListResponse,
   KnowledgeBase,
   KnowledgeBaseDetailResponse,
@@ -183,6 +184,41 @@ class ApiClient {
       body: JSON.stringify({ is_pinned: pinned }),
     });
   }
+  // -----------------------------------------------------------
+  // Folders (migration 022).
+  // -----------------------------------------------------------
+  listFolders() {
+    return this.json<{ folders: Folder[] }>("/folders");
+  }
+  createFolder(name: string) {
+    return this.json<Folder>("/folders", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+  renameFolder(id: string, name: string) {
+    return this.json<Folder>(`/folders/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
+    });
+  }
+  deleteFolder(id: string) {
+    return this.raw(`/folders/${id}`, { method: "DELETE" });
+  }
+  reorderFolders(folderIds: string[]) {
+    return this.json<{ folders: Folder[] }>("/folders/reorder", {
+      method: "PUT",
+      body: JSON.stringify({ folder_ids: folderIds }),
+    });
+  }
+  /** Move a conversation into a folder, or `null` to unfile it. */
+  moveConversationToFolder(id: string, folderId: string | null) {
+    return this.raw(`/conversations/${id}/folder`, {
+      method: "PUT",
+      body: JSON.stringify({ folder_id: folderId }),
+    });
+  }
+
   deleteConversation(id: string) {
     return this.raw(`/conversations/${id}`, { method: "DELETE" });
   }

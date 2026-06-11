@@ -20,6 +20,7 @@ import { parseSSE } from "@/lib/stream";
 import type {
   Conversation,
   FileAttachment,
+  Folder,
   Message,
   SSEAnalysisStatus,
   SSEContentDelta,
@@ -133,6 +134,24 @@ interface ChatState {
   togglePinConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
 
+  // ── folder ops (migration 022) ───────────────────────────
+  /** User-defined sidebar folders, ordered by position. */
+  folders: Folder[];
+  foldersLoaded: boolean;
+  loadFolders: () => Promise<void>;
+  createFolder: (name: string) => Promise<Folder | null>;
+  renameFolder: (id: string, name: string) => Promise<void>;
+  /** Delete a folder; its conversations become unfiled (server SET NULL),
+   *  mirrored locally so the sidebar re-buckets without a refetch. */
+  deleteFolder: (id: string) => Promise<void>;
+  reorderFolders: (folderIds: string[]) => Promise<void>;
+  /** Move a conversation into a folder, or `null` to unfile it. Optimistic
+   *  (the sidebar re-groups immediately); rolls back on failure. */
+  moveConversationToFolder: (
+    convId: string,
+    folderId: string | null,
+  ) => Promise<void>;
+
   // ── message ops ──────────────────────────────────────────
   loadMessages: (convId: string) => Promise<void>;
   loadOlderMessages: (convId: string) => Promise<void>;
@@ -151,6 +170,8 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   conversationsLoaded: false,
+  folders: [],
+  foldersLoaded: false,
   conversationsCursor: null,
   hasMoreConversations: false,
   loadingMoreConversations: false,
@@ -535,6 +556,126 @@ export const useChatStore = create<ChatState>((set, get) => ({
           s.activeConversationId === id ? null : s.activeConversationId,
       };
     });
+  },
+
+  // ── folders (migration 022) ──────────────────────────────
+  async loadFolders() {
+    try {
+      const res = await api.listFolders();
+      set({ folders: res?.folders ?? [], foldersLoaded: true });
+    } catch {
+      // Non-fatal: the sidebar simply renders without folders.
+      set({ foldersLoaded: true });
+    }
+  },
+
+  async createFolder(name) {
+    try {
+      const folder = await api.createFolder(name);
+      set((s) => ({ folders: [...s.folders, folder] }));
+      return folder;
+    } catch {
+      get().setError("Couldn't create folder. Please try again.");
+      return null;
+    }
+  },
+
+  async renameFolder(id, name) {
+    const prev = get().folders;
+    // Optimistic rename.
+    set((s) => ({
+      folders: s.folders.map((f) => (f.id === id ? { ...f, name } : f)),
+    }));
+    try {
+      const updated = await api.renameFolder(id, name);
+      set((s) => ({
+        folders: s.folders.map((f) => (f.id === id ? { ...f, ...updated } : f)),
+      }));
+    } catch {
+      set({ folders: prev });
+      get().setError("Couldn't rename folder. Please try again.");
+    }
+  },
+
+  async deleteFolder(id) {
+    const prevFolders = get().folders;
+    const prevConversations = get().conversations;
+    // Optimistic: drop the folder and unfile its conversations locally
+    // (server does the same via ON DELETE SET NULL).
+    set((s) => ({
+      folders: s.folders.filter((f) => f.id !== id),
+      conversations: s.conversations.map((c) =>
+        c.folder_id === id ? { ...c, folder_id: null } : c,
+      ),
+    }));
+    try {
+      await api.deleteFolder(id);
+    } catch {
+      set({ folders: prevFolders, conversations: prevConversations });
+      get().setError("Couldn't delete folder. Please try again.");
+    }
+  },
+
+  async reorderFolders(folderIds) {
+    const prev = get().folders;
+    // Optimistic: reorder locally to match the requested id order.
+    const byId = new Map(prev.map((f) => [f.id, f]));
+    const next = folderIds
+      .map((fid, i) => {
+        const f = byId.get(fid);
+        return f ? { ...f, position: i + 1 } : null;
+      })
+      .filter((f): f is Folder => f !== null);
+    set({ folders: next });
+    try {
+      const res = await api.reorderFolders(folderIds);
+      if (res?.folders) set({ folders: res.folders });
+    } catch {
+      set({ folders: prev });
+      get().setError("Couldn't reorder folders. Please try again.");
+    }
+  },
+
+  async moveConversationToFolder(convId, folderId) {
+    const existing = get().conversations.find((c) => c.id === convId);
+    const prevFolderId = existing?.folder_id ?? null;
+    if (prevFolderId === folderId) return;
+    // Optimistic: re-file the conversation + adjust folder counts so the
+    // sidebar re-groups immediately.
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === convId ? { ...c, folder_id: folderId } : c,
+      ),
+      folders: s.folders.map((f) => {
+        if (f.id === prevFolderId) {
+          return { ...f, conversation_count: Math.max(0, f.conversation_count - 1) };
+        }
+        if (f.id === folderId) {
+          return { ...f, conversation_count: f.conversation_count + 1 };
+        }
+        return f;
+      }),
+    }));
+    try {
+      await api.moveConversationToFolder(convId, folderId);
+    } catch {
+      // Roll back both the membership and the counts.
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === convId ? { ...c, folder_id: prevFolderId } : c,
+        ),
+        folders: s.folders.map((f) => {
+          if (f.id === folderId) {
+            return { ...f, conversation_count: Math.max(0, f.conversation_count - 1) };
+          }
+          if (f.id === prevFolderId) {
+            return { ...f, conversation_count: f.conversation_count + 1 };
+          }
+          return f;
+        }),
+      }));
+      get().setError("Couldn't move conversation. Please try again.");
+    }
   },
 
   // ────────────────────────────────────────────────────────
