@@ -22,11 +22,11 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { logoutSession } from "@/lib/auth";
 import { useI18nStore, useT } from "@/lib/i18n";
-import type { Conversation } from "@/lib/types";
+import type { Conversation, Folder } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
-import { Brain } from "lucide-react";
+import { Brain, ChevronRight, FolderPlus, Pencil, Trash2 } from "lucide-react";
 
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 
@@ -46,6 +46,7 @@ interface Props {
 
 type Row =
   | { kind: "header"; label: string; key: string }
+  | { kind: "folder"; folder: Folder; collapsed: boolean; key: string }
   | { kind: "conv"; conv: Conversation; key: string };
 
 export function Sidebar({
@@ -71,6 +72,13 @@ export function Sidebar({
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
   const togglePinConversation = useChatStore((s) => s.togglePinConversation);
+  const folders = useChatStore((s) => s.folders);
+  const foldersLoaded = useChatStore((s) => s.foldersLoaded);
+  const loadFolders = useChatStore((s) => s.loadFolders);
+  const createFolder = useChatStore((s) => s.createFolder);
+  const renameFolder = useChatStore((s) => s.renameFolder);
+  const deleteFolder = useChatStore((s) => s.deleteFolder);
+  const moveConversationToFolder = useChatStore((s) => s.moveConversationToFolder);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const messagesByConv = useChatStore((s) => s.messages);
   const newChat = useNewChatHandler();
@@ -78,12 +86,53 @@ export function Sidebar({
   const [search, setSearch] = useState("");
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  // Per-folder collapse state, persisted so a folder the user closed stays
+  // closed across reloads. Keyed by folder id → true when collapsed.
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>(
+    () => {
+      if (typeof window === "undefined") return {};
+      try {
+        return JSON.parse(localStorage.getItem("sidebar.folders.collapsed") || "{}");
+      } catch {
+        return {};
+      }
+    },
+  );
   const debouncedSearch = useDebounce(search, 300);
   const t = useT();
 
   useEffect(() => {
     if (!conversationsLoaded) void loadConversations();
   }, [conversationsLoaded, loadConversations]);
+
+  useEffect(() => {
+    if (!foldersLoaded) void loadFolders();
+  }, [foldersLoaded, loadFolders]);
+
+  function toggleFolderCollapsed(id: string) {
+    setCollapsedFolders((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        localStorage.setItem("sidebar.folders.collapsed", JSON.stringify(next));
+      } catch {
+        /* ignore quota / privacy-mode failures */
+      }
+      return next;
+    });
+  }
+
+  async function handleCreateFolder() {
+    const f = await createFolder(t("folder.defaultName"));
+    if (f) {
+      // Expand the new (empty) folder so the user sees it appear.
+      setCollapsedFolders((prev) => ({ ...prev, [f.id]: false }));
+    }
+  }
+
+  async function handleCreateFolderForMove(convId: string) {
+    const f = await createFolder(t("folder.defaultName"));
+    if (f) await moveConversationToFolder(convId, f.id);
+  }
 
   useEffect(() => {
     const q = debouncedSearch.trim();
@@ -116,13 +165,36 @@ export function Sidebar({
     const byRecency = (a: Conversation, b: Conversation) =>
       new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
 
-    // Pinned conversations get their own "PINNED" section at the very
-    // top, independent of the time buckets, sorted by updated_at within
-    // the section. The remainder flow through the normal time grouping.
-    const pinned = filtered.filter((c) => c.is_pinned).sort(byRecency);
-    const unpinned = filtered.filter((c) => !c.is_pinned).sort(byRecency);
-
     const out: Row[] = [];
+
+    // Folders come FIRST, above PINNED + the time buckets (migration 022).
+    // Each folder is a collapsible section; only its own conversations
+    // (folder_id === folder.id) render under it. A filed conversation does
+    // NOT appear in the PINNED / time buckets below.
+    const filedByFolder = new Map<string, Conversation[]>();
+    for (const c of filtered) {
+      if (!c.folder_id) continue;
+      const list = filedByFolder.get(c.folder_id) ?? [];
+      list.push(c);
+      filedByFolder.set(c.folder_id, list);
+    }
+    for (const folder of folders) {
+      const collapsed = collapsedFolders[folder.id] ?? false;
+      out.push({ kind: "folder", folder, collapsed, key: `folder-${folder.id}` });
+      if (collapsed) continue;
+      const inFolder = (filedByFolder.get(folder.id) ?? []).sort(byRecency);
+      for (const c of inFolder) {
+        out.push({ kind: "conv", conv: c, key: c.id });
+      }
+    }
+
+    // Only UNFILED conversations flow through PINNED + the time buckets.
+    const unfiled = filtered.filter((c) => !c.folder_id);
+    // Pinned conversations get their own "PINNED" section, independent of
+    // the time buckets, sorted by updated_at within the section.
+    const pinned = unfiled.filter((c) => c.is_pinned).sort(byRecency);
+    const unpinned = unfiled.filter((c) => !c.is_pinned).sort(byRecency);
+
     if (pinned.length > 0) {
       out.push({
         kind: "header",
@@ -142,7 +214,7 @@ export function Sidebar({
       }
     }
     return out;
-  }, [searchActive, searchResults, conversations, activeConversationId, messagesByConv]);
+  }, [searchActive, searchResults, conversations, activeConversationId, messagesByConv, folders, collapsedFolders]);
 
   function handleNew() {
     newChat();
@@ -243,6 +315,15 @@ export function Sidebar({
             </span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => void handleCreateFolder()}
+            className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          >
+            <FolderPlus width={16} height={16} aria-hidden />
+            <span>{t("folder.new")}</span>
+          </button>
+
           {searchExpanded || search ? (
             <div className="relative">
               <svg
@@ -332,6 +413,12 @@ export function Sidebar({
             if (id === activeId) router.replace("/chat");
           }}
           onTogglePin={(id) => togglePinConversation(id)}
+          folders={folders}
+          onMoveToFolder={(id, folderId) => moveConversationToFolder(id, folderId)}
+          onCreateFolderForMove={(id) => handleCreateFolderForMove(id)}
+          onToggleFolder={toggleFolderCollapsed}
+          onRenameFolder={(id, name) => renameFolder(id, name)}
+          onDeleteFolder={(id) => deleteFolder(id)}
         />
 
         {/* Footer — single user row that opens the popup menu. */}
@@ -720,6 +807,12 @@ interface AreaProps {
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
+  folders: Folder[];
+  onMoveToFolder: (id: string, folderId: string | null) => Promise<void> | void;
+  onCreateFolderForMove: (id: string) => Promise<void> | void;
+  onToggleFolder: (id: string) => void;
+  onRenameFolder: (id: string, name: string) => Promise<void> | void;
+  onDeleteFolder: (id: string) => Promise<void> | void;
 }
 
 function ConversationsArea({
@@ -735,9 +828,23 @@ function ConversationsArea({
   onRename,
   onDelete,
   onTogglePin,
+  folders,
+  onMoveToFolder,
+  onCreateFolderForMove,
+  onToggleFolder,
+  onRenameFolder,
+  onDeleteFolder,
 }: AreaProps) {
   const ref = useRef<HTMLDivElement>(null);
   const useVirtual = rows.length >= VIRTUALIZE_THRESHOLD;
+  const folderCtx: FolderCtx = {
+    folders,
+    onMoveToFolder,
+    onCreateFolderForMove,
+    onToggleFolder,
+    onRenameFolder,
+    onDeleteFolder,
+  };
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -816,6 +923,7 @@ function ConversationsArea({
                   onRename={onRename}
                   onDelete={onDelete}
                   onTogglePin={onTogglePin}
+                  folderCtx={folderCtx}
                 />
               </div>
             );
@@ -832,6 +940,7 @@ function ConversationsArea({
               onRename={onRename}
               onDelete={onDelete}
               onTogglePin={onTogglePin}
+              folderCtx={folderCtx}
             />
           ))}
         </div>
@@ -858,6 +967,17 @@ function ConversationsArea({
   );
 }
 
+// FolderCtx bundles the folder data + handlers so SidebarRow gets one prop
+// instead of six. Built once in ConversationsArea.
+interface FolderCtx {
+  folders: Folder[];
+  onMoveToFolder: (id: string, folderId: string | null) => Promise<void> | void;
+  onCreateFolderForMove: (id: string) => Promise<void> | void;
+  onToggleFolder: (id: string) => void;
+  onRenameFolder: (id: string, name: string) => Promise<void> | void;
+  onDeleteFolder: (id: string) => Promise<void> | void;
+}
+
 function SidebarRow({
   row,
   active,
@@ -865,6 +985,7 @@ function SidebarRow({
   onRename,
   onDelete,
   onTogglePin,
+  folderCtx,
 }: {
   row: Row;
   active: boolean;
@@ -872,6 +993,7 @@ function SidebarRow({
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
+  folderCtx: FolderCtx;
 }) {
   const t = useT();
   if (row.kind === "header") {
@@ -883,15 +1005,186 @@ function SidebarRow({
       </div>
     );
   }
+  if (row.kind === "folder") {
+    return (
+      <FolderHeader
+        folder={row.folder}
+        collapsed={row.collapsed}
+        onToggle={() => folderCtx.onToggleFolder(row.folder.id)}
+        onRename={(name) => folderCtx.onRenameFolder(row.folder.id, name)}
+        onDelete={() => folderCtx.onDeleteFolder(row.folder.id)}
+      />
+    );
+  }
   return (
     <ConversationItem
       conv={row.conv}
       active={active}
       onSelect={() => onSelect(row.conv.id)}
-      onRename={(t) => onRename(row.conv.id, t)}
+      onRename={(title) => onRename(row.conv.id, title)}
       onDelete={() => onDelete(row.conv.id)}
       onTogglePin={() => onTogglePin(row.conv.id)}
+      folders={folderCtx.folders}
+      onMoveToFolder={(folderId) => folderCtx.onMoveToFolder(row.conv.id, folderId)}
+      onCreateFolderForMove={() => folderCtx.onCreateFolderForMove(row.conv.id)}
     />
+  );
+}
+
+// FolderHeader — collapsible folder section header with a ··· menu
+// (inline rename + delete-with-confirm). Mirrors ConversationItem's menu
+// idiom so the two read consistently.
+function FolderHeader({
+  folder,
+  collapsed,
+  onToggle,
+  onRename,
+  onDelete,
+}: {
+  folder: Folder;
+  collapsed: boolean;
+  onToggle: () => void;
+  onRename: (name: string) => Promise<void> | void;
+  onDelete: () => Promise<void> | void;
+}) {
+  const t = useT();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [draft, setDraft] = useState(folder.name);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (renaming) {
+      setDraft(folder.name);
+      inputRef.current?.select();
+    }
+  }, [renaming, folder.name]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const off = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", off);
+    return () => document.removeEventListener("mousedown", off);
+  }, [menuOpen]);
+
+  return (
+    <div className="group relative flex flex-col">
+      <div className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-text-secondary transition-colors hover:bg-bg-elevated">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          className="focus-ring flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
+          <ChevronRight
+            width={14}
+            height={14}
+            aria-hidden
+            className={`shrink-0 text-text-muted transition-transform ${collapsed ? "" : "rotate-90"}`}
+          />
+          <span aria-hidden className="shrink-0">📁</span>
+          {renaming ? (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onBlur={() => {
+                const n = draft.trim();
+                if (n && n !== folder.name) void onRename(n);
+                setRenaming(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                else if (e.key === "Escape") {
+                  setDraft(folder.name);
+                  setRenaming(false);
+                }
+              }}
+              className="w-full rounded bg-bg-base px-1.5 py-0.5 text-sm text-text-primary outline-none focus:ring-1 focus:ring-border-strong"
+            />
+          ) : (
+            <>
+              <span className="truncate font-medium">{folder.name}</span>
+              <span className="shrink-0 text-text-muted">
+                ({folder.conversation_count})
+              </span>
+            </>
+          )}
+        </button>
+        <button
+          type="button"
+          aria-label="Folder actions"
+          onClick={() => setMenuOpen((v) => !v)}
+          className={`focus-ring tap-44 rounded p-1 text-text-muted transition-opacity hover:bg-bg-secondary hover:text-text-primary md:opacity-0 md:group-hover:opacity-100 ${
+            menuOpen ? "md:opacity-100" : ""
+          }`}
+        >
+          <svg viewBox="0 0 16 16" width={14} height={14} aria-hidden>
+            <circle cx="3" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="13" cy="8" r="1.5" fill="currentColor" />
+          </svg>
+        </button>
+        {menuOpen ? (
+          <div
+            ref={menuRef}
+            className="popover-appear absolute right-1 top-9 z-10 w-36 overflow-hidden rounded-md border border-border bg-bg-surface text-xs shadow-xl"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                setRenaming(true);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+            >
+              <Pencil width={14} height={14} aria-hidden />
+              {t("folder.rename")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                setConfirmingDelete(true);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-status-danger hover:bg-status-danger/15"
+            >
+              <Trash2 width={14} height={14} aria-hidden />
+              {t("folder.delete")}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {confirmingDelete ? (
+        <div className="border-t border-border/60 px-3 py-2 text-[11px]">
+          <p className="text-text-secondary">{t("folder.deleteConfirm")}</p>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmingDelete(false);
+                void onDelete();
+              }}
+              className="focus-ring rounded bg-status-danger/85 px-2 py-1 font-medium text-white hover:bg-status-danger"
+            >
+              {t("folder.delete")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              className="focus-ring rounded border border-border px-2 py-1 text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+            >
+              {t("common.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
