@@ -48,6 +48,10 @@ type GatewayClient struct {
 	APIKey           string // optional; preferred over service JWT
 	ServiceJWTSecret string
 	ServiceJWTTTL    time.Duration
+	// InternalServiceSecret, when set, is forwarded as
+	// ``X-Internal-Service-Secret`` so the gateway trusts our
+	// ``X-User-ID`` for per-end-user rate limiting. Empty → not sent.
+	InternalServiceSecret string
 
 	http *http.Client
 }
@@ -55,12 +59,14 @@ type GatewayClient struct {
 func NewGatewayClient(
 	baseURL, apiKey, serviceJWTSecret string,
 	serviceJWTTTL time.Duration,
+	internalServiceSecret string,
 ) *GatewayClient {
 	return &GatewayClient{
-		BaseURL:          strings.TrimRight(baseURL, "/"),
-		APIKey:           apiKey,
-		ServiceJWTSecret: serviceJWTSecret,
-		ServiceJWTTTL:    serviceJWTTTL,
+		BaseURL:               strings.TrimRight(baseURL, "/"),
+		APIKey:                apiKey,
+		ServiceJWTSecret:      serviceJWTSecret,
+		ServiceJWTTTL:         serviceJWTTTL,
+		InternalServiceSecret: internalServiceSecret,
 		http: &http.Client{
 			// Long timeout because the LLM completion path can be
 			// slow on cold starts; streaming uses no body timeout
@@ -570,6 +576,11 @@ func (g *GatewayClient) do(
 	// attribution. The gateway is free to ignore unknown headers.
 	httpReq.Header.Set("X-Tenant-ID", callCtx.TenantID.String())
 	httpReq.Header.Set("X-User-ID", callCtx.UserID.String())
+	// Prove we're a trusted internal caller so the gateway keys its rate
+	// limiter per END-USER (X-User-ID) rather than per shared API key.
+	if g.InternalServiceSecret != "" {
+		httpReq.Header.Set("X-Internal-Service-Secret", g.InternalServiceSecret)
+	}
 	if callCtx.ConversationID != uuid.Nil {
 		httpReq.Header.Set("X-Conversation-ID", callCtx.ConversationID.String())
 	}
@@ -669,6 +680,11 @@ func (g *GatewayClient) GenerateImages(
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("X-Tenant-ID", callCtx.TenantID.String())
 	httpReq.Header.Set("X-User-ID", callCtx.UserID.String())
+	// Prove we're a trusted internal caller so the gateway keys its rate
+	// limiter per END-USER (X-User-ID) rather than per shared API key.
+	if g.InternalServiceSecret != "" {
+		httpReq.Header.Set("X-Internal-Service-Secret", g.InternalServiceSecret)
+	}
 	if callCtx.ConversationID != uuid.Nil {
 		httpReq.Header.Set("X-Conversation-ID", callCtx.ConversationID.String())
 	}

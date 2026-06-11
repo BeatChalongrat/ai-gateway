@@ -7,6 +7,8 @@ Supports two auth methods:
 
 from __future__ import annotations
 
+import dataclasses
+import hmac
 from dataclasses import dataclass
 from typing import Generator
 
@@ -29,6 +31,12 @@ class ResolvedApiKey:
     project_id: str
     key_prefix: str
     role: str = "user"
+    # Effective key for the per-request rate limiter. Differs from
+    # ``key_id`` only for SHARED API keys carrying a TRUSTED ``X-User-ID``
+    # (web-chat → chat-edge → gateway), where it becomes
+    # ``<key_id>:user:<user_id>`` so each end-user gets their own bucket.
+    # ``None`` => the limiter falls back to ``key_id`` (legacy behaviour).
+    rate_limit_key_id: str | None = None
 
 
 def get_db_session() -> Generator[Session, None, None]:
@@ -95,13 +103,71 @@ def _resolve_jwt_token(token: str, session: Session) -> ResolvedApiKey:
     )
 
 
+def _internal_signal_trusted(secret: str | None) -> bool:
+    """True only when the caller proves it's a trusted internal service.
+
+    Compares the request's ``X-Internal-Service-Secret`` against the
+    env-configured ``INTERNAL_SERVICE_SECRET`` in constant time. Returns
+    False (the safe default) whenever the secret is unset on the server
+    OR absent/mismatched on the request — so an external, untrusted
+    client can never clear this gate.
+    """
+    from app.core.config import settings
+
+    configured = (settings.internal_service_secret or "").strip()
+    if not configured:
+        return False
+    provided = (secret or "").strip()
+    if not provided:
+        return False
+    return hmac.compare_digest(provided, configured)
+
+
+def resolve_rate_limit_key_id(
+    *,
+    is_api_key: bool,
+    base_key_id: str,
+    x_user_id: str | None,
+    x_internal_service_secret: str | None,
+) -> str:
+    """Compute the effective rate-limit bucket key.
+
+    Behaviour (matches the auth matrix in the rate-limit redesign):
+
+    * JWT / admin-session identity (``is_api_key=False``): ``base_key_id``
+      is already per-user (``jwt:<id>`` / ``session:<id>``) — returned
+      unchanged.
+    * API key with NO trusted ``X-User-ID``: ``base_key_id`` (the shared
+      ``api_key.key_id``) — unchanged legacy behaviour. This is the path
+      both normal external clients AND external clients SPOOFING
+      ``X-User-ID`` (without the internal secret) take.
+    * API key WITH a trusted ``X-User-ID``: ``<base_key_id>:user:<uid>``
+      so each end-user behind a shared key gets an independent counter.
+    """
+    if not is_api_key:
+        return base_key_id
+    if not _internal_signal_trusted(x_internal_service_secret):
+        return base_key_id
+    user = (x_user_id or "").strip()
+    if not user:
+        return base_key_id
+    return f"{base_key_id}:user:{user}"
+
+
 def get_resolved_api_key(
     authorization: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
+    x_internal_service_secret: str | None = Header(default=None),
 ) -> ResolvedApiKey:
     """Validate Bearer token and return resolved identity.
 
     Accepts both API keys (gw_xxxx) and JWT tokens (eyJ...).
     Raises AuthenticationError (maps to 401) on any failure.
+
+    ``X-User-ID`` + ``X-Internal-Service-Secret`` are read here to derive
+    the per-request rate-limit bucket (``ResolvedApiKey.rate_limit_key_id``)
+    without trusting an arbitrary external client — see
+    ``resolve_rate_limit_key_id``.
 
     Track A: verification runs on a SHORT-LIVED sync session that closes
     (releasing the pooled connection) the moment auth finishes — it is NOT
@@ -124,19 +190,30 @@ def get_resolved_api_key(
         if raw_key.startswith("eyJ"):
             resolved = _resolve_jwt_token(raw_key, session)
             session.commit()
-            return resolved
+            # JWT identity is already per-user; pin the rate-limit bucket
+            # to its key_id explicitly (X-User-ID is ignored on this path).
+            return dataclasses.replace(
+                resolved, rate_limit_key_id=resolved.key_id
+            )
 
         # Otherwise treat as API key (gw_xxxx)
         api_key: ApiKeyORM | None = _api_key_service.verify_key(session, raw_key)
         if api_key is None:
             raise AuthenticationError("Invalid, expired, or revoked API key")
 
+        rate_limit_key_id = resolve_rate_limit_key_id(
+            is_api_key=True,
+            base_key_id=api_key.key_id,
+            x_user_id=x_user_id,
+            x_internal_service_secret=x_internal_service_secret,
+        )
         resolved = ResolvedApiKey(
             key_id=api_key.key_id,
             tenant_id=api_key.tenant_id,
             project_id=api_key.project_id,
             key_prefix=api_key.key_prefix,
             role=getattr(api_key, "role", "user"),
+            rate_limit_key_id=rate_limit_key_id,
         )
         session.commit()
         return resolved
