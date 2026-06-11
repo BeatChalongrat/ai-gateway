@@ -61,6 +61,18 @@ async def lifespan(app: FastAPI):
     """Seed default admin user on startup, start event loop monitor."""
     import asyncio
     import concurrent.futures
+    import os as _os
+
+    # Debug-only memory profiling. Inert unless ENABLE_TRACEMALLOC=true; when
+    # on, start tracing AS EARLY AS POSSIBLE so baseline snapshots capture the
+    # warm import set. Snapshots are taken via the gated internal_debug router.
+    if _os.environ.get("ENABLE_TRACEMALLOC", "").lower() in ("1", "true", "yes"):
+        import tracemalloc as _tm
+
+        if not _tm.is_tracing():
+            _tm.start(int(_os.environ.get("TRACEMALLOC_NFRAME", "15")))
+        print("tracemalloc_enabled nframe="
+              f"{_os.environ.get('TRACEMALLOC_NFRAME', '15')}", flush=True)
 
     # Set explicit thread pool — prevents exhaustion from asyncio.to_thread() calls.
     # Default is min(32, cpu+4) which can be as low as 5 on small machines.
@@ -706,6 +718,14 @@ app.add_exception_handler(Exception, handle_unhandled_exception)
 
 # --- Routers ---
 app.include_router(health_router)
+# Debug-only tracemalloc router — ONLY mounted when ENABLE_TRACEMALLOC=true,
+# and every endpoint additionally requires the internal secret. Off by
+# default so the debug surface does not exist in dev/prod.
+import os as _os_main
+if _os_main.environ.get("ENABLE_TRACEMALLOC", "").lower() in ("1", "true", "yes"):
+    from app.api.routes.internal_debug import router as _internal_debug_router
+
+    app.include_router(_internal_debug_router)
 app.include_router(auth_router)  # /auth/login → 410, /auth/refresh, /auth/me
 from app.api.routes.admin_session import router as admin_session_router
 app.include_router(admin_session_router)  # /auth/session/{login,logout,me}
