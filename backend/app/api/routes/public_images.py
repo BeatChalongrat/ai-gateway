@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import ResolvedApiKey, get_resolved_api_key
 from app.core.config import settings
 from app.core.db import get_async_db
-from app.core.exceptions import DLPViolationError
+from app.core.exceptions import DLPViolationError, RateLimitExceededError
 from app.domain.observability import RequestRecord, RequestStatus
 from app.schemas.common import ErrorResponse
 from app.schemas.public import (
@@ -40,6 +40,69 @@ from app.services.providers.openai_images_client import (
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+_IMAGE_USER_WINDOW_SECONDS = 3600   # per-end-user hourly bucket
+_IMAGE_TENANT_WINDOW_SECONDS = 86400  # per-tenant daily bucket
+
+
+async def _enforce_image_rate_limits(
+    orch: GatewayOrchestrator, auth: ResolvedApiKey
+) -> None:
+    """Throttle image generation — it has direct $ exposure per call.
+
+    Two independent Redis sliding-window scopes (reusing the request
+    limiter's backend, never the Rust sidecar):
+
+      * per END-USER, ``IMAGE_RATE_LIMIT_USER_PER_HOUR`` / hour. Keyed on
+        ``auth.rate_limit_key_id`` (the SAME trusted per-user key the chat
+        limiter uses), so a SHARED web-chat key splits per user — and an
+        external client SPOOFING ``X-User-ID`` (no internal secret) falls
+        back to the shared ``key_id`` and so cannot mint fresh quota.
+      * per TENANT, ``IMAGE_RATE_LIMIT_TENANT_PER_DAY`` / day — the
+        aggregate cost backstop.
+
+    Fail-open on a Redis outage (inherited from the limiter) — an image
+    request is never blocked by an infra blip, only by real over-use.
+    """
+    user_key = str(getattr(auth, "rate_limit_key_id", None) or auth.key_id)
+
+    user_rl = await orch.rate_limit_service.check_window_async(
+        f"rl:img:user:{user_key}",
+        settings.image_rate_limit_user_per_hour,
+        _IMAGE_USER_WINDOW_SECONDS,
+    )
+    if not user_rl["allowed"]:
+        retry_after = max(1, user_rl["reset_at"] - int(time.time()))
+        raise RateLimitExceededError(
+            "Image generation limit reached "
+            f"({settings.image_rate_limit_user_per_hour}/hour per user).",
+            details={
+                "scope": "image_user",
+                "limit": user_rl["limit"],
+                "remaining": user_rl["remaining"],
+                "reset_at": user_rl["reset_at"],
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    tenant_rl = await orch.rate_limit_service.check_window_async(
+        f"rl:img:tenant:{auth.tenant_id}",
+        settings.image_rate_limit_tenant_per_day,
+        _IMAGE_TENANT_WINDOW_SECONDS,
+    )
+    if not tenant_rl["allowed"]:
+        retry_after = max(1, tenant_rl["reset_at"] - int(time.time()))
+        raise RateLimitExceededError(
+            "Image generation limit reached "
+            f"({settings.image_rate_limit_tenant_per_day}/day per tenant).",
+            details={
+                "scope": "image_tenant",
+                "limit": tenant_rl["limit"],
+                "remaining": tenant_rl["remaining"],
+                "reset_at": tenant_rl["reset_at"],
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 async def _persist(
@@ -106,6 +169,9 @@ async def generate_images(
     request_id = str(uuid.uuid4())
     model = payload.model if payload.model in IMAGE_MODELS else DEFAULT_IMAGE_MODEL
     orch = GatewayOrchestrator()
+
+    # --- Cost-control rate limit (before any provider / DLP work) ------
+    await _enforce_image_rate_limits(orch, auth)
 
     # --- Inbound DLP on the prompt -------------------------------------
     span_map: dict[str, str] = {}

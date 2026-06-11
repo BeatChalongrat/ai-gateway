@@ -291,8 +291,13 @@ class GatewayOrchestrator:
         with record_phase("rate_limit"), REDIS_COMMAND_DURATION.labels(
             operation="rate_limit_pipeline"
         ).time():
+            # Per-end-user bucket for trusted shared-key traffic (web-chat);
+            # falls back to ``auth.key_id`` for everything else. Cost /
+            # audit attribution below still keys on ``auth.key_id``.
             rl = await self.rate_limit_service.check_all_async(
-                key_id=str(auth.key_id),
+                key_id=str(
+                    getattr(auth, "rate_limit_key_id", None) or auth.key_id
+                ),
                 project_id=str(ctx.project_id),
                 tenant_id=str(ctx.tenant_id),
             )
