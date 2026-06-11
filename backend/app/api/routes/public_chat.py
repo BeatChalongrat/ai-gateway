@@ -678,7 +678,12 @@ async def chat_completions(
 
     if await _is_unhealthy(route.provider_name):
         fb_runner = orchestrator._get_fallback_orchestrator()
-        fb_candidate = fb_runner.select_streaming_candidate(
+        # The chat hot-path ``session`` is an AsyncSession, so use the async
+        # selector (awaits get_api_key_async). Passing the async session to
+        # the SYNC ``select_streaming_candidate`` made AsyncSession.execute()
+        # return an un-awaited coroutine -> "'coroutine' object has no
+        # attribute 'scalars'" 500s whenever the provider was unhealthy.
+        fb_candidate = await fb_runner.select_streaming_candidate_async(
             original_provider=_stream_original_provider,
             original_model=_stream_original_model,
             session=session,
