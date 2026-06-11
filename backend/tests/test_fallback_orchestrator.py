@@ -325,3 +325,75 @@ async def test_session_none_treats_all_candidates_as_keyless():
             ctx=_make_ctx(),
         )
     assert dispatcher.calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Regression: streaming pre-check must use the AWAITED async key lookup.
+#
+# Bug: the streaming fallback PRE-CHECK (public_chat.py) runs with the chat
+# hot path's still-open AsyncSession. It called the SYNC
+# ``select_streaming_candidate`` -> sync ``get_api_key`` ->
+# ``AsyncSession.execute(...).scalars()``; since execute() on an AsyncSession
+# returns a coroutine, this raised ``'coroutine' object has no attribute
+# 'scalars'`` and 500'd — intermittently, only when a provider had just been
+# marked unhealthy (so the pre-check fired). Fix added
+# ``select_streaming_candidate_async`` which awaits ``get_api_key_async``.
+# ---------------------------------------------------------------------------
+
+
+class _StreamingAdapter:
+    supports_streaming = True
+
+
+class _AsyncOnlyKeyService:
+    """The SYNC key path is unsafe with an AsyncSession (it would do an
+    un-awaited execute), so it explodes here; only the awaited async path is
+    valid. Mirrors the real failure mode the bug exposed."""
+
+    def get_api_key(self, session, provider):  # noqa: D401
+        raise AssertionError(
+            "sync get_api_key must NOT be called on the async streaming "
+            "pre-check path (it does an un-awaited AsyncSession.execute)"
+        )
+
+    async def get_api_key_async(self, session, provider):
+        return f"sk-{provider}"
+
+
+@pytest.mark.asyncio
+async def test_streaming_candidate_async_uses_awaited_key_lookup():
+    class _Dispatcher:
+        adapters = {"anthropic": _StreamingAdapter()}
+
+    runner = FallbackOrchestrator(
+        dispatcher=_Dispatcher(),
+        key_service=_AsyncOnlyKeyService(),
+    )
+    # ``session`` is a truthy stand-in for the open AsyncSession.
+    candidate = await runner.select_streaming_candidate_async(
+        original_provider="openai",
+        original_model="gpt-4o",
+        session=object(),
+    )
+    assert candidate is not None
+    assert candidate["provider"] == "anthropic"
+    assert candidate["api_key"] == "sk-anthropic"
+
+
+@pytest.mark.asyncio
+async def test_streaming_candidate_async_none_session_returns_none():
+    class _Dispatcher:
+        adapters = {"anthropic": _StreamingAdapter()}
+
+    runner = FallbackOrchestrator(
+        dispatcher=_Dispatcher(),
+        key_service=_AsyncOnlyKeyService(),
+    )
+    assert (
+        await runner.select_streaming_candidate_async(
+            original_provider="openai",
+            original_model="gpt-4o",
+            session=None,
+        )
+        is None
+    )
