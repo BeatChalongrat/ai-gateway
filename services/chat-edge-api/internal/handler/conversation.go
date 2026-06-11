@@ -130,6 +130,9 @@ type conversationResponse struct {
 	// IsPinned surfaces the sidebar pin flag (migration 021) so the
 	// frontend can render the "PINNED" section + the pin/unpin toggle.
 	IsPinned bool `json:"is_pinned"`
+	// FolderID is the sidebar-folder membership (migration 022). null when
+	// the conversation is unfiled; the frontend groups by this id.
+	FolderID *string `json:"folder_id"`
 }
 
 func toResponse(c *model.Conversation) conversationResponse {
@@ -149,6 +152,10 @@ func toResponse(c *model.Conversation) conversationResponse {
 	if c.KnowledgeBaseID != nil {
 		s := c.KnowledgeBaseID.String()
 		r.KnowledgeBaseID = &s
+	}
+	if c.FolderID != nil {
+		s := c.FolderID.String()
+		r.FolderID = &s
 	}
 	return r
 }
