@@ -1,0 +1,26 @@
+# OPT-IN tracemalloc profiling overlay (NOT applied by default).
+#
+# Turns on the debug-only tracemalloc instrumentation (gated router +
+# boot-time tracing) for a memory-leak investigation. Chain it on top of the
+# mock prod-like chain, and run with GUNICORN_WORKERS=1 so every request and
+# every snapshot call lands on the SAME process (coherent snapshots).
+#
+# Apply (1 worker, mock provider, tracemalloc on):
+#   INTERNAL_SERVICE_SECRET=<secret> GUNICORN_WORKERS=1 GUNICORN_MAX_REQUESTS=0 \
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f tools/loadtest/docker-compose.loadtest.yml \
+#     -f tools/loadtest/docker-compose.prodlike.yml \
+#     -f tools/loadtest/docker-compose.prodlike-profile.yml \
+#     up -d backend
+#
+# Revert to the normal dev backend:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d backend
+
+services:
+  backend:
+    environment:
+      ENABLE_TRACEMALLOC: "true"
+      TRACEMALLOC_TOP_N: "30"
+      TRACEMALLOC_NFRAME: "20"
+      TRACEMALLOC_SNAPSHOT_DIR: /tmp/tracemalloc
