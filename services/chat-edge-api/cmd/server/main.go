@@ -103,6 +103,7 @@ func main() {
 	refreshTokens := repository.NewRefreshTokenRepo(pool)
 	invitations := repository.NewInvitationTokenRepo(pool)
 	conversations := repository.NewConversationRepo(pool)
+	folders := repository.NewFolderRepo(pool)
 	messages := repository.NewMessageRepo(pool)
 	feedbackRepo := repository.NewFeedbackRepo(pool)
 	filesRepo := repository.NewFileRepo(pool)
@@ -129,6 +130,7 @@ func main() {
 		cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry,
 	)
 	conversationSvc := service.NewConversationService(conversations, cfg)
+	folderSvc := service.NewFolderService(folders, conversations)
 	messageSvc := service.NewMessageService(
 		conversations, messages, gateway, titles, cfg, cfg.MaxContextMessages,
 	)
@@ -280,6 +282,8 @@ func main() {
 	conversationHandler := handler.NewConversationHandler(conversationSvc)
 	conversationHandler.SetExportSources(conversations, messages, filesRepo, cfg)
 	conversationHandler.SetKnowledgeService(knowledgeSvc)
+
+	folderHandler := handler.NewFolderHandler(folderSvc)
 	conversationHandler.SetTitleService(titles)
 	conversationHandler.SetConversationStateService(stateSvc)
 	conversationHandler.SetMessageService(messageSvc)
@@ -323,6 +327,7 @@ func main() {
 	handlers := router.Handlers{
 		Auth:         handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Conversation: conversationHandler,
+		Folder:       folderHandler,
 		Message:      messageHandler,
 		Model:        modelHandler,
 		Feedback:     handler.NewFeedbackHandler(feedbackSvc),
