@@ -118,6 +118,7 @@ func main() {
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
 		cfg.ServiceJWTSecret, cfg.ServiceJWTTTL,
+		cfg.InternalServiceSecret,
 	)
 	titles := service.NewTitleService(gateway)
 	titles.SetRepos(conversations, messages)
