@@ -1,0 +1,28 @@
+# OPT-IN real-provider prod-like overlay (NOT applied by default).
+#
+# Chains ON TOP of docker-compose.loadtest.yml to flip the provider back to
+# the REAL upstream (OpenAI) while keeping the trusted secret + raised
+# project/tenant limits. The ONLY difference from the mock prod-like chain is
+# that PROVIDER_BASE_URL_OVERRIDES is cleared, so the OpenAI adapter hits the
+# real API instead of the in-cluster mock.
+#
+# Apply (real provider, 4 gunicorn workers, pool from prodlike.yml):
+#   INTERNAL_SERVICE_SECRET=<secret> GUNICORN_MAX_REQUESTS=0 \
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f tools/loadtest/docker-compose.loadtest.yml \
+#     -f tools/loadtest/docker-compose.prodlike.yml \
+#     -f tools/loadtest/docker-compose.prodlike-real.yml \
+#     up -d backend
+#
+# Revert to the normal dev backend:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d backend
+#
+# WARNING: real provider => real API cost. Keep runs short and watch spend.
+
+services:
+  backend:
+    environment:
+      # Clear the mock override set by docker-compose.loadtest.yml so the
+      # adapters use the real provider base URLs.
+      PROVIDER_BASE_URL_OVERRIDES: ""
