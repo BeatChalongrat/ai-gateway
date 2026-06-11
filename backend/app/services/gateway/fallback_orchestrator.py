@@ -498,6 +498,64 @@ class FallbackOrchestrator:
             }
         return None
 
+    async def select_streaming_candidate_async(
+        self,
+        *,
+        original_provider: str,
+        original_model: str,
+        session: "AsyncSession | None",
+        skip_providers: set[str] | None = None,
+        required: "RequiredCapabilities | None" = None,
+    ) -> dict | None:
+        """Async twin of :meth:`select_streaming_candidate`.
+
+        The streaming **pre-check** runs while the request's AsyncSession is
+        still open and on the event loop, so it must resolve the candidate
+        key via ``get_api_key_async`` (awaited) — passing that async session
+        to the sync :meth:`select_streaming_candidate` made
+        ``AsyncSession.execute()`` return an un-awaited coroutine and blew up
+        with ``'coroutine' object has no attribute 'scalars'`` whenever a
+        provider was marked unhealthy. The in-generator error path keeps
+        using the SYNC variant because its session is already closed and it
+        mints a short-lived sync one instead.
+        """
+        if session is None:
+            return None
+
+        skip = skip_providers or set()
+        chain = get_fallback_chain(original_model, original_provider)
+        tried = 0
+
+        for candidate in chain:
+            if tried >= self.max_candidates:
+                break
+            provider = candidate["provider"]
+            model = candidate["model"]
+            if provider in skip:
+                continue
+
+            if required is not None:
+                from app.services.capability_detection import model_meets
+
+                if not model_meets(required, model):
+                    continue
+
+            api_key = await self.key_service.get_api_key_async(session, provider)
+            if not api_key:
+                continue
+
+            adapter = self.dispatcher.adapters.get(provider)
+            if adapter is None or not getattr(adapter, "supports_streaming", False):
+                continue
+
+            tried += 1
+            return {
+                "provider": provider,
+                "model": model,
+                "api_key": api_key,
+            }
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Eligibility classifier
