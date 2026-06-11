@@ -73,4 +73,9 @@ type Conversation struct {
 	// false. ListByUser orders is_pinned-first so pinned rows always
 	// appear on the first page regardless of their updated_at.
 	IsPinned bool
+
+	// FolderID is the sidebar-folder membership (migration 022). Nullable —
+	// NULL means "unfiled" (the conversation shows in the PINNED / time
+	// buckets). The frontend groups conversations under folders by this id.
+	FolderID *uuid.UUID
 }
