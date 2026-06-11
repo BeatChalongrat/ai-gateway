@@ -178,23 +178,42 @@ def analyze_sync(
     except RuntimeError:
         loop = None
 
-    coro = analyze(
-        text,
-        language=language,
-        entities=entities,
-        score_threshold=score_threshold,
-    )
+    async def _analyze_and_evict() -> list[NerEntity]:
+        # ``asyncio.run()`` below creates a THROWAWAY event loop per call
+        # (one per request when NER is on). ``analyze`` caches an
+        # ``httpx.AsyncClient`` in the module-global ``_clients_by_loop``
+        # keyed by ``id(loop)``; that client's transport pins the loop, so
+        # without this cleanup the loop's id is never reused and every call
+        # leaks a dead-loop + client pair — the unbounded RSS growth the
+        # load test caught (~2 GiB / 90s at 100c). Close + evict the
+        # client for THIS loop before ``asyncio.run`` disposes it.
+        run_loop = asyncio.get_event_loop()
+        try:
+            return await analyze(
+                text,
+                language=language,
+                entities=entities,
+                score_threshold=score_threshold,
+            )
+        finally:
+            client = _clients_by_loop.pop(id(run_loop), None)
+            if client is not None:
+                try:
+                    await client.aclose()
+                except Exception:  # noqa: BLE001
+                    pass
 
     if loop is None or not loop.is_running():
-        return asyncio.run(coro)
+        return asyncio.run(_analyze_and_evict())
 
     # We're already inside a running loop. Push to a thread so we
     # don't deadlock on it. This is the path FastAPI's ``def`` handlers
-    # take when they touch the detector chain.
+    # take when they touch the detector chain. The thread's
+    # ``asyncio.run`` loop is cleaned up by ``_analyze_and_evict`` too.
     import concurrent.futures
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(lambda: asyncio.run(coro)).result()
+        return pool.submit(lambda: asyncio.run(_analyze_and_evict())).result()
 
 
 async def aclose() -> None:
