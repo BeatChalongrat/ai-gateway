@@ -199,11 +199,26 @@ async def get_async_db():
     on completion. Use for ``/v1/chat/completions`` only; admin/portal
     keep ``get_db``.
     """
+    from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+
     factory = get_async_session_factory()
     async with factory() as session:
         try:
             yield session
             await session.commit()
+        except SQLAlchemyTimeoutError:
+            # Async pool exhausted — a checkout exceeded pool_timeout and
+            # 500'd. This is the failure the 150-concurrent baseline hit;
+            # count it so the async pool ceiling is observable instead of
+            # only surfacing as opaque 500s (the sync DB_POOL_CHECKOUT_
+            # TIMEOUTS counter does NOT cover this separate pool).
+            from app.observability.metrics import (
+                ASYNC_DB_POOL_CHECKOUT_TIMEOUTS,
+            )
+
+            ASYNC_DB_POOL_CHECKOUT_TIMEOUTS.inc()
+            await session.rollback()
+            raise
         except Exception:
             await session.rollback()
             raise
