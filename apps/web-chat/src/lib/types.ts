@@ -87,6 +87,21 @@ export interface Conversation {
    *  above the time buckets. Defaults false server-side; older
    *  payloads flow through as `undefined` (treated as unpinned). */
   is_pinned?: boolean;
+  /** Sidebar folder membership (migration 022). `null`/`undefined` means
+   *  unfiled — the conversation shows in the PINNED / time buckets. A UUID
+   *  files it under that folder; the sidebar groups by this value. */
+  folder_id?: UUID | null;
+}
+
+/** A user-defined sidebar folder (migration 022). Flat (no nesting). */
+export interface Folder {
+  id: UUID;
+  name: string;
+  position: number;
+  /** Live count of non-deleted conversations filed in this folder. */
+  conversation_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ConversationListResponse {
