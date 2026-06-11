@@ -34,6 +34,9 @@ import (
 type Handlers struct {
 	Auth         *handler.AuthHandler
 	Conversation *handler.ConversationHandler
+	// Folder owns the chat-folders surface (migration 022): folder CRUD +
+	// reorder, plus the conversation→folder move route.
+	Folder       *handler.FolderHandler
 	Message      *handler.MessageHandler
 	Model        *handler.ModelHandler
 	Feedback     *handler.FeedbackHandler
@@ -125,6 +128,21 @@ func New(
 			r.Get("/conversations/{id}", h.Conversation.Get)
 			r.Patch("/conversations/{id}", h.Conversation.Update)
 			r.Delete("/conversations/{id}", h.Conversation.Delete)
+
+			// Folders (migration 022). Optional — only wired when the
+			// handler is present so router-construction tests stay green.
+			// ``/folders/reorder`` is registered alongside ``/folders/{id}``;
+			// chi matches the static segment first, so PUT on the literal
+			// path never collides with the {id} rename route.
+			if h.Folder != nil {
+				r.Get("/folders", h.Folder.List)
+				r.Post("/folders", h.Folder.Create)
+				r.Put("/folders/reorder", h.Folder.Reorder)
+				r.Put("/folders/{id}", h.Folder.Rename)
+				r.Delete("/folders/{id}", h.Folder.Delete)
+				// Conversation → folder membership.
+				r.Put("/conversations/{id}/folder", h.Folder.MoveConversation)
+			}
 
 			// Cancel — interrupts the in-flight stream for a
 			// conversation. Scoped at the conversation (one active
