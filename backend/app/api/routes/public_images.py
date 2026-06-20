@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import ResolvedApiKey, get_resolved_api_key
 from app.core.config import settings
 from app.core.db import get_async_db
-from app.core.exceptions import DLPViolationError, RateLimitExceededError
+from app.core.exceptions import DLPViolationError, GatewayError, RateLimitExceededError
 from app.domain.observability import RequestRecord, RequestStatus
 from app.schemas.common import ErrorResponse
 from app.schemas.public import (
@@ -173,6 +173,18 @@ async def generate_images(
     # --- Cost-control rate limit (before any provider / DLP work) ------
     await _enforce_image_rate_limits(orch, auth)
 
+    # --- Portal credit gate — images have direct $ exposure per call ---
+    from app.services.gateway.portal_credit_check import (
+        check_portal_credit_async,
+        deduct_portal_credit_async,
+    )
+
+    await check_portal_credit_async(
+        session,
+        str(auth.key_id),
+        portal_user_id=getattr(auth, "portal_user_id", None),
+    )
+
     # --- Inbound DLP on the prompt -------------------------------------
     span_map: dict[str, str] = {}
     masked_prompt = payload.prompt
@@ -214,16 +226,50 @@ async def generate_images(
             dlp_action = "mask"
 
     # --- Call the provider with the masked prompt ----------------------
-    result = await generate_image(
-        session,
+    logger.info(
+        "backend_image_generation_started",
+        request_id=request_id,
+        tenant_id=str(auth.tenant_id),
+        user_id=str(getattr(auth, "user_id", "")) or None,
+        provider="openai",
         model=model,
-        prompt=masked_prompt,
-        n=payload.n,
-        size=payload.size,
-        quality=payload.quality,
-        style=payload.style,
-        response_format=payload.response_format,
+        endpoint="/v1/images/generations",
+        timeout_ms=int(settings.image_generation_timeout_seconds * 1000),
+        openai_timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
     )
+    try:
+        result = await generate_image(
+            session,
+            model=model,
+            prompt=masked_prompt,
+            request_id=request_id,
+            n=payload.n,
+            size=payload.size,
+            quality=payload.quality,
+            style=payload.style,
+            response_format=payload.response_format,
+        )
+    except GatewayError as exc:
+        details = getattr(exc, "details", {}) or {}
+        body = details.get("body") if isinstance(details, dict) else None
+        err_body = body.get("error") if isinstance(body, dict) else None
+        logger.warning(
+            "image_generation_provider_error",
+            request_id=request_id,
+            tenant_id=str(auth.tenant_id),
+            user_id=str(getattr(auth, "user_id", "")) or None,
+            model=model,
+            provider="openai",
+            resolved_endpoint="/v1/images/generations",
+            status_code=details.get("status") if isinstance(details, dict) else None,
+            openai_error_type=err_body.get("type") if isinstance(err_body, dict) else None,
+            openai_error_code=err_body.get("code") if isinstance(err_body, dict) else None,
+            openai_error_message=err_body.get("message") if isinstance(err_body, dict) else str(exc),
+            latency_ms=int((time.perf_counter() - t0) * 1000),
+            retry_count=settings.provider_max_retries,
+            fallback_result="none",
+        )
+        raise
 
     # --- Restore masked tokens in the revised_prompt -------------------
     out_data: list[ImageData] = []
@@ -247,9 +293,28 @@ async def generate_images(
         cost_usd=result.cost_usd, policy_action=dlp_action,
         dlp_findings=dlp_findings, input_masked=masked_prompt,
     )
+
+    # Portal credit deduction — per-image COST (images report no
+    # tokens), × tenant markup × USAGE_CREDITS_PER_USD, min 1 credit.
+    # Best-effort: the image is already generated, a ledger hiccup must
+    # not fail the response.
+    try:
+        await deduct_portal_credit_async(
+            session,
+            str(auth.key_id),
+            request_id,
+            cost_usd=float(result.cost_usd or 0.0),
+            tokens_used=0,
+            tenant_id=str(auth.tenant_id),
+            portal_user_id=getattr(auth, "portal_user_id", None),
+        )
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("image_credit_deduct_failed", error=str(exc))
     logger.info(
         "image_generation",
         request_id=request_id, model=model, cost_usd=result.cost_usd,
+        provider="openai", endpoint="/v1/images/generations",
         dlp_action=dlp_action, findings=dlp_findings,
         latency_ms=latency_ms, count=len(out_data),
     )

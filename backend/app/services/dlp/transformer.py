@@ -22,7 +22,8 @@ import base64
 import hashlib
 import hmac as _hmac
 import re
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Mapping
 
 import structlog
 
@@ -37,6 +38,46 @@ if TYPE_CHECKING:
     from app.schemas.common import Message
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class AllocatedTokenRecord:
+    """One emitted mask token bound to the EXACT finding/span it masked.
+
+    Phase 4A.1.1 C2 fix — produced by the V2 masking path so Vault V2
+    entries derive metadata from the precise applied finding, NOT from a
+    raw-value reverse lookup. Immutable; carries no cross-request hash of
+    the raw value.
+    """
+
+    token: str
+    raw_value: str
+    category: str
+    detector: str | None
+    entity_type: str | None
+    action: str
+    policy_v2: Mapping[str, object] = field(default_factory=dict)
+    message_index: int | None = None
+    start: int | None = None
+    end: int | None = None
+
+
+def _build_allocated_record(token, original, ma, message_index):
+    """Build an :class:`AllocatedTokenRecord` from a token + its MatchAction."""
+    m = ma.match
+    pv = _pv2(ma)
+    return AllocatedTokenRecord(
+        token=token,
+        raw_value=original,
+        category=getattr(m, "category", "") or "",
+        detector=getattr(m, "detector_name", None),
+        entity_type=getattr(m, "entity_type", None),
+        action=ma.action.name,
+        policy_v2=dict(pv) if pv else {},
+        message_index=message_index,
+        start=getattr(m, "start", None),
+        end=getattr(m, "end", None),
+    )
 
 # Neutral ``<rN>`` token shape — May 2026 switch from ``[CATEGORY_N]``.
 # Why: OpenAI's safety filter refuses prompts containing tokens like
@@ -82,6 +123,20 @@ _PSEUDONYM_TOKEN_RE = re.compile(r"<<([A-Z][A-Z0-9_]*?)_([A-Z]|\d+)>>")
 _DOUBLE_BRACKET_TOKEN_RE = re.compile(r"<<(r[A-Za-z0-9_\-]+)>>")
 _DOUBLE_OPEN_TOKEN_RE = re.compile(r"<<(r[A-Za-z0-9_\-]+)>(?!>)")
 _DOUBLE_CLOSE_TOKEN_RE = re.compile(r"(?<!<)<(r[A-Za-z0-9_\-]+)>>")
+
+
+def contains_mask_token(text: str) -> bool:
+    """True if ``text`` contains any DLP mask placeholder.
+
+    Recognises both shapes (``<rN>`` and ``<<CATEGORY_N>>``) via the
+    same ``ANY_MASK_TOKEN_RE`` used by restore/orphan-detection, so
+    callers (e.g. the tool-argument placeholder-safety gate) stay in
+    lockstep with the emitter and never hard-code the format. Read-only;
+    does NOT change the placeholder format.
+    """
+    if not text:
+        return False
+    return ANY_MASK_TOKEN_RE.search(text) is not None
 
 
 def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
@@ -460,8 +515,8 @@ def _allocate_deterministic_token(
         logger.warning(
             "dlp_deterministic_token_collision",
             base=base,
-            existing_value_prefix=existing[:20],
-            new_value_prefix=original[:20],
+            existing_length=len(existing),
+            new_length=len(original),
             disambiguated_token=token,
         )
 
@@ -552,6 +607,29 @@ SECRET_DETECTORS: set[str] = {
 # income figures that are sensitive in aggregate but useless to the
 # assistant without the number.
 BYPASS_DETECTORS: set[str] = {"income"}
+
+# Phase 2A.1 — V2 numeric metadata accessors + message-index binding.
+_POLICY_V2_KEY = "policy_v2"
+# Supplemental/confidential/secret categories whose mask binding must
+# never silently fail (fail closed instead of leaking the value).
+_BIND_FAIL_CLOSED_CATEGORIES = frozenset({"secret", "credential", "financial"})
+
+
+class MaskBindingError(Exception):
+    """Raised when a message-index-bound sensitive finding cannot be
+    validated against its target message — fail closed, never skip."""
+
+
+def _pv2(match_action) -> dict:
+    return (match_action.match.metadata or {}).get(_POLICY_V2_KEY) or {}
+
+
+def _match_message_index(match_action):
+    return _pv2(match_action).get("message_index")
+
+
+def _match_force_mask(match_action) -> bool:
+    return bool(_pv2(match_action).get("force_mask"))
 
 
 def _is_pseudonym_mode_on() -> bool:
@@ -658,8 +736,18 @@ def _allocate_token(
     counters: dict[str, int],
     span_map: dict[str, str],
     original: str,
+    *,
+    force_mask: bool = False,
+    allocator=None,
 ) -> str | None:
     """Pick the next ``[BASE_N]`` token for this detector and bind it.
+
+    Phase 4A.1.1: when ``allocator`` is provided (Vault V2 path), the
+    token comes EXCLUSIVELY from the scoped atomic reservation — the
+    in-request ``__global__`` counter and pseudonym shapes are bypassed
+    so the Redis ``__counter__`` is the single allocation authority. The
+    income/``force_mask`` bypass is still honoured. Exhausting the
+    reserved range raises (fail closed — never an in-request ``<rN>``).
 
     Counter keying: by *base* name. This is the fix for the collision
     bug where two detectors sharing a base (``api_key_secret`` and
@@ -697,8 +785,19 @@ def _allocate_token(
     # Bypass — only honoured in pseudonym mode. In legacy mode every
     # finding still gets a placeholder; flipping the mode is the
     # opt-in for letting income / similar fields through to the LLM.
-    if pseudonym_mode and detector_name in BYPASS_DETECTORS:
+    # ``force_mask`` (Phase 2A.1) overrides the bypass: when the V2
+    # numeric policy classified this finding CONFIDENTIAL_NUMERIC, the
+    # value must be masked even though ``income`` is in BYPASS_DETECTORS.
+    if pseudonym_mode and detector_name in BYPASS_DETECTORS and not force_mask:
         return None
+
+    # Vault V2 reserved-token path — single allocation authority. No
+    # pseudonym shape, no internal counter, no collision fallback (each
+    # reserved token is unique by construction).
+    if allocator is not None:
+        token = allocator.next()
+        span_map[token] = original
+        return token
 
     # Identity-class pseudonym path (only in pseudonym mode + detector
     # listed in PSEUDONYM_MAP + not in SECRET_DETECTORS).
@@ -718,15 +817,16 @@ def _allocate_token(
             logger.error(
                 "dlp_pseudonym_collision",
                 token=token,
-                existing_value_prefix=existing[:20],
-                new_value_prefix=original[:20],
+                existing_length=len(existing),
+                new_length=len(original),
                 detector=detector_name,
             )
             # Advance past this slot and try again — the per-category
             # counter has already incremented, so the next call will
             # land on a fresh suffix.
             return _allocate_token(
-                detector_name, counters, span_map, original
+                detector_name, counters, span_map, original,
+                force_mask=force_mask,
             )
         span_map[token] = original
         return token
@@ -755,8 +855,8 @@ def _allocate_token(
         logger.error(
             "dlp_span_map_collision",
             token=token,
-            existing_value_prefix=existing[:20],
-            new_value_prefix=original[:20],
+            existing_length=len(existing),
+            new_length=len(original),
             detector=detector_name,
         )
         fallback = idx
@@ -1073,8 +1173,18 @@ class DLPTransformer:
         conversation_key: bytes | None = None,
         start_counters: dict[str, int] | None = None,
         vault_reverse_map: dict[str, str] | None = None,
+        token_allocator=None,
+        record_sink: list | None = None,
     ) -> tuple[list[Message], dict[str, str], dict[str, int]]:
         """Mask messages using indexed tokens and return a span_map.
+
+        Phase 4A.1.1 (Vault V2): when ``token_allocator`` is provided,
+        tokens are consumed from a scoped atomic reservation instead of the
+        in-request counter, within-call value-dedup is disabled (each
+        finding/span gets its OWN token), and one
+        :class:`AllocatedTokenRecord` per emitted token is appended to
+        ``record_sink``. When ``token_allocator`` is None (legacy/default),
+        behaviour is byte-identical to before.
 
         Unlike ``transform_messages``, each MASK replacement uses a
         per-detector indexed token (``[EMAIL_0]``, ``[EMAIL_1]`` …) so
@@ -1144,7 +1254,7 @@ class DLPTransformer:
             dict(vault_reverse_map) if vault_reverse_map else {}
         )
 
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             # Vision-format pass-through — same rationale as the
             # transform_messages branch above: list-typed content
             # has no scannable spans here.
@@ -1153,12 +1263,41 @@ class DLPTransformer:
                 continue
 
             # Find match_actions whose spans fall within this message.
-            msg_actions = [
-                ma for ma in match_actions
-                if 0 <= ma.match.start < len(msg.content)
-                and ma.match.end <= len(msg.content)
-                and msg.content[ma.match.start:ma.match.end] == ma.match.matched_text
-            ]
+            # Phase 2A.1: a finding carrying ``message_index`` is bound to
+            # exactly that message — it is applied ONLY there, never to a
+            # different message even if the offset+value coincide. A
+            # message-index-bound sensitive finding that fails span
+            # validation FAILS CLOSED (no silent skip). Findings WITHOUT a
+            # message_index keep the legacy offset+value match (single-text
+            # callers, and the unchanged legacy decision path in shadow).
+            def _slice_ok(ma):
+                s, e = ma.match.start, ma.match.end
+                return (
+                    0 <= s < len(msg.content)
+                    and e <= len(msg.content)
+                    and msg.content[s:e] == ma.match.matched_text
+                )
+
+            msg_actions = []
+            for ma in match_actions:
+                mi = _match_message_index(ma)
+                if mi is not None:
+                    if mi != idx:
+                        continue
+                    if _slice_ok(ma):
+                        msg_actions.append(ma)
+                    elif (
+                        ma.action in (EnforcementAction.MASK, EnforcementAction.REDACT)
+                        and ma.match.category in _BIND_FAIL_CLOSED_CATEGORIES
+                    ):
+                        raise MaskBindingError(
+                            f"message-index binding failed for "
+                            f"{ma.match.detector_name} on message {idx}"
+                        )
+                    # else: non-sensitive bound finding that doesn't
+                    # validate → drop (safe).
+                elif _slice_ok(ma):
+                    msg_actions.append(ma)
 
             # Filter to actionable items (MASK or REDACT).
             actionable = [
@@ -1196,18 +1335,34 @@ class DLPTransformer:
             for ma in resolved:
                 if ma.action == EnforcementAction.MASK:
                     original = msg.content[ma.match.start:ma.match.end]
-                    existing_token = reverse_map.get(original)
-                    if existing_token is not None:
-                        span_map.setdefault(existing_token, original)
-                        token = existing_token
-                    else:
+                    if token_allocator is not None:
+                        # V2: reserved token per span; no value-dedup so
+                        # duplicate values bind to distinct tokens/records.
                         token = _allocate_token(
-                            ma.match.detector_name, counters, span_map, original
+                            ma.match.detector_name, counters, span_map, original,
+                            force_mask=_match_force_mask(ma),
+                            allocator=token_allocator,
                         )
                         if token is None:
-                            # Bypass — leave the value untouched.
-                            continue
-                        reverse_map[original] = token
+                            continue  # bypass — value untouched
+                        if record_sink is not None:
+                            record_sink.append(
+                                _build_allocated_record(token, original, ma, idx)
+                            )
+                    else:
+                        existing_token = reverse_map.get(original)
+                        if existing_token is not None:
+                            span_map.setdefault(existing_token, original)
+                            token = existing_token
+                        else:
+                            token = _allocate_token(
+                                ma.match.detector_name, counters, span_map, original,
+                                force_mask=_match_force_mask(ma),
+                            )
+                            if token is None:
+                                # Bypass — leave the value untouched.
+                                continue
+                            reverse_map[original] = token
                     replacements.append(
                         (ma.match.start, ma.match.end, token, original)
                     )
@@ -1244,8 +1399,15 @@ class DLPTransformer:
         start_counters: dict[str, int] | None = None,
         conversation_key: bytes | None = None,
         vault_reverse_map: dict[str, str] | None = None,
+        token_allocator=None,
+        record_sink: list | None = None,
+        record_message_index: int | None = None,
     ) -> tuple[str, dict[str, str], dict[str, int]]:
         """Mask a single text string using indexed tokens + span_map.
+
+        Phase 4A.1.1 (Vault V2): ``token_allocator`` / ``record_sink``
+        behave as in :meth:`mask_messages` (reserved tokens, per-span
+        records). Legacy behaviour is byte-identical when both are None.
 
         Shares the same indexing scheme as ``mask_messages`` but operates
         on a raw string (used for the provider response path where there
@@ -1290,18 +1452,34 @@ class DLPTransformer:
         for ma in resolved:
             if ma.action == EnforcementAction.MASK:
                 original = text[ma.match.start:ma.match.end]
-                existing_token = reverse_map.get(original)
-                if existing_token is not None:
-                    span_map.setdefault(existing_token, original)
-                    token = existing_token
-                else:
+                if token_allocator is not None:
                     token = _allocate_token(
-                        ma.match.detector_name, counters, span_map, original
+                        ma.match.detector_name, counters, span_map, original,
+                        force_mask=_match_force_mask(ma),
+                        allocator=token_allocator,
                     )
                     if token is None:
-                        # Bypass — leave the value untouched.
-                        continue
-                    reverse_map[original] = token
+                        continue  # bypass
+                    if record_sink is not None:
+                        record_sink.append(
+                            _build_allocated_record(
+                                token, original, ma, record_message_index
+                            )
+                        )
+                else:
+                    existing_token = reverse_map.get(original)
+                    if existing_token is not None:
+                        span_map.setdefault(existing_token, original)
+                        token = existing_token
+                    else:
+                        token = _allocate_token(
+                            ma.match.detector_name, counters, span_map, original,
+                            force_mask=_match_force_mask(ma),
+                        )
+                        if token is None:
+                            # Bypass — leave the value untouched.
+                            continue
+                        reverse_map[original] = token
                 replacements.append((ma.match.start, ma.match.end, token))
             else:  # REDACT
                 replacements.append((ma.match.start, ma.match.end, "[REDACTED]"))

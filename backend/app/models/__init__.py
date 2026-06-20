@@ -21,6 +21,7 @@ from app.models.project_member import ProjectMemberORM
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
 from app.models.request_log import RequestLogORM
+from app.models.search_provider import SearchProviderORM
 from app.models.system_setting import SystemSettingORM
 from app.models.tenant import TenantORM
 from app.models.tenant_invite import TenantInviteORM
@@ -34,6 +35,6 @@ __all__ = [
     "ModelConfigORM",
     "OrgSettingsORM", "PolicyORM", "PolicyProfileORM",
     "PortalUserORM", "ProjectORM", "ProjectMemberORM", "ProviderORM", "ProviderKeyORM",
-    "RequestLogORM", "SystemSettingORM", "TenantORM",
+    "RequestLogORM", "SearchProviderORM", "SystemSettingORM", "TenantORM",
     "TenantInviteORM", "TokenPackORM",
 ]

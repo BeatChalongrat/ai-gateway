@@ -29,6 +29,24 @@ class TenantORM(Base):
     dlp_engine: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="inherit"
     )
+    # Credit billing multiplier applied to this tenant's request cost
+    # before converting to ledger credits (migration 054). 1.0 = at
+    # cost, 1.5 = 50% margin, 2.0 = 100% margin. Used identically by
+    # the balance deduction AND the usage-panel display so they match.
+    credit_markup: Mapped[float] = mapped_column(
+        sa.Numeric(4, 2), nullable=False, server_default=sa.text("1.0")
+    )
+    # Web-search feature (migration 055). ``search_enabled`` gates the
+    # whole feature for the tenant — chat-edge only offers the
+    # web_search tool when this is on AND a provider is configured.
+    # ``search_credit_cost`` is the flat credit charge per search query
+    # (web search bills per-query, not by token cost).
+    search_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    search_credit_cost: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("5")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

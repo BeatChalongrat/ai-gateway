@@ -222,3 +222,41 @@ class TestGoogleAIStreaming:
         assert chunks[-1].finish_reason == "stop"
         assert chunks[-1].usage is not None
         assert chunks[-1].usage.total_tokens == 7
+
+
+class TestGoogleMultimodalContent:
+    """OpenAI-format content arrays (vision turns from chat-edge) must
+    become Gemini text / inline_data parts — not a list embedded under
+    ``text`` (which Gemini rejects)."""
+
+    def test_image_url_data_url_becomes_inline_data(self):
+        msgs = [
+            Message(
+                role="user",
+                content=[
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,AAAA", "detail": "low"},
+                    },
+                    {"type": "text", "text": "what is this?"},
+                ],
+            ),
+        ]
+        contents = _build_contents(msgs)
+        parts = contents[0]["parts"]
+        assert parts[0] == {"inline_data": {"mime_type": "image/png", "data": "AAAA"}}
+        assert parts[1] == {"text": "what is this?"}
+
+    def test_plain_string_content_unchanged(self):
+        contents = _build_contents([Message(role="user", content="hi")])
+        assert contents[0]["parts"] == [{"text": "hi"}]
+
+    def test_unconvertible_image_degrades_to_placeholder(self):
+        msgs = [
+            Message(
+                role="user",
+                content=[{"type": "image_url", "image_url": {"url": "ftp://nope"}}],
+            ),
+        ]
+        parts = _build_contents(msgs)[0]["parts"]
+        assert parts == [{"text": "[image omitted]"}]

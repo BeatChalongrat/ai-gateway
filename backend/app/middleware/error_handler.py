@@ -28,6 +28,8 @@ from app.core.exceptions import (
     ProviderUnavailableError,
     QuotaExceededError,
     RateLimitExceededError,
+    SearchDisabledError,
+    SearchProvidersUnavailableError,
     UpstreamBadResponseError,
     ValidationError,
 )
@@ -46,6 +48,8 @@ _STATUS_MAP: dict[type[GatewayError], int] = {
     DLPViolationError: 403,
     RateLimitExceededError: 429,
     QuotaExceededError: 429,
+    SearchDisabledError: 400,
+    SearchProvidersUnavailableError: 503,
     ProviderTimeoutError: 504,
     ProviderUnavailableError: 503,
     ProviderNotImplementedError: 501,

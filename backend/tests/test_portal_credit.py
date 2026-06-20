@@ -176,7 +176,9 @@ def test_gateway_skips_credit_check_for_non_portal_keys():
         db.add(key)
         db.commit()
         check_portal_credit(db, "admin-key-x")  # must not raise
-        deduct_portal_credit(db, "admin-key-x", 500, "r-x")  # must not raise
+        deduct_portal_credit(
+            db, "admin-key-x", "r-x", cost_usd=0.001, tokens_used=500
+        )  # must not raise
     finally:
         db.rollback()
         db.close()
@@ -188,7 +190,11 @@ def test_deduct_via_gateway_hook():
         user = _make_user(db, balance=1000)
         _make_key(db, user.id, key_id="deduct-key")
         db.commit()
-        deduct_portal_credit(db, "deduct-key", 250, "req-9")
+        # Cost-based: credits = ceil(cost_usd * markup * USAGE_CREDITS_PER_USD).
+        # 0.0000833 USD * 3,000,000 = 249.9 → ceil → 250 credits.
+        deduct_portal_credit(
+            db, "deduct-key", "req-9", cost_usd=0.0000833, tokens_used=250
+        )
         db.refresh(user)
         assert user.credit_balance == 750
         assert user.credit_used == 250

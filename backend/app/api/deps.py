@@ -37,6 +37,22 @@ class ResolvedApiKey:
     # ``<key_id>:user:<user_id>`` so each end-user gets their own bucket.
     # ``None`` => the limiter falls back to ``key_id`` (legacy behaviour).
     rate_limit_key_id: str | None = None
+    # TRUSTED end-user portal id behind a shared key (same gate as the
+    # rate limiter: ``X-User-ID`` honoured only with the internal-service
+    # secret). The credit check/deduction debits THIS user when the key
+    # itself isn't portal-owned, so web-chat traffic drains the actual
+    # chatting user's balance. ``None`` => key-owner semantics only.
+    portal_user_id: str | None = None
+    # True only when the caller proved the internal-service secret (the
+    # web-chat → chat-edge → gateway path). Used purely as DLP audit
+    # metadata (channel=webchat) — NOT a security principal; ownership is
+    # still tenant/project/actor. Never trust this to relax policy.
+    internal_trusted: bool = False
+    # Conversation locator from ``X-Conversation-ID``, honoured ONLY when
+    # ``internal_trusted`` (web-chat). For untrusted/public callers this is
+    # always ``None`` — a public client's header is ignored, exactly like
+    # ``X-User-ID``. This is an opaque locator, NOT proof of ownership.
+    trusted_conversation_id: str | None = None
 
 
 def get_db_session() -> Generator[Session, None, None]:
@@ -158,6 +174,7 @@ def get_resolved_api_key(
     authorization: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None),
     x_internal_service_secret: str | None = Header(default=None),
+    x_conversation_id: str | None = Header(default=None),
 ) -> ResolvedApiKey:
     """Validate Bearer token and return resolved identity.
 
@@ -185,6 +202,17 @@ def get_resolved_api_key(
     if not raw_key:
         raise AuthenticationError("Missing or invalid authorization header")
 
+    # Internal-service trust gate (same as the rate-limiter / portal-user
+    # gate). ``X-Conversation-ID`` is an opaque locator honoured ONLY for
+    # a trusted internal caller (web-chat → chat-edge); a public client's
+    # header is ignored.
+    _internal_trusted = _internal_signal_trusted(x_internal_service_secret)
+    _trusted_conv_id = (
+        ((x_conversation_id or "").strip() or None)
+        if _internal_trusted
+        else None
+    )
+
     with SessionLocal() as session:
         # JWT tokens start with "eyJ" (base64-encoded JSON header)
         if raw_key.startswith("eyJ"):
@@ -193,7 +221,10 @@ def get_resolved_api_key(
             # JWT identity is already per-user; pin the rate-limit bucket
             # to its key_id explicitly (X-User-ID is ignored on this path).
             return dataclasses.replace(
-                resolved, rate_limit_key_id=resolved.key_id
+                resolved,
+                rate_limit_key_id=resolved.key_id,
+                internal_trusted=_internal_trusted,
+                trusted_conversation_id=_trusted_conv_id,
             )
 
         # Otherwise treat as API key (gw_xxxx)
@@ -207,6 +238,16 @@ def get_resolved_api_key(
             x_user_id=x_user_id,
             x_internal_service_secret=x_internal_service_secret,
         )
+        # Same trust gate as the limiter: only a caller proving the
+        # internal-service secret gets its X-User-ID honoured as the
+        # credit-debit identity.
+        trusted_user = (x_user_id or "").strip()
+        portal_user_id = (
+            trusted_user
+            if trusted_user
+            and _internal_signal_trusted(x_internal_service_secret)
+            else None
+        )
         resolved = ResolvedApiKey(
             key_id=api_key.key_id,
             tenant_id=api_key.tenant_id,
@@ -214,6 +255,9 @@ def get_resolved_api_key(
             key_prefix=api_key.key_prefix,
             role=getattr(api_key, "role", "user"),
             rate_limit_key_id=rate_limit_key_id,
+            portal_user_id=portal_user_id,
+            internal_trusted=_internal_trusted,
+            trusted_conversation_id=_trusted_conv_id,
         )
         session.commit()
         return resolved

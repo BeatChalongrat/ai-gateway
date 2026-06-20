@@ -248,6 +248,7 @@ def get_usage_summary(
             "estimated_cost_usd": 0.0,
             "estimated_cost_thb": 0.0,
             "cost_display": "฿0.0000",
+            "credits_used": 0,
         },
         "windows": {"today": 0, "last_7d": 0, "last_30d": 0},
         "top_models": [],
@@ -283,15 +284,24 @@ def get_usage_summary(
             or 0
         )
 
-    # Top 5 models by request count (descending)
+    # Top 5 models by request count (descending). Grouped by
+    # (model, provider) so the per-model rows can carry a provider
+    # label, and summed cost feeds the display-credit conversion
+    # (credits = real logged USD cost × usage_credits_per_usd —
+    # 1 display credit ≈ 1 blended budget-tier token, so expensive
+    # models burn proportionally more credits than cheap ones).
     top_models_rows = session.execute(
         select(
             RequestLogORM.model,
+            RequestLogORM.provider,
             func.count(RequestLogORM.request_id).label("requests"),
             func.coalesce(func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(RequestLogORM.estimated_cost_usd), 0.0).label(
+                "cost_usd"
+            ),
         )
         .where(scope)
-        .group_by(RequestLogORM.model)
+        .group_by(RequestLogORM.model, RequestLogORM.provider)
         .order_by(func.count(RequestLogORM.request_id).desc())
         .limit(5)
     ).all()
@@ -312,9 +322,23 @@ def get_usage_summary(
         .order_by(func.count(RequestLogORM.request_id).desc())
     ).all()
 
+    from app.core.config import settings
     from app.services.currency_service import currency_service
     _total_usd = float(totals_row[2] or 0.0)
     _cost_info = currency_service.format_cost(_total_usd)
+    # Same conversion the deduction uses: cost × tenant markup ×
+    # USAGE_CREDITS_PER_USD — so the usage panel matches what actually
+    # left the balance.
+    from app.models.tenant import TenantORM
+
+    _markup = 1.0
+    _tenant = session.get(TenantORM, tenant_id)
+    if _tenant is not None:
+        try:
+            _markup = max(1.0, float(_tenant.credit_markup or 1.0))
+        except (TypeError, ValueError):
+            _markup = 1.0
+    _credit_rate = int(settings.usage_credits_per_usd) * _markup
     return {
         "totals": {
             "requests": int(totals_row[0] or 0),
@@ -322,6 +346,9 @@ def get_usage_summary(
             "estimated_cost_usd": _total_usd,
             "estimated_cost_thb": _cost_info["thb"],
             "cost_display": _cost_info["display"],
+            # Display credits — derived from real logged cost, NOT the
+            # token-lockstep credit_balance debits.
+            "credits_used": int(round(_total_usd * _credit_rate)),
         },
         "windows": {
             "today": _count_since(today_start),
@@ -331,8 +358,10 @@ def get_usage_summary(
         "top_models": [
             {
                 "model": row[0],
-                "requests": int(row[1]),
-                "tokens": int(row[2]),
+                "provider": row[1] or "",
+                "requests": int(row[2]),
+                "tokens": int(row[3]),
+                "credits_used": int(round(float(row[4] or 0.0) * _credit_rate)),
             }
             for row in top_models_rows
         ],
