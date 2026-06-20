@@ -82,16 +82,36 @@ def classify_query_complexity(messages: list[dict]) -> str:
         return QueryComplexity.SIMPLE
 
     text = last_user.lower()
-    word_count = len(text.split())
 
     complex_score = sum(1 for s in _COMPLEX_SIGNALS if s in text)
     simple_score = sum(1 for s in _SIMPLE_SIGNALS if s in text)
 
-    # Long messages skew complex.
-    if word_count > 100:
-        complex_score += 2
-    if word_count > 200:
-        complex_score += 1
+    # P1-1 — length scoring is LANGUAGE-AWARE. Thai (and other space-free
+    # scripts) can't be word-counted with ``str.split()``: a whole Thai
+    # sentence is a single "word", so the English word thresholds never fire
+    # and every long Thai prompt looked trivial. For Thai-dominant text we
+    # score by CHARACTER count instead; English keeps the exact word-based
+    # path so its behavior is unchanged.
+    stripped = text.strip()
+    thai_chars = sum(1 for ch in stripped if "฀" <= ch <= "๿")
+    is_thai = bool(stripped) and thai_chars >= 0.3 * len(stripped)
+
+    if is_thai:
+        char_count = len(stripped)
+        if char_count > 200:
+            complex_score += 2          # long Thai paragraph → complex
+        if char_count > 400:
+            complex_score += 1
+        length_moderate = char_count > 120
+        length_simple = char_count < 30
+    else:
+        word_count = len(text.split())
+        if word_count > 100:
+            complex_score += 2
+        if word_count > 200:
+            complex_score += 1
+        length_moderate = word_count > 50
+        length_simple = word_count < 15
 
     # Multiple questions = more to reason about.
     question_marks = text.count("?") + text.count("？")
@@ -104,8 +124,8 @@ def classify_query_complexity(messages: list[dict]) -> str:
 
     if complex_score >= 2:
         return QueryComplexity.COMPLEX
-    if complex_score >= 1 or word_count > 50:
+    if complex_score >= 1 or length_moderate:
         return QueryComplexity.MODERATE
-    if simple_score >= 1 or word_count < 15:
+    if simple_score >= 1 or length_simple:
         return QueryComplexity.SIMPLE
     return QueryComplexity.MODERATE
