@@ -1,0 +1,49 @@
+diff --git a/backend/app/services/dlp/conversation_vault.py b/backend/app/services/dlp/conversation_vault.py
+index 7333a84..8944842 100644
+--- a/backend/app/services/dlp/conversation_vault.py
++++ b/backend/app/services/dlp/conversation_vault.py
+@@ -95,7 +95,7 @@ class ConversationVault:
+             logger.warning(
+                 "conversation_vault_extend_failed",
+                 conversation_id=conversation_id,
+-                error=str(exc)[:200],
++                exception_type=type(exc).__name__,
+             )
+ 
+     async def resolve_async(
+@@ -114,7 +114,7 @@ class ConversationVault:
+             logger.warning(
+                 "conversation_vault_resolve_failed",
+                 conversation_id=conversation_id,
+-                error=str(exc)[:200],
++                exception_type=type(exc).__name__,
+             )
+             return {}
+         out: dict[str, str] = {}
+@@ -133,7 +133,7 @@ class ConversationVault:
+             logger.warning(
+                 "conversation_vault_delete_failed",
+                 conversation_id=conversation_id,
+-                error=str(exc)[:200],
++                exception_type=type(exc).__name__,
+             )
+ 
+     async def get_all_tokens_async(
+@@ -150,7 +150,7 @@ class ConversationVault:
+             logger.warning(
+                 "conversation_vault_get_all_failed",
+                 conversation_id=conversation_id,
+-                error=str(exc)[:200],
++                exception_type=type(exc).__name__,
+             )
+             return {}
+ 
+@@ -204,7 +204,7 @@ class ConversationVault:
+             logger.warning(
+                 "conversation_vault_extend_failed",
+                 conversation_id=conversation_id,
+-                error=str(exc)[:200],
++                exception_type=type(exc).__name__,
+             )
+ 
+     def _resolve_via_fake(

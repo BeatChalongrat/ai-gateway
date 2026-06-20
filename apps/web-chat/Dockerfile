@@ -14,8 +14,8 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Next.js standalone bundle ships its own minimal node_modules.
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/.next-fresh/standalone ./
+COPY --from=builder /app/.next-fresh/static ./.next-fresh/static
 COPY --from=builder /app/public ./public
 
 EXPOSE 3002

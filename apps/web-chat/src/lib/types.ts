@@ -131,6 +131,7 @@ export interface FileAttachment {
   filename: string;
   content_type: string;
   file_size_bytes: number;
+  download_url?: string;
   extraction_status:
     | "pending"
     | "processing"
@@ -312,6 +313,24 @@ export interface Message {
   reasoning_content?: string | null;
   is_thinking?: boolean;
   thinking_duration_ms?: number;
+  /** local-only — flipped on by the ``image_generating`` SSE event
+   *  while the backend is generating an image for this turn.
+   *  MessageBubble renders the ImageGeneratingPlaceholder until the
+   *  ``message_files`` event (or a terminal frame) clears it. */
+  is_generating_image?: boolean;
+  /** Web-search citations — the sources the assistant cited via the
+   *  web_search tool. Persisted server-side (search_sources column) so
+   *  they hydrate on reload, and delivered live via the
+   *  ``message_sources`` SSE event. Drives the citation chips. */
+  search_sources?: SearchSource[];
+  /** local-only — flipped on by the ``search_status`` SSE event while
+   *  the backend is searching the web. MessageBubble shows the
+   *  SearchingIndicator until content streams / sources land. */
+  is_searching?: boolean;
+  /** local-only — wall-clock duration of the streaming turn (send →
+   *  message_complete). Shown in the per-message metadata line; absent
+   *  after a page reload (not persisted). */
+  response_time_ms?: number;
   /** B1 — local-only. Set when the stream failed; drives the error
    *  bubble styling + localized message in MessageBubble. */
   error_code?: string;
@@ -518,9 +537,78 @@ export interface SSEAnalysisStatus {
   status: "started" | "completed";
 }
 
+/** Image-generation phase marker. The backend emits `started` just
+ *  before the image provider call begins; the ChatStore flips
+ *  Message.is_generating_image on, and the `message_files` event
+ *  (or a terminal frame) flips it back off. */
+export interface SSEImageGenerating {
+  status: "started";
+}
+
 export interface SSEMessageComplete {
   message_id: UUID;
   token_usage?: TokenUsage & { reasoning?: number };
+}
+
+// ── Usage & credits (credit badge + popover) ─────────────────
+// Served by chat-edge GET /usage/me, which proxies the gateway's
+// portal API (same numbers the Portal Dashboard shows).
+// 1 credit = 1 token; the pool is a lifetime allotment.
+
+export interface ModelUsage {
+  model: string;
+  /** Gateway provider id (openai / anthropic / openrouter / …);
+   *  may be empty on legacy rows. */
+  provider: string;
+  tokens: number;
+  /** Display credits — real logged cost × the gateway's credit rate,
+   *  so expensive models burn proportionally more than cheap ones. */
+  credits_used: number;
+  request_count: number;
+  /** Share of total credit usage, 0–100 with one decimal. */
+  percentage: number;
+}
+
+export interface UsageResponse {
+  credits: {
+    total: number;
+    used: number;
+    remaining: number;
+    reset_date: string | null;
+  };
+  usage_by_model: ModelUsage[];
+  /** Display credits across ALL models (not just the top rows). */
+  total_credits_used: number;
+  period: string;
+}
+
+export interface SSEMessageFiles {
+  message_id: UUID;
+  files: FileAttachment[];
+}
+
+/** One web-search citation (rendered as a chip under the message). */
+export interface SearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+  domain: string;
+  published_date?: string | null;
+}
+
+/** Web-search phase marker. The backend emits `searching` just before
+ *  the web_search tool runs; the ChatStore flips Message.is_searching
+ *  on, and content_delta / message_sources / message_complete clear it. */
+export interface SSESearchStatus {
+  status: "searching";
+}
+
+/** Web-search citations delivered live after the assistant turn. The
+ *  ChatStore stores them on the message; they also hydrate on reload
+ *  from the message-list API (search_sources). */
+export interface SSEMessageSources {
+  message_id: UUID;
+  sources: SearchSource[];
 }
 
 /** One attempted model in a fallback chain (B2/B3). */

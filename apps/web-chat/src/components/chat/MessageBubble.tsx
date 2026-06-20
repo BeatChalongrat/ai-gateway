@@ -22,6 +22,7 @@ import rehypeHighlight from "rehype-highlight";
 import type { FallbackAttempt, Message } from "@/lib/types";
 import { fallbackNotice } from "@/lib/errorMessages";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
+import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
 import { BranchNavigator } from "./BranchNavigator";
@@ -31,6 +32,9 @@ import type { DocPlan } from "./DocPlanCard";
 import { ExcelPlanCard } from "./ExcelPlanCard";
 import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
+import { ImageGeneratingPlaceholder } from "./ImageGeneratingPlaceholder";
+import { SearchCitations } from "./SearchCitations";
+import { SearchingIndicator } from "./SearchingIndicator";
 import { SourcesCard } from "./SourcesCard";
 import { MessageAttachments } from "./MessageAttachments";
 import { PptxPlanCard } from "./PptxPlanCard";
@@ -372,8 +376,22 @@ function MessageBubbleImpl({
         />
       ) : null}
 
+      {/* Image-generation placeholder — occupies the attachment slot
+          while the backend generates an image, then the real thumbnail
+          (message_files) replaces it in place. */}
+      {message.is_generating_image &&
+      !(message.files && message.files.length > 0) ? (
+        <ImageGeneratingPlaceholder />
+      ) : null}
+
       {message.files && message.files.length > 0 ? (
         <MessageAttachments files={message.files} />
+      ) : null}
+
+      {/* Web-search citation chips — the sources the assistant cited.
+          Live via message_sources, hydrated from the API on reload. */}
+      {message.search_sources && message.search_sources.length > 0 ? (
+        <SearchCitations sources={message.search_sources} />
       ) : null}
 
       {/* S7 — "Sources used" rail. Renders only when the
@@ -433,8 +451,35 @@ function MessageBubbleImpl({
         {message.status === "cancelled" ? (
           <span className="ml-2 text-[11px] text-text-muted">stopped</span>
         ) : null}
+        {!message.isStreaming ? <MessageMeta message={message} /> : null}
       </div>
     </div>
+  );
+}
+
+// Subtle per-message metadata: "GPT-4o · 342 tokens · 1.2s". Tokens
+// come from the message_complete SSE frame (persisted server-side, so
+// they survive reloads); the duration is local-only and disappears on
+// reload. Renders nothing when no token data is available.
+function MessageMeta({ message }: { message: Message }) {
+  const models = useModelStore((s) => s.models);
+  const usage = message.token_usage;
+  if (!usage) return null;
+  const total = (usage.input ?? 0) + (usage.output ?? 0);
+  if (total <= 0) return null;
+  const name = message.model_id
+    ? (models.find((m) => m.id === message.model_id)?.name ?? message.model_id)
+    : null;
+  const parts: string[] = [];
+  if (name) parts.push(name);
+  parts.push(`${total.toLocaleString()} tokens`);
+  if (message.response_time_ms && message.response_time_ms > 0) {
+    parts.push(`${(message.response_time_ms / 1000).toFixed(1)}s`);
+  }
+  return (
+    <span className="ml-2 text-[11px] text-text-muted">
+      {parts.join(" · ")}
+    </span>
   );
 }
 
@@ -656,6 +701,13 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
   const isStreaming = message.isStreaming;
 
   if (!hasContent && isStreaming) {
+    // While an image is generating, the ImageGeneratingPlaceholder
+    // below the body already communicates progress — duplicate
+    // typing dots would read as a second, unrelated loading state.
+    if (message.is_generating_image) return null;
+    // While searching the web, show the searching indicator in place of
+    // the typing dots. It self-hides once the answer streams in.
+    if (message.is_searching) return <SearchingIndicator />;
     return (
       <span className="typing-indicator" aria-label="Thinking">
         <span />
@@ -781,6 +833,7 @@ function areEqual(prev: Props, next: Props): boolean {
     a.branch_count === b.branch_count &&
     a.has_branches === b.has_branches &&
     a.token_usage === b.token_usage &&
+    a.response_time_ms === b.response_time_ms &&
     // T4 — re-render while reasoning text streams in. Without these,
     // a turn that updates ONLY reasoning_content / is_thinking /
     // thinking_duration_ms (no content delta or status flip) would be
@@ -788,7 +841,15 @@ function areEqual(prev: Props, next: Props): boolean {
     a.reasoning_content === b.reasoning_content &&
     a.is_thinking === b.is_thinking &&
     a.thinking_duration_ms === b.thinking_duration_ms &&
+    // Image-generation placeholder — re-render when the flag flips
+    // (set by the image_generating SSE event, cleared by
+    // message_files / message_complete / error).
+    a.is_generating_image === b.is_generating_image &&
     a.files === b.files &&
+    // Web search — re-render when the searching flag flips or the
+    // citation sources arrive (live via message_sources / on reload).
+    a.is_searching === b.is_searching &&
+    a.search_sources === b.search_sources &&
     // S7 — re-render when the per-turn context_sources array
     // arrives or changes. The first render after a stream
     // finishes carries no sources (they persist async); the next
