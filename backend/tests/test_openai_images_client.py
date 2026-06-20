@@ -4,6 +4,7 @@ import httpx
 import pytest
 import respx
 
+from app.core.exceptions import ProviderTimeoutError
 from app.services.providers.openai_images_client import generate_image, image_cost_usd
 
 _KEY_PATH = "app.services.provider_key_service.ProviderKeyService.get_active_key_async"
@@ -129,3 +130,66 @@ async def test_generate_gpt_image_b64_and_quality(monkeypatch):
     assert result.data[0]["b64_json"] == "AAAA"
     assert result.data[0].get("url") is None
     assert result.cost_usd == 0.167  # high 1024x1024
+
+
+@pytest.mark.asyncio
+async def test_generate_image_uses_dedicated_image_timeout(monkeypatch):
+    async def _fake_key(self, session, provider):
+        return "sk-test-key"
+
+    class FakeClient:
+        def __init__(self):
+            self.timeout = None
+
+        async def post(self, path, *, json, headers, timeout):
+            self.timeout = timeout
+            return httpx.Response(
+                200,
+                json={"created": 1, "data": [{"b64_json": "AAAA"}]},
+                request=httpx.Request("POST", "https://api.openai.com/v1/images/generations"),
+            )
+
+    fake = FakeClient()
+
+    async def _fake_client(**kwargs):
+        return fake
+
+    monkeypatch.setattr(_KEY_PATH, _fake_key)
+    monkeypatch.setattr(
+        "app.services.providers.openai_images_client.get_provider_client",
+        _fake_client,
+    )
+    monkeypatch.setattr(
+        "app.services.providers.openai_images_client.settings.openai_image_timeout_seconds",
+        180.0,
+    )
+
+    await generate_image(None, model="gpt-image-1", prompt="a cat")
+
+    assert fake.timeout.read == 180.0
+
+
+@pytest.mark.asyncio
+async def test_generate_image_timeout_maps_to_provider_timeout(monkeypatch):
+    async def _fake_key(self, session, provider):
+        return "sk-test-key"
+
+    class FakeClient:
+        async def post(self, path, *, json, headers, timeout):
+            raise httpx.ReadTimeout("image slow")
+
+    async def _fake_client(**kwargs):
+        return FakeClient()
+
+    monkeypatch.setattr(_KEY_PATH, _fake_key)
+    monkeypatch.setattr(
+        "app.services.providers.openai_images_client.get_provider_client",
+        _fake_client,
+    )
+    monkeypatch.setattr(
+        "app.services.providers.openai_images_client.settings.provider_max_retries",
+        0,
+    )
+
+    with pytest.raises(ProviderTimeoutError):
+        await generate_image(None, model="gpt-image-1", prompt="a cat")

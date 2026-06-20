@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "registry_version": "2026-06-17",
+  "notes": "Phase 3 seed: conservative, verified Thai royal/historical/public references only. Used solely as span-scoped NEGATIVE evidence against name/place/org findings. Contains NO private or sensitive data. Numerals (Thai/Arabic) and optional whitespace are handled by the matcher, so aliases need not enumerate every numeral form.",
+  "entities": [
+    {
+      "entity_id": "thai_royal_reign_01",
+      "entity_type": "ROYAL_REIGN_REFERENCE",
+      "canonical_name": "รัชกาลที่ 1",
+      "aliases": ["ร.1", "ร. 1"],
+      "ambiguous_aliases": [],
+      "required_context": [],
+      "status": "active"
+    },
+    {
+      "entity_id": "thai_royal_reign_05",
+      "entity_type": "ROYAL_REIGN_REFERENCE",
+      "canonical_name": "รัชกาลที่ 5",
+      "aliases": ["ร.5", "ร. 5"],
+      "ambiguous_aliases": [],
+      "required_context": [],
+      "status": "active"
+    },
+    {
+      "entity_id": "thai_royal_reign_09",
+      "entity_type": "ROYAL_REIGN_REFERENCE",
+      "canonical_name": "รัชกาลที่ 9",
+      "aliases": ["ร.9", "ร. 9"],
+      "ambiguous_aliases": [],
+      "required_context": [],
+      "status": "active"
+    },
+    {
+      "entity_id": "thai_royal_reign_10",
+      "entity_type": "ROYAL_REIGN_REFERENCE",
+      "canonical_name": "รัชกาลที่ 10",
+      "aliases": ["ร.10", "ร. 10"],
+      "ambiguous_aliases": [],
+      "required_context": [],
+      "status": "active"
+    },
+    {
+      "entity_id": "thai_royal_title_king",
+      "entity_type": "ROYAL_TITLE",
+      "canonical_name": "พระบาทสมเด็จพระเจ้าอยู่หัว",
+      "aliases": [],
+      "ambiguous_aliases": ["ในหลวง"],
+      "required_context": ["รัชกาล", "พระมหากษัตริย์", "กษัตริย์", "เสด็จ", "ทรง", "พระราช"],
+      "status": "active",
+      "notes": "Full title is exact; the short colloquial reference is ambiguous and requires royal context."
+    },
+    {
+      "entity_id": "thai_royal_title_queen",
+      "entity_type": "ROYAL_TITLE",
+      "canonical_name": "สมเด็จพระนางเจ้าฯ",
+      "aliases": ["สมเด็จพระนางเจ้า"],
+      "ambiguous_aliases": [],
+      "required_context": [],
+      "status": "active"
+    },
+    {
+      "entity_id": "thai_public_place_grand_palace",
+      "entity_type": "PUBLIC_PLACE",
+      "canonical_name": "พระบรมมหาราชวัง",
+      "aliases": [],
+      "ambiguous_aliases": [],
+      "required_context": [],
+      "status": "active"
+    },
+    {
+      "entity_id": "thai_public_org_royal_household_bureau",
+      "entity_type": "PUBLIC_ORGANIZATION",
+      "canonical_name": "สำนักพระราชวัง",
+      "aliases": [],
+      "ambiguous_aliases": [],
+      "required_context": [],
+      "status": "active"
+    }
+  ]
+}

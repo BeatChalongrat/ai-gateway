@@ -86,7 +86,10 @@ async def test_deduct_portal_credit_async_writes_ledger_and_decrements(async_db)
     key = await _seed_key(async_db, portal_user_id=user.id)
 
     req_id = uuid.uuid4().hex
-    await deduct_portal_credit_async(async_db, key.key_id, 300, req_id)
+    # Cost-based: ceil(0.0000999 USD * 3,000,000/USD) = 300 credits.
+    await deduct_portal_credit_async(
+        async_db, key.key_id, req_id, cost_usd=0.0000999, tokens_used=300
+    )
 
     refreshed = await async_db.get(PortalUserORM, user.id)
     assert int(refreshed.credit_balance) == 700
@@ -109,7 +112,10 @@ async def test_deduct_portal_credit_async_clamps_at_zero(async_db):
     user = await _seed_user(async_db, status="active", balance=100)
     key = await _seed_key(async_db, portal_user_id=user.id)
 
-    await deduct_portal_credit_async(async_db, key.key_id, 999, uuid.uuid4().hex)
+    # ceil(0.000333 * 3,000,000) = 999 credits requested, balance only 100.
+    await deduct_portal_credit_async(
+        async_db, key.key_id, uuid.uuid4().hex, cost_usd=0.000333, tokens_used=999
+    )
 
     refreshed = await async_db.get(PortalUserORM, user.id)
     assert int(refreshed.credit_balance) == 0
@@ -121,7 +127,11 @@ async def test_deduct_portal_credit_async_noop_zero_tokens(async_db):
     user = await _seed_user(async_db, status="active", balance=500)
     key = await _seed_key(async_db, portal_user_id=user.id)
 
-    await deduct_portal_credit_async(async_db, key.key_id, 0, uuid.uuid4().hex)
+    # Zero cost AND zero tokens — no billable work, must be a no-op
+    # (the min-1-credit floor only applies to billable requests).
+    await deduct_portal_credit_async(
+        async_db, key.key_id, uuid.uuid4().hex, cost_usd=0.0, tokens_used=0
+    )
 
     refreshed = await async_db.get(PortalUserORM, user.id)
     assert int(refreshed.credit_balance) == 500

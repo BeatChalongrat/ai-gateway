@@ -44,6 +44,7 @@ class TestTenantSchema:
             "region",
             "ner_enabled",  # added by migration 019
             "dlp_engine",  # added by migration 043 (Phase-3c Rust DLP sidecar)
+            "credit_markup",  # added by migration 054 (cost-based credit billing)
             "created_at",
             "updated_at",
         }
@@ -265,6 +266,7 @@ class TestMigration002:
         post_002 = {
             "ner_enabled",  # added in migration 019
             "dlp_engine",   # added in migration 043 (Phase-3c)
+            "credit_markup",  # added in migration 054 (cost-based billing)
         }
         assert migration_cols == (orm_cols - post_002)
         engine.dispose()
