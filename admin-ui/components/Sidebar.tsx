@@ -22,6 +22,7 @@ const NAV_SECTIONS: { title: string; items: { label: string; href: string; icon:
       { label: "Policies", href: "/policies", icon: <svg {...S}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> },
       { label: "Routing", href: "/routing", icon: <svg {...S}><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="M6 9v3a3 3 0 003 3h6a3 3 0 003-3V9"/></svg> },
       { label: "DLP coverage", href: "/dlp-coverage", icon: <svg {...S}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg> },
+      { label: "Search", href: "/search-settings", icon: <svg {...S}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> },
     ],
   },
   {
