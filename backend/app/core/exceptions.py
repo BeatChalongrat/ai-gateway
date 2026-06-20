@@ -122,6 +122,18 @@ class QuotaExceededError(GatewayError):
     message = "Usage quota or budget limit has been reached."
 
 
+# --- Web search ---
+
+class SearchDisabledError(GatewayError):
+    code = "search_not_enabled"
+    message = "Web search is not enabled for this tenant."
+
+
+class SearchProvidersUnavailableError(GatewayError):
+    code = "search_unavailable"
+    message = "Web search is unavailable — no provider could answer."
+
+
 # --- Provider / Upstream ---
 
 class ProviderError(GatewayError):

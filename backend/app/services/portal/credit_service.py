@@ -32,6 +32,28 @@ TransactionType = Literal[
 ]
 
 
+def credits_for_cost(cost_usd: float, markup: float = 1.0) -> int:
+    """Convert a request's real USD cost into ledger credits.
+
+    THE single conversion used by both the usage DISPLAY (portal usage
+    summary) and the balance DEDUCTION, so the panel always matches what
+    actually left the balance:
+
+        credits = ceil(cost_usd * markup * settings.usage_credits_per_usd)
+
+    Rounded UP (never give away fractional credits) with a floor of
+    1 credit per billable request — a near-zero-cost call still costs
+    something. ``markup`` is the tenant's ``credit_markup`` multiplier
+    (1.0 = at cost).
+    """
+    import math
+
+    from app.core.config import settings
+
+    raw = float(cost_usd or 0.0) * max(1.0, float(markup or 1.0))
+    return max(1, math.ceil(raw * int(settings.usage_credits_per_usd)))
+
+
 def get_setting(db: Session, key: str, default: str | None = None) -> str | None:
     """Read a value from ``system_settings``.
 

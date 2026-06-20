@@ -115,6 +115,9 @@ class TenantResponse(BaseModel):
     status: str
     region: str
     ner_enabled: bool = False
+    # Credit billing multiplier (1.0 = at cost). Applied to request
+    # cost before converting to ledger credits.
+    credit_markup: float = 1.0
     created_at: Optional[datetime] = None
 
 
@@ -127,6 +130,9 @@ class TenantUpdate(BaseModel):
     region: Optional[str] = None
     status: Optional[str] = None  # 'active' | 'inactive'
     ner_enabled: Optional[bool] = None
+    # Credit billing multiplier: 1.0 = at cost, 1.5 = 50% margin,
+    # 2.0 = 100% margin. Bounded so a typo can't 50x a tenant's bill.
+    credit_markup: Optional[float] = Field(None, ge=1.0, le=5.0)
 
     @field_validator("name")
     @classmethod

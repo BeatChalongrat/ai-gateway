@@ -18,6 +18,7 @@ Differences from OpenAI schema we handle:
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, AsyncIterator
 
 import httpx
@@ -75,9 +76,48 @@ def _to_gemini_role(role: str) -> str:
 
 def _build_contents(messages: list[Message]) -> list[dict]:
     return [
-        {"role": _to_gemini_role(m.role), "parts": [{"text": m.content}]}
+        {"role": _to_gemini_role(m.role), "parts": _to_gemini_parts(m.content)}
         for m in messages
     ]
+
+
+# data:image/png;base64,<payload> — the shape chat-edge ships for both
+# current-turn uploads and generated-image history replay.
+_DATA_URL_RE = re.compile(r"^data:(image/[a-z0-9.+-]+);base64,(.+)$", re.DOTALL)
+
+
+def _to_gemini_parts(content) -> list[dict]:
+    """Canonical message content → Gemini ``parts``.
+
+    Plain strings keep the legacy single-text-part shape. OpenAI-format
+    multimodal arrays (``text`` / ``image_url`` parts with base64 data
+    URLs) become ``{"text": …}`` / ``{"inline_data": …}`` parts —
+    before this, a content array was embedded verbatim under ``text``
+    and Gemini rejected the request, silently breaking vision (uploads
+    and generated-image history replay). Unconvertible parts degrade to
+    a short text placeholder.
+    """
+    if not isinstance(content, list):
+        return [{"text": content or ""}]
+    parts: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        ptype = part.get("type")
+        if ptype == "text":
+            parts.append({"text": part.get("text") or ""})
+        elif ptype == "image_url":
+            url = (part.get("image_url") or {}).get("url") or ""
+            m = _DATA_URL_RE.match(url)
+            if m:
+                parts.append(
+                    {"inline_data": {"mime_type": m.group(1), "data": m.group(2)}}
+                )
+            else:
+                parts.append({"text": "[image omitted]"})
+    if not parts:
+        parts.append({"text": ""})
+    return parts
 
 
 def _parse_response(data: dict) -> ProviderResponse:

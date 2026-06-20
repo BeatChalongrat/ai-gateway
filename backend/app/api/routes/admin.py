@@ -143,7 +143,7 @@ async def _reject_unknown_fields(request: Request, allowed: set[str]) -> None:
         )
 
 
-_TENANT_UPDATE_ALLOWED = {"name", "region", "status", "ner_enabled"}
+_TENANT_UPDATE_ALLOWED = {"name", "region", "status", "ner_enabled", "credit_markup"}
 _PROJECT_UPDATE_ALLOWED = {"name", "policy_profile_id", "status"}
 
 
@@ -1121,6 +1121,7 @@ def _tenant_to_response(tenant: TenantORM) -> TenantResponse:
         status=tenant.status,
         region=tenant.region,
         ner_enabled=bool(getattr(tenant, "ner_enabled", False)),
+        credit_markup=float(getattr(tenant, "credit_markup", 1.0) or 1.0),
         created_at=tenant.created_at,
     )
 
@@ -1199,6 +1200,8 @@ def update_tenant(
         tenant.status = body.status
     if body.ner_enabled is not None:
         tenant.ner_enabled = body.ner_enabled
+    if body.credit_markup is not None:
+        tenant.credit_markup = body.credit_markup
     session.flush()
     return _tenant_to_response(tenant)
 

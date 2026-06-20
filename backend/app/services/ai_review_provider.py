@@ -18,8 +18,10 @@ single POST; callers pick up exceptions for the failure path.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -126,6 +128,94 @@ def resolve_provider_meta(row: AiReviewSettingsORM) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Egress trust boundary (Phase 1 blocker B1)
+# ---------------------------------------------------------------------------
+#
+# The reviewer payload is post-DLP, pre-restore: raw secrets/credentials
+# are masked/blocked, but non-secret PII the detectors MISSED may be
+# present by design. So the destination host must be internal or
+# explicitly allowlisted before that payload may egress.
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+_INTERNAL_SUFFIXES = (".internal", ".local", ".svc", ".cluster.local")
+
+
+def _host_of(base_url: str | None) -> str:
+    if not base_url:
+        return ""
+    try:
+        return (urlparse(base_url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def classify_review_host(base_url: str | None) -> str:
+    """Classify a reviewer endpoint host as internal / trusted / external.
+
+    - ``internal``: localhost, private/loopback/link-local IP, a single-
+      label hostname (docker service name like ``ner-service``), or an
+      ``*.internal/.local/.svc/.cluster.local`` suffix.
+    - ``trusted``: host listed in ``settings.ai_review_allowed_hosts``.
+    - ``external``: anything else (including an unparseable URL).
+    """
+    host = _host_of(base_url)
+    if not host:
+        return "external"
+    if host in _LOCAL_HOSTS:
+        return "internal"
+    if any(host.endswith(s) for s in _INTERNAL_SUFFIXES):
+        return "internal"
+    if "." not in host:
+        return "internal"
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            return "internal"
+    except ValueError:
+        pass
+    allowed = {
+        h.strip().lower()
+        for h in (settings.ai_review_allowed_hosts or "").split(",")
+        if h.strip()
+    }
+    if host in allowed:
+        return "trusted"
+    return "external"
+
+
+# Built-in first-party LLM vendor providers. Their endpoints are fixed
+# preset hosts baked into the product (PROVIDER_PRESETS), NOT operator-
+# arbitrary — so they are trusted by default. The B1 risk the gate
+# addresses is the ``custom`` provider pointing at an arbitrary host.
+_FIRST_PARTY_PROVIDERS = frozenset({"anthropic", "openai", "openrouter"})
+
+
+def review_egress_allowed(
+    base_url: str | None, provider: str | None = None
+) -> tuple[bool, str, str]:
+    """Return (allowed, host_class, host) for a reviewer endpoint.
+
+    Gated by ``ai_review_require_trusted_endpoint`` (default True):
+    - First-party preset providers (anthropic/openai/openrouter) use
+      fixed vendor hosts → ``trusted_preset`` → allowed.
+    - ``custom`` provider: internal/allowlisted host → allowed; any other
+      external host → blocked unless ``ai_review_allow_external`` is true.
+    When the gate is disabled, everything is allowed (legacy behavior).
+    """
+    host = _host_of(base_url)
+    if not getattr(settings, "ai_review_require_trusted_endpoint", True):
+        return True, "gate_disabled", host
+    if provider in _FIRST_PARTY_PROVIDERS:
+        return True, "trusted_preset", host
+    host_class = classify_review_host(base_url)
+    if host_class in ("internal", "trusted"):
+        return True, host_class, host
+    if getattr(settings, "ai_review_allow_external", False):
+        return True, host_class, host
+    return False, host_class, host
+
+
 def estimate_cost(
     provider: str, prompt_tokens: int, completion_tokens: int
 ) -> float:
@@ -188,6 +278,18 @@ async def call_review_api(
     if provider == "custom" and not model:
         raise ValueError(
             "Custom provider selected but review_model is not set."
+        )
+
+    # B1 egress trust boundary — defense in depth. The realtime hook
+    # also checks this and skips with a sanitized log, but enforce here
+    # too so the manual scan + test-connection paths can never ship the
+    # (missed-PII-bearing) payload to a non-allowlisted external host.
+    allowed, host_class, _host = review_egress_allowed(base_url, provider)
+    if not allowed:
+        raise ReviewApiError(
+            f"AI review egress blocked: endpoint host class '{host_class}' "
+            "is not internal or allowlisted. Add the host to "
+            "AI_REVIEW_ALLOWED_HOSTS or set AI_REVIEW_ALLOW_EXTERNAL=true."
         )
 
     api_key = resolve_review_key(row)
@@ -294,12 +396,14 @@ def build_ai_review_prompt(
 
     system = (
         "You are a sensitive data analyst reviewing AI model responses. "
-        "The texts below are raw responses from an AI provider, sent "
-        "BEFORE any post-processing by the gateway.\n\n"
+        "The texts below are AI provider responses AFTER the gateway's "
+        "DLP masking pass but BEFORE restore. Data the DLP pipeline "
+        "already caught appears as opaque placeholder tokens (e.g. "
+        "'<r0>') — ignore those. \n\n"
         "Identify any sensitive, personal, financial, or confidential "
-        "data present in each response. Focus on data that the AI model "
-        "generated or leaked that should have been detected and masked "
-        "by DLP filters but was not.\n\n"
+        "data that is still present in PLAINTEXT — i.e. data the AI "
+        "model generated that should have been detected and masked by "
+        "DLP filters but was not.\n\n"
         f"Existing detectors that already handle these categories: "
         f"{detector_list}\n\n"
         "Mark is_in_coverage=true if an existing detector would catch it. "

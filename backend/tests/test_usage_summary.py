@@ -140,6 +140,7 @@ class TestUsageSummary:
             "estimated_cost_usd": 0.0,
             "estimated_cost_thb": 0.0,
             "cost_display": "฿0.0000",
+            "credits_used": 0,
         }
         assert body["top_models"] == []
         assert body["by_project"] == []
