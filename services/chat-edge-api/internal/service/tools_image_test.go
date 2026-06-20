@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -27,10 +28,11 @@ func (f *fakeImageGen) GenerateImages(
 }
 
 type fakeImageSaver struct {
-	gotData  []byte
-	gotMsgID uuid.UUID
-	err      error
-	called   bool
+	gotData      []byte
+	gotMsgID     uuid.UUID
+	gotRequestID string
+	err          error
+	called       bool
 }
 
 func (f *fakeImageSaver) SaveGeneratedImage(
@@ -39,6 +41,7 @@ func (f *fakeImageSaver) SaveGeneratedImage(
 	f.called = true
 	f.gotData = in.Data
 	f.gotMsgID = in.MessageID
+	f.gotRequestID = in.RequestID
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -162,5 +165,144 @@ func TestExecGenerateImageNoMessageID(t *testing.T) {
 	}
 	if gen.gotReq.Prompt != "" {
 		t.Fatal("gateway should not be called when MessageID is nil")
+	}
+}
+
+func TestDirectImageGenerationUsesImageEndpointAndSavesAttachment(t *testing.T) {
+	png := []byte("\x89PNG direct image bytes")
+	gen := &fakeImageGen{resp: &GatewayImagesResponse{
+		Data: []GatewayImageDatum{{B64JSON: base64.StdEncoding.EncodeToString(png)}},
+	}}
+	saver := &fakeImageSaver{}
+	exec := newImageExecutor(gen, saver)
+	svc := &MessageService{toolExec: exec}
+	asstID := uuid.New()
+
+	out := svc.generateImageForMessage(context.Background(), SendInput{
+		TenantID:  uuid.New(),
+		UserID:    uuid.New(),
+		Content:   "สร้างรูปแมว",
+		RequestID: "req-image-test",
+	}, uuid.New(), asstID)
+
+	if gen.gotReq.Model != "gpt-image-1" {
+		t.Fatalf("expected image model gpt-image-1, got %q", gen.gotReq.Model)
+	}
+	if gen.gotReq.Prompt != "สร้างรูปแมว" {
+		t.Fatalf("expected original prompt, got %q", gen.gotReq.Prompt)
+	}
+	if gen.gotReq.Size != "1024x1024" || gen.gotReq.Quality != "auto" {
+		t.Fatalf("unexpected defaults: %+v", gen.gotReq)
+	}
+	if !saver.called || saver.gotMsgID != asstID || saver.gotRequestID != "req-image-test" ||
+		string(saver.gotData) != string(png) {
+		t.Fatalf("image was not saved on assistant message: called=%v msg=%s", saver.called, saver.gotMsgID)
+	}
+	if out.Err != nil {
+		t.Fatalf("expected success, got error %+v", out.Err)
+	}
+	if !strings.Contains(out.Message, "สร้างรูป") {
+		t.Fatalf("expected Thai success acknowledgement, got %q", out.Message)
+	}
+}
+
+func TestMapImageGenerationError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{
+			name: "invalid request",
+			err:  &GatewayUnavailableError{Status: 502, Body: `{"error":{"code":"upstream_bad_response","message":"bad","details":{"status":400,"body":{"error":{"code":"invalid_request_error","message":"invalid size"}}}}}`},
+			code: "image_invalid_request",
+		},
+		{
+			name: "auth",
+			err:  &GatewayUnavailableError{Status: 502, Body: `{"error":{"code":"provider_error","message":"credentials","details":{"status":401,"body":{"error":{"code":"invalid_api_key","message":"bad key"}}}}}`},
+			code: "image_auth_error",
+		},
+		{
+			name: "permission",
+			err:  &GatewayUnavailableError{Status: 502, Body: `{"error":{"code":"provider_error","message":"permission","details":{"status":403}}}`},
+			code: "image_auth_error",
+		},
+		{
+			name: "rate limited",
+			err:  &GatewayUnavailableError{Status: 429, Body: `{"error":{"code":"rate_limit_exceeded","message":"rate limit","details":{"status":429,"body":{"error":{"code":"insufficient_quota"}}}}}`},
+			code: "image_rate_limited",
+		},
+		{
+			name: "timeout",
+			err:  &GatewayUnavailableError{Status: 504, Body: `{"error":{"code":"provider_timeout","message":"timed out"}}`},
+			code: "image_timeout",
+		},
+		{
+			name: "provider unavailable",
+			err:  &GatewayUnavailableError{Status: 503, Body: `{"error":{"code":"provider_unavailable","message":"down","details":{"status":503}}}`},
+			code: "image_provider_unavailable",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mapImageGenerationError(tc.err)
+			if got.Code != tc.code {
+				t.Fatalf("code = %q, want %q (%+v)", got.Code, tc.code, got)
+			}
+			if got.Code == "provider_error" || got.Code == "all_models_failed" {
+				t.Fatalf("image error collapsed to generic provider code: %+v", got)
+			}
+		})
+	}
+}
+
+func TestDirectImageGenerationContextTimeout(t *testing.T) {
+	gen := &fakeImageGen{err: context.DeadlineExceeded}
+	svc := &MessageService{
+		toolExec:               newImageExecutor(gen, &fakeImageSaver{}),
+		imageGenerationTimeout: time.Second,
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	out := svc.generateImageForMessage(ctx, SendInput{
+		TenantID: uuid.New(),
+		UserID:   uuid.New(),
+		Content:  "draw a cat",
+	}, uuid.New(), uuid.New())
+
+	if out.Err == nil || out.Err.Code != "image_timeout" {
+		t.Fatalf("expected image_timeout, got %+v", out.Err)
+	}
+}
+
+func TestDirectImageGenerationContextCancel(t *testing.T) {
+	gen := &fakeImageGen{err: context.Canceled}
+	svc := &MessageService{
+		toolExec:               newImageExecutor(gen, &fakeImageSaver{}),
+		imageGenerationTimeout: time.Second,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	out := svc.generateImageForMessage(ctx, SendInput{
+		TenantID: uuid.New(),
+		UserID:   uuid.New(),
+		Content:  "draw a cat",
+	}, uuid.New(), uuid.New())
+
+	if out.Err == nil || out.Err.Code != "image_cancelled" {
+		t.Fatalf("expected image_cancelled, got %+v", out.Err)
+	}
+}
+
+func TestNewMessageServiceDefaultImageTimeout(t *testing.T) {
+	svc := NewMessageService(nil, nil, nil, nil, nil, 0)
+	if svc.imageGenerationTimeout != 180*time.Second {
+		t.Fatalf("image timeout = %s, want 180s", svc.imageGenerationTimeout)
+	}
+	svc.SetImageGenerationTimeout(2 * time.Second)
+	if svc.imageGenerationTimeout != 2*time.Second {
+		t.Fatalf("image timeout setter failed: %s", svc.imageGenerationTimeout)
 	}
 }

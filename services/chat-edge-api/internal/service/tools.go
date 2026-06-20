@@ -34,6 +34,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -265,6 +266,13 @@ type ToolExecutor struct {
 	imageGen   imageGenerator
 	imageFiles generatedImageSaver
 	imageModel string
+	// Web search (gateway-backed). When both are wired the executor
+	// exposes web_search: call the gateway /search endpoint, persist the
+	// cited sources on the assistant message (so citation chips survive
+	// a reload), and feed the results back to the model. Interfaces so
+	// the handler stays unit-testable without a live gateway / DB.
+	webSearch   webSearcher
+	searchSaver searchSourcesSaver
 }
 
 // imageGenerator is the subset of *GatewayClient the image tool needs.
@@ -275,6 +283,18 @@ type imageGenerator interface {
 // generatedImageSaver is the subset of *FileService the image tool needs.
 type generatedImageSaver interface {
 	SaveGeneratedImage(ctx context.Context, in GeneratedImageInput) (*model.ConversationFile, error)
+}
+
+// webSearcher is the subset of *GatewayClient the web_search tool needs.
+type webSearcher interface {
+	Search(ctx context.Context, callCtx GatewayCallContext, req GatewaySearchRequest) (*GatewaySearchResponse, error)
+}
+
+// searchSourcesSaver persists the cited sources on the assistant
+// message so the handler can read them back and emit message_sources
+// (the same read-back pattern generate_image uses for files).
+type searchSourcesSaver interface {
+	SaveSearchSources(ctx context.Context, messageID uuid.UUID, sources []GatewaySearchResult) error
 }
 
 func NewToolExecutor(memories *MemoryService) *ToolExecutor {
@@ -293,6 +313,22 @@ func (e *ToolExecutor) SetImageGeneration(gen imageGenerator, files generatedIma
 		model = "gpt-image-1"
 	}
 	e.imageModel = model
+}
+
+// SetWebSearch wires the web_search tool. Optional — when either
+// dependency is nil, web_search is hidden from the tool list. The tool
+// is also gated per-tenant at attach time (the gateway tells chat-edge
+// whether the tenant enabled search), so wiring it here only makes it
+// *available*, not unconditionally offered.
+func (e *ToolExecutor) SetWebSearch(searcher webSearcher, saver searchSourcesSaver) {
+	e.webSearch = searcher
+	e.searchSaver = saver
+}
+
+// HasWebSearch reports whether the web_search tool is wired (used by
+// the per-tenant attach-time gate).
+func (e *ToolExecutor) HasWebSearch() bool {
+	return e.webSearch != nil && e.searchSaver != nil
 }
 
 // SetConversationStateService wires the S3 state layer. Optional
@@ -335,6 +371,13 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	if e.imageGen != nil && e.imageFiles != nil {
 		defs = append(defs, generateImageToolDef())
 	}
+	// Web search. Wired-globally like image gen; the PER-TENANT gate
+	// (tenant search_enabled + a provider configured) is applied by the
+	// caller (attachTools) via the gateway search-config check, so this
+	// only adds the def to the candidate set.
+	if e.HasWebSearch() {
+		defs = append(defs, webSearchToolDef())
+	}
 	return defs
 }
 
@@ -346,6 +389,22 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 func (e *ToolExecutor) Execute(
 	ctx context.Context, call GatewayToolCall, ec ToolExecContext,
 ) string {
+	// DLP blocked-marker guard (Phase 1 B2). The backend replaces a
+	// tool call's arguments with a safe marker
+	// (``{"_dlp_blocked": true, ...}``) when DLP decided the arguments
+	// must not be executed (e.g. an external-egress tool whose query
+	// carried protected data). Honor that decision here: do NOT dispatch
+	// the real tool, do NOT call external services, and return a safe
+	// tool result instead. No detector logic, no unmasking — only marker
+	// detection. Logs carry the tool name + reason, never the arguments.
+	if blocked, reason := dlpBlockedMarker(call.Function.Arguments); blocked {
+		slog.Info("tool_call_blocked_by_dlp",
+			"tool", call.Function.Name,
+			"tool_call_id", call.ID,
+			"reason", reason,
+		)
+		return dlpBlockedToolResult(call.Function.Name)
+	}
 	switch call.Function.Name {
 	case "save_memory":
 		return e.execSaveMemory(ctx, call.Function.Arguments, ec)
@@ -357,9 +416,54 @@ func (e *ToolExecutor) Execute(
 		return e.execSearchPastConversations(ctx, call.Function.Arguments, ec)
 	case "generate_image":
 		return e.execGenerateImage(ctx, call.Function.Arguments, ec)
+	case "web_search":
+		return e.execWebSearch(ctx, call.Function.Arguments, ec)
 	default:
 		return fmt.Sprintf("Unknown tool %q.", call.Function.Name)
 	}
+}
+
+// dlpBlockedMarker reports whether the tool arguments are the DLP
+// "blocked" marker the backend substitutes for arguments that contained
+// protected data: ``{"_dlp_blocked": true, "reason": "...", ...}``.
+//
+// Detection is conservative and fail-safe: if the raw arguments mention
+// the marker key but the JSON is malformed, the call is still treated as
+// blocked (we never execute the real tool on a suspected blocked call).
+// Returns (blocked, reason); reason is never the arguments text.
+func dlpBlockedMarker(rawArgs string) (bool, string) {
+	if !strings.Contains(rawArgs, "_dlp_blocked") {
+		return false, ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(rawArgs), &m); err != nil {
+		// Malformed marker — fail safe.
+		return true, "malformed_marker"
+	}
+	if b, ok := m["_dlp_blocked"].(bool); ok && b {
+		reason, _ := m["reason"].(string)
+		if reason == "" {
+			reason = "blocked"
+		}
+		return true, reason
+	}
+	return false, ""
+}
+
+// dlpBlockedToolResult builds the safe role="tool" result content for a
+// DLP-blocked call. Contains no arguments, placeholders, or PII — only a
+// structured, machine-readable block signal.
+func dlpBlockedToolResult(toolName string) string {
+	b, err := json.Marshal(map[string]any{
+		"ok":      false,
+		"error":   "tool_call_blocked_by_dlp",
+		"message": "This tool call was blocked by data-protection policy.",
+		"tool":    toolName,
+	})
+	if err != nil {
+		return `{"ok":false,"error":"tool_call_blocked_by_dlp"}`
+	}
+	return string(b)
 }
 
 // ---------------------------------------------------------------------------
@@ -724,13 +828,46 @@ func (e *ToolExecutor) execGenerateImage(
 		Quality: quality,
 	})
 	if err != nil {
-		return "I couldn't generate the image right now. Please try again in a moment."
+		// Surface the REAL provider failure (status + body snippet are
+		// carried in GatewayUnavailableError.Error()) — without this the
+		// only signal upstream is the model's Thai paraphrase of the
+		// friendly string below, with no way to tell 403 vs 503 vs 429.
+		slog.Error("image_generation_failed",
+			"error", err.Error(),
+			"model", e.imageModel,
+			"conversation_id", ec.ConversationID,
+		)
+		// Map common provider HTTP statuses to an actionable message. The
+		// status=NNN / body markers come from GatewayUnavailableError.
+		errStr := err.Error()
+		switch {
+		case strings.Contains(errStr, "status=403"):
+			return "The image generation model is not available with the current API configuration. Please contact your administrator."
+		case strings.Contains(errStr, "status=429"):
+			return "Image generation rate limit reached. Please wait a moment and try again."
+		case strings.Contains(errStr, "status=401"):
+			return "The API key for image generation is invalid. Please contact your administrator."
+		case strings.Contains(errStr, "No API key configured"), strings.Contains(errStr, "status=503"):
+			return "Image generation service is not configured. Please contact your administrator."
+		default:
+			return "I couldn't generate the image right now. Please try again in a moment."
+		}
 	}
 	if len(resp.Data) == 0 || resp.Data[0].B64JSON == "" {
+		slog.Error("image_generation_empty_response",
+			"model", e.imageModel,
+			"conversation_id", ec.ConversationID,
+			"data_len", len(resp.Data),
+		)
 		return "The image service returned no image. Please try again."
 	}
 	raw, err := base64.StdEncoding.DecodeString(resp.Data[0].B64JSON)
 	if err != nil {
+		slog.Error("image_generation_decode_failed",
+			"error", err.Error(),
+			"model", e.imageModel,
+			"conversation_id", ec.ConversationID,
+		)
 		return "The generated image was malformed. Please try again."
 	}
 
@@ -743,6 +880,11 @@ func (e *ToolExecutor) execGenerateImage(
 		ContentType:    "image/png",
 		Prompt:         args.Prompt,
 	}); err != nil {
+		slog.Error("image_generation_save_failed",
+			"error", err.Error(),
+			"model", e.imageModel,
+			"conversation_id", ec.ConversationID,
+		)
 		return "I generated the image but couldn't save it. Please try again."
 	}
 
@@ -754,6 +896,106 @@ func (e *ToolExecutor) execGenerateImage(
 			"Do NOT include a URL or a markdown image — the image displays automatically.",
 		size, quality,
 	)
+}
+
+// ---------------------------------------------------------------------------
+// web_search
+// ---------------------------------------------------------------------------
+
+// webSearchToolDef is the web-search tool. The description steers the
+// model to call it ONLY for current/recent/real-time information (so it
+// doesn't search for things it already knows), and to cite sources by
+// number in its answer.
+func webSearchToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "web_search",
+			Description: "Search the web for current information. Use this when the user asks about " +
+				"recent events, news, today's date-specific facts, current data, prices, or anything " +
+				"that needs up-to-date information beyond your knowledge cutoff. Do NOT use it for " +
+				"general knowledge, math, or things you already know. After the results come back, " +
+				"answer the user's question and cite sources by number [N] when referencing specific facts.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "The search query. Be specific and concise. Use the same language the user is speaking.",
+					},
+				},
+				"required": []string{"query"},
+			},
+		},
+	}
+}
+
+type webSearchArgs struct {
+	Query string `json:"query"`
+}
+
+func (e *ToolExecutor) execWebSearch(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if e.webSearch == nil || e.searchSaver == nil {
+		return "Web search isn't available right now."
+	}
+	var args webSearchArgs
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return "I couldn't parse the web_search arguments."
+	}
+	query := strings.TrimSpace(args.Query)
+	if query == "" {
+		return "Please provide a search query."
+	}
+
+	resp, err := e.webSearch.Search(ctx, GatewayCallContext{
+		TenantID:       ec.TenantID,
+		UserID:         ec.UserID,
+		ConversationID: ec.ConversationID,
+	}, GatewaySearchRequest{Query: query, MaxResults: 5})
+	if err != nil {
+		slog.Error("web_search_failed",
+			"error", err.Error(),
+			"conversation_id", ec.ConversationID,
+		)
+		errStr := err.Error()
+		switch {
+		case strings.Contains(errStr, "not_enabled"), strings.Contains(errStr, "not enabled"):
+			return "Web search is not available. Please contact your administrator to enable it."
+		case strings.Contains(errStr, "insufficient_credits"):
+			return "Not enough credits for web search. I'll answer based on my existing knowledge."
+		default:
+			return "I couldn't search the web right now. I'll answer based on my existing knowledge."
+		}
+	}
+	if resp == nil || len(resp.Results) == 0 {
+		return fmt.Sprintf(
+			"No web results found for %q. I'll answer based on my existing knowledge.", query)
+	}
+
+	// Persist the cited sources on the assistant message so the citation
+	// chips re-render after a page reload. Best-effort — a save failure
+	// must not lose the answer; the model still gets the results below.
+	if ec.MessageID != uuid.Nil {
+		if err := e.searchSaver.SaveSearchSources(ctx, ec.MessageID, resp.Results); err != nil {
+			slog.Error("web_search_sources_save_failed",
+				"error", err.Error(),
+				"message_id", ec.MessageID.String(),
+			)
+		}
+	}
+
+	// Format results for the model. Numbered so the model can cite [N].
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Web search results for %q:\n\n", query)
+	for i, r := range resp.Results {
+		fmt.Fprintf(&sb, "[%d] %s\n%s\nSource: %s\n\n", i+1, r.Title, r.Snippet, r.URL)
+	}
+	sb.WriteString(
+		"Use these sources to answer the user's question. Cite sources by number [N] " +
+			"when referencing specific information. Answer in the user's language.")
+	return sb.String()
 }
 
 // ---------------------------------------------------------------------------

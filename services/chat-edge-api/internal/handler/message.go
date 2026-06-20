@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -63,24 +64,25 @@ func (h *MessageHandler) SetSourceRepo(sr *repository.ResponseContextSourceRepo)
 // ---------------------------------------------------------------------------
 
 type messageResponse struct {
-	ID             string                          `json:"id"`
-	Role           string                          `json:"role"`
-	Content        string                          `json:"content"`
-	Status         string                          `json:"status"`
-	ModelID        *string                         `json:"model_id,omitempty"`
-	TokenUsage     *tokenUsage                     `json:"token_usage,omitempty"`
-	CreatedAt      string                          `json:"created_at"`
+	ID         string      `json:"id"`
+	Role       string      `json:"role"`
+	Content    string      `json:"content"`
+	Status     string      `json:"status"`
+	ModelID    *string     `json:"model_id,omitempty"`
+	TokenUsage *tokenUsage `json:"token_usage,omitempty"`
+	CreatedAt  string      `json:"created_at"`
 	// Auto Thinking Mode — the model's thinking summary for this
 	// assistant turn (masked, persisted in migration 019). nil for
 	// user turns and assistant turns that didn't think, so the wire
 	// stays unchanged for non-reasoning messages. Lets the
 	// ThinkingBlock re-render after a page reload (the live SSE
 	// reasoning_delta stream is gone once the turn completes).
-	ReasoningContent *string `json:"reasoning_content,omitempty"`
-	Files          []fileResponse                  `json:"files,omitempty"`
-	BranchIndex    int                             `json:"branch_index"`
-	BranchCount    int                             `json:"branch_count"`
-	HasBranches    bool                            `json:"has_branches"`
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	SearchSources    json.RawMessage `json:"search_sources,omitempty"`
+	Files            []fileResponse  `json:"files,omitempty"`
+	BranchIndex      int             `json:"branch_index"`
+	BranchCount      int             `json:"branch_count"`
+	HasBranches      bool            `json:"has_branches"`
 	// S7 — populated only on assistant messages that have at least
 	// one context source recorded. Empty / nil for user messages
 	// and for assistants that drew on no special context (memory,
@@ -145,6 +147,11 @@ func messageToWire(m *model.Message) messageResponse {
 	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
 		r.ReasoningContent = m.ReasoningContent
 	}
+	// Web-search citations — forward the stored JSON array verbatim so
+	// the frontend renders citation chips on reload.
+	if len(m.SearchSources) > 0 {
+		r.SearchSources = json.RawMessage(m.SearchSources)
+	}
 	if m.TokenUsageInput != nil && m.TokenUsageOutput != nil {
 		r.TokenUsage = &tokenUsage{
 			Input:  *m.TokenUsageInput,
@@ -182,6 +189,21 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	items := make([]messageResponse, 0, len(msgs))
 	for i := range msgs {
 		items = append(items, messageToWire(&msgs[i]))
+	}
+
+	// Phase 4A.2.4 — display lifecycle. When enabled, the persisted
+	// content_masked is no longer the restored raw display, so the reload read
+	// goes through the owner restore-on-read policy: restored (Vault V2) or a
+	// tokenized/redacted fallback. No-op when the feature is off (items keep
+	// the legacy content_masked passthrough).
+	if h.messages.DisplayLifecycleEnabled() {
+		actor := service.DisplayActor{UserID: caller.UserID, TenantID: caller.TenantUUID}
+		for i := range msgs {
+			rep := h.messages.ResolveRepresentation(
+				r.Context(), service.ConsumerBrowserReloadOwner, msgs[i], actor,
+			)
+			items[i].Content = rep.Content
+		}
 	}
 
 	// Branch counts. One batched query per parent_id; messages
@@ -298,6 +320,9 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		Content:        req.Content,
 		RequestID:      r.Header.Get("X-Request-Id"),
 		ImageMode:      req.ImageMode,
+	}
+	if in.RequestID == "" {
+		in.RequestID = uuid.NewString()
 	}
 	if len(req.FileIDs) > 0 {
 		in.FileIDs = make([]uuid.UUID, 0, len(req.FileIDs))
@@ -431,6 +456,21 @@ Loop:
 					"status": ev.AnalysisStatus,
 				})
 			}
+			// Image-generation phase marker — the frontend swaps the
+			// typing dots for an image placeholder until message_files
+			// (or a terminal frame) arrives.
+			if ev.ImageStatus != "" {
+				writeSSEEvent(w, flusher, "image_generating", map[string]any{
+					"status": ev.ImageStatus,
+				})
+			}
+			// Web-search phase marker — the frontend shows a "searching
+			// the web" indicator until the answer streams / sources land.
+			if ev.SearchStatus != "" {
+				writeSSEEvent(w, flusher, "search_status", map[string]any{
+					"status": ev.SearchStatus,
+				})
+			}
 			// B1: a provider error frame from the Gateway. Forward it as
 			// an ``error`` event so the client renders an error bubble
 			// rather than ending blank. Not a ``break`` — the Gateway
@@ -469,6 +509,8 @@ Loop:
 		persistFinishReason = "error"
 	}
 	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
+	h.writeMessageFiles(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
+	h.writeMessageSources(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
 
 	// Emit final completion frame. Even on error we send a
 	// message_complete so the client always has a deterministic
@@ -496,6 +538,65 @@ Loop:
 // this point in the request we've already committed to a 200
 // response — the client will see a missing frame, the SSE clean-up
 // loop on the browser handles the missing terminator.
+func (h *MessageHandler) writeMessageFiles(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	ctx context.Context,
+	tenantID uuid.UUID,
+	messageID uuid.UUID,
+) {
+	if h.files == nil {
+		return
+	}
+	byMsg, err := h.files.ListByMessageIDs(ctx, tenantID, []uuid.UUID{messageID})
+	if err != nil {
+		return
+	}
+	files := byMsg[messageID]
+	if len(files) == 0 {
+		return
+	}
+	out := make([]fileResponse, 0, len(files))
+	for i := range files {
+		out = append(out, FileToWire(&files[i]))
+	}
+	writeSSEEvent(w, flusher, "message_files", map[string]any{
+		"message_id": messageID.String(),
+		"files":      out,
+	})
+	slog.Info("sse_message_files_sent",
+		"tenant_id", tenantID.String(),
+		"message_id", messageID.String(),
+		"file_count", len(out),
+	)
+}
+
+// writeMessageSources emits the web_search citations persisted on the
+// assistant message (read-back pattern matching writeMessageFiles). The
+// frontend renders these as citation chips and clears the searching
+// indicator. No-op when the turn didn't search.
+func (h *MessageHandler) writeMessageSources(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	ctx context.Context,
+	tenantID uuid.UUID,
+	messageID uuid.UUID,
+) {
+	raw, err := h.messages.GetSearchSources(ctx, tenantID, messageID)
+	if err != nil || len(raw) == 0 {
+		return
+	}
+	// Forward the stored JSON array verbatim under "sources".
+	writeSSEEvent(w, flusher, "message_sources", map[string]any{
+		"message_id": messageID.String(),
+		"sources":    json.RawMessage(raw),
+	})
+	slog.Info("sse_message_sources_sent",
+		"tenant_id", tenantID.String(),
+		"message_id", messageID.String(),
+	)
+}
+
 func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, data any) {
 	buf, err := json.Marshal(data)
 	if err != nil {
@@ -514,6 +615,12 @@ func (h *MessageHandler) writeSendError(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
 	case errors.Is(err, service.ErrMessageEmptyContent):
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "content is required")
+	case strings.Contains(err.Error(), "insufficient_credits"):
+		// Gateway's portal credit gate fired (cost-based deduction).
+		// 402 + a stable code so the frontend shows the Thai
+		// credits-exhausted notice instead of a generic provider error.
+		WriteError(w, http.StatusPaymentRequired, "INSUFFICIENT_CREDITS",
+			"เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต")
 	case errors.Is(err, service.ErrMessageGatewayUnavailable):
 		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
 	default:
@@ -648,6 +755,12 @@ Loop:
 			if ev.AnalysisStatus != "" {
 				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
 			}
+			if ev.ImageStatus != "" {
+				writeSSEEvent(w, flusher, "image_generating", map[string]any{"status": ev.ImageStatus})
+			}
+			if ev.SearchStatus != "" {
+				writeSSEEvent(w, flusher, "search_status", map[string]any{"status": ev.SearchStatus})
+			}
 			// B1: forward a Gateway provider-error frame as an ``error``
 			// event (see sendStream above for the full rationale).
 			if ev.ProviderError != nil {
@@ -680,6 +793,8 @@ Loop:
 		persistFinishReason = "error"
 	}
 	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
+	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
+	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
 	if finalUsage != nil {
@@ -791,6 +906,12 @@ Loop:
 			if ev.AnalysisStatus != "" {
 				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
 			}
+			if ev.ImageStatus != "" {
+				writeSSEEvent(w, flusher, "image_generating", map[string]any{"status": ev.ImageStatus})
+			}
+			if ev.SearchStatus != "" {
+				writeSSEEvent(w, flusher, "search_status", map[string]any{"status": ev.SearchStatus})
+			}
 			// B1: forward a Gateway provider-error frame as an ``error``
 			// event (see sendStream above for the full rationale).
 			if ev.ProviderError != nil {
@@ -822,6 +943,8 @@ Loop:
 		persistFinishReason = "error"
 	}
 	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
+	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
+	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
 	if finalUsage != nil {
@@ -848,6 +971,12 @@ func (h *MessageHandler) writeEditError(w http.ResponseWriter, err error) {
 			"only user messages can be edited")
 	case errors.Is(err, service.ErrMessageEmptyContent):
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "content is required")
+	case strings.Contains(err.Error(), "insufficient_credits"):
+		// Gateway's portal credit gate fired (cost-based deduction).
+		// 402 + a stable code so the frontend shows the Thai
+		// credits-exhausted notice instead of a generic provider error.
+		WriteError(w, http.StatusPaymentRequired, "INSUFFICIENT_CREDITS",
+			"เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต")
 	case errors.Is(err, service.ErrMessageGatewayUnavailable):
 		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
 	default:
@@ -919,6 +1048,12 @@ func (h *MessageHandler) writeRegenerateError(w http.ResponseWriter, err error) 
 	case errors.Is(err, service.ErrMessageModelNotAllowed):
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
 			"conversation model is no longer allowed")
+	case strings.Contains(err.Error(), "insufficient_credits"):
+		// Gateway's portal credit gate fired (cost-based deduction).
+		// 402 + a stable code so the frontend shows the Thai
+		// credits-exhausted notice instead of a generic provider error.
+		WriteError(w, http.StatusPaymentRequired, "INSUFFICIENT_CREDITS",
+			"เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต")
 	case errors.Is(err, service.ErrMessageGatewayUnavailable):
 		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
 	default:

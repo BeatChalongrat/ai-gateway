@@ -69,6 +69,9 @@ type Handlers struct {
 	Search *handler.SearchHandler
 	// S9 — GDPR-style data export + right-to-erasure for memory.
 	Account *handler.AccountHandler
+	// Usage — credit badge + per-model breakdown for web-chat.
+	// Thin authenticated proxy onto the gateway's portal API.
+	Usage *handler.UsageHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -167,6 +170,12 @@ func New(
 
 			// Models.
 			r.Get("/models", h.Model.List)
+
+			// Usage — credit balance + per-model breakdown (proxied
+			// from the gateway portal API with the caller's token).
+			if h.Usage != nil {
+				r.Get("/usage/me", h.Usage.Me)
+			}
 
 			// File attachments. Upload + list scoped to a
 			// conversation; download + delete go through the file

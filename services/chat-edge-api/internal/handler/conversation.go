@@ -578,16 +578,16 @@ func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Requ
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"conversation_id":       convID.String(),
-		"total_budget":          compiled.Budget.TotalBudget,
-		"system_prompt_tokens":  compiled.Budget.SystemPromptTokens,
-		"output_reserve":        compiled.Budget.OutputReserve,
-		"tool_reserve":          compiled.Budget.ToolReserve,
-		"messages_budget":       compiled.Budget.MessagesRemaining,
-		"messages_total":        compiled.MessagesTotal,
-		"messages_would_send":   compiled.MessagesSent,
-		"compacted":             compiled.Compacted,
-		"extraction_triggered":  compiled.ExtractionTriggered,
+		"conversation_id":      convID.String(),
+		"total_budget":         compiled.Budget.TotalBudget,
+		"system_prompt_tokens": compiled.Budget.SystemPromptTokens,
+		"output_reserve":       compiled.Budget.OutputReserve,
+		"tool_reserve":         compiled.Budget.ToolReserve,
+		"messages_budget":      compiled.Budget.MessagesRemaining,
+		"messages_total":       compiled.MessagesTotal,
+		"messages_would_send":  compiled.MessagesSent,
+		"compacted":            compiled.Compacted,
+		"extraction_triggered": compiled.ExtractionTriggered,
 	})
 }
 
@@ -637,6 +637,15 @@ func (h *ConversationHandler) Export(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
+	}
+	// Phase 4A.2.4 — export is a non-restoring consumer: under display
+	// lifecycle it must never emit restored raw display. canonical_safe /
+	// redacted rows already carry safe content; raw-sensitive legacy rows are
+	// redacted. No-op when the feature is off.
+	if h.cfg != nil && h.cfg.DLPDisplayLifecycleEnabled {
+		for i := range msgs {
+			msgs[i].ContentMasked = service.NonRestoringRepresentation(true, msgs[i])
+		}
 	}
 
 	// File join — same batched query used by /messages so exports

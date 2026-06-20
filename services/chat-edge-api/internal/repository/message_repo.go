@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,14 +24,38 @@ import (
 // “content_masked“ to keep migrations forward-compatible.
 type MessageRepo struct {
 	db DB
+	// canonicalHistory gates whether history reads SELECT the canonical
+	// columns (Phase 4A.2.2.1, H4 deploy-order). When false, queries never
+	// reference canonical_* columns, so a pre-migration DB (migration 024
+	// not applied) keeps working with the legacy path. Set from config at
+	// wiring time; defaults false.
+	canonicalHistory bool
+	// displayLifecycle gates whether writes/reads reference the
+	// ``display_state`` column (Phase 4A.2.4, migration 025). Same H4
+	// deploy-order contract as ``canonicalHistory``: when false, queries never
+	// reference ``display_state`` so a pre-migration DB keeps working.
+	displayLifecycle bool
 }
 
 func NewMessageRepo(db *pgxpool.Pool) *MessageRepo {
 	return &MessageRepo{db: db}
 }
 
+// SetCanonicalHistory toggles canonical-column reads (H4). Only set true
+// once migration 024 is applied AND the feature is enabled.
+func (r *MessageRepo) SetCanonicalHistory(enabled bool) {
+	r.canonicalHistory = enabled
+}
+
+// SetDisplayLifecycle toggles display_state column reads/writes (Phase
+// 4A.2.4). Only set true once migration 025 is applied AND the feature is
+// enabled.
+func (r *MessageRepo) SetDisplayLifecycle(enabled bool) {
+	r.displayLifecycle = enabled
+}
+
 func (r *MessageRepo) WithTx(tx pgx.Tx) *MessageRepo {
-	return &MessageRepo{db: tx}
+	return &MessageRepo{db: tx, canonicalHistory: r.canonicalHistory, displayLifecycle: r.displayLifecycle}
 }
 
 // Create inserts a new message row. “ContentMasked“ carries the
@@ -104,11 +129,18 @@ func (r *MessageRepo) ListByConversation(
 	// Only fetched on the user-facing list (this read powers the
 	// React chat thread); the context-building reads below leave it
 	// out so prompt history stays focused on visible content.
-	const q = `
+	// Phase 4A.2.4 (H4-style): the display-lifecycle columns are selected ONLY
+	// when the feature is enabled, so a pre-migration-025 DB never references a
+	// missing column. The read handler then applies the representation policy.
+	extraCols := ""
+	if r.displayLifecycle {
+		extraCols = `, content_canonical, canonical_status, display_state`
+	}
+	q := `
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
 		       secure_trace_id, created_at, parent_id, branch_index, is_active,
-		       reasoning_content
+		       reasoning_content, search_sources` + extraCols + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
@@ -129,13 +161,17 @@ func (r *MessageRepo) ListByConversation(
 	out := make([]model.Message, 0, limit)
 	for rows.Next() {
 		var m model.Message
-		if err := rows.Scan(
+		dest := []any{
 			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
 			&m.ContentMasked, &m.Status, &m.ModelID,
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
 			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
-			&m.ReasoningContent,
-		); err != nil {
+			&m.ReasoningContent, &m.SearchSources,
+		}
+		if r.displayLifecycle {
+			dest = append(dest, &m.ContentCanonical, &m.CanonicalStatus, &m.DisplayState)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, false, fmt.Errorf("list scan: %w", err)
 		}
 		out = append(out, m)
@@ -169,10 +205,8 @@ func (r *MessageRepo) ListContextByConversation(
 	if limit > 200 {
 		limit = 200
 	}
-	const q = `
-		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
-		       status, model_id, token_usage_input, token_usage_output,
-		       secure_trace_id, created_at, parent_id, branch_index, is_active
+	q := `
+		SELECT ` + r.messageContextColumns() + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1 AND tenant_id = $2 AND is_active = true
 		ORDER BY created_at DESC
@@ -187,12 +221,7 @@ func (r *MessageRepo) ListContextByConversation(
 	out := make([]model.Message, 0, limit)
 	for rows.Next() {
 		var m model.Message
-		if err := rows.Scan(
-			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
-			&m.ContentMasked, &m.Status, &m.ModelID,
-			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
-			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
-		); err != nil {
+		if err := r.scanContextRow(rows, &m); err != nil {
 			return nil, fmt.Errorf("context scan: %w", err)
 		}
 		out = append(out, m)
@@ -204,6 +233,44 @@ func (r *MessageRepo) ListContextByConversation(
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
+}
+
+// messageContextColumns returns the SELECT column list for context reads.
+// H4: the canonical columns are included ONLY when canonical history is
+// enabled, so a pre-migration DB never hits a missing column.
+func (r *MessageRepo) messageContextColumns() string {
+	base := `id, conversation_id, tenant_id, user_id, role, content_masked,
+	       status, model_id, token_usage_input, token_usage_output,
+	       secure_trace_id, created_at, parent_id, branch_index, is_active`
+	if !r.canonicalHistory {
+		return base
+	}
+	// H1: load the integrity fields so the history builder can RE-VALIDATE
+	// (not just trust canonical_status).
+	return base + `, content_canonical, canonical_status,
+	       canonical_schema_version, canonical_generation_id,
+	       canonical_sha256, canonical_length`
+}
+
+// scanContextRow scans a row produced by messageContextColumns().
+func (r *MessageRepo) scanContextRow(rows pgx.Rows, m *model.Message) error {
+	if !r.canonicalHistory {
+		return rows.Scan(
+			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
+			&m.ContentMasked, &m.Status, &m.ModelID,
+			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
+			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
+		)
+	}
+	return rows.Scan(
+		&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
+		&m.ContentMasked, &m.Status, &m.ModelID,
+		&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
+		&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
+		&m.ContentCanonical, &m.CanonicalStatus,
+		&m.CanonicalSchemaVersion, &m.CanonicalGenerationID,
+		&m.CanonicalSHA256, &m.CanonicalLength,
+	)
 }
 
 // MessageSearchHit is a single row from SearchUserMessages —
@@ -220,6 +287,16 @@ type MessageSearchHit struct {
 	Content           string
 	CreatedAt         time.Time
 	Rank              float64
+	// Phase 4A.2.4.1 — display-lifecycle classification, loaded ONLY when the
+	// feature is enabled (H4 deploy-order). The search SERVICE uses these to
+	// emit a non-raw representation (legacy → redacted, canonical_safe →
+	// tokenized) so a legacy ``content_masked`` raw value never reaches the
+	// search index or the LLM ``search_past_conversations`` tool. ``Content``
+	// is the raw ``content_masked`` and MUST NOT be surfaced directly when
+	// display lifecycle is on.
+	DisplayState     string
+	ContentCanonical *string
+	CanonicalStatus  string
 }
 
 // SearchUserMessages runs a tsvector full-text search across every
@@ -247,7 +324,15 @@ func (r *MessageRepo) SearchUserMessages(
 	if limit > 50 {
 		limit = 50
 	}
-	const sql = `
+	// Phase 4A.2.4.1 (H4-style): the display-lifecycle columns are selected
+	// ONLY when the feature is enabled, so a pre-migration-025 DB never
+	// references a missing column. The search SERVICE then derives a non-raw
+	// representation from them.
+	extraCols := ""
+	if r.displayLifecycle {
+		extraCols = `, m.display_state, m.content_canonical, m.canonical_status`
+	}
+	sql := `
 		SELECT
 			m.id,
 			m.conversation_id,
@@ -255,7 +340,7 @@ func (r *MessageRepo) SearchUserMessages(
 			m.role,
 			m.content_masked,
 			m.created_at,
-			ts_rank(m.search_vector, plainto_tsquery('simple', $3))::float8 AS rank
+			ts_rank(m.search_vector, plainto_tsquery('simple', $3))::float8 AS rank` + extraCols + `
 		FROM chat.messages_masked m
 		JOIN chat.conversations c ON c.id = m.conversation_id
 		WHERE c.user_id = $1
@@ -275,10 +360,14 @@ func (r *MessageRepo) SearchUserMessages(
 	out := make([]MessageSearchHit, 0, limit)
 	for rows.Next() {
 		var hit MessageSearchHit
-		if err := rows.Scan(
+		dest := []any{
 			&hit.MessageID, &hit.ConversationID, &hit.ConversationTitle,
 			&hit.Role, &hit.Content, &hit.CreatedAt, &hit.Rank,
-		); err != nil {
+		}
+		if r.displayLifecycle {
+			dest = append(dest, &hit.DisplayState, &hit.ContentCanonical, &hit.CanonicalStatus)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("search user messages scan: %w", err)
 		}
 		out = append(out, hit)
@@ -414,10 +503,8 @@ func (r *MessageRepo) ListContextBeforeMessage(
 	if limit > 200 {
 		limit = 200
 	}
-	const q = `
-		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
-		       status, model_id, token_usage_input, token_usage_output,
-		       secure_trace_id, created_at, parent_id, branch_index, is_active
+	q := `
+		SELECT ` + r.messageContextColumns() + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1 AND tenant_id = $2 AND created_at < $3
 		  AND is_active = true
@@ -433,12 +520,7 @@ func (r *MessageRepo) ListContextBeforeMessage(
 	out := make([]model.Message, 0, limit)
 	for rows.Next() {
 		var m model.Message
-		if err := rows.Scan(
-			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
-			&m.ContentMasked, &m.Status, &m.ModelID,
-			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
-			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
-		); err != nil {
+		if err := r.scanContextRow(rows, &m); err != nil {
 			return nil, fmt.Errorf("context before scan: %w", err)
 		}
 		out = append(out, m)
@@ -582,7 +664,7 @@ func (r *MessageRepo) BranchCountByParent(
 // captured during a streaming assistant turn (T4 — migration 019).
 // Separate from UpdateContent so the existing 6 callsites don't
 // need to fan out a new parameter — success-path finish closures
-// call this BEFORE UpdateContent when ``reasoning != ""`` and
+// call this BEFORE UpdateContent when “reasoning != ""“ and
 // skip it otherwise. Empty / nil reasoning never reaches the DB.
 //
 // Idempotent: calling with the same text overwrites the same
@@ -599,6 +681,39 @@ func (r *MessageRepo) SetReasoningContent(
 		return fmt.Errorf("set reasoning_content: %w", err)
 	}
 	return nil
+}
+
+// SetSearchSources persists the web_search citations on an assistant
+// message (migration 023). “raw“ is a JSON array of source objects;
+// nil/empty is a no-op (non-search turns leave the column NULL).
+func (r *MessageRepo) SetSearchSources(
+	ctx context.Context, msgID uuid.UUID, raw json.RawMessage,
+) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	const q = `UPDATE chat.messages_masked SET search_sources = $2 WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, []byte(raw)); err != nil {
+		return fmt.Errorf("set search_sources: %w", err)
+	}
+	return nil
+}
+
+// GetSearchSources reads the persisted web_search citations for one
+// message (tenant-scoped). Returns nil when the message has none.
+func (r *MessageRepo) GetSearchSources(
+	ctx context.Context, tenantID, msgID uuid.UUID,
+) (json.RawMessage, error) {
+	const q = `SELECT search_sources FROM chat.messages_masked
+	           WHERE id = $1 AND tenant_id = $2`
+	var raw json.RawMessage
+	if err := r.db.QueryRow(ctx, q, msgID, tenantID).Scan(&raw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get search_sources: %w", err)
+	}
+	return raw, nil
 }
 
 // UpdateContent overwrites the content + status + token usage of
@@ -621,6 +736,101 @@ func (r *MessageRepo) UpdateContent(
 	`
 	if _, err := r.db.Exec(ctx, q, msgID, content, status, tokenInput, tokenOutput); err != nil {
 		return fmt.Errorf("update message content: %w", err)
+	}
+	return nil
+}
+
+// CanonicalWrite carries the canonical artifact metadata persisted
+// alongside the display content (Phase 4A.2.2). For a non-“complete“
+// status, “Content“ and the integrity fields are nil — provider history
+// will EXCLUDE the row (never a display fallback). “ErrorCode“ is a
+// stable safe code only (never raw text).
+type CanonicalWrite struct {
+	Status        string
+	Content       *string
+	SchemaVersion *int
+	GenerationID  *string
+	SHA256        *string
+	Length        *int
+	ErrorCode     *string
+	// DisplayState (Phase 4A.2.4) classifies what content_masked holds. Only
+	// written when the repo's displayLifecycle flag is on. Empty → treated as
+	// legacy_display.
+	DisplayState string
+}
+
+// UpdateContentAndCanonical persists the restored DISPLAY content and the
+// CANONICAL artifact metadata in a SINGLE atomic UPDATE, so a row can
+// never end up “canonical_status='complete'“ with a missing canonical.
+// Used by the streaming + non-stream consumers when canonical history is
+// enabled.
+func (r *MessageRepo) UpdateContentAndCanonical(
+	ctx context.Context,
+	msgID uuid.UUID,
+	content, status string,
+	tokenInput, tokenOutput *int,
+	canon CanonicalWrite,
+) error {
+	set := `content_masked = $2, status = $3,
+		    token_usage_input = $4, token_usage_output = $5,
+		    content_canonical = $6, canonical_status = $7,
+		    canonical_schema_version = $8, canonical_generation_id = $9,
+		    canonical_sha256 = $10, canonical_length = $11,
+		    canonical_error_code = $12, canonical_received_at = now()`
+	args := []any{
+		msgID, content, status, tokenInput, tokenOutput,
+		canon.Content, canon.Status, canon.SchemaVersion, canon.GenerationID,
+		canon.SHA256, canon.Length, canon.ErrorCode,
+	}
+	if r.displayLifecycle {
+		ds := canon.DisplayState
+		if ds == "" {
+			ds = "legacy_display"
+		}
+		set += `, display_state = $13`
+		args = append(args, ds)
+	}
+	q := `UPDATE chat.messages_masked SET ` + set + ` WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, args...); err != nil {
+		return fmt.Errorf("update message content+canonical: %w", err)
+	}
+	return nil
+}
+
+// UpdateContentInvalidateCanonical writes display content AND atomically
+// INVALIDATES any prior canonical artifact (H3): NULLs the canonical
+// content + integrity fields and sets a non-complete status. Used by every
+// display-only finish/update path (error/cancel/edit/image/non-stream/
+// fallback) when canonical history is enabled, so a stale “complete“
+// canonical can never survive a display change and be replayed to the
+// provider. “errCode“ is a stable safe code (never raw text).
+func (r *MessageRepo) UpdateContentInvalidateCanonical(
+	ctx context.Context,
+	msgID uuid.UUID,
+	content, status, canonicalStatus, errCode, displayState string,
+	tokenInput, tokenOutput *int,
+) error {
+	set := `content_masked = $2, status = $3,
+		    token_usage_input = $4, token_usage_output = $5,
+		    content_canonical = NULL, canonical_status = $6,
+		    canonical_schema_version = NULL, canonical_generation_id = NULL,
+		    canonical_sha256 = NULL, canonical_length = NULL,
+		    canonical_error_code = $7, canonical_received_at = now()`
+	args := []any{
+		msgID, content, status, tokenInput, tokenOutput,
+		canonicalStatus, errCode,
+	}
+	if r.displayLifecycle {
+		ds := displayState
+		if ds == "" {
+			ds = "legacy_display"
+		}
+		set += `, display_state = $8`
+		args = append(args, ds)
+	}
+	q := `UPDATE chat.messages_masked SET ` + set + ` WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, args...); err != nil {
+		return fmt.Errorf("update message content (invalidate canonical): %w", err)
 	}
 	return nil
 }
