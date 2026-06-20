@@ -26,7 +26,7 @@ import type { Conversation, Folder } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
-import { Brain, ChevronRight, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import { Brain, ChevronRight, Folder as FolderIcon, FolderPlus, Pencil, Trash2 } from "lucide-react";
 
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 
@@ -1086,7 +1086,7 @@ function FolderHeader({
             aria-hidden
             className={`shrink-0 text-text-muted transition-transform ${collapsed ? "" : "rotate-90"}`}
           />
-          <span aria-hidden className="shrink-0">📁</span>
+          <FolderIcon width={14} height={14} aria-hidden className="shrink-0" />
           {renaming ? (
             <input
               ref={inputRef}

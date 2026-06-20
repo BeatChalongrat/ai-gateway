@@ -76,5 +76,12 @@ export function AuthedImage({ fileId, alt, className, onReady }: Props) {
     );
   }
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt={alt} decoding="async" className={className} />;
+  return (
+    <img
+      src={url}
+      alt={alt}
+      decoding="async"
+      className={`img-fade-in ${className ?? ""}`}
+    />
+  );
 }

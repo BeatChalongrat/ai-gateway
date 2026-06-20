@@ -1,0 +1,114 @@
+diff --git a/backend/app/domain/observability.py b/backend/app/domain/observability.py
+index fdf8fd6..b851b6f 100644
+--- a/backend/app/domain/observability.py
++++ b/backend/app/domain/observability.py
+@@ -148,6 +148,24 @@ class RequestRecord:
+         }
+ 
+ 
++def resolved_log_model(routed: str, reported: str | None) -> str:
++    """The model name to persist on ``request_logs.model``.
++
++    Routing always resolves the caller's ``auto`` before dispatch —
++    EXCEPT the cross-provider fallback chain, whose OpenRouter
++    candidate is the literal ``"auto"`` sentinel (OpenRouter's own
++    meta-router decides server-side). Recording that sentinel makes the
++    usage breakdown meaningless ("auto" rows). The provider RESPONSE
++    reports what actually answered, so prefer it for the sentinel case
++    only. Concrete routed ids stay verbatim — provider-reported names
++    carry date suffixes (gpt-4o-mini-2024-07-18) that would fragment
++    per-model aggregation.
++    """
++    if routed == "auto" and reported and reported != "auto":
++        return reported
++    return routed
++
++
+ # ---------------------------------------------------------------------------
+ # DLP trace helpers
+ # ---------------------------------------------------------------------------
+@@ -275,6 +293,45 @@ def safe_input_masked_snapshot(
+     return input_masked
+ 
+ 
++# Marker stored in ``output_final`` when no provider-safe (masked /
++# canonical) representation is available for a request that had DLP
++# findings — used INSTEAD of ever persisting the restored display.
++OUTPUT_FINAL_REDACTED_MARKER = "[REDACTED_NO_CANONICAL]"
++
++
++def safe_output_final_snapshot(
++    output_masked: str | None,
++    enforcement: Any,
++    *,
++    blocked_placeholder: str = "[BLOCKED_BY_DLP]",
++    redacted_marker: str = OUTPUT_FINAL_REDACTED_MARKER,
++) -> str | None:
++    """Phase 4A.2.3 — DB-safe snapshot for the ``output_final`` column.
++
++    ``output_final`` now stores the PROVIDER-SAFE (post-outbound-DLP,
++    PRE-restore, tokenized) representation — the same masked text the
++    provider would receive as history — and NEVER the restored display
++    the user saw. Callers MUST pass the masked output (``ai_to_service_
++    masked`` / the cached masked text / the aggregated masked-provider
++    stream text).
++
++    Fallbacks (never display raw):
++      - blocked request → ``[BLOCKED_BY_DLP]``.
++      - masked text unavailable but DLP fired → ``redacted_marker``.
++      - no findings + no masked text → pass through (clean/empty text is
++        provider-safe).
++    The ``app.jobs.dlp_retention`` job still NULLs this column on its
++    retention schedule.
++    """
++    if getattr(enforcement, "is_blocked", False):
++        return blocked_placeholder
++    if output_masked is None or output_masked == "":
++        if getattr(enforcement, "match_actions", None):
++            return redacted_marker
++        return output_masked
++    return output_masked
++
++
+ def safe_output_snapshot(
+     output_raw: str | None,
+     output_final: str | None,
+@@ -282,28 +339,19 @@ def safe_output_snapshot(
+     *,
+     blocked_placeholder: str = "[BLOCKED_BY_DLP]",
+ ) -> str | None:
+-    """Return the snapshot for the ``output_final`` column.
+-
+-    Stage 4 of the 4-stage trace (Service → User). Stores the actual
+-    post-restore plaintext the user received — the same text the
+-    Safe Trace panel surfaces to admins for audit.
+-
+-    Privacy posture (deliberate trade-off):
+-      - Anyone with DB access AND ``Role.ADMIN`` on the API layer
+-        can now read the restored response, including any PII that
+-        was unmasked for the user. This matches how
+-        ``input_masked`` / ``output_raw`` are already stored (no
+-        raw-PII placeholders — tokens only, but still plaintext).
+-      - The ``[BLOCKED_BY_DLP]`` placeholder is retained for the
+-        blocked path: a blocked request never produces a meaningful
+-        user-facing response, so there is nothing to persist there.
+-      - The ``app.jobs.dlp_retention`` job NULLs this column after
+-        ``settings.dlp_raw_retention_days`` along with the other
+-        raw-content columns — same retention contract as before.
++    """DEPRECATED (Phase 4A.2.3) — use :func:`safe_output_final_snapshot`.
++
++    Retained only for signature compatibility. It NO LONGER persists the
++    restored display (``output_final`` arg): it returns the provider-safe
++    masked arg (``output_raw``) or a redacted marker, so a stray call can
++    never leak restored raw into ``output_final``.
+     """
+     if getattr(enforcement, "is_blocked", False):
+         return blocked_placeholder
+-    return output_final if output_final is not None else output_raw
++    del output_final  # restored display is no longer persisted
++    return safe_output_final_snapshot(
++        output_raw, enforcement, blocked_placeholder=blocked_placeholder
++    )
+ 
+ 
+ def safe_output_raw_snapshot(

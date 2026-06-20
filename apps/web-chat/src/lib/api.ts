@@ -26,6 +26,7 @@ import type {
   Message,
   MessageListResponse,
   ModelListResponse,
+  UsageResponse,
   ShareExpiry,
   ShareLink,
   UserPreferences,
@@ -104,6 +105,11 @@ class ApiClient {
   // ----- Models ---------------------------------------------
   models() {
     return this.json<ModelListResponse>("/models");
+  }
+
+  // ----- Usage & credits ------------------------------------
+  getUsage() {
+    return this.json<UsageResponse>("/usage/me");
   }
 
   // ----- Conversations --------------------------------------

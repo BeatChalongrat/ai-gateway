@@ -302,6 +302,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-stable-key-change-in-prod}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-dev-stable-key-change-in-prod}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      # Trust anchor for the chat-edge → gateway X-User-ID header
+      # (per-end-user rate limiting AND per-end-user credit billing
+      # behind the shared service key). MUST match the chat-edge
+      # stack's INTERNAL_SERVICE_SECRET. Empty disables the trust
+      # (headers are then ignored — safe default).
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-}
       # DLP HMAC secret — drives deterministic per-conversation
       # tokenization when a request supplies metadata.conversation_id.
       # Generate prod value with: python3 -c "import secrets;print(secrets.token_hex(32))"
@@ -313,6 +319,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      IMAGE_GENERATION_TIMEOUT_SECONDS: ${IMAGE_GENERATION_TIMEOUT_SECONDS:-180}
+      OPENAI_IMAGE_TIMEOUT_SECONDS: ${OPENAI_IMAGE_TIMEOUT_SECONDS:-180}
       # 3000=admin-ui, 3001=portal, 3002=web-chat. allow_credentials=True
       # requires explicit origins (no "*"), and web-chat (:3002) now calls
       # the gateway directly for silent refresh, so it must be listed.
