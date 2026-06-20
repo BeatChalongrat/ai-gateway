@@ -53,17 +53,18 @@ func scanFile(row pgx.Row, f *model.ConversationFile) error {
 // extraction_status defaults to "pending" via the DB.
 //
 // Phase-4 fields (is_generated, parent_file_id, version, change_log)
-// are honoured when set so the executor result path can write a
-// "generated" row in a single insert; legacy direct-upload callers
-// can leave them zero-valued and the DB defaults pick up
+// and message_id are honoured when set so generated-file paths can
+// write a fully-linked row in a single insert; legacy direct-upload
+// callers leave them zero-valued (message_id NULL — AttachToMessage
+// links later) and the DB defaults pick up
 // (is_generated=false, version=1, parent_file_id NULL).
 func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*model.ConversationFile, error) {
 	const q = `
 		INSERT INTO chat.conversation_files
-			(conversation_id, tenant_id, user_id, filename, original_filename,
+			(conversation_id, message_id, tenant_id, user_id, filename, original_filename,
 			 content_type, file_size_bytes, storage_path, extraction_status,
 			 is_generated, parent_file_id, version, change_log, inspection_json)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING id, created_at, updated_at
 	`
 	if f.ExtractionStatus == "" {
@@ -73,7 +74,7 @@ func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*mode
 		f.Version = 1
 	}
 	err := r.db.QueryRow(ctx, q,
-		f.ConversationID, f.TenantID, f.UserID, f.Filename, f.OriginalFilename,
+		f.ConversationID, f.MessageID, f.TenantID, f.UserID, f.Filename, f.OriginalFilename,
 		f.ContentType, f.FileSizeBytes, f.StoragePath, f.ExtractionStatus,
 		f.IsGenerated, f.ParentFileID, f.Version, f.ChangeLog, f.InspectionJSON,
 	).Scan(&f.ID, &f.CreatedAt, &f.UpdatedAt)

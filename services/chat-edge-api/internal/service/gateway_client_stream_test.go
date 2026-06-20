@@ -6,7 +6,7 @@ import "testing"
 // the pump can forward it to the client instead of swallowing it.
 func TestParseStreamChunk_ProviderErrorFrame(t *testing.T) {
 	raw := `{"error":{"code":"all_models_failed","message":"Unable to get a response right now","attempts":[{"model":"gpt-4o","error":"401"}]}}`
-	ev, err := parseStreamChunk(raw)
+	ev, err := parseStreamChunk(raw, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestParseStreamChunk_ProviderErrorFrame(t *testing.T) {
 // B2 — a fallback_info frame must parse into FallbackInfo.
 func TestParseStreamChunk_FallbackInfoFrame(t *testing.T) {
 	raw := `{"type":"fallback_info","fallback_info":{"requested_model":"gpt-4o","actual_model":"claude-sonnet-4"}}`
-	ev, err := parseStreamChunk(raw)
+	ev, err := parseStreamChunk(raw, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestParseStreamChunk_FallbackInfoFrame(t *testing.T) {
 // and must NOT be mistaken for an error/fallback frame.
 func TestParseStreamChunk_NormalContentUnaffected(t *testing.T) {
 	raw := `{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`
-	ev, err := parseStreamChunk(raw)
+	ev, err := parseStreamChunk(raw, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestParseStreamChunk_NormalContentUnaffected(t *testing.T) {
 // error/fallback sniffing was added ahead of it.
 func TestParseStreamChunk_ReasoningStillWorks(t *testing.T) {
 	raw := `{"type":"reasoning_summary_delta","text":"thinking..."}`
-	ev, err := parseStreamChunk(raw)
+	ev, err := parseStreamChunk(raw, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

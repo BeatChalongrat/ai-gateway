@@ -124,6 +124,14 @@ func RequireAuth(
 	}
 }
 
+// ExtractPortalToken exposes the raw portal JWT for handlers that
+// proxy to the gateway's portal API on the caller's behalf (e.g. the
+// usage endpoint forwards it as a Bearer header). Same cookie-first
+// contract as RequireAuth.
+func ExtractPortalToken(r *http.Request) (string, error) {
+	return extractToken(r)
+}
+
 func extractToken(r *http.Request) (string, error) {
 	// Cookie-first, matching the FastAPI ``get_portal_user`` contract.
 	// Post-HttpOnly-migration the browser holds the access token in the
