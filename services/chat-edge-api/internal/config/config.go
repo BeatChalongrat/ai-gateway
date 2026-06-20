@@ -131,6 +131,9 @@ type Config struct {
 	// Phase B — the gateway image model the generate_image tool calls.
 	// gpt-image-1 is OpenAI's current image model (DALL-E is retiring).
 	ImageGenModel string `env:"IMAGE_GEN_MODEL" envDefault:"gpt-image-1"`
+	// Dedicated image-generation timeout. Image models often take much
+	// longer than chat completions; keep this separate from streaming chat.
+	ChatEdgeImageTimeoutSeconds int `env:"CHAT_EDGE_IMAGE_TIMEOUT_SECONDS" envDefault:"180"`
 
 	// Blob-storage backend selection.
 	//
@@ -152,6 +155,57 @@ type Config struct {
 	// link-sharing damage, long enough that a slow client can finish
 	// the download.
 	PresignedURLExpiry time.Duration `env:"PRESIGNED_URL_EXPIRY" envDefault:"15m"`
+
+	// DLP canonical history (Phase 4A.2.2). When ``Enabled`` is true the
+	// service consumes the gateway's canonical artifact, persists it, and
+	// builds provider history from ``content_canonical`` ONLY (legacy /
+	// non-complete rows are excluded — never a display fallback). When
+	// ``Shadow`` is true (and Enabled false) the artifact is parsed +
+	// validated and divergence counters logged, but NOTHING is persisted
+	// and provider history is unchanged. Defaults keep production behavior.
+	DLPCanonicalHistoryEnabled bool `env:"DLP_CANONICAL_HISTORY_ENABLED" envDefault:"false"`
+	DLPCanonicalHistoryShadow  bool `env:"DLP_CANONICAL_HISTORY_SHADOW" envDefault:"true"`
+
+	// DLP display lifecycle (Phase 4A.2.4). When ``Enabled`` is true, NEW
+	// assistant writes stop persisting restored RAW display into
+	// ``content_masked`` — they store the tokenized canonical (provider-safe)
+	// or a redacted placeholder, classified by the ``display_state`` column
+	// (migration 025). The live stream is unchanged; reload uses restore-on-
+	// read (Vault V2) or a tokenized/redacted fallback. ``Shadow`` reserves
+	// the same observe-only semantics as the other DLP rollouts (no persisted
+	// change). ``StrictLegacy`` additionally redacts pre-feature legacy rows
+	// on owner reload instead of showing their stored raw display. Display
+	// lifecycle requires canonical history to be enabled (it needs the
+	// canonical artifact to store a provider-safe representation). Defaults
+	// keep production behavior (restored display persisted, as before).
+	DLPDisplayLifecycleEnabled      bool `env:"DLP_DISPLAY_LIFECYCLE_ENABLED" envDefault:"false"`
+	DLPDisplayLifecycleShadow       bool `env:"DLP_DISPLAY_LIFECYCLE_SHADOW" envDefault:"true"`
+	DLPDisplayLifecycleStrictLegacy bool `env:"DLP_DISPLAY_LIFECYCLE_STRICT_LEGACY" envDefault:"false"`
+
+	// DLP Vault V2 (Phase 4A.2.5). Mirrors the Python gateway flag — chat-edge
+	// only needs it to gate the restore-on-read bridge: the Go→Vault V2
+	// DisplayRestorer is wired ONLY when Vault V2 is enabled (and display
+	// lifecycle is enabled). Default off → restore-on-read stays a
+	// tokenized/redacted fallback. chat-edge never reads Vault V2 directly.
+	DLPVaultV2Enabled bool `env:"DLP_VAULT_V2_ENABLED" envDefault:"false"`
+
+	// DLP secure calculator (Phase 4A.2.5 placeholder — NOT implemented). The
+	// pre-audit gated calculator behind this flag; it stays default off/shadow
+	// and inert. No calculator / <CALC_n> exists yet; this only reserves the
+	// flag so the next phase doesn't churn config defaults.
+	DLPSecureCalcEnabled bool `env:"DLP_SECURE_CALC_ENABLED" envDefault:"false"`
+	DLPSecureCalcShadow  bool `env:"DLP_SECURE_CALC_SHADOW" envDefault:"true"`
+
+	// Phase 4A.2.7 — tenant-scoped feature gating (mirror of the Python
+	// gateway). A canary-sensitive feature is effective for a request only when
+	// its flag is on AND the tenant is in scope. Modes: off (default) | allowlist
+	// | global. Allowlist entries are ``tenant/project`` (chat-edge matches on
+	// the tenant part, since project lives gateway-side). The Python gateway is
+	// the authoritative tenant gate (it withholds canonical events for
+	// non-allowlisted tenants, so chat-edge naturally persists legacy); these
+	// fields add defense-in-depth + parity.
+	DLPFeatureScopeMode string `env:"DLP_FEATURE_SCOPE_MODE" envDefault:"off"`
+	DLPFeatureAllowlist string `env:"DLP_FEATURE_ALLOWLIST" envDefault:""`
 }
 
 // ModelEntry is one entry in the model list surfaced by GET /models.
@@ -172,7 +226,7 @@ type ModelEntry struct {
 //
 // Order matters for Auto Thinking Mode: ResolveAutoModelWithReasoning
 // returns the FIRST reasoning-capable id in this list for a complex
-// turn. ``o3-mini`` is listed ahead of ``claude-sonnet-4`` so Auto
+// turn. “o3-mini“ is listed ahead of “claude-sonnet-4“ so Auto
 // prefers the OpenAI o-series (valid key in this deployment) over the
 // Claude row (placeholder Anthropic key) — picking Claude would route
 // to an unreachable provider and error the turn.

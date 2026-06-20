@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -98,11 +99,11 @@ func NewGatewayClient(
 //   - ToolCallID + Name — set on role="tool" messages we send back
 //     to the gateway carrying the result of a tool execution.
 type GatewayMessage struct {
-	Role       string             `json:"role"`
-	Content    any                `json:"content"`
-	ToolCalls  []GatewayToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string             `json:"tool_call_id,omitempty"`
-	Name       string             `json:"name,omitempty"`
+	Role       string            `json:"role"`
+	Content    any               `json:"content"`
+	ToolCalls  []GatewayToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	Name       string            `json:"name,omitempty"`
 }
 
 // GatewayToolCall mirrors OpenAI's tool_calls[] response shape. The
@@ -139,9 +140,9 @@ type GatewayToolFunction struct {
 // array. Used by the message builder when image attachments are
 // present on a user turn.
 type GatewayContentBlock struct {
-	Type     string             `json:"type"`
-	Text     string             `json:"text,omitempty"`
-	ImageURL *GatewayImageURL   `json:"image_url,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	ImageURL *GatewayImageURL `json:"image_url,omitempty"`
 }
 
 type GatewayImageURL struct {
@@ -150,14 +151,14 @@ type GatewayImageURL struct {
 }
 
 // GatewayReasoningConfig mirrors the Gateway's public
-// ``ReasoningConfig`` (backend/app/schemas/public.py — T1). Provider-
-// neutral on the wire; the Gateway adapter translates ``mode`` into
-// the provider-native shape (Anthropic ``thinking`` block, OpenAI
-// ``reasoning_effort``, Gemini ``thinkingConfig.thinkingLevel``,
-// DeepSeek / Groq R1 ``reasoning_content`` parsing).
+// “ReasoningConfig“ (backend/app/schemas/public.py — T1). Provider-
+// neutral on the wire; the Gateway adapter translates “mode“ into
+// the provider-native shape (Anthropic “thinking“ block, OpenAI
+// “reasoning_effort“, Gemini “thinkingConfig.thinkingLevel“,
+// DeepSeek / Groq R1 “reasoning_content“ parsing).
 //
-// Mode values: ``off`` / ``auto`` / ``low`` / ``medium`` / ``high``.
-// ``ShowSummary`` controls whether reasoning text is streamed back —
+// Mode values: “off“ / “auto“ / “low“ / “medium“ / “high“.
+// “ShowSummary“ controls whether reasoning text is streamed back —
 // the model still thinks (better answers) either way; only the
 // SSE emit / response field is gated.
 type GatewayReasoningConfig struct {
@@ -165,7 +166,7 @@ type GatewayReasoningConfig struct {
 	ShowSummary bool   `json:"show_summary"`
 }
 
-// RoutingHints mirrors the Gateway's public ``RoutingHints``
+// RoutingHints mirrors the Gateway's public “RoutingHints“
 // (backend/app/schemas/public.py). Sent ONLY alongside model="auto":
 // chat-edge describes what the turn NEEDS (capabilities + complexity)
 // and the gateway's provider-agnostic smart router picks the best model
@@ -178,9 +179,9 @@ type RoutingHints struct {
 	NeedsReasoning bool   `json:"needs_reasoning,omitempty"`
 	HasCode        bool   `json:"has_code,omitempty"`
 	HasFiles       bool   `json:"has_files,omitempty"`
-	Complexity     string `json:"complexity,omitempty"`      // "low" | "medium" | "high"
+	Complexity     string `json:"complexity,omitempty"` // "low" | "medium" | "high"
 	ConvTurnCount  int    `json:"conv_turn_count,omitempty"`
-	Language       string `json:"language,omitempty"`        // "th" | "en" | "zh" | ...
+	Language       string `json:"language,omitempty"` // "th" | "en" | "zh" | ...
 }
 
 type GatewayChatRequest struct {
@@ -248,6 +249,10 @@ type GatewayChatResponse struct {
 	Model   string              `json:"model"`
 	Choices []GatewayChatChoice `json:"choices"`
 	Usage   *GatewayChatUsage   `json:"usage"`
+	// Phase 4A.2.2 — internal DLP canonical envelope on managed WebChat
+	// non-stream responses (off-schema; public callers never send it).
+	// Parsed into a CanonicalArtifact by the consumer; never the display.
+	XSranDLP *CanonicalArtifact `json:"x_sran_dlp,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -323,10 +328,17 @@ type StreamEvent struct {
 	// before the answering model's content when a fallback rescued
 	// the request, so the client can show which model actually replied.
 	FallbackInfo map[string]any
+	// Phase 4A.2.2 — internal DLP canonical artifact frames, carried on
+	// named SSE events (``event: dlp.canonical_*``). These are consumed
+	// by the chat-edge canonical state machine and are NEVER forwarded to
+	// the browser, appended to display content, or counted as tokens.
+	CanonicalCapability  *CanonicalCapabilityFrame
+	CanonicalFinal       *CanonicalArtifact
+	CanonicalUnavailable *CanonicalUnavailableFrame
 }
 
-// StreamProviderError is the payload of a Gateway ``error`` SSE frame
-// (B1). ``Attempts`` is populated on the ``all_models_failed`` case so
+// StreamProviderError is the payload of a Gateway “error“ SSE frame
+// (B1). “Attempts“ is populated on the “all_models_failed“ case so
 // the client can show which models were tried and why each failed.
 type StreamProviderError struct {
 	Code     string         `json:"code"`
@@ -396,9 +408,21 @@ func (s *StreamReader) Close() error { return s.body.Close() }
 // gateway's payload format so we treat each “data: …“ as a
 // complete event.
 func (s *StreamReader) Next() (*StreamEvent, error) {
+	// Track the most recent ``event:`` name so the following ``data:``
+	// line can be dispatched to the canonical consumer. A blank line ends
+	// an SSE record and resets the pending event name.
+	eventName := ""
 	for s.scanner.Scan() {
 		line := strings.TrimRight(s.scanner.Text(), "\r")
-		if line == "" || strings.HasPrefix(line, ":") {
+		if line == "" {
+			eventName = ""
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		if strings.HasPrefix(line, "event: ") {
+			eventName = strings.TrimPrefix(line, "event: ")
 			continue
 		}
 		if !strings.HasPrefix(line, "data: ") {
@@ -408,7 +432,8 @@ func (s *StreamReader) Next() (*StreamEvent, error) {
 		if payload == "[DONE]" {
 			return &StreamEvent{Done: true}, nil
 		}
-		ev, err := parseStreamChunk(payload)
+		ev, err := parseStreamChunk(payload, eventName)
+		eventName = ""
 		if err != nil {
 			// Malformed chunk → skip rather than abort the stream;
 			// the gateway sometimes emits keep-alive comments that
@@ -433,9 +458,9 @@ func (s *StreamReader) Next() (*StreamEvent, error) {
 // tool-call delta.
 //
 // T4 adds two reasoning-channel shapes the Gateway emits alongside
-// the OpenAI chunks: ``reasoning_summary_delta`` (carries
-// ``text``) and ``analysis_status`` (carries ``status``). Both have
-// ``type`` at the top level rather than nesting under ``choices``,
+// the OpenAI chunks: “reasoning_summary_delta“ (carries
+// “text“) and “analysis_status“ (carries “status“). Both have
+// “type“ at the top level rather than nesting under “choices“,
 // so we sniff for that key first and short-circuit before falling
 // through to the OpenAI-shape decoder.
 type streamChunk struct {
@@ -458,10 +483,10 @@ type streamChunk struct {
 }
 
 // reasoningEnvelope is the minimal shape we need to detect a
-// Gateway T2/T3 reasoning frame. ``Type`` is the discriminator.
+// Gateway T2/T3 reasoning frame. “Type“ is the discriminator.
 // We unmarshal everything first into this small struct, then
 // re-unmarshal into the typed shape if it's an OpenAI chunk —
-// cheaper than a full ``map[string]any`` round-trip and keeps the
+// cheaper than a full “map[string]any“ round-trip and keeps the
 // hot path allocation-light.
 type reasoningEnvelope struct {
 	Type   string `json:"type"`
@@ -483,7 +508,32 @@ type reasoningEnvelope struct {
 	} `json:"usage,omitempty"`
 }
 
-func parseStreamChunk(raw string) (*StreamEvent, error) {
+func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
+	// Phase 4A.2.2 — internal DLP canonical events are carried on named
+	// SSE events. Parse them into typed canonical fields so the consumer
+	// state machine sees them; a malformed canonical payload yields an
+	// empty (non-forwarded, non-content) event rather than aborting.
+	switch eventName {
+	case "dlp.canonical_capability":
+		var f CanonicalCapabilityFrame
+		if json.Unmarshal([]byte(raw), &f) == nil {
+			return &StreamEvent{CanonicalCapability: &f}, nil
+		}
+		return &StreamEvent{}, nil
+	case "dlp.canonical_final":
+		var a CanonicalArtifact
+		if json.Unmarshal([]byte(raw), &a) == nil {
+			return &StreamEvent{CanonicalFinal: &a}, nil
+		}
+		return &StreamEvent{}, nil
+	case "dlp.canonical_unavailable":
+		var u CanonicalUnavailableFrame
+		if json.Unmarshal([]byte(raw), &u) == nil {
+			return &StreamEvent{CanonicalUnavailable: &u}, nil
+		}
+		return &StreamEvent{}, nil
+	}
+
 	// Reasoning-channel frames (T2/T3) carry ``type`` at the top
 	// level. Sniff first so we never accidentally swallow a
 	// reasoning frame into the OpenAI-shape decoder.
@@ -504,11 +554,11 @@ func parseStreamChunk(raw string) (*StreamEvent, error) {
 			return &StreamEvent{ReasoningDelta: env.Text}, nil
 		case "analysis_status":
 			return &StreamEvent{AnalysisStatus: env.Status}, nil
-		// Gateway's final chat.completion.chunk frame ALSO has
-		// ``object: "chat.completion.chunk"`` but no top-level
-		// ``type`` — it falls through to the OpenAI branch below.
-		// Unknown ``type`` values fall through too so future
-		// Gateway-side frame additions don't crash the pump.
+			// Gateway's final chat.completion.chunk frame ALSO has
+			// ``object: "chat.completion.chunk"`` but no top-level
+			// ``type`` — it falls through to the OpenAI branch below.
+			// Unknown ``type`` values fall through too so future
+			// Gateway-side frame additions don't crash the pump.
 		}
 	}
 
@@ -692,16 +742,62 @@ func (g *GatewayClient) GenerateImages(
 		httpReq.Header.Set("X-Request-Id", callCtx.RequestID)
 	}
 
+	start := time.Now()
+	slog.Info("chat_edge_to_gateway_started",
+		"request_id", callCtx.RequestID,
+		"conversation_id", callCtx.ConversationID.String(),
+		"model", req.Model,
+		"provider", "gateway",
+		"endpoint", "/images/generations",
+	)
 	resp, err := g.http.Do(httpReq)
+	latencyMs := time.Since(start).Milliseconds()
 	if err != nil {
+		slog.Error("gateway_image_request_failed",
+			"request_id", callCtx.RequestID,
+			"conversation_id", callCtx.ConversationID.String(),
+			"model", req.Model,
+			"endpoint", "/images/generations",
+			"latency_ms", latencyMs,
+			"elapsed_ms", latencyMs,
+			"error_type", "transport",
+			"error_message", truncate(err.Error(), 200),
+		)
 		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		slog.Error("gateway_image_request_failed",
+			"request_id", callCtx.RequestID,
+			"conversation_id", callCtx.ConversationID.String(),
+			"model", req.Model,
+			"endpoint", "/images/generations",
+			"status_code", resp.StatusCode,
+			"latency_ms", latencyMs,
+			"elapsed_ms", latencyMs,
+			"error_type", "http_status",
+		)
 		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
 	}
+	slog.Info("gateway_image_request_succeeded",
+		"request_id", callCtx.RequestID,
+		"conversation_id", callCtx.ConversationID.String(),
+		"model", req.Model,
+		"endpoint", "/images/generations",
+		"status_code", resp.StatusCode,
+		"latency_ms", latencyMs,
+	)
+	slog.Info("gateway_image_response_received",
+		"request_id", callCtx.RequestID,
+		"conversation_id", callCtx.ConversationID.String(),
+		"model", req.Model,
+		"provider", "gateway",
+		"endpoint", "/images/generations",
+		"status_code", resp.StatusCode,
+		"elapsed_ms", latencyMs,
+	)
 
 	out := &GatewayImagesResponse{}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -778,6 +874,154 @@ func (g *GatewayClient) ListModels(ctx context.Context) ([]GatewayModelInfo, err
 		return nil, fmt.Errorf("gateway models: decode: %w", err)
 	}
 	return out.Data, nil
+}
+
+// ---------------------------------------------------------------------------
+// Web search (gateway /v1/search)
+// ---------------------------------------------------------------------------
+
+type GatewaySearchRequest struct {
+	Query      string `json:"query"`
+	MaxResults int    `json:"max_results,omitempty"`
+}
+
+// GatewaySearchResult is one normalized hit. Mirrors the gateway's
+// SearchResult.to_dict() shape (title/url/snippet/domain/published_date).
+type GatewaySearchResult struct {
+	Title         string `json:"title"`
+	URL           string `json:"url"`
+	Snippet       string `json:"snippet"`
+	Domain        string `json:"domain"`
+	PublishedDate string `json:"published_date,omitempty"`
+}
+
+type GatewaySearchResponse struct {
+	Query     string                `json:"query"`
+	Provider  string                `json:"provider"`
+	LatencyMs int                   `json:"latency_ms"`
+	Results   []GatewaySearchResult `json:"results"`
+}
+
+// GatewaySearchConfig mirrors GET /v1/search/config: whether the
+// caller's tenant should be offered the web_search tool.
+type GatewaySearchConfig struct {
+	Enabled       bool `json:"enabled"`
+	SearchEnabled bool `json:"search_enabled"`
+	ProviderCount int  `json:"provider_count"`
+}
+
+// Search issues a non-streaming web-search call to the gateway's
+// /search endpoint. Same auth + audit headers as GenerateImages so the
+// gateway bills the trusted end-user. Returns GatewayUnavailableError
+// on any non-2xx (carrying the status + body so the tool can map
+// "not enabled" / "insufficient_credits" to a graceful model message).
+func (g *GatewayClient) Search(
+	ctx context.Context,
+	callCtx GatewayCallContext,
+	req GatewaySearchRequest,
+) (*GatewaySearchResponse, error) {
+	buf, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: marshal search request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, g.BaseURL+"/search", bytes.NewReader(buf),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build search request: %w", err)
+	}
+	bearer, err := g.bearer()
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+bearer)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-Tenant-ID", callCtx.TenantID.String())
+	httpReq.Header.Set("X-User-ID", callCtx.UserID.String())
+	if g.InternalServiceSecret != "" {
+		httpReq.Header.Set("X-Internal-Service-Secret", g.InternalServiceSecret)
+	}
+	if callCtx.ConversationID != uuid.Nil {
+		httpReq.Header.Set("X-Conversation-ID", callCtx.ConversationID.String())
+	}
+	if callCtx.RequestID != "" {
+		httpReq.Header.Set("X-Request-Id", callCtx.RequestID)
+	}
+
+	start := time.Now()
+	resp, err := g.http.Do(httpReq)
+	latencyMs := time.Since(start).Milliseconds()
+	if err != nil {
+		slog.Error("gateway_search_request_failed",
+			"request_id", callCtx.RequestID,
+			"conversation_id", callCtx.ConversationID.String(),
+			"latency_ms", latencyMs,
+			"error_type", "transport",
+			"error_message", truncate(err.Error(), 200),
+		)
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		slog.Warn("gateway_search_request_failed",
+			"request_id", callCtx.RequestID,
+			"conversation_id", callCtx.ConversationID.String(),
+			"status_code", resp.StatusCode,
+			"latency_ms", latencyMs,
+		)
+		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
+	}
+	out := &GatewaySearchResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return nil, fmt.Errorf("gateway: decode search response: %w", err)
+	}
+	slog.Info("gateway_search_request_succeeded",
+		"request_id", callCtx.RequestID,
+		"conversation_id", callCtx.ConversationID.String(),
+		"provider", out.Provider,
+		"results_count", len(out.Results),
+		"latency_ms", latencyMs,
+	)
+	return out, nil
+}
+
+// SearchConfig fetches GET /v1/search/config for the caller's tenant.
+// chat-edge uses this to decide whether to offer the web_search tool.
+func (g *GatewayClient) SearchConfig(
+	ctx context.Context, callCtx GatewayCallContext,
+) (*GatewaySearchConfig, error) {
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, g.BaseURL+"/search/config", nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build search-config request: %w", err)
+	}
+	bearer, err := g.bearer()
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+bearer)
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-Tenant-ID", callCtx.TenantID.String())
+	httpReq.Header.Set("X-User-ID", callCtx.UserID.String())
+	if g.InternalServiceSecret != "" {
+		httpReq.Header.Set("X-Internal-Service-Secret", g.InternalServiceSecret)
+	}
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("gateway search-config: status %d", resp.StatusCode)
+	}
+	out := &GatewaySearchConfig{}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return nil, fmt.Errorf("gateway: decode search-config: %w", err)
+	}
+	return out, nil
 }
 
 func truncate(s string, n int) string {

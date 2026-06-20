@@ -31,6 +31,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -158,18 +160,18 @@ func NewFileService(
 // Anything outside the set is rejected at the service boundary.
 var allowedContentTypes = map[string]bool{
 	"application/pdf": true,
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
-	"text/csv":      true,
-	"text/plain":    true,
-	"text/markdown": true,
-	"text/html":     true,
+	"text/csv":         true,
+	"text/plain":       true,
+	"text/markdown":    true,
+	"text/html":        true,
 	"application/json": true,
-	"image/png":  true,
-	"image/jpeg": true,
-	"image/gif":  true,
-	"image/webp": true,
+	"image/png":        true,
+	"image/jpeg":       true,
+	"image/gif":        true,
+	"image/webp":       true,
 }
 
 // textLikeExtensions are read verbatim as UTF-8 text. Browsers report
@@ -355,6 +357,7 @@ type GeneratedImageInput struct {
 	UserID         uuid.UUID
 	ConversationID uuid.UUID
 	MessageID      uuid.UUID
+	RequestID      string
 	Data           []byte
 	ContentType    string // image/png (default), image/jpeg, image/webp
 	Prompt         string // used for the display filename
@@ -420,6 +423,15 @@ func (s *FileService) SaveGeneratedImage(
 		_ = s.storage.Delete(ctx, key)
 		return nil, err
 	}
+	slog.Info("generated_image_attachment_saved",
+		"request_id", in.RequestID,
+		"conversation_id", in.ConversationID.String(),
+		"message_id", in.MessageID.String(),
+		"file_id", row.ID.String(),
+		"relative_url", "/files/"+row.ID.String()+"/download",
+		"file_size_bytes", row.FileSizeBytes,
+		"mime_type", row.ContentType,
+	)
 	return row, nil
 }
 
@@ -853,10 +865,163 @@ func (s *FileService) ImageDataURLsForMessage(
 	return out
 }
 
+// GeneratedImageNotes returns, per message id, a short API-side note
+// describing the AI-generated image attachments on that message. The
+// message flow appends the note to the assistant message COPY it sends
+// to the provider (never the stored row) so a model switched mid-
+// conversation knows the image really exists — without it, the bare
+// stored text ("สร้างรูปเรียบร้อยแล้วครับ") reads as an unsubstantiated
+// claim and the new model contradicts it. One batched query; uploads
+// (is_generated=false) and non-image generations are excluded. Returns
+// nil on error or when no message carries a generated image.
+func (s *FileService) GeneratedImageNotes(
+	ctx context.Context, tenantID uuid.UUID, messageIDs []uuid.UUID,
+) map[uuid.UUID]string {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	byMsg, err := s.files.ListByMessageIDs(ctx, tenantID, messageIDs)
+	if err != nil {
+		return nil
+	}
+	out := make(map[uuid.UUID]string)
+	for msgID, files := range byMsg {
+		names := make([]string, 0, len(files))
+		for i := range files {
+			f := &files[i]
+			if f.IsGenerated && isImageContentType(f.ContentType) {
+				names = append(names, f.OriginalFilename)
+			}
+		}
+		if len(names) > 0 {
+			out[msgID] = generatedImageNote(names)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// Approach B — history-replay limits for generated images. detail:"low"
+// caps the API-side token cost (~85 tokens/image) but the base64
+// payload itself still rides the wire, so the source is resized to
+// 512px (plenty for context continuity) and the count is bounded.
+const (
+	// visionHistoryMaxDim bounds the longest side of a replayed image.
+	visionHistoryMaxDim = 512
+	// visionHistoryMaxImages caps the TOTAL replayed images per request;
+	// older ones keep the text annotation only.
+	visionHistoryMaxImages = 5
+	// visionHistoryMaxPerMsg caps images per assistant message.
+	visionHistoryMaxPerMsg = 3
+	// visionHistoryMaxFileBytes skips abnormally large source blobs.
+	visionHistoryMaxFileBytes = 5 << 20 // 5 MB
+)
+
+// GeneratedImageVisionURLs returns, per message id, base64 data URLs
+// for the AI-generated image attachments on those messages, so the
+// message flow can replay them into history as vision content for a
+// vision-capable model (Approach B — lets the model SEE images it or
+// a previous model generated). Newest images win the caps above; any
+// skipped or failed image silently degrades to the Approach-A text
+// annotation the caller keeps on every generated-image message.
+func (s *FileService) GeneratedImageVisionURLs(
+	ctx context.Context, tenantID uuid.UUID, messageIDs []uuid.UUID,
+) map[uuid.UUID][]string {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	byMsg, err := s.files.ListByMessageIDs(ctx, tenantID, messageIDs)
+	if err != nil {
+		return nil
+	}
+	type candidate struct {
+		msgID uuid.UUID
+		f     *model.ConversationFile
+	}
+	cands := make([]candidate, 0, 4)
+	for msgID, files := range byMsg {
+		for i := range files {
+			f := &files[i]
+			if f.IsGenerated && isImageContentType(f.ContentType) {
+				cands = append(cands, candidate{msgID, f})
+			}
+		}
+	}
+	if len(cands) == 0 {
+		return nil
+	}
+	// Newest first so the caps keep the most recent images — those are
+	// what a follow-up ("change the background") refers to.
+	sort.Slice(cands, func(i, j int) bool {
+		return cands[i].f.CreatedAt.After(cands[j].f.CreatedAt)
+	})
+
+	out := make(map[uuid.UUID][]string)
+	perMsg := make(map[uuid.UUID]int)
+	included, skipped := 0, 0
+	for _, c := range cands {
+		if included >= visionHistoryMaxImages || perMsg[c.msgID] >= visionHistoryMaxPerMsg {
+			skipped++
+			continue
+		}
+		if c.f.FileSizeBytes > visionHistoryMaxFileBytes {
+			slog.Warn("generated_image_vision_skipped_too_large",
+				"file_id", c.f.ID.String(),
+				"file_size_bytes", c.f.FileSizeBytes)
+			skipped++
+			continue
+		}
+		url := s.imageDataURLSized(ctx, c.f, visionHistoryMaxDim, ".vision512")
+		if url == "" {
+			// Read / resize failure (already logged inside) — this
+			// image keeps its text annotation only.
+			skipped++
+			continue
+		}
+		out[c.msgID] = append(out[c.msgID], url)
+		perMsg[c.msgID]++
+		included++
+	}
+	slog.Info("generated_image_vision_history",
+		"included", included,
+		"skipped", skipped,
+		"messages", len(out))
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// generatedImageNote phrases the annotation. English so every model
+// follows it as an instruction; the filenames carry the (often Thai)
+// prompt the image was generated from, which doubles as a description.
+func generatedImageNote(names []string) string {
+	noun := "An AI-generated image"
+	if len(names) > 1 {
+		noun = "AI-generated images"
+	}
+	return fmt.Sprintf(
+		"[Context: %s (%s) was created with this reply and displayed to the user; it is still visible in the chat. Treat the image as already delivered.]",
+		noun, strings.Join(names, ", "),
+	)
+}
+
 // imageDataURL is the per-file path: ensure a local copy of the
 // source blob, run image_resize.py (with caching), read the .b64
 // sidecar, return the data URL.
 func (s *FileService) imageDataURL(ctx context.Context, f *model.ConversationFile) string {
+	return s.imageDataURLSized(ctx, f, 2048, ".vision")
+}
+
+// imageDataURLSized is the parameterised core: maxDim bounds the longest
+// side and sidecarTag namespaces the cache file so different sizes of
+// the same source don't clobber each other (".vision" = the 2048px
+// current-turn uploads cache, ".vision512" = history-replay images).
+func (s *FileService) imageDataURLSized(
+	ctx context.Context, f *model.ConversationFile, maxDim int, sidecarTag string,
+) string {
 	srcPath, cleanup, err := s.storage.OpenLocalCopy(ctx, f.StoragePath)
 	if err != nil {
 		slog.Warn("vision: storage local-copy failed",
@@ -876,7 +1041,7 @@ func (s *FileService) imageDataURL(ctx context.Context, f *model.ConversationFil
 	if outExt != ".png" && outExt != ".jpeg" && outExt != ".gif" && outExt != ".webp" {
 		outExt = ".png"
 	}
-	visionPath := srcPath + ".vision" + outExt
+	visionPath := srcPath + sidecarTag + outExt
 	b64Path := visionPath + ".b64"
 
 	if data, err := os.ReadFile(b64Path); err == nil && len(data) > 0 {
@@ -896,7 +1061,7 @@ func (s *FileService) imageDataURL(ctx context.Context, f *model.ConversationFil
 
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, s.knobs.ExtractPythonBinary, script, srcPath, visionPath, "2048")
+	cmd := exec.CommandContext(cctx, s.knobs.ExtractPythonBinary, script, srcPath, visionPath, strconv.Itoa(maxDim))
 	if out, err := cmd.Output(); err != nil {
 		slog.Warn("vision: image_resize.py failed",
 			"file_id", f.ID.String(), "err", err, "out", string(out))

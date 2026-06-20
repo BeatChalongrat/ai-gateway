@@ -53,6 +53,17 @@ type SearchService struct {
 	messages      *repository.MessageRepo
 	conversations *repository.ConversationRepo
 	memories      *repository.MemoryRepo
+	// Phase 4A.2.4.1 — when true, message hits are emitted through
+	// SearchSafeContent so a legacy raw ``content_masked`` never reaches the
+	// search index or the LLM ``search_past_conversations`` tool. Wired from
+	// config in main.go; default false (legacy passthrough).
+	displayLifecycle bool
+}
+
+// SetDisplayLifecycle toggles the non-raw search representation (Phase
+// 4A.2.4.1). Set true when DLP_DISPLAY_LIFECYCLE_ENABLED is on.
+func (s *SearchService) SetDisplayLifecycle(enabled bool) {
+	s.displayLifecycle = enabled
 }
 
 func NewSearchService(
@@ -132,12 +143,16 @@ func (s *SearchService) SearchPastContext(
 		if err == nil {
 			for i := range hits {
 				h := &hits[i]
+				// Phase 4A.2.4.1 — never feed a raw legacy content_masked to the
+				// index/tool/LLM. canonical_safe → tokenized; legacy/redacted →
+				// redacted placeholder. No-op when display lifecycle is off.
+				safe := SearchSafeContent(s.displayLifecycle, h.DisplayState, h.Content)
 				out = append(out, PastContextResult{
 					Type:              "message",
 					ConversationID:    h.ConversationID.String(),
 					ConversationTitle: h.ConversationTitle,
 					Role:              h.Role,
-					Content:           truncateRunes(h.Content, contentTruncate),
+					Content:           truncateRunes(safe, contentTruncate),
 					Date:              h.CreatedAt.UTC().Format("2006-01-02"),
 					Relevance:         relevanceFromRank(h.Rank),
 				})
