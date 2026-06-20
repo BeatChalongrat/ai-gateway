@@ -158,7 +158,10 @@ var modelMetadata = map[string]modelMeta{
 		MaxOutputTokens: 4096,
 		InputPricePerM:  10.00,
 		OutputPricePerM: 30.00,
-		Capabilities:    []string{"streaming", "vision", "function_calling"},
+		// vision removed 2026-06-12: OpenAI now rejects image_url on
+		// gpt-4-turbo ("image_url is only supported by certain
+		// models", verified live) — its image input was retired.
+		Capabilities:    []string{"streaming", "function_calling"},
 	},
 	"o1": {
 		Description:     "Reasoning-tuned model that thinks before responding. Best for hard math/code.",
@@ -394,6 +397,55 @@ func (h *ModelHandler) SupportsImageTools(ctx context.Context, id string) bool {
 		return false
 	}
 	return false
+}
+
+// SupportsVision reports whether the model's catalog entry advertises
+// the vision capability. Used by MessageService to decide whether
+// generated images can be replayed into history as image_url content
+// (Approach B) — unknown ids and the Auto sentinel return false so the
+// flow safely falls back to the text annotation (Approach A) rather
+// than sending image blocks a model might reject.
+func (h *ModelHandler) SupportsVision(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, m := range h.catalog(ctx) {
+		if m.ID != id {
+			continue
+		}
+		for _, c := range m.Capabilities {
+			if c == "vision" {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// KnownWithoutTools reports whether ``id`` has a CURATED metadata entry
+// that deliberately omits function_calling (e.g. o1, o3-mini).
+// MessageService uses this to skip attaching the tools block so a
+// mid-conversation switch to such a model doesn't send a ``tools``
+// request param the provider may reject.
+//
+// Deliberately consults ONLY the static modelMetadata map, NOT the live
+// catalog: gateway-discovered models carry no capability flags, so the
+// dynamic catalog under-reports tool support (gpt-5.x etc. show no
+// function_calling despite supporting it). Gating on the catalog would
+// silently strip tools from those models. Unknown ids and the Auto
+// sentinel return false (capability unknown → keep tools).
+func (h *ModelHandler) KnownWithoutTools(_ context.Context, id string) bool {
+	meta, ok := modelMetadata[id]
+	if !ok {
+		return false
+	}
+	for _, c := range meta.Capabilities {
+		if c == "function_calling" {
+			return false
+		}
+	}
+	return true
 }
 
 // configCatalog is the static fallback path (Gateway unreachable). It

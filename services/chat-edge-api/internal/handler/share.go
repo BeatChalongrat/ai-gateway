@@ -25,10 +25,21 @@ import (
 
 type ShareHandler struct {
 	shares *service.ShareService
+	// Phase 4A.2.4.1 — when true, the PUBLIC shared view emits a non-raw
+	// representation (legacy → redacted, canonical_safe → tokenized) so a
+	// shared link never exposes restored raw display from legacy rows. Wired
+	// from config in main.go; default false (legacy passthrough).
+	displayLifecycle bool
 }
 
 func NewShareHandler(s *service.ShareService) *ShareHandler {
 	return &ShareHandler{shares: s}
+}
+
+// SetDisplayLifecycle toggles the non-raw shared-view representation
+// (Phase 4A.2.4.1). Set true when DLP_DISPLAY_LIFECYCLE_ENABLED is on.
+func (h *ShareHandler) SetDisplayLifecycle(enabled bool) {
+	h.displayLifecycle = enabled
 }
 
 // ---------------------------------------------------------------------------
@@ -169,10 +180,13 @@ func (h *ShareHandler) PublicGet(w http.ResponseWriter, r *http.Request) {
 	msgs := make([]sharedMessageWire, 0, len(view.Messages))
 	for i := range view.Messages {
 		m := &view.Messages[i]
+		// Phase 4A.2.4.1 — share is a NON-RESTORING public consumer: never emit
+		// restored raw display. Legacy rows are redacted; canonical_safe rows
+		// expose their tokenized content. No-op when the feature is off.
 		row := sharedMessageWire{
 			ID:        m.ID.String(),
 			Role:      m.Role,
-			Content:   m.ContentMasked,
+			Content:   service.NonRestoringRepresentation(h.displayLifecycle, *m),
 			ModelID:   m.ModelID,
 			CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
 		}

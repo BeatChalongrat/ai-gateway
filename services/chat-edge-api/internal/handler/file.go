@@ -51,6 +51,7 @@ type fileResponse struct {
 	FileSizeBytes    int64  `json:"file_size_bytes"`
 	ExtractionStatus string `json:"extraction_status"`
 	CreatedAt        string `json:"created_at"`
+	DownloadURL      string `json:"download_url"`
 	// Phase 4 — Excel Smart Workspace surface fields. Frontend
 	// uses IsGenerated to flip the file card into the
 	// "AI-generated" treatment; Version + ParentFileID drive the
@@ -73,6 +74,7 @@ func FileToWire(f *model.ConversationFile) fileResponse {
 		FileSizeBytes:    f.FileSizeBytes,
 		ExtractionStatus: f.ExtractionStatus,
 		CreatedAt:        f.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		DownloadURL:      "/files/" + f.ID.String() + "/download",
 		IsGenerated:      f.IsGenerated,
 		Version:          f.Version,
 	}

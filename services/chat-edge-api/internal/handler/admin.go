@@ -39,7 +39,19 @@ type AdminHandler struct {
 	// endpoint can call MemoryRepo.GetAggregateStats without
 	// AdminHandler depending on the full service layer.
 	memoryStatsFn func(ctx context.Context, tenantID uuid.UUID) (any, error)
+	// Phase 4A.2.4.1 — when true, the admin conversation viewer is a
+	// NON-RESTORING consumer: legacy raw display rows are redacted by default
+	// (raw trace is a separate privileged surface, not the default viewer);
+	// canonical_safe / redacted rows keep their already-safe content_masked.
+	// Inlined here (no service-package import — see AdminKBSink rationale).
+	// Wired from config in main.go; default false (legacy passthrough).
+	displayLifecycle bool
 }
+
+// adminRedactedDisplay is the admin-default stand-in for a raw-sensitive
+// (legacy) row. The admin viewer's default surface never shows restored raw
+// display; a privileged raw-trace surface (secure trace) is the separate path.
+const adminRedactedDisplay = "[redacted — raw display not shown in admin default view]"
 
 // AdminKBSink is the function-bag the admin KB endpoints call when
 // they need to mutate state. Function pointers (rather than an
@@ -48,6 +60,12 @@ type AdminHandler struct {
 type AdminKBSink struct {
 	ReindexDocument func(ctx context.Context, tenantID, kbID, docID uuid.UUID) error
 	DeleteKB        func(ctx context.Context, tenantID, id uuid.UUID) error
+}
+
+// SetDisplayLifecycle toggles the non-raw admin viewer representation
+// (Phase 4A.2.4.1). Set true when DLP_DISPLAY_LIFECYCLE_ENABLED is on.
+func (h *AdminHandler) SetDisplayLifecycle(enabled bool) {
+	h.displayLifecycle = enabled
 }
 
 func NewAdminHandler(pool *pgxpool.Pool) *AdminHandler {
@@ -486,10 +504,17 @@ func (h *AdminHandler) ConversationDetail(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	const msgQ = `
+	// Phase 4A.2.4.1 (H4-style): select display_state only when the feature is
+	// enabled (pre-migration-025 DBs never reference the column). Legacy rows
+	// are then redacted in the default admin viewer.
+	dlCol := ""
+	if h.displayLifecycle {
+		dlCol = ", display_state"
+	}
+	msgQ := `
 		SELECT id, role, content_masked, model_id, token_usage_input,
 		       token_usage_output, created_at,
-		       EXISTS(SELECT 1 FROM chat.conversation_files f WHERE f.message_id = m.id)
+		       EXISTS(SELECT 1 FROM chat.conversation_files f WHERE f.message_id = m.id)` + dlCol + `
 		FROM chat.messages_masked m
 		WHERE conversation_id = $1 AND is_active = true
 		ORDER BY created_at ASC
@@ -504,16 +529,26 @@ func (h *AdminHandler) ConversationDetail(w http.ResponseWriter, r *http.Request
 	msgs := make([]adminMessageRow, 0)
 	for rows.Next() {
 		var (
-			m        adminMessageRow
-			created  time.Time
-			modelPtr *string
-			tokenIn  *int
-			tokenOut *int
-			hasFiles bool
+			m            adminMessageRow
+			created      time.Time
+			modelPtr     *string
+			tokenIn      *int
+			tokenOut     *int
+			hasFiles     bool
+			displayState string
 		)
-		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &modelPtr, &tokenIn, &tokenOut, &created, &hasFiles); err != nil {
+		dest := []any{&m.ID, &m.Role, &m.Content, &modelPtr, &tokenIn, &tokenOut, &created, &hasFiles}
+		if h.displayLifecycle {
+			dest = append(dest, &displayState)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 			return
+		}
+		// Non-restoring admin default: redact raw-sensitive (legacy/empty) rows;
+		// canonical_safe / redacted rows already hold safe content_masked.
+		if h.displayLifecycle && displayState != "canonical_safe" && displayState != "redacted" {
+			m.Content = adminRedactedDisplay
 		}
 		m.CreatedAt = created.UTC().Format(time.RFC3339)
 		m.ModelID = modelPtr
