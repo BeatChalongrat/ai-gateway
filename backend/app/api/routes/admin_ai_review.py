@@ -62,6 +62,7 @@ from app.services.ai_review_provider import (
     estimate_cost,
     parse_findings_json,
     resolve_provider_meta,
+    review_egress_allowed,
 )
 from app.services.dlp.detectors.registry import get_default_registry
 
@@ -743,21 +744,79 @@ def invalidate_settings_cache() -> None:
     _settings_cache["expires_at"] = 0.0
 
 
+# Categories that must NEVER egress to an external reviewer in raw form.
+# Mirrors the orchestrator's ``_NEVER_RESTORE_CATEGORIES``.
+_REVIEW_FAIL_CLOSED_CATEGORIES = frozenset({"secret", "credential"})
+
+
+def _assert_no_unmasked_secrets(text: str, request_id: str) -> bool:
+    """Return True if ``text`` is safe to send to the external reviewer.
+
+    Defensive egress boundary: re-scans the (expected-to-be-sanitized)
+    text with the in-process DLP registry and refuses (returns False) if
+    any secret/credential category is still present unmasked. This is a
+    cheap, opt-in, background-path check — not a hot-path scan — and
+    enforces the Phase 1 rule that a custom reviewer provider can never
+    receive raw PII. Logs only counts/categories, never matched text.
+    """
+    try:
+        registry = get_default_registry(ner_enabled=False)
+        matches = registry.scan_text(text)
+        leaked = sorted(
+            {
+                m.category
+                for m in matches
+                if m.category in _REVIEW_FAIL_CLOSED_CATEGORIES
+            }
+        )
+        if leaked:
+            logger.error(
+                "ai_review_egress_blocked_unmasked_secret",
+                request_id=request_id,
+                leaked_categories=leaked,
+                finding_count=len(matches),
+            )
+            return False
+        return True
+    except Exception as exc:
+        # If the guard itself fails, fail closed — skip the review.
+        logger.warning(
+            "ai_review_egress_guard_failed",
+            request_id=request_id,
+            error=str(exc)[:200],
+        )
+        return False
+
+
 async def _maybe_ai_review(
-    request_id: str, output_raw: str | None, *, api_key_id: str | None = None
+    request_id: str, sanitized_output: str | None, *, api_key_id: str | None = None
 ) -> None:
     """Fire-and-forget realtime review of a single request's output.
 
-    Scans ``output_raw`` — the raw provider response BEFORE DLP
-    restore — so the review catches PII the model generated that the
-    outbound DLP pipeline didn't cover.
+    Scans ``sanitized_output`` — the POST-DLP, PRE-RESTORE masked
+    provider output. PII the outbound pipeline already masked is a
+    ``<rN>`` token here (so it never reaches the external reviewer);
+    PII the pipeline MISSED is still present, which is exactly what the
+    reviewer is meant to surface as a coverage gap.
+
+    A defensive egress guard (``_assert_no_unmasked_secrets``) re-scans
+    the payload for secret/credential categories and SKIPS the review
+    (fail closed) if any unmasked secret slipped through — so a
+    custom/third-party reviewer endpoint can never receive a raw secret.
 
     Runs after the user-facing response has already been sent, so
     every exception is caught and logged — the realtime hook must
     never affect the request.
     """
     try:
-        if not output_raw or not output_raw.strip():
+        if not sanitized_output or not sanitized_output.strip():
+            return
+
+        # Egress guard — never send unmasked secrets/credentials to an
+        # external reviewer (incl. operator-custom endpoints). Fail
+        # closed: if the guard trips, skip the review entirely. Logs
+        # carry only category counts, never matched text.
+        if not _assert_no_unmasked_secrets(sanitized_output, request_id):
             return
 
         snapshot = _load_cached_settings()
@@ -790,8 +849,26 @@ async def _maybe_ai_review(
         proxy.review_endpoint = snapshot["review_endpoint"]
 
         meta = resolve_provider_meta(proxy)  # type: ignore[arg-type]
+
+        # B1 egress trust boundary — the payload may carry missed
+        # non-secret PII, so an external non-allowlisted reviewer host is
+        # refused (fail closed: skip the review). Logs only the host
+        # classification + reason, never the payload text.
+        _allowed, _host_class, _ = review_egress_allowed(
+            meta.get("base_url"), meta.get("provider")
+        )
+        if not _allowed:
+            logger.error(
+                "ai_review_egress_blocked_untrusted_host",
+                request_id=request_id,
+                reviewer_provider=meta.get("provider"),
+                host_classification="external_blocked",
+                skipped_reason="endpoint_not_internal_or_allowlisted",
+            )
+            return
+
         detector_names = [d.name for d in get_default_registry().all()]
-        system, user = build_ai_review_prompt([output_raw], detector_names)
+        system, user = build_ai_review_prompt([sanitized_output], detector_names)
 
         try:
             norm = await call_review_api(
@@ -878,13 +955,16 @@ _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 
 
 def maybe_ai_review_background(
-    request_id: str, output_raw: str | None, *, api_key_id: str | None = None
+    request_id: str, sanitized_output: str | None, *, api_key_id: str | None = None
 ) -> None:
     """Schedule ``_maybe_ai_review`` on the running event loop.
 
-    Callers pass ``output_raw`` — the raw provider response before DLP
-    restore. It never raises — a missing loop or a closed loop is
-    silently ignored.
+    Callers MUST pass ``sanitized_output`` — the POST-DLP, PRE-RESTORE
+    masked provider output (``ai_to_service_masked``). Passing the raw
+    provider response or the restored ``output_final`` is a contract
+    violation; the egress guard in ``_maybe_ai_review`` re-checks for
+    unmasked secrets and fails closed regardless. It never raises — a
+    missing loop or a closed loop is silently ignored.
     """
     try:
         loop = asyncio.get_running_loop()
@@ -892,7 +972,7 @@ def maybe_ai_review_background(
         return
     try:
         task = loop.create_task(
-            _maybe_ai_review(request_id, output_raw, api_key_id=api_key_id)
+            _maybe_ai_review(request_id, sanitized_output, api_key_id=api_key_id)
         )
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)

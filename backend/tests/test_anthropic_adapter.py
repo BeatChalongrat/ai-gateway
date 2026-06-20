@@ -397,3 +397,52 @@ def test_context_budget_noop_when_window_unknown(monkeypatch):
     # budget high = 8192, padded to 8192+4096 since default max_tokens < budget
     assert body["thinking"]["budget_tokens"] == 8192
     assert body["max_tokens"] == 8192 + 4096
+
+
+class TestAnthropicMultimodalContent:
+    """OpenAI-format content arrays (vision turns from chat-edge) must
+    become Anthropic ``image`` / ``text`` blocks — the native API
+    rejects ``image_url`` parts passed through verbatim."""
+
+    def test_image_url_data_url_becomes_image_block(self):
+        from app.schemas.common import Message
+        from app.services.providers.anthropic_adapter import AnthropicAdapter
+
+        msg = Message(
+            role="user",
+            content=[
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,AAAA", "detail": "low"},
+                },
+                {"type": "text", "text": "what is this?"},
+            ],
+        )
+        out = AnthropicAdapter._serialize_message(msg)
+        assert out["role"] == "user"
+        assert out["content"][0] == {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
+        }
+        assert out["content"][1] == {"type": "text", "text": "what is this?"}
+
+    def test_http_url_becomes_url_source(self):
+        from app.schemas.common import Message
+        from app.services.providers.anthropic_adapter import AnthropicAdapter
+
+        msg = Message(
+            role="user",
+            content=[{"type": "image_url", "image_url": {"url": "https://x/y.png"}}],
+        )
+        out = AnthropicAdapter._serialize_message(msg)
+        assert out["content"][0] == {
+            "type": "image",
+            "source": {"type": "url", "url": "https://x/y.png"},
+        }
+
+    def test_plain_string_content_unchanged(self):
+        from app.schemas.common import Message
+        from app.services.providers.anthropic_adapter import AnthropicAdapter
+
+        msg = Message(role="user", content="hi")
+        assert AnthropicAdapter._serialize_message(msg) == {"role": "user", "content": "hi"}

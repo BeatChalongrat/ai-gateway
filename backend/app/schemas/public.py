@@ -314,6 +314,14 @@ class ChatCompletionsResponse(BaseModel):
     reasoning_downgraded: Optional[bool] = None
     reasoning_downgrade_reason: Optional[str] = None
 
+    # NOTE (Phase 4A.2.2 / F2): the internal canonical artifact extension
+    # is intentionally NOT a field on this public model, so it never appears
+    # in the public OpenAPI schema. For managed internal-trusted WebChat
+    # requests it is injected as a top-level ``x_sran_dlp`` key on a custom
+    # JSONResponse at the route layer (see ``chat_completions``), bypassing
+    # public response-model serialization. Public Direct API callers never
+    # see it on the wire or in the schema.
+
 
 class FeedbackRequest(BaseModel):
     """Rating for a prior response, linked by request_id."""

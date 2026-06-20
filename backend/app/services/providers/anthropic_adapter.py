@@ -12,6 +12,7 @@ Messages API, which differs from OpenAI in several ways:
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, AsyncIterator
 
 import httpx
@@ -54,6 +55,53 @@ _REASONING_BUDGET_TOKENS: dict[str, int] = {
     "medium": 4096,
     "high": 8192,
 }
+
+# data:image/png;base64,<payload> — the shape chat-edge ships for both
+# current-turn uploads and generated-image history replay.
+_DATA_URL_RE = re.compile(r"^data:(image/[a-z0-9.+-]+);base64,(.+)$", re.DOTALL)
+
+
+def _convert_user_blocks(parts: list) -> list[dict]:
+    """OpenAI multimodal user content → Anthropic content blocks.
+
+    ``image_url`` parts carrying base64 data URLs become ``image``
+    blocks with a ``base64`` source; plain http(s) URLs become a
+    ``url`` source. Unconvertible parts degrade to a short text
+    placeholder so one malformed block never fails the whole request.
+    """
+    out: list[dict] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        ptype = part.get("type")
+        if ptype == "text":
+            out.append({"type": "text", "text": part.get("text") or ""})
+        elif ptype == "image_url":
+            url = (part.get("image_url") or {}).get("url") or ""
+            m = _DATA_URL_RE.match(url)
+            if m:
+                out.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": m.group(1),
+                            "data": m.group(2),
+                        },
+                    }
+                )
+            elif url.startswith(("http://", "https://")):
+                out.append(
+                    {"type": "image", "source": {"type": "url", "url": url}}
+                )
+            else:
+                out.append({"type": "text", "text": "[image omitted]"})
+        elif ptype == "image":
+            # Already Anthropic-shaped (defensive) — pass through.
+            out.append(part)
+    if not out:
+        out.append({"type": "text", "text": "[empty message]"})
+    return out
 
 
 class AnthropicAdapter(BaseProviderAdapter):
@@ -286,6 +334,19 @@ class AnthropicAdapter(BaseProviderAdapter):
                     }
                 )
             return {"role": "assistant", "content": blocks}
+
+        # Multimodal user turn (OpenAI-format content array). chat-edge
+        # ships vision turns — current-turn uploads AND generated-image
+        # history replay — as ``image_url`` parts with base64 data URLs.
+        # Anthropic's native API rejects ``image_url``; convert to its
+        # ``{"type": "image", "source": …}`` blocks. Without this the
+        # array passed through verbatim and the request 400'd, silently
+        # breaking vision on Claude models.
+        if msg.role == "user" and isinstance(msg.content, list):
+            return {
+                "role": "user",
+                "content": _convert_user_blocks(msg.content),
+            }
 
         return {"role": msg.role, "content": msg.content or ""}
 

@@ -24,6 +24,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+import httpx
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -40,6 +42,7 @@ OPENAI_BASE_URL = "https://api.openai.com/v1"
 # accounts). The client still understands dall-e-* by id if they're re-added.
 IMAGE_MODELS = ("gpt-image-1", "gpt-image-1-mini")
 DEFAULT_IMAGE_MODEL = "gpt-image-1"
+logger = structlog.get_logger(__name__)
 
 
 def _is_gpt_image(model: str) -> bool:
@@ -115,6 +118,7 @@ async def generate_image(
     *,
     model: str,
     prompt: str,
+    request_id: str | None = None,
     n: int = 1,
     size: str = "1024x1024",
     quality: str = "auto",
@@ -146,12 +150,64 @@ async def generate_image(
         timeout_read=settings.provider_timeout_read,
     )
     headers = {"Authorization": f"Bearer {key}"}
-    resp = await call_with_retry(
-        lambda: client.post("/images/generations", json=body, headers=headers),
-        provider_name="openai",
-        max_retries=settings.provider_max_retries,
+    timeout = httpx.Timeout(
+        connect=settings.provider_timeout_connect,
+        read=settings.openai_image_timeout_seconds,
+        write=10.0,
+        pool=5.0,
     )
+    t0 = time.perf_counter()
+    logger.info(
+        "backend_openai_image_started",
+        request_id=request_id,
+        provider="openai",
+        model=model,
+        endpoint="/images/generations",
+        timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
+    )
+    try:
+        resp = await call_with_retry(
+            lambda: client.post(
+                "/images/generations",
+                json=body,
+                headers=headers,
+                timeout=timeout,
+            ),
+            provider_name="openai",
+            max_retries=settings.provider_max_retries,
+        )
+    except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        event = (
+            "backend_openai_image_timeout"
+            if isinstance(exc, httpx.TimeoutException)
+            or getattr(exc, "code", "") == "provider_timeout"
+            else "backend_openai_image_failed"
+        )
+        logger.warning(
+            event,
+            request_id=request_id,
+            provider="openai",
+            model=model,
+            endpoint="/images/generations",
+            elapsed_ms=elapsed_ms,
+            timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
+            error_code=getattr(exc, "code", type(exc).__name__),
+            error_message=str(exc)[:200],
+        )
+        raise
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
     data = resp.json()
+    logger.info(
+        "backend_openai_image_succeeded",
+        request_id=request_id,
+        provider="openai",
+        model=model,
+        endpoint="/images/generations",
+        status_code=resp.status_code,
+        elapsed_ms=elapsed_ms,
+        timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
+    )
     return ImageResult(
         created=int(data.get("created", time.time())),
         data=list(data.get("data", [])),
