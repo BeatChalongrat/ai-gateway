@@ -17,7 +17,7 @@ const GATEWAY_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_GATEWAY_URL) ||
   "http://localhost:8080";
 
-const PORTAL_URL =
+export const PORTAL_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PORTAL_URL) ||
   "http://localhost:3001";
 

@@ -128,7 +128,7 @@ export default function TenantsPage() {
   // Tenant slug is intentionally NOT editable — it's the URL-stable
   // identifier and changing it would break every cached resource.
   const [editTarget, setEditTarget] = useState<any | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", region: "global", status: "active" });
+  const [editForm, setEditForm] = useState({ name: "", region: "global", status: "active", credit_markup: "1.0" });
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [updating, setUpdating] = useState(false);
   const [search, setSearch] = useState("");
@@ -199,6 +199,7 @@ export default function TenantsPage() {
       name: t.name || "",
       region: t.region || "global",
       status: t.status || "active",
+      credit_markup: String(t.credit_markup ?? 1.0),
     });
     setEditErrors({});
     setEditTarget(t);
@@ -207,6 +208,10 @@ export default function TenantsPage() {
   function validateEdit() {
     const e: Record<string, string> = {};
     if (!editForm.name.trim()) e.name = "Name is required";
+    const markup = parseFloat(editForm.credit_markup);
+    if (Number.isNaN(markup) || markup < 1.0 || markup > 5.0) {
+      e.credit_markup = "Must be between 1.0 and 5.0";
+    }
     setEditErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -221,6 +226,8 @@ export default function TenantsPage() {
       if (editForm.name !== editTarget.name) body.name = editForm.name.trim();
       if (editForm.region !== editTarget.region) body.region = editForm.region;
       if (editForm.status !== editTarget.status) body.status = editForm.status;
+      const newMarkup = parseFloat(editForm.credit_markup);
+      if (newMarkup !== Number(editTarget.credit_markup ?? 1.0)) body.credit_markup = newMarkup;
       if (Object.keys(body).length === 0) {
         toast("No changes to save");
         setEditTarget(null);
@@ -483,6 +490,20 @@ export default function TenantsPage() {
                   <option value="deleted">deleted</option>
                 </select>
               </div>
+            </div>
+            <div>
+              <label className="sran-label">Credit markup multiplier</label>
+              <input
+                type="number"
+                className={`sran-input ${editErrors.credit_markup ? "sran-input-error" : ""}`}
+                value={editForm.credit_markup}
+                onChange={(e) => setEditForm({ ...editForm, credit_markup: e.target.value })}
+                step={0.1}
+                min={1.0}
+                max={5.0}
+              />
+              {editErrors.credit_markup && <div className="sran-field-error">{editErrors.credit_markup}</div>}
+              <div className="sran-char-count">1.0 = at cost, 1.5 = 50% margin, 2.0 = 100% margin</div>
             </div>
             <div className="sran-detail-field"><div className="sran-detail-label">Created</div><div className="sran-detail-value">{editTarget.created_at ? new Date(editTarget.created_at).toLocaleString() : "—"}</div></div>
           </div>

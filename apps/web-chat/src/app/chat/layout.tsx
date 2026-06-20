@@ -8,6 +8,7 @@ import {
 import { useEffect, useState } from "react";
 import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
+import { CreditBadge } from "@/components/chat/CreditBadge";
 import { Sidebar } from "@/components/chat/Sidebar";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -152,6 +153,12 @@ export default function ChatLayout({
         </div>
 
         {children}
+
+        {/* Floating usage toggle (mini ring pill) — bottom-right of
+            the chat area, above the composer. Positions itself
+            absolutely against this relative <main>; the panel opens
+            upward from the pill. */}
+        <CreditBadge />
       </main>
     </div>
   );

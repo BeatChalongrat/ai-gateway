@@ -14,6 +14,7 @@
 
 import { create } from "zustand";
 
+import { bumpUsageVersion } from "@/hooks/useUsage";
 import { api, ApiError } from "@/lib/api";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
@@ -27,6 +28,8 @@ import type {
   SSEError,
   SSEFallbackInfo,
   SSEMessageComplete,
+  SSEMessageFiles,
+  SSEMessageSources,
   SSEMessageStart,
   SSEReasoningDelta,
 } from "@/lib/types";
@@ -35,6 +38,8 @@ import type {
 // Tracked client-side while uploads are in flight. After the user
 // presses send, ready file ids ride along on the message request
 // and the pending list is cleared.
+const IMAGE_GENERATION_TIMEOUT_MS = 180_000;
+
 export interface PendingFile {
   /** Client-only id used to address the card before the server
    *  knows about it. */
@@ -542,14 +547,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async deleteConversation(id) {
+    // Capture folder membership BEFORE the await — mirrors
+    // moveConversationToFolder, which reads folder_id via get() before
+    // mutating. Reading it only inside the post-await set() risks a null
+    // if the conversation list is mutated during the request window.
+    const beforeFolderId = get().conversations.find((c) => c.id === id)?.folder_id ?? null;
     await api.deleteConversation(id);
     set((s) => {
       const next = { ...s.messages };
       delete next[id];
       const nextLoaded = { ...s.messagesLoaded };
       delete nextLoaded[id];
+      // If the deleted conversation was filed in a folder, decrement that
+      // folder's count so the sidebar "(N)" stays accurate without a
+      // refetch — mirrors the count adjust in moveConversationToFolder.
+      const insideFolderId = s.conversations.find((c) => c.id === id)?.folder_id ?? null;
+      // [DEBUG delete] temporary instrumentation — remove after diagnosis.
+      console.log(
+        "[DEBUG delete] id=", id,
+        "| beforeFolderId (get, pre-await)=", beforeFolderId,
+        "| insideFolderId (s, post-await)=", insideFolderId,
+        "| all folder ids=", s.folders.map((f) => f.id),
+      );
+      // Prefer the pre-await value; fall back to the in-set lookup.
+      const deletedFolderId = beforeFolderId ?? insideFolderId;
       return {
         conversations: s.conversations.filter((c) => c.id !== id),
+        folders: deletedFolderId
+          ? s.folders.map((f) =>
+              f.id === deletedFolderId
+                ? { ...f, conversation_count: Math.max(0, f.conversation_count - 1) }
+                : f,
+            )
+          : s.folders,
         messages: next,
         messagesLoaded: nextLoaded,
         activeConversationId:
@@ -844,6 +874,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     const ctrl = new AbortController();
+    let imageTimedOut = false;
+    const imageTimeout =
+      imageMode === true
+        ? window.setTimeout(() => {
+            imageTimedOut = true;
+            void api.cancelGeneration(convId).catch(() => {
+              /* best-effort */
+            });
+            ctrl.abort();
+          }, IMAGE_GENERATION_TIMEOUT_MS)
+        : null;
     set((s) => ({
       abortControllers: { ...s.abortControllers, [convId]: ctrl },
     }));
@@ -890,12 +931,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (err) {
       if ((err as Error).name === "AbortError") {
+        if (imageTimedOut) {
+          const localized = localizeErrorCode("image_timeout");
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            return {
+              messages: {
+                ...s.messages,
+                [convId]: list.map((m) =>
+                  m.id === tempAsstId
+                    ? {
+                        ...m,
+                        error_code: "image_timeout",
+                        error_message: localized,
+                      }
+                    : m,
+                ),
+              },
+            };
+          });
+          get().setError(localized);
+          finalizeMessage(set, get, convId, tempAsstId, "error");
+          return;
+        }
         finalizeMessage(set, get, convId, tempAsstId, "cancelled");
         return;
       }
       get().setError("Network error during streaming.");
       finalizeMessage(set, get, convId, tempAsstId, "error");
     } finally {
+      if (imageTimeout != null) {
+        window.clearTimeout(imageTimeout);
+      }
       set((s) => {
         const aborts = { ...s.abortControllers };
         delete aborts[convId];
@@ -1114,6 +1181,9 @@ async function consumeStream(
   tempAsstId: string,
 ) {
   let realAssistantId: string | null = null;
+  // Wall-clock turn duration for the per-message metadata line
+  // ("GPT-4o · 342 tokens · 1.2s"). Stream open → message_complete.
+  const streamStartedAt = Date.now();
   // RAF-batched delta buffer. content_delta events from fast models
   // can fire 50+ times/sec; flushing every token to React state
   // collapses the main thread. We buffer deltas in a plain string
@@ -1261,6 +1331,68 @@ async function consumeStream(
             };
           });
         }
+      } else if (evt.event === "image_generating") {
+        // Image-generation phase marker — swap the typing dots for the
+        // image placeholder. Cleared when message_files delivers the
+        // attachment, or by message_complete / error if it never does.
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id ? { ...m, is_generating_image: true } : m,
+              ),
+            },
+          };
+        });
+      } else if (evt.event === "message_files") {
+        const data = evt.data as SSEMessageFiles;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === data.message_id
+                  ? { ...m, files: data.files, is_generating_image: false }
+                  : m,
+              ),
+            },
+          };
+        });
+      } else if (evt.event === "search_status") {
+        // Web-search phase marker — show the searching indicator. It
+        // auto-hides once content streams in, and is_searching is
+        // cleared by message_sources / message_complete / error.
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id ? { ...m, is_searching: true } : m,
+              ),
+            },
+          };
+        });
+      } else if (evt.event === "message_sources") {
+        const data = evt.data as SSEMessageSources;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === data.message_id
+                  ? { ...m, search_sources: data.sources, is_searching: false }
+                  : m,
+              ),
+            },
+          };
+        });
       } else if (evt.event === "message_complete") {
         // Flush any buffered tail BEFORE writing the terminal state
         // so the final content paint includes every token.
@@ -1280,15 +1412,23 @@ async function consumeStream(
                 m.id === id
                   ? {
                       ...m,
-                      status: m.status === "cancelled" ? "cancelled" : "completed",
+                      status:
+                        m.status === "cancelled" || m.status === "error"
+                          ? m.status
+                          : "completed",
                       isStreaming: false,
+                      is_generating_image: false,
+                      is_searching: false,
                       token_usage: data.token_usage ?? null,
+                      response_time_ms: Date.now() - streamStartedAt,
                     }
                   : m,
               ),
             },
           };
         });
+        // Refresh the credit badge — this turn just spent credits.
+        bumpUsageVersion();
       } else if (evt.event === "fallback_info") {
         // B2 — a fallback model answered. Stash the requested/actual
         // model pair on the message so MessageBubble can show a small
@@ -1339,6 +1479,8 @@ async function consumeStream(
                       error_code: data?.code,
                       error_message: localized,
                       error_attempts: data?.attempts,
+                      is_generating_image: false,
+                      is_searching: false,
                     }
                   : m,
               ),
@@ -1370,13 +1512,21 @@ async function handleStreamPreError(
 ) {
   const text = await res.text();
   let msg = res.statusText;
+  let code: string | undefined;
   try {
-    const env = JSON.parse(text) as { error?: { message?: string } };
+    const env = JSON.parse(text) as {
+      error?: { code?: string; message?: string };
+    };
     msg = env.error?.message ?? msg;
+    code = env.error?.code;
   } catch {
     /* ignore */
   }
-  if (res.status === 429) {
+  if (res.status === 402 || code === "INSUFFICIENT_CREDITS") {
+    // Credit balance exhausted — chat-edge already localized the
+    // message; localizeErrorCode keeps a fallback if it didn't.
+    get().setError(localizeErrorCode(code ?? "INSUFFICIENT_CREDITS", msg));
+  } else if (res.status === 429) {
     get().setError("Too many messages — slow down for a minute.");
   } else if (res.status === 502) {
     get().setError("AI service is temporarily unavailable.");
