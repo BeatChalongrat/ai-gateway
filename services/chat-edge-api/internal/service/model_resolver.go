@@ -17,6 +17,7 @@ package service
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // AutoModelID is the sentinel the frontend persists when the user
@@ -107,7 +108,7 @@ func isComplexQuery(
 	if hasImages || hasFiles {
 		return true
 	}
-	if len(message) > 500 || conversationMessageCount > 30 {
+	if utf8.RuneCountInString(message) > 500 || conversationMessageCount > 30 {
 		return true
 	}
 	lower := strings.ToLower(message)
@@ -123,6 +124,27 @@ func isComplexQuery(
 		}
 	}
 	return false
+}
+
+// isTrivialQuery reports whether a turn is light enough that a reasoning model
+// should NOT spend a thinking budget on it (P1-4). Trivial = clearly not a
+// complex turn, short, and not a question. Used to suppress thinking on a
+// PINNED reasoning-capable model for greetings like "ไง" / "hi" so they don't
+// burn a full budget. Rune-based (not bytes) so Thai length is counted
+// correctly — "ไง" is 2 runes, not 6 bytes.
+func isTrivialQuery(message string) bool {
+	if isComplexQuery(message, false, false, 0) {
+		return false
+	}
+	trimmed := strings.TrimSpace(message)
+	if utf8.RuneCountInString(trimmed) > 30 {
+		return false
+	}
+	// A question deserves a real answer — let the model think.
+	if strings.Contains(trimmed, "?") || strings.Contains(trimmed, "？") {
+		return false
+	}
+	return true
 }
 
 // ResolveAutoModel picks the concrete model id Auto should serve
@@ -261,7 +283,7 @@ func ResolveAutoModelWithReasoning(
 	if hasFiles {
 		return flagship
 	}
-	if len(message) > 500 {
+	if utf8.RuneCountInString(message) > 500 {
 		return flagship
 	}
 	if conversationMessageCount > 30 {
@@ -344,7 +366,7 @@ func BuildRoutingHints(
 	switch {
 	case complex || hasCode || hasImages || hasFiles:
 		complexity = "high"
-	case len(message) <= 80 && conversationMessageCount <= 4 && !strings.Contains(message, "?"):
+	case utf8.RuneCountInString(message) <= 80 && conversationMessageCount <= 4 && !strings.Contains(message, "?"):
 		complexity = "low"
 	}
 
