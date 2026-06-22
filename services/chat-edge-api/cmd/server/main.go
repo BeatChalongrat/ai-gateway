@@ -432,6 +432,9 @@ func main() {
 		Memory:       handler.NewMemoryHandler(memorySvc),
 		Search:       handler.NewSearchHandler(searchSvc),
 		Account:      handler.NewAccountHandler(exportSvc, purgeSvc),
+		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
+		// GatewayClient (and its internal-trust headers) as the video tool.
+		MediaProxy: handler.NewMediaProxyHandler(gateway),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a

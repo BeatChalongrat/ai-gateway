@@ -863,6 +863,43 @@ func (g *GatewayClient) internalHeaders(httpReq *http.Request, callCtx GatewayCa
 	return nil
 }
 
+// ProxyPublicMedia forwards a direct-dispatch media request from web-chat to
+// the gateway's PUBLIC media route as a TRUSTED internal caller carrying the
+// end-user's identity (the same header set as SubmitVideoJob / the tool
+// path). ``subpath`` is BaseURL-relative, e.g. "/videos/generations" →
+// {BaseURL}/videos/generations. Returns the upstream status + raw body so
+// the caller can relay the gateway's response (and error envelope) verbatim.
+func (g *GatewayClient) ProxyPublicMedia(
+	ctx context.Context,
+	callCtx GatewayCallContext,
+	method, subpath string,
+	body []byte,
+) (int, []byte, error) {
+	var rdr io.Reader
+	if len(body) > 0 {
+		rdr = bytes.NewReader(body)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, g.BaseURL+subpath, rdr)
+	if err != nil {
+		return 0, nil, fmt.Errorf("gateway: build media proxy request: %w", err)
+	}
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return 0, nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return 0, nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
+	if err != nil {
+		return 0, nil, fmt.Errorf("gateway: read media proxy response: %w", err)
+	}
+	return resp.StatusCode, respBody, nil
+}
+
 // SubmitVideoJob enqueues an async video-generation job on the backend and
 // returns the job id. The provider runs out-of-band (job loop); poll with
 // PollVideoJob until terminal.
