@@ -275,3 +275,94 @@ async def deduct_portal_credit_async(
     )
     session.add(tx)
     await session.flush()
+
+
+# ---------------------------------------------------------------------------
+# Media-generation cost pre-check (Sprint 1).
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass as _dataclass  # noqa: E402
+from decimal import Decimal as _Decimal  # noqa: E402
+
+
+@_dataclass
+class EstimateResult:
+    """Result of a media-gen cost estimate + balance check (no deduction)."""
+
+    estimated_credits: int
+    balance: int
+    sufficient: bool
+    breakdown: dict
+
+
+def _media_cost_usd(job_type: str, model_config, input_metadata: dict) -> _Decimal:
+    """Pure USD cost estimate. Raises ValueError if the required cost field
+    is missing on the model_config or the job_type is unknown.
+
+    Reads cost fields via ``getattr`` because the new model_configs cost
+    columns (migration 056) are not yet declared on the ORM model — that
+    wiring lands in a later sprint.
+    """
+    meta = input_metadata or {}
+    if job_type == "video":
+        rate = getattr(model_config, "cost_per_second", None)
+        if rate is None:
+            raise ValueError("model_config.cost_per_second is required for video")
+        units = _Decimal(str(meta.get("duration_sec", 0) or 0))
+        return _Decimal(str(rate)) * units
+    if job_type == "audio_tts":
+        rate = getattr(model_config, "cost_per_character", None)
+        if rate is None:
+            raise ValueError(
+                "model_config.cost_per_character is required for audio_tts"
+            )
+        units = _Decimal(str(meta.get("char_count", 0) or 0))
+        return _Decimal(str(rate)) * units
+    if job_type == "music":
+        rate = getattr(model_config, "cost_per_generation", None)
+        if rate is None:
+            raise ValueError(
+                "model_config.cost_per_generation is required for music"
+            )
+        return _Decimal(str(rate))
+    raise ValueError(f"unsupported media job_type: {job_type!r}")
+
+
+async def estimate_and_check_balance(
+    session: AsyncSession,
+    tenant_id: str | None,
+    user_id: str | None,
+    job_type: str,
+    model_config,
+    input_metadata: dict,
+) -> EstimateResult:
+    """Estimate a media-gen job's credit cost and check the user's balance.
+
+    Does NOT deduct. Reuses ``credit_service.credits_for_cost`` (no
+    duplicated rounding/markup math) and the tenant's ``credit_markup``.
+
+    NOTE: extends the Sprint plan's 4-arg signature with ``session`` and
+    ``user_id`` — both are required to read the tenant markup and the
+    user's balance, which the plan's "fetch current balance" step assumed
+    but did not pass in.
+    """
+    cost_usd = _media_cost_usd(job_type, model_config, input_metadata)
+    markup = await _tenant_markup_async(session, tenant_id)
+    estimated_credits = credit_service.credits_for_cost(float(cost_usd), markup)
+
+    balance = 0
+    if user_id:
+        user = await session.get(PortalUserORM, user_id)
+        if user is not None:
+            balance = int(user.credit_balance or 0)
+
+    return EstimateResult(
+        estimated_credits=estimated_credits,
+        balance=balance,
+        sufficient=balance >= estimated_credits,
+        breakdown={
+            "job_type": job_type,
+            "cost_usd": float(cost_usd),
+            "markup": markup,
+        },
+    )
