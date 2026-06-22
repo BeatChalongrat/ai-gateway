@@ -50,6 +50,11 @@ export interface ModelEntry {
   allowed: boolean;
   /** T4 — reasoning capability. Undefined for non-reasoning models. */
   reasoning?: ReasoningCapability;
+  /** Sprint 2A.5 — single source of truth for which UI to render:
+   *  "chat" → chat composer + tool buttons; "video"/"audio"/"tts" →
+   *  direct-dispatch media form. Missing/undefined is treated as "chat"
+   *  so older chat-edge payloads degrade cleanly. */
+  model_kind?: "chat" | "video" | "audio" | "tts";
 }
 
 export interface ModelListResponse {
@@ -640,4 +645,53 @@ export interface SSEFallbackInfo {
   actual_model: string;
   reason?: string;
   attempts?: FallbackAttempt[];
+}
+
+// ── Direct-dispatch media generation (Sprint 2A.5) ──────────────
+// Wire shapes for the BACKEND public endpoints POST /v1/videos|audio/
+// generations + GET /v1/jobs/{id}. Every credit field carries a sibling
+// *_usd display string.
+
+export interface VideoGenInput {
+  prompt: string;
+  model: string;
+  duration_sec: number;
+  resolution: string;
+  has_audio: boolean;
+  conversation_id?: string | null;
+  idempotency_key?: string;
+}
+
+export interface AudioGenInput {
+  prompt: string;
+  model: string;
+  mode: "tts" | "music";
+  voice_id?: string;
+  duration_sec?: number;
+  conversation_id?: string | null;
+  idempotency_key?: string;
+}
+
+export interface MediaGenSubmitResponse {
+  job_id: string;
+  status: string;
+  estimated_cost_credits: number;
+  estimated_cost_usd: string;
+  balance_after_credits: number;
+  balance_after_usd: string;
+  requires_confirmation: boolean;
+  poll_url: string;
+}
+
+export interface MediaJobStatus {
+  job_id: string;
+  status: string;
+  progress_pct?: number | null;
+  output_url?: string | null;
+  actual_cost_credits?: number | null;
+  actual_cost_usd?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  created_at: string;
+  completed_at?: string | null;
 }

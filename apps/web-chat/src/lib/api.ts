@@ -20,6 +20,9 @@ import type {
   KnowledgeBaseListResponse,
   KnowledgeDocument,
   KnowledgeSearchResponse,
+  AudioGenInput,
+  MediaGenSubmitResponse,
+  MediaJobStatus,
   Memory,
   MemoryEventListResponse,
   MemoryListResponse,
@@ -27,6 +30,7 @@ import type {
   MessageListResponse,
   ModelListResponse,
   UsageResponse,
+  VideoGenInput,
   ShareExpiry,
   ShareLink,
   UserPreferences,
@@ -105,6 +109,28 @@ class ApiClient {
   // ----- Models ---------------------------------------------
   models() {
     return this.json<ModelListResponse>("/models");
+  }
+
+  // ----- Direct-dispatch media generation (Sprint 2A.5) -----
+  // PROXY-PENDING: these direct-dispatch endpoints live on the BACKEND
+  // (/v1/videos|audio/generations, /v1/jobs/{id}), NOT chat-edge. There is
+  // no chat-edge proxy for them yet — these typed methods are wired for the
+  // UI build; the runtime path (a chat-edge proxy or a backend-direct base)
+  // is completed + verified in the E2E phase. Until then the calls will 404.
+  submitVideoGen(input: VideoGenInput) {
+    return this.json<MediaGenSubmitResponse>("/videos/generations", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+  submitAudioGen(input: AudioGenInput) {
+    return this.json<MediaGenSubmitResponse>("/audio/generations", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+  getMediaJob(jobId: string) {
+    return this.json<MediaJobStatus>(`/jobs/${jobId}`);
   }
 
   // ----- Usage & credits ------------------------------------
