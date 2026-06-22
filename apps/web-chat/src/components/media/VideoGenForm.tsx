@@ -20,6 +20,7 @@ import {
   type MediaGenErrorCode,
   mediaErrorCodeFromStatus,
 } from "./MediaGenError";
+import { ProvenanceBadge } from "./ProvenanceBadge";
 
 interface Props {
   model: ModelEntry;
@@ -288,12 +289,19 @@ export function VideoGenForm({ model, conversationId }: Props) {
         <div className="flex flex-col items-center gap-3">
           {/* PROXY-PENDING: output_url is a backend URL; auth/proxy wiring
               for the direct-dispatch download lands in the E2E phase. */}
-          <video
-            src={job.output_url}
-            controls
-            preload="metadata"
-            className="w-full max-w-[480px] rounded-lg border border-border bg-black"
-          />
+          <div className="relative w-full max-w-[480px]">
+            <video
+              src={job.output_url}
+              controls
+              preload="metadata"
+              className="w-full rounded-lg border border-border bg-black"
+            />
+            {job.provenance ? (
+              <div className="absolute bottom-2 right-2">
+                <ProvenanceBadge provenance={job.provenance} />
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={reset}
