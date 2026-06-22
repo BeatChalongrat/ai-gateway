@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "updated": "2026-06-23",
+  "entries": [
+    {"name": "Taylor Swift", "kind": "artist", "regions": ["global"]},
+    {"name": "Beyoncé", "kind": "artist", "regions": ["global"]},
+    {"name": "Drake", "kind": "artist", "regions": ["global"]},
+    {"name": "Ed Sheeran", "kind": "artist", "regions": ["global"]},
+    {"name": "The Beatles", "kind": "artist", "regions": ["global"]},
+    {"name": "BTS", "kind": "artist", "regions": ["global"]},
+    {"name": "BLACKPINK", "kind": "artist", "regions": ["global"]},
+    {"name": "Billie Eilish", "kind": "artist", "regions": ["global"]},
+    {"name": "Mickey Mouse", "kind": "character", "regions": ["global"]},
+    {"name": "Iron Man", "kind": "character", "regions": ["global"]},
+    {"name": "Spider-Man", "kind": "character", "regions": ["global"]},
+    {"name": "Batman", "kind": "character", "regions": ["global"]},
+    {"name": "Superman", "kind": "character", "regions": ["global"]},
+    {"name": "Elsa", "kind": "character", "regions": ["global"]},
+    {"name": "Darth Vader", "kind": "character", "regions": ["global"]},
+    {"name": "Pikachu", "kind": "character", "regions": ["global"]},
+    {"name": "Mario", "kind": "character", "regions": ["global"]},
+    {"name": "Hello Kitty", "kind": "character", "regions": ["global"]},
+    {"name": "Harry Potter", "kind": "character", "regions": ["global"]},
+    {"name": "SpongeBob", "kind": "character", "regions": ["global"]},
+    {"name": "บอย โกสิยพงษ์", "kind": "artist", "regions": ["TH"]},
+    {"name": "Atom ชนกันต์", "kind": "artist", "regions": ["TH"]},
+    {"name": "Bowkylion", "kind": "artist", "regions": ["TH"]},
+    {"name": "พี่เบิร์ด ธงไชย", "kind": "artist", "regions": ["TH"]},
+    {"name": "Three Man Down", "kind": "artist", "regions": ["TH"]},
+    {"name": "BNK48", "kind": "artist", "regions": ["TH"]}
+  ]
+}
