@@ -19,17 +19,30 @@ import type { FileAttachment } from "@/lib/types";
 import { openLightbox } from "@/components/ui/ImageLightbox";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { AuthedImage } from "./AuthedImage";
+import { VideoPlayer } from "./VideoPlayer";
 
 interface Props {
   files: FileAttachment[];
 }
 
+const isVideoMime = (ct?: string) => Boolean(ct?.startsWith("video/"));
+
 export function MessageAttachments({ files }: Props) {
   if (!files || files.length === 0) return null;
+  const videos = files.filter((f) => isVideoMime(f.content_type));
   const images = files.filter((f) => isImageMime(f.content_type));
-  const others = files.filter((f) => !isImageMime(f.content_type));
+  const others = files.filter(
+    (f) => !isImageMime(f.content_type) && !isVideoMime(f.content_type),
+  );
   return (
     <div className="mt-1 flex flex-col gap-1.5">
+      {videos.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          {videos.map((f) => (
+            <VideoPlayer key={f.id} fileId={f.id} filename={f.filename} />
+          ))}
+        </div>
+      ) : null}
       {images.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {images.map((f) => (

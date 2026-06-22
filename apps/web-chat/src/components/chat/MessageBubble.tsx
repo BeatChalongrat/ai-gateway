@@ -33,6 +33,7 @@ import { ExcelPlanCard } from "./ExcelPlanCard";
 import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { ImageGeneratingPlaceholder } from "./ImageGeneratingPlaceholder";
+import { VideoGeneratingPlaceholder } from "./VideoGeneratingPlaceholder";
 import { SearchCitations } from "./SearchCitations";
 import { SearchingIndicator } from "./SearchingIndicator";
 import { SourcesCard } from "./SourcesCard";
@@ -384,6 +385,12 @@ function MessageBubbleImpl({
         <ImageGeneratingPlaceholder />
       ) : null}
 
+      {/* Video-generation placeholder — same swap-in-place behaviour. */}
+      {message.is_generating_video &&
+      !(message.files && message.files.length > 0) ? (
+        <VideoGeneratingPlaceholder />
+      ) : null}
+
       {message.files && message.files.length > 0 ? (
         <MessageAttachments files={message.files} />
       ) : null}
@@ -705,6 +712,8 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
     // below the body already communicates progress — duplicate
     // typing dots would read as a second, unrelated loading state.
     if (message.is_generating_image) return null;
+    // Same for video generation — the VideoGeneratingPlaceholder covers it.
+    if (message.is_generating_video) return null;
     // While searching the web, show the searching indicator in place of
     // the typing dots. It self-hides once the answer streams in.
     if (message.is_searching) return <SearchingIndicator />;
@@ -845,6 +854,7 @@ function areEqual(prev: Props, next: Props): boolean {
     // (set by the image_generating SSE event, cleared by
     // message_files / message_complete / error).
     a.is_generating_image === b.is_generating_image &&
+    a.is_generating_video === b.is_generating_video &&
     a.files === b.files &&
     // Web search — re-render when the searching flag flips or the
     // citation sources arrive (live via message_sources / on reload).
