@@ -120,6 +120,7 @@ _ENV_KEYS = {
     # Sprint 2B.5: reuse the existing Sprint 2B field (replicate_api_token),
     # NOT a separate replicate_api_key — one source of truth for the env key.
     "replicate": lambda: settings.replicate_api_token,
+    "elevenlabs": lambda: settings.elevenlabs_api_key,  # Sprint 4
 }
 
 # In-memory round-robin counters (per worker process)
@@ -445,6 +446,8 @@ class ProviderKeyService:
                 return await self._test_openrouter(api_key)
             elif provider_name == "replicate":
                 return await self._test_replicate(api_key)
+            elif provider_name == "elevenlabs":
+                return await self._test_elevenlabs(api_key)
             else:
                 return {"valid": False, "latency_ms": 0, "error": f"Unknown provider: {provider_name}"}
         except Exception as e:
@@ -520,6 +523,39 @@ class ProviderKeyService:
                 resp = await client.get(
                     "https://api.replicate.com/v1/account",
                     headers={"Authorization": f"Bearer {api_key}"},
+                )
+            ms = round((time.perf_counter() - t0) * 1000)
+            if resp.status_code == 200:
+                return {"valid": True, "latency_ms": ms, "error": None}
+            if resp.status_code == 401:
+                return {"valid": False, "latency_ms": ms, "error": "invalid key (HTTP 401)"}
+            return {"valid": False, "latency_ms": ms, "error": f"HTTP {resp.status_code}"}
+        except httpx.TimeoutException:
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "timeout",
+            }
+        except Exception:  # noqa: BLE001 — never surface raw exception text
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "connection error",
+            }
+
+    async def _test_elevenlabs(self, api_key: str) -> dict:
+        """Validate an ElevenLabs key via ``GET /v1/user``.
+
+        Same dict shape as the other ``_test_*`` probes. Error strings are
+        static labels only — never the key, response body, or raw exception
+        text (token-isolation rule).
+        """
+        t0 = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.elevenlabs.io/v1/user",
+                    headers={"xi-api-key": api_key},
                 )
             ms = round((time.perf_counter() - t0) * 1000)
             if resp.status_code == 200:
