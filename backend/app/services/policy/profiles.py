@@ -117,6 +117,51 @@ STRICT_PROFILE = PolicyProfile(
     moderation_enabled=True,
 )
 
+# Media-generation profile (Sprint 1 — multi-modal generation foundation).
+#
+# Big media-gen providers (OpenAI, Google, Replicate, ElevenLabs, Suno) do
+# NOT mask end-user PII in generation prompts — they pass it through and
+# enforce CONTENT policy instead (audit v2, 2026-06-22). Masking a user's
+# own name/address in their own image/video prompt only degrades output
+# quality for no compliance gain, so this profile lets identity-class PII
+# PASS while still hard-BLOCKING anything that must never egress raw to a
+# third-party provider (credentials, secrets, financial instruments).
+#
+# Mapping to runtime categories:
+#   - pii / identity / network  -> ALLOW (pass-through). Listed EXPLICITLY
+#     (not left to the absent-category default) so the explicit action wins
+#     over ``severity_threshold_block`` — a CRITICAL-severity identity
+#     finding (e.g. thai_national_id) still passes, by design.
+#   - credential / secret / financial -> BLOCK.
+#   - The PDPA-sensitive detectors (medical_record, health_condition, …)
+#     emit category ``pii`` at runtime, so ``pii: ALLOW`` already covers
+#     them — there is no separate ``pdpa_sensitive`` category to map.
+#
+# NOT wired to anything in Sprint 1: ``public_images.py`` still uses the
+# DEFAULT profile. Sprint 2 retrofits the image path + new media routes to
+# select this profile. Per-tenant ``DLP_MEDIA_GEN_MASK_IDENTITY`` (the
+# tenants column added in migration 056) will let enterprise tenants opt
+# back into masking later.
+MEDIA_GEN_PROFILE = PolicyProfile(
+    profile_id="media_gen",
+    name="Media Generation",
+    category_actions={
+        "pii": EnforcementAction.ALLOW,
+        "identity": EnforcementAction.ALLOW,
+        "network": EnforcementAction.ALLOW,
+        "financial": EnforcementAction.BLOCK,
+        "credential": EnforcementAction.BLOCK,
+        "secret": EnforcementAction.BLOCK,
+    },
+    # No separate outbound map — media output is binary (image/video/audio),
+    # not scannable text, and ``scan_responses`` is off below.
+    category_actions_output=None,
+    severity_threshold_block=SensitivityLevel.CRITICAL,
+    # Generated media is a binary artifact; there is no text response to
+    # scan back to the user.
+    scan_responses=False,
+)
+
 # ---------------------------------------------------------------------------
 # Lookup
 # ---------------------------------------------------------------------------
@@ -124,6 +169,7 @@ STRICT_PROFILE = PolicyProfile(
 _PROFILES: dict[str, PolicyProfile] = {
     DEFAULT_PROFILE.profile_id: DEFAULT_PROFILE,
     STRICT_PROFILE.profile_id: STRICT_PROFILE,
+    MEDIA_GEN_PROFILE.profile_id: MEDIA_GEN_PROFILE,
 }
 
 
