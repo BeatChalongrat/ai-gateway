@@ -117,6 +117,9 @@ _ENV_KEYS = {
     "qwen": lambda: settings.qwen_api_key,
     "kimi": lambda: settings.kimi_api_key,
     "zai": lambda: settings.zai_api_key,
+    # Sprint 2B.5: reuse the existing Sprint 2B field (replicate_api_token),
+    # NOT a separate replicate_api_key — one source of truth for the env key.
+    "replicate": lambda: settings.replicate_api_token,
 }
 
 # In-memory round-robin counters (per worker process)
@@ -440,6 +443,8 @@ class ProviderKeyService:
                 return await self._test_anthropic(api_key)
             elif provider_name == "openrouter":
                 return await self._test_openrouter(api_key)
+            elif provider_name == "replicate":
+                return await self._test_replicate(api_key)
             else:
                 return {"valid": False, "latency_ms": 0, "error": f"Unknown provider: {provider_name}"}
         except Exception as e:
@@ -497,6 +502,43 @@ class ProviderKeyService:
             )
             err = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
             return {"valid": False, "latency_ms": ms, "error": err}
+
+    async def _test_replicate(self, api_key: str) -> dict:
+        """Validate a Replicate key via ``GET /v1/account``.
+
+        Returns the same dict shape as the other ``_test_*`` probes
+        (``{valid, latency_ms, error}``) so ``add_provider_key`` and the
+        re-test route consume it unchanged.
+
+        Token isolation: the error string is NEVER built from the key, the
+        response body, or raw exception text — only static status labels —
+        so a key fragment can't leak into logs or the API response.
+        """
+        t0 = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.replicate.com/v1/account",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            ms = round((time.perf_counter() - t0) * 1000)
+            if resp.status_code == 200:
+                return {"valid": True, "latency_ms": ms, "error": None}
+            if resp.status_code == 401:
+                return {"valid": False, "latency_ms": ms, "error": "invalid key (HTTP 401)"}
+            return {"valid": False, "latency_ms": ms, "error": f"HTTP {resp.status_code}"}
+        except httpx.TimeoutException:
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "timeout",
+            }
+        except Exception:  # noqa: BLE001 — never surface raw exception text
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "connection error",
+            }
 
     # ------------------------------------------------------------------
     # Legacy compat — key status summary
