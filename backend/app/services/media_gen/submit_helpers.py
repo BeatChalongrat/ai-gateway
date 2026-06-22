@@ -73,6 +73,30 @@ async def scan_media_prompt_with_profile(prompt: str, db: AsyncSession) -> None:
     enforcement = orch._scan_and_evaluate(detection, profile)
     if enforcement.is_blocked:
         raise HTTPException(status_code=403, detail="prompt blocked by DLP policy")
+    if content_policy_blocked(prompt, profile):
+        raise HTTPException(status_code=403, detail="prompt blocked by content policy")
+
+
+def content_policy_blocked(prompt: str, profile) -> bool:
+    """Whether the content-policy detectors fire AND the active profile BLOCKs
+    the ``content_policy`` category (Sprint 4).
+
+    The detectors (CSAM / copyright / public figure) run ONLY on the media-gen
+    path — they are deliberately NOT in the default DLP registry, so the chat
+    path is unaffected. Returns a bool so each caller raises in its own idiom
+    (the video/audio scan raises 403; the image route persists an audit row
+    then raises DLPViolationError).
+    """
+    from app.domain.policy import EnforcementAction
+
+    if profile.category_actions.get("content_policy") != EnforcementAction.BLOCK:
+        return False
+    from app.services.dlp.detectors.content_policy import content_policy_detectors
+
+    for detector in content_policy_detectors():
+        if detector.detect(prompt or ""):
+            return True
+    return False
 
 
 async def estimate_and_validate_cost(
