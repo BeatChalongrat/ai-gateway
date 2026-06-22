@@ -122,6 +122,7 @@ async def get_job_status(
         status=job.status,
         progress_pct=job.progress_pct,
         output_url=output_url,
+        provenance=meta.get("provenance"),
         actual_cost_credits=actual,
         actual_cost_usd=credits_to_usd_display(actual) if actual else None,
         error_code=job.error_code,

@@ -237,10 +237,16 @@ async def _process_job(session, job_id: str) -> None:
         actual = int(job.estimated_cost_credits)
         job.status = "done"
         job.progress_pct = 100
+        # Provenance (Sprint 5): built here, not in the adapter (adapters are
+        # sealed). Pure function over provider/model + the adapter's
+        # result_metadata (seed / completed_at, when disclosed).
+        from app.services.media_gen.provenance import build_provenance
+
         job.output_metadata = {
             "output_path": out_path,
             "content_type": (result_meta or {}).get("content_type", "video/mp4"),
             "size": len(data),
+            "provenance": build_provenance(provider, job.model_id, result_meta),
         }
         job.actual_cost_credits = actual
         job.completed_at = datetime.now(timezone.utc)
