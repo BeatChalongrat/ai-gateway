@@ -80,10 +80,14 @@ class ModelCapabilities(BaseModel):
     # The actual tool wiring is a later phase; this flag just lets the UI
     # light up the image affordance for these models now.
     image_generation_via_tools: Optional[bool] = None
-    # Chat models that CAN emit a video by calling the generate_video tool
-    # (which routes to a video model like mock-video-1 / Replicate). Mirrors
-    # image_generation_via_tools; lets the UI light up the 🎬 affordance.
+    # DEDICATED video model (direct-dispatch target). The UI shows the video
+    # gen form for these (model_kind=video), NOT the chat composer.
     video_generation: Optional[bool] = None
+    # Chat models that CAN emit a video by calling the generate_video tool
+    # (routes to a dedicated video model). Mirrors image_generation_via_tools;
+    # lights up the 🎬 composer button. Kept DISTINCT from video_generation so
+    # chat-edge can tell a chat-via-tools model from a dedicated video model.
+    video_generation_via_tools: Optional[bool] = None
     # Dedicated media-model capabilities (Sprint 2A.5). Set on the model_configs
     # rows for music / TTS models; surface to the UI for the direct-dispatch
     # forms. (Wire names mirror image_generation/video_generation, NOT

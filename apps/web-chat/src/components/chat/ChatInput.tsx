@@ -107,12 +107,14 @@ export function ChatInput({
   useEffect(() => {
     if (!canGenerateImages && imageMode) setImageMode(false);
   }, [canGenerateImages, imageMode]);
-  // Sprint 2A — 🎬 video mode. Gated on the model's video_generation
-  // capability (Auto kept on, like image mode).
+  // Sprint 2A — 🎬 video mode (tool path). Gated on the chat model's
+  // video_generation_via_tools capability (Auto kept on, like image mode).
+  // NOTE: dedicated video models use model_kind="video" (direct-dispatch
+  // form) instead — the bare "video_generation" cap is theirs, not chat's.
   const [videoMode, setVideoMode] = useState(false);
   const canGenerateVideos =
     activeModelId === AUTO_MODEL_ID ||
-    Boolean(activeModel?.capabilities?.includes("video_generation"));
+    Boolean(activeModel?.capabilities?.includes("video_generation_via_tools"));
   useEffect(() => {
     if (!canGenerateVideos && videoMode) setVideoMode(false);
   }, [canGenerateVideos, videoMode]);
