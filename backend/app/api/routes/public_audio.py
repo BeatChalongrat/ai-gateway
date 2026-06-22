@@ -20,6 +20,7 @@ from app.schemas.media_gen_public import (
     AudioGenPublicRequest,
     AudioGenPublicResponse,
 )
+from app.services.media_gen.rate_limit import enforce_media_rate_limit
 from app.services.media_gen.submit_helpers import (
     enforce_daily_cap_and_enrich_meta,
     estimate_and_validate_cost,
@@ -41,6 +42,12 @@ async def generate_audio(
     if not settings.video_gen_enabled:
         # Media generation shares one feature flag for the alpha.
         raise HTTPException(status_code=403, detail="media generation is disabled")
+
+    await enforce_media_rate_limit(
+        auth, bucket="audio", limit=settings.media_rate_limit_audio_per_hour,
+        window_seconds=3600,
+        scope=f"{settings.media_rate_limit_audio_per_hour}/hour per key",
+    )
 
     user_id = getattr(auth, "portal_user_id", None)
     if not user_id:
