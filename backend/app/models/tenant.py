@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, String, DateTime, func
@@ -59,6 +60,11 @@ class TenantORM(Base):
     )
     monthly_audio_quota: Mapped[int | None] = mapped_column(
         sa.Integer, nullable=True
+    )
+    # L2 spend guard (migration 058). Hard per-tenant daily USD ceiling on
+    # real media generation. Default $10; raise per-tenant via DB (audited).
+    max_daily_spend_usd: Mapped[Decimal] = mapped_column(
+        sa.Numeric(10, 2), nullable=False, server_default=sa.text("10.00")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

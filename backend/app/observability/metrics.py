@@ -306,6 +306,41 @@ GEN_QUEUE_DEPTH = Gauge(
 )
 
 
+# ---------------------------------------------------------------------------
+# Replicate cost-safety observability (Sprint 2B). The spend guards drive
+# these so a spend spike or a guard misfire is visible/alertable before it
+# burns budget. ``guard_level`` ∈ {L1_session, L2_tenant_daily};
+# ``error_class`` ∈ {auth, content_policy, timeout, other}.
+# ---------------------------------------------------------------------------
+
+REPLICATE_SESSION_SPEND_USD = Gauge(
+    "replicate_session_spend_usd",
+    "Current session-wide Replicate spend in USD (today's L1 counter).",
+    registry=metrics_registry,
+)
+
+REPLICATE_DAILY_SPEND_USD = Gauge(
+    "replicate_daily_spend_usd",
+    "Per-tenant daily Replicate spend in USD (today's L2 counter).",
+    labelnames=("tenant_id",),
+    registry=metrics_registry,
+)
+
+REPLICATE_BUDGET_BLOCKS_TOTAL = Counter(
+    "replicate_budget_blocks_total",
+    "Times an L1/L2 spend guard blocked a media-gen submit.",
+    labelnames=("guard_level",),
+    registry=metrics_registry,
+)
+
+REPLICATE_API_ERRORS_TOTAL = Counter(
+    "replicate_api_errors_total",
+    "Replicate API errors by class.",
+    labelnames=("error_class",),
+    registry=metrics_registry,
+)
+
+
 def render_prometheus_exposition() -> tuple[bytes, str]:
     """Serialize the registry into the Prometheus text exposition format.
 
