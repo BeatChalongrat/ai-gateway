@@ -72,6 +72,10 @@ type Handlers struct {
 	// Usage — credit badge + per-model breakdown for web-chat.
 	// Thin authenticated proxy onto the gateway's portal API.
 	Usage *handler.UsageHandler
+	// MediaProxy — Sprint 2A.5 direct-dispatch media gen. Thin trusted
+	// proxy forwarding /videos|audio/generations + /jobs/{id} to the
+	// gateway's public media routes. Optional (nil when not wired).
+	MediaProxy *handler.MediaProxyHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -170,6 +174,18 @@ func New(
 
 			// Models.
 			r.Get("/models", h.Model.List)
+
+			// Sprint 2A.5 — direct-dispatch media generation. Thin trusted
+			// proxy to the gateway's PUBLIC media routes (caller identity
+			// forwarded via the internal-trust headers, same as the tool
+			// path). The gateway enforces DLP + balance + the feature gate.
+			// Submits are rate-limited (high-cost, like message Send); job
+			// polling is not.
+			if h.MediaProxy != nil {
+				r.With(sendRateLimit).Post("/videos/generations", h.MediaProxy.SubmitVideo)
+				r.With(sendRateLimit).Post("/audio/generations", h.MediaProxy.SubmitAudio)
+				r.Get("/jobs/{id}", h.MediaProxy.GetJob)
+			}
 
 			// Usage — credit balance + per-model breakdown (proxied
 			// from the gateway portal API with the caller's token).
