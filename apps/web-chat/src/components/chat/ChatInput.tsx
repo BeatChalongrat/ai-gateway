@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { ImagePlus } from "lucide-react";
+import { Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import {
@@ -39,7 +39,12 @@ interface Props {
    *  next to the model picker. */
   activeKBId?: string | null;
   onKBPick?: (kbId: string | null) => Promise<void>;
-  onSend: (text: string, fileIds: string[], imageMode?: boolean) => void;
+  onSend: (
+    text: string,
+    fileIds: string[],
+    imageMode?: boolean,
+    videoMode?: boolean,
+  ) => void;
   onStop: () => void;
   injectedText?: string | null;
   onInjectedTextConsumed?: () => void;
@@ -99,6 +104,15 @@ export function ChatInput({
   useEffect(() => {
     if (!canGenerateImages && imageMode) setImageMode(false);
   }, [canGenerateImages, imageMode]);
+  // Sprint 2A — 🎬 video mode. Gated on the model's video_generation
+  // capability (Auto kept on, like image mode).
+  const [videoMode, setVideoMode] = useState(false);
+  const canGenerateVideos =
+    activeModelId === AUTO_MODEL_ID ||
+    Boolean(activeModel?.capabilities?.includes("video_generation"));
+  useEffect(() => {
+    if (!canGenerateVideos && videoMode) setVideoMode(false);
+  }, [canGenerateVideos, videoMode]);
   const [isMobile, setIsMobile] = useState(false);
   // Distance (px) the on-screen keyboard is occluding the bottom of
   // the layout viewport. Updated from visualViewport.resize so the
@@ -299,7 +313,7 @@ export function ChatInput({
   function submit() {
     if (!canSend) return;
     const t = text.trim();
-    onSend(t, readyFileIds, imageMode);
+    onSend(t, readyFileIds, imageMode, videoMode);
     setText("");
     // Clear whichever bucket the visible chips were rendering from —
     // covers both the conv-page case (real id) and the landing
@@ -656,7 +670,10 @@ export function ChatInput({
               {canGenerateImages && !streaming ? (
                 <button
                   type="button"
-                  onClick={() => setImageMode((v) => !v)}
+                  onClick={() => {
+                    setImageMode((v) => !v);
+                    setVideoMode(false);
+                  }}
                   aria-label={t("input.imageMode")}
                   title={t("input.imageMode")}
                   aria-pressed={imageMode}
@@ -668,6 +685,26 @@ export function ChatInput({
                   }`}
                 >
                   <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
+                </button>
+              ) : null}
+              {canGenerateVideos && !streaming ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVideoMode((v) => !v);
+                    setImageMode(false);
+                  }}
+                  aria-label={t("input.videoMode")}
+                  title={t("input.videoMode")}
+                  aria-pressed={videoMode}
+                  disabled={disabled}
+                  className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    videoMode
+                      ? "bg-rose-500/15 text-rose-400"
+                      : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
+                  }`}
+                >
+                  <Clapperboard className="h-[18px] w-[18px]" aria-hidden />
                 </button>
               ) : null}
               <ModelSelector

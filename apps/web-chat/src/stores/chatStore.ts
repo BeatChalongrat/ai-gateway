@@ -160,7 +160,7 @@ interface ChatState {
   // ── message ops ──────────────────────────────────────────
   loadMessages: (convId: string) => Promise<void>;
   loadOlderMessages: (convId: string) => Promise<void>;
-  sendMessage: (convId: string, content: string, fileIds?: string[], imageMode?: boolean) => Promise<void>;
+  sendMessage: (convId: string, content: string, fileIds?: string[], imageMode?: boolean, videoMode?: boolean) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   regenerate: (convId: string, messageId: string) => Promise<void>;
   editMessage: (convId: string, messageId: string, newContent: string) => Promise<void>;
@@ -783,7 +783,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // ────────────────────────────────────────────────────────
-  async sendMessage(convId, content, fileIds, imageMode) {
+  async sendMessage(convId, content, fileIds, imageMode, videoMode) {
     const trimmed = content.trim();
     if (!trimmed && (!fileIds || fileIds.length === 0)) return;
     // Offline guard. SSE streams need a live socket — bail early
@@ -875,8 +875,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const ctrl = new AbortController();
     let imageTimedOut = false;
+    // Image AND video gen are both long-running tool calls that block the
+    // stream; give them the same generous client-side timeout.
     const imageTimeout =
-      imageMode === true
+      imageMode === true || videoMode === true
         ? window.setTimeout(() => {
             imageTimedOut = true;
             void api.cancelGeneration(convId).catch(() => {
@@ -896,6 +898,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ctrl.signal,
         fileIds,
         imageMode,
+        videoMode,
       );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
@@ -1347,6 +1350,22 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "video_generating") {
+        // Video-generation phase marker — swap the typing dots for the
+        // video placeholder. Cleared when message_files delivers the
+        // attachment, or by message_complete / error if it never does.
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id ? { ...m, is_generating_video: true } : m,
+              ),
+            },
+          };
+        });
       } else if (evt.event === "message_files") {
         const data = evt.data as SSEMessageFiles;
         set((s) => {
@@ -1356,7 +1375,12 @@ async function consumeStream(
               ...s.messages,
               [convId]: list.map((m) =>
                 m.id === data.message_id
-                  ? { ...m, files: data.files, is_generating_image: false }
+                  ? {
+                      ...m,
+                      files: data.files,
+                      is_generating_image: false,
+                      is_generating_video: false,
+                    }
                   : m,
               ),
             },
@@ -1418,6 +1442,7 @@ async function consumeStream(
                           : "completed",
                       isStreaming: false,
                       is_generating_image: false,
+                      is_generating_video: false,
                       is_searching: false,
                       token_usage: data.token_usage ?? null,
                       response_time_ms: Date.now() - streamStartedAt,
@@ -1480,6 +1505,7 @@ async function consumeStream(
                       error_message: localized,
                       error_attempts: data?.attempts,
                       is_generating_image: false,
+                      is_generating_video: false,
                       is_searching: false,
                     }
                   : m,

@@ -318,6 +318,11 @@ export interface Message {
    *  MessageBubble renders the ImageGeneratingPlaceholder until the
    *  ``message_files`` event (or a terminal frame) clears it. */
   is_generating_image?: boolean;
+  /** local-only — flipped on by the ``video_generating`` SSE event while
+   *  the backend is generating a video for this turn. MessageBubble shows
+   *  the VideoGeneratingPlaceholder until ``message_files`` (or a terminal
+   *  frame) clears it. */
+  is_generating_video?: boolean;
   /** Web-search citations — the sources the assistant cited via the
    *  web_search tool. Persisted server-side (search_sources column) so
    *  they hydrate on reload, and delivered live via the
