@@ -464,6 +464,11 @@ Loop:
 					"status": ev.ImageStatus,
 				})
 			}
+			if ev.VideoStatus != "" {
+				writeSSEEvent(w, flusher, "video_generating", map[string]any{
+					"status": ev.VideoStatus,
+				})
+			}
 			// Web-search phase marker — the frontend shows a "searching
 			// the web" indicator until the answer streams / sources land.
 			if ev.SearchStatus != "" {
@@ -758,6 +763,9 @@ Loop:
 			if ev.ImageStatus != "" {
 				writeSSEEvent(w, flusher, "image_generating", map[string]any{"status": ev.ImageStatus})
 			}
+			if ev.VideoStatus != "" {
+				writeSSEEvent(w, flusher, "video_generating", map[string]any{"status": ev.VideoStatus})
+			}
 			if ev.SearchStatus != "" {
 				writeSSEEvent(w, flusher, "search_status", map[string]any{"status": ev.SearchStatus})
 			}
@@ -908,6 +916,9 @@ Loop:
 			}
 			if ev.ImageStatus != "" {
 				writeSSEEvent(w, flusher, "image_generating", map[string]any{"status": ev.ImageStatus})
+			}
+			if ev.VideoStatus != "" {
+				writeSSEEvent(w, flusher, "video_generating", map[string]any{"status": ev.VideoStatus})
 			}
 			if ev.SearchStatus != "" {
 				writeSSEEvent(w, flusher, "search_status", map[string]any{"status": ev.SearchStatus})

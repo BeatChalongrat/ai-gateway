@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -266,6 +267,14 @@ type ToolExecutor struct {
 	imageGen   imageGenerator
 	imageFiles generatedImageSaver
 	imageModel string
+	// Sprint 2A — optional. When both are wired, the executor exposes
+	// generate_video: submit an async video job to the backend, poll to
+	// completion, fetch the bytes, and save as a ConversationFile attached
+	// to the assistant message. Interfaces (not concrete types) so the
+	// handler stays unit-testable without a live gateway / storage backend.
+	videoGen   videoGenerator
+	videoFiles generatedVideoSaver
+	videoModel string
 	// Web search (gateway-backed). When both are wired the executor
 	// exposes web_search: call the gateway /search endpoint, persist the
 	// cited sources on the assistant message (so citation chips survive
@@ -283,6 +292,18 @@ type imageGenerator interface {
 // generatedImageSaver is the subset of *FileService the image tool needs.
 type generatedImageSaver interface {
 	SaveGeneratedImage(ctx context.Context, in GeneratedImageInput) (*model.ConversationFile, error)
+}
+
+// videoGenerator is the subset of *GatewayClient the video tool needs.
+type videoGenerator interface {
+	SubmitVideoJob(ctx context.Context, callCtx GatewayCallContext, req GatewayVideoSubmitRequest) (*GatewayVideoSubmitResponse, error)
+	PollVideoJob(ctx context.Context, callCtx GatewayCallContext, jobID string) (*GatewayVideoStatusResponse, error)
+	FetchVideoOutput(ctx context.Context, callCtx GatewayCallContext, jobID string) ([]byte, error)
+}
+
+// generatedVideoSaver is the subset of *FileService the video tool needs.
+type generatedVideoSaver interface {
+	SaveGeneratedVideo(ctx context.Context, in GeneratedVideoInput) (*model.ConversationFile, error)
 }
 
 // webSearcher is the subset of *GatewayClient the web_search tool needs.
@@ -313,6 +334,18 @@ func (e *ToolExecutor) SetImageGeneration(gen imageGenerator, files generatedIma
 		model = "gpt-image-1"
 	}
 	e.imageModel = model
+}
+
+// SetVideoGeneration wires the Sprint-2A video tool. Optional — when
+// either dependency is nil, generate_video is hidden from the tool list.
+// An empty model defaults to mock-video-1 (the dev mock provider).
+func (e *ToolExecutor) SetVideoGeneration(gen videoGenerator, files generatedVideoSaver, model string) {
+	e.videoGen = gen
+	e.videoFiles = files
+	if model == "" {
+		model = "mock-video-1"
+	}
+	e.videoModel = model
 }
 
 // SetWebSearch wires the web_search tool. Optional — when either
@@ -371,6 +404,12 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	if e.imageGen != nil && e.imageFiles != nil {
 		defs = append(defs, generateImageToolDef())
 	}
+	// Sprint 2A — video generation. Same availability rule as image gen
+	// (not gated on MemoryEnabled); the per-conversation tool list offers
+	// it whenever the dependencies are wired.
+	if e.videoGen != nil && e.videoFiles != nil {
+		defs = append(defs, generateVideoToolDef())
+	}
 	// Web search. Wired-globally like image gen; the PER-TENANT gate
 	// (tenant search_enabled + a provider configured) is applied by the
 	// caller (attachTools) via the gateway search-config check, so this
@@ -416,6 +455,8 @@ func (e *ToolExecutor) Execute(
 		return e.execSearchPastConversations(ctx, call.Function.Arguments, ec)
 	case "generate_image":
 		return e.execGenerateImage(ctx, call.Function.Arguments, ec)
+	case "generate_video":
+		return e.execGenerateVideo(ctx, call.Function.Arguments, ec)
 	case "web_search":
 		return e.execWebSearch(ctx, call.Function.Arguments, ec)
 	default:
@@ -896,6 +937,149 @@ func (e *ToolExecutor) execGenerateImage(
 			"Do NOT include a URL or a markdown image — the image displays automatically.",
 		size, quality,
 	)
+}
+
+// ---------------------------------------------------------------------------
+// generate_video (Sprint 2A)
+// ---------------------------------------------------------------------------
+
+// generateVideoToolDef is the Sprint-2A video-generation tool. Like
+// generate_image it steers the model to produce an enhanced English prompt
+// and to NOT fabricate a URL — the video attaches to the reply
+// automatically (message.files[]).
+func generateVideoToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "generate_video",
+			Description: "Generate a short video clip from a text description. Use this when the user asks to " +
+				"create, make, or generate a video / clip / วิดีโอ / คลิป. ALWAYS translate and enhance the " +
+				"user's request into a detailed, vivid ENGLISH prompt (subject, action, camera, style, mood). " +
+				"The generated video is attached to your reply automatically — after calling this tool, just " +
+				"tell the user their video is ready in a short friendly sentence. Do NOT invent a URL or a " +
+				"markdown link. Generation can take up to a minute.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "Detailed video description in English. Translate + enhance the user's request into a vivid, specific prompt with subject + action + style.",
+					},
+					"duration_sec": map[string]any{
+						"type":        "integer",
+						"description": "Clip length in seconds (default 5). Longer clips cost more.",
+					},
+				},
+				"required": []string{"prompt"},
+			},
+		},
+	}
+}
+
+type generateVideoArgs struct {
+	Prompt      string `json:"prompt"`
+	DurationSec int    `json:"duration_sec"`
+}
+
+func (e *ToolExecutor) execGenerateVideo(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if e.videoGen == nil || e.videoFiles == nil {
+		return "Video generation isn't available right now."
+	}
+	var args generateVideoArgs
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return "I couldn't parse the generate_video arguments."
+	}
+	if strings.TrimSpace(args.Prompt) == "" {
+		return "I need a description of the video to generate."
+	}
+	if ec.MessageID == uuid.Nil {
+		return "I can only generate videos on the streaming chat path right now. Please try again."
+	}
+	duration := args.DurationSec
+	if duration <= 0 {
+		duration = 5
+	}
+
+	callCtx := GatewayCallContext{
+		TenantID:       ec.TenantID,
+		UserID:         ec.UserID,
+		ConversationID: ec.ConversationID,
+	}
+	sub, err := e.videoGen.SubmitVideoJob(ctx, callCtx, GatewayVideoSubmitRequest{
+		Model:          e.videoModel,
+		Prompt:         args.Prompt,
+		DurationSec:    duration,
+		ConversationID: ec.ConversationID.String(),
+		MessageID:      ec.MessageID.String(),
+	})
+	if err != nil {
+		slog.Error("video_generation_submit_failed",
+			"error", err.Error(), "model", e.videoModel, "conversation_id", ec.ConversationID)
+		errStr := err.Error()
+		switch {
+		case strings.Contains(errStr, "status=403"):
+			return "Video generation isn't enabled for your account. Please contact your administrator."
+		case strings.Contains(errStr, "status=402"):
+			return "You don't have enough credits to generate this video."
+		case strings.Contains(errStr, "status=400"):
+			return "The selected model can't generate videos, or the request was invalid."
+		default:
+			return "I couldn't start the video generation right now. Please try again in a moment."
+		}
+	}
+
+	// Poll until terminal. Fixed interval; the request ctx cancels it, and a
+	// hard deadline bounds a stuck provider.
+	jobID := sub.JobID
+	const pollInterval = 3 * time.Second
+	deadline := time.Now().Add(10 * time.Minute)
+	for {
+		select {
+		case <-ctx.Done():
+			return "The video generation was cancelled."
+		case <-time.After(pollInterval):
+		}
+		status, perr := e.videoGen.PollVideoJob(ctx, callCtx, jobID)
+		if perr != nil {
+			slog.Error("video_generation_poll_failed", "error", perr.Error(), "job_id", jobID)
+			return "I lost track of the video generation. Please try again."
+		}
+		if status.Status == "done" {
+			break
+		}
+		if status.Status == "failed" {
+			slog.Error("video_generation_job_failed",
+				"job_id", jobID, "error_code", status.ErrorCode, "error_message", status.ErrorMessage)
+			return "The video generation failed. Please try again with a different prompt."
+		}
+		if time.Now().After(deadline) {
+			return "The video generation took too long. Please try again."
+		}
+	}
+
+	data, err := e.videoGen.FetchVideoOutput(ctx, callCtx, jobID)
+	if err != nil || len(data) == 0 {
+		slog.Error("video_generation_fetch_failed", "job_id", jobID, "error", fmt.Sprintf("%v", err))
+		return "I generated the video but couldn't download it. Please try again."
+	}
+	if _, err := e.videoFiles.SaveGeneratedVideo(ctx, GeneratedVideoInput{
+		TenantID:       ec.TenantID,
+		UserID:         ec.UserID,
+		ConversationID: ec.ConversationID,
+		MessageID:      ec.MessageID,
+		Data:           data,
+		ContentType:    "video/mp4",
+		Prompt:         args.Prompt,
+	}); err != nil {
+		slog.Error("video_generation_save_failed", "error", err.Error(), "job_id", jobID)
+		return "I generated the video but couldn't save it. Please try again."
+	}
+
+	return "Video generated successfully and attached to your reply. " +
+		"Tell the user their video is ready in a short, friendly sentence. " +
+		"Do NOT include a URL or a markdown link — the video displays automatically."
 }
 
 // ---------------------------------------------------------------------------

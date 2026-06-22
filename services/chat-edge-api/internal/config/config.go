@@ -131,6 +131,10 @@ type Config struct {
 	// Phase B — the gateway image model the generate_image tool calls.
 	// gpt-image-1 is OpenAI's current image model (DALL-E is retiring).
 	ImageGenModel string `env:"IMAGE_GEN_MODEL" envDefault:"gpt-image-1"`
+	// Sprint 2A — the video model the generate_video tool submits to. The
+	// dev default is the mock provider (mock-video-1); Sprint 2B swaps in
+	// a real Replicate model id.
+	VideoGenModel string `env:"VIDEO_GEN_MODEL" envDefault:"mock-video-1"`
 	// Dedicated image-generation timeout. Image models often take much
 	// longer than chat completions; keep this separate from streaming chat.
 	ChatEdgeImageTimeoutSeconds int `env:"CHAT_EDGE_IMAGE_TIMEOUT_SECONDS" envDefault:"180"`

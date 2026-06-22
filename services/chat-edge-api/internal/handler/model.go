@@ -356,6 +356,11 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 		if m.Capabilities != nil && m.Capabilities.ImageGenerationViaTools {
 			resp.Capabilities = append(resp.Capabilities, "image_generation_via_tools")
 		}
+		// Surface the video-gen flag so the frontend can gate the 🎬
+		// composer button (mirrors image_generation_via_tools).
+		if m.Capabilities != nil && m.Capabilities.VideoGeneration {
+			resp.Capabilities = append(resp.Capabilities, "video_generation")
+		}
 		out = append(out, resp)
 	}
 	return out
