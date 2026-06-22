@@ -482,6 +482,14 @@ func (s *MessageService) SetImageGeneration(gen imageGenerator, files generatedI
 	}
 }
 
+// SetVideoGeneration wires the Sprint-2A generate_video tool onto the
+// ToolExecutor. Same optional passthrough pattern as SetImageGeneration.
+func (s *MessageService) SetVideoGeneration(gen videoGenerator, files generatedVideoSaver, model string) {
+	if s.toolExec != nil {
+		s.toolExec.SetVideoGeneration(gen, files, model)
+	}
+}
+
 // SetWebSearch wires the web_search tool onto the ToolExecutor (gateway
 // search client + the message service that persists citations). Same
 // passthrough pattern as SetImageGeneration. Pair with
@@ -794,6 +802,12 @@ type StreamUpdate struct {
 	// There is no "completed" — the message_files SSE event (or a
 	// terminal error / message_complete) ends the phase client-side.
 	ImageStatus string
+
+	// Video-generation phase marker, "started" only. Emitted just before
+	// the generate_video tool executes so the frontend can show a video
+	// placeholder. Like ImageStatus there is no "completed" — message_files
+	// (or a terminal error / message_complete) ends the phase client-side.
+	VideoStatus string
 
 	// Web-search phase marker, "searching" only. Emitted just before
 	// the web_search tool executes so the frontend can show a "searching
@@ -3570,6 +3584,8 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			switch tc.Function.Name {
 			case "generate_image":
 				in.out <- StreamUpdate{ImageStatus: "started"}
+			case "generate_video":
+				in.out <- StreamUpdate{VideoStatus: "started"}
 			case "web_search":
 				in.out <- StreamUpdate{SearchStatus: "searching"}
 			}
