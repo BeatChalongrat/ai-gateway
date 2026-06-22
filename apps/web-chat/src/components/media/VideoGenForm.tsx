@@ -1,0 +1,202 @@
+"use client";
+
+// Direct-dispatch video generation form (Sprint 2A.5). Standalone — does
+// NOT create chat messages. Submit → poll the job every 2s → show the
+// VideoGeneratingPlaceholder while running → play the result on done.
+// Media-gen job state is kept LOCAL here (not in the chat streaming store)
+// so the streaming path stays untouched.
+
+import { useEffect, useRef, useState } from "react";
+
+import { api, ApiError } from "@/lib/api";
+import type { MediaJobStatus, ModelEntry } from "@/lib/types";
+
+import { VideoGeneratingPlaceholder } from "../chat/VideoGeneratingPlaceholder";
+import { CostPreview } from "./CostPreview";
+
+interface Props {
+  model: ModelEntry;
+  conversationId?: string | null;
+}
+
+type Phase = "form" | "submitting" | "polling" | "done" | "failed";
+
+export function VideoGenForm({ model, conversationId }: Props) {
+  const [prompt, setPrompt] = useState("");
+  const [duration, setDuration] = useState(5);
+  const [resolution, setResolution] = useState("1080p");
+  const [hasAudio, setHasAudio] = useState(false);
+  const [phase, setPhase] = useState<Phase>("form");
+  const [job, setJob] = useState<MediaJobStatus | null>(null);
+  const [cost, setCost] = useState<{
+    estimateUsd: string;
+    balanceAfter: string;
+    requiresConfirmation: boolean;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<number | null>(null);
+
+  function stopPolling() {
+    if (pollRef.current) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+  useEffect(() => stopPolling, []);
+
+  function reset() {
+    stopPolling();
+    setPhase("form");
+    setJob(null);
+    setError(null);
+    setCost(null);
+  }
+
+  function startPolling(jobId: string) {
+    stopPolling();
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const j = await api.getMediaJob(jobId);
+        setJob(j);
+        if (j.status === "done") {
+          stopPolling();
+          setPhase("done");
+        } else if (j.status === "failed") {
+          stopPolling();
+          setError(j.error_message || "Generation failed.");
+          setPhase("failed");
+        }
+      } catch {
+        /* transient poll error — keep polling */
+      }
+    }, 2000);
+  }
+
+  async function submit() {
+    if (!prompt.trim() || phase === "submitting" || phase === "polling") return;
+    setPhase("submitting");
+    setError(null);
+    try {
+      const res = await api.submitVideoGen({
+        prompt: prompt.trim(),
+        model: model.id,
+        duration_sec: duration,
+        resolution,
+        has_audio: hasAudio,
+        conversation_id: conversationId ?? null,
+      });
+      setCost({
+        estimateUsd: res.estimated_cost_usd,
+        balanceAfter: res.balance_after_usd,
+        requiresConfirmation: res.requires_confirmation,
+      });
+      setPhase("polling");
+      startPolling(res.job_id);
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "Failed to submit video job.",
+      );
+      setPhase("failed");
+    }
+  }
+
+  const busy = phase === "submitting" || phase === "polling";
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-bg-surface p-4">
+      {phase === "form" || phase === "failed" ? (
+        <>
+          <textarea
+            rows={3}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Describe the video you want to generate…"
+            className="w-full resize-none rounded-lg border border-border bg-bg-base px-3 py-2 text-[15px] text-text-primary placeholder:text-text-placeholder focus:border-border-strong focus:outline-none"
+          />
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              <span>Duration</span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="accent-rose-400"
+              />
+              <span className="w-8 tabular-nums text-text-primary">{duration}s</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              <span>Resolution</span>
+              <select
+                value={resolution}
+                onChange={(e) => setResolution(e.target.value)}
+                className="rounded-md border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
+              >
+                <option value="720p">720p</option>
+                <option value="1080p">1080p</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={hasAudio}
+                onChange={(e) => setHasAudio(e.target.checked)}
+                className="accent-rose-400"
+              />
+              <span>Audio</span>
+            </label>
+          </div>
+          {error ? (
+            <p className="text-sm text-status-danger">{error}</p>
+          ) : null}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!prompt.trim()}
+            className="self-end rounded-full bg-rose-500 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {phase === "failed" ? "Retry" : "Generate video"}
+          </button>
+        </>
+      ) : null}
+
+      {busy ? (
+        <div className="flex flex-col items-center gap-3">
+          <VideoGeneratingPlaceholder />
+          {job?.progress_pct != null ? (
+            <span className="text-xs text-text-muted">{job.progress_pct}%</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {cost ? (
+        <CostPreview
+          estimateUsd={cost.estimateUsd}
+          balanceAfter={cost.balanceAfter}
+          requiresConfirmation={cost.requiresConfirmation}
+        />
+      ) : null}
+
+      {phase === "done" && job?.output_url ? (
+        <div className="flex flex-col items-center gap-3">
+          {/* PROXY-PENDING: output_url is a backend URL; auth/proxy wiring
+              for the direct-dispatch download lands in the E2E phase. */}
+          <video
+            src={job.output_url}
+            controls
+            preload="metadata"
+            className="w-full max-w-[480px] rounded-lg border border-border bg-black"
+          />
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded-full border border-border px-4 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          >
+            Generate another
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}

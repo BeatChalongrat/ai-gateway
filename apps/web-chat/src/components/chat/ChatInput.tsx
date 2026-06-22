@@ -22,6 +22,9 @@ import { FilePreviewCard } from "./FilePreviewCard";
 import { KBSelector } from "./KBSelector";
 import { ModelSelector } from "./ModelSelector";
 import { RecordingBar } from "./RecordingBar";
+import { AudioGenForm } from "../media/AudioGenForm";
+import { MediaModeIndicator } from "../media/MediaModeIndicator";
+import { VideoGenForm } from "../media/VideoGenForm";
 
 interface Props {
   /** Active conversation id. The input uses it as the key for the
@@ -113,6 +116,11 @@ export function ChatInput({
   useEffect(() => {
     if (!canGenerateVideos && videoMode) setVideoMode(false);
   }, [canGenerateVideos, videoMode]);
+  // Sprint 2A.5 — Hybrid. A concrete media model (video/audio/tts) swaps
+  // the chat composer for a direct-dispatch form. Auto + chat models keep
+  // the chat composer (modelKind defaults to "chat" when the model is the
+  // Auto sentinel, unknown, or a payload without model_kind).
+  const modelKind = activeModel?.model_kind ?? "chat";
   const [isMobile, setIsMobile] = useState(false);
   // Distance (px) the on-screen keyboard is occluding the bottom of
   // the layout viewport. Updated from visualViewport.resize so the
@@ -518,6 +526,36 @@ export function ChatInput({
     el.addEventListener("paste", onPaste);
     return () => el.removeEventListener("paste", onPaste);
   }, []);
+
+  // Sprint 2A.5 — direct-dispatch path: a media model renders its gen form
+  // in place of the chat composer. The ModelSelector stays visible so the
+  // user can switch back to a chat model.
+  if (modelKind !== "chat" && activeModel) {
+    return (
+      <div className="safe-bottom bg-bg-base px-3 py-3 md:px-6 md:py-4">
+        <div className="mx-auto flex w-full max-w-chat flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <MediaModeIndicator kind={modelKind} modelName={activeModel.name} />
+            <ModelSelector
+              activeModelId={activeModelId}
+              disabled={streaming}
+              compact
+              onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
+            />
+          </div>
+          {modelKind === "video" ? (
+            <VideoGenForm model={activeModel} conversationId={conversationId} />
+          ) : null}
+          {modelKind === "audio" ? (
+            <AudioGenForm model={activeModel} mode="music" conversationId={conversationId} />
+          ) : null}
+          {modelKind === "tts" ? (
+            <AudioGenForm model={activeModel} mode="tts" conversationId={conversationId} />
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
