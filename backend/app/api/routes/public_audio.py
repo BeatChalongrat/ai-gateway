@@ -21,6 +21,7 @@ from app.schemas.media_gen_public import (
     AudioGenPublicResponse,
 )
 from app.services.media_gen.submit_helpers import (
+    enforce_daily_cap_and_enrich_meta,
     estimate_and_validate_cost,
     format_submit_response_usd,
     insert_generation_job_row,
@@ -66,6 +67,10 @@ async def generate_audio(
 
     est = await estimate_and_validate_cost(
         session, auth.tenant_id, user_id, job_type, mc, meta
+    )
+    await enforce_daily_cap_and_enrich_meta(
+        session, tenant_id=auth.tenant_id, model_id=payload.model,
+        input_metadata=meta, est=est,
     )
     job = await insert_generation_job_row(
         session,

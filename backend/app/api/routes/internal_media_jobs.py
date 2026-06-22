@@ -33,6 +33,7 @@ from app.schemas.media_gen import (
     VideoGenSubmitResponse,
 )
 from app.services.media_gen.submit_helpers import (
+    enforce_daily_cap_and_enrich_meta,
     estimate_and_validate_cost,
     format_submit_response_usd,
     insert_generation_job_row,
@@ -75,6 +76,10 @@ async def submit_video_job(
     }
     est = await estimate_and_validate_cost(
         session, auth.tenant_id, user_id, "video", mc, meta
+    )
+    await enforce_daily_cap_and_enrich_meta(
+        session, tenant_id=auth.tenant_id, model_id=payload.model,
+        input_metadata=meta, est=est,
     )
     job = await insert_generation_job_row(
         session,
