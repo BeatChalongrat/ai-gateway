@@ -272,12 +272,16 @@ class ApiClient {
     signal: AbortSignal,
     fileIds?: string[],
     imageMode?: boolean,
+    videoMode?: boolean,
   ): Promise<Response> {
     const body: Record<string, unknown> = { content, stream: true };
     if (fileIds && fileIds.length > 0) body.file_ids = fileIds;
     // Phase C — 🎨 image mode: biases a tool-capable model to call
     // generate_image (chat-edge appends a system hint).
     if (imageMode) body.image_mode = true;
+    // Sprint 2A — 🎬 video mode: biases a tool-capable model to call
+    // generate_video (chat-edge appends a system hint).
+    if (videoMode) body.video_mode = true;
     return this.raw(`/conversations/${convId}/messages`, {
       method: "POST",
       body: JSON.stringify(body),
