@@ -9,11 +9,17 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 import type { MediaJobStatus, ModelEntry } from "@/lib/types";
 
 import { VideoGeneratingPlaceholder } from "../chat/VideoGeneratingPlaceholder";
 import { CostConfirmModal } from "./CostConfirmModal";
 import { CostPreview } from "./CostPreview";
+import {
+  MediaGenError,
+  type MediaGenErrorCode,
+  mediaErrorCodeFromStatus,
+} from "./MediaGenError";
 
 interface Props {
   model: ModelEntry;
@@ -49,10 +55,13 @@ export function VideoGenForm({ model, conversationId }: Props) {
     requiresConfirmation: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<MediaGenErrorCode | null>(null);
   // Job reserved by submit() and awaiting confirm (or being polled).
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<Date | null>(null);
   const pollRef = useRef<number | null>(null);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "owner";
 
   function stopPolling() {
     if (pollRef.current) {
@@ -67,6 +76,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
     setPhase("form");
     setJob(null);
     setError(null);
+    setErrorCode(null);
     setCost(null);
     setPendingJobId(null);
     setStartedAt(null);
@@ -100,6 +110,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
     if (!prompt.trim() || phase === "submitting" || phase === "polling") return;
     setPhase("submitting");
     setError(null);
+    setErrorCode(null);
     try {
       const res = await api.submitVideoGen({
         prompt: prompt.trim(),
@@ -124,9 +135,13 @@ export function VideoGenForm({ model, conversationId }: Props) {
         startPolling(res.job_id);
       }
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Failed to submit video job.",
-      );
+      if (err instanceof ApiError) {
+        setError(err.message);
+        setErrorCode(mediaErrorCodeFromStatus(err.status, err.code));
+      } else {
+        setError("Failed to submit video job.");
+        setErrorCode("unknown");
+      }
       setPhase("failed");
     }
   }
@@ -211,7 +226,19 @@ export function VideoGenForm({ model, conversationId }: Props) {
               <span>Audio</span>
             </label>
           </div>
-          {error ? (
+          {phase === "failed" && errorCode ? (
+            <MediaGenError
+              errorCode={errorCode}
+              errorMessage={error ?? ""}
+              isAdmin={isAdmin}
+              onRetry={submit}
+              onDismiss={() => {
+                setError(null);
+                setErrorCode(null);
+                setPhase("form");
+              }}
+            />
+          ) : error ? (
             <p className="text-sm text-status-danger">{error}</p>
           ) : null}
           <button
