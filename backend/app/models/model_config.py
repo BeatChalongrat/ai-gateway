@@ -8,6 +8,7 @@ job upsert without overwriting admin edits.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, func
@@ -80,6 +81,30 @@ class ModelConfigORM(Base):
     )
     cost_per_output_token: Mapped[float] = mapped_column(
         Float, nullable=False, server_default=sa.text("0.0")
+    )
+
+    # --- Media generation (migration 056) ---
+    # Capability flags drive the /v1/models wire capabilities
+    # (supports_video_gen -> "video_generation", etc.). Cost fields are
+    # per-unit USD: video bills per second, TTS per character, music per
+    # generation. NULL where not applicable to the model's modality.
+    supports_video_gen: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    supports_audio_gen: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    supports_tts: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    cost_per_second: Mapped[Decimal | None] = mapped_column(
+        sa.Numeric(10, 6), nullable=True
+    )
+    cost_per_character: Mapped[Decimal | None] = mapped_column(
+        sa.Numeric(12, 8), nullable=True
+    )
+    cost_per_generation: Mapped[Decimal | None] = mapped_column(
+        sa.Numeric(10, 4), nullable=True
     )
 
     # --- Discovery metadata ---
