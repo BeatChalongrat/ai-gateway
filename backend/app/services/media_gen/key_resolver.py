@@ -19,14 +19,12 @@ from __future__ import annotations
 from typing import Optional
 
 
-async def resolve_replicate_key() -> Optional[str]:
-    """Resolve the active Replicate API key, or ``None`` if none configured.
-
-    Fails CLOSED: any DB / lookup error returns ``None`` so the adapter
-    raises ``ProviderKeyMissing`` before making a provider call rather than
-    dispatching with a bad/absent credential. The exception details are
-    swallowed deliberately — they must never reach a log line that could
-    carry a key fragment.
+async def _resolve_key_for(provider_name: str) -> Optional[str]:
+    """Resolve a provider's active key via ProviderKeyService (UI → legacy →
+    env). Fails CLOSED: any DB / lookup error returns ``None`` so the adapter
+    raises ``ProviderKeyMissing`` before any provider call. Errors are
+    swallowed deliberately — they must never reach a log line that could carry
+    a key fragment.
     """
     from app.core.db import get_async_session_factory
     from app.services.provider_key_service import ProviderKeyService
@@ -35,7 +33,22 @@ async def resolve_replicate_key() -> Optional[str]:
         factory = get_async_session_factory()
         async with factory() as session:
             return await ProviderKeyService().get_active_key_async(
-                session, "replicate"
+                session, provider_name
             )
     except Exception:  # noqa: BLE001 — fail closed, never leak details
         return None
+
+
+async def resolve_replicate_key() -> Optional[str]:
+    """Resolve the active Replicate API key, or ``None`` if none configured."""
+    return await _resolve_key_for("replicate")
+
+
+async def resolve_openai_key() -> Optional[str]:
+    """Resolve the active OpenAI API key (reused for OpenAI TTS). Sprint 4."""
+    return await _resolve_key_for("openai")
+
+
+async def resolve_elevenlabs_key() -> Optional[str]:
+    """Resolve the active ElevenLabs API key. Sprint 4."""
+    return await _resolve_key_for("elevenlabs")
