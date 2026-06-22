@@ -172,6 +172,17 @@ var allowedContentTypes = map[string]bool{
 	"image/jpeg":       true,
 	"image/gif":        true,
 	"image/webp":       true,
+	// Video / audio (media generation — Sprint 1). Generated clips and
+	// audio tracks are persisted as conversation files, so the upload
+	// allow-list must accept them. Pairs with the raised MaxFileSizeBytes
+	// (200 MiB) / MaxConvFileTotal (1 GiB) in config.go.
+	"video/mp4":        true,
+	"video/webm":       true,
+	"video/quicktime":  true,
+	"audio/mpeg":       true,
+	"audio/wav":        true,
+	"audio/mp4":        true,
+	"audio/webm":       true,
 }
 
 // textLikeExtensions are read verbatim as UTF-8 text. Browsers report
