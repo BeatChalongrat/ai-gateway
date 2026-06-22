@@ -162,6 +162,13 @@ class Settings(BaseSettings):
     # is explicitly approved.
     usage_credits_per_usd: int = 3_000_000
 
+    # Video generation (Sprint 2A). Feature-flagged OFF by default; the
+    # internal video route returns 403 when disabled. A submit response
+    # sets ``requires_confirmation`` when the estimated USD cost meets this
+    # threshold so the frontend can show a confirm modal.
+    video_gen_enabled: bool = False
+    video_gen_default_threshold_usd: float = 1.00
+
     # Provider timeouts and retry
     provider_timeout_connect: float = 5.0
     provider_timeout_read: float = 30.0
