@@ -83,3 +83,9 @@ func (h *MediaProxyHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	h.forward(w, r, http.MethodGet, "/jobs/"+id)
 }
+
+// CancelJob proxies POST /jobs/{id}/cancel (Sprint 3 — abort + refund).
+func (h *MediaProxyHandler) CancelJob(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	h.forward(w, r, http.MethodPost, "/jobs/"+id+"/cancel")
+}

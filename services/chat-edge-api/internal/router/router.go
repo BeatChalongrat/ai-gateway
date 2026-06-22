@@ -185,6 +185,7 @@ func New(
 				r.With(sendRateLimit).Post("/videos/generations", h.MediaProxy.SubmitVideo)
 				r.With(sendRateLimit).Post("/audio/generations", h.MediaProxy.SubmitAudio)
 				r.Get("/jobs/{id}", h.MediaProxy.GetJob)
+				r.Post("/jobs/{id}/cancel", h.MediaProxy.CancelJob)
 			}
 
 			// Usage — credit balance + per-model breakdown (proxied
