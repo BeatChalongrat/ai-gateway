@@ -21,8 +21,20 @@ interface Props {
 }
 
 // "confirm" (Sprint 3): the job is reserved but NOT polling yet, awaiting the
-// user's premium-cost confirmation (post-submit flow).
-type Phase = "form" | "submitting" | "confirm" | "polling" | "done" | "failed";
+// user's premium-cost confirmation (post-submit flow). "cancelled": user
+// aborted an in-flight job.
+type Phase =
+  | "form"
+  | "submitting"
+  | "confirm"
+  | "polling"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+// Heuristic generation time for the ETA fallback when no progress % is
+// available yet. Progress-based ETA overrides this once the job reports a %.
+const GEN_ETA_FALLBACK_SEC = 60;
 
 export function VideoGenForm({ model, conversationId }: Props) {
   const [prompt, setPrompt] = useState("");
@@ -39,6 +51,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
   const [error, setError] = useState<string | null>(null);
   // Job reserved by submit() and awaiting confirm (or being polled).
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<Date | null>(null);
   const pollRef = useRef<number | null>(null);
 
   function stopPolling() {
@@ -56,10 +69,12 @@ export function VideoGenForm({ model, conversationId }: Props) {
     setError(null);
     setCost(null);
     setPendingJobId(null);
+    setStartedAt(null);
   }
 
   function startPolling(jobId: string) {
     stopPolling();
+    setStartedAt(new Date());
     pollRef.current = window.setInterval(async () => {
       try {
         const j = await api.getMediaJob(jobId);
@@ -71,6 +86,9 @@ export function VideoGenForm({ model, conversationId }: Props) {
           stopPolling();
           setError(j.error_message || "Generation failed.");
           setPhase("failed");
+        } else if (j.status === "cancelled") {
+          stopPolling();
+          setPhase("cancelled");
         }
       } catch {
         /* transient poll error — keep polling */
@@ -127,6 +145,21 @@ export function VideoGenForm({ model, conversationId }: Props) {
         await api.cancelMediaJob(id);
       } catch {
         /* best-effort abort — the reservation expires server-side regardless */
+      }
+    }
+  }
+
+  // Cancel an actively-polling job: stop polling, show the cancelled state,
+  // and abort server-side (best-effort).
+  async function cancelInProgress() {
+    const id = pendingJobId;
+    stopPolling();
+    setPhase("cancelled");
+    if (id) {
+      try {
+        await api.cancelMediaJob(id);
+      } catch {
+        /* best-effort */
       }
     }
   }
@@ -194,10 +227,25 @@ export function VideoGenForm({ model, conversationId }: Props) {
 
       {busy ? (
         <div className="flex flex-col items-center gap-3">
-          <VideoGeneratingPlaceholder />
-          {job?.progress_pct != null ? (
-            <span className="text-xs text-text-muted">{job.progress_pct}%</span>
-          ) : null}
+          <VideoGeneratingPlaceholder
+            progressPct={job?.progress_pct ?? null}
+            startedAt={startedAt ?? undefined}
+            estimatedDurationSec={GEN_ETA_FALLBACK_SEC}
+            onCancel={cancelInProgress}
+          />
+        </div>
+      ) : null}
+
+      {phase === "cancelled" ? (
+        <div className="flex flex-col items-center gap-3 py-2">
+          <p className="text-sm text-text-secondary">Generation cancelled.</p>
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded-full border border-border px-4 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          >
+            Start over
+          </button>
         </div>
       ) : null}
 

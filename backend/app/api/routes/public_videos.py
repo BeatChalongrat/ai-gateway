@@ -131,6 +131,68 @@ async def get_job_status(
     )
 
 
+@router.post("/jobs/{job_id}/cancel", response_model=JobStatusPublicResponse)
+async def cancel_job(
+    job_id: str,
+    auth: ResolvedApiKey = Depends(get_resolved_api_key),
+    session: AsyncSession = Depends(get_async_db),
+) -> JobStatusPublicResponse:
+    """Cancel a reserved / in-flight job (Sprint 3).
+
+    Idempotent: a job already in a terminal state is returned unchanged. For
+    an active (``queued``/``processing``) job we mark it ``cancelled``, refund
+    the L1 session reservation, and best-effort cancel the provider job. The
+    job loop's webhook-aware re-read stops polling once it sees ``cancelled``.
+    """
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    job = await session.get(GenerationJobORM, job_id)
+    if job is None or job.tenant_id != auth.tenant_id:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    if job.status in ("queued", "processing"):
+        job.status = "cancelled"
+        job.completed_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(job)
+
+        # Refund the L1 session reservation (best-effort; the estimate was
+        # stashed on input_metadata at submit time — Sprint 2B.5).
+        est = (job.input_metadata or {}).get("estimate_usd")
+        if est:
+            try:
+                from app.services.media_gen.spend_guard import release_session_budget
+
+                await release_session_budget(Decimal(str(est)))
+            except Exception:  # noqa: BLE001 — refund is best-effort
+                pass
+
+        # Best-effort provider-side cancel for an already-dispatched job.
+        if job.external_job_id:
+            try:
+                from app.services.media_gen.registry import get_adapter
+
+                adapter = get_adapter(job.provider, job.job_type)
+                await adapter.cancel_job(job.external_job_id)
+            except Exception:  # noqa: BLE001 — provider cancel is best-effort
+                pass
+
+    actual = job.actual_cost_credits
+    return JobStatusPublicResponse(
+        job_id=job.id,
+        status=job.status,
+        progress_pct=job.progress_pct,
+        output_url=None,
+        actual_cost_credits=actual,
+        actual_cost_usd=credits_to_usd_display(actual) if actual else None,
+        error_code=job.error_code,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        completed_at=job.completed_at,
+    )
+
+
 @router.get("/jobs/{job_id}/output")
 async def get_job_output(
     job_id: str,
