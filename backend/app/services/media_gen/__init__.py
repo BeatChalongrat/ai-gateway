@@ -34,3 +34,15 @@ try:
 except Exception as _exc:  # noqa: BLE001
     _log.error("Failed to register Replicate adapter: %s", _exc)
 
+# Replicate MusicGen (Sprint 4) — same provider key, distinct job_type "music".
+# Registered unconditionally; per-request key resolution + fail-closed apply.
+try:
+    from app.services.media_gen.adapters.replicate_music import (  # noqa: E402
+        ReplicateMusicAdapter,
+    )
+
+    register_adapter(ReplicateMusicAdapter)
+    _log.info("Replicate MusicGen adapter registered (key resolved per-request)")
+except Exception as _exc:  # noqa: BLE001
+    _log.error("Failed to register Replicate MusicGen adapter: %s", _exc)
+

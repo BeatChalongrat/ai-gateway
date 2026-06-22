@@ -16,6 +16,9 @@ import respx
 
 from app.core.config import settings
 import app.services.media_gen.adapters.replicate_video as rv
+# Sprint 4: the shared HTTP/budget/key logic moved to replicate_base; the
+# budget + resolver module globals that these tests patch now live there.
+import app.services.media_gen.adapters.replicate_base as rb
 from app.services.media_gen.adapters.replicate_video import (
     ContentPolicyBlocked,
     ProviderAuthError,
@@ -43,7 +46,7 @@ def _token(monkeypatch):
     async def _fake_resolver():
         return _FAKE_TOKEN
 
-    monkeypatch.setattr(rv, "resolve_replicate_key", _fake_resolver)
+    monkeypatch.setattr(rb, "resolve_replicate_key", _fake_resolver)
 
 
 @pytest.fixture
@@ -57,8 +60,8 @@ def budget(monkeypatch):
     async def _release(estimate, **kw):
         calls["release"] += 1
 
-    monkeypatch.setattr(rv, "check_and_reserve_session_budget", _reserve)
-    monkeypatch.setattr(rv, "release_session_budget", _release)
+    monkeypatch.setattr(rb, "check_and_reserve_session_budget", _reserve)
+    monkeypatch.setattr(rb, "release_session_budget", _release)
     return calls
 
 
@@ -90,7 +93,7 @@ async def test_submit_budget_exhausted_makes_no_http_call(monkeypatch):
     async def _reserve(estimate, **kw):
         return False
 
-    monkeypatch.setattr(rv, "check_and_reserve_session_budget", _reserve)
+    monkeypatch.setattr(rb, "check_and_reserve_session_budget", _reserve)
     route = respx.post(_PRED).mock(return_value=httpx.Response(201, json={"id": "x"}))
     with pytest.raises(SpendCapExceeded):
         await ReplicateVideoAdapter().submit_job("a cat", _meta())
