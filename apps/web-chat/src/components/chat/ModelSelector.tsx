@@ -50,6 +50,14 @@ const AUTO_PICK_ENTRY: ModelEntry = {
   allowed: true,
 };
 
+// Sprint 3 — dedicated media-model kind sections (shown above provider
+// groups so video/audio/tts models are discoverable even at 0 count).
+const MEDIA_KIND_SECTIONS: { kind: "video" | "audio" | "tts"; label: string }[] = [
+  { kind: "video", label: "Video Generation" },
+  { kind: "audio", label: "Audio / Music" },
+  { kind: "tts", label: "Text-to-Speech" },
+];
+
 // Preview rows shown per provider group before the "…N more" expander.
 const PROVIDER_PREVIEW_COUNT = 3;
 const POPULAR_COUNT = 4;
@@ -279,9 +287,22 @@ function ModelPicker({
       .slice(0, RECENT_COUNT);
   }, [models, searching]);
 
+  // Sprint 3 — dedicated media models (model_kind video/audio/tts) get their
+  // own kind sections; the provider groups below carry chat models only.
+  const mediaByKind = useMemo(
+    () => ({
+      video: filtered.filter((m) => m.model_kind === "video"),
+      audio: filtered.filter((m) => m.model_kind === "audio"),
+      tts: filtered.filter((m) => m.model_kind === "tts"),
+    }),
+    [filtered],
+  );
+
   const providerGroups = useMemo(() => {
     const groups = new Map<string, ModelEntry[]>();
     for (const m of filtered) {
+      // Media models render in their kind sections, not the provider groups.
+      if (m.model_kind && m.model_kind !== "chat") continue;
       const p = m.provider || "other";
       if (!groups.has(p)) groups.set(p, []);
       groups.get(p)!.push(m);
@@ -394,6 +415,39 @@ function ModelPicker({
           </Section>
         ) : null}
 
+        {/* Media-model kind sections (Sprint 3). Shown even at 0 count when
+            not searching, so users discover the video/audio/tts verticals and
+            learn a key is needed. Hidden when searching unless they match. */}
+        {MEDIA_KIND_SECTIONS.map(({ kind, label }) => {
+          const items = mediaByKind[kind];
+          if (searching && items.length === 0) return null;
+          return (
+            <Section
+              key={`kind-${kind}`}
+              title={`${MEDIA_BADGE[kind]} ${label}`}
+              count={items.length || undefined}
+            >
+              {items.length > 0 ? (
+                items.map((m) => (
+                  <ModelRow
+                    key={`kind-${kind}-${m.id}`}
+                    label={m.name}
+                    sub={m.provider}
+                    selected={!isAuto && m.id === activeId}
+                    onClick={() => onPickModel(m)}
+                    mediaKind={kind}
+                    tier={m.cost_tier}
+                  />
+                ))
+              ) : (
+                <p className="px-3 py-2 text-[11px] text-text-muted">
+                  No models available — add a provider key in the admin console.
+                </p>
+              )}
+            </Section>
+          );
+        })}
+
         {providerGroups.map(([provider, group]) => {
           const isExpanded = searching || expanded.has(provider);
           const preview = isExpanded ? group : group.slice(0, PROVIDER_PREVIEW_COUNT);
@@ -473,6 +527,8 @@ interface RowProps {
   imageGen?: boolean;
   /** Sprint 2A.5 — media model kind badge (🎬 video / 🎵 audio / 🔊 tts). */
   mediaKind?: "video" | "audio" | "tts";
+  /** Sprint 3 — coarse cost-tier badge. Dormant until the catalog serves it. */
+  tier?: "free" | "low" | "medium" | "high";
 }
 
 const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
@@ -481,7 +537,14 @@ const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
   tts: "🔊",
 };
 
-function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen, mediaKind }: RowProps) {
+const TIER_LABEL: Record<"free" | "low" | "medium" | "high", string> = {
+  free: "Free",
+  low: "Standard",
+  medium: "Premium",
+  high: "Premium+",
+};
+
+function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen, mediaKind, tier }: RowProps) {
   const t = useT();
   return (
     <div
@@ -526,6 +589,14 @@ function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen,
           className="inline-flex shrink-0 items-center rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-medium text-rose-400"
         >
           {MEDIA_BADGE[mediaKind]}
+        </span>
+      ) : null}
+      {tier ? (
+        <span
+          title={`Cost tier: ${TIER_LABEL[tier]}`}
+          className="inline-flex shrink-0 items-center rounded-md bg-bg-elevated px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary"
+        >
+          {TIER_LABEL[tier]}
         </span>
       ) : null}
       {selected ? (
