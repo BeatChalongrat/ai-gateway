@@ -810,6 +810,10 @@ app.include_router(internal_media_jobs_router)  # prefix declared on the router
 app.include_router(public_chat_router, prefix="/v1")
 app.include_router(public_models_router, prefix="/v1")
 app.include_router(public_images_router, prefix="/v1")
+from app.api.routes.public_videos import router as public_videos_router  # noqa: E402
+from app.api.routes.public_audio import router as public_audio_router  # noqa: E402
+app.include_router(public_videos_router, prefix="/v1")  # /v1/videos/generations + /v1/jobs/{id}
+app.include_router(public_audio_router, prefix="/v1")  # /v1/audio/generations
 app.include_router(public_search_router, prefix="/v1")  # /v1/search + /v1/search/config
 app.include_router(admin_router, prefix="/admin")
 
