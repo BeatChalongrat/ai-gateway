@@ -80,7 +80,7 @@ async def get_models(
         # it), additionally behind the video_gen feature flag so the 🎬
         # affordance only lights up where the feature is enabled.
         if c.supports_tools and settings.video_gen_enabled:
-            cap_flags["video_generation"] = True
+            cap_flags["video_generation_via_tools"] = True
         # Dedicated media-model capabilities (Sprint 2A.5). Chat candidates
         # don't carry these attributes, so getattr → False (no-op here). They
         # only matter once dedicated media models are surfaced to /v1/models
@@ -110,5 +110,42 @@ async def get_models(
                     capabilities=ModelCapabilities(image_generation=True),
                 )
             )
+
+    # Dedicated media models (Sprint 2A.5) — direct-dispatch targets, NOT chat
+    # candidates. Listed with their DEDICATED capability so chat-edge's
+    # deriveModelKind sets model_kind=video/audio/tts and the UI shows the gen
+    # form. Not provider-key gated (the mock model needs no key); video gated
+    # on the feature flag. ``from sqlalchemy import select`` is local to keep
+    # the import surface minimal.
+    from sqlalchemy import or_, select as _select
+    from app.models.model_config import ModelConfigORM as _ModelConfigORM
+
+    media_rows = session.execute(
+        _select(_ModelConfigORM).where(
+            _ModelConfigORM.is_active.is_(True),
+            or_(
+                _ModelConfigORM.supports_video_gen.is_(True),
+                _ModelConfigORM.supports_audio_gen.is_(True),
+                _ModelConfigORM.supports_tts.is_(True),
+            ),
+        )
+    ).scalars().all()
+    for mc in media_rows:
+        mcaps: dict[str, bool] = {}
+        if mc.supports_video_gen and settings.video_gen_enabled:
+            mcaps["video_generation"] = True
+        if mc.supports_audio_gen:
+            mcaps["audio_generation"] = True
+        if mc.supports_tts:
+            mcaps["tts"] = True
+        if not mcaps:
+            continue
+        entries.append(
+            ModelInfo(
+                id=mc.model,
+                provider=mc.provider,
+                capabilities=ModelCapabilities(**mcaps),
+            )
+        )
 
     return ModelListResponse(data=entries)

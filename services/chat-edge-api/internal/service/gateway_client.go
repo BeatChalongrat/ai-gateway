@@ -980,7 +980,11 @@ type GatewayModelCapabilities struct {
 	Reasoning               bool `json:"reasoning"`
 	ImageGeneration         bool `json:"image_generation"`
 	ImageGenerationViaTools bool `json:"image_generation_via_tools"`
+	// VideoGeneration marks a DEDICATED video model (model_kind=video);
+	// VideoGenerationViaTools marks a chat model that can call generate_video
+	// (the 🎬 composer button). Kept distinct so model_kind disambiguates.
 	VideoGeneration         bool `json:"video_generation"`
+	VideoGenerationViaTools bool `json:"video_generation_via_tools"`
 	// Sprint 2A.5 — dedicated media-model capabilities (music / TTS).
 	AudioGeneration bool `json:"audio_generation"`
 	Tts             bool `json:"tts"`
