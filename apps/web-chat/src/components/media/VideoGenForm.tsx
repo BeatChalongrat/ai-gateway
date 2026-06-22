@@ -12,6 +12,7 @@ import { api, ApiError } from "@/lib/api";
 import type { MediaJobStatus, ModelEntry } from "@/lib/types";
 
 import { VideoGeneratingPlaceholder } from "../chat/VideoGeneratingPlaceholder";
+import { CostConfirmModal } from "./CostConfirmModal";
 import { CostPreview } from "./CostPreview";
 
 interface Props {
@@ -19,7 +20,9 @@ interface Props {
   conversationId?: string | null;
 }
 
-type Phase = "form" | "submitting" | "polling" | "done" | "failed";
+// "confirm" (Sprint 3): the job is reserved but NOT polling yet, awaiting the
+// user's premium-cost confirmation (post-submit flow).
+type Phase = "form" | "submitting" | "confirm" | "polling" | "done" | "failed";
 
 export function VideoGenForm({ model, conversationId }: Props) {
   const [prompt, setPrompt] = useState("");
@@ -34,6 +37,8 @@ export function VideoGenForm({ model, conversationId }: Props) {
     requiresConfirmation: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Job reserved by submit() and awaiting confirm (or being polled).
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
   function stopPolling() {
@@ -50,6 +55,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
     setJob(null);
     setError(null);
     setCost(null);
+    setPendingJobId(null);
   }
 
   function startPolling(jobId: string) {
@@ -90,13 +96,38 @@ export function VideoGenForm({ model, conversationId }: Props) {
         balanceAfter: res.balance_after_usd,
         requiresConfirmation: res.requires_confirmation,
       });
-      setPhase("polling");
-      startPolling(res.job_id);
+      setPendingJobId(res.job_id);
+      // Sprint 3: premium jobs (server-side $1 threshold → requires_confirmation)
+      // pause here for explicit confirm; cheap jobs poll immediately.
+      if (res.requires_confirmation) {
+        setPhase("confirm");
+      } else {
+        setPhase("polling");
+        startPolling(res.job_id);
+      }
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Failed to submit video job.",
       );
       setPhase("failed");
+    }
+  }
+
+  function confirmGenerate() {
+    if (!pendingJobId) return;
+    setPhase("polling");
+    startPolling(pendingJobId);
+  }
+
+  async function cancelGenerate() {
+    const id = pendingJobId;
+    reset();
+    if (id) {
+      try {
+        await api.cancelMediaJob(id);
+      } catch {
+        /* best-effort abort — the reservation expires server-side regardless */
+      }
     }
   }
 
@@ -197,6 +228,14 @@ export function VideoGenForm({ model, conversationId }: Props) {
           </button>
         </div>
       ) : null}
+
+      <CostConfirmModal
+        open={phase === "confirm"}
+        estimatedUsd={cost?.estimateUsd ?? "—"}
+        balanceAfterUsd={cost?.balanceAfter}
+        onConfirm={confirmGenerate}
+        onCancel={cancelGenerate}
+      />
     </div>
   );
 }
