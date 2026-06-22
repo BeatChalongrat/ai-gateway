@@ -7,44 +7,39 @@ never reach them.
   POST /internal/v1/jobs/video        — submit a video job (DLP + balance gated)
   GET  /internal/v1/jobs/{id}         — poll status (USD siblings)
   GET  /internal/v1/jobs/{id}/output  — stream the generated artifact bytes
-                                        (chat-edge fetches this and persists
-                                        the ConversationFile on its side)
 
-Every credit field in a response carries a sibling ``*_usd`` display
-string. DLP uses the MEDIA_GEN profile (secret/credential BLOCK, identity
-PASS-through).
+Sprint 2A.5: the submit flow now delegates to the shared
+``media_gen.submit_helpers`` (DRY with the public direct-dispatch routes).
+Behavior is unchanged for the internal contract; the only edge difference
+is that a totally-unknown model now returns 404 (was 400) via the shared
+``validate_model_capability`` — untested and an improvement.
 """
 
 from __future__ import annotations
 
 import os
-import uuid
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ResolvedApiKey, get_resolved_api_key
 from app.core.config import settings
 from app.core.db import get_async_db
 from app.models.generation_job import GenerationJobORM
-from app.models.model_config import ModelConfigORM
-from app.models.portal_user import PortalUserORM
 from app.schemas.media_gen import (
     JobStatusResponse,
     VideoGenSubmitRequest,
     VideoGenSubmitResponse,
 )
-from app.services.gateway.portal_credit_check import estimate_and_check_balance
-from app.services.orchestrator import GatewayOrchestrator
-from app.services.policy.profile_service import get_runtime_profile_async
-from app.services.portal.credit_display import (
-    credits_to_usd,
-    credits_to_usd_display,
+from app.services.media_gen.submit_helpers import (
+    estimate_and_validate_cost,
+    format_submit_response_usd,
+    insert_generation_job_row,
+    scan_media_prompt_with_profile,
+    validate_model_capability,
 )
+from app.services.portal.credit_display import credits_to_usd_display
 
 router = APIRouter(prefix="/internal/v1/jobs", tags=["internal-media"])
 
@@ -52,21 +47,6 @@ router = APIRouter(prefix="/internal/v1/jobs", tags=["internal-media"])
 def _require_internal(auth: ResolvedApiKey) -> None:
     if not getattr(auth, "internal_trusted", False):
         raise HTTPException(status_code=401, detail="internal service auth required")
-
-
-def _submit_response(job: GenerationJobORM, balance: int) -> VideoGenSubmitResponse:
-    est = int(job.estimated_cost_credits)
-    threshold = Decimal(str(settings.video_gen_default_threshold_usd))
-    balance_after = max(0, balance - est)
-    return VideoGenSubmitResponse(
-        job_id=job.id,
-        status=job.status,
-        estimated_cost_credits=est,
-        estimated_cost_usd=credits_to_usd_display(est),
-        balance_after_credits=balance_after,
-        balance_after_usd=credits_to_usd_display(balance_after),
-        requires_confirmation=credits_to_usd(est) >= threshold,
-    )
 
 
 @router.post("/video", response_model=VideoGenSubmitResponse)
@@ -85,77 +65,34 @@ async def submit_video_job(
             status_code=400, detail="no end-user identity (X-User-ID required)"
         )
 
-    user = await session.get(PortalUserORM, user_id)
-    balance = int(user.credit_balance or 0) if user is not None else 0
-
-    # Model + capability gate.
-    mc = (
-        await session.execute(
-            select(ModelConfigORM).where(ModelConfigORM.model == payload.model)
-        )
-    ).scalars().first()
-    if mc is None or not mc.supports_video_gen:
-        raise HTTPException(
-            status_code=400, detail="model does not support video generation"
-        )
-
-    # Idempotency: a repeated key returns the existing job (no new row).
-    if payload.idempotency_key:
-        existing = (
-            await session.execute(
-                select(GenerationJobORM).where(
-                    GenerationJobORM.tenant_id == auth.tenant_id,
-                    GenerationJobORM.idempotency_key == payload.idempotency_key,
-                )
-            )
-        ).scalars().first()
-        if existing is not None:
-            return _submit_response(existing, balance)
-
-    # DLP — MEDIA_GEN profile: secret/credential BLOCK, identity PASS.
-    if settings.dlp_enabled:
-        orch = GatewayOrchestrator()
-        profile = await get_runtime_profile_async(session, "media_gen")
-        detection = await orch._scan_text_as_result_async(
-            payload.prompt, direction="input", ner_enabled=False
-        )
-        enforcement = orch._scan_and_evaluate(detection, profile)
-        if enforcement.is_blocked:
-            raise HTTPException(
-                status_code=403, detail="prompt blocked by DLP policy"
-            )
+    mc = await validate_model_capability(session, payload.model, "supports_video_gen")
+    await scan_media_prompt_with_profile(payload.prompt, session)
 
     meta = {
         "duration_sec": payload.duration_sec,
         "resolution": payload.resolution,
         "has_audio": payload.has_audio,
     }
-    est = await estimate_and_check_balance(
+    est = await estimate_and_validate_cost(
         session, auth.tenant_id, user_id, "video", mc, meta
     )
-    if not est.sufficient:
-        raise HTTPException(status_code=402, detail="insufficient credits")
-
-    job = GenerationJobORM(
-        id=str(uuid.uuid4()),
+    job = await insert_generation_job_row(
+        session,
         tenant_id=auth.tenant_id,
         user_id=user_id,
-        conversation_id=payload.conversation_id,
-        message_id=payload.message_id,
+        model_id=payload.model,
         job_type="video",
         provider=mc.provider,
-        model_id=payload.model,
-        status="queued",
         input_prompt=payload.prompt,
         input_metadata=meta,
-        estimated_cost_credits=est.estimated_credits,
+        estimate_credits=est.estimated_credits,
         idempotency_key=payload.idempotency_key,
-        ttl_expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+        conversation_id=payload.conversation_id,
+        message_id=payload.message_id,
     )
-    session.add(job)
-    await session.commit()
-    await session.refresh(job)
-    return _submit_response(job, balance)
+    d = format_submit_response_usd(job, est.balance)
+    d.pop("poll_url", None)  # internal response has no poll_url
+    return VideoGenSubmitResponse(**d)
 
 
 @router.get("/{job_id}", response_model=JobStatusResponse)
