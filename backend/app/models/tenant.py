@@ -47,6 +47,19 @@ class TenantORM(Base):
     search_credit_cost: Mapped[int] = mapped_column(
         sa.Integer, nullable=False, server_default=sa.text("5")
     )
+    # Media generation (migration 056). ``dlp_media_gen_mask_identity``:
+    # per-tenant override — when True, mask identity-class PII in media-gen
+    # prompts (enterprise-strict); default False = industry-standard
+    # pass-through. ``monthly_*_quota`` NULL = unlimited.
+    dlp_media_gen_mask_identity: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
+    monthly_video_quota: Mapped[int | None] = mapped_column(
+        sa.Integer, nullable=True
+    )
+    monthly_audio_quota: Mapped[int | None] = mapped_column(
+        sa.Integer, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
