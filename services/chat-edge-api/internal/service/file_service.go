@@ -446,6 +446,90 @@ func (s *FileService) SaveGeneratedImage(
 	return row, nil
 }
 
+// GeneratedVideoInput carries a decoded AI-generated video to persist as
+// a ConversationFile attached to an assistant message. Same shape as
+// GeneratedImageInput — the bytes are already in hand (fetched from the
+// backend output endpoint) and a video has no text to extract.
+type GeneratedVideoInput struct {
+	TenantID       uuid.UUID
+	UserID         uuid.UUID
+	ConversationID uuid.UUID
+	MessageID      uuid.UUID
+	RequestID      string
+	Data           []byte
+	ContentType    string // video/mp4 (default), video/webm, video/quicktime
+	Prompt         string // used for the display filename
+}
+
+// SaveGeneratedVideo stores a generated video blob and creates a
+// ConversationFile row linked to the assistant message, flagged
+// IsGenerated — it then renders in web-chat via the same message.files[]
+// attachment pipeline images use (GET /files/{id}/download). Mirrors
+// SaveGeneratedImage.
+func (s *FileService) SaveGeneratedVideo(
+	ctx context.Context, in GeneratedVideoInput,
+) (*model.ConversationFile, error) {
+	if len(in.Data) == 0 {
+		return nil, ErrFileEmpty
+	}
+	ct := strings.ToLower(strings.TrimSpace(in.ContentType))
+	if ct == "" {
+		ct = "video/mp4"
+	}
+	ext := "mp4"
+	switch ct {
+	case "video/webm":
+		ext = "webm"
+	case "video/quicktime":
+		ext = "mov"
+	}
+
+	storageName := fmt.Sprintf("%s_generated.%s", uuid.New().String(), ext)
+	key := storage.JoinKey(
+		conversationFilesKeyPrefix,
+		in.TenantID.String(),
+		in.ConversationID.String(),
+		storageName,
+	)
+	if err := s.storage.Upload(ctx, key, bytes.NewReader(in.Data), ct, int64(len(in.Data))); err != nil {
+		return nil, fmt.Errorf("storage upload: %w", err)
+	}
+
+	var msgID *uuid.UUID
+	if in.MessageID != uuid.Nil {
+		m := in.MessageID
+		msgID = &m
+	}
+	row, err := s.files.Create(ctx, &model.ConversationFile{
+		ConversationID:   in.ConversationID,
+		MessageID:        msgID,
+		TenantID:         in.TenantID,
+		UserID:           in.UserID,
+		Filename:         storageName,
+		OriginalFilename: generatedImageFilename(in.Prompt, ext),
+		ContentType:      ct,
+		FileSizeBytes:    int64(len(in.Data)),
+		StoragePath:      key,
+		ExtractionStatus: "completed", // video carries no extractable text
+		IsGenerated:      true,
+		Version:          1,
+	})
+	if err != nil {
+		_ = s.storage.Delete(ctx, key)
+		return nil, err
+	}
+	slog.Info("generated_video_attachment_saved",
+		"request_id", in.RequestID,
+		"conversation_id", in.ConversationID.String(),
+		"message_id", in.MessageID.String(),
+		"file_id", row.ID.String(),
+		"relative_url", "/files/"+row.ID.String()+"/download",
+		"file_size_bytes", row.FileSizeBytes,
+		"mime_type", row.ContentType,
+	)
+	return row, nil
+}
+
 // generatedImageFilename builds a friendly download label from the
 // prompt. The on-disk name is the UUID-prefixed storageName; this is
 // only the display filename. Rune-sliced so multibyte (Thai) prompts

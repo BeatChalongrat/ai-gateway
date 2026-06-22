@@ -806,6 +806,157 @@ func (g *GatewayClient) GenerateImages(
 	return out, nil
 }
 
+// ---------------------------------------------------------------------------
+// Async video generation (backend /internal/v1/jobs/*)
+// ---------------------------------------------------------------------------
+
+// rootURL strips the trailing ``/v1`` from BaseURL so we can reach the
+// backend's ROOT-level internal routes (``/internal/v1/jobs/...``), which
+// are NOT under the public ``/v1`` prefix.
+func (g *GatewayClient) rootURL() string {
+	return strings.TrimSuffix(g.BaseURL, "/v1")
+}
+
+type GatewayVideoSubmitRequest struct {
+	Model          string `json:"model"`
+	Prompt         string `json:"prompt"`
+	DurationSec    int    `json:"duration_sec"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	MessageID      string `json:"message_id,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+type GatewayVideoSubmitResponse struct {
+	JobID                string `json:"job_id"`
+	Status               string `json:"status"`
+	EstimatedCostUSD     string `json:"estimated_cost_usd"`
+	RequiresConfirmation bool   `json:"requires_confirmation"`
+}
+
+type GatewayVideoStatusResponse struct {
+	JobID        string `json:"job_id"`
+	Status       string `json:"status"`
+	ProgressPct  *int   `json:"progress_pct"`
+	OutputURL    string `json:"output_url"`
+	ErrorCode    string `json:"error_code"`
+	ErrorMessage string `json:"error_message"`
+}
+
+func (g *GatewayClient) internalHeaders(httpReq *http.Request, callCtx GatewayCallContext) error {
+	bearer, err := g.bearer()
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+bearer)
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-Tenant-ID", callCtx.TenantID.String())
+	httpReq.Header.Set("X-User-ID", callCtx.UserID.String())
+	if g.InternalServiceSecret != "" {
+		httpReq.Header.Set("X-Internal-Service-Secret", g.InternalServiceSecret)
+	}
+	if callCtx.ConversationID != uuid.Nil {
+		httpReq.Header.Set("X-Conversation-ID", callCtx.ConversationID.String())
+	}
+	if callCtx.RequestID != "" {
+		httpReq.Header.Set("X-Request-Id", callCtx.RequestID)
+	}
+	return nil
+}
+
+// SubmitVideoJob enqueues an async video-generation job on the backend and
+// returns the job id. The provider runs out-of-band (job loop); poll with
+// PollVideoJob until terminal.
+func (g *GatewayClient) SubmitVideoJob(
+	ctx context.Context, callCtx GatewayCallContext, req GatewayVideoSubmitRequest,
+) (*GatewayVideoSubmitResponse, error) {
+	buf, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: marshal video submit: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, g.rootURL()+"/internal/v1/jobs/video", bytes.NewReader(buf),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build video submit: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return nil, err
+	}
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
+	}
+	out := &GatewayVideoSubmitResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return nil, fmt.Errorf("gateway: decode video submit: %w", err)
+	}
+	return out, nil
+}
+
+// PollVideoJob reads the current status of a submitted job.
+func (g *GatewayClient) PollVideoJob(
+	ctx context.Context, callCtx GatewayCallContext, jobID string,
+) (*GatewayVideoStatusResponse, error) {
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, g.rootURL()+"/internal/v1/jobs/"+jobID, nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build video poll: %w", err)
+	}
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return nil, err
+	}
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
+	}
+	out := &GatewayVideoStatusResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return nil, fmt.Errorf("gateway: decode video poll: %w", err)
+	}
+	return out, nil
+}
+
+// FetchVideoOutput downloads the finished artifact bytes from the backend
+// output endpoint (the backend stores them; chat-edge persists the
+// ConversationFile on its own side).
+func (g *GatewayClient) FetchVideoOutput(
+	ctx context.Context, callCtx GatewayCallContext, jobID string,
+) ([]byte, error) {
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, g.rootURL()+"/internal/v1/jobs/"+jobID+"/output", nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build video output: %w", err)
+	}
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return nil, err
+	}
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
+	}
+	// Cap the read at 200 MiB (the chat-edge per-file ceiling) so a runaway
+	// response can't exhaust memory.
+	return io.ReadAll(io.LimitReader(resp.Body, 200*1024*1024))
+}
+
 // GatewayModelInfo is one entry from the Gateway's GET /v1/models.
 // The Gateway returns a minimal shape (id + provider, plus an optional
 // reasoning block for reasoning-capable models); chat-edge enriches it
@@ -829,6 +980,7 @@ type GatewayModelCapabilities struct {
 	Reasoning               bool `json:"reasoning"`
 	ImageGeneration         bool `json:"image_generation"`
 	ImageGenerationViaTools bool `json:"image_generation_via_tools"`
+	VideoGeneration         bool `json:"video_generation"`
 }
 
 // GatewayReasoningCapability mirrors the Gateway's ReasoningCapability

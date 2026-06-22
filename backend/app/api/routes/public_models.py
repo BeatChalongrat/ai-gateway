@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session
+from app.core.config import settings
 from app.schemas.common import ErrorResponse
 from app.schemas.public import (
     ModelCapabilities,
@@ -74,6 +75,12 @@ async def get_models(
             cap_flags["reasoning"] = True
         if c.supports_tools:
             cap_flags["image_generation_via_tools"] = True
+        # Video generation via the generate_video tool — same gate as
+        # image_generation_via_tools (any tool-capable chat model can call
+        # it), additionally behind the video_gen feature flag so the 🎬
+        # affordance only lights up where the feature is enabled.
+        if c.supports_tools and settings.video_gen_enabled:
+            cap_flags["video_generation"] = True
         entries.append(
             ModelInfo(
                 id=c.model,

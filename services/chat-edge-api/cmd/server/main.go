@@ -303,6 +303,11 @@ func main() {
 	// SetMemoryService). gateway + fileSvc satisfy the executor's
 	// imageGenerator / generatedImageSaver interfaces.
 	messageSvc.SetImageGeneration(gateway, fileSvc, cfg.ImageGenModel)
+	// Sprint 2A — wire the generate_video tool: the gateway client (async
+	// submit/poll/fetch against the backend job API) + the file service
+	// (persists the fetched MP4 as a ConversationFile). gateway + fileSvc
+	// satisfy the executor's videoGenerator / generatedVideoSaver interfaces.
+	messageSvc.SetVideoGeneration(gateway, fileSvc, cfg.VideoGenModel)
 	// Web search — wire the gateway client (web_search calls + the
 	// per-tenant search-config gate) and the message service (persists
 	// citations on the assistant message). The tool is offered only when
