@@ -357,28 +357,30 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 			continue
 		}
 		resp := h.buildModelResponse(m.ID, name, m.Provider, rb)
-		// Surface the image-via-tools flag so the frontend can gate the
-		// image (🎨) composer button + show the image badge.
+		// 🎨 / 🎬 composer-button gates — chat models advertise the
+		// *_via_tools flags (kept distinct from the dedicated media caps so
+		// model_kind can disambiguate).
 		if m.Capabilities != nil && m.Capabilities.ImageGenerationViaTools {
 			resp.Capabilities = append(resp.Capabilities, "image_generation_via_tools")
 		}
-		// Surface the video-gen flag so the frontend can gate the 🎬
-		// composer button (mirrors image_generation_via_tools).
+		if m.Capabilities != nil && m.Capabilities.VideoGenerationViaTools {
+			resp.Capabilities = append(resp.Capabilities, "video_generation_via_tools")
+		}
+		// Dedicated media-model capability strings (direct-dispatch models).
 		if m.Capabilities != nil && m.Capabilities.VideoGeneration {
 			resp.Capabilities = append(resp.Capabilities, "video_generation")
 		}
-		// Sprint 2A.5 — dedicated media-model capability strings.
 		if m.Capabilities != nil && m.Capabilities.AudioGeneration {
 			resp.Capabilities = append(resp.Capabilities, "audio_generation")
 		}
 		if m.Capabilities != nil && m.Capabilities.Tts {
 			resp.Capabilities = append(resp.Capabilities, "tts")
 		}
-		// Every model in this loop is a CHAT candidate, so model_kind is
-		// "chat" even when it carries video_generation (the via-tools flag
-		// for the 🎬 composer button). Dedicated media models — listed
-		// separately once /v1/models surfaces them — use deriveModelKind.
-		resp.ModelKind = "chat"
+		// model_kind: dedicated media models (bare video/audio/tts flags) →
+		// "video"/"audio"/"tts"; chat models (incl. the via-tools flags) →
+		// "chat". The Sprint 2A.5 /v1/models media listing surfaces dedicated
+		// models through this same loop.
+		resp.ModelKind = deriveModelKind(m.Capabilities)
 		out = append(out, resp)
 	}
 	return out
