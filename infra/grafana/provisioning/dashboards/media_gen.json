@@ -1,0 +1,81 @@
+{
+  "title": "Media Gen — Video",
+  "uid": "media-gen-video",
+  "tags": ["media-gen", "replicate"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Replicate Session Spend Today (USD)",
+      "targets": [
+        {"expr": "replicate_session_spend_usd", "refId": "A"}
+      ],
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 4},
+              {"color": "red", "value": 4.5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "bargauge",
+      "title": "Top 10 Tenant Daily Spend (USD)",
+      "targets": [
+        {"expr": "topk(10, replicate_daily_spend_usd)", "refId": "A", "legendFormat": "{{tenant_id}}"}
+      ],
+      "gridPos": {"h": 6, "w": 12, "x": 6, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Replicate API Errors (5m rate)",
+      "targets": [
+        {"expr": "rate(replicate_api_errors_total[5m])", "refId": "A", "legendFormat": "{{error_class}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Budget Blocks by Guard (15m rate)",
+      "targets": [
+        {"expr": "rate(replicate_budget_blocks_total[15m])", "refId": "A", "legendFormat": "{{guard_level}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Generation Duration (modality=video)",
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(gen_duration_seconds_bucket{modality=\"video\"}[5m])) by (le))", "refId": "A", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum(rate(gen_duration_seconds_bucket{modality=\"video\"}[5m])) by (le))", "refId": "B", "legendFormat": "p95"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Video Gen Failures by Reason",
+      "targets": [
+        {"expr": "rate(gen_failure_total{modality=\"video\"}[5m])", "refId": "A", "legendFormat": "{{reason}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14}
+    }
+  ]
+}
