@@ -725,6 +725,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Idempotency cache for media-generation submit routes (Sprint 1). Only
+# REGISTERED when enabled, and even then the middleware no-ops unless an
+# X-Idempotency-Key header is present AND the path is allowlisted
+# (/v1/videos/, /v1/audio/ — neither exists until Sprint 2). Gated via env
+# (IDEMPOTENCY_ENABLED, default on) instead of a settings field so
+# core/config.py stays untouched this sprint.
+import os as _os_idem
+
+if _os_idem.getenv("IDEMPOTENCY_ENABLED", "true").lower() not in (
+    "0",
+    "false",
+    "no",
+):
+    from app.middleware.idempotency import IdempotencyMiddleware
+
+    app.add_middleware(IdempotencyMiddleware)
 # Lightweight ASGI middlewares (no BaseHTTPMiddleware — avoids worker starvation)
 # NOTE: add_middleware stacks inside-out — last added runs first on the request path.
 # Order on the wire: BodySizeLimit -> RequestContext -> RequestTiming -> Timeout -> Metrics

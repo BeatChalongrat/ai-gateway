@@ -260,6 +260,52 @@ EVENT_LOOP_BLOCK_TOTAL = Counter(
 )
 
 
+# ---------------------------------------------------------------------------
+# Media generation (Sprint 1 — multi-modal generation foundation).
+# Declared now so ``/metrics`` exposes the series (with zero values) before
+# any job runs; the job loop + Sprint 2 provider adapters populate the
+# labels. ``modality`` ∈ {video, audio_tts, music, image_edit};
+# ``status`` ∈ {done, failed}; ``reason`` is the generation_jobs.error_code
+# (e.g. no_adapter, provider_error, timeout).
+# ---------------------------------------------------------------------------
+
+GEN_DURATION_SECONDS = Histogram(
+    "gen_duration_seconds",
+    "End-to-end media-generation job duration in seconds (submit → terminal).",
+    labelnames=("modality", "provider", "status"),
+    buckets=(5, 15, 30, 60, 120, 300, 600),
+    registry=metrics_registry,
+)
+
+GEN_COST_CREDITS = Histogram(
+    "gen_cost_credits",
+    "Credits charged per completed media-generation job.",
+    labelnames=("modality", "provider"),
+    buckets=(10, 50, 200, 500, 1000, 5000, 20000),
+    registry=metrics_registry,
+)
+
+GEN_FAILURE_TOTAL = Counter(
+    "gen_failure_total",
+    "Media-generation job failures, labeled by failure reason (error_code).",
+    labelnames=("modality", "provider", "reason"),
+    registry=metrics_registry,
+)
+
+GEN_JOBS_ACTIVE = Gauge(
+    "gen_jobs_active",
+    "Media-generation jobs currently in the 'processing' state.",
+    labelnames=("modality",),
+    registry=metrics_registry,
+)
+
+GEN_QUEUE_DEPTH = Gauge(
+    "gen_queue_depth",
+    "Queued media-generation jobs awaiting a worker.",
+    registry=metrics_registry,
+)
+
+
 def render_prometheus_exposition() -> tuple[bytes, str]:
     """Serialize the registry into the Prometheus text exposition format.
 
