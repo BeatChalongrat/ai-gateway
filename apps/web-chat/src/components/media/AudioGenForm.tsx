@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import type { MediaJobStatus, ModelEntry } from "@/lib/types";
 
 import { CostPreview } from "./CostPreview";
+import { ProvenanceBadge } from "./ProvenanceBadge";
 import {
   MediaGenError,
   type MediaGenErrorCode,
@@ -211,6 +212,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
           {/* PROXY-PENDING: output_url is a backend URL; auth/proxy wiring
               for the direct-dispatch download lands in the E2E phase. */}
           <audio src={job.output_url} controls className="w-full max-w-[480px]" />
+          {job.provenance ? <ProvenanceBadge provenance={job.provenance} /> : null}
           <button
             type="button"
             onClick={reset}

@@ -687,11 +687,22 @@ export interface MediaGenSubmitResponse {
   poll_url: string;
 }
 
+export interface MediaProvenance {
+  provider: string;
+  model_id: string;
+  c2pa_embedded?: boolean;
+  synthid_embedded?: boolean;
+  visible_watermark?: boolean;
+  generation_seed?: number;
+  provider_disclosed_at?: string;
+}
+
 export interface MediaJobStatus {
   job_id: string;
   status: string;
   progress_pct?: number | null;
   output_url?: string | null;
+  provenance?: MediaProvenance | null;
   actual_cost_credits?: number | null;
   actual_cost_usd?: string | null;
   error_code?: string | null;
