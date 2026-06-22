@@ -29,6 +29,7 @@ from app.schemas.media_gen_public import (
     VideoGenPublicResponse,
 )
 from app.services.media_gen.submit_helpers import (
+    enforce_daily_cap_and_enrich_meta,
     estimate_and_validate_cost,
     format_submit_response_usd,
     insert_generation_job_row,
@@ -78,6 +79,11 @@ async def generate_video(
     }
     est = await estimate_and_validate_cost(
         session, auth.tenant_id, user_id, "video", mc, meta
+    )
+    # L2 daily-spend cap + enrich meta with estimate_usd/replicate_model.
+    await enforce_daily_cap_and_enrich_meta(
+        session, tenant_id=auth.tenant_id, model_id=payload.model,
+        input_metadata=meta, est=est,
     )
     job = await insert_generation_job_row(
         session,
