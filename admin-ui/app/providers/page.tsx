@@ -48,6 +48,7 @@ const BRAND: Record<string, { color: string; initial: string; display: string; n
   qwen:       { color: "#615ced", initial: "Q", display: "Qwen" },
   kimi:       { color: "#1877f2", initial: "K", display: "Kimi" },
   zai:        { color: "#8b5cf6", initial: "Z", display: "Z.AI" },
+  replicate:  { color: "#000000", initial: "R", display: "Replicate", note: "Video generation (Kling, Wan)" },
 };
 
 function brandFor(name: string) {
@@ -316,6 +317,8 @@ function KeysPanel({
                 ? "AIza..."
                 : providerName === "openrouter"
                 ? "sk-or-..."
+                : providerName === "replicate"
+                ? "r8_..."
                 : "..."
             }
             style={{ fontSize: "var(--font-size-sm)" }}
