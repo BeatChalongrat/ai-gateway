@@ -132,6 +132,14 @@ class ApiClient {
   getMediaJob(jobId: string) {
     return this.json<MediaJobStatus>(`/jobs/${jobId}`);
   }
+  // Sprint 3 — abort a reserved/in-flight job (premium-confirm Cancel and the
+  // in-progress Cancel button). Backend marks it cancelled + refunds the L1
+  // session reservation; the chat-edge proxy forwards POST /jobs/{id}/cancel.
+  cancelMediaJob(jobId: string) {
+    return this.json<MediaJobStatus>(`/jobs/${jobId}/cancel`, {
+      method: "POST",
+    });
+  }
 
   // ----- Usage & credits ------------------------------------
   getUsage() {
