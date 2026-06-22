@@ -371,6 +371,7 @@ function ModelPicker({
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
                 imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
+                mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
               />
             ))}
           </Section>
@@ -387,6 +388,7 @@ function ModelPicker({
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
                 imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
+                mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
               />
             ))}
           </Section>
@@ -410,6 +412,7 @@ function ModelPicker({
                   onClick={() => onPickModel(m)}
                   reasoning={Boolean(m.reasoning?.supported)}
                   imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
+                  mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
                 />
               ))}
               {hiddenCount > 0 ? (
@@ -468,9 +471,17 @@ interface RowProps {
   reasoning?: boolean;
   /** Phase C — show an image badge when the model can generate images. */
   imageGen?: boolean;
+  /** Sprint 2A.5 — media model kind badge (🎬 video / 🎵 audio / 🔊 tts). */
+  mediaKind?: "video" | "audio" | "tts";
 }
 
-function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen }: RowProps) {
+const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
+  video: "🎬",
+  audio: "🎵",
+  tts: "🔊",
+};
+
+function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen, mediaKind }: RowProps) {
   const t = useT();
   return (
     <div
@@ -506,6 +517,15 @@ function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen 
         >
           <ImagePlus className="h-3 w-3" aria-hidden />
           {t("model.imageBadge")}
+        </span>
+      ) : null}
+      {mediaKind ? (
+        <span
+          title={mediaKind}
+          aria-label={mediaKind}
+          className="inline-flex shrink-0 items-center rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-medium text-rose-400"
+        >
+          {MEDIA_BADGE[mediaKind]}
         </span>
       ) : null}
       {selected ? (
