@@ -81,6 +81,14 @@ async def get_models(
         # affordance only lights up where the feature is enabled.
         if c.supports_tools and settings.video_gen_enabled:
             cap_flags["video_generation"] = True
+        # Dedicated media-model capabilities (Sprint 2A.5). Chat candidates
+        # don't carry these attributes, so getattr → False (no-op here). They
+        # only matter once dedicated media models are surfaced to /v1/models
+        # (see Sprint 2A.5 report: that listing is a follow-up gap).
+        if getattr(c, "supports_audio_gen", False):
+            cap_flags["audio_generation"] = True
+        if getattr(c, "supports_tts", False):
+            cap_flags["tts"] = True
         entries.append(
             ModelInfo(
                 id=c.model,

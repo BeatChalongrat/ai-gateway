@@ -84,6 +84,12 @@ class ModelCapabilities(BaseModel):
     # (which routes to a video model like mock-video-1 / Replicate). Mirrors
     # image_generation_via_tools; lets the UI light up the 🎬 affordance.
     video_generation: Optional[bool] = None
+    # Dedicated media-model capabilities (Sprint 2A.5). Set on the model_configs
+    # rows for music / TTS models; surface to the UI for the direct-dispatch
+    # forms. (Wire names mirror image_generation/video_generation, NOT
+    # supports_*, to keep the capabilities convention consistent.)
+    audio_generation: Optional[bool] = None
+    tts: Optional[bool] = None
 
 
 class ModelInfo(BaseModel):
