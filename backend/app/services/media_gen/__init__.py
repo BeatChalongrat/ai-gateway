@@ -57,3 +57,14 @@ try:
 except Exception as _exc:  # noqa: BLE001
     _log.error("Failed to register OpenAI TTS adapter: %s", _exc)
 
+# ElevenLabs TTS (Sprint 4) — new provider; synchronous fast-path.
+try:
+    from app.services.media_gen.adapters.elevenlabs_tts import (  # noqa: E402
+        ElevenLabsTTSAdapter,
+    )
+
+    register_adapter(ElevenLabsTTSAdapter)
+    _log.info("ElevenLabs TTS adapter registered (key resolved per-request)")
+except Exception as _exc:  # noqa: BLE001
+    _log.error("Failed to register ElevenLabs TTS adapter: %s", _exc)
+
