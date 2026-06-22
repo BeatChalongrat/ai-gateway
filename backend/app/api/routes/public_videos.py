@@ -28,6 +28,7 @@ from app.schemas.media_gen_public import (
     VideoGenPublicRequest,
     VideoGenPublicResponse,
 )
+from app.services.media_gen.rate_limit import enforce_media_rate_limit
 from app.services.media_gen.submit_helpers import (
     enforce_daily_cap_and_enrich_meta,
     estimate_and_validate_cost,
@@ -66,6 +67,11 @@ async def generate_video(
 ) -> VideoGenPublicResponse:
     if not settings.video_gen_enabled:
         raise HTTPException(status_code=403, detail="video generation is disabled")
+    await enforce_media_rate_limit(
+        auth, bucket="video", limit=settings.media_rate_limit_video_per_hour,
+        window_seconds=3600,
+        scope=f"{settings.media_rate_limit_video_per_hour}/hour per key",
+    )
     user_id, _balance = await _resolve_user(auth, session)
 
     mc = await validate_model_capability(session, payload.model, "supports_video_gen")
@@ -107,6 +113,11 @@ async def get_job_status(
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
     session: AsyncSession = Depends(get_async_db),
 ) -> JobStatusPublicResponse:
+    await enforce_media_rate_limit(
+        auth, bucket="jobs", limit=settings.media_rate_limit_jobs_per_min,
+        window_seconds=60,
+        scope=f"{settings.media_rate_limit_jobs_per_min}/min per key",
+    )
     job = await session.get(GenerationJobORM, job_id)
     if job is None or job.tenant_id != auth.tenant_id:
         raise HTTPException(status_code=404, detail="job not found")
@@ -148,6 +159,11 @@ async def cancel_job(
     from datetime import datetime, timezone
     from decimal import Decimal
 
+    await enforce_media_rate_limit(
+        auth, bucket="cancel", limit=settings.media_rate_limit_cancel_per_min,
+        window_seconds=60,
+        scope=f"{settings.media_rate_limit_cancel_per_min}/min per key",
+    )
     job = await session.get(GenerationJobORM, job_id)
     if job is None or job.tenant_id != auth.tenant_id:
         raise HTTPException(status_code=404, detail="job not found")

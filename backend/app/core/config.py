@@ -89,6 +89,15 @@ class Settings(BaseSettings):
     image_rate_limit_user_per_hour: int = 10
     image_rate_limit_tenant_per_day: int = 100
 
+    # Media-generation cost-control ceilings (Sprint 5). Video is the most
+    # expensive modality (per-second provider billing), audio cheaper; job
+    # polling is high-frequency. Per-key sliding windows, same Redis backend
+    # as the image limiter, fail-open on a Redis outage.
+    media_rate_limit_video_per_hour: int = 5
+    media_rate_limit_audio_per_hour: int = 30
+    media_rate_limit_jobs_per_min: int = 60
+    media_rate_limit_cancel_per_min: int = 10
+
     # Portal JWT — separate secret so leaking the admin secret does not
     # forge portal tokens (and vice versa). Payload carries type="portal".
     portal_jwt_secret: str = "change-me-portal-secret"
