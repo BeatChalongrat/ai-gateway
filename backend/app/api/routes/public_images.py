@@ -191,9 +191,11 @@ async def generate_images(
     dlp_action = "allow"
     dlp_findings = 0
     if settings.dlp_enabled:
-        profile = await get_runtime_profile_async(
-            session, settings.dlp_default_profile
-        )
+        # Media-generation DLP profile (Sprint 2A): identity-class PII
+        # PASSES through (no quality-degrading masking of the user's own
+        # subject), while credentials/secrets/financial hard-BLOCK. Swapped
+        # from the DEFAULT profile, which masked identity.
+        profile = await get_runtime_profile_async(session, "media_gen")
         detection = await orch._scan_text_as_result_async(
             payload.prompt, direction="input", ner_enabled=False
         )
