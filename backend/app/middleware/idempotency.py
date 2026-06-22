@@ -43,6 +43,17 @@ _DEFAULT_TTL_SECONDS = 24 * 60 * 60
 _HEADER = "x-idempotency-key"
 _TENANT_HEADER = "x-tenant-id"
 
+# Streaming routes that must NEVER be buffered by this BaseHTTPMiddleware —
+# buffering the response body breaks Server-Sent Events. Backend SSE
+# (chat completions), the chat-edge SSE proxy, and job polling that may
+# upgrade to SSE. The ``Accept: text/event-stream`` check in ``_is_sse``
+# is the catch-all for any streaming request not matched by prefix.
+SSE_PATH_PREFIXES = (
+    "/v1/chat/completions",
+    "/v1/conversations/",
+    "/internal/v1/jobs/",
+)
+
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):
     def __init__(
@@ -67,7 +78,19 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
     def _is_allowlisted(self, path: str) -> bool:
         return any(path.startswith(prefix) for prefix in self._allowlist)
 
+    def _is_sse(self, request: Request) -> bool:
+        path = request.url.path
+        if any(path.startswith(p) for p in SSE_PATH_PREFIXES):
+            return True
+        return "text/event-stream" in request.headers.get("accept", "").lower()
+
     async def dispatch(self, request: Request, call_next):
+        # SSE bypass FIRST: this is a BaseHTTPMiddleware, which buffers the
+        # response body and would break streaming. Never touch SSE traffic,
+        # even on an allowlisted path.
+        if self._is_sse(request):
+            return await call_next(request)
+
         key = request.headers.get(_HEADER)
         if not key or not self._is_allowlisted(request.url.path):
             return await call_next(request)
