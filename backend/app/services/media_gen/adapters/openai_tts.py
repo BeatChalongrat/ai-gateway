@@ -46,7 +46,8 @@ _DEFAULT_VOICE = "alloy"
 
 class OpenAITTSAdapter(MediaGenAdapter):
     provider_name = "openai"
-    supported_job_types = ["tts"]
+    # Canonical job_type is "audio_tts" (matches the route + generation_jobs).
+    supported_job_types = ["audio_tts"]
 
     def __init__(
         self,
