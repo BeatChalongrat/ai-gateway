@@ -80,6 +80,10 @@ class ModelCapabilities(BaseModel):
     # The actual tool wiring is a later phase; this flag just lets the UI
     # light up the image affordance for these models now.
     image_generation_via_tools: Optional[bool] = None
+    # Chat models that CAN emit a video by calling the generate_video tool
+    # (which routes to a video model like mock-video-1 / Replicate). Mirrors
+    # image_generation_via_tools; lets the UI light up the 🎬 affordance.
+    video_generation: Optional[bool] = None
 
 
 class ModelInfo(BaseModel):
