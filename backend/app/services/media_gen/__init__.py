@@ -18,22 +18,19 @@ _log = logging.getLogger(__name__)
 # Mock always registers — zero dependencies, used by dev/CI/tests.
 register_adapter(MockVideoAdapter)
 
-# Replicate registers ONLY when a token is configured. Without it the
-# adapter is absent and a replicate-provider job fails closed
-# (no_adapter) rather than crashing the app at import. Registration stores
-# the class; instantiation (which re-checks the token) happens per job.
-from app.core.config import settings as _settings  # noqa: E402
+# Replicate registers UNCONDITIONALLY (Sprint 2B.5). The key is resolved
+# per-request from the DB (provider_keys → legacy providers → env), so a key
+# added through the admin /providers UI activates the adapter with no restart.
+# A job with no resolvable key fails closed at submit time (ProviderKeyMissing)
+# rather than the adapter being absent. Registration stores the class;
+# instantiation (cls()) happens per job — the registry contract is unchanged.
+try:
+    from app.services.media_gen.adapters.replicate_video import (  # noqa: E402
+        ReplicateVideoAdapter,
+    )
 
-if _settings.replicate_api_token:
-    try:
-        from app.services.media_gen.adapters.replicate_video import (  # noqa: E402
-            ReplicateVideoAdapter,
-        )
-
-        register_adapter(ReplicateVideoAdapter)
-        _log.info("Registered adapter: replicate")
-    except Exception as _exc:  # noqa: BLE001
-        _log.error("Failed to register Replicate adapter: %s", _exc)
-else:
-    _log.info("Replicate adapter NOT registered (REPLICATE_API_TOKEN absent)")
+    register_adapter(ReplicateVideoAdapter)
+    _log.info("Replicate adapter registered (key resolved per-request)")
+except Exception as _exc:  # noqa: BLE001
+    _log.error("Failed to register Replicate adapter: %s", _exc)
 
