@@ -156,6 +156,17 @@ class ProviderNotImplementedError(ProviderError):
     message = "Adapter implementation pending."
 
 
+class ProviderKeyMissing(ProviderError):
+    """No active provider key is available (UI / legacy / env all empty).
+
+    Raised by an adapter when it needs a key but none resolves, so the
+    caller fails closed BEFORE any provider HTTP call. Sprint 2B.5.
+    """
+
+    code = "provider_key_missing"
+    message = "No active provider API key is configured."
+
+
 class UpstreamBadResponseError(GatewayError):
     code = "upstream_bad_response"
     message = "The upstream provider returned an unparseable response."
