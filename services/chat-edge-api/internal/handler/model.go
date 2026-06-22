@@ -86,6 +86,12 @@ type modelResponse struct {
 	// non-reasoning models. Populated for the known set in
 	// ``reasoningCapableModels`` below.
 	Reasoning *reasoningCapability `json:"reasoning,omitempty"`
+	// Sprint 2A.5 — single source of truth for the frontend UI dispatch:
+	// "chat" (chat input + 🎨/🎬 tool buttons) vs "video"/"audio"/"tts"
+	// (direct-dispatch form). Models in the chat picker are always "chat"
+	// even when they carry the via-tools video_generation flag; dedicated
+	// media models use deriveModelKind once /v1/models surfaces them.
+	ModelKind string `json:"model_kind"`
 }
 
 // reasoningCapableModels is the known set of model ids whose
@@ -361,9 +367,42 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 		if m.Capabilities != nil && m.Capabilities.VideoGeneration {
 			resp.Capabilities = append(resp.Capabilities, "video_generation")
 		}
+		// Sprint 2A.5 — dedicated media-model capability strings.
+		if m.Capabilities != nil && m.Capabilities.AudioGeneration {
+			resp.Capabilities = append(resp.Capabilities, "audio_generation")
+		}
+		if m.Capabilities != nil && m.Capabilities.Tts {
+			resp.Capabilities = append(resp.Capabilities, "tts")
+		}
+		// Every model in this loop is a CHAT candidate, so model_kind is
+		// "chat" even when it carries video_generation (the via-tools flag
+		// for the 🎬 composer button). Dedicated media models — listed
+		// separately once /v1/models surfaces them — use deriveModelKind.
+		resp.ModelKind = "chat"
 		out = append(out, resp)
 	}
 	return out
+}
+
+// deriveModelKind maps a DEDICATED media model's capability flags to its
+// frontend UI kind ("video"/"audio"/"tts"), else "chat". NOTE: do NOT call
+// this on chat candidates — they carry video_generation as a via-tools flag
+// and must stay "chat". This is the derivation a future dedicated-media-model
+// listing in /v1/models will use (Sprint 2A.5 — see report).
+func deriveModelKind(caps *service.GatewayModelCapabilities) string {
+	if caps == nil {
+		return "chat"
+	}
+	switch {
+	case caps.VideoGeneration:
+		return "video"
+	case caps.AudioGeneration:
+		return "audio"
+	case caps.Tts:
+		return "tts"
+	default:
+		return "chat"
+	}
 }
 
 // isImageOnlyModel reports whether a model is a DEDICATED image-generation
