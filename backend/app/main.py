@@ -134,6 +134,15 @@ async def lifespan(app: FastAPI):
     # matter as long as it runs at least once before each month rolls.
     partition_task = asyncio.create_task(_daily_partition_maintenance())
 
+    # Sprint 1 — async media-generation job loop. Polls ``generation_jobs``
+    # and (once Sprint 2 lands a provider adapter) drives video/music/TTS
+    # jobs to completion under advisory lock 900004. Inert-ish today: with
+    # no adapter registered it marks any queued job failed('no_adapter').
+    # Cancellation-safe like the daily loops above; Postgres-only (idles on
+    # other dialects). See app/services/media_gen/job_loop.py.
+    from app.services.media_gen.job_loop import run_generation_job_loop
+    generation_job_task = asyncio.create_task(run_generation_job_loop())
+
     # DB pool sampler — every 5s reads SQLAlchemy pool stats and
     # pushes them to the Prometheus gauge. Load tests consume this
     # via /metrics to correlate saturation with pool contention.
@@ -212,6 +221,7 @@ async def lifespan(app: FastAPI):
     alert_task.cancel()
     search_health_task.cancel()
     partition_task.cancel()
+    generation_job_task.cancel()
     pool_task.cancel()
     executor.shutdown(wait=False)
 
