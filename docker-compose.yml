@@ -308,6 +308,12 @@ services:
       # stack's INTERNAL_SERVICE_SECRET. Empty disables the trust
       # (headers are then ignored — safe default).
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-}
+      # Media generation (Sprint 2A/2A.5). Feature-flagged OFF by default;
+      # set VIDEO_GEN_ENABLED=true in the host env to surface dedicated video
+      # models in /v1/models + enable the video gen routes/tool. Controlled
+      # here (not hardcoded) so `VIDEO_GEN_ENABLED=true docker compose up -d
+      # backend` flips it without a code change.
+      VIDEO_GEN_ENABLED: ${VIDEO_GEN_ENABLED:-false}
       # DLP HMAC secret — drives deterministic per-conversation
       # tokenization when a request supplies metadata.conversation_id.
       # Generate prod value with: python3 -c "import secrets;print(secrets.token_hex(32))"
