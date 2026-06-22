@@ -49,6 +49,7 @@ const BRAND: Record<string, { color: string; initial: string; display: string; n
   kimi:       { color: "#1877f2", initial: "K", display: "Kimi" },
   zai:        { color: "#8b5cf6", initial: "Z", display: "Z.AI" },
   replicate:  { color: "#000000", initial: "R", display: "Replicate", note: "Video generation (Kling, Wan)" },
+  elevenlabs: { color: "#000000", initial: "E", display: "ElevenLabs", note: "Text-to-speech voices" },
 };
 
 function brandFor(name: string) {
@@ -319,6 +320,8 @@ function KeysPanel({
                 ? "sk-or-..."
                 : providerName === "replicate"
                 ? "r8_..."
+                : providerName === "elevenlabs"
+                ? "xi-..."
                 : "..."
             }
             style={{ fontSize: "var(--font-size-sm)" }}

@@ -179,6 +179,10 @@ class Settings(BaseSettings):
     # ``repr=False`` so they never appear in ``repr(settings)`` or an
     # accidental settings dump in logs.
     replicate_api_token: str | None = Field(default=None, repr=False)
+    # ElevenLabs TTS env fallback (Sprint 4). ``repr=False`` so the key never
+    # appears in ``repr(settings)``. Prefer the UI provider-key flow; this is
+    # the dev/CI fallback (resolution priority: provider_keys → legacy → env).
+    elevenlabs_api_key: str | None = Field(default=None, repr=False)
     # L1: session-wide spend ceiling (USD) enforced atomically in Redis.
     replicate_test_budget_usd: Decimal = Field(default=Decimal("5.00"))
     # Hard server-side duration clamp — a request asking for 60s is capped
