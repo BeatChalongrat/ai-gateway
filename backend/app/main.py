@@ -805,6 +805,8 @@ app.include_router(admin_session_router)  # /auth/session/{login,logout,me}
 # internal-service secret AND Vault V2 enabled, else it restores nothing.
 from app.api.routes.internal_dlp import router as internal_dlp_router  # noqa: E402
 app.include_router(internal_dlp_router, tags=["internal-dlp"])
+from app.api.routes.internal_media_jobs import router as internal_media_jobs_router  # noqa: E402
+app.include_router(internal_media_jobs_router)  # prefix declared on the router
 app.include_router(public_chat_router, prefix="/v1")
 app.include_router(public_models_router, prefix="/v1")
 app.include_router(public_images_router, prefix="/v1")
