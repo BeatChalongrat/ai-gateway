@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "updated": "2026-06-23",
+  "entries": [
+    {"name": "Donald Trump", "role": "head_of_state", "country": "US"},
+    {"name": "Joe Biden", "role": "former_head_of_state", "country": "US"},
+    {"name": "Kamala Harris", "role": "politician", "country": "US"},
+    {"name": "Barack Obama", "role": "former_head_of_state", "country": "US"},
+    {"name": "Elon Musk", "role": "executive", "country": "US"},
+    {"name": "Jeff Bezos", "role": "executive", "country": "US"},
+    {"name": "Mark Zuckerberg", "role": "executive", "country": "US"},
+    {"name": "Bill Gates", "role": "executive", "country": "US"},
+    {"name": "Tim Cook", "role": "executive", "country": "US"},
+    {"name": "Sam Altman", "role": "executive", "country": "US"},
+    {"name": "Xi Jinping", "role": "head_of_state", "country": "CN"},
+    {"name": "Vladimir Putin", "role": "head_of_state", "country": "RU"},
+    {"name": "Narendra Modi", "role": "head_of_government", "country": "IN"},
+    {"name": "Emmanuel Macron", "role": "head_of_state", "country": "FR"},
+    {"name": "Olaf Scholz", "role": "head_of_government", "country": "DE"},
+    {"name": "Rishi Sunak", "role": "head_of_government", "country": "GB"},
+    {"name": "Keir Starmer", "role": "head_of_government", "country": "GB"},
+    {"name": "Volodymyr Zelensky", "role": "head_of_state", "country": "UA"},
+    {"name": "Benjamin Netanyahu", "role": "head_of_government", "country": "IL"},
+    {"name": "Kim Jong Un", "role": "head_of_state", "country": "KP"},
+    {"name": "Justin Trudeau", "role": "head_of_government", "country": "CA"},
+    {"name": "Anthony Albanese", "role": "head_of_government", "country": "AU"},
+    {"name": "Lula da Silva", "role": "head_of_state", "country": "BR"},
+    {"name": "Pope Francis", "role": "religious_leader", "country": "VA"},
+    {"name": "เศรษฐา ทวีสิน", "role": "former_head_of_government", "country": "TH"},
+    {"name": "แพทองธาร ชินวัตร", "role": "head_of_government", "country": "TH"},
+    {"name": "ทักษิณ ชินวัตร", "role": "politician", "country": "TH"}
+  ]
+}
