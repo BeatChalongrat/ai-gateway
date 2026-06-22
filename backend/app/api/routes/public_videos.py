@@ -59,12 +59,23 @@ async def _resolve_user(auth: ResolvedApiKey, session: AsyncSession) -> tuple[st
     return user_id, balance
 
 
-@router.post("/videos/generations", response_model=VideoGenPublicResponse)
+@router.post(
+    "/videos/generations",
+    response_model=VideoGenPublicResponse,
+    summary="Submit a video generation job",
+    description=(
+        "Submit a video job (API key or session auth). Returns a queued job "
+        "immediately; poll `poll_url` for completion. Rate limit: 5/hour per "
+        "key. Errors: 400 DLP/content-policy block or non-video model, 403 "
+        "feature disabled, 404 model not found, 429 rate limit."
+    ),
+)
 async def generate_video(
     payload: VideoGenPublicRequest,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
     session: AsyncSession = Depends(get_async_db),
 ) -> VideoGenPublicResponse:
+    """Submit a video generation job and return its queued status + cost."""
     if not settings.video_gen_enabled:
         raise HTTPException(status_code=403, detail="video generation is disabled")
     await enforce_media_rate_limit(
@@ -107,12 +118,23 @@ async def generate_video(
     return VideoGenPublicResponse(**format_submit_response_usd(job, est.balance))
 
 
-@router.get("/jobs/{job_id}", response_model=JobStatusPublicResponse)
+@router.get(
+    "/jobs/{job_id}",
+    response_model=JobStatusPublicResponse,
+    summary="Poll a generation job's status",
+    description=(
+        "Shared across all modalities. Returns status, progress, the derived "
+        "`output_url` and provider-disclosed `provenance` (once done), and the "
+        "actual cost. Rate limit: 60/min per key. 404 if the job belongs to "
+        "another tenant."
+    ),
+)
 async def get_job_status(
     job_id: str,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
     session: AsyncSession = Depends(get_async_db),
 ) -> JobStatusPublicResponse:
+    """Return the current status, output URL, provenance, and cost of a job."""
     await enforce_media_rate_limit(
         auth, bucket="jobs", limit=settings.media_rate_limit_jobs_per_min,
         window_seconds=60,
@@ -143,7 +165,16 @@ async def get_job_status(
     )
 
 
-@router.post("/jobs/{job_id}/cancel", response_model=JobStatusPublicResponse)
+@router.post(
+    "/jobs/{job_id}/cancel",
+    response_model=JobStatusPublicResponse,
+    summary="Cancel a reserved / in-flight job",
+    description=(
+        "Idempotent — a terminal job is returned unchanged. Refunds the L1 "
+        "session reservation and best-effort cancels the provider job. Rate "
+        "limit: 10/min per key."
+    ),
+)
 async def cancel_job(
     job_id: str,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
@@ -210,7 +241,15 @@ async def cancel_job(
     )
 
 
-@router.get("/jobs/{job_id}/output")
+@router.get(
+    "/jobs/{job_id}/output",
+    summary="Stream the generated artifact bytes",
+    description=(
+        "Streams the persisted artifact (FileResponse). 404 until the job is "
+        "done. Bytes are stored server-side so a direct API caller can refetch "
+        "without a chat-edge conversation."
+    ),
+)
 async def get_job_output(
     job_id: str,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
