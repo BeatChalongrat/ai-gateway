@@ -310,7 +310,7 @@ GEN_QUEUE_DEPTH = Gauge(
 # Replicate cost-safety observability (Sprint 2B). The spend guards drive
 # these so a spend spike or a guard misfire is visible/alertable before it
 # burns budget. ``guard_level`` ∈ {L1_session, L2_tenant_daily};
-# ``error_class`` ∈ {auth, content_policy, timeout, other}.
+# ``error_class`` ∈ {auth, content_policy, timeout, rate_limit, other}.
 # ---------------------------------------------------------------------------
 
 REPLICATE_SESSION_SPEND_USD = Gauge(
@@ -335,7 +335,8 @@ REPLICATE_BUDGET_BLOCKS_TOTAL = Counter(
 
 REPLICATE_API_ERRORS_TOTAL = Counter(
     "replicate_api_errors_total",
-    "Replicate API errors by class.",
+    "Replicate API errors by class "
+    "(auth | content_policy | timeout | rate_limit | other).",
     labelnames=("error_class",),
     registry=metrics_registry,
 )

@@ -150,15 +150,31 @@ class ReplicateVideoAdapter(MediaGenAdapter):
             raise
 
     async def poll_job(self, external_job_id: str) -> PollResult:
-        async with httpx.AsyncClient(
-            timeout=float(settings.replicate_request_timeout_sec)
-        ) as client:
-            resp = await client.get(
-                f"{REPLICATE_API_BASE}/predictions/{external_job_id}",
-                headers=self._headers(),
-            )
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            async with httpx.AsyncClient(
+                timeout=float(settings.replicate_request_timeout_sec)
+            ) as client:
+                resp = await client.get(
+                    f"{REPLICATE_API_BASE}/predictions/{external_job_id}",
+                    headers=self._headers(),
+                )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.TimeoutException:
+            _inc_api_error("timeout")
+            raise
+        except httpx.HTTPStatusError as e:
+            code = getattr(e.response, "status_code", None)
+            if code == 429:
+                _inc_api_error("rate_limit")
+            elif code == 401:
+                _inc_api_error("auth")
+            else:
+                _inc_api_error("other")
+            raise
+        except Exception:
+            _inc_api_error("other")
+            raise
         status = data.get("status")
         if status in ("starting", "processing"):
             return PollResult(status="processing", progress_pct=None)
@@ -190,16 +206,36 @@ class ReplicateVideoAdapter(MediaGenAdapter):
         return resp.status_code == 200
 
     async def fetch_result_bytes(self, result_url: str) -> bytes:
-        async with httpx.AsyncClient(
-            timeout=float(settings.replicate_request_timeout_sec)
-        ) as client:
-            head = await client.head(result_url)
-            clen = int(head.headers.get("content-length", "0") or "0")
-            if clen > _MAX_OUTPUT_BYTES:
-                raise ValueError(f"output too large: {clen} bytes")
-            resp = await client.get(result_url)
-            resp.raise_for_status()
-            data = resp.content
+        try:
+            async with httpx.AsyncClient(
+                timeout=float(settings.replicate_request_timeout_sec)
+            ) as client:
+                head = await client.head(result_url)
+                clen = int(head.headers.get("content-length", "0") or "0")
+                if clen > _MAX_OUTPUT_BYTES:
+                    raise ValueError(f"output too large: {clen} bytes")
+                resp = await client.get(result_url)
+                resp.raise_for_status()
+                data = resp.content
+        except httpx.TimeoutException:
+            _inc_api_error("timeout")
+            raise
+        except httpx.HTTPStatusError as e:
+            code = getattr(e.response, "status_code", None)
+            if code == 429:
+                _inc_api_error("rate_limit")
+            elif code == 401:
+                _inc_api_error("auth")
+            else:
+                _inc_api_error("other")
+            raise
+        except ValueError:
+            # Local size-guard failure — not a provider API error; re-raise
+            # without polluting the api-error metric.
+            raise
+        except Exception:
+            _inc_api_error("other")
+            raise
         if len(data) > _MAX_OUTPUT_BYTES:
             raise ValueError(f"output too large: {len(data)} bytes")
         return data
