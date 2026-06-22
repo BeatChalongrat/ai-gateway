@@ -46,3 +46,14 @@ try:
 except Exception as _exc:  # noqa: BLE001
     _log.error("Failed to register Replicate MusicGen adapter: %s", _exc)
 
+# OpenAI TTS (Sprint 4) — reuses the OpenAI key; synchronous fast-path.
+try:
+    from app.services.media_gen.adapters.openai_tts import (  # noqa: E402
+        OpenAITTSAdapter,
+    )
+
+    register_adapter(OpenAITTSAdapter)
+    _log.info("OpenAI TTS adapter registered (key resolved per-request)")
+except Exception as _exc:  # noqa: BLE001
+    _log.error("Failed to register OpenAI TTS adapter: %s", _exc)
+
