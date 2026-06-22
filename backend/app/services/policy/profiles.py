@@ -152,6 +152,10 @@ MEDIA_GEN_PROFILE = PolicyProfile(
         "financial": EnforcementAction.BLOCK,
         "credential": EnforcementAction.BLOCK,
         "secret": EnforcementAction.BLOCK,
+        # Sprint 4 — content-policy detectors (CSAM / copyright / public figure)
+        # BLOCK in media gen only. category_actions wins over the severity
+        # threshold, so HIGH-severity copyright/public-figure also block.
+        "content_policy": EnforcementAction.BLOCK,
     },
     # No separate outbound map — media output is binary (image/video/audio),
     # not scannable text, and ``scan_responses`` is off below.

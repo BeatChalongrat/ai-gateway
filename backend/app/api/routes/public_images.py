@@ -221,6 +221,23 @@ async def generate_images(
                 },
             )
 
+        # Sprint 4 — content-policy detectors (CSAM / copyright / public figure)
+        # apply to image gen via the shared MEDIA_GEN gate (same as video/audio).
+        from app.services.media_gen.submit_helpers import content_policy_blocked
+
+        if content_policy_blocked(payload.prompt, profile):
+            await _persist(
+                orch, session, request_id=request_id, auth=auth, model=model,
+                status=RequestStatus.BLOCKED,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                cost_usd=0.0, policy_action="block", dlp_findings=dlp_findings,
+                input_masked="[BLOCKED_BY_CONTENT_POLICY]",
+            )
+            raise DLPViolationError(
+                "Image prompt blocked by content policy.",
+                details={"direction": "input", "categories": ["CONTENT_POLICY"]},
+            )
+
         if enforcement.requires_transformation:
             masked_prompt, span_map, _ = orch.transformer.mask_text(
                 payload.prompt, enforcement.match_actions
