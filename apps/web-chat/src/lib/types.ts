@@ -55,6 +55,10 @@ export interface ModelEntry {
    *  direct-dispatch media form. Missing/undefined is treated as "chat"
    *  so older chat-edge payloads degrade cleanly. */
   model_kind?: "chat" | "video" | "audio" | "tts";
+  /** Sprint 3 — coarse cost tier for a selector badge. Optional: dormant
+   *  until the gateway/chat-edge serialize it; the badge renders only when
+   *  present so older payloads degrade cleanly. */
+  cost_tier?: "free" | "low" | "medium" | "high";
 }
 
 export interface ModelListResponse {
