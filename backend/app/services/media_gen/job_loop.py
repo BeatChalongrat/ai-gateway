@@ -58,10 +58,23 @@ def _poll_interval() -> float:
 
 
 def _adapter_poll_interval() -> float:
+    # Webhook-aware default (Sprint 2B): when a Replicate webhook is
+    # configured it's the primary completion signal, so poll less
+    # aggressively; otherwise poll faster. An explicit env override still
+    # wins (tests set it low).
+    from app.core.config import settings
+
+    if (settings.replicate_webhook_secret or "").strip():
+        default = settings.replicate_poll_interval_sec_with_webhook
+    else:
+        default = settings.replicate_poll_interval_sec_no_webhook
     try:
-        return max(0.2, float(os.getenv("GENERATION_JOB_ADAPTER_POLL_SECONDS", "3")))
+        return max(
+            0.2,
+            float(os.getenv("GENERATION_JOB_ADAPTER_POLL_SECONDS", str(default))),
+        )
     except (TypeError, ValueError):
-        return 3.0
+        return float(default)
 
 
 def _max_job_seconds() -> float:
@@ -182,6 +195,12 @@ async def _process_job(session, job_id: str) -> None:
             deadline = time.monotonic() + _max_job_seconds()
             interval = _adapter_poll_interval()
             while True:
+                # Webhook awareness (Sprint 2B): a Replicate webhook may have
+                # finalized this job out-of-band. Re-read; if terminal, stop
+                # polling — poll is the fallback, the webhook is primary.
+                await session.refresh(job)
+                if job.status in ("done", "failed", "cancelled"):
+                    return
                 poll = await adapter.poll_job(submit.external_job_id)
                 if poll.progress_pct is not None and poll.progress_pct != job.progress_pct:
                     job.progress_pct = int(poll.progress_pct)

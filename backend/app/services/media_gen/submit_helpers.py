@@ -92,6 +92,57 @@ async def estimate_and_validate_cost(
     return est
 
 
+async def enforce_daily_cap_and_enrich_meta(
+    db: AsyncSession,
+    *,
+    tenant_id: str,
+    model_id: str,
+    input_metadata: dict,
+    est: EstimateResult,
+) -> None:
+    """L2 spend guard + adapter-metadata enrichment (Sprint 2B).
+
+    Runs AFTER ``estimate_and_validate_cost`` and BEFORE the INSERT, for
+    both the public and internal submit paths:
+
+    - **L2 daily cap**: rejects with 402 when ``today's tenant spend +
+      this estimate`` would exceed ``tenants.max_daily_spend_usd``. Mock
+      jobs cost ~$0 so they always pass — no special-casing.
+    - **Meta enrichment**: stuffs ``estimate_usd`` (for the adapter's L1
+      reservation) and ``replicate_model`` (the model_configs.model path)
+      into ``input_metadata`` IN PLACE, because the ``MediaGenAdapter``
+      ABC ``submit_job(prompt, meta)`` signature carries no model_config.
+      Harmless for the mock adapter (it ignores them).
+    """
+    cost_usd = Decimal(str((est.breakdown or {}).get("cost_usd", 0) or 0))
+
+    # Local import keeps the spend_guard (Redis) dependency off the hot
+    # import path for routes that never touch media gen.
+    from app.services.media_gen.spend_guard import check_daily_spend_cap
+
+    # L2 fails OPEN on a Redis/infra error: the L1 atomic reserve (in the
+    # adapter's submit_job, at provider-call time) is the HARD backstop for
+    # real money, and it itself fails closed if Redis is down. So a transient
+    # Redis blip here must not 500 the submit (and must not block the free
+    # mock provider, which has no L1 reservation at all).
+    cap = None
+    try:
+        cap = await check_daily_spend_cap(db, tenant_id, cost_usd)
+    except Exception:  # noqa: BLE001
+        cap = None
+    if cap is not None and not cap.allowed:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"daily spend cap reached: today ${cap.current_spend} + "
+                f"${cost_usd} would exceed the ${cap.cap} tenant limit"
+            ),
+        )
+
+    input_metadata["estimate_usd"] = str(cost_usd)
+    input_metadata["replicate_model"] = model_id
+
+
 async def insert_generation_job_row(
     db: AsyncSession,
     *,
