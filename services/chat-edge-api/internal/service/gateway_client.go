@@ -981,6 +981,9 @@ type GatewayModelCapabilities struct {
 	ImageGeneration         bool `json:"image_generation"`
 	ImageGenerationViaTools bool `json:"image_generation_via_tools"`
 	VideoGeneration         bool `json:"video_generation"`
+	// Sprint 2A.5 — dedicated media-model capabilities (music / TTS).
+	AudioGeneration bool `json:"audio_generation"`
+	Tts             bool `json:"tts"`
 }
 
 // GatewayReasoningCapability mirrors the Gateway's ReasoningCapability
