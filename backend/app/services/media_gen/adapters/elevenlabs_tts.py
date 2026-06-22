@@ -38,7 +38,8 @@ _DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # "Rachel"
 
 class ElevenLabsTTSAdapter(MediaGenAdapter):
     provider_name = "elevenlabs"
-    supported_job_types = ["tts"]
+    # Canonical job_type is "audio_tts" (matches the route + generation_jobs).
+    supported_job_types = ["audio_tts"]
 
     def __init__(
         self,
