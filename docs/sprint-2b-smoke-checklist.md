@@ -8,19 +8,30 @@
 
 ## Pre-flight (no cost)
 
-- [ ] `REPLICATE_API_TOKEN` added to `backend/.env`
-- [ ] Verify: `docker compose exec backend env | grep REPLICATE_API_TOKEN` → shows value
+Add the Replicate key through the admin UI (Sprint 2B.5) — no env var, no restart:
+
+- [ ] Open http://localhost:3000/providers
+- [ ] Find the "Replicate" card → click "Add Key"
+- [ ] Paste your `r8_...` token from https://replicate.com/account/api-tokens
+- [ ] Click Save → wait for the green "valid" badge
+      (the backend pings Replicate `GET /v1/account` ~500ms before saving)
+- [ ] Card now shows "1/1 keys"
+- [ ] Verify backend resolves it (adapter registers unconditionally at boot):
+      `docker compose logs backend --tail=50 | grep -i "Replicate adapter registered"`
+      → shows `Replicate adapter registered (key resolved per-request)`
+- [ ] No restart needed — the adapter resolves the key per-request from the DB
 - [ ] `REPLICATE_TEST_BUDGET_USD=5.00` set in `backend/.env` (or default applies)
 - [ ] Migrations at head: `docker compose exec -e PYTHONPATH=. -T backend alembic current` → `059 (head)`
-- [ ] Backend rebuilt + restarted with token:
-      `docker compose up -d --build backend`
-- [ ] Adapter registered:
-      `docker compose logs backend --tail=50 | grep -i "Registered adapter: replicate"`
-      → must show the line
 - [ ] Session counter reset (in case of stale value):
       `docker compose exec redis redis-cli DEL "replicate:spend:session:$(date -u +%Y-%m-%d)"`
 - [ ] Get `DEV_AUTH_TOKEN`: extract a bearer for a dev tenant with $5+ balance
       (check `backend/scripts/` or existing dev fixtures for the token-mint helper)
+
+### Optional: env fallback (legacy, for CI / dev convenience)
+
+- [ ] Set `REPLICATE_API_TOKEN=r8_xxx` in `backend/.env`, then `docker compose restart backend`
+- [ ] The Replicate card shows a "via env" badge
+- [ ] A UI-added key (priority 1) overrides the env key (priority 3) when both are set
 
 ---
 
@@ -109,5 +120,12 @@
 
 ## Rollback if anything looks wrong
 
-See `docs/sprint-2b-rollback.md`. Fast disable:
-`REPLICATE_API_TOKEN=` (blank) → `docker compose restart backend` → adapter unregisters.
+See `docs/sprint-2b-rollback.md`. Fast disable (Sprint 2B.5 — the adapter now
+registers unconditionally and resolves the key per-request, so blanking the env
+var alone is NOT enough; remove the UI key too):
+
+- UI: open /providers → Replicate card → delete / deactivate all keys
+- Legacy: `UPDATE providers SET is_active=false WHERE name='replicate';`
+- Env: blank `REPLICATE_API_TOKEN` + `docker compose restart backend`
+
+All three must be absent for the adapter to fail closed (`ProviderKeyMissing`).
