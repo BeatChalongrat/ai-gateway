@@ -8,9 +8,15 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 import type { MediaJobStatus, ModelEntry } from "@/lib/types";
 
 import { CostPreview } from "./CostPreview";
+import {
+  MediaGenError,
+  type MediaGenErrorCode,
+  mediaErrorCodeFromStatus,
+} from "./MediaGenError";
 
 interface Props {
   model: ModelEntry;
@@ -38,7 +44,10 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
     requiresConfirmation: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<MediaGenErrorCode | null>(null);
   const pollRef = useRef<number | null>(null);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "owner";
 
   function stopPolling() {
     if (pollRef.current) {
@@ -53,6 +62,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
     setPhase("form");
     setJob(null);
     setError(null);
+    setErrorCode(null);
     setCost(null);
   }
 
@@ -80,6 +90,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
     if (!prompt.trim() || phase === "submitting" || phase === "polling") return;
     setPhase("submitting");
     setError(null);
+    setErrorCode(null);
     try {
       const res = await api.submitAudioGen({
         prompt: prompt.trim(),
@@ -97,9 +108,13 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
       setPhase("polling");
       startPolling(res.job_id);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Failed to submit audio job.",
-      );
+      if (err instanceof ApiError) {
+        setError(err.message);
+        setErrorCode(mediaErrorCodeFromStatus(err.status, err.code));
+      } else {
+        setError("Failed to submit audio job.");
+        setErrorCode("unknown");
+      }
       setPhase("failed");
     }
   }
@@ -149,7 +164,19 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
               <span className="w-10 tabular-nums text-text-primary">{duration}s</span>
             </label>
           )}
-          {error ? (
+          {phase === "failed" && errorCode ? (
+            <MediaGenError
+              errorCode={errorCode}
+              errorMessage={error ?? ""}
+              isAdmin={isAdmin}
+              onRetry={submit}
+              onDismiss={() => {
+                setError(null);
+                setErrorCode(null);
+                setPhase("form");
+              }}
+            />
+          ) : error ? (
             <p className="text-sm text-status-danger">{error}</p>
           ) : null}
           <button
