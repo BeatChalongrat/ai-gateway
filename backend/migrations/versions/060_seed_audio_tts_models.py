@@ -42,15 +42,19 @@ _SEEDED = [
 def upgrade() -> None:
     if os.environ.get("APP_ENV", "development").lower() == "production":
         return
+    # Music cost is flat per-generation (the credit engine reads
+    # cost_per_generation for job_type 'music', NOT cost_per_second); we set
+    # both so the adapter's own duration-based estimate also has a rate.
     op.execute(
         """
         INSERT INTO model_configs
             (provider, model, supports_audio_gen, supports_tts,
-             cost_per_second, cost_per_character, source, is_active)
+             cost_per_second, cost_per_character, cost_per_generation,
+             source, is_active)
         VALUES
-            ('replicate', 'meta/musicgen',          true,  false, 0.000200, NULL,     'seed', true),
-            ('openai',    'gpt-4o-mini-tts',         false, true,  NULL,     0.000015, 'seed', true),
-            ('elevenlabs','eleven_multilingual_v2',  false, true,  NULL,     0.000100, 'seed', true)
+            ('replicate', 'meta/musicgen',          true,  false, 0.000200, NULL,     0.002000, 'seed', true),
+            ('openai',    'gpt-4o-mini-tts',         false, true,  NULL,     0.000015, NULL,     'seed', true),
+            ('elevenlabs','eleven_multilingual_v2',  false, true,  NULL,     0.000100, NULL,     'seed', true)
         ON CONFLICT (provider, model) DO NOTHING
         """
     )
