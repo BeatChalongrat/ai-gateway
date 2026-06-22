@@ -1,6 +1,8 @@
 import warnings
+from decimal import Decimal
 from urllib.parse import quote_plus
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_DEFAULTS = {"change-me", "changeme", "secret", "password", "", "dev-stable-key-change-in-prod"}
@@ -168,6 +170,27 @@ class Settings(BaseSettings):
     # threshold so the frontend can show a confirm modal.
     video_gen_enabled: bool = False
     video_gen_default_threshold_usd: float = 1.00
+
+    # --- Replicate video provider (Sprint 2B) --------------------------
+    # ALL THREE cost guards (L1 session budget, L2 tenant daily cap, L3
+    # per-job confirmation) are mandatory — there is NO bypass flag. To
+    # raise a limit, change the DB column (tenants.max_daily_spend_usd),
+    # which leaves an audit trail. The token + webhook secret use
+    # ``repr=False`` so they never appear in ``repr(settings)`` or an
+    # accidental settings dump in logs.
+    replicate_api_token: str | None = Field(default=None, repr=False)
+    # L1: session-wide spend ceiling (USD) enforced atomically in Redis.
+    replicate_test_budget_usd: Decimal = Field(default=Decimal("5.00"))
+    # Hard server-side duration clamp — a request asking for 60s is capped
+    # to this regardless, so a bad client can't 6x the cost.
+    replicate_max_video_duration_sec: int = 10
+    replicate_request_timeout_sec: int = 600
+    replicate_webhook_secret: str | None = Field(default=None, repr=False)
+    # Public URL the gateway is reachable at; used to build the Replicate
+    # webhook callback. Empty → no webhook registered (poll-only fallback).
+    replicate_webhook_base_url: str = ""
+    replicate_poll_interval_sec_no_webhook: int = 5
+    replicate_poll_interval_sec_with_webhook: int = 15
 
     # Provider timeouts and retry
     provider_timeout_connect: float = 5.0
