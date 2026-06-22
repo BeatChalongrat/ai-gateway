@@ -35,6 +35,16 @@ def _token(monkeypatch):
     monkeypatch.setattr(settings, "replicate_webhook_secret", None)
     monkeypatch.setattr(settings, "replicate_request_timeout_sec", 600)
 
+    # Sprint 2B.5: the adapter resolves its key per-request via the module
+    # function ``resolve_replicate_key`` (DB-backed). Unit tests have no DB,
+    # so patch the resolver to return the fake token. ``__init__`` reads the
+    # module global by name, so a default-constructed ``ReplicateVideoAdapter()``
+    # picks this up. Tests that inject ``key_resolver=`` bypass it.
+    async def _fake_resolver():
+        return _FAKE_TOKEN
+
+    monkeypatch.setattr(rv, "resolve_replicate_key", _fake_resolver)
+
 
 @pytest.fixture
 def budget(monkeypatch):
@@ -206,3 +216,99 @@ async def test_fetch_small_ok():
     )
     data = await ReplicateVideoAdapter().fetch_result_bytes(url)
     assert data[4:8] == b"ftyp"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 2B.5 — DB-backed per-request key resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_submit_no_key_raises_and_refunds_no_http(budget):
+    """Resolver returns None → ProviderKeyMissing, no HTTP, L1 reserved+released."""
+    from app.core.exceptions import ProviderKeyMissing
+
+    async def _no_key():
+        return None
+
+    route = respx.post(_PRED).mock(
+        return_value=httpx.Response(201, json={"id": "should_not_happen"})
+    )
+    a = ReplicateVideoAdapter(key_resolver=_no_key)
+    with pytest.raises(ProviderKeyMissing):
+        await a.submit_job("a cat", _meta())
+    assert route.call_count == 0  # failed closed before any provider call
+    # L1 reserved first, then refunded because no key was available.
+    assert budget["reserve"] == 1 and budget["release"] == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_submit_uses_resolved_key_in_auth_header(budget):
+    """Resolver value lands verbatim in the Authorization header."""
+    captured = {}
+
+    def _resp(request):
+        captured["auth"] = request.headers.get("authorization")
+        return httpx.Response(201, json={"id": "pred_keyed"})
+
+    respx.post(_PRED).mock(side_effect=_resp)
+
+    async def _key():
+        return "r8_resolved_test_key"
+
+    res = await ReplicateVideoAdapter(key_resolver=_key).submit_job("a cat", _meta())
+    assert res.external_job_id == "pred_keyed"
+    assert captured["auth"] == "Bearer r8_resolved_test_key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_resolver_called_fresh_each_request(budget):
+    """The key is resolved on EVERY submit — never cached on the instance."""
+    respx.post(_PRED).mock(return_value=httpx.Response(201, json={"id": "p"}))
+    calls = {"n": 0}
+
+    async def _key():
+        calls["n"] += 1
+        return "r8_x"
+
+    a = ReplicateVideoAdapter(key_resolver=_key)
+    await a.submit_job("a cat", _meta())
+    assert calls["n"] == 1
+    await a.submit_job("a cat", _meta())
+    assert calls["n"] == 2  # resolved again, not reused
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_resolved_key_never_leaks(budget):
+    """A resolved key must not appear in repr / __dict__ / exception text."""
+    secret = "r8_SECRET_VALUE_must_not_leak"
+
+    async def _key():
+        return secret
+
+    a = ReplicateVideoAdapter(key_resolver=_key)
+    # Not on the instance at all (resolver holds it in a closure).
+    assert secret not in repr(a)
+    assert secret not in str(a.__dict__)
+
+    # Error path: provider 401 → ProviderAuthError; secret not in any message.
+    respx.post(_PRED).mock(return_value=httpx.Response(401, json={"detail": "no"}))
+    with pytest.raises(ProviderAuthError) as exc_info:
+        await a.submit_job("a cat", _meta())
+    assert secret not in str(exc_info.value)
+    assert secret not in repr(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_mock_adapter_unaffected_regression():
+    """MockVideoAdapter still constructs + submits exactly as before (no key)."""
+    from app.services.media_gen.adapters.mock_video import MockVideoAdapter
+
+    m = MockVideoAdapter()
+    res = await m.submit_job("a cat", {"duration_sec": 5})
+    assert res.external_job_id.startswith("mock_")
+    assert res.initial_status == "processing"
