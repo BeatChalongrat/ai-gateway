@@ -61,6 +61,10 @@ class JobStatusPublicResponse(BaseModel):
     status: str
     progress_pct: Optional[int] = None
     output_url: Optional[str] = None
+    # Provider-disclosed provenance (Sprint 5) — C2PA / watermark flags,
+    # seed, model id. Surfaced from output_metadata.provenance; the internal
+    # output_path is deliberately NOT exposed.
+    provenance: Optional[dict] = None
     actual_cost_credits: Optional[int] = None
     actual_cost_usd: Optional[str] = None
     error_code: Optional[str] = None
