@@ -6,22 +6,39 @@ Strategies in order of preference (least invasive first).
 
 Best for: token leak, spend spike, adapter buggy.
 
-```bash
-# In backend/.env, blank the token:
-REPLICATE_API_TOKEN=
+Sprint 2B.5: the adapter registers UNCONDITIONALLY and resolves its key
+per-request, so it fails closed only when ALL key sources are removed.
+Disable by clearing every source (see precedence below):
 
+```bash
+# 1. UI keys (highest priority): /providers → Replicate → delete/deactivate
+# 2. Legacy single key:
+docker compose exec -T postgres psql -U postgres -d ai_gateway \
+  -c "UPDATE providers SET is_active=false WHERE name='replicate';"
+# 3. Env fallback:
+#    blank REPLICATE_API_TOKEN in backend/.env, then:
 docker compose restart backend
 ```
 
 Effects:
-- Adapter unregisters at boot (`Replicate adapter NOT registered`)
+- With all key sources gone, every new Replicate submit raises
+  `ProviderKeyMissing` (fails closed) before any provider call
 - mock-video-1 path still works
-- New Replicate jobs return 503 "provider unavailable"
 - In-flight Replicate jobs:
   - If webhook arrives → still processed normally
-  - Otherwise → poll loop continues with no adapter → marked `failed` after retries
+  - Otherwise → poll continues; the next provider call fails closed once
+    the key is gone, and the job is marked `failed` after retries
 - All DB rows preserved
 - All Redis spend counters preserved
+
+### Key precedence reference
+
+Replicate adapter resolves keys in this priority order (highest first):
+1. `provider_keys` table — active + valid (UI Add-Key flow)
+2. `providers.api_key_encrypted` — legacy single key (rarely used)
+3. `REPLICATE_API_TOKEN` env — fallback for dev / CI
+
+To fully disable, ALL THREE must be absent (see the commands above).
 
 ## Strategy 2 — Circuit Breaker (emergency spend stop)
 
