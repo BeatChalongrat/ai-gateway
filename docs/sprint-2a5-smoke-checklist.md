@@ -2,14 +2,13 @@
 
 Run when you have time. ~10 minutes. **No real money** — still the mock provider.
 
-> ⚠️ **Read first — the direct-dispatch UI is currently DORMANT.**
-> Dedicated media models (e.g. `mock-video-1`) are **not yet listed in
-> `/v1/models`**, so the ModelSelector shows no video/audio model and
-> `model_kind` is `"chat"` for everything. The **DIRECT PATH** section
-> below will therefore NOT light up until the "Model-listing activation"
-> follow-up lands (see `Sprint 2A.5 report` / the open decision). The
-> **TOOL PATH** (Sprint 2A) is unaffected and should work. Run the tool
-> path + the "build sanity" checks now; run the direct path after activation.
+> ✅ **Both paths are live.** With `VIDEO_GEN_ENABLED=true` (see Prereq) the
+> direct-dispatch UI activates end-to-end: dedicated media models are listed
+> in `/v1/models` (`model_kind=video`), the ModelSelector shows them, and the
+> chat-edge proxy forwards the gen forms to the backend public routes
+> (`/api/v1/videos|audio/generations`, `/api/v1/jobs/{id}`). The TOOL PATH
+> (Sprint 2A) is independent and also works. Audio/TTS forms render but have
+> no real provider yet (Sprint 4).
 
 ## Prereq
 - [ ] `VIDEO_GEN_ENABLED=true` in the backend env, backend restarted
@@ -34,8 +33,8 @@ Run when you have time. ~10 minutes. **No real money** — still the mock provid
 - [ ] Click 🎬 → type "a sunset" → send
 - [ ] Placeholder → video plays after ~5s
 
-## DIRECT PATH (Sprint 2A.5 — **dormant until model-listing activation**)
-- [ ] ModelSelector shows a "Video" group with `mock-video-1` (🎬 badge)  ← *blocked: model not listed yet*
+## DIRECT PATH (Sprint 2A.5 — live)
+- [ ] ModelSelector shows a "Video" group with `mock-video-1` (🎬 badge)
 - [ ] Select `mock-video-1` → chat input replaced by **VideoGenForm**
 - [ ] Banner: "🎬 Video Generation Mode — Mock Video (Dev)"
 - [ ] Enter prompt, duration=5 → **CostPreview** shows "$0.35" + balance delta
@@ -52,10 +51,10 @@ Run when you have time. ~10 minutes. **No real money** — still the mock provid
 - [ ] A model priced ≥ $0.10/s at 10s → estimate ≥ $1.00 → "⚠ Premium action" confirmation appears
 
 ## Notes
-- **Web-chat → backend wiring:** the direct-dispatch endpoints live on the
-  BACKEND (`/v1/...`); web-chat's client talks to chat-edge. The submit
-  call sites carry a `proxy-pending` comment — confirm the request actually
-  reaches the backend (chat-edge proxy or a direct backend client) as part
-  of activation.
+- **Web-chat → backend wiring:** wired. The chat-edge MediaProxy handler
+  forwards `/api/v1/videos|audio/generations` + `/api/v1/jobs/{id}` to the
+  backend public routes with the internal-trust headers (same pattern as the
+  generate_video tool); the backend enforces auth + DLP + balance + the
+  feature gate. Covered by `media_proxy_test.go`.
 - **Audio/TTS:** forms are built but there's no real audio provider yet
   (Sprint 4). The mock path is video-only.
