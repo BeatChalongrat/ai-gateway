@@ -111,3 +111,61 @@ async def test_valid_tts_submit_200(async_db, monkeypatch):
     assert data["status"] == "queued"
     assert "estimated_cost_usd" in data
     assert data["poll_url"].startswith("/v1/jobs/")
+
+
+# --- Sprint 4: music mode + mode-dispatch validation -----------------------
+
+
+@pytest.mark.asyncio
+async def test_valid_music_submit_200(async_db, monkeypatch):
+    # mode=music routes through the supports_audio_gen capability + the
+    # cost_per_generation cost path; the route returns a queued job (the
+    # async adapter dispatch happens in the job loop).
+    monkeypatch.setattr(settings, "video_gen_enabled", True)
+    uid = await _seed_user(async_db)
+    await _ensure_model(
+        async_db, "mock-music-1", supports_audio_gen=True,
+        cost_per_generation=Decimal("0.002"),
+    )
+    await async_db.commit()
+    with _auth(uid):
+        r = TestClient(main_app).post(
+            "/v1/audio/generations",
+            json=_body(model="mock-music-1", mode="music", duration_sec=8),
+        )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["status"] == "queued"
+    assert data["poll_url"].startswith("/v1/jobs/")
+
+
+@pytest.mark.asyncio
+async def test_music_mode_on_tts_only_model_400(async_db, monkeypatch):
+    # mode=music against a model that only supports_tts → capability 400.
+    monkeypatch.setattr(settings, "video_gen_enabled", True)
+    uid = await _seed_user(async_db)
+    await _ensure_model(
+        async_db, "mock-ttsonly", supports_tts=True, supports_audio_gen=False,
+        cost_per_character=Decimal("0.0001"),
+    )
+    await async_db.commit()
+    with _auth(uid):
+        r = TestClient(main_app).post(
+            "/v1/audio/generations",
+            json=_body(model="mock-ttsonly", mode="music"),
+        )
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_invalid_mode_400(async_db, monkeypatch):
+    monkeypatch.setattr(settings, "video_gen_enabled", True)
+    uid = await _seed_user(async_db)
+    await _ensure_model(async_db, "mock-tts-1", supports_tts=True,
+                        cost_per_character=Decimal("0.0001"))
+    await async_db.commit()
+    with _auth(uid):
+        r = TestClient(main_app).post(
+            "/v1/audio/generations", json=_body(model="mock-tts-1", mode="bogus")
+        )
+    assert r.status_code == 400
