@@ -33,12 +33,24 @@ from app.services.media_gen.submit_helpers import (
 router = APIRouter(tags=["public-media"])
 
 
-@router.post("/audio/generations", response_model=AudioGenPublicResponse)
+@router.post(
+    "/audio/generations",
+    response_model=AudioGenPublicResponse,
+    summary="Submit a TTS or music generation job",
+    description=(
+        "Branched by `mode`: 'tts' (validates supports_tts, cost per "
+        "character) or 'music' (validates supports_audio_gen, flat cost). "
+        "Returns a queued job; poll `poll_url`. Rate limit: 30/hour per key. "
+        "Errors: 400 invalid mode / missing capability / DLP block, 403 "
+        "feature disabled, 404 model not found, 429 rate limit."
+    ),
+)
 async def generate_audio(
     payload: AudioGenPublicRequest,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
     session: AsyncSession = Depends(get_async_db),
 ) -> AudioGenPublicResponse:
+    """Submit a TTS or music generation job and return its queued status."""
     if not settings.video_gen_enabled:
         # Media generation shares one feature flag for the alpha.
         raise HTTPException(status_code=403, detail="media generation is disabled")
