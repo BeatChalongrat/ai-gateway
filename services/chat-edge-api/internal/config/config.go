@@ -123,8 +123,8 @@ type Config struct {
 	// directory the service owns end-to-end; uploads land under
 	// ``{root}/{tenant_id}/{conversation_id}/{file_id}_{name}``.
 	FileStorageRoot     string `env:"FILE_STORAGE_ROOT" envDefault:"./data/uploads"`
-	MaxFileSizeBytes    int64  `env:"MAX_FILE_SIZE_BYTES" envDefault:"26214400"`        // 25 MiB
-	MaxConvFileTotal    int64  `env:"MAX_CONV_FILE_TOTAL_BYTES" envDefault:"104857600"` // 100 MiB
+	MaxFileSizeBytes    int64  `env:"MAX_FILE_SIZE_BYTES" envDefault:"209715200"`         // 200 MiB (raised for media gen — Sprint 1)
+	MaxConvFileTotal    int64  `env:"MAX_CONV_FILE_TOTAL_BYTES" envDefault:"1073741824"` // 1 GiB (raised for media gen — Sprint 1)
 	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
 	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`
 
