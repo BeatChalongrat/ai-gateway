@@ -12,11 +12,14 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Optional
 
 from app.domain.dlp import DetectionMatch, DetectionResult
 from app.services.dlp.detectors.base import BaseDetector
+
+log = logging.getLogger(__name__)
 from app.services.dlp.language import detect_language
 from app.services.dlp.preprocessor import (
     NormalizedText,
@@ -34,6 +37,16 @@ class DetectorRegistry:
     def __init__(self) -> None:
         self._detectors: list[BaseDetector] = []
         self._names: set[str] = set()
+        # Sprint 6: optional provider of admin-defined custom detectors,
+        # hot-reloaded at runtime. Default None → zero behaviour change (the
+        # built-in count + every existing detector test stays identical).
+        self._custom_provider: Optional[Callable[[], list[BaseDetector]]] = None
+
+    def set_custom_provider(
+        self, provider: Optional[Callable[[], list[BaseDetector]]]
+    ) -> None:
+        """Install (or clear) the dynamic custom-detector provider."""
+        self._custom_provider = provider
 
     # -- Registration -------------------------------------------------------
 
@@ -91,6 +104,26 @@ class DetectorRegistry:
             if from_decoded and getattr(detector, "ACCEPTS_DECODED", False):
                 kwargs["from_decoded"] = True
             matches.extend(detector.detect(text, **kwargs))
+
+        # Sprint 6: run admin-defined custom detectors after the built-ins.
+        # Each custom detector's detect() is internally crash-safe, but we
+        # also guard here so a provider/instantiation fault can never break
+        # the scan for the built-ins.
+        if self._custom_provider is not None:
+            try:
+                custom = self._custom_provider()
+            except Exception:  # noqa: BLE001
+                custom = []
+                log.warning("custom detector provider failed", exc_info=True)
+            for detector in custom:
+                try:
+                    matches.extend(detector.detect(text))
+                except Exception:  # noqa: BLE001 — isolate a bad custom detector
+                    log.warning(
+                        "custom detector %r raised; skipped",
+                        getattr(detector, "name", "?"),
+                        exc_info=True,
+                    )
         return matches
 
     def scan_text(
@@ -367,3 +400,12 @@ def get_default_registry(
         if detector.name not in disabled_set:
             registry.register(detector)
     return registry
+
+
+def get_built_in_detector_count(*, ner_enabled: bool = True) -> int:
+    """Number of built-in detectors (excludes admin-defined custom ones).
+
+    Sprint 6 verification helper — custom detectors are dynamic and provided
+    at runtime, so they never count toward the built-in total.
+    """
+    return len(get_default_registry(ner_enabled=ner_enabled))
