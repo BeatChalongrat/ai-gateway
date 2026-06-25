@@ -11,8 +11,10 @@ schema, not the idealized spec):
 - All ids are app-generated ``String(36)`` UUIDs, NOT native ``UUID`` /
   ``gen_random_uuid()`` — the same migration + ORM run against the SQLite test
   engine and Postgres alike.
-- ``created_by_user_id`` / ``changed_by_user_id`` reference
-  ``portal_users.id`` (itself ``String(36)``), so the FK types match.
+- ``created_by_user_id`` / ``changed_by_user_id`` are the ADMIN actor
+  (``admin_users``), stored as plain ``String(36)`` audit fields with NO FK —
+  the audit trail must survive user-row changes and stay decoupled from any
+  single user store.
 - JSON columns use ``sa.JSON`` with a ``JSONB`` variant on Postgres.
 - ``ix_custom_detectors_active`` is PARTIAL on Postgres (only the
   hot ``active``/``testing`` rows the loader reads); under SQLite the
@@ -86,12 +88,10 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("0"),
         ),
-        sa.Column(
-            "created_by_user_id",
-            sa.String(36),
-            sa.ForeignKey("portal_users.id"),
-            nullable=False,
-        ),
+        # Actor is an ADMIN user (admin_users), recorded as a plain audit
+        # field with NO FK — it must survive any later user-row change and
+        # not couple this table to a specific user store.
+        sa.Column("created_by_user_id", sa.String(36), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -148,12 +148,8 @@ def upgrade() -> None:
         # Snapshot of the name even if the detector is later hard-deleted.
         sa.Column("detector_name", sa.String(128), nullable=False),
         sa.Column("action", sa.String(32), nullable=False),
-        sa.Column(
-            "changed_by_user_id",
-            sa.String(36),
-            sa.ForeignKey("portal_users.id"),
-            nullable=False,
-        ),
+        # Admin actor — plain audit field, no FK (see custom_detectors above).
+        sa.Column("changed_by_user_id", sa.String(36), nullable=False),
         sa.Column(
             "changed_at",
             sa.DateTime(timezone=True),

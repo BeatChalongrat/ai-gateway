@@ -38,9 +38,8 @@ class DlpRuleAuditLogORM(Base):
     )
     detector_name: Mapped[str] = mapped_column(String(128), nullable=False)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
-    changed_by_user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("portal_users.id"), nullable=False
-    )
+    # Admin actor — plain audit field, no FK (decoupled from any user store).
+    changed_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

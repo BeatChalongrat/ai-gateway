@@ -862,6 +862,9 @@ app.include_router(admin_system_settings_router, prefix="/admin/system-settings"
 app.include_router(admin_token_packs_router, prefix="/admin/token-packs", tags=["admin-packs"])
 from app.api.routes.admin_search import router as admin_search_router  # noqa: E402
 app.include_router(admin_search_router, prefix="/admin", tags=["admin-search"])
+# Sprint 6: admin-configurable custom DLP detectors (/admin/dlp/custom-detectors)
+from app.api.routes.admin_dlp_detectors import router as admin_dlp_detectors_router  # noqa: E402
+app.include_router(admin_dlp_detectors_router, prefix="/admin")
 
 # Admin endpoints for the DB-backed model registry (status, sync,
 # list, override). Mounted at /admin/models; backed by
