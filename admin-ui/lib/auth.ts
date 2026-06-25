@@ -76,5 +76,5 @@ export const ROLE_NAV: Record<DemoRole, string[]> = {
   viewer: ["/", "/requests", "/usage", "/alerts/events"],
   project_admin: ["/", "/projects", "/api-keys", "/requests", "/usage", "/alerts/events"],
   tenant_admin: ["/", "/projects", "/api-keys", "/tenants", "/requests", "/usage", "/alerts/events"],
-  admin: ["/", "/providers", "/models", "/policies", "/routing", "/dlp-coverage", "/search-settings", "/tenants", "/projects", "/api-keys", "/portal-users", "/portal-settings", "/portal-token-packs", "/requests", "/usage", "/audit-log", "/alerts/events", "/ai-review", "/chat-analytics", "/chat-conversations", "/chat-users", "/chat-knowledge"],
+  admin: ["/", "/providers", "/models", "/policies", "/routing", "/dlp-coverage", "/dlp-detectors", "/search-settings", "/tenants", "/projects", "/api-keys", "/portal-users", "/portal-settings", "/portal-token-packs", "/requests", "/usage", "/audit-log", "/alerts/events", "/ai-review", "/chat-analytics", "/chat-conversations", "/chat-users", "/chat-knowledge"],
 };
