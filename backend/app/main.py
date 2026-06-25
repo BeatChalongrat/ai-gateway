@@ -169,6 +169,27 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(_initial_registry_reload)
     _start_model_discovery_scheduler()
 
+    # Sprint 6: admin-configurable custom DLP detectors. Build the initial
+    # snapshot, subscribe to the Redis reload channel, and install the
+    # process-wide provider so the detectors run alongside the built-ins.
+    # Best-effort: a failure here must not stop the gateway booting (custom
+    # detectors are additive; the 31 built-ins still run).
+    custom_detector_loader = None
+    try:
+        from app.core.db import get_async_session_factory
+        from app.services._redis_pool import get_async_redis
+        from app.services.dlp.custom_detector_loader import CustomDetectorLoader
+        from app.services.dlp.detectors.registry import set_global_custom_provider
+
+        custom_detector_loader = CustomDetectorLoader(
+            get_async_redis(), get_async_session_factory()
+        )
+        await custom_detector_loader.start()
+        set_global_custom_provider(custom_detector_loader.get_cached_detectors)
+        app.state.custom_detector_loader = custom_detector_loader
+    except Exception as exc:  # noqa: BLE001 — additive feature, never block boot
+        print(f"custom_detector_loader_start_skipped error={exc}", flush=True)
+
     # Phase-1 async request-log queue. Starts the background worker
     # that drains the queue every ~100ms or whenever a 50-record batch
     # is ready. Until this completes ``enqueue()`` falls back to a
@@ -223,6 +244,15 @@ async def lifespan(app: FastAPI):
     partition_task.cancel()
     generation_job_task.cancel()
     pool_task.cancel()
+    # Sprint 6: stop the custom-detector loader + clear the global provider.
+    try:
+        from app.services.dlp.detectors.registry import set_global_custom_provider
+
+        set_global_custom_provider(None)
+        if custom_detector_loader is not None:
+            await custom_detector_loader.stop()
+    except Exception:  # noqa: BLE001
+        pass
     executor.shutdown(wait=False)
 
 
