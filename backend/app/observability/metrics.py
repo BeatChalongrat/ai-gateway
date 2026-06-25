@@ -305,6 +305,29 @@ GEN_QUEUE_DEPTH = Gauge(
     registry=metrics_registry,
 )
 
+# --- Sprint 6: admin-configurable custom DLP detectors ---
+DLP_CUSTOM_DETECTOR_MATCH_TOTAL = Counter(
+    "dlp_custom_detector_match_total",
+    "Custom (admin-defined) DLP detector matches.",
+    labelnames=("detector_id", "category"),
+    registry=metrics_registry,
+)
+
+DLP_CUSTOM_DETECTOR_TIMEOUT_TOTAL = Counter(
+    "dlp_custom_detector_timeout_total",
+    "Custom DLP detector regex-timeout events.",
+    labelnames=("detector_id",),
+    registry=metrics_registry,
+)
+
+DLP_CUSTOM_DETECTOR_LATENCY_SECONDS = Histogram(
+    "dlp_custom_detector_latency_seconds",
+    "Custom DLP detector execution time.",
+    labelnames=("detector_id", "detection_type"),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5),
+    registry=metrics_registry,
+)
+
 
 # ---------------------------------------------------------------------------
 # Replicate cost-safety observability (Sprint 2B). The spend guards drive
