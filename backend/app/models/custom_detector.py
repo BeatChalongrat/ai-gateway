@@ -15,7 +15,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     String,
@@ -67,9 +66,8 @@ class CustomDetectorORM(Base):
     timeout_failures: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
-    created_by_user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("portal_users.id"), nullable=False
-    )
+    # Admin actor — plain audit field, no FK (decoupled from any user store).
+    created_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
