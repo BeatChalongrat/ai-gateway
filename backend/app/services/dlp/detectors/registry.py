@@ -18,8 +18,6 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from app.domain.dlp import DetectionMatch, DetectionResult
 from app.services.dlp.detectors.base import BaseDetector
-
-log = logging.getLogger(__name__)
 from app.services.dlp.language import detect_language
 from app.services.dlp.preprocessor import (
     NormalizedText,
@@ -27,8 +25,26 @@ from app.services.dlp.preprocessor import (
     normalize_for_scan,
 )
 
+log = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from app.schemas.common import Message
+
+
+# Sprint 6: process-wide provider of admin-defined custom detectors. Installed
+# once at startup (the loader passes its sync cache reader) and attached to
+# EVERY registry that get_default_registry builds — so custom detectors apply
+# whether the orchestrator (and its two registry singletons) is shared or
+# rebuilt per request. Default None → zero behaviour change.
+_global_custom_provider: "Optional[Callable[[], list[BaseDetector]]]" = None
+
+
+def set_global_custom_provider(
+    provider: "Optional[Callable[[], list[BaseDetector]]]",
+) -> None:
+    """Install (or clear) the process-wide custom-detector provider."""
+    global _global_custom_provider
+    _global_custom_provider = provider
 
 
 class DetectorRegistry:
@@ -399,6 +415,9 @@ def get_default_registry(
     for detector in all_detectors:
         if detector.name not in disabled_set:
             registry.register(detector)
+    # Attach the process-wide custom-detector provider (None until the loader
+    # installs it at startup) so admin-defined detectors run on this registry.
+    registry.set_custom_provider(_global_custom_provider)
     return registry
 
 
