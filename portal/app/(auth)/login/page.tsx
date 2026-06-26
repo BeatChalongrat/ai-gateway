@@ -92,6 +92,20 @@ function LoginFormSkeleton() {
     <div className="auth-form-card" aria-hidden="true">
       <div className="af-eyebrow">Sign in</div>
       <h1 className="af-title">Welcome back</h1>
+      <p className="af-desc">
+        Enter your credentials to access your SRAN dashboard.
+      </p>
+      <div className="af-form">
+        <div className="af-field">
+          <div className="af-skeleton af-skeleton-label skeleton" />
+          <div className="af-skeleton af-skeleton-input skeleton" />
+        </div>
+        <div className="af-field">
+          <div className="af-skeleton af-skeleton-label skeleton" />
+          <div className="af-skeleton af-skeleton-input skeleton" />
+        </div>
+        <div className="af-skeleton af-skeleton-button skeleton" />
+      </div>
     </div>
   );
 }
