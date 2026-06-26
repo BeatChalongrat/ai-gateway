@@ -7,7 +7,7 @@ import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Input } from "@/components/Input";
-import { PageSpinner } from "@/components/Spinner";
+import { HeroSkeleton } from "@/components/skeletons/HeroSkeleton";
 import { useToast } from "@/components/Toast";
 import { AvatarCropModal } from "./_crop/AvatarCropModal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -188,7 +188,14 @@ export default function SettingsPage() {
     });
   }
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <HeroSkeleton />
+        <HeroSkeleton />
+        <HeroSkeleton />
+      </div>
+    );
 
   const planLabel = user?.plan
     .replace(/_/g, " ")

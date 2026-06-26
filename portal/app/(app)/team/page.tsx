@@ -30,7 +30,7 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { PageSpinner } from "@/components/Spinner";
+import { TableSkeleton } from "@/components/skeletons/TableSkeleton";
 import { useToast } from "@/components/Toast";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate, relativeTime } from "@/lib/format";
@@ -149,7 +149,13 @@ export default function TeamPage() {
     return c;
   }, [members]);
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <div className="skeleton" style={{ height: 32, width: 200, borderRadius: 8 }} />
+        <TableSkeleton rows={6} />
+      </div>
+    );
   if (error) {
     return (
       <div className="space-y-6">
