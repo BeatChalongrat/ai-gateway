@@ -22,6 +22,12 @@ type InlineMsg = { type: "success" | "error"; text: string } | null;
 const PASSWORD_CHANGE_ENABLED =
   process.env.NEXT_PUBLIC_PASSWORD_CHANGE_ENABLED === "true";
 
+// Account deletion has no backend yet. Gate the Danger Zone behind an env
+// flag (default off → hidden) rather than showing a disabled destructive
+// button, which would imply the account can't be deleted at all.
+const ACCOUNT_DELETE_ENABLED =
+  process.env.NEXT_PUBLIC_ACCOUNT_DELETE_ENABLED === "true";
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const [user, setUser] = useState<PortalUser | null>(null);
@@ -643,7 +649,9 @@ export default function SettingsPage() {
         />
       </Card>
 
-      {/* Danger zone */}
+      {/* Danger zone — hidden until account deletion is wired (see
+          ACCOUNT_DELETE_ENABLED above). */}
+      {ACCOUNT_DELETE_ENABLED && (
       <section
         className="p-6"
         style={{
@@ -722,6 +730,7 @@ export default function SettingsPage() {
           </button>
         </div>
       </section>
+      )}
 
       <AvatarCropModal
         open={cropSource !== null}
