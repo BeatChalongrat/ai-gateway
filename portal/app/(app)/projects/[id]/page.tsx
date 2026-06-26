@@ -86,6 +86,7 @@ export default function ProjectDetailPage() {
   const [rotateTarget, setRotateTarget] = useState<ApiKey | null>(null);
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -165,12 +166,13 @@ export default function ProjectDetailPage() {
   async function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       await api.delete(`/portal/projects/${projectId}/keys/${deleteTarget.key_id}`);
       setDeleteTarget(null);
       load();
     } catch (err) {
-      alert(err instanceof PortalApiError ? err.message : "Failed to revoke key.");
+      setDeleteError(err instanceof PortalApiError ? err.message : "Failed to revoke key.");
     } finally {
       setDeleting(false);
     }
@@ -527,13 +529,21 @@ export default function ProjectDetailPage() {
       {/* Revoke confirmation */}
       <Modal
         open={!!deleteTarget}
-        onClose={() => !deleting && setDeleteTarget(null)}
+        onClose={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
         title="Revoke this key?"
         footer={
           <>
             <Button
               variant="secondary"
-              onClick={() => setDeleteTarget(null)}
+              onClick={() => {
+                setDeleteTarget(null);
+                setDeleteError(null);
+              }}
               disabled={deleting}
             >
               Cancel
@@ -544,13 +554,29 @@ export default function ProjectDetailPage() {
           </>
         }
       >
-        <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-          Revoke{" "}
-          <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-            {deleteTarget?.name}
-          </span>
-          ? Any request using this key will immediately fail authentication.
-        </p>
+        <div className="space-y-3">
+          {deleteError ? (
+            <div
+              style={{
+                background: "rgba(220,38,38,0.08)",
+                border: "1px solid rgba(220,38,38,0.25)",
+                color: "var(--accent-danger)",
+                fontSize: 13,
+                padding: "8px 12px",
+                borderRadius: 8,
+              }}
+            >
+              {deleteError}
+            </div>
+          ) : null}
+          <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+            Revoke{" "}
+            <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+              {deleteTarget?.name}
+            </span>
+            ? Any request using this key will immediately fail authentication.
+          </p>
+        </div>
       </Modal>
 
       {/* Rotate confirmation */}

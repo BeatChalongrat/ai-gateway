@@ -10,6 +10,7 @@ import { Input } from "@/components/Input";
 import { PageSpinner } from "@/components/Spinner";
 import { useToast } from "@/components/Toast";
 import { AvatarCropModal } from "./_crop/AvatarCropModal";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { PortalUser } from "@/lib/types";
@@ -44,6 +45,7 @@ export default function SettingsPage() {
   const [avatarMsg, setAvatarMsg] = useState<InlineMsg>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cropSource, setCropSource] = useState<string | null>(null);
+  const [removeAvatarOpen, setRemoveAvatarOpen] = useState(false);
 
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -152,9 +154,12 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleAvatarRemove() {
+  function handleAvatarRemove() {
     if (!user?.avatar_url) return;
-    if (!confirm("Remove your profile picture?")) return;
+    setRemoveAvatarOpen(true);
+  }
+
+  async function confirmAvatarRemove() {
     setUploadingAvatar(true);
     setAvatarMsg(null);
     try {
@@ -170,6 +175,7 @@ export default function SettingsPage() {
       toast(msg, "error");
     } finally {
       setUploadingAvatar(false);
+      setRemoveAvatarOpen(false);
     }
   }
 
@@ -737,6 +743,16 @@ export default function SettingsPage() {
         imageSrc={cropSource}
         onCancel={() => setCropSource(null)}
         onConfirm={handleCropConfirm}
+      />
+
+      <ConfirmDialog
+        open={removeAvatarOpen}
+        onClose={() => !uploadingAvatar && setRemoveAvatarOpen(false)}
+        onConfirm={confirmAvatarRemove}
+        title="Remove profile picture?"
+        message="Your avatar will be removed and replaced with your initials."
+        confirmLabel="Remove"
+        loading={uploadingAvatar}
       />
     </div>
   );
