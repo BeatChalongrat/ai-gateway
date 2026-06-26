@@ -267,8 +267,8 @@ export default function ProjectDetailPage() {
 
       {/* Stats row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatTile Icon={Hash} label="Total Requests" value={stats.requests.toLocaleString()} />
-        <StatTile Icon={Zap} label="Tokens Used" value={formatTokens(stats.tokens)} />
+        <StatTile Icon={Hash} label="Total Requests" value={stats.requests.toLocaleString()} hint="Across all your projects" />
+        <StatTile Icon={Zap} label="Tokens Used" value={formatTokens(stats.tokens)} hint="Across all your projects" />
         <StatTile Icon={Key} label="API Keys" value={keys.length.toString()} />
       </div>
 
@@ -654,10 +654,12 @@ function StatTile({
   Icon,
   label,
   value,
+  hint,
 }: {
   Icon: typeof Zap;
   label: string;
   value: string;
+  hint?: string;
 }) {
   return (
     <Card padding="md">
@@ -693,6 +695,14 @@ function StatTile({
       >
         {value}
       </p>
+      {hint ? (
+        <p
+          title="Per-project breakdown coming soon"
+          style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}
+        >
+          {hint}
+        </p>
+      ) : null}
     </Card>
   );
 }
