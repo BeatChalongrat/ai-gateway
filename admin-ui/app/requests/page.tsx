@@ -77,7 +77,21 @@ const CSS = `
 .rq-detail-in{animation:rqSlideIn 0.25s ease-out both}
 .rq-row{transition:background 80ms}
 .rq-row:hover{background:rgba(59,108,246,0.04)}
-@media(max-width:1100px){.rq-detail-panel{display:none!important}.rq-split{grid-template-columns:1fr!important}}
+/* Detail panel positioning lives here (not inline) so the narrow-screen
+   media query can override it into a bottom sheet. */
+.rq-detail-panel{position:sticky;top:20px;align-self:start;max-height:calc(100vh - 60px);overflow-y:auto;border-radius:14px}
+.rq-sheet-close{display:none}
+.rq-sheet-backdrop{display:none}
+@keyframes rqSheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@media(max-width:1100px){
+  .rq-split{grid-template-columns:1fr!important}
+  /* Unselected: keep the placeholder panel out of the way on narrow. */
+  .rq-detail-panel{display:none!important}
+  /* Selected: slide up as a bottom sheet instead of vanishing. */
+  .rq-detail-panel.rq-detail-open{display:block!important;position:fixed!important;left:0;right:0;bottom:0;top:auto!important;max-height:85vh;border-radius:16px 16px 0 0;z-index:60;animation:rqSheetUp 0.25s ease-out}
+  .rq-detail-open .rq-sheet-close{display:inline-flex}
+  .rq-sheet-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:55}
+}
 `;
 
 /* ── Sparkline ────────────────────────────────────────────────────── */
@@ -552,8 +566,16 @@ export default function RequestsPage() {
             </div>
           </div>
 
-          {/* Right: detail sidebar */}
-          <div className="rq-detail-panel" style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: 24, position: "sticky", top: 20, alignSelf: "start", maxHeight: "calc(100vh - 60px)", overflowY: "auto" }}>
+          {/* Right: detail panel — sticky sidebar on desktop; below 1100px it
+              becomes a bottom sheet (with backdrop) so row selection stays
+              usable instead of doing nothing. */}
+          {selected && (
+            <div className="rq-sheet-backdrop" onClick={() => setSelected(null)} aria-hidden="true" />
+          )}
+          <div className={`rq-detail-panel${selected ? " rq-detail-open" : ""}`} style={{ background: T.card, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: 24 }}>
+            <button className="rq-sheet-close" onClick={() => setSelected(null)} aria-label="Close details" style={{ position: "absolute", top: 12, right: 12, background: "none", border: "none", cursor: "pointer", color: T.tt, padding: 4 }}>
+              <Icon name="x" size={18} />
+            </button>
             {!selected ? (
               <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>Select a request to view details</div>
             ) : detailLoading ? (
