@@ -110,12 +110,9 @@ export default function SignupForm({
         <div className="sv-form-header anim d1">
           {inviteContext ? (
             <>
-              <div
-                className="sv-form-eyebrow"
-                style={{ color: "#A5B4FC" }}
-              >
-                Team invite
-              </div>
+              {/* Default white-on-gradient pill — a custom light-lavender
+                  override read low-contrast on the violet→cyan background. */}
+              <div className="sv-form-eyebrow">Team invite</div>
               <h1>Join {inviteContext.tenantName}</h1>
               <p>
                 {inviteContext.inviterName
