@@ -476,7 +476,20 @@ function DetectorsTab() {
                   </td>
                   <td><CatPill category={det.category} /></td>
                   <td><SevBadge severity={det.severity} /></td>
-                  <td style={{ textAlign: "center" }}><Toggle checked={det.enabled} disabled={dis} /></td>
+                  <td style={{ textAlign: "center" }}>
+                    {/* Built-in detector availability is set via server config
+                        (settings.dlp_disabled_detectors / DLP_DISABLED_DETECTORS),
+                        not editable per-detector here. Render a read-only status
+                        indicator instead of an interactive switch so the control
+                        doesn't imply it can be toggled from the UI. */}
+                    <span
+                      title="Set via server configuration (DLP_DISABLED_DETECTORS) — not editable here."
+                      style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: det.enabled ? "var(--accent-success)" : C.textTertiary }}
+                    >
+                      <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: det.enabled ? "var(--accent-success)" : C.textTertiary }} />
+                      {det.enabled ? "Enabled" : "Disabled"}
+                    </span>
+                  </td>
                   <td><span title={dis ? "Enable NER stage to configure" : undefined} style={{ display: "inline-block" }}><ActionSel value={actionFor(det)} onChange={(a) => onAction(det.category, a)} disabled={dis} /></span></td>
                   <td style={{ textAlign: "center" }}><SaveDot state={saveState[det.category] ?? "idle"} /></td>
                 </tr>
