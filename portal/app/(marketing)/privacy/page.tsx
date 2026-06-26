@@ -12,15 +12,30 @@ export default function PrivacyPage() {
     <PageShell
       eyebrow="Legal"
       title="Privacy Policy"
-      subtitle="Last updated: April 2026"
+      subtitle="What SRAN collects, why we collect it, and the controls you have over your data."
     >
+      <p className="legal-updated">Last updated: April 2026</p>
+
+      <nav className="legal-toc" aria-label="On this page">
+        <p className="legal-toc-title">On this page</p>
+        <ul>
+          <li><a href="#what-we-collect">What we collect</a></li>
+          <li><a href="#how-we-use-data">How we use data</a></li>
+          <li><a href="#who-we-share-data-with">Who we share data with</a></li>
+          <li><a href="#your-rights">Your rights</a></li>
+          <li><a href="#data-location">Data location</a></li>
+          <li><a href="#changes-to-this-policy">Changes to this policy</a></li>
+          <li><a href="#contact">Contact</a></li>
+        </ul>
+      </nav>
+
       <p>
         This policy explains what SRAN collects, why we collect it, and what we
         do with it. We wrote this in plain language because you should actually
         be able to read it.
       </p>
 
-      <h2>What we collect</h2>
+      <h2 id="what-we-collect">What we collect</h2>
       <h3>Account information</h3>
       <p>
         When you sign up, we collect your email address, a password hash, and
@@ -47,7 +62,7 @@ export default function PrivacyPage() {
         doesn&apos;t set cookies or collect personal data.
       </p>
 
-      <h2>How we use data</h2>
+      <h2 id="how-we-use-data">How we use data</h2>
       <ul>
         <li>
           To operate SRAN — routing your requests, enforcing policies, billing
@@ -69,7 +84,7 @@ export default function PrivacyPage() {
         your data with advertisers.
       </p>
 
-      <h2>Who we share data with</h2>
+      <h2 id="who-we-share-data-with">Who we share data with</h2>
       <ul>
         <li>
           <strong>Model providers</strong> — we forward your requests to the
@@ -90,7 +105,7 @@ export default function PrivacyPage() {
         </li>
       </ul>
 
-      <h2>Your rights</h2>
+      <h2 id="your-rights">Your rights</h2>
       <p>You can:</p>
       <ul>
         <li>Export all your data from the dashboard</li>
@@ -105,20 +120,20 @@ export default function PrivacyPage() {
         </li>
       </ul>
 
-      <h2>Data location</h2>
+      <h2 id="data-location">Data location</h2>
       <p>
         Our primary infrastructure is in US-East. EU customers can request
         EU-region pinning on Pro and Enterprise plans.
       </p>
 
-      <h2>Changes to this policy</h2>
+      <h2 id="changes-to-this-policy">Changes to this policy</h2>
       <p>
         When we change this policy materially, we&apos;ll email account holders
         at least 30 days before the change takes effect. Minor clarifications
         will be noted with a revised date at the top of this page.
       </p>
 
-      <h2>Contact</h2>
+      <h2 id="contact">Contact</h2>
       <p>
         Privacy questions:{" "}
         <a href="mailto:privacy@sran.ai">privacy@sran.ai</a>
