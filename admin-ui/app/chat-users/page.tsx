@@ -7,6 +7,7 @@ import Pagination from "../../components/ui/Pagination";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
+import { useToast } from "../../components/ui/Toast";
 import {
   AdminUserListResponse,
   AdminUserRow,
@@ -41,6 +42,7 @@ export default function ChatUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,8 +81,9 @@ export default function ChatUsersPage() {
             }
           : prev,
       );
-    } catch {
-      // best-effort; refetch to recover from any drift
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update user", "error");
+      // refetch to recover from any drift
       void load();
     } finally {
       setPendingId(null);
