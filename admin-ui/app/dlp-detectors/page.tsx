@@ -7,6 +7,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
 import Modal from "../../components/ui/Modal";
+import EmptyState from "../../components/ui/EmptyState";
+import { SkeletonTable } from "../../components/ui/Skeleton";
+import { Icon } from "../../components/ui/Icon";
 import CustomDetectorForm, { DetectorInitial } from "../../components/dlp/CustomDetectorForm";
 import AuditLogTimeline, { AuditEntry } from "../../components/dlp/AuditLogTimeline";
 
@@ -28,8 +31,12 @@ interface Detector {
 }
 
 const STATUS_TABS = ["all", "active", "testing", "draft", "disabled"];
-const STATUS_COLOR: Record<string, string> = {
-  active: "#059669", testing: "#b45309", draft: "#6b7280", disabled: "#dc2626",
+// Map lifecycle status → shared design-system badge variant (theme-aware).
+const STATUS_BADGE: Record<string, string> = {
+  active: "sran-badge-success",
+  testing: "sran-badge-warning",
+  draft: "sran-badge-neutral",
+  disabled: "sran-badge-error",
 };
 
 export default function DlpDetectorsPage() {
@@ -149,11 +156,21 @@ export default function DlpDetectorsPage() {
       <div style={{ display: "flex", gap: 20 }}>
         {/* list */}
         <div style={{ flex: 1 }}>
-          {error && <div style={{ color: "#dc2626", fontSize: 13 }}>{error}</div>}
+          {error && <div style={{ color: "var(--color-status-error)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
           {loading ? (
-            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading…</div>
+            <SkeletonTable rows={6} cols={6} />
           ) : rows.length === 0 ? (
-            <div style={{ color: "var(--text-muted)", fontSize: 13, padding: 20 }}>No detectors.</div>
+            <EmptyState
+              icon={<Icon name="shield" size={22} />}
+              message={tab === "all" ? "No custom detectors yet" : `No ${tab} detectors`}
+              action={
+                tab === "all" ? (
+                  <button style={primaryBtn} onClick={() => { setCreating(true); setSelected(null); }}>
+                    Create a detector
+                  </button>
+                ) : undefined
+              }
+            />
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
@@ -170,7 +187,7 @@ export default function DlpDetectorsPage() {
                     <td style={td}>{d.category}</td>
                     <td style={td}>{d.detection_type}</td>
                     <td style={td}>
-                      <span style={{ color: STATUS_COLOR[d.status] ?? "var(--text-secondary)", fontWeight: 700 }}>
+                      <span className={`sran-badge ${STATUS_BADGE[d.status] ?? "sran-badge-neutral"}`}>
                         {d.status}
                       </span>
                     </td>
@@ -187,7 +204,7 @@ export default function DlpDetectorsPage() {
                         {d.status !== "disabled" && (
                           <button style={miniBtn} onClick={() => transition(d, "disable")}>Disable</button>
                         )}
-                        <button style={{ ...miniBtn, color: "#dc2626" }} onClick={() => remove(d)}>Delete</button>
+                        <button style={dangerBtn} onClick={() => remove(d)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -302,4 +319,9 @@ const primaryBtn: React.CSSProperties = {
 const miniBtn: React.CSSProperties = {
   padding: "4px 10px", fontSize: 12, fontWeight: 600, borderRadius: 5, cursor: "pointer",
   border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)",
+};
+const dangerBtn: React.CSSProperties = {
+  padding: "4px 10px", fontSize: 12, fontWeight: 600, borderRadius: 5, cursor: "pointer",
+  border: "1px solid var(--color-status-error)", background: "var(--color-status-error-bg)",
+  color: "var(--color-status-error)", marginLeft: 4,
 };
