@@ -572,6 +572,9 @@ export default function ModelsPage() {
                       }}
                         onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.boxShadow = "none"; }}
+                        // Keyboard-focus parity with the mouse hover lift (mirrors providers).
+                        onFocus={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.boxShadow = "none"; }}
                       >
                         {/* Header */}
                         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
