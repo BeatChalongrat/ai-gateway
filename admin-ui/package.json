@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint": "next lint"
   },
   "dependencies": {
     "next": "14.2.15",
@@ -17,7 +18,11 @@
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "25.5.2",
     "@types/react": "19.2.14",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "autoprefixer": "^10.4.27",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.15",
     "postcss": "^8.5.9",
     "tailwindcss": "^4.2.2",
     "typescript": "6.0.2"
