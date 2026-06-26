@@ -122,11 +122,9 @@ export default function SearchSettingsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({ provider: "tavily", api_key: "", display_name: "", max_results: "5" });
   const [adding, setAdding] = useState(false);
-  const [addTestResult, setAddTestResult] = useState<string | null>(null);
 
   function openAdd() {
     setAddForm({ provider: "tavily", api_key: "", display_name: "", max_results: "5" });
-    setAddTestResult(null);
     setShowAdd(true);
   }
   async function submitAdd() {
@@ -382,7 +380,7 @@ export default function SearchSettingsPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <label className="sran-label">Provider</label>
-            <select className="sran-input" value={addForm.provider} onChange={(e) => { setAddForm({ ...addForm, provider: e.target.value }); setAddTestResult(null); }}>
+            <select className="sran-input" value={addForm.provider} onChange={(e) => setAddForm({ ...addForm, provider: e.target.value })}>
               {PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABEL[p]}</option>)}
             </select>
             <div style={{ fontSize: 12, color: T.tt, marginTop: 6 }}>{PROVIDER_HINT[addForm.provider]}</div>
@@ -399,7 +397,6 @@ export default function SearchSettingsPage() {
             <label className="sran-label">Max results (1–10)</label>
             <input className="sran-input" type="number" min={1} max={10} value={addForm.max_results} onChange={(e) => setAddForm({ ...addForm, max_results: e.target.value })} style={{ width: 90 }} />
           </div>
-          {addTestResult ? <div style={{ fontSize: 13, color: T.ts }}>{addTestResult}</div> : null}
         </div>
       </Modal>
 
