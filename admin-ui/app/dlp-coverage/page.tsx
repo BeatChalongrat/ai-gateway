@@ -219,7 +219,7 @@ export default function DlpCoveragePage() {
                 padding: "8px 14px", borderRadius: 10, cursor: "default",
                 transition: "background 100ms", textAlign: "center", minWidth: 70,
               }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "#f3f4f6"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
                 <Pill text={cat} color={cs.color} bg={cs.bg} />
@@ -291,7 +291,7 @@ export default function DlpCoveragePage() {
               onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.04)"; }}
             >
               {/* Header */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid #f3f4f6" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid var(--border-default)" }}>
                 <Pill text={cat} color={cs.color} bg={cs.bg} />
                 <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>{info.count} detector{info.count !== 1 ? "s" : ""}</span>
               </div>
@@ -307,7 +307,7 @@ export default function DlpCoveragePage() {
                     animationDelay: `${0.3 + ci * 0.05 + ri * 0.02}s`,
                     display: "flex", alignItems: "center", justifyContent: "space-between",
                     padding: "12px 20px",
-                    borderBottom: ri < info.detectors.length - 1 ? "1px solid #f8f9fa" : "none",
+                    borderBottom: ri < info.detectors.length - 1 ? "1px solid var(--border-subtle)" : "none",
                     transition: "background 80ms",
                     opacity: isDisabled ? 0.55 : 1,
                   }}
