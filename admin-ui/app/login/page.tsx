@@ -76,6 +76,15 @@ export default function LoginPage() {
       position: "relative",
       overflow: "hidden",
     }}>
+      {/* Keyboard-focus ring on the inputs (the inline onFocus only swaps the
+          border colour; this adds a visible focus-visible outline). */}
+      <style>{`
+        .login-input:focus-visible {
+          outline: 2px solid var(--accent-primary);
+          outline-offset: 2px;
+        }
+      `}</style>
+
       {/* Grid pattern */}
       <div style={{
         position: "absolute", inset: 0, opacity: 0.03,
@@ -131,6 +140,9 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="admin or you@example.com"
                 autoComplete="username"
+                required
+                aria-invalid={error ? true : undefined}
+                className="login-input"
                 style={inputStyle}
                 onFocus={(e) => { e.target.style.borderColor = "rgba(100,160,255,0.5)"; }}
                 onBlur={(e) => { e.target.style.borderColor = "rgba(100,140,220,0.2)"; }}
@@ -145,6 +157,9 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password"
                 autoComplete="current-password"
+                required
+                aria-invalid={error ? true : undefined}
+                className="login-input"
                 style={inputStyle}
                 onFocus={(e) => { e.target.style.borderColor = "rgba(100,160,255,0.5)"; }}
                 onBlur={(e) => { e.target.style.borderColor = "rgba(100,140,220,0.2)"; }}
@@ -171,7 +186,7 @@ export default function LoginPage() {
               style={{
                 width: "100%",
                 padding: "0.7rem",
-                background: loading ? "rgba(60,100,200,0.4)" : "linear-gradient(135deg, #2d5bc4 0%, #1e3d8f 100%)",
+                background: loading ? "rgba(60,100,200,0.4)" : "var(--color-sran-700)",
                 border: "1px solid rgba(100,150,255,0.3)",
                 borderRadius: "7px",
                 color: "#ffffff",
