@@ -11,9 +11,13 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, Suspense, useMemo, useState } from "react";
 
 import { api, PortalApiError } from "@/lib/api";
+// Brand styles (.auth-root, .auth-form-card, .af-*) live in login.css. This
+// page is always entered cold via an email link, so without the import it
+// renders unstyled.
+import "../login/login.css";
 
 // useSearchParams() requires a Suspense boundary so Next can prerender
 // the static shell without bailing the whole route during build.
@@ -79,7 +83,7 @@ function ResetPasswordInner() {
   }
 
   return (
-    <>
+    <div className="auth-root" style={authShellStyle}>
       <Link href="/login" className="auth-back-home">
         <span aria-hidden="true">←</span> Back to sign in
       </Link>
@@ -160,6 +164,17 @@ function ResetPasswordInner() {
           </button>
         </form>
       </div>
-    </>
+    </div>
   );
 }
+
+// Centered single-card shell (no split visual panel on this page, so
+// .auth-root alone doesn't center the .auth-form-card).
+const authShellStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "100vh",
+  padding: 24,
+};
