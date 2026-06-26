@@ -33,12 +33,13 @@ const PROVIDER_HINT: Record<string, string> = {
 
 // health_status → dot color + label
 function healthStyle(status: string, enabled: boolean): { color: string; label: string } {
-  if (!enabled) return { color: "#888780", label: "Disabled" };
+  // Status palette via semantic tokens (theme-correct in dark + light).
+  if (!enabled) return { color: "var(--text-muted)", label: "Disabled" };
   switch (status) {
-    case "healthy": return { color: "#5DCAA5", label: "Healthy" };
-    case "degraded": return { color: "#EF9F27", label: "Degraded" };
-    case "down": return { color: "#E24B4A", label: "Down" };
-    default: return { color: "#888780", label: "Not checked" };
+    case "healthy": return { color: "var(--color-status-success)", label: "Healthy" };
+    case "degraded": return { color: "var(--color-status-warning)", label: "Degraded" };
+    case "down": return { color: "var(--color-status-error)", label: "Down" };
+    default: return { color: "var(--text-muted)", label: "Not checked" };
   }
 }
 
