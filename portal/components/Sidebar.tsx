@@ -13,6 +13,7 @@ import {
   Settings,
   TrendingUp,
   Users,
+  X,
 } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
@@ -293,9 +294,9 @@ export function Sidebar() {
               <button
                 aria-label="Close menu"
                 onClick={() => setMobileOpen(false)}
-                className="text-white text-xl leading-none px-2"
+                className="text-white leading-none px-2"
               >
-                ×
+                <X size={20} />
               </button>
             </div>
             {sidebarBody}

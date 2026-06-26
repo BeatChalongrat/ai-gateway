@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { FormEvent, useState } from "react";
+import { ArrowRight } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
 import type { AuthResponse } from "@/lib/types";
@@ -174,7 +175,7 @@ export default function LoginForm() {
 
           <button type="submit" className="af-submit" disabled={loading}>
             {loading ? "Signing in…" : "Sign in"}
-            {!loading ? <span className="arrow" aria-hidden="true">→</span> : null}
+            {!loading ? <span className="arrow" aria-hidden="true"><ArrowRight size={16} /></span> : null}
           </button>
         </form>
 

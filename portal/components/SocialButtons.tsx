@@ -1,6 +1,6 @@
 "use client";
 
-import { Github } from "lucide-react";
+import { Github, Sparkles } from "lucide-react";
 import { signIn } from "next-auth/react";
 
 // Env-gated: when NEXT_PUBLIC_OAUTH_ENABLED !== "true" we render a
@@ -18,8 +18,9 @@ const CALLBACK = "/oauth-complete";
 export function SocialButtons() {
   if (!enabled) {
     return (
-      <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-sm text-gray-600 text-center">
-        💡 Social login coming soon. Sign up with email for now.
+      <div className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-sm text-gray-600 text-center">
+        <Sparkles size={14} className="shrink-0" />
+        Social login coming soon. Sign up with email for now.
       </div>
     );
   }

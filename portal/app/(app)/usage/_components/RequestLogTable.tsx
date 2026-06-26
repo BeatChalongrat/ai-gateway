@@ -1,4 +1,4 @@
-import { Activity } from "lucide-react";
+import { Activity, ArrowRight } from "lucide-react";
 
 import EmptyState from "../../_components/EmptyState";
 
@@ -78,7 +78,14 @@ export default function RequestLogTable({ rows }: Props) {
           icon={<Activity className="w-7 h-7" strokeWidth={1.5} />}
           title="No requests in this period"
           description="Once you send requests with your API keys, they'll appear here with token counts and latency."
-          action={{ label: "View API Keys →", href: "/projects" }}
+          action={{
+            label: (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                View API Keys <ArrowRight size={14} />
+              </span>
+            ),
+            href: "/projects",
+          }}
         />
       </div>
     );

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowRight,
   FolderOpen,
   Key,
   MoreVertical,
@@ -191,7 +192,7 @@ export default function ProjectCard({
       <Link
         href={`/projects/${project.id}`}
         onClick={(e) => e.stopPropagation()}
-        className="btn-premium mt-2 inline-flex items-center justify-center w-full py-2 px-4 rounded-lg"
+        className="btn-premium mt-2 inline-flex items-center justify-center gap-1.5 w-full py-2 px-4 rounded-lg"
         style={{
           background: "var(--bg-sidebar)",
           color: "#FFFFFF",
@@ -200,7 +201,7 @@ export default function ProjectCard({
           textDecoration: "none",
         }}
       >
-        Open project →
+        Open project <ArrowRight size={14} />
       </Link>
     </div>
   );

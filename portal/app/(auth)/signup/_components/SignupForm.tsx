@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
+import { ArrowRight } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
 import type { AuthResponse } from "@/lib/types";
@@ -274,7 +275,7 @@ export default function SignupForm({
 
           <button type="submit" className="sv-submit" disabled={loading}>
             {loading ? "Creating account…" : "Create account"}
-            {!loading ? <span className="sv-arrow" aria-hidden="true">→</span> : null}
+            {!loading ? <span className="sv-arrow" aria-hidden="true"><ArrowRight size={16} /></span> : null}
           </button>
         </form>
 

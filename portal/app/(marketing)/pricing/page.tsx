@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Check } from "lucide-react";
 
 import PageShell from "../_components/PageShell";
 
@@ -31,9 +32,9 @@ export default function PricingPage() {
                 <span className="pricing-price-num">10</span>
               </div>
               <ul className="pricing-features">
-                <li>All models</li>
-                <li>No expiry</li>
-                <li>Email support</li>
+                <li><Check size={16} /> All models</li>
+                <li><Check size={16} /> No expiry</li>
+                <li><Check size={16} /> Email support</li>
               </ul>
               <a href="/signup" className="pricing-cta secondary">Get started</a>
             </article>
@@ -50,9 +51,9 @@ export default function PricingPage() {
                 <span className="pricing-price-num">40</span>
               </div>
               <ul className="pricing-features">
-                <li>All models</li>
-                <li>No expiry</li>
-                <li>Priority support</li>
+                <li><Check size={16} /> All models</li>
+                <li><Check size={16} /> No expiry</li>
+                <li><Check size={16} /> Priority support</li>
               </ul>
               <a href="/signup" className="pricing-cta primary">Get started</a>
             </article>
@@ -69,9 +70,9 @@ export default function PricingPage() {
                 <span className="pricing-price-num">120</span>
               </div>
               <ul className="pricing-features">
-                <li>All models</li>
-                <li>No expiry</li>
-                <li>Dedicated support</li>
+                <li><Check size={16} /> All models</li>
+                <li><Check size={16} /> No expiry</li>
+                <li><Check size={16} /> Dedicated support</li>
               </ul>
               <a href="/signup" className="pricing-cta secondary">Get started</a>
             </article>

@@ -175,10 +175,13 @@ export default function DashboardPage() {
               color: "inherit",
               cursor: "pointer",
               fontSize: 13,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
             }}
             type="button"
           >
-            View plans →
+            View plans <ArrowRight size={14} />
           </button>
         </div>
       ) : null}
@@ -444,9 +447,12 @@ function CreditHero({
                 color: "rgba(255,255,255,0.7)",
                 textDecoration: "none",
                 whiteSpace: "nowrap",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
               }}
             >
-              View transactions →
+              View transactions <ArrowRight size={14} />
             </Link>
             <Link
               href="/billing"

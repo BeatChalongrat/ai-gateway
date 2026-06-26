@@ -12,6 +12,7 @@
 
 import Link from "next/link";
 import { CSSProperties, FormEvent, useState } from "react";
+import { ArrowRight } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
 // Brand styles (.auth-root, .auth-form-card, .af-*) live in login.css.
@@ -114,7 +115,7 @@ export default function ForgotPasswordPage() {
             {loading ? "Sending…" : "Send reset link"}
             {!loading ? (
               <span className="arrow" aria-hidden="true">
-                →
+                <ArrowRight size={16} />
               </span>
             ) : null}
           </button>

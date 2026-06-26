@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 type Variant = "primary" | "secondary";
 
 type ActionProp = {
-  label: string;
+  label: ReactNode;
   href?: string;
   onClick?: () => void;
   variant?: Variant;

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight, Sparkles } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Sparkles } from "lucide-react";
 
 interface Props {
   balance: number;
@@ -184,9 +184,9 @@ export function CreditBar({
             {viewTransactionsHref ? (
               <Link
                 href={viewTransactionsHref}
-                className="text-xs text-white/70 hover:text-white transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-1 text-xs text-white/70 hover:text-white transition-colors whitespace-nowrap"
               >
-                View transactions →
+                View transactions <ArrowRight className="w-3 h-3" />
               </Link>
             ) : null}
             {onUpgrade ? (

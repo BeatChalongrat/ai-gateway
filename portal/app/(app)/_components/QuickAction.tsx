@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { ArrowRight } from "lucide-react";
 
 type Props = {
   icon: ReactNode;
@@ -40,10 +41,10 @@ export default function QuickAction({ icon, title, description, href }: Props) {
         >
           {title}
           <span
-            className="transition-transform group-hover:translate-x-0.5"
+            className="inline-flex transition-transform group-hover:translate-x-0.5"
             style={{ color: "var(--accent-primary)" }}
           >
-            →
+            <ArrowRight size={14} />
           </span>
         </div>
         <div
