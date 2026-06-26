@@ -37,6 +37,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState<PortalUser | null>(null);
   const [projectCount, setProjectCount] = useState(0);
   const [keyCount, setKeyCount] = useState(0);
+  const [keyCountPartial, setKeyCountPartial] = useState(false);
   const [recent, setRecent] = useState<UsageRequest[]>([]);
   const [totalRequests, setTotalRequests] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -54,16 +55,19 @@ export default function DashboardPage() {
         if (!alive) return;
         setUser(me);
         setProjectCount(projs.projects.length);
-        const counts = await Promise.all(
+        // allSettled (not all+catch→0) so a failed per-project /keys call is
+        // recorded as partial data, not silently counted as zero keys.
+        const keyResults = await Promise.allSettled(
           projs.projects.map((p) =>
             api
               .get<{ keys: { key_id: string }[] }>(`/portal/projects/${p.id}/keys`)
               .then((r) => r.keys.length)
-              .catch(() => 0)
           )
         );
         if (!alive) return;
+        const counts = keyResults.map((r) => (r.status === "fulfilled" ? r.value : 0));
         setKeyCount(counts.reduce((a, b) => a + b, 0));
+        setKeyCountPartial(keyResults.some((r) => r.status === "rejected"));
         setRecent(usage.requests || []);
         setTotalRequests(usage.total ?? 0);
       } catch (err) {
@@ -186,6 +190,7 @@ export default function DashboardPage() {
         used={used}
         projectCount={projectCount}
         keyCount={keyCount}
+        keyCountPartial={keyCountPartial}
       />
 
       <RecentActivitySection recent={recent} totalRequests={totalRequests} />
@@ -679,10 +684,12 @@ function StatsGrid({
   used,
   projectCount,
   keyCount,
+  keyCountPartial,
 }: {
   used: number;
   projectCount: number;
   keyCount: number;
+  keyCountPartial: boolean;
 }) {
   return (
     <div
@@ -710,8 +717,8 @@ function StatsGrid({
       <StatPanel
         rgb="245,158,11"
         label="API Keys"
-        value={keyCount.toString()}
-        caption="Across all projects"
+        value={keyCountPartial ? `${keyCount}+` : keyCount.toString()}
+        caption={keyCountPartial ? "Some counts unavailable" : "Across all projects"}
         icon={<Key size={12} strokeWidth={2} />}
         href="/projects"
       />
