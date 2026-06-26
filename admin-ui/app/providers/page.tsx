@@ -393,6 +393,18 @@ function ProviderCard({
         e.currentTarget.style.boxShadow = "0 1px 2px rgba(15, 31, 56, 0.04)";
         e.currentTarget.style.transform = "translateY(0)";
       }}
+      // Keyboard-focus parity: mirror the hover lift so tabbing to the card
+      // gets the same affordance as a mouse hover.
+      onFocus={(e) => {
+        e.currentTarget.style.borderColor = "var(--color-border-strong)";
+        e.currentTarget.style.boxShadow = "0 4px 10px -2px rgba(15, 31, 56, 0.08)";
+        e.currentTarget.style.transform = "translateY(-1px)";
+      }}
+      onBlur={(e) => {
+        if (!isExpanded) e.currentTarget.style.borderColor = "var(--color-border-default)";
+        e.currentTarget.style.boxShadow = "0 1px 2px rgba(15, 31, 56, 0.04)";
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
     >
       {/* Row 1: logo + name + status dot + NEW badge */}
       <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
@@ -459,7 +471,15 @@ function ProviderCard({
 
       {/* Row 2: key status badge + model count */}
       <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", flexWrap: "wrap" }}>
-        {totalKeys > 0 ? (
+        {keyStatus === undefined && totalKeys === 0 ? (
+          // Key/status resolves asynchronously after the card mounts — show a
+          // badge-sized skeleton instead of flashing a premature "no key".
+          <span
+            className="sran-skeleton"
+            aria-hidden
+            style={{ width: 64, height: 18, borderRadius: 999 }}
+          />
+        ) : totalKeys > 0 ? (
           <Badge variant={validKeys > 0 ? "success" : "warning"}>
             {validKeys}/{totalKeys} keys
           </Badge>
