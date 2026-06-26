@@ -4,7 +4,7 @@ export default function EmptyState({
   action,
 }: {
   message?: string;
-  icon?: string;
+  icon?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (

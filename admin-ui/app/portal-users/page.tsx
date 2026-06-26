@@ -12,6 +12,7 @@ import { useToast } from "../../components/ui/Toast";
 import { api, ApiError } from "../../lib/api";
 import { useApi } from "../../lib/useApi";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { Icon } from "../../components/ui/Icon";
 
 interface PortalUser {
   id: string;
@@ -92,7 +93,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function PlanChip({ plan }: { plan: string }) {
   const pretty = plan.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  const color = plan === "free_trial" ? "#64748b" : "#1e3a5f";
+  const color = plan === "free_trial" ? "#64748b" : "var(--accent-primary)";
   return (
     <span style={{ fontSize: 12, fontWeight: 500, color }}>
       {pretty}
@@ -341,7 +342,7 @@ export default function PortalUsersPage() {
           <ErrorState message={error} onRetry={refetch} />
         ) : filtered.length === 0 ? (
           <EmptyState
-            icon="👥"
+            icon={<Icon name="users" size={22} />}
             message="No portal users yet. Share your signup link to get started."
           />
         ) : (
@@ -471,13 +472,13 @@ export default function PortalUsersPage() {
 
             <div style={{ display: "flex", gap: 8 }}>
               <button className="sran-btn sran-btn-primary" onClick={() => openTopup(detailUser)}>
-                💰 Top-up Credits
+                <Icon name="dollar" size={14} /> Top-up Credits
               </button>
               <button
                 className="sran-btn sran-btn-secondary"
                 onClick={() => setSuspendTarget(detailUser)}
               >
-                {detailUser.status === "active" ? "⏸ Suspend" : "▶ Activate"}
+                {detailUser.status === "active" ? (<><Icon name="pause" size={14} /> Suspend</>) : (<><Icon name="play" size={14} /> Activate</>)}
               </button>
             </div>
 
@@ -497,10 +498,10 @@ export default function PortalUsersPage() {
                   </thead>
                   <tbody>
                     {detail.transactions.map((t) => (
-                      <tr key={t.id} style={{ borderTop: "1px solid #f0f2f5" }}>
+                      <tr key={t.id} style={{ borderTop: "1px solid var(--border-default)" }}>
                         <td style={{ padding: "6px 8px 6px 0", color: "var(--text-tertiary)" }}>{formatDate(t.created_at)}</td>
                         <td style={{ padding: "6px 8px" }}>{t.type.replace(/_/g, " ")}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: t.amount >= 0 ? "#10b981" : "#111827" }}>
+                        <td style={{ padding: "6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: t.amount >= 0 ? "#10b981" : "var(--text-primary)" }}>
                           {t.amount >= 0 ? "+" : ""}{formatTokensFull(t.amount)}
                         </td>
                         <td style={{ padding: "6px 0 6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
@@ -678,20 +679,20 @@ function RowActions({
             zIndex: 5,
           }}
         >
-          <ActionItem icon="💰" label="Top-up Credits" onClick={() => { setOpen(false); onTopup(); }} />
+          <ActionItem icon={<Icon name="dollar" size={14} />} label="Top-up Credits" onClick={() => { setOpen(false); onTopup(); }} />
           <ActionItem
-            icon={user.status === "active" ? "⏸" : "▶"}
+            icon={user.status === "active" ? <Icon name="pause" size={14} /> : <Icon name="play" size={14} />}
             label={user.status === "active" ? "Suspend" : "Activate"}
             onClick={() => { setOpen(false); onToggle(); }}
           />
-          <ActionItem icon="👁" label="View Details" onClick={() => { setOpen(false); onView(); }} />
+          <ActionItem icon={<Icon name="eye" size={14} />} label="View Details" onClick={() => { setOpen(false); onView(); }} />
         </div>
       ) : null}
     </div>
   );
 }
 
-function ActionItem({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+function ActionItem({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}

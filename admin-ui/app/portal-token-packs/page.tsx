@@ -12,6 +12,7 @@ import { useToast } from "../../components/ui/Toast";
 import { api, ApiError } from "../../lib/api";
 import { useApi } from "../../lib/useApi";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { Icon } from "../../components/ui/Icon";
 
 interface TokenPack {
   id: string;
@@ -220,7 +221,7 @@ export default function TokenPacksPage() {
         ) : error ? (
           <ErrorState message={error} onRetry={refetch} />
         ) : sorted.length === 0 ? (
-          <EmptyState icon="💎" message="No token packs yet." action={
+          <EmptyState icon={<Icon name="gem" size={22} />} message="No token packs yet." action={
             <button className="sran-btn sran-btn-primary" onClick={openCreate}>Create your first pack</button>
           } />
         ) : (
@@ -244,7 +245,7 @@ export default function TokenPacksPage() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{p.name}</span>
                       {p.id === popularId ? (
-                        <span className="sran-badge sran-badge-info" style={{ fontSize: 9.5, padding: "2px 6px" }}>★ Popular</span>
+                        <span className="sran-badge sran-badge-info" style={{ fontSize: 9.5, padding: "2px 6px" }}><Icon name="star" size={11} /> Popular</span>
                       ) : null}
                     </div>
                   </td>
