@@ -24,7 +24,6 @@ interface KeysResp {
 
 interface ProjectStats {
   keys: number;
-  requests: number;
 }
 
 export default function ProjectsPage() {
@@ -66,9 +65,9 @@ export default function ProjectsPage() {
         r.projects.map(async (p) => {
           try {
             const k = await api.get<KeysResp>(`/portal/projects/${p.id}/keys`);
-            stats[p.id] = { keys: k.keys.length, requests: 0 };
+            stats[p.id] = { keys: k.keys.length };
           } catch {
-            stats[p.id] = { keys: 0, requests: 0 };
+            stats[p.id] = { keys: 0 };
           }
         })
       );
@@ -197,7 +196,7 @@ export default function ProjectsPage() {
             <ProjectCard
               key={p.id}
               project={p}
-              stats={statsMap[p.id] ?? { keys: 0, requests: 0 }}
+              stats={statsMap[p.id] ?? { keys: 0 }}
               onRename={() => {
                 setRenameTarget(p);
                 setRenameValue(p.name);

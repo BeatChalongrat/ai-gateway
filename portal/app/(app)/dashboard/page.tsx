@@ -320,7 +320,8 @@ function CreditHero({
           >
             <HeroStat label="Used" value={used.toLocaleString()} />
             <HeroStat label="Remaining" value={balance.toLocaleString()} />
-            <HeroStat label="Next Reset" value="—" />
+            {/* "Next Reset" removed (F6): value was a permanent "—". Re-add
+                when the backend exposes a real reset date. */}
           </div>
         </div>
 

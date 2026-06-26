@@ -1,8 +1,13 @@
 "use client";
 
+import { useMemo } from "react";
+
 type Range = "today" | "7d" | "30d" | "all";
 
+type UsagePoint = { created_at?: string | null };
+
 type Props = {
+  points: UsagePoint[];
   totalRequests: number;
   range: Range;
 };
@@ -14,14 +19,58 @@ const RANGE_LABEL: Record<Range, string> = {
   all: "All time",
 };
 
-// Deterministic heights so SSR and CSR render identical markup. 24
-// bars at 20-80% heights creates a natural-looking sparkline shape.
+// Faint backdrop bars for the empty state only. Deterministic so SSR/CSR
+// render identical markup before any data arrives.
 const PLACEHOLDER_HEIGHTS: number[] = Array.from({ length: 24 }, (_, i) => {
   return 20 + ((i * 37) % 60);
 });
 
-export default function UsageChart({ totalRequests, range }: Props) {
+// Bucket the in-range request timestamps into evenly-spaced time slices.
+// Bucket count is chosen per range (24 hourly for today, daily for 7d/30d,
+// and an even 24-way split across the data span for "all").
+function bucketCounts(points: UsagePoint[], range: Range): number[] {
+  const now = Date.now();
+  let count: number;
+  let startMs: number;
+  if (range === "today") {
+    count = 24;
+    startMs = now - 24 * 60 * 60 * 1000;
+  } else if (range === "7d") {
+    count = 7;
+    startMs = now - 7 * 24 * 60 * 60 * 1000;
+  } else if (range === "30d") {
+    count = 30;
+    startMs = now - 30 * 24 * 60 * 60 * 1000;
+  } else {
+    // all: span from the earliest point to now, split into 24 slices.
+    count = 24;
+    let earliest = now;
+    for (const p of points) {
+      if (!p.created_at) continue;
+      const t = new Date(p.created_at).getTime();
+      if (!Number.isNaN(t) && t < earliest) earliest = t;
+    }
+    startMs = earliest < now ? earliest : now - 60 * 60 * 1000;
+  }
+  const span = Math.max(1, now - startMs);
+  const bucketMs = span / count;
+  const buckets = new Array<number>(count).fill(0);
+  for (const p of points) {
+    if (!p.created_at) continue;
+    const t = new Date(p.created_at).getTime();
+    if (Number.isNaN(t) || t < startMs) continue;
+    let idx = Math.floor((t - startMs) / bucketMs);
+    if (idx < 0) idx = 0;
+    if (idx >= count) idx = count - 1;
+    buckets[idx] += 1;
+  }
+  return buckets;
+}
+
+export default function UsageChart({ points, totalRequests, range }: Props) {
   const hasData = totalRequests > 0;
+  const counts = useMemo(() => bucketCounts(points, range), [points, range]);
+  const maxCount = Math.max(1, ...counts);
 
   return (
     <div
@@ -97,26 +146,30 @@ export default function UsageChart({ totalRequests, range }: Props) {
             </div>
           </>
         ) : (
-          /* Placeholder until a chart library is wired up. */
+          // Real per-bucket request counts (normalised to the busiest bucket).
           <div className="absolute inset-0 flex items-end gap-1.5">
-            {PLACEHOLDER_HEIGHTS.map((h, i) => (
-              <div
-                key={i}
-                className="flex-1 rounded-t transition-opacity bar-grow"
-                style={{
-                  height: `${h}%`,
-                  background: "var(--accent-primary)",
-                  opacity: 0.6,
-                  animationDelay: `${i * 30}ms`,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.opacity = "1";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.opacity = "0.6";
-                }}
-              />
-            ))}
+            {counts.map((c, i) => {
+              const h = c > 0 ? Math.max(4, Math.round((c / maxCount) * 100)) : 2;
+              return (
+                <div
+                  key={i}
+                  className="flex-1 rounded-t transition-opacity bar-grow"
+                  title={`${c} request${c !== 1 ? "s" : ""}`}
+                  style={{
+                    height: `${h}%`,
+                    background: "var(--accent-primary)",
+                    opacity: 0.6,
+                    animationDelay: `${i * 30}ms`,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.opacity = "1";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = "0.6";
+                  }}
+                />
+              );
+            })}
           </div>
         )}
       </div>

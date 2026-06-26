@@ -478,11 +478,6 @@ function RoutingStatsSection() {
     return data.models.filter((m) => m.count > 0).length;
   }, [data]);
 
-  const successRate = useMemo(() => {
-    if (!data || totalRequests === 0) return "—";
-    return "99.2%";
-  }, [data, totalRequests]);
-
   const maxRouterCount = useMemo(() => {
     if (!data || data.routers.length === 0) return 0;
     return Math.max(...data.routers.map((r) => r.count));
@@ -532,15 +527,8 @@ function RoutingStatsSection() {
           iconColor="#5DCAA5"
           loading={loading}
         />
-        <StatTile
-          icon={<IconCircleCheck />}
-          label="Success rate"
-          value={loading ? "—" : successRate}
-          accentColor="#378ADD"
-          iconBg="rgba(55, 138, 221, 0.12)"
-          iconColor="#85B7EB"
-          loading={loading}
-        />
+        {/* Success-rate tile removed (F6): its value was hardcoded "99.2%".
+            Re-add when a real success metric is exposed by the API. */}
       </div>
 
       {/* Breakdown rows */}

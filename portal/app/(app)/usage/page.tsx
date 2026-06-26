@@ -218,7 +218,7 @@ export default function UsagePage() {
         />
       </div>
 
-      <UsageChart totalRequests={totals.requests} range={range} />
+      <UsageChart points={filtered} totalRequests={totals.requests} range={range} />
 
       {summary ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

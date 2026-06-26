@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
-  Activity,
   FolderOpen,
   Key,
   MoreVertical,
@@ -14,7 +13,9 @@ import {
 import { relativeTime } from "@/lib/format";
 import type { Project } from "@/lib/types";
 
-export type ProjectStats = { keys: number; requests: number };
+// Per-project request counts aren't available from the backend yet, so the
+// card shows only the key count (a fabricated "0 requests" was removed — F6).
+export type ProjectStats = { keys: number };
 
 type Props = {
   project: Project;
@@ -183,18 +184,6 @@ export default function ProjectCard({
           </span>
           <span style={{ color: "var(--text-tertiary)" }}>
             {stats.keys === 1 ? "key" : "keys"}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Activity
-            className="w-3.5 h-3.5"
-            style={{ color: "var(--text-tertiary)" }}
-          />
-          <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-            {stats.requests.toLocaleString()}
-          </span>
-          <span style={{ color: "var(--text-tertiary)" }}>
-            {stats.requests === 1 ? "request" : "requests"}
           </span>
         </div>
       </div>
