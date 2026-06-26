@@ -1,0 +1,20 @@
+{
+  "root": true,
+  "rules": {
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "confirm",
+        "message": "Use the in-app ConfirmDialog instead of window.confirm."
+      },
+      {
+        "name": "alert",
+        "message": "Use the in-app Toast/Modal instead of window.alert."
+      },
+      {
+        "name": "prompt",
+        "message": "Use an in-app input Modal instead of window.prompt."
+      }
+    ]
+  }
+}
