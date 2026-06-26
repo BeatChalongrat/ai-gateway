@@ -98,9 +98,11 @@ export default async function InviteLandingPage({
                 className="sv-form-header anim d1"
                 style={{ marginBottom: 24 }}
               >
+                {/* Error eyebrow: red-tint background instead of the brand
+                    violet→cyan gradient, so the red text reads cleanly. */}
                 <div
                   className="sv-form-eyebrow"
-                  style={{ color: "#F87171" }}
+                  style={{ background: "rgba(248,113,113,0.15)", color: "#F87171" }}
                 >
                   Invite unavailable
                 </div>
