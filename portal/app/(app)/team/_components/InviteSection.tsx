@@ -17,7 +17,7 @@
  * component is never mounted.
  */
 
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -749,8 +749,25 @@ function RoleSelector({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  // Close on Escape or click-outside (was mouse-leave only).
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
   return (
-    <div style={{ position: "relative", flexShrink: 0 }}>
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
       <span
         style={{
           fontSize: 11,
@@ -790,7 +807,6 @@ function RoleSelector({
       {open ? (
         <div
           role="menu"
-          onMouseLeave={() => setOpen(false)}
           style={{
             position: "absolute",
             right: 0,
@@ -814,11 +830,8 @@ function RoleSelector({
               setOpen(false);
             }}
           />
-          <MenuOption
-            label="Admin"
-            hint="Coming soon"
-            disabled
-          />
+          {/* 'Admin' role option removed — it was a disabled 'Coming soon'
+              stub. Re-add when the backend supports admin invites. */}
         </div>
       ) : null}
     </div>
