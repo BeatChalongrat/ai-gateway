@@ -120,6 +120,17 @@ export default function ChatAnalyticsPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Recharts renders axis ticks as SVG fill attributes, so a CSS var() won't
+  // resolve. Read the resolved --text-muted token once on mount instead.
+  const [axisColor, setAxisColor] = useState("#8b92a5");
+
+  useEffect(() => {
+    setAxisColor(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--text-muted")
+        .trim() || "#8b92a5",
+    );
+  }, []);
 
   const load = useCallback(async (p: AnalyticsPeriod) => {
     setLoading(true);
@@ -276,11 +287,11 @@ export default function ChatAnalyticsPage() {
                       />
                       <XAxis
                         dataKey="date"
-                        tick={{ fontSize: 10, fill: "rgba(180,200,230,0.7)" }}
+                        tick={{ fontSize: 10, fill: axisColor }}
                         tickFormatter={(v: string) => v.slice(5)}
                       />
                       <YAxis
-                        tick={{ fontSize: 10, fill: "rgba(180,200,230,0.7)" }}
+                        tick={{ fontSize: 10, fill: axisColor }}
                         tickFormatter={(v: number) => compactNumber(v)}
                       />
                       <Tooltip
@@ -335,13 +346,13 @@ export default function ChatAnalyticsPage() {
                       />
                       <XAxis
                         type="number"
-                        tick={{ fontSize: 10, fill: "rgba(180,200,230,0.7)" }}
+                        tick={{ fontSize: 10, fill: axisColor }}
                         tickFormatter={(v: number) => compactNumber(v)}
                       />
                       <YAxis
                         type="category"
                         dataKey="model_id"
-                        tick={{ fontSize: 10, fill: "rgba(180,200,230,0.8)" }}
+                        tick={{ fontSize: 10, fill: axisColor }}
                         width={120}
                         tickFormatter={(v: string) =>
                           v.length > 18 ? `${v.slice(0, 18)}…` : v

@@ -16,12 +16,12 @@ export interface AuditEntry {
 }
 
 const ACTION_COLOR: Record<string, string> = {
-  create: "#059669",
-  update: "#2563eb",
-  activate: "#7c3aed",
-  move_to_testing: "#b45309",
-  disable: "#dc2626",
-  delete: "#dc2626",
+  create: "var(--color-status-success)",
+  update: "var(--color-status-info)",
+  activate: "var(--accent-violet)",
+  move_to_testing: "var(--color-status-warning)",
+  disable: "var(--color-status-error)",
+  delete: "var(--color-status-error)",
 };
 
 function patternOf(v?: Record<string, any> | null): string | null {
@@ -76,8 +76,8 @@ export default function AuditLogTimeline({ entries }: { entries: AuditEntry[] })
               )}
               {beforeP && afterP && beforeP !== afterP && (
                 <div style={{ fontSize: 12, marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>
-                  <div style={{ color: "#dc2626" }}>- {beforeP}</div>
-                  <div style={{ color: "#059669" }}>+ {afterP}</div>
+                  <div style={{ color: "var(--color-status-error)" }}>- {beforeP}</div>
+                  <div style={{ color: "var(--color-status-success)" }}>+ {afterP}</div>
                 </div>
               )}
               {e.reason && (

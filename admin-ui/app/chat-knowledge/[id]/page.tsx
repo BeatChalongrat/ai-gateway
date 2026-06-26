@@ -156,8 +156,8 @@ export default function ChatKnowledgeDetailPage() {
           style={{
             padding: "0.6rem 0.875rem",
             marginBottom: "0.875rem",
-            background: "rgba(59,130,246,0.08)",
-            border: "1px solid rgba(59,130,246,0.25)",
+            background: "var(--color-status-info-bg)",
+            border: "1px solid var(--color-status-info)",
             color: "var(--color-text-primary)",
             fontSize: "0.875rem",
           }}
@@ -325,8 +325,8 @@ export default function ChatKnowledgeDetailPage() {
         className="sran-card"
         style={{
           padding: "0.875rem 1rem",
-          border: "1px solid rgba(248,113,113,0.25)",
-          background: "rgba(248,113,113,0.04)",
+          border: "1px solid var(--color-status-error)",
+          background: "var(--color-status-error-bg)",
         }}
       >
         <h2
@@ -364,9 +364,9 @@ export default function ChatKnowledgeDetailPage() {
             disabled={reindexing || deleting}
             onClick={() => setDeleteConfirmOpen(true)}
             style={{
-              background: "rgba(248,113,113,0.12)",
-              color: "rgb(252,165,165)",
-              border: "1px solid rgba(248,113,113,0.35)",
+              background: "var(--color-status-error-bg)",
+              color: "var(--color-status-error)",
+              border: "1px solid var(--color-status-error)",
             }}
           >
             {deleting ? "Deleting…" : "Delete knowledge base"}
@@ -413,7 +413,7 @@ function DocRow({ doc }: { doc: AdminKBDocRow }) {
           <div
             style={{
               fontSize: "0.7rem",
-              color: "rgb(252,165,165)",
+              color: "var(--color-status-error)",
               marginTop: 2,
               maxWidth: 360,
               overflow: "hidden",
@@ -445,24 +445,24 @@ function DocRow({ doc }: { doc: AdminKBDocRow }) {
 function DocStatusPill({ status }: { status: AdminKBDocRow["status"] }) {
   const palette: Record<AdminKBDocRow["status"], { bg: string; fg: string; border: string }> = {
     pending: {
-      bg: "rgba(148,163,184,0.16)",
+      bg: "var(--bg-elevated)",
       fg: "var(--color-text-muted)",
       border: "var(--color-border)",
     },
     processing: {
-      bg: "rgba(245,158,11,0.14)",
-      fg: "rgb(252,211,77)",
-      border: "rgba(245,158,11,0.35)",
+      bg: "var(--color-status-warning-bg)",
+      fg: "var(--color-status-warning)",
+      border: "var(--color-status-warning)",
     },
     indexed: {
-      bg: "rgba(34,197,94,0.12)",
-      fg: "rgb(74,222,128)",
-      border: "rgba(34,197,94,0.3)",
+      bg: "var(--color-status-success-bg)",
+      fg: "var(--color-status-success)",
+      border: "var(--color-status-success)",
     },
     failed: {
-      bg: "rgba(248,113,113,0.12)",
-      fg: "rgb(252,165,165)",
-      border: "rgba(248,113,113,0.35)",
+      bg: "var(--color-status-error-bg)",
+      fg: "var(--color-status-error)",
+      border: "var(--color-status-error)",
     },
   };
   const p = palette[status] ?? palette.pending;

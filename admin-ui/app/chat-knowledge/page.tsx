@@ -372,11 +372,11 @@ function StatusPill({ active }: { active: boolean }) {
         textTransform: "uppercase",
         letterSpacing: "0.03em",
         background: active
-          ? "rgba(34,197,94,0.12)"
-          : "rgba(148,163,184,0.16)",
-        color: active ? "rgb(74,222,128)" : "var(--color-text-muted)",
+          ? "var(--color-status-success-bg)"
+          : "var(--bg-elevated)",
+        color: active ? "var(--color-status-success)" : "var(--color-text-muted)",
         border: active
-          ? "1px solid rgba(34,197,94,0.3)"
+          ? "1px solid var(--color-status-success)"
           : "1px solid var(--color-border)",
       }}
     >

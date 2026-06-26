@@ -187,7 +187,7 @@ export default function CustomDetectorForm({
                 match
               </label>
               {testResults && tc.input in testResults && (
-                <span style={{ fontSize: 12, fontWeight: 700, color: testResults[tc.input] === tc.expected_match ? "#059669" : "#dc2626" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: testResults[tc.input] === tc.expected_match ? "var(--color-status-success)" : "var(--color-status-error)" }}>
                   {testResults[tc.input] ? "matched" : "no match"}
                 </span>
               )}
@@ -200,7 +200,7 @@ export default function CustomDetectorForm({
         </div>
       </div>
 
-      {error && <div style={{ color: "#dc2626", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-status-error)", fontSize: 13 }}>{error}</div>}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button style={btn("ghost")} onClick={onCancel} disabled={busy}>Cancel</button>

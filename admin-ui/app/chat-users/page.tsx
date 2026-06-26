@@ -296,8 +296,8 @@ export default function ChatUsersPage() {
 }
 
 function StatusPill({ active }: { active: boolean }) {
-  const bg = active ? "rgba(34,197,94,0.16)" : "rgba(239,68,68,0.16)";
-  const fg = active ? "#86efac" : "#fca5a5";
+  const bg = active ? "var(--color-status-success-bg)" : "var(--color-status-error-bg)";
+  const fg = active ? "var(--color-status-success)" : "var(--color-status-error)";
   return (
     <span
       style={{
