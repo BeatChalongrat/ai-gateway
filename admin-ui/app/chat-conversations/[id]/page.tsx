@@ -27,26 +27,29 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 function roleColor(role: string): { bg: string; tint: string; fg: string; label: string } {
+  // Token-driven so the role tints read correctly in BOTH themes (the prior
+  // rgba literals were tuned for dark and went low-contrast on light). bg =
+  // pill fill, tint = message-tile fill, fg = pill text + left accent border.
   switch (role) {
     case "user":
       return {
-        bg: "rgba(99, 102, 241, 0.18)",
-        tint: "rgba(99, 102, 241, 0.06)",
-        fg: "#a5b4fc",
+        bg: "color-mix(in srgb, var(--accent-primary) 16%, transparent)",
+        tint: "color-mix(in srgb, var(--accent-primary) 7%, transparent)",
+        fg: "var(--accent-primary)",
         label: "User",
       };
     case "assistant":
       return {
-        bg: "rgba(34, 197, 94, 0.16)",
-        tint: "rgba(34, 197, 94, 0.05)",
-        fg: "#86efac",
+        bg: "color-mix(in srgb, var(--accent-success) 16%, transparent)",
+        tint: "color-mix(in srgb, var(--accent-success) 7%, transparent)",
+        fg: "var(--accent-success)",
         label: "Assistant",
       };
     default:
       return {
-        bg: "rgba(148, 163, 184, 0.18)",
-        tint: "rgba(148, 163, 184, 0.06)",
-        fg: "#cbd5e1",
+        bg: "var(--bg-elevated)",
+        tint: "color-mix(in srgb, var(--text-muted) 8%, transparent)",
+        fg: "var(--text-secondary)",
         label: role,
       };
   }
