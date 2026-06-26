@@ -23,7 +23,6 @@ import {
   DoorOpen,
   MoreVertical,
   Search,
-  Shield,
   UserCheck,
   UserMinus,
 } from "lucide-react";
@@ -767,19 +766,6 @@ function RowMenu({ onRemove }: { onRemove: () => void }) {
             gap: 2,
           }}
         >
-          <MenuItem
-            icon={<Shield size={13} />}
-            label="Change role"
-            disabled
-            hint="Coming soon"
-          />
-          <div
-            style={{
-              height: 1,
-              background: "var(--border-subtle)",
-              margin: "4px 2px",
-            }}
-          />
           <MenuItem
             icon={<UserMinus size={13} />}
             label="Remove from team"
