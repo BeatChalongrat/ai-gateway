@@ -15,7 +15,9 @@ import {
 
 import { Button } from "@/components/Button";
 import { Modal } from "@/components/Modal";
-import { PageSpinner } from "@/components/Spinner";
+import { CardGridSkeleton } from "@/components/skeletons/CardGridSkeleton";
+import { HeroSkeleton } from "@/components/skeletons/HeroSkeleton";
+import { TableSkeleton } from "@/components/skeletons/TableSkeleton";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate, formatTokens, formatUsd } from "@/lib/format";
 import { useCountUp } from "@/lib/hooks/useCountUp";
@@ -108,7 +110,14 @@ export default function BillingPage() {
   // target is 0 and the hook is a no-op.
   const displayBalance = useCountUp(user?.credit_balance ?? 0, 1000);
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <HeroSkeleton />
+        <CardGridSkeleton count={3} />
+        <TableSkeleton rows={5} />
+      </div>
+    );
 
   const planLabel =
     user?.plan.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ?? "—";
