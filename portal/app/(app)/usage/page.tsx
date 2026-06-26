@@ -337,8 +337,11 @@ export default function UsagePage() {
           className="text-right"
           style={{ fontSize: 11, color: "var(--text-tertiary)" }}
         >
-          Showing {filtered.length} of {total} request
-          {total === 1 ? "" : "s"}
+          {/* Truthful: the page loads only the latest ~200 requests and the
+              range filter narrows that loaded set — not the full backend total. */}
+          Showing {filtered.length} of {rows.length} recent request
+          {rows.length === 1 ? "" : "s"}
+          {total > rows.length ? ` · ${total.toLocaleString()} all-time` : null}
         </p>
       ) : null}
     </div>
