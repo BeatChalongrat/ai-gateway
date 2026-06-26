@@ -17,6 +17,11 @@ import PageHeader from "../_components/PageHeader";
 
 type InlineMsg = { type: "success" | "error"; text: string } | null;
 
+// Password change has no backend yet. Gate the Security card behind an env
+// flag (default off → hidden) instead of shipping a disabled stub form.
+const PASSWORD_CHANGE_ENABLED =
+  process.env.NEXT_PUBLIC_PASSWORD_CHANGE_ENABLED === "true";
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const [user, setUser] = useState<PortalUser | null>(null);
@@ -535,8 +540,10 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Security — coming soon. Fields stay shown (disabled) so the
-          roadmap is visible, but they read as non-interactive. */}
+      {/* Security — password change has no backend yet, so the whole card is
+          hidden behind NEXT_PUBLIC_PASSWORD_CHANGE_ENABLED (default off)
+          instead of shipping a disabled stub form. */}
+      {PASSWORD_CHANGE_ENABLED && (
       <Card padding="md">
         <div className="flex items-center justify-between mb-5">
           <h2
@@ -594,6 +601,7 @@ export default function SettingsPage() {
           </form>
         </div>
       </Card>
+      )}
 
       {/* Linked accounts — Phase 3 Session 5. Read-only for now: the
           /portal/me payload carries the user's oauth_provider field;
