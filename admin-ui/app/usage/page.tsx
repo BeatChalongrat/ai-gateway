@@ -5,6 +5,8 @@ import PageHeader from "../../components/ui/PageHeader";
 import StatCard from "../../components/ui/StatCard";
 import Badge from "../../components/ui/Badge";
 import ErrorState from "../../components/ui/ErrorState";
+import EmptyState from "../../components/ui/EmptyState";
+import { Icon } from "../../components/ui/Icon";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 
@@ -256,37 +258,31 @@ export default function UsagePage() {
 
               <div className="sran-card" style={{ padding: 0 }}>
                 {systemRuns.length === 0 ? (
-                  <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>
-                    No scan runs yet.
+                  <div style={{ padding: "2rem 1rem" }}>
+                    <EmptyState message="No scan runs yet" icon={<Icon name="info" />} />
                   </div>
                 ) : (
                   <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", fontSize: "var(--font-size-xs)", borderCollapse: "collapse" }}>
+                    <table className="sran-table">
                       <thead>
                         <tr>
                           {["Time", "Trigger", "Provider", "Model", "Requests", "Findings", "Tokens", "Cost", "Status"].map((h) => (
-                            <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", fontWeight: 600 }}>{h}</th>
+                            <th key={h}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {systemRuns.map((r) => (
                           <tr key={r.scan_run_id}>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>
-                              {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
-                            </td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>
-                              <Badge variant={r.trigger === "realtime" ? "warning" : "info"}>{r.trigger}</Badge>
-                            </td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.provider}</td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}><code>{r.model}</code></td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.requests_scanned}</td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.findings_count}</td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.total_tokens.toLocaleString()}</td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{formatCost(r.estimated_cost_usd)}</td>
-                            <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>
-                              <Badge variant={r.status === "completed" ? "success" : r.status === "failed" ? "error" : "warning"}>{r.status}</Badge>
-                            </td>
+                            <td>{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</td>
+                            <td><Badge variant={r.trigger === "realtime" ? "warning" : "info"}>{r.trigger}</Badge></td>
+                            <td>{r.provider}</td>
+                            <td><code>{r.model}</code></td>
+                            <td>{r.requests_scanned}</td>
+                            <td>{r.findings_count}</td>
+                            <td>{r.total_tokens.toLocaleString()}</td>
+                            <td>{formatCost(r.estimated_cost_usd)}</td>
+                            <td><Badge variant={r.status === "completed" ? "success" : r.status === "failed" ? "error" : "warning"}>{r.status}</Badge></td>
                           </tr>
                         ))}
                       </tbody>
