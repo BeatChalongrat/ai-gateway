@@ -19,7 +19,8 @@ import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Input } from "@/components/Input";
 import { Modal } from "@/components/Modal";
-import { PageSpinner } from "@/components/Spinner";
+import { StatCardRowSkeleton } from "@/components/skeletons/StatCardRowSkeleton";
+import { TableSkeleton } from "@/components/skeletons/TableSkeleton";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate, formatTokens, relativeTime } from "@/lib/format";
 import type {
@@ -208,7 +209,14 @@ export default function ProjectDetailPage() {
     });
   }
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <div className="skeleton" style={{ height: 48, width: 280, borderRadius: 12 }} />
+        <StatCardRowSkeleton count={3} />
+        <TableSkeleton rows={5} />
+      </div>
+    );
 
   if (error) {
     return (

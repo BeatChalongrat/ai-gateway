@@ -18,7 +18,9 @@ import {
 } from "lucide-react";
 
 import { Avatar } from "@/components/Avatar";
-import { PageSpinner } from "@/components/Spinner";
+import { HeroSkeleton } from "@/components/skeletons/HeroSkeleton";
+import { StatCardRowSkeleton } from "@/components/skeletons/StatCardRowSkeleton";
+import { TableSkeleton } from "@/components/skeletons/TableSkeleton";
 import { api, PortalApiError } from "@/lib/api";
 import { formatTokens, relativeTime } from "@/lib/format";
 import { useCountUp } from "@/lib/hooks/useCountUp";
@@ -82,7 +84,14 @@ export default function DashboardPage() {
     };
   }, []);
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-5">
+        <HeroSkeleton />
+        <StatCardRowSkeleton />
+        <TableSkeleton rows={5} />
+      </div>
+    );
 
   const balance = user?.credit_balance ?? 0;
   const used = user?.credit_used ?? 0;

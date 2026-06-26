@@ -7,7 +7,7 @@ import { FolderPlus } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
 import { Modal } from "@/components/Modal";
-import { PageSpinner } from "@/components/Spinner";
+import { CardGridSkeleton } from "@/components/skeletons/CardGridSkeleton";
 import { api, PortalApiError } from "@/lib/api";
 import type { PortalUser, Project } from "@/lib/types";
 import EmptyState from "../_components/EmptyState";
@@ -168,7 +168,10 @@ export default function ProjectsPage() {
       ) : null}
 
       {loading ? (
-        <PageSpinner />
+        <div className="space-y-6">
+          <div className="skeleton" style={{ height: 32, width: 220, borderRadius: 8 }} />
+          <CardGridSkeleton />
+        </div>
       ) : projects.length === 0 ? (
         // Empty-state copy branches on tenant role. A tenant-owner with
         // no projects is a fresh tenant; a plain member with no
