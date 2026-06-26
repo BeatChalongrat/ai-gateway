@@ -1155,9 +1155,10 @@
 .dlp-row { animation: dlpFadeUp 0.35s ease-out both; }
 .dlp-card-anim { animation: dlpFadeUp 0.4s ease-out both; }
 .dlp-tab-content { animation: dlpTabIn 0.25s ease-out both; }
-.dlp-icon-pulse svg { animation: dlpPulse 2.5s ease-in-out infinite; }
-.dlp-icon-swing svg { animation: dlpSwing 3s ease-in-out infinite; }
-.dlp-icon-glow svg { animation: dlpGlow 2s ease-in-out infinite; }
+/* One-shot on mount (was infinite) — single attention cue, not perpetual. */
+.dlp-icon-pulse svg { animation: dlpPulse 2.5s ease-in-out; }
+.dlp-icon-swing svg { animation: dlpSwing 3s ease-in-out; }
+.dlp-icon-glow svg { animation: dlpGlow 2s ease-in-out; }
 
 .dlp-table { width: 100%; border-collapse: collapse; }
 .dlp-table th {
@@ -1247,3 +1248,20 @@
 /* ─── Google Fonts import ────────────────────────────────────────── */
 
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+/* ─── Reduced-motion ───────────────────────────────────────────────
+   Honor the OS accessibility preference across the whole admin app
+   (portal/app/globals.css already ships the equivalent). Near-instantly
+   kills keyframe animations + transitions — this also guards the routing
+   refresh spin and any other admin motion under prefers-reduced-motion.
+   Kept LAST so it overrides earlier-declared animations/transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

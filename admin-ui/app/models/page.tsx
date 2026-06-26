@@ -132,9 +132,11 @@ const STYLES = `
 @keyframes mrPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
 @keyframes mrRock { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(8deg)} 75%{transform:rotate(-8deg)} }
 @keyframes mrBreathe { 0%,100%{opacity:1} 50%{opacity:0.6} }
-.mr-icon-pulse svg { animation: mrPulse 2.5s ease-in-out infinite; }
-.mr-icon-rock svg { animation: mrRock 3s ease-in-out infinite; }
-.mr-icon-breathe svg { animation: mrBreathe 2s ease-in-out infinite; }
+/* One-shot on mount (was infinite) — a single attention cue, not perpetual
+   motion on a dense data table. */
+.mr-icon-pulse svg { animation: mrPulse 2.5s ease-in-out; }
+.mr-icon-rock svg { animation: mrRock 3s ease-in-out; }
+.mr-icon-breathe svg { animation: mrBreathe 2s ease-in-out; }
 `;
 
 /* ── Sub-components ───────────────────────────────────────────────── */
