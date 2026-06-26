@@ -10,6 +10,7 @@ import {
   Sliders,
   Sparkles,
   Star,
+  X,
   Zap,
 } from "lucide-react";
 
@@ -164,12 +165,12 @@ export default function BillingPage() {
               background: "transparent",
               border: "none",
               color: "inherit",
-              fontSize: 18,
               lineHeight: 1,
               cursor: "pointer",
+              display: "inline-flex",
             }}
           >
-            ×
+            <X size={16} />
           </button>
         </div>
       ) : null}

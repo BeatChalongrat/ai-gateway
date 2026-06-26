@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { MouseEvent, useEffect, useState } from "react";
+import { ArrowRight } from "lucide-react";
 
 import LogoTile from "@/app/_shared/LogoTile";
 
@@ -122,7 +123,7 @@ export function MarketingNav() {
             className="btn brand-cta"
             style={{ fontWeight: 500, color: "#ffffff" }}
           >
-            Get started <span className="arrow" aria-hidden="true">→</span>
+            Get started <span className="arrow" aria-hidden="true"><ArrowRight size={16} /></span>
           </Link>
         </div>
 
@@ -193,7 +194,7 @@ export function MarketingNav() {
             style={{ fontWeight: 500, color: "#ffffff" }}
             onClick={closeMenu}
           >
-            Get started <span className="arrow" aria-hidden="true">→</span>
+            Get started <span className="arrow" aria-hidden="true"><ArrowRight size={16} /></span>
           </Link>
         </div>
       </div>

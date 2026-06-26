@@ -5,6 +5,8 @@
  * Light container that matches hero; Gateway card remains the only
  * purple-gradient element so it pops as the page's hero visual.
  */
+import { Check } from "lucide-react";
+
 function AppTileGrid() {
   return (
     <div
@@ -359,7 +361,7 @@ function GatewayCard() {
           {["DLP", "Smart route", "Log & bill"].map((t) => (
             <span
               key={t}
-              className="rounded-md backdrop-blur"
+              className="rounded-md backdrop-blur inline-flex items-center gap-1"
               style={{
                 fontSize: 9,
                 fontWeight: 500,
@@ -369,7 +371,7 @@ function GatewayCard() {
                 border: "1px solid rgba(255,255,255,0.1)",
               }}
             >
-              ✓ {t}
+              <Check size={11} /> {t}
             </span>
           ))}
         </div>

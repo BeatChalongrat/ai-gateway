@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { ArrowRight, Check } from "lucide-react";
 import { useState, type MouseEvent, type ReactNode } from "react";
 
 function FrostCard({
@@ -653,7 +654,7 @@ export function Hero() {
                 color: "#ffffff",
               }}
             >
-              Start free <span className="arrow" aria-hidden>→</span>
+              Start free <span className="arrow" aria-hidden><ArrowRight size={16} /></span>
             </Link>
             <a
               href="#how"
@@ -678,16 +679,16 @@ export function Hero() {
               color: "#64748b",
             }}
           >
-            <span>
-              <span style={{ color: "#10b981", fontWeight: 700, marginRight: 6 }}>✓</span>
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              <Check size={14} style={{ color: "#10b981", marginRight: 6 }} />
               Free 200K tokens
             </span>
-            <span>
-              <span style={{ color: "#10b981", fontWeight: 700, marginRight: 6 }}>✓</span>
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              <Check size={14} style={{ color: "#10b981", marginRight: 6 }} />
               No credit card
             </span>
-            <span>
-              <span style={{ color: "#10b981", fontWeight: 700, marginRight: 6 }}>✓</span>
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              <Check size={14} style={{ color: "#10b981", marginRight: 6 }} />
               5-minute setup
             </span>
           </div>

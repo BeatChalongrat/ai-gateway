@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
 export function CTASection() {
   return (
@@ -40,7 +41,7 @@ export function CTASection() {
           >
             Create your account{" "}
             <span className="arrow" aria-hidden="true">
-              →
+              <ArrowRight size={16} />
             </span>
           </Link>
         </div>

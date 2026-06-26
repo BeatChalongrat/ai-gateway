@@ -438,11 +438,13 @@
   font-size: 13px;
   color: var(--text-3);
 }
-.hero-trust span::before {
-  content: "✓";
+.hero-trust span {
+  display: inline-flex;
+  align-items: center;
+}
+.hero-trust span svg {
   color: var(--green);
   margin-right: 6px;
-  font-weight: 700;
 }
 
 /* ========== FLOW DIAGRAM ========== */
@@ -574,6 +576,9 @@
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   transition: background 0.25s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .flow-node.center .node-features span:hover { background: rgba(255, 255, 255, 0.32); }
 
@@ -1747,10 +1752,9 @@ section.cta-section { padding: 120px 0; }
   justify-content: center;
   gap: 8px;
 }
-.pricing-features li::before {
-  content: "✓";
+.pricing-features li svg {
   color: var(--green, #10B981);
-  font-weight: 700;
+  flex-shrink: 0;
 }
 .pricing-cta {
   display: block;

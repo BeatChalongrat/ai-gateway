@@ -12,6 +12,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CSSProperties, FormEvent, Suspense, useMemo, useState } from "react";
+import { ArrowRight } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
 // Brand styles (.auth-root, .auth-form-card, .af-*) live in login.css. This
@@ -158,7 +159,7 @@ function ResetPasswordInner() {
             {loading ? "Updating…" : "Set new password"}
             {!loading ? (
               <span className="arrow" aria-hidden="true">
-                →
+                <ArrowRight size={16} />
               </span>
             ) : null}
           </button>

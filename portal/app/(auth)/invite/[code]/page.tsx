@@ -16,6 +16,7 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
 import "../../login/login.css";
 import "../../signup/signup.css";
@@ -117,7 +118,7 @@ export default async function InviteLandingPage({
                   style={{ display: "inline-flex", textDecoration: "none" }}
                 >
                   Create your own team
-                  <span className="sv-arrow" aria-hidden="true">→</span>
+                  <span className="sv-arrow" aria-hidden="true"><ArrowRight size={16} /></span>
                 </Link>
                 <Link
                   href="/login"

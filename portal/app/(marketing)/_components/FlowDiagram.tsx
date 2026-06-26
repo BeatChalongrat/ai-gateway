@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Check } from "lucide-react";
 
 // easeOutQuart matches the reference HTML — gives a fast initial
 // run-up that decelerates toward the target.
@@ -95,9 +96,9 @@ export function FlowDiagram() {
           <div className="node-title">Route · Protect · Track</div>
           <div className="node-desc">Every request secured and optimized</div>
           <div className="node-features">
-            <span>✓ DLP scan</span>
-            <span>✓ Smart route</span>
-            <span>✓ Log &amp; bill</span>
+            <span><Check size={12} /> DLP scan</span>
+            <span><Check size={12} /> Smart route</span>
+            <span><Check size={12} /> Log &amp; bill</span>
           </div>
         </div>
         <div className="flow-arrow" aria-hidden="true">
