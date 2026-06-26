@@ -1631,6 +1631,48 @@ section.cta-section { padding: 120px 0; }
 }
 .page-content a:hover { text-decoration-color: var(--violet); }
 
+/* ---- Legal pages (privacy / terms): updated caption, TOC, dividers ---- */
+.legal-updated {
+  font-size: 13px;
+  color: var(--text-3);
+  margin-bottom: 24px;
+}
+.legal-toc {
+  margin: 0 0 40px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-soft);
+}
+.legal-toc-title {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin: 0 0 10px;
+}
+.legal-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.legal-toc li { margin: 0; }
+.legal-toc a {
+  font-size: 14px;
+  color: var(--violet);
+  text-decoration: none;
+}
+.legal-toc a:hover { text-decoration: underline; }
+/* Subtle clause dividers — top border before each h2 after the TOC. */
+.legal-toc ~ h2 {
+  padding-top: 40px;
+  border-top: 1px solid var(--line);
+}
+
 /* Pricing section — breaks out of .page-content's 760px to use the
    full 1160px container width so 3 cards have room to breathe. */
 .pricing-section {
