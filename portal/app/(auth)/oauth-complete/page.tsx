@@ -53,19 +53,49 @@ export default function OAuthCompletePage() {
   );
 }
 
-function OAuthCompleteFallback() {
+// Centered branded card shell with a one-shot page-enter (fade + lift).
+function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main
-      className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
+      className="min-h-screen flex items-center justify-center px-4 py-10"
       style={{ background: "var(--bg-base)" }}
     >
+      <div
+        className="page-enter"
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 16,
+          boxShadow: "var(--shadow-md)",
+          padding: "32px 28px",
+          width: "100%",
+          maxWidth: 380,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          textAlign: "center",
+        }}
+      >
+        {children}
+      </div>
+    </main>
+  );
+}
+
+function LoadingView() {
+  return (
+    <Shell>
       <Logo variant="dark" size="md" />
       <Spinner size={28} className="mt-6" />
       <p className="mt-3 text-sm" style={{ color: "var(--text-secondary)" }}>
-        Signing you in…
+        Securely signing you in…
       </p>
-    </main>
+    </Shell>
   );
+}
+
+function OAuthCompleteFallback() {
+  return <LoadingView />;
 }
 
 function OAuthCompleteInner() {
@@ -114,45 +144,29 @@ function OAuthCompleteInner() {
 
   if (error) {
     return (
-      <main
-        className="min-h-screen flex items-center justify-center px-4 py-10"
-        style={{ background: "var(--bg-base)" }}
-      >
-        <div className="flex flex-col items-center text-center max-w-sm">
-          <div className="mb-4">
-            <Logo variant="dark" size="md" />
-          </div>
-          <div
-            className="w-11 h-11 rounded-full flex items-center justify-center mb-3"
-            style={{ background: "rgba(220,38,38,0.1)", color: "var(--accent-danger)" }}
-          >
-            <AlertCircle size={22} />
-          </div>
-          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            {error}
-          </p>
-          <a
-            href="/login"
-            className="mt-4 inline-block font-medium hover:underline"
-            style={{ color: "var(--accent-primary)" }}
-          >
-            Back to sign in
-          </a>
+      <Shell>
+        <div className="mb-4">
+          <Logo variant="dark" size="md" />
         </div>
-      </main>
+        <div
+          className="w-11 h-11 rounded-full flex items-center justify-center mb-3"
+          style={{ background: "rgba(220,38,38,0.1)", color: "var(--accent-danger)" }}
+        >
+          <AlertCircle size={22} />
+        </div>
+        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+          {error}
+        </p>
+        <a
+          href="/login"
+          className="mt-4 inline-block font-medium hover:underline"
+          style={{ color: "var(--accent-primary)" }}
+        >
+          Back to sign in
+        </a>
+      </Shell>
     );
   }
 
-  return (
-    <main
-      className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
-      style={{ background: "var(--bg-base)" }}
-    >
-      <Logo variant="dark" size="md" />
-      <Spinner size={28} className="mt-6" />
-      <p className="mt-3 text-sm" style={{ color: "var(--text-secondary)" }}>
-        Signing you in…
-      </p>
-    </main>
-  );
+  return <LoadingView />;
 }
