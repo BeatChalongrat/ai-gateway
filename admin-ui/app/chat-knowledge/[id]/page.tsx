@@ -5,8 +5,8 @@
 //
 // The reindex call is synchronous server-side and can take minutes
 // for big KBs; the UI shows a spinning button while it runs and
-// re-loads on completion. Delete double-confirms via window.confirm
-// — sufficient for a v1 admin tool.
+// re-loads on completion. Reindex and delete each confirm via the
+// shared ConfirmModal.
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
