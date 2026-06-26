@@ -1782,3 +1782,209 @@ section.cta-section { padding: 120px 0; }
   background: var(--bg-soft);
   border-color: var(--text-3);
 }
+
+/* ===================================================================
+   Security page — detector cards + compliance badge grid
+   =================================================================== */
+.sec-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin: 24px 0 8px;
+}
+.sec-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px 22px 20px;
+  transition: transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out),
+    border-color 0.3s var(--ease-out);
+}
+.sec-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--line-2);
+}
+.sec-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 14px;
+  background: var(--violet-soft);
+  color: var(--violet);
+}
+.sec-card h3 {
+  font-family: var(--ff);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin: 0 0 6px;
+}
+.sec-card p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  margin: 0;
+}
+
+.compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin: 20px 0 8px;
+}
+.compliance-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+.compliance-item-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--green-soft);
+  color: var(--green);
+}
+.compliance-item-name {
+  font-family: var(--ff);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.compliance-item-note {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* ===================================================================
+   Docs page — tabbed code block + reference list
+   =================================================================== */
+.code-tabs {
+  margin: 18px 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0f1424;
+}
+.code-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 0;
+  background: #0b0f1c;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.code-tabs-list {
+  display: flex;
+  gap: 2px;
+}
+.code-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--ff);
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.55);
+  padding: 8px 14px;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.code-tab:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+.code-tab.is-active {
+  color: #fff;
+  border-bottom-color: var(--violet);
+}
+.code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--ff);
+  padding: 5px 10px;
+  margin: 0 2px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.code-copy:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+/* Scoped under .page-content to outrank `.page-content pre` / `.page-content
+   code` (the prose code styles), which would otherwise add a light pill bg
+   + wrong padding/radius to this dark tabbed block. */
+.page-content .code-tabs-pre {
+  margin: 0;
+  padding: 16px 18px;
+  border-radius: 0;
+  overflow-x: auto;
+  background: #0f1424;
+}
+.page-content .code-tabs-pre code {
+  font-family: var(--ff-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: #e6e9f5;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  white-space: pre;
+}
+.docs-ref {
+  margin: 16px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.docs-ref-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.docs-ref-row:last-child {
+  border-bottom: none;
+}
+.docs-ref dt {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+.docs-ref dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+@media (max-width: 640px) {
+  .sec-grid,
+  .compliance-grid {
+    grid-template-columns: 1fr;
+  }
+  .docs-ref-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
