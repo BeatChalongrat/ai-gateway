@@ -102,7 +102,6 @@ export default function ChatConversationsPage() {
               }}
               placeholder="Search conversations..."
               className="sran-input"
-              style={inputStyle}
             />
           </Field>
           <Field label="Model id">
@@ -114,7 +113,6 @@ export default function ChatConversationsPage() {
               }
               placeholder="e.g. gpt-4o"
               className="sran-input"
-              style={inputStyle}
             />
           </Field>
           <Field label="From">
@@ -125,7 +123,6 @@ export default function ChatConversationsPage() {
                 setDraft({ ...draft, date_from: e.target.value || undefined })
               }
               className="sran-input"
-              style={inputStyle}
             />
           </Field>
           <Field label="To">
@@ -136,7 +133,6 @@ export default function ChatConversationsPage() {
                 setDraft({ ...draft, date_to: e.target.value || undefined })
               }
               className="sran-input"
-              style={inputStyle}
             />
           </Field>
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -211,8 +207,8 @@ export default function ChatConversationsPage() {
                         <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                           {compact(c.token_count)}
                         </td>
-                        <td>{c.has_files ? <Icon name="check" size={14} style={{ color: "var(--accent-success)", verticalAlign: "middle" }} /> : "—"}</td>
-                        <td>{c.is_shared ? <Icon name="check" size={14} style={{ color: "var(--accent-success)", verticalAlign: "middle" }} /> : "—"}</td>
+                        <td style={{ textAlign: "center" }}><BoolCell value={c.has_files} /></td>
+                        <td style={{ textAlign: "center" }}><BoolCell value={c.is_shared} /></td>
                         <td style={{ color: "var(--color-text-muted)" }}>
                           {formatDate(c.created_at)}
                         </td>
@@ -240,6 +236,19 @@ export default function ChatConversationsPage() {
   );
 }
 
+function BoolCell({ value }: { value: boolean }) {
+  return value ? (
+    <span
+      className="sran-badge sran-badge-success"
+      style={{ padding: "0.0625rem 0.375rem" }}
+    >
+      <Icon name="check" size={12} />
+    </span>
+  ) : (
+    <span style={{ color: "var(--color-text-muted)" }}>—</span>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -257,14 +266,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "0.375rem 0.55rem",
-  background: "var(--color-bg)",
-  border: "1px solid var(--color-border)",
-  borderRadius: 5,
-  color: "var(--color-text-primary)",
-  fontSize: "0.8rem",
-};
