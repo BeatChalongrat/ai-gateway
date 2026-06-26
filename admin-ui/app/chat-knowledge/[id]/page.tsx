@@ -15,6 +15,7 @@ import Link from "next/link";
 import PageHeader from "../../../components/ui/PageHeader";
 import ErrorState from "../../../components/ui/ErrorState";
 import ConfirmModal from "../../../components/ui/ConfirmModal";
+import StatCard from "../../../components/ui/StatCard";
 import { SkeletonTable } from "../../../components/ui/Skeleton";
 import {
   AdminKBDetailResponse,
@@ -483,33 +484,6 @@ function DocStatusPill({ status }: { status: AdminKBDocRow["status"] }) {
     >
       {status}
     </span>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="sran-card" style={{ padding: "0.7rem 0.875rem" }}>
-      <div
-        style={{
-          fontSize: "0.7rem",
-          color: "var(--color-text-muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: "1.05rem",
-          fontWeight: 600,
-          color: "var(--color-text-primary)",
-        }}
-      >
-        {value}
-      </div>
-    </div>
   );
 }
 
