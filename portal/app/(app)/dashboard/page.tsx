@@ -527,13 +527,12 @@ function QuickstartGrid() {
         description="Start sending requests in under a minute"
         href="/projects"
       />
-      {/* TODO: point to /docs when docs page is built */}
       <QuickstartCard
         rgb="245,158,11"
         icon={<BookOpen size={16} strokeWidth={1.75} />}
         title="Read the quickstart"
         description="OpenAI-compatible — swap one line"
-        href="/projects"
+        href="/docs"
       />
     </div>
   );
