@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import PageHeader from "../../components/ui/PageHeader";
 import Badge from "../../components/ui/Badge";
 import DataTable, { Column } from "../../components/ui/DataTable";
+import { Icon } from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import { useApi } from "../../lib/useApi";
@@ -901,7 +902,7 @@ function KeywordRulesSection() {
             loading={loading}
             error={error}
             emptyMessage="No keyword rules yet"
-            emptyIcon="⌨"
+            emptyIcon={<Icon name="git-merge" size={22} />}
             emptyAction={<button className="sran-btn sran-btn-primary" onClick={openCreate}>Create your first rule</button>}
             rowKey={(r) => r.id}
             onRowClick={openEdit}

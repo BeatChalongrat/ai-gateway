@@ -6,6 +6,7 @@ import Modal from "../../components/ui/Modal";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
+import { Icon } from "../../components/ui/Icon";
 import { SkeletonCards } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
@@ -241,7 +242,7 @@ export default function ProjectsPage() {
               onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
               onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
             />
-            {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.tt, fontSize: 12, padding: 2 }}>✕</button>}
+            {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.tt, fontSize: 12, padding: 2 }}><Icon name="x" size={12} /></button>}
           </div>
 
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -316,7 +317,7 @@ export default function ProjectsPage() {
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>
       ) : items.length === 0 ? (
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}>
-          <EmptyState message="No projects yet" icon="▢" action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>Create your first project</button>} />
+          <EmptyState message="No projects yet" icon={<Icon name="folder" size={22} />} action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>Create your first project</button>} />
         </div>
       ) : view === "grid" ? (
         /* ── Grid view ── */

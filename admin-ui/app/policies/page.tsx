@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { Outfit } from "next/font/google";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
+import { Icon } from "../../components/ui/Icon";
 import { SkeletonCards, SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api, ApiError } from "../../lib/api";
@@ -172,7 +173,7 @@ function ActionSel({ value, onChange, disabled }: {
 function SaveDot({ state }: { state: SaveState }) {
   if (state === "idle") return <span style={{ color: "#d1d5db" }}>—</span>;
   if (state === "saving") return <span style={{ color: C.textTertiary, fontSize: "12px" }}>saving…</span>;
-  if (state === "saved") return <span style={{ color: "#059669", fontSize: "12px", fontWeight: 600 }}>✓ saved</span>;
+  if (state === "saved") return <span style={{ color: "#059669", fontSize: "12px", fontWeight: 600 }}><Icon name="check" size={12} /> saved</span>;
   return <span style={{ color: "#dc2626", fontSize: "12px", fontWeight: 600 }}>error</span>;
 }
 
@@ -267,7 +268,7 @@ function ProfilesTab() {
 
   if (loading) return <div style={{ padding: 20 }}><SkeletonCards count={2} /></div>;
   if (error) return <div style={{ padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>;
-  if (!data?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No policy profiles configured" icon="◆" /></div>;
+  if (!data?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No policy profiles configured" icon={<Icon name="shield" size={22} />} /></div>;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: "20px", padding: "20px" }}>
@@ -407,7 +408,7 @@ function DetectorsTab() {
 
   if (dL || pL) return <div style={{ padding: 20 }}><SkeletonTable rows={8} cols={6} /></div>;
   if (dE) return <div style={{ padding: 20 }}><ErrorState message={dE} onRetry={dR} /></div>;
-  if (!detectorData?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No detectors registered" icon="◆" /></div>;
+  if (!detectorData?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No detectors registered" icon={<Icon name="shield" size={22} />} /></div>;
 
   const actionFor = (det: Detector): Action => {
     if (overrides[det.category]) return overrides[det.category];
@@ -446,7 +447,7 @@ function DetectorsTab() {
             onFocus={(e) => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(99,102,241,0.18)`; e.currentTarget.style.background = "var(--bg-surface)"; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = C.borderLight; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
           />
-          {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.textTertiary, fontSize: 12, padding: 2 }}>✕</button>}
+          {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.textTertiary, fontSize: 12, padding: 2 }}><Icon name="x" size={12} /></button>}
         </div>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: "12px", fontWeight: 500, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>

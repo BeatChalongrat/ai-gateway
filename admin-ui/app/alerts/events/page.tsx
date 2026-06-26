@@ -4,6 +4,7 @@ import { useState } from "react";
 import PageHeader from "../../../components/ui/PageHeader";
 import Badge from "../../../components/ui/Badge";
 import DataTable, { Column } from "../../../components/ui/DataTable";
+import { Icon } from "../../../components/ui/Icon";
 import Modal from "../../../components/ui/Modal";
 import { useApi } from "../../../lib/useApi";
 
@@ -106,7 +107,7 @@ export default function AlertEventsPage() {
           loading={loading}
           error={error}
           emptyMessage="No alert events recorded yet"
-          emptyIcon="!"
+          emptyIcon={<Icon name="alert-triangle" size={22} />}
           rowKey={(r) => r.id}
           onRowClick={(row) => setSelected(row)}
           searchable
