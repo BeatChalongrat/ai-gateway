@@ -11,9 +11,12 @@
  */
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { CSSProperties, FormEvent, useState } from "react";
 
 import { api, PortalApiError } from "@/lib/api";
+// Brand styles (.auth-root, .auth-form-card, .af-*) live in login.css.
+// Without this import the page renders unstyled on a cold / email-link load.
+import "../login/login.css";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -50,7 +53,7 @@ export default function ForgotPasswordPage() {
 
   if (submitted) {
     return (
-      <>
+      <div className="auth-root" style={authShellStyle}>
         <Link href="/login" className="auth-back-home">
           <span aria-hidden="true">←</span> Back to sign in
         </Link>
@@ -67,12 +70,12 @@ export default function ForgotPasswordPage() {
             <Link href="/login">sign in</Link> to try again.
           </p>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="auth-root" style={authShellStyle}>
       <Link href="/login" className="auth-back-home">
         <span aria-hidden="true">←</span> Back to sign in
       </Link>
@@ -121,6 +124,17 @@ export default function ForgotPasswordPage() {
           Remember your password? <Link href="/login">Sign in</Link>
         </p>
       </div>
-    </>
+    </div>
   );
 }
+
+// Centered single-card shell (these recovery pages have no split visual
+// panel, so .auth-root alone doesn't center the .auth-form-card).
+const authShellStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "100vh",
+  padding: 24,
+};
