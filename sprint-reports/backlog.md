@@ -4,7 +4,7 @@ Items discovered during sprints that were out of the current sprint's scope. Pul
 
 ## From Sprint 1
 - **ESLint toolchain not installed** (both apps). The `.eslintrc.json` no-restricted-globals ban is dormant until `eslint` + `@typescript-eslint/parser` are installed (admin-ui has no lint script at all). When installing, also add `no-restricted-properties` to catch `window.confirm/alert/prompt` member calls (the globals rule only catches bare calls). Consider `eslint-config-next` for proper TSX parsing.
-- **chat-analytics axis-tick colors** (`admin-ui/app/chat-analytics/page.tsx:279,283`): hardcoded `rgba(180,200,230,0.7)` is light-on-dark. Passed to recharts as SVG `fill` **attribute** → CSS `var()` won't resolve. Needs `getComputedStyle` of a token or a theme-neutral color. (Excluded from Sprint 1 F2.)
+- ~~**chat-analytics axis-tick colors**~~ — RESOLVED Sprint 3 (`getComputedStyle` of `--text-muted` → recharts tick fill).
 - ~~**invite invalid-branch eyebrow** red-on-gradient~~ — RESOLVED Sprint 2 (`a61dde2`): red-tint background.
 - **Dead `.sv-*` CSS** in `portal/app/(auth)/signup/signup.css` (`.sv-divider`, `.sv-socials`, `.sv-social`): orphaned after signup OAuth → `<SocialButtons/>` swap. Remove in a cleanup pass. (Still open after Sprint 2.)
 - ~~**portal `SocialButtons` "coming soon" 💡 emoji**~~ — RESOLVED Sprint 2 (`2fa60a0`): lucide Sparkles.
