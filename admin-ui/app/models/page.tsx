@@ -338,13 +338,13 @@ export default function ModelsPage() {
             <div className="mr-chip-fade" style={{
               animationDelay: "0.2s",
               padding: "0.625rem 1rem",
-              borderBottom: "1px solid #f1f5f9",
+              borderBottom: "1px solid var(--border-default)",
               display: "flex", alignItems: "center", gap: "0.5rem",
               flexWrap: "wrap",
             }}>
               {/* Search */}
               <div style={{ position: "relative", flex: "0 1 200px", minWidth: "140px" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "0.5rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "0.5rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
                   <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
                 <input
