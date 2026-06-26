@@ -319,7 +319,7 @@ export default function SearchSettingsPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: i === 0 ? "#3b6cf6" : "#6b7280", borderRadius: 5, padding: "2px 7px" }}>{priorityBadge(i)}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: i === 0 ? "var(--color-status-info)" : "#6b7280", borderRadius: 5, padding: "2px 7px" }}>{priorityBadge(i)}</span>
                     <span style={{ fontSize: 15, fontWeight: 700, color: T.tp }}>{PROVIDER_LABEL[p.provider] || p.provider}</span>
                     {p.display_name ? <span style={{ fontSize: 13, color: T.tt }}>· {p.display_name}</span> : null}
                   </div>
