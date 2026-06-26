@@ -26,23 +26,26 @@ function formatDate(iso: string | null | undefined): string {
   return d.toLocaleString();
 }
 
-function roleColor(role: string): { bg: string; fg: string; label: string } {
+function roleColor(role: string): { bg: string; tint: string; fg: string; label: string } {
   switch (role) {
     case "user":
       return {
         bg: "rgba(99, 102, 241, 0.18)",
+        tint: "rgba(99, 102, 241, 0.06)",
         fg: "#a5b4fc",
         label: "User",
       };
     case "assistant":
       return {
         bg: "rgba(34, 197, 94, 0.16)",
+        tint: "rgba(34, 197, 94, 0.05)",
         fg: "#86efac",
         label: "Assistant",
       };
     default:
       return {
         bg: "rgba(148, 163, 184, 0.18)",
+        tint: "rgba(148, 163, 184, 0.06)",
         fg: "#cbd5e1",
         label: role,
       };
@@ -176,9 +179,10 @@ export default function ChatConversationDetailPage() {
                     key={m.id}
                     style={{
                       border: "1px solid var(--color-border)",
+                      borderLeft: `3px solid ${rc.fg}`,
                       borderRadius: 8,
                       padding: "0.75rem 0.875rem",
-                      background: "var(--color-bg)",
+                      background: rc.tint,
                     }}
                   >
                     <div
@@ -196,7 +200,7 @@ export default function ChatConversationDetailPage() {
                           color: rc.fg,
                           padding: "0.1rem 0.5rem",
                           borderRadius: 999,
-                          fontSize: "0.65rem",
+                          fontSize: "0.75rem",
                           textTransform: "uppercase",
                           letterSpacing: "0.04em",
                           fontWeight: 600,
@@ -207,7 +211,7 @@ export default function ChatConversationDetailPage() {
                       {m.model_id ? (
                         <span
                           style={{
-                            fontSize: "0.65rem",
+                            fontSize: "0.75rem",
                             color: "var(--color-text-muted)",
                           }}
                         >
@@ -216,7 +220,7 @@ export default function ChatConversationDetailPage() {
                       ) : null}
                       <span
                         style={{
-                          fontSize: "0.65rem",
+                          fontSize: "0.75rem",
                           color: "var(--color-text-muted)",
                           marginLeft: "auto",
                         }}
@@ -241,7 +245,7 @@ export default function ChatConversationDetailPage() {
                       <div
                         style={{
                           marginTop: "0.4rem",
-                          fontSize: "0.6rem",
+                          fontSize: "0.75rem",
                           color: "var(--color-text-muted)",
                         }}
                       >
@@ -296,7 +300,7 @@ export default function ChatConversationDetailPage() {
               <p
                 style={{
                   marginTop: "0.5rem",
-                  fontSize: "0.65rem",
+                  fontSize: "0.75rem",
                   color: "var(--color-text-muted)",
                 }}
               >
@@ -316,7 +320,7 @@ function Summary({ label, value }: { label: string; value: string }) {
     <div>
       <div
         style={{
-          fontSize: "0.6rem",
+          fontSize: "0.75rem",
           textTransform: "uppercase",
           letterSpacing: "0.05em",
           color: "var(--color-text-muted)",
