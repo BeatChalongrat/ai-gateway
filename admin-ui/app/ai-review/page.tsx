@@ -5,6 +5,7 @@ import PageHeader from "../../components/ui/PageHeader";
 import StatCard from "../../components/ui/StatCard";
 import Badge from "../../components/ui/Badge";
 import ErrorState from "../../components/ui/ErrorState";
+import { Icon } from "../../components/ui/Icon";
 import { api, ApiError } from "../../lib/api";
 
 // ---------------------------------------------------------------------------
@@ -487,7 +488,7 @@ export default function AiReviewPage() {
           </div>
           <button className="sran-btn sran-btn-secondary" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", padding: "0.375rem 0.75rem", fontSize: "var(--font-size-xs)", flexShrink: 0, marginLeft: "0.75rem" }}
             onClick={(e) => { e.stopPropagation(); toggleSettings(); }}>
-            <span style={{ fontSize: "0.75rem" }}>&#9881;</span> Settings {settingsOpen ? "▲" : "▼"}
+            <Icon name="settings" size={12} /> Settings {settingsOpen ? <Icon name="chevron-up" size={12} /> : <Icon name="chevron-down" size={12} />}
           </button>
         </div>
 

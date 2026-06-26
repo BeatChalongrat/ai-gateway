@@ -21,7 +21,7 @@ interface Props<T> {
   loading?: boolean;
   error?: string | null;
   emptyMessage?: string;
-  emptyIcon?: string;
+  emptyIcon?: React.ReactNode;
   emptyAction?: React.ReactNode;
   onRowClick?: (row: T) => void;
   rowKey?: (row: T) => string;

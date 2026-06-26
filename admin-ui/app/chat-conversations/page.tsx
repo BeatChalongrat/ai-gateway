@@ -7,6 +7,7 @@ import PageHeader from "../../components/ui/PageHeader";
 import Pagination from "../../components/ui/Pagination";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
+import { Icon } from "../../components/ui/Icon";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import {
   AdminConvQuery,
@@ -210,8 +211,8 @@ export default function ChatConversationsPage() {
                         <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                           {compact(c.token_count)}
                         </td>
-                        <td>{c.has_files ? "✓" : "—"}</td>
-                        <td>{c.is_shared ? "✓" : "—"}</td>
+                        <td>{c.has_files ? <Icon name="check" size={14} style={{ color: "var(--accent-success)", verticalAlign: "middle" }} /> : "—"}</td>
+                        <td>{c.is_shared ? <Icon name="check" size={14} style={{ color: "var(--accent-success)", verticalAlign: "middle" }} /> : "—"}</td>
                         <td style={{ color: "var(--color-text-muted)" }}>
                           {formatDate(c.created_at)}
                         </td>

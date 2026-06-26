@@ -5,6 +5,7 @@ import PageHeader from "../../components/ui/PageHeader";
 import Badge from "../../components/ui/Badge";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
+import { Icon } from "../../components/ui/Icon";
 import { SkeletonCards } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
@@ -36,7 +37,7 @@ interface ProviderItem {
 const BRAND: Record<string, { color: string; initial: string; display: string; note?: string }> = {
   openai:     { color: "#10a37f", initial: "O", display: "OpenAI" },
   anthropic:  { color: "#d97757", initial: "A", display: "Anthropic" },
-  openrouter: { color: "#1a1f36", initial: "◆", display: "OpenRouter", note: "Unified billing across 300+ models" },
+  openrouter: { color: "#1a1f36", initial: "OR", display: "OpenRouter", note: "Unified billing across 300+ models" },
   google:     { color: "#4285f4", initial: "G", display: "Google AI" },
   groq:       { color: "#f55036", initial: "Q", display: "Groq" },
   deepseek:   { color: "#4d6bfe", initial: "D", display: "DeepSeek" },
@@ -678,11 +679,11 @@ export default function ProvidersPage() {
         </div>
       ) : !items.length ? (
         <div className="sran-card">
-          <EmptyState message="No providers registered" icon="⬡" />
+          <EmptyState message="No providers registered" icon={<Icon name="server" size={22} />} />
         </div>
       ) : filtered.length === 0 ? (
         <div className="sran-card">
-          <EmptyState message={`No providers match "${query}"`} icon="🔍" />
+          <EmptyState message={`No providers match "${query}"`} icon={<Icon name="search" size={22} />} />
         </div>
       ) : (
         <div

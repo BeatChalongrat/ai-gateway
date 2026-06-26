@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
+import { Icon } from "../../components/ui/Icon";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import Pagination from "../../components/ui/Pagination";
 import { useApi } from "../../lib/useApi";
@@ -328,7 +329,7 @@ export default function ModelsPage() {
         ) : error ? (
           <ErrorState message={error} onRetry={refetch} />
         ) : items.length === 0 ? (
-          <EmptyState message="No models registered" icon="◇" />
+          <EmptyState message="No models registered" icon={<Icon name="box" size={22} />} />
         ) : (
           <>
             {/* ── Toolbar ── */}
@@ -372,7 +373,7 @@ export default function ModelsPage() {
                     position: "absolute", right: "0.375rem", top: "50%", transform: "translateY(-50%)",
                     background: "none", border: "none", cursor: "pointer",
                     color: "var(--text-muted)", fontSize: "0.75rem", padding: 2,
-                  }}>✕</button>
+                  }}><Icon name="x" size={12} /></button>
                 )}
               </div>
 

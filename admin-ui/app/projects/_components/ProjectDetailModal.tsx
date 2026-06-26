@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import ConfirmModal from "../../../components/ui/ConfirmModal";
+import { Icon } from "../../../components/ui/Icon";
 import Modal from "../../../components/ui/Modal";
 import { useToast } from "../../../components/ui/Toast";
 import { api, ApiError } from "../../../lib/api";
@@ -837,7 +838,7 @@ function MemberRow({
                 }}
               >
                 {r}
-                {r === member.role ? <span>✓</span> : null}
+                {r === member.role ? <Icon name="check" size={14} /> : null}
               </button>
             ))}
             <div
