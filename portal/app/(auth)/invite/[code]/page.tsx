@@ -126,8 +126,11 @@ export default async function InviteLandingPage({
                     alignItems: "center",
                     padding: "12px 20px",
                     borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.18)",
-                    color: "rgba(255,255,255,0.82)",
+                    // Was white-on-white (invisible) on the light .sv-form-side.
+                    // Use theme tokens so it reads as a legible secondary button.
+                    border: "1px solid var(--line-2)",
+                    background: "var(--bg-2)",
+                    color: "var(--text)",
                     textDecoration: "none",
                     fontSize: 14,
                     fontWeight: 500,
