@@ -136,6 +136,7 @@ function KeysPanel({
 }) {
   const [keys, setKeys] = useState<ProviderKey[]>([]);
   const [loading, setLoading] = useState(true);
+  const [keysError, setKeysError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [adding, setAdding] = useState(false);
@@ -143,11 +144,12 @@ function KeysPanel({
   const { toast } = useToast();
 
   const loadKeys = useCallback(async () => {
+    setKeysError(null);
     try {
       const data = await api.get(`/admin/providers/${providerName}/keys`);
       setKeys(data.items || []);
-    } catch {
-      /* ignore */
+    } catch (e: any) {
+      setKeysError(e?.body?.error?.message || "Failed to load keys for this provider.");
     }
     setLoading(false);
   }, [providerName]);
@@ -232,6 +234,11 @@ function KeysPanel({
       {loading ? (
         <div className="sran-empty" style={{ padding: "1rem" }}>
           Loading keys...
+        </div>
+      ) : keysError ? (
+        <div className="sran-empty" style={{ padding: "1rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
+          <span style={{ color: "var(--color-status-error)", fontWeight: 500 }}>{keysError}</span>
+          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => { setLoading(true); loadKeys(); }}>Retry</button>
         </div>
       ) : activeKeys.length > 0 ? (
         <div style={{ overflowX: "auto", marginBottom: "1.25rem" }}>
