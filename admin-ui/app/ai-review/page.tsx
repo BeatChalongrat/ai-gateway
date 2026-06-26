@@ -6,6 +6,7 @@ import StatCard from "../../components/ui/StatCard";
 import Badge from "../../components/ui/Badge";
 import ErrorState from "../../components/ui/ErrorState";
 import { Icon } from "../../components/ui/Icon";
+import { SkeletonTable } from "../../components/ui/Skeleton";
 import { api, ApiError } from "../../lib/api";
 
 // ---------------------------------------------------------------------------
@@ -476,6 +477,7 @@ export default function AiReviewPage() {
 
   return (
     <>
+      <style>{`.air-td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--color-border-default); }`}</style>
       <PageHeader title="AI Sensitive Data Reviewer" subtitle="Scans AI provider responses for sensitive data that DLP filters may have missed on the way out" />
 
       {error && <div className="sran-card" style={{ marginBottom: "1rem" }}><ErrorState message={error} onRetry={reloadAll} /></div>}
@@ -654,15 +656,15 @@ export default function AiReviewPage() {
                   <thead><tr>{["Time", "Trigger", "Provider", "Model", "Requests", "Findings", "Tokens", "Cost", "Status"].map((h) => <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", fontWeight: 600 }}>{h}</th>)}</tr></thead>
                   <tbody>{scanRuns.map((r) => (
                     <tr key={r.scan_run_id}>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}><Badge variant={r.trigger === "realtime" ? "warning" : "info"}>{r.trigger}</Badge></td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.provider}</td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}><code>{r.model}</code></td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.requests_scanned}</td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.findings_count}</td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{r.total_tokens.toLocaleString()}</td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{formatCost(r.estimated_cost_usd)}</td>
-                      <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}><Badge variant={r.status === "completed" ? "success" : r.status === "failed" ? "error" : "warning"}>{r.status}</Badge></td>
+                      <td className="air-td">{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</td>
+                      <td className="air-td"><Badge variant={r.trigger === "realtime" ? "warning" : "info"}>{r.trigger}</Badge></td>
+                      <td className="air-td">{r.provider}</td>
+                      <td className="air-td"><code>{r.model}</code></td>
+                      <td className="air-td">{r.requests_scanned}</td>
+                      <td className="air-td">{r.findings_count}</td>
+                      <td className="air-td">{r.total_tokens.toLocaleString()}</td>
+                      <td className="air-td">{formatCost(r.estimated_cost_usd)}</td>
+                      <td className="air-td"><Badge variant={r.status === "completed" ? "success" : r.status === "failed" ? "error" : "warning"}>{r.status}</Badge></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -671,7 +673,9 @@ export default function AiReviewPage() {
             {scanAggregate && <div style={{ padding: "0.75rem 1rem", borderTop: "1px solid var(--color-border-default)", fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>Total AI review cost: <strong>{formatCost(scanAggregate.total_cost_usd)}</strong> across {scanAggregate.total_runs} runs ({scanAggregate.total_tokens.toLocaleString()} tokens).</div>}
           </div>
         ) : loading ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>Loading…</div>
+          <div style={{ padding: "0.5rem 0.75rem" }}>
+            <SkeletonTable rows={6} cols={7} />
+          </div>
         ) : visibleFindings.length === 0 ? (
           <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>No findings in this tab yet. {settings?.enabled ? "Run a scan to populate." : "Enable AI review first."}</div>
         ) : (
@@ -680,13 +684,13 @@ export default function AiReviewPage() {
               <thead><tr>{["Request", "Entity type", "Risk", "Sample", "Suggested detector", "Status", "Actions"].map((h) => <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", fontWeight: 600 }}>{h}</th>)}</tr></thead>
               <tbody>{visibleFindings.map((f) => (
                 <tr key={f.id}>
-                  <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}><code>{f.request_id.slice(0, 16)}…</code></td>
-                  <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{f.entity_type}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}><Badge variant={f.risk_level === "HIGH" ? "error" : f.risk_level === "MEDIUM" ? "warning" : "info"}>{f.risk_level}</Badge></td>
-                  <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", maxWidth: "18rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><code>{f.sample_text}</code></td>
-                  <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>{f.suggested_detector ? <code>{f.suggested_detector}</code> : "—"}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}><Badge variant={f.status === "dismissed" ? "info" : f.status === "added_to_dlp" ? "success" : f.status === "reviewed" ? "warning" : "info"}>{f.status}</Badge></td>
-                  <td style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)" }}>
+                  <td className="air-td"><code>{f.request_id.slice(0, 16)}…</code></td>
+                  <td className="air-td">{f.entity_type}</td>
+                  <td className="air-td"><Badge variant={f.risk_level === "HIGH" ? "error" : f.risk_level === "MEDIUM" ? "warning" : "info"}>{f.risk_level}</Badge></td>
+                  <td className="air-td" style={{ maxWidth: "18rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><code>{f.sample_text}</code></td>
+                  <td className="air-td">{f.suggested_detector ? <code>{f.suggested_detector}</code> : "—"}</td>
+                  <td className="air-td"><Badge variant={f.status === "dismissed" ? "info" : f.status === "added_to_dlp" ? "success" : f.status === "reviewed" ? "warning" : "info"}>{f.status}</Badge></td>
+                  <td className="air-td">
                     <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
                       <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "reviewed")}>Mark reviewed</button>
                       <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "added_to_dlp")}>Add to DLP</button>
