@@ -14,6 +14,7 @@ import Link from "next/link";
 
 import PageHeader from "../../../components/ui/PageHeader";
 import ErrorState from "../../../components/ui/ErrorState";
+import ConfirmModal from "../../../components/ui/ConfirmModal";
 import { SkeletonTable } from "../../../components/ui/Skeleton";
 import {
   AdminKBDetailResponse,
@@ -46,6 +47,8 @@ export default function ChatKnowledgeDetailPage() {
   const [reindexing, setReindexing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [reindexConfirmOpen, setReindexConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -66,16 +69,8 @@ export default function ChatKnowledgeDetailPage() {
     void load();
   }, [load]);
 
-  async function handleReindex() {
+  async function doReindex() {
     if (!data) return;
-    if (
-      !window.confirm(
-        `Reindex every document in "${data.knowledge_base.name}"? ` +
-          `This re-embeds ${data.documents.length} document${data.documents.length === 1 ? "" : "s"} and may take several minutes.`,
-      )
-    ) {
-      return;
-    }
     setReindexing(true);
     setActionMessage(null);
     try {
@@ -91,19 +86,12 @@ export default function ChatKnowledgeDetailPage() {
       );
     } finally {
       setReindexing(false);
+      setReindexConfirmOpen(false);
     }
   }
 
-  async function handleDelete() {
+  async function doDelete() {
     if (!data) return;
-    if (
-      !window.confirm(
-        `Delete "${data.knowledge_base.name}"? ` +
-          `${data.knowledge_base.document_count} documents and ${data.knowledge_base.total_chunks} chunks will be permanently removed.`,
-      )
-    ) {
-      return;
-    }
     setDeleting(true);
     setActionMessage(null);
     try {
@@ -114,6 +102,7 @@ export default function ChatKnowledgeDetailPage() {
         err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed",
       );
       setDeleting(false);
+      setDeleteConfirmOpen(false);
     }
   }
 
@@ -365,7 +354,7 @@ export default function ChatKnowledgeDetailPage() {
             type="button"
             className="sran-btn sran-btn-secondary sran-btn-sm"
             disabled={reindexing || deleting}
-            onClick={() => void handleReindex()}
+            onClick={() => setReindexConfirmOpen(true)}
           >
             {reindexing ? "Reindexing…" : "Reindex all documents"}
           </button>
@@ -373,7 +362,7 @@ export default function ChatKnowledgeDetailPage() {
             type="button"
             className="sran-btn sran-btn-sm"
             disabled={reindexing || deleting}
-            onClick={() => void handleDelete()}
+            onClick={() => setDeleteConfirmOpen(true)}
             style={{
               background: "rgba(248,113,113,0.12)",
               color: "rgb(252,165,165)",
@@ -391,6 +380,26 @@ export default function ChatKnowledgeDetailPage() {
           </Link>
         </div>
       </div>
+
+      <ConfirmModal
+        open={reindexConfirmOpen}
+        onClose={() => !reindexing && setReindexConfirmOpen(false)}
+        onConfirm={() => void doReindex()}
+        title="Reindex documents?"
+        message={`Re-index all documents in "${kb.name}"? This re-embeds ${data.documents.length} document${data.documents.length === 1 ? "" : "s"} and may take a while.`}
+        confirmLabel="Reindex"
+        loading={reindexing}
+      />
+
+      <ConfirmModal
+        open={deleteConfirmOpen}
+        onClose={() => !deleting && setDeleteConfirmOpen(false)}
+        onConfirm={() => void doDelete()}
+        title="Delete knowledge base?"
+        message={`Delete "${kb.name}"? ${kb.document_count} documents and ${kb.total_chunks} chunks will be permanently removed.`}
+        confirmLabel="Delete"
+        loading={deleting}
+      />
     </div>
   );
 }

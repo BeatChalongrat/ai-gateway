@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
+import Modal from "../../components/ui/Modal";
 import CustomDetectorForm, { DetectorInitial } from "../../components/dlp/CustomDetectorForm";
 import AuditLogTimeline, { AuditEntry } from "../../components/dlp/AuditLogTimeline";
 
@@ -39,6 +40,10 @@ export default function DlpDetectorsPage() {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Detector | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [disableTarget, setDisableTarget] = useState<Detector | null>(null);
+  const [disableReason, setDisableReason] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Detector | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -64,30 +69,53 @@ export default function DlpDetectorsPage() {
   }, []);
 
   async function transition(d: Detector, verb: "activate" | "testing" | "disable") {
+    if (verb === "disable") {
+      setDisableReason("");
+      setDisableTarget(d);
+      return;
+    }
     try {
-      if (verb === "disable") {
-        const reason = window.prompt("Reason for disabling:");
-        if (!reason) return;
-        await api.post(`${BASE}/${d.id}/disable`, { reason });
-      } else {
-        await api.post(`${BASE}/${d.id}/${verb}`, {});
-      }
+      await api.post(`${BASE}/${d.id}/${verb}`, {});
       await load();
       if (selected?.id === d.id) openDetail(d);
     } catch (e) {
-      alert(e instanceof ApiError ? (e.body?.error?.message ?? "action failed") : "action failed");
+      setError(e instanceof ApiError ? (e.body?.error?.message ?? "action failed") : "action failed");
     }
   }
 
-  async function remove(d: Detector) {
-    const reason = window.prompt(`Delete "${d.name}"? This is permanent. Reason:`);
+  async function doDisable() {
+    if (!disableTarget) return;
+    const d = disableTarget;
+    const reason = disableReason.trim();
     if (!reason) return;
-    if (!window.confirm(`Really delete ${d.name}?`)) return;
+    try {
+      await api.post(`${BASE}/${d.id}/disable`, { reason });
+      setDisableTarget(null);
+      await load();
+      if (selected?.id === d.id) openDetail(d);
+    } catch (e) {
+      setError(e instanceof ApiError ? (e.body?.error?.message ?? "action failed") : "action failed");
+    }
+  }
+
+  function remove(d: Detector) {
+    setDeleteReason("");
+    setDeleteTarget(d);
+  }
+
+  async function doDelete() {
+    if (!deleteTarget) return;
+    const d = deleteTarget;
+    const reason = deleteReason.trim();
+    if (!reason) return;
     try {
       await api.delete(`${BASE}/${d.id}?reason=${encodeURIComponent(reason)}`);
+      setDeleteTarget(null);
       setSelected(null);
       await load();
-    } catch { alert("delete failed"); }
+    } catch {
+      setError("delete failed");
+    }
   }
 
   return (
@@ -198,6 +226,69 @@ export default function DlpDetectorsPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        open={!!disableTarget}
+        onClose={() => setDisableTarget(null)}
+        title="Disable detector"
+        footer={
+          <>
+            <button style={miniBtn} onClick={() => setDisableTarget(null)}>Cancel</button>
+            <button
+              style={{ ...primaryBtn, opacity: disableReason.trim() ? 1 : 0.5 }}
+              disabled={!disableReason.trim()}
+              onClick={() => void doDisable()}
+            >
+              Disable
+            </button>
+          </>
+        }
+      >
+        <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
+          Reason for disabling{disableTarget ? ` "${disableTarget.name}"` : ""}:
+        </label>
+        <input
+          className="sran-input"
+          autoFocus
+          value={disableReason}
+          onChange={(e) => setDisableReason(e.target.value)}
+          placeholder="Reason for disabling"
+          style={{ width: "100%" }}
+        />
+      </Modal>
+
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete detector"
+        footer={
+          <>
+            <button style={miniBtn} onClick={() => setDeleteTarget(null)}>Cancel</button>
+            <button
+              className="sran-btn sran-btn-danger"
+              disabled={!deleteReason.trim()}
+              onClick={() => void doDelete()}
+            >
+              Delete
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 0, marginBottom: 12 }}>
+          Delete &quot;{deleteTarget?.name}&quot;? This is permanent.
+        </p>
+        <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
+          Reason:
+        </label>
+        <input
+          className="sran-input"
+          autoFocus
+          value={deleteReason}
+          onChange={(e) => setDeleteReason(e.target.value)}
+          placeholder="Reason for deleting"
+          style={{ width: "100%" }}
+        />
+      </Modal>
     </div>
   );
 }
