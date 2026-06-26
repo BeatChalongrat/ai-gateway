@@ -46,6 +46,8 @@ export default function ProjectsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Inline error for the rename/delete modals (only one is open at a time).
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -109,6 +111,7 @@ export default function ProjectsPage() {
     if (!renameTarget) return;
     if (!renameValue.trim()) return;
     setRenameSaving(true);
+    setActionError(null);
     try {
       await api.patch(`/portal/projects/${renameTarget.id}`, {
         name: renameValue.trim(),
@@ -116,7 +119,7 @@ export default function ProjectsPage() {
       setRenameTarget(null);
       load();
     } catch (err) {
-      alert(err instanceof PortalApiError ? err.message : "Rename failed");
+      setActionError(err instanceof PortalApiError ? err.message : "Rename failed");
     } finally {
       setRenameSaving(false);
     }
@@ -125,12 +128,13 @@ export default function ProjectsPage() {
   async function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    setActionError(null);
     try {
       await api.delete(`/portal/projects/${deleteTarget.id}`);
       setDeleteTarget(null);
       load();
     } catch (err) {
-      alert(err instanceof PortalApiError ? err.message : "Delete failed");
+      setActionError(err instanceof PortalApiError ? err.message : "Delete failed");
     } finally {
       setDeleting(false);
     }
@@ -260,13 +264,21 @@ export default function ProjectsPage() {
       {/* Rename modal */}
       <Modal
         open={!!renameTarget}
-        onClose={() => !renameSaving && setRenameTarget(null)}
+        onClose={() => {
+          if (!renameSaving) {
+            setRenameTarget(null);
+            setActionError(null);
+          }
+        }}
         title="Rename project"
         footer={
           <>
             <Button
               variant="secondary"
-              onClick={() => setRenameTarget(null)}
+              onClick={() => {
+                setRenameTarget(null);
+                setActionError(null);
+              }}
               disabled={renameSaving}
             >
               Cancel
@@ -277,7 +289,21 @@ export default function ProjectsPage() {
           </>
         }
       >
-        <form onSubmit={handleRename}>
+        <form onSubmit={handleRename} className="space-y-4">
+          {actionError ? (
+            <div
+              style={{
+                background: "rgba(220, 38, 38, 0.08)",
+                border: "1px solid rgba(220, 38, 38, 0.25)",
+                color: "var(--accent-danger)",
+                fontSize: 13,
+                padding: "8px 12px",
+                borderRadius: 8,
+              }}
+            >
+              {actionError}
+            </div>
+          ) : null}
           <Input
             label="Project name"
             autoFocus
@@ -291,13 +317,21 @@ export default function ProjectsPage() {
       {/* Delete modal */}
       <Modal
         open={!!deleteTarget}
-        onClose={() => !deleting && setDeleteTarget(null)}
+        onClose={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+            setActionError(null);
+          }
+        }}
         title="Delete project?"
         footer={
           <>
             <Button
               variant="secondary"
-              onClick={() => setDeleteTarget(null)}
+              onClick={() => {
+                setDeleteTarget(null);
+                setActionError(null);
+              }}
               disabled={deleting}
             >
               Cancel
@@ -308,6 +342,21 @@ export default function ProjectsPage() {
           </>
         }
       >
+        {actionError ? (
+          <div
+            style={{
+              background: "rgba(220, 38, 38, 0.08)",
+              border: "1px solid rgba(220, 38, 38, 0.25)",
+              color: "var(--accent-danger)",
+              fontSize: 13,
+              padding: "8px 12px",
+              borderRadius: 8,
+              marginBottom: 12,
+            }}
+          >
+            {actionError}
+          </div>
+        ) : null}
         <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
           Delete{" "}
           <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
