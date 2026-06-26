@@ -63,7 +63,7 @@ function Header() {
         Recent requests
       </h3>
       <p style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2 }}>
-        The last 100 requests from your API keys
+        Your most recent requests
       </p>
     </div>
   );
