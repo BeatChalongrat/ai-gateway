@@ -49,7 +49,9 @@ export default function SignupForm({
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [inviteCode, setInviteCode] = useState(presetInviteCode ?? "");
-  const [tos, setTos] = useState(true);
+  // Unchecked by default — pre-ticked consent is a recognized anti-pattern
+  // (GDPR/UX); the user must explicitly accept (locked decision).
+  const [tos, setTos] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -212,6 +214,18 @@ export default function SignupForm({
                 {showConfirm ? "Hide" : "Show"}
               </button>
             </div>
+            {confirm ? (
+              <span
+                className={`sv-match-hint ${
+                  password === confirm ? "ok" : "bad"
+                }`}
+                aria-live="polite"
+              >
+                {password === confirm
+                  ? "Passwords match"
+                  : "Passwords don't match"}
+              </span>
+            ) : null}
           </div>
 
           {locked ? null : (
