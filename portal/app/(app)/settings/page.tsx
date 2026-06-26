@@ -629,38 +629,46 @@ export default function SettingsPage() {
           underlying multi-provider link model isn't built yet (Phase 4),
           and shipping the action buttons without a backing endpoint
           would be a worse experience than no buttons at all. */}
-      <Card padding="md">
-        <div className="flex items-center justify-between mb-5">
-          <h2
-            className="font-heading"
-            style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+      {/* Only render when a provider is actually linked (read-only). Connect/
+          Disconnect have no backend yet, so we don't ship non-functional
+          "Coming soon" connect rows for unlinked providers — the section is
+          simply hidden for email/password accounts. */}
+      {user?.oauth_provider === "google" || user?.oauth_provider === "github" ? (
+        <Card padding="md">
+          <div className="flex items-center justify-between mb-5">
+            <h2
+              className="font-heading"
+              style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
+            >
+              Linked accounts
+            </h2>
+          </div>
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--text-secondary)",
+              marginBottom: 16,
+            }}
           >
-            Linked accounts
-          </h2>
-        </div>
-        <p
-          style={{
-            fontSize: 13,
-            color: "var(--text-secondary)",
-            marginBottom: 16,
-          }}
-        >
-          Single-sign-on providers connected to this account. You can sign in
-          using any connected method.
-        </p>
-        <LinkedAccountRow
-          provider="google"
-          label="Google"
-          connectedProvider={user?.oauth_provider ?? null}
-          email={user?.email ?? null}
-        />
-        <LinkedAccountRow
-          provider="github"
-          label="GitHub"
-          connectedProvider={user?.oauth_provider ?? null}
-          email={user?.email ?? null}
-        />
-      </Card>
+            Single-sign-on provider connected to this account.
+          </p>
+          {user.oauth_provider === "google" ? (
+            <LinkedAccountRow
+              provider="google"
+              label="Google"
+              connectedProvider={user.oauth_provider}
+              email={user.email ?? null}
+            />
+          ) : (
+            <LinkedAccountRow
+              provider="github"
+              label="GitHub"
+              connectedProvider={user.oauth_provider}
+              email={user.email ?? null}
+            />
+          )}
+        </Card>
+      ) : null}
 
       {/* Danger zone — hidden until account deletion is wired (see
           ACCOUNT_DELETE_ENABLED above). */}
