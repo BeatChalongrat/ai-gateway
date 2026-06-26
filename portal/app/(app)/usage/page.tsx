@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Hash, TrendingUp, Zap } from "lucide-react";
 
-import { PageSpinner } from "@/components/Spinner";
+import { HeroSkeleton } from "@/components/skeletons/HeroSkeleton";
+import { StatCardRowSkeleton } from "@/components/skeletons/StatCardRowSkeleton";
+import { TableSkeleton } from "@/components/skeletons/TableSkeleton";
 import { api, PortalApiError } from "@/lib/api";
 import { formatDate, formatTokens } from "@/lib/format";
 import type { UsageRequest } from "@/lib/types";
@@ -128,7 +130,14 @@ export default function UsagePage() {
     });
   }, [filtered]);
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <StatCardRowSkeleton />
+        <HeroSkeleton />
+        <TableSkeleton rows={6} />
+      </div>
+    );
 
   return (
     <div className="space-y-6">
