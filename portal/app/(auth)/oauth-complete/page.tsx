@@ -4,6 +4,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { getSession } from "next-auth/react";
 import { Suspense, useEffect, useState } from "react";
 
+import { AlertCircle } from "lucide-react";
+
+import { Logo } from "@/components/Logo";
 import { Spinner } from "@/components/Spinner";
 
 // Landing page for a successful NextAuth OAuth sign-in. Reads the
@@ -52,9 +55,15 @@ export default function OAuthCompletePage() {
 
 function OAuthCompleteFallback() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-10 bg-bg-page text-gray-500">
-      <Spinner size={28} />
-      <p className="mt-3 text-sm">Signing you in…</p>
+    <main
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
+      style={{ background: "var(--bg-base)" }}
+    >
+      <Logo variant="dark" size="md" />
+      <Spinner size={28} className="mt-6" />
+      <p className="mt-3 text-sm" style={{ color: "var(--text-secondary)" }}>
+        Signing you in…
+      </p>
     </main>
   );
 }
@@ -105,12 +114,27 @@ function OAuthCompleteInner() {
 
   if (error) {
     return (
-      <main className="min-h-screen flex items-center justify-center px-4 py-10 bg-bg-page">
-        <div className="text-center">
-          <p className="text-brand-red text-sm">{error}</p>
+      <main
+        className="min-h-screen flex items-center justify-center px-4 py-10"
+        style={{ background: "var(--bg-base)" }}
+      >
+        <div className="flex flex-col items-center text-center max-w-sm">
+          <div className="mb-4">
+            <Logo variant="dark" size="md" />
+          </div>
+          <div
+            className="w-11 h-11 rounded-full flex items-center justify-center mb-3"
+            style={{ background: "rgba(220,38,38,0.1)", color: "var(--accent-danger)" }}
+          >
+            <AlertCircle size={22} />
+          </div>
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            {error}
+          </p>
           <a
             href="/login"
-            className="mt-4 inline-block text-brand-navy font-medium hover:underline"
+            className="mt-4 inline-block font-medium hover:underline"
+            style={{ color: "var(--accent-primary)" }}
           >
             Back to sign in
           </a>
@@ -120,9 +144,15 @@ function OAuthCompleteInner() {
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-10 bg-bg-page text-gray-500">
-      <Spinner size={28} />
-      <p className="mt-3 text-sm">Signing you in…</p>
+    <main
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
+      style={{ background: "var(--bg-base)" }}
+    >
+      <Logo variant="dark" size="md" />
+      <Spinner size={28} className="mt-6" />
+      <p className="mt-3 text-sm" style={{ color: "var(--text-secondary)" }}>
+        Signing you in…
+      </p>
     </main>
   );
 }
