@@ -305,7 +305,8 @@ export default function AiReviewPage() {
   const [draftRtEnabled, setDraftRtEnabled] = useState(false);
   const [draftRtScope, setDraftRtScope] = useState<"all" | "specific">("all");
   const [draftRtIds, setDraftRtIds] = useState<string[]>([]);
-  const [draftManualEnabled, setDraftManualEnabled] = useState(true);
+  // No draftManualEnabled: manual scan is always available via "Run scan now"
+  // (POST /admin/ai-review/scan); the backend has no persisted manual-enabled flag.
   const [draftManualScope, setDraftManualScope] = useState<"all" | "specific">("all");
   const [draftManualIds, setDraftManualIds] = useState<string[]>([]);
   const [draftScanLimit, setDraftScanLimit] = useState(50);
@@ -329,7 +330,6 @@ export default function AiReviewPage() {
     const ids = st.monitored_key_ids ?? [];
     setDraftRtEnabled(st.realtime_enabled);
     setDraftRtScope(scope); setDraftRtIds([...ids]);
-    setDraftManualEnabled(!st.realtime_enabled);
     setDraftManualScope(scope); setDraftManualIds([...ids]);
     setDraftScanLimit(st.scan_limit);
     setRtPickerOpen(false); setManualPickerOpen(false);
@@ -581,14 +581,14 @@ export default function AiReviewPage() {
                     {/* Manual scan */}
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 16px" }}>
-                        <div style={{ flex: 1, opacity: draftManualEnabled ? 1 : 0.5 }}>
+                        <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 600, fontSize: "13px" }}>Manual scan</div>
                           <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>Run on demand, scan recent requests</div>
                         </div>
-                        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "var(--color-status-info-bg)", color: "var(--color-status-info)", fontWeight: 600, opacity: draftManualEnabled ? 1 : 0.5 }}>On demand</span>
-                        <ToggleSwitch checked={draftManualEnabled} onChange={setDraftManualEnabled} />
+                        {/* No toggle: manual scan is always available via "Run scan now"
+                            below, so the scope/limit config is always shown. */}
+                        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "var(--color-status-info-bg)", color: "var(--color-status-info)", fontWeight: 600 }}>On demand</span>
                       </div>
-                      {draftManualEnabled && (
                         <div style={{ borderTop: "1px solid var(--color-border-default)", padding: "12px 16px", background: "var(--color-surface-secondary)" }}>
                           <label className="sran-label" style={{ marginBottom: "6px", display: "block" }}>Scan scope</label>
                           <KeyPicker open={manualPickerOpen} scope={draftManualScope} selectedIds={draftManualIds} allKeys={allKeys} tenantMap={tenantMap}
@@ -604,7 +604,6 @@ export default function AiReviewPage() {
                             </div>
                           </div>
                         </div>
-                      )}
                     </div>
                   </div>
 
