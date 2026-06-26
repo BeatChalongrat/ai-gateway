@@ -259,7 +259,11 @@ export default function ChatUsersPage() {
                             type="button"
                             onClick={() => void toggleActive(u)}
                             disabled={pendingId === u.id}
-                            className="sran-btn sran-btn-secondary sran-btn-sm"
+                            // State-aware, token-colored affordance for the
+                            // active/inactive concept: enabling a disabled user
+                            // is the positive (primary) action; disabling an
+                            // active user is the neutral (secondary) action.
+                            className={`sran-btn sran-btn-sm ${u.is_active ? "sran-btn-secondary" : "sran-btn-primary"}`}
                             title={u.is_active ? "Disable user" : "Enable user"}
                           >
                             {pendingId === u.id
