@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { Outfit } from "next/font/google";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
+import Modal from "../../components/ui/Modal";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
@@ -186,6 +187,8 @@ export default function RequestsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [downloading, setDownloading] = useState(false);
+  const [secureReasonOpen, setSecureReasonOpen] = useState(false);
+  const [secureReason, setSecureReason] = useState("");
   const { toast } = useToast();
 
   const items = data?.items ?? [];
@@ -300,10 +303,8 @@ export default function RequestsPage() {
     });
   }
 
-  async function loadSecureTrace() {
+  async function loadSecureTrace(reason: string) {
     if (!detail || secureTraceLoading) return;
-    const reason = window.prompt("Reason for viewing sensitive raw trace");
-    if (reason === null) return;
     setSecureTraceLoading(true);
     try {
       const path = `/admin/requests/${detail.request_id}/secure-trace?reason=${encodeURIComponent(reason || "admin-debug")}`;
@@ -316,6 +317,13 @@ export default function RequestsPage() {
     } finally {
       setSecureTraceLoading(false);
     }
+  }
+
+  function submitSecureReason() {
+    const reason = secureReason.trim();
+    if (!reason) return;
+    setSecureReasonOpen(false);
+    void loadSecureTrace(reason);
   }
 
   const okCount = items.filter((x) => x.status === "success").length;
@@ -585,7 +593,7 @@ export default function RequestsPage() {
                         <div style={{ fontSize: 11, color: T.tt, marginTop: 2 }}>Persisted logs are masked for support and monitoring.</div>
                       </div>
                       <button
-                        onClick={loadSecureTrace}
+                        onClick={() => { setSecureReason(""); setSecureReasonOpen(true); }}
                         disabled={secureTraceLoading}
                         style={{
                           border: `1px solid ${T.bl}`, background: "var(--bg-elevated)",
@@ -731,6 +739,44 @@ export default function RequestsPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={secureReasonOpen}
+        onClose={() => setSecureReasonOpen(false)}
+        title="Admin Secure Trace"
+        footer={
+          <>
+            <button
+              className="sran-btn sran-btn-secondary"
+              onClick={() => setSecureReasonOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="sran-btn sran-btn-primary"
+              onClick={submitSecureReason}
+              disabled={!secureReason.trim()}
+            >
+              View trace
+            </button>
+          </>
+        }
+      >
+        <label
+          style={{ display: "block", fontSize: 13, fontWeight: 600, color: T.ts, marginBottom: 8 }}
+        >
+          Reason for viewing sensitive raw trace
+        </label>
+        <input
+          className="sran-input"
+          autoFocus
+          value={secureReason}
+          onChange={(e) => setSecureReason(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submitSecureReason(); }}
+          placeholder="Reason for viewing sensitive raw trace"
+          style={{ width: "100%" }}
+        />
+      </Modal>
     </div>
   );
 }
