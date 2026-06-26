@@ -327,7 +327,7 @@ function ProfCard({ profile, idx }: { profile: Profile; idx: number }) {
       onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.06)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid #f3f4f6" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--border-default)" }}>
         <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: C.textPrimary }}>{profile.name}</h3>
         <span style={{
           display: "inline-block", padding: "2px 10px",
@@ -431,7 +431,7 @@ function DetectorsTab() {
   return (
     <>
       {/* Toolbar */}
-      <div style={{ padding: "10px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: "8px" }}>
+      <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border-default)", display: "flex", alignItems: "center", gap: "8px" }}>
         <div style={{ position: "relative", flex: "0 1 240px", minWidth: 140 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -567,7 +567,7 @@ function NerTab() {
         <div style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "12px 14px", borderRadius: 10, marginBottom: 20,
-          background: isReady ? "rgba(16,185,129,0.06)" : "#f3f4f6",
+          background: isReady ? "rgba(16,185,129,0.06)" : "var(--bg-elevated)",
           border: `1px solid ${isReady ? "rgba(16,185,129,0.15)" : C.borderLight}`,
         }}>
           <span style={{
@@ -583,7 +583,7 @@ function NerTab() {
           display: "flex", gap: 10, alignItems: "flex-start",
           padding: "12px 14px", borderRadius: 10,
           background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)",
-          fontSize: "13px", color: "#92400e", lineHeight: 1.55,
+          fontSize: "13px", color: "var(--accent-warning)", lineHeight: 1.55,
         }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>

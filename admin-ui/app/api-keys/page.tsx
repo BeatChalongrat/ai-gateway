@@ -351,7 +351,7 @@ export default function ApiKeysPage() {
       <Modal open={!!rawKey} onClose={() => { setRawKey(null); setShowCreate(false); }} title="API Key Created" footer={
         <button className="sran-btn sran-btn-primary" onClick={() => { setRawKey(null); setShowCreate(false); }}>Done</button>
       }>
-        <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "#92400e", lineHeight: 1.5 }}>
+        <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "var(--accent-warning)", lineHeight: 1.5 }}>
           Save this key now. It will not be shown again.
         </div>
         <div style={{ position: "relative" }}>
