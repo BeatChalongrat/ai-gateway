@@ -221,9 +221,9 @@ export default function SearchSettingsPage() {
     try {
       const r = await api.post(`/admin/tenants/${tenantId}/search-providers/${p.id}/test`, {});
       if (r.status === "success") {
-        toast(`✓ ${PROVIDER_LABEL[p.provider]}: ${r.results_count} results in ${r.latency_ms}ms`);
+        toast(`${PROVIDER_LABEL[p.provider]}: ${r.results_count} results in ${r.latency_ms}ms`);
       } else {
-        toast(`✗ ${PROVIDER_LABEL[p.provider]}: ${r.error}`, "error");
+        toast(`${PROVIDER_LABEL[p.provider]}: ${r.error}`, "error");
       }
     } catch (e: any) {
       toast(e.body?.error?.message || "Test failed", "error");

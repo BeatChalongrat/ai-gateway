@@ -32,6 +32,7 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { Icon } from "../../components/ui/Icon";
 
 // -----------------------------------------------------------------------
 // Theme tokens
@@ -1214,7 +1215,7 @@ export default function AuditLogPage() {
                   ? "No admin actions recorded yet."
                   : "No actions match the current filter."
               }
-              icon="🛡"
+              icon={<Icon name="shield" size={22} />}
             />
           </div>
         ) : (

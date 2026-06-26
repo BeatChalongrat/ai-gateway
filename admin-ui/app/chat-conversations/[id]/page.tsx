@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import PageHeader from "../../../components/ui/PageHeader";
 import ErrorState from "../../../components/ui/ErrorState";
 import { SkeletonTable } from "../../../components/ui/Skeleton";
+import { Icon } from "../../../components/ui/Icon";
 import {
   AdminConversationDetail,
   fetchAdminConversation,
@@ -112,7 +113,7 @@ export default function ChatConversationDetailPage() {
           color: "var(--color-text-secondary)",
         }}
       >
-        <span aria-hidden style={{ fontSize: "0.95rem" }}>⚠️</span>
+        <span aria-hidden style={{ fontSize: "0.95rem" }}><Icon name="alert-triangle" size={14} /></span>
         <span>
           Viewing masked content — PII has been redacted by the DLP pipeline.
           Raw user prompts are never stored in this database.
