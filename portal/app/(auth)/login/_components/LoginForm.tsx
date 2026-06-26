@@ -56,6 +56,10 @@ export default function LoginForm() {
     null,
   );
 
+  // Set by the reset-password flow on successful completion
+  // (router.push("/login?reset=success")). Visual-only flash.
+  const resetSuccess = params?.get("reset") === "success";
+
   function handleSocial(provider: "google" | "github") {
     setSocialLoading(provider);
     setError(null);
@@ -119,6 +123,12 @@ export default function LoginForm() {
         <p className="af-desc af-anim d2">
           Enter your credentials to access your SRAN dashboard.
         </p>
+
+        {resetSuccess ? (
+          <div className="af-success af-anim" role="status">
+            Your password was reset — sign in with your new password.
+          </div>
+        ) : null}
 
         {error ? (
           <div className="af-error af-anim" role="alert">
