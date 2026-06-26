@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import PageHeader from "../../../components/ui/PageHeader";
 import Badge from "../../../components/ui/Badge";
 import DataTable, { Column } from "../../../components/ui/DataTable";
@@ -54,6 +54,39 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+// Small token-colored filter pill (mirrors the audit-log quick-chip style).
+function FilterPill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "4px 11px",
+        borderRadius: 100,
+        fontSize: "var(--font-size-xs)",
+        fontWeight: active ? 600 : 500,
+        border: `1px solid ${active ? "var(--color-status-info)" : "var(--color-border-default)"}`,
+        background: active ? "var(--color-status-info-bg)" : "var(--color-surface-primary)",
+        color: active ? "var(--color-status-info)" : "var(--color-text-secondary)",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        textTransform: "capitalize",
+        transition: "background 120ms, border-color 120ms",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString();
@@ -88,6 +121,26 @@ const columns: Column<AlertEvent>[] = [
 export default function AlertEventsPage() {
   const { data, loading, error, refetch } = useApi<AlertEventListResponse>("/admin/alert-events?limit=50");
   const [selected, setSelected] = useState<AlertEvent | null>(null);
+  const [sevFilter, setSevFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+
+  const items = data?.items ?? null;
+  const severities = useMemo(
+    () => Array.from(new Set((items ?? []).map((i) => i.severity))).sort(),
+    [items],
+  );
+  const statuses = useMemo(
+    () => Array.from(new Set((items ?? []).map((i) => i.delivery_status))).sort(),
+    [items],
+  );
+  const filtered = useMemo(() => {
+    if (!items) return null;
+    return items.filter(
+      (i) =>
+        (!sevFilter || i.severity === sevFilter) &&
+        (!statusFilter || i.delivery_status === statusFilter),
+    );
+  }, [items, sevFilter, statusFilter]);
 
   return (
     <>
@@ -100,14 +153,37 @@ export default function AlertEventsPage() {
           </button>
         }
       />
+      {items && items.length > 0 && (severities.length > 1 || statuses.length > 1) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "1.25rem", marginBottom: "0.875rem" }}>
+          {severities.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>Severity</span>
+              <FilterPill active={sevFilter === ""} onClick={() => setSevFilter("")}>All</FilterPill>
+              {severities.map((s) => (
+                <FilterPill key={s} active={sevFilter === s} onClick={() => setSevFilter(sevFilter === s ? "" : s)}>{s}</FilterPill>
+              ))}
+            </div>
+          )}
+          {statuses.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>Delivery</span>
+              <FilterPill active={statusFilter === ""} onClick={() => setStatusFilter("")}>All</FilterPill>
+              {statuses.map((s) => (
+                <FilterPill key={s} active={statusFilter === s} onClick={() => setStatusFilter(statusFilter === s ? "" : s)}>{s}</FilterPill>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="sran-card" style={{ padding: 0, overflow: "hidden" }}>
         <DataTable
           columns={columns}
-          data={data?.items ?? null}
+          data={filtered}
           loading={loading}
           error={error}
           emptyMessage="No alert events recorded yet"
-          emptyIcon={<Icon name="alert-triangle" size={22} />}
+          emptyIcon={<Icon name="bell" size={22} />}
           rowKey={(r) => r.id}
           onRowClick={(row) => setSelected(row)}
           searchable
