@@ -1,0 +1,115 @@
+<Window x:Class="SranDesktop.Presentation.Views.Dialogs.ToolConsentDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
+        xmlns:controls="clr-namespace:SranDesktop.Presentation.Controls"
+        xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:ToolConsentViewModel}"
+        Title="Permission required"
+        SizeToContent="Height"
+        Width="460"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BgPrimaryBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <Window.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
+    <StackPanel Margin="24,20">
+        <!-- Header -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Border Width="36" Height="36" CornerRadius="8"
+                    Background="{DynamicResource BgSecondaryBrush}">
+                <controls:IconView Width="19" Height="19"
+                                   Stroke="{DynamicResource TextPrimaryBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <controls:IconView.Style>
+                        <Style TargetType="controls:IconView">
+                            <Setter Property="Geometry" Value="{StaticResource Geo_Tool}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Category}" Value="FileSystem">
+                                    <Setter Property="Geometry" Value="{StaticResource Geo_FileSystem}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Category}" Value="Browser">
+                                    <Setter Property="Geometry" Value="{StaticResource Geo_Browser}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Category}" Value="Clipboard">
+                                    <Setter Property="Geometry" Value="{StaticResource Geo_Clipboard}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Category}" Value="Shell">
+                                    <Setter Property="Geometry" Value="{StaticResource Geo_Terminal}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Category}" Value="Screen">
+                                    <Setter Property="Geometry" Value="{StaticResource Geo_Screenshot}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </controls:IconView.Style>
+                </controls:IconView>
+            </Border>
+            <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="AI wants to use a tool"
+                           FontWeight="SemiBold" FontSize="15"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <TextBlock Text="{Binding ToolName}"
+                           Foreground="{DynamicResource TextPrimaryBrush}"
+                           FontWeight="SemiBold" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Description -->
+        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+
+        <!-- Arguments -->
+        <Border Background="{DynamicResource BgSecondaryBrush}"
+                CornerRadius="6" Padding="12,8" MaxHeight="200" Margin="0,0,0,12">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBlock Text="{Binding ArgumentsFormatted}"
+                           FontFamily="Cascadia Mono, Consolas" FontSize="12"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+            </ScrollViewer>
+        </Border>
+
+        <!-- Danger warning -->
+        <Border Visibility="{Binding IsDangerous, Converter={StaticResource BoolToVisibility}}"
+                Background="{DynamicResource BgSecondaryBrush}"
+                BorderBrush="{DynamicResource AccentRedBrush}"
+                BorderThickness="1"
+                CornerRadius="6" Padding="10,8" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal">
+                <controls:IconView Geometry="{StaticResource Geo_Warning}"
+                                   Stroke="{DynamicResource AccentRedBrush}"
+                                   Width="15" Height="15" Margin="0,0,7,0"
+                                   VerticalAlignment="Top" />
+                <TextBlock Text="This action modifies your system. Review the arguments carefully."
+                           Foreground="{DynamicResource AccentRedBrush}" FontSize="12"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <!-- Buttons -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Deny" Style="{DynamicResource DangerButton}"
+                    MinWidth="80" Margin="0,0,8,0" Padding="10,6"
+                    IsCancel="True"
+                    Click="Deny_Click" />
+            <Button Content="Allow Once" MinWidth="100" Margin="0,0,8,0" Padding="10,6"
+                    IsDefault="True"
+                    Click="AllowOnce_Click" />
+            <Button Content="Always Allow" Style="{DynamicResource AccentButton}"
+                    MinWidth="110" Padding="10,6"
+                    Click="AllowAlways_Click" />
+        </StackPanel>
+        <TextBlock Text="Always Allow remembers this tool for the same target permanently."
+                   Margin="0,8,0,0" FontSize="11"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+    </StackPanel>
+</Window>

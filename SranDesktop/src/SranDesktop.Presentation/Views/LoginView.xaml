@@ -1,0 +1,293 @@
+<UserControl x:Class="SranDesktop.Presentation.Views.LoginView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
+             xmlns:controls="clr-namespace:SranDesktop.Presentation.Controls"
+             xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
+             xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:LoginViewModel}"
+             IsVisibleChanged="LoginView_IsVisibleChanged"
+             Background="{DynamicResource BgPrimaryBrush}">
+
+    <UserControl.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <!-- Chromeless inner boxes — strip the app-wide TextBox/PasswordBox
+             chrome (rounded border + focus ring) so it doesn't double-render
+             inside the icon input containers. -->
+        <Style x:Key="BareTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource BgSelectedBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Grid>
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          VerticalAlignment="Center" Focusable="False" />
+                            <TextBlock x:Name="Watermark"
+                                       Text="{Binding Path=(controls:WatermarkService.Text), RelativeSource={RelativeSource TemplatedParent}}"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                       Padding="2,0,0,0" VerticalAlignment="Center"
+                                       IsHitTestVisible="False" Visibility="Collapsed"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Text" Value="">
+                                <Setter TargetName="Watermark" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="BarePasswordBox" TargetType="PasswordBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource BgSelectedBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      VerticalAlignment="Center" Focusable="False" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- Full-window centered layout — form lives in a bordered card -->
+    <Grid>
+        <!-- Subtle tiled grid texture behind the card (R12-fix-3). TextPrimary
+             at 6% opacity self-adapts: faint light lines in dark mode, faint
+             dark lines in light mode. -->
+        <Border>
+            <Border.Background>
+                <DrawingBrush TileMode="Tile" Viewport="0,0,40,40"
+                              ViewportUnits="Absolute" Opacity="0.06">
+                    <DrawingBrush.Drawing>
+                        <GeometryDrawing>
+                            <GeometryDrawing.Pen>
+                                <Pen Brush="{DynamicResource TextPrimaryBrush}"
+                                     Thickness="0.5" />
+                            </GeometryDrawing.Pen>
+                            <GeometryDrawing.Geometry>
+                                <GeometryGroup>
+                                    <LineGeometry StartPoint="0,40" EndPoint="40,40" />
+                                    <LineGeometry StartPoint="40,0" EndPoint="40,40" />
+                                </GeometryGroup>
+                            </GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                    </DrawingBrush.Drawing>
+                </DrawingBrush>
+            </Border.Background>
+        </Border>
+
+        <Border VerticalAlignment="Center" HorizontalAlignment="Center"
+                Background="{DynamicResource BgElevatedBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="16"
+                Padding="40,36"
+                MinWidth="400">
+        <Border.Effect>
+            <DropShadowEffect Color="Black"
+                              BlurRadius="40"
+                              ShadowDepth="0"
+                              Opacity="0.5"
+                              Direction="270" />
+        </Border.Effect>
+        <StackPanel Width="320">
+
+            <!-- ═══ Logo (theme-aware SRAN cat; wordmark is baked into the image) ═══ -->
+            <Image Source="{DynamicResource LogoSource}"
+                   Width="96" Height="96"
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   HorizontalAlignment="Center" Margin="0,0,0,32" />
+
+            <!-- ═══ Email ═══ -->
+            <TextBlock Text="{loc:T login.email}" FontSize="12"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       Margin="0,0,0,6" />
+            <Border x:Name="EmailBorder"
+                    CornerRadius="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    Background="{DynamicResource BgSecondaryBrush}"
+                    Padding="12,0" Height="42" Margin="0,0,0,16">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <controls:IconView Grid.Column="0" Width="16" Height="16"
+                                       Geometry="{StaticResource Geo_Mail}"
+                                       Stroke="{DynamicResource TextTertiaryBrush}"
+                                       VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <TextBox Grid.Column="1" x:Name="EmailBox"
+                             Style="{StaticResource BareTextBox}"
+                             Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}"
+                             controls:WatermarkService.Text="{loc:T login.emailPlaceholder}"
+                             FontSize="13" VerticalAlignment="Center"
+                             GotKeyboardFocus="EmailBox_GotFocus"
+                             LostKeyboardFocus="EmailBox_LostFocus" />
+                </Grid>
+            </Border>
+
+            <!-- ═══ Password ═══ -->
+            <TextBlock Text="{loc:T login.password}" FontSize="12"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       Margin="0,0,0,6" />
+            <Border x:Name="PasswordBorder"
+                    CornerRadius="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    Background="{DynamicResource BgSecondaryBrush}"
+                    Padding="12,0" Height="42" Margin="0,0,0,20">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <controls:IconView Grid.Column="0" Width="16" Height="16"
+                                       Geometry="{StaticResource Geo_Lock}"
+                                       Stroke="{DynamicResource TextTertiaryBrush}"
+                                       VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <!-- Hidden (default) -->
+                    <PasswordBox Grid.Column="1" x:Name="PasswordInput"
+                                 Style="{StaticResource BarePasswordBox}"
+                                 FontSize="13" VerticalAlignment="Center"
+                                 PasswordChanged="PasswordInput_PasswordChanged"
+                                 KeyDown="PasswordInput_KeyDown"
+                                 GotKeyboardFocus="PasswordField_GotFocus"
+                                 LostKeyboardFocus="PasswordField_LostFocus"
+                                 Visibility="{Binding IsPasswordHidden, Converter={StaticResource BoolToVisibility}}" />
+                    <!-- Revealed -->
+                    <TextBox Grid.Column="1" x:Name="PasswordRevealBox"
+                             Style="{StaticResource BareTextBox}"
+                             Text="{Binding Password, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="13" VerticalAlignment="Center"
+                             KeyDown="PasswordInput_KeyDown"
+                             GotKeyboardFocus="PasswordField_GotFocus"
+                             LostKeyboardFocus="PasswordField_LostFocus"
+                             Visibility="{Binding IsPasswordHidden, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                    <!-- Eye toggle -->
+                    <Button Grid.Column="2" Width="28" Height="28"
+                            Style="{DynamicResource IconButton}"
+                            Command="{Binding TogglePasswordVisibilityCommand}"
+                            ToolTip="{loc:T login.showPassword}"
+                            Focusable="False">
+                        <Grid>
+                            <controls:IconView Width="14" Height="14"
+                                               Geometry="{StaticResource Geo_Eye}"
+                                               Stroke="{DynamicResource TextTertiaryBrush}"
+                                               Visibility="{Binding IsPasswordHidden, Converter={StaticResource BoolToVisibility}}" />
+                            <controls:IconView Width="14" Height="14"
+                                               Geometry="{StaticResource Geo_EyeOff}"
+                                               Stroke="{DynamicResource TextTertiaryBrush}"
+                                               Visibility="{Binding IsPasswordHidden, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                        </Grid>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- Error card -->
+            <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,16"
+                    Background="{DynamicResource DangerHoverBgBrush}"
+                    Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel Orientation="Horizontal">
+                    <controls:IconView Width="14" Height="14"
+                                       Geometry="{StaticResource Geo_AlertCircle}"
+                                       Stroke="{DynamicResource AccentRedBrush}"
+                                       VerticalAlignment="Top" Margin="0,1,8,0" />
+                    <TextBlock Text="{Binding ErrorMessage}" FontSize="12.5"
+                               Foreground="{DynamicResource AccentRedBrush}"
+                               TextWrapping="Wrap" MaxWidth="300" />
+                </StackPanel>
+            </Border>
+
+            <!-- Sign in -->
+            <Button Style="{DynamicResource AccentButton}"
+                    controls:ButtonHelper.CornerRadius="8"
+                    Command="{Binding LoginCommand}"
+                    Height="42" FontSize="14"
+                    IsDefault="True">
+                <Grid>
+                    <TextBlock Text="{loc:T login.signIn}"
+                               FontSize="14" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+                        <Border Width="16" Height="16" CornerRadius="8"
+                                BorderThickness="2"
+                                BorderBrush="{DynamicResource OnAccentBrush}"
+                                Opacity="0.7" Margin="0,0,8,0"
+                                VerticalAlignment="Center"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <RotateTransform />
+                            </Border.RenderTransform>
+                            <Border.OpacityMask>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="Transparent" Offset="0" />
+                                    <GradientStop Color="Black" Offset="0.7" />
+                                </LinearGradientBrush>
+                            </Border.OpacityMask>
+                            <Border.Triggers>
+                                <EventTrigger RoutedEvent="Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                                             From="0" To="360" Duration="0:0:1" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Border.Triggers>
+                        </Border>
+                        <TextBlock Text="{loc:T login.signingIn}"
+                                   FontSize="14" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </Button>
+
+            <!-- Forgot password (centered below button) -->
+            <TextBlock HorizontalAlignment="Center" Margin="0,16,0,0">
+                <Hyperlink Command="{Binding ForgotPasswordCommand}"
+                           Foreground="{DynamicResource AccentBlueBrush}"
+                           TextDecorations="{x:Null}">
+                    <Run Text="{loc:T login.forgotPassword}" FontSize="12" />
+                </Hyperlink>
+            </TextBlock>
+
+        </StackPanel>
+        </Border>
+
+        <!-- Theme toggle: sun in dark mode ("switch to light"), moon in light -->
+        <Button Width="36" Height="36"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,16,16,0"
+                Style="{DynamicResource IconButton}"
+                controls:ButtonHelper.CornerRadius="18"
+                Command="{Binding ToggleThemeCommand}"
+                ToolTip="{loc:T login.toggleTheme}">
+            <Grid>
+                <controls:IconView Width="16" Height="16"
+                                   Geometry="{StaticResource Geo_Sun}"
+                                   Stroke="{DynamicResource TextSecondaryBrush}"
+                                   Visibility="{Binding IsDarkTheme, Converter={StaticResource BoolToVisibility}}" />
+                <controls:IconView Width="16" Height="16"
+                                   Geometry="{StaticResource Geo_Moon}"
+                                   Stroke="{DynamicResource TextSecondaryBrush}"
+                                   Visibility="{Binding IsDarkTheme, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+            </Grid>
+        </Button>
+    </Grid>
+</UserControl>

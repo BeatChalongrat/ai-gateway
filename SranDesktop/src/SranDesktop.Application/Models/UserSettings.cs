@@ -1,0 +1,84 @@
+using System.Text.Json.Serialization;
+
+namespace SranDesktop.Application.Models;
+
+/// <summary>User-editable settings persisted to %APPDATA%\SRAN Desktop\settings.json.</summary>
+public sealed class UserSettings
+{
+    [JsonPropertyName("chat_edge_base_url")]
+    public string ChatEdgeBaseUrl { get; set; } = "http://localhost:4000";
+
+    [JsonPropertyName("gateway_base_url")]
+    public string GatewayBaseUrl { get; set; } = "http://localhost:8080";
+
+    [JsonPropertyName("default_model")]
+    public string DefaultModel { get; set; } = "gpt-4o-mini";
+
+    /// <summary>"Dark" or "Light".</summary>
+    [JsonPropertyName("theme")]
+    public string Theme { get; set; } = "Dark";
+
+    [JsonPropertyName("minimize_to_tray")]
+    public bool MinimizeToTray { get; set; } = true;
+
+    [JsonPropertyName("start_with_windows")]
+    public bool StartWithWindows { get; set; }
+
+    /// <summary>MRU model ids for the picker's "Recently used" section (max 5).</summary>
+    [JsonPropertyName("recent_models")]
+    public List<string> RecentModels { get; set; } = new();
+
+    /// <summary>UI language: "en" or "th". Empty = auto-detect from the OS culture.</summary>
+    [JsonPropertyName("locale")]
+    public string Locale { get; set; } = "";
+
+    /// <summary>AI-generated writing style prompt fragment; empty = none (R9 L).</summary>
+    [JsonPropertyName("writing_style_profile")]
+    public string WritingStyleProfile { get; set; } = "";
+
+    /// <summary>Voice settings (R9 J): TTS voice name, rate (-10..10), auto-read.</summary>
+    [JsonPropertyName("voice_name")]
+    public string VoiceName { get; set; } = "";
+
+    [JsonPropertyName("voice_rate")]
+    public int VoiceRate { get; set; }
+
+    [JsonPropertyName("voice_auto_read")]
+    public bool VoiceAutoRead { get; set; }
+
+    /// <summary>Speech backend (R10 Fix 2): "auto" | "windows" | "azure".
+    /// Auto prefers Azure whenever a key is stored.</summary>
+    [JsonPropertyName("speech_backend")]
+    public string SpeechBackend { get; set; } = "auto";
+
+    /// <summary>STT language for dictation, e.g. "th-TH". Empty = backend default.</summary>
+    [JsonPropertyName("speech_language")]
+    public string SpeechLanguage { get; set; } = "";
+
+    /// <summary>Azure Speech region (key lives in DPAPI, never here).</summary>
+    [JsonPropertyName("azure_speech_region")]
+    public string AzureSpeechRegion { get; set; } = "southeastasia";
+
+    /// <summary>Opt-in crash telemetry (R11 A3). Default OFF — user's choice.</summary>
+    [JsonPropertyName("crash_reporting_enabled")]
+    public bool CrashReportingEnabled { get; set; }
+
+    /// <summary>One-way backup of agent-mode chats to the user's account
+    /// (Phase 3 D). Default ON; when off the sync service does nothing.</summary>
+    [JsonPropertyName("sync_agent_conversations")]
+    public bool SyncAgentConversations { get; set; } = true;
+
+    /// <summary>Extra folders the agent's file tools may reach, beyond the
+    /// built-in user-profile + temp roots (Phase 6 Task 1). Each is validated
+    /// (existing directory, not a drive/system root) before being applied.</summary>
+    [JsonPropertyName("granted_folders")]
+    public List<string> GrantedFolders { get; set; } = new();
+
+    public UserSettings Clone()
+    {
+        var copy = (UserSettings)MemberwiseClone();
+        copy.RecentModels = new List<string>(RecentModels);
+        copy.GrantedFolders = new List<string>(GrantedFolders);
+        return copy;
+    }
+}

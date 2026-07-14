@@ -1,0 +1,215 @@
+using System.Net.Http;
+using System.Text.Json;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Models;
+using SranDesktop.Presentation.Localization;
+
+namespace SranDesktop.Presentation.ViewModels;
+
+/// <summary>
+/// One :::excel-plan / :::doc-plan / :::pptx-plan fence parsed out of an
+/// assistant message (R7 Feature C). Executes via chat-edge and swaps itself
+/// into a result card.
+/// </summary>
+public partial class PlanBlockViewModel : ObservableObject
+{
+    private readonly IChatEdgeApiClient _api;
+    private readonly string _conversationId;
+    private readonly JsonElement _plan;
+
+    /// <summary>"excel" | "doc" | "pptx".</summary>
+    public string PlanType { get; }
+
+    public string? Description { get; }
+    public string? OutputFilename { get; }
+    public IReadOnlyList<string> Actions { get; }
+
+    public bool HasDescription => !string.IsNullOrEmpty(Description);
+
+    public string Title => LocaleService.Instance.T(PlanType switch
+    {
+        "excel" => "plan.excel.title",
+        "pptx" => "plan.pptx.title",
+        _ => "plan.doc.title"
+    });
+
+    public string ActionsHeader => LocaleService.Instance.T("plan.changes", Actions.Count);
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ExecuteCommand))]
+    private bool _isExecuting;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasResult))]
+    private PlanResultViewModel? _result;
+
+    public bool HasResult => Result is not null;
+
+    [ObservableProperty]
+    private string? _errorMessage;
+
+    public PlanBlockViewModel(
+        IChatEdgeApiClient api, string conversationId, string planType, JsonElement plan)
+    {
+        _api = api;
+        _conversationId = conversationId;
+        _plan = plan;
+        PlanType = planType;
+
+        Description = GetString(plan, "description");
+        OutputFilename = GetString(plan, "output_filename");
+        Actions = SummarizeActions(planType, plan);
+    }
+
+    private bool CanExecute() => !IsExecuting && Result is null;
+
+    [RelayCommand(CanExecute = nameof(CanExecute))]
+    private async Task ExecuteAsync()
+    {
+        IsExecuting = true;
+        ErrorMessage = null;
+        try
+        {
+            var sourceFileId = GetString(_plan, "source_file_id");
+            var result = PlanType == "excel"
+                ? await _api.ExecuteExcelPlanAsync(_conversationId,
+                    new ExecuteExcelPlanRequest(sourceFileId, OutputFilename, _plan))
+                : await _api.ExecuteDocumentPlanAsync(_conversationId,
+                    new ExecuteDocumentPlanRequest(
+                        sourceFileId,
+                        PlanType == "pptx" ? "pptx" : GetString(_plan, "format") ?? "docx",
+                        OutputFilename, _plan));
+
+            Result = new PlanResultViewModel(_api, result);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            ErrorMessage = $"{LocaleService.Instance.T("plan.failed")}: {ex.Message}";
+        }
+        finally
+        {
+            IsExecuting = false;
+        }
+    }
+
+    /// <summary>Human-readable one-liners for the card's action list.</summary>
+    private static IReadOnlyList<string> SummarizeActions(string planType, JsonElement plan)
+    {
+        var items = new List<string>();
+        var arrayName = planType == "pptx" ? "slides" : "actions";
+        if (plan.ValueKind != JsonValueKind.Object
+            || !plan.TryGetProperty(arrayName, out var array)
+            || array.ValueKind != JsonValueKind.Array)
+            return items;
+
+        foreach (var entry in array.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object)
+                continue;
+            var type = GetString(entry, "type") ?? "step";
+            var detail = GetString(entry, "sheet_name")
+                         ?? GetString(entry, "title")
+                         ?? GetString(entry, "text")
+                         ?? GetString(entry, "range");
+            if (detail is { Length: > 60 })
+                detail = detail[..60] + "…";
+            items.Add(detail is null
+                ? type.Replace('_', ' ')
+                : $"{type.Replace('_', ' ')} — {detail}");
+        }
+        return items;
+    }
+
+    private static string? GetString(JsonElement element, string property) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+}
+
+/// <summary>Result card state after a successful plan execution.</summary>
+public partial class PlanResultViewModel : ObservableObject
+{
+    private readonly IChatEdgeApiClient _api;
+    private readonly PlanFileDto? _file;
+
+    public string Filename { get; }
+    public string MetaLine { get; }
+    public IReadOnlyList<string> Changes { get; }
+
+    [ObservableProperty]
+    private bool _isDownloading;
+
+    public PlanResultViewModel(IChatEdgeApiClient api, PlanExecutionResult result)
+    {
+        _api = api;
+        _file = result.File;
+
+        Filename = _file is null
+            ? "output"
+            : _file.Version > 0 ? $"{_file.Filename} (v{_file.Version})" : _file.Filename;
+
+        var parts = new List<string>();
+        if (_file is not null)
+            parts.Add(FormatSize(_file.FileSizeBytes));
+        var stats = result.Validation?.Stats;
+        if (stats is not null)
+        {
+            if (stats.TryGetValue("sheets", out var sheets))
+                parts.Add($"{sheets} {LocaleService.Instance.T("plan.result.sheets")}");
+            if (stats.TryGetValue("charts", out var charts) && charts > 0)
+                parts.Add($"{charts} {LocaleService.Instance.T("plan.result.charts")}");
+            if (stats.TryGetValue("page_count", out var pages) && pages > 0)
+                parts.Add($"{pages} pages");
+        }
+        MetaLine = string.Join("  ·  ", parts);
+        Changes = result.Changes ?? new List<string>();
+    }
+
+    public bool HasChanges => Changes.Count > 0;
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
+        >= 1024 => $"{bytes / 1024.0:0.#} KB",
+        _ => $"{bytes} B"
+    };
+
+    [RelayCommand]
+    private async Task DownloadAsync()
+    {
+        if (_file?.DownloadUrl is null)
+            return;
+
+        var ext = System.IO.Path.GetExtension(_file.Filename);
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = _file.Filename,
+            Filter = string.IsNullOrEmpty(ext)
+                ? "All files (*.*)|*.*"
+                : $"{ext.TrimStart('.').ToUpperInvariant()} (*{ext})|*{ext}|All files (*.*)|*.*"
+        };
+        if (dialog.ShowDialog() != true)
+            return;
+
+        IsDownloading = true;
+        try
+        {
+            var bytes = await _api.DownloadFileAsync(_file.DownloadUrl);
+            await System.IO.File.WriteAllBytesAsync(dialog.FileName, bytes);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.IO.IOException)
+        {
+            System.Windows.MessageBox.Show(ex.Message,
+                LocaleService.Instance.T("common.download"),
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsDownloading = false;
+        }
+    }
+}

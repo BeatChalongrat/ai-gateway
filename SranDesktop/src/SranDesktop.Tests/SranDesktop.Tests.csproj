@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>SranDesktop.Tests</RootNamespace>
+    <!-- Presentation is a WPF library; referencing it requires UseWPF here too. -->
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWPF removes the System.IO implicit using; the tests rely on it. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Moq" Version="4.*" />
+    <PackageReference Include="FluentAssertions" Version="6.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
+    <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
+    <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
+    <ProjectReference Include="..\SranDesktop.Presentation\SranDesktop.Presentation.csproj" />
+  </ItemGroup>
+
+</Project>

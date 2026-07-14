@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.Infrastructure</RootNamespace>
+    <!-- MCP tools use WPF Clipboard (STA) and System.Drawing screenshots -->
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SranDesktop.Tests" />
+  </ItemGroup>
+
+  <!-- The WindowsDesktop SDK (UseWPF) drops these from implicit usings -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.*" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.*" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.*" />
+    <!-- R10 Fix 2: speech backends (Windows built-in + Azure AI Speech) -->
+    <PackageReference Include="System.Speech" Version="8.0.*" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
+    <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,52 @@
+<Window x:Class="SranDesktop.Presentation.Views.Dialogs.MemoryFormDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
+        Title="{loc:T memory.form.titleAdd}"
+        Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BgPrimaryBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <StackPanel Margin="20,16">
+        <!-- Content -->
+        <TextBlock Text="{loc:T memory.form.content}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <TextBox x:Name="ContentBox"
+                 AcceptsReturn="True" TextWrapping="Wrap"
+                 MinHeight="90" MaxHeight="180"
+                 MaxLength="1500"
+                 VerticalScrollBarVisibility="Auto"
+                 TextChanged="ContentBox_TextChanged" />
+        <TextBlock x:Name="CounterText" Text="0 / 1500"
+                   FontSize="11" HorizontalAlignment="Right" Margin="0,3,0,10"
+                   Foreground="{DynamicResource TextTertiaryBrush}" />
+
+        <!-- Type -->
+        <TextBlock Text="{loc:T memory.form.type}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <ComboBox x:Name="TypeBox" Margin="0,0,0,12">
+            <ComboBoxItem Content="{loc:T memory.type.fact}" Tag="explicit_fact" IsSelected="True" />
+            <ComboBoxItem Content="{loc:T memory.type.preference}" Tag="response_preference" />
+            <ComboBoxItem Content="{loc:T memory.type.interest}" Tag="ongoing_interest" />
+            <ComboBoxItem Content="{loc:T memory.type.instruction}" Tag="confirmed_instruction" />
+        </ComboBox>
+
+        <!-- Category -->
+        <TextBlock Text="{loc:T memory.form.category}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <TextBox x:Name="CategoryBox" Margin="0,0,0,16" />
+
+        <!-- Buttons -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="{loc:T common.cancel}" IsCancel="True"
+                    Padding="16,6" Margin="0,0,8,0" />
+            <Button x:Name="SaveButton" Content="{loc:T common.save}"
+                    Style="{DynamicResource AccentButton}"
+                    Padding="16,6" IsDefault="True"
+                    Click="Save_Click" IsEnabled="False" />
+        </StackPanel>
+    </StackPanel>
+</Window>

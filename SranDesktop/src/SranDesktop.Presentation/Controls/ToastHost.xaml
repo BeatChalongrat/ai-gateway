@@ -1,0 +1,53 @@
+<UserControl x:Class="SranDesktop.Presentation.Controls.ToastHost"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:SranDesktop.Presentation.Controls"
+             IsHitTestVisible="True">
+
+    <!-- Bottom-right stack, newest at the bottom (matches the credits badge
+         corner language). Cards are click-to-dismiss; screen readers announce
+         them politely via LiveSetting on each card. -->
+    <ItemsControl x:Name="Items"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Bottom"
+                  Margin="0,0,14,52">
+        <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="{x:Type controls:ToastRow}">
+                <Border x:Name="Card"
+                        Background="{DynamicResource BgElevatedBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="12,10"
+                        Margin="0,6,0,0"
+                        MinWidth="220" MaxWidth="380"
+                        Cursor="Hand"
+                        AutomationProperties.LiveSetting="Polite"
+                        AutomationProperties.Name="{Binding Text}"
+                        MouseLeftButtonUp="Card_MouseLeftButtonUp"
+                        Loaded="Card_Loaded">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="16" ShadowDepth="3"
+                                          Opacity="0.35" Color="Black" />
+                    </Border.Effect>
+                    <Border.RenderTransform>
+                        <TranslateTransform />
+                    </Border.RenderTransform>
+                    <StackPanel Orientation="Horizontal">
+                        <controls:IconView Geometry="{Binding IconGeometry}"
+                                           Stroke="{Binding IconBrush}"
+                                           Width="16" Height="16"
+                                           Margin="0,1,10,0"
+                                           VerticalAlignment="Top" />
+                        <TextBlock Text="{Binding Text}"
+                                   FontSize="12.5"
+                                   TextWrapping="Wrap"
+                                   MaxWidth="320"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                    </StackPanel>
+                </Border>
+            </DataTemplate>
+        </ItemsControl.ItemTemplate>
+    </ItemsControl>
+</UserControl>
