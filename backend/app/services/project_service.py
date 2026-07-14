@@ -85,6 +85,7 @@ class ProjectService:
             request_id=request_id,
             region=region,
             ner_enabled=ner_enabled,
+            user_id=getattr(auth, "log_user_id", None),
         )
 
     async def resolve_project_context_async(
@@ -159,4 +160,5 @@ class ProjectService:
             request_id=request_id,
             region=region,
             ner_enabled=ner_enabled,
+            user_id=getattr(auth, "log_user_id", None),
         )

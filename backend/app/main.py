@@ -17,6 +17,7 @@ from app.api.routes.portal_auth import router as portal_auth_router
 from app.api.routes.portal_me import router as portal_me_router
 from app.api.routes.portal_projects import router as portal_projects_router
 from app.api.routes.portal_billing import router as portal_billing_router
+from app.api.routes.portal_connectors import router as portal_connectors_router
 from app.api.routes.portal_team import router as portal_team_router
 from app.api.routes.admin_portal_users import router as admin_portal_users_router
 from app.api.routes.admin_system_settings import router as admin_system_settings_router
@@ -855,6 +856,8 @@ app.include_router(portal_me_router, prefix="/portal/me", tags=["portal-me"])
 app.include_router(portal_projects_router, prefix="/portal/projects", tags=["portal-projects"])
 app.include_router(portal_billing_router, prefix="/portal/billing", tags=["portal-billing"])
 app.include_router(portal_team_router, prefix="/portal/team", tags=["portal-team"])
+# Connector OAuth broker (Desktop Phase 7) — provider tokens stay server-side.
+app.include_router(portal_connectors_router, prefix="/portal/connectors", tags=["portal-connectors"])
 
 # Admin views over portal data
 app.include_router(admin_portal_users_router, prefix="/admin/portal-users", tags=["admin-portal"])

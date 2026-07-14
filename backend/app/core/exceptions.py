@@ -20,6 +20,7 @@ GatewayError                       (base for all gateway domain errors)
 │   ├── ProviderTimeoutError       (upstream did not respond in time)
 │   └── ProviderUnavailableError   (upstream is down or unreachable)
 ├── UpstreamBadResponseError       (upstream returned unparseable response)
+├── ContextLengthExceededError     (request exceeds the model's context window)
 └── InternalServiceError           (unexpected internal failure)
 """
 
@@ -134,6 +135,19 @@ class SearchProvidersUnavailableError(GatewayError):
     message = "Web search is unavailable — no provider could answer."
 
 
+class SearchQueryBlockedError(GatewayError):
+    """The search query was withheld by DLP egress policy (Phase 9).
+
+    Raised for the credential/secret class always, and for identity PII
+    when the tenant's ``search_pii_egress`` policy is ``block``. The
+    query is never masked (a masked query returns garbage results) —
+    it is either sent verbatim or refused outright.
+    """
+
+    code = "search_query_blocked"
+    message = "Search query blocked by DLP egress policy."
+
+
 # --- Provider / Upstream ---
 
 class ProviderError(GatewayError):
@@ -170,6 +184,23 @@ class ProviderKeyMissing(ProviderError):
 class UpstreamBadResponseError(GatewayError):
     code = "upstream_bad_response"
     message = "The upstream provider returned an unparseable response."
+
+
+class ContextLengthExceededError(GatewayError):
+    """The provider rejected the request because the prompt exceeds the
+    model's context window.
+
+    Deliberately NOT fallback-eligible (see ``FALLBACK_ELIGIBLE_ERRORS``):
+    retrying a too-long prompt on another model wastes money — the client
+    is responsible for trimming its conversation. ``details`` carries the
+    provider name and the provider's original error message.
+    """
+
+    code = "context_length_exceeded"
+    message = (
+        "The request exceeds the model's context window. "
+        "Shorten the conversation and try again."
+    )
 
 
 # --- Internal ---

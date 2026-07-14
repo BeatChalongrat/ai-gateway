@@ -52,6 +52,11 @@ class RequestContext:
     # behaviour). Optional + last in the field list keeps every
     # existing positional ``RequestContext(...)`` call site working.
     conversation_id: Optional[str] = None
+    # Portal user this request bills/attributes to — key owner first
+    # (api_keys.portal_user_id), trusted X-User-ID second; None for
+    # admin/tenant keys. Copied onto RequestRecord.user_id at log time
+    # (migration 062).
+    user_id: Optional[str] = None
 
 
 @dataclass

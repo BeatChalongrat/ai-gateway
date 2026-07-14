@@ -10,6 +10,8 @@ GET /v1/search/config lets chat-edge decide whether to even offer the
 web_search tool to the model (tenant search on + at least one provider).
 """
 
+import hashlib
+
 import structlog
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -24,6 +26,7 @@ from app.core.exceptions import (
 )
 from app.models.search_provider import SearchProviderORM
 from app.models.tenant import TenantORM
+from app.services.dlp.egress_policy import scan_search_query
 from app.services.gateway.portal_credit_check import deduct_portal_credit_async
 from app.services.search.base import (
     SearchNotConfiguredError,
@@ -54,6 +57,20 @@ async def search(
     if tenant is None or not bool(getattr(tenant, "search_enabled", False)):
         raise SearchDisabledError("Web search is not enabled for this tenant.")
 
+    # Phase 9 (A1): DLP egress scan BEFORE any provider call or credit
+    # deduction. The query is intentionally NOT masked — search needs
+    # the real text for useful results — but the credential/secret
+    # class is always withheld, and tenants with search_pii_egress =
+    # "block" fail closed on any identity PII. Raises 403
+    # search_query_blocked; on block nothing is searched or billed.
+    await scan_search_query(
+        payload.query,
+        session,
+        tenant,
+        project_id=str(getattr(auth, "project_id", "") or ""),
+        user_id=getattr(auth, "log_user_id", None),
+    )
+
     try:
         results = await search_service.search(
             session, auth.tenant_id, payload.query
@@ -74,16 +91,20 @@ async def search(
 
     # Flat per-query credit charge (search bills per query, not by token
     # cost). Debits the trusted end-user behind the shared web-chat key.
+    # Phase 9 (A2): the ledger reference/description must carry NO query
+    # text — the query is PII-bearing and the billing row only needs a
+    # correlation handle, so a truncated sha256 stands in for it.
     cost = int(getattr(tenant, "search_credit_cost", 5) or 5)
+    query_hash = hashlib.sha256(payload.query.encode("utf-8")).hexdigest()[:12]
     try:
         await deduct_portal_credit_async(
             session,
             str(auth.key_id),
-            f"search:{payload.query[:40]}",
+            f"search:{query_hash}",
             credits_override=cost,
             tenant_id=auth.tenant_id,
             portal_user_id=getattr(auth, "portal_user_id", None),
-            description=f"web_search: {payload.query[:50]}",
+            description="web_search",
         )
         await session.commit()
     except Exception as exc:  # noqa: BLE001 — search already ran; don't fail it

@@ -55,6 +55,19 @@ class TenantORM(Base):
     dlp_media_gen_mask_identity: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sa.text("false")
     )
+    # Phase 9 (migration 064) — per-tenant raw-egress policy for the two
+    # INTENTIONAL unmasked channels. "allow" (default) = identity PII may
+    # egress raw (audited); "block" = fail closed on ANY identity PII in
+    # a search query / media prompt. The credential/secret class blocks
+    # regardless. (Supersedes the never-wired dlp_media_gen_mask_identity
+    # above — masking a media prompt was rejected in favor of block-or-
+    # allow; the dormant column stays for migration compatibility.)
+    search_pii_egress: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="allow"
+    )
+    media_pii_egress: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="allow"
+    )
     monthly_video_quota: Mapped[int | None] = mapped_column(
         sa.Integer, nullable=True
     )

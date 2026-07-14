@@ -17,6 +17,7 @@ from app.core.exceptions import (
     AuthenticationError,
     AuthorizationError,
     ConflictError,
+    ContextLengthExceededError,
     DLPViolationError,
     GatewayError,
     InternalServiceError,
@@ -30,6 +31,7 @@ from app.core.exceptions import (
     RateLimitExceededError,
     SearchDisabledError,
     SearchProvidersUnavailableError,
+    SearchQueryBlockedError,
     UpstreamBadResponseError,
     ValidationError,
 )
@@ -50,11 +52,15 @@ _STATUS_MAP: dict[type[GatewayError], int] = {
     QuotaExceededError: 429,
     SearchDisabledError: 400,
     SearchProvidersUnavailableError: 503,
+    # 403 like the other DLP blocks — the query itself is refused.
+    SearchQueryBlockedError: 403,
     ProviderTimeoutError: 504,
     ProviderUnavailableError: 503,
     ProviderNotImplementedError: 501,
     ProviderError: 502,
     UpstreamBadResponseError: 502,
+    # 400, not 502: the request is the client's to fix (trim + retry).
+    ContextLengthExceededError: 400,
     InternalServiceError: 500,
 }
 

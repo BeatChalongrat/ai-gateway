@@ -385,40 +385,57 @@ def get_usage(
     user: PortalUserORM = Depends(get_portal_user),
     session: Session = Depends(get_db_session),
 ):
-    """Recent gateway requests made with keys owned by the current user.
+    """Recent gateway requests attributed to the current user.
 
-    Joins ``request_logs`` back to ``api_keys`` via ``api_key_id`` and
-    filters on ``api_keys.portal_user_id``. If the request log rows use
-    a different FK name in this codebase (``key_id`` vs ``api_key_id``),
-    the join condition adapts to whichever column exists.
+    Primary path: ``request_logs.user_id`` (migration 062 — written by
+    the orchestrator for every request whose key/identity resolves to a
+    portal user). Legacy fallback for rows that predate the column
+    (user_id IS NULL): attribute via the ``credit_transactions``
+    (type='usage') row that carries this user's id + the request_id.
+
+    NOTE: the previous implementation joined through a
+    ``request_logs.api_key_id`` column that never existed in this
+    schema, so it silently returned an empty list forever.
     """
-    join_col = getattr(RequestLogORM, "api_key_id", None) or getattr(
-        RequestLogORM, "key_id", None
+    from sqlalchemy import and_, or_
+
+    from app.models.credit_transaction import CreditTransactionORM
+
+    legacy_ids = (
+        select(CreditTransactionORM.request_id)
+        .where(
+            CreditTransactionORM.user_id == user.id,
+            CreditTransactionORM.type == "usage",
+            CreditTransactionORM.request_id.is_not(None),
+        )
+    )
+    ownership = or_(
+        RequestLogORM.user_id == user.id,
+        and_(
+            RequestLogORM.user_id.is_(None),
+            RequestLogORM.request_id.in_(legacy_ids),
+        ),
     )
 
-    total = 0
-    rows: list[RequestLogORM] = []
-    if join_col is not None:
-        base = (
-            select(RequestLogORM)
-            .join(ApiKeyORM, join_col == ApiKeyORM.key_id)
-            .where(ApiKeyORM.portal_user_id == user.id)
-        )
-        total = session.execute(
+    total = (
+        session.execute(
             select(func.count())
-            .select_from(ApiKeyORM)
-            .join(RequestLogORM, join_col == ApiKeyORM.key_id)
-            .where(ApiKeyORM.portal_user_id == user.id)
-        ).scalar() or 0
-        rows = (
-            session.execute(
-                base.order_by(RequestLogORM.created_at.desc())
-                .limit(limit)
-                .offset(offset)
-            )
-            .scalars()
-            .all()
+            .select_from(RequestLogORM)
+            .where(ownership)
+        ).scalar()
+        or 0
+    )
+    rows = (
+        session.execute(
+            select(RequestLogORM)
+            .where(ownership)
+            .order_by(RequestLogORM.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
+        .scalars()
+        .all()
+    )
 
     def _to_dict(r: RequestLogORM) -> dict:
         # Use getattr with defaults so this works regardless of which
@@ -436,6 +453,129 @@ def get_usage(
         }
 
     return {"requests": [_to_dict(r) for r in rows], "total": int(total)}
+
+
+@router.get("/team/usage")
+@scope_to_portal_tenant
+def get_team_usage(
+    period: str = Query("all", pattern="^(7d|30d|all)$"),
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Per-member token usage for the caller's tenant (dashboard Team
+    usage section). Owner/admin only — plain members get 403.
+
+    Attribution merges the same two sources as ``/admin/usage/by-user``
+    (never double-counting a row):
+
+    * **Strategy A** — ``request_logs.user_id`` (migration 062).
+    * **Strategy B** — legacy rows (``user_id IS NULL``) joined through
+      ``credit_transactions`` (type='usage').
+
+    Every active member appears in the response, including zero-usage
+    ones — the dashboard renders them with an empty bar rather than
+    silently omitting teammates.
+    """
+    from datetime import datetime, timedelta
+
+    from app.core.exceptions import AuthorizationError
+
+    if (user.tenant_role or "member") not in ("owner", "admin"):
+        raise AuthorizationError(
+            "Team usage requires tenant-owner or admin privileges.",
+            code="owner_or_admin_required",
+        )
+
+    empty = {"members": [], "teamTotal": 0, "memberCount": 0}
+    if not user.tenant_id:
+        return empty
+
+    members = (
+        session.execute(
+            select(PortalUserORM).where(
+                PortalUserORM.tenant_id == user.tenant_id,
+                PortalUserORM.status == "active",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not members:
+        return empty
+    member_ids = [m.id for m in members]
+
+    time_filters: list = []
+    if period in ("7d", "30d"):
+        days = 7 if period == "7d" else 30
+        time_filters.append(
+            RequestLogORM.created_at >= datetime.utcnow() - timedelta(days=days)
+        )
+
+    agg = [
+        func.count().label("requests"),
+        func.coalesce(func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+        func.max(RequestLogORM.created_at).label("last_active"),
+    ]
+
+    rows_a = session.execute(
+        select(RequestLogORM.user_id, *agg)
+        .where(RequestLogORM.user_id.in_(member_ids), *time_filters)
+        .group_by(RequestLogORM.user_id)
+    ).all()
+
+    rows_b = session.execute(
+        select(CreditTransactionORM.user_id, *agg)
+        .select_from(CreditTransactionORM)
+        .join(
+            RequestLogORM,
+            RequestLogORM.request_id == CreditTransactionORM.request_id,
+        )
+        .where(
+            CreditTransactionORM.type == "usage",
+            CreditTransactionORM.user_id.in_(member_ids),
+            RequestLogORM.user_id.is_(None),
+            *time_filters,
+        )
+        .group_by(CreditTransactionORM.user_id)
+    ).all()
+
+    merged: dict[str, dict] = {}
+    for uid, requests, tokens, last_active in [*rows_a, *rows_b]:
+        m = merged.setdefault(
+            uid, {"requests": 0, "tokens": 0, "last_active": None}
+        )
+        m["requests"] += int(requests)
+        m["tokens"] += int(tokens)
+        if last_active is not None and (
+            m["last_active"] is None or last_active > m["last_active"]
+        ):
+            m["last_active"] = last_active
+
+    team_total = sum(m["tokens"] for m in merged.values())
+
+    out = []
+    for member in members:
+        m = merged.get(member.id, {"requests": 0, "tokens": 0, "last_active": None})
+        share = (
+            round(m["tokens"] / team_total * 100) if team_total > 0 else 0
+        )
+        out.append(
+            {
+                "userId": member.id,
+                "displayName": member.display_name or member.email,
+                "email": member.email,
+                "tenantRole": member.tenant_role or "member",
+                "totalTokens": m["tokens"],
+                "requestCount": m["requests"],
+                "lastActive": (
+                    m["last_active"].isoformat() if m["last_active"] else None
+                ),
+                "sharePercent": share,
+            }
+        )
+    out.sort(key=lambda r: r["totalTokens"], reverse=True)
+
+    return {"members": out, "teamTotal": team_total, "memberCount": len(out)}
 
 
 @router.get("/transactions")

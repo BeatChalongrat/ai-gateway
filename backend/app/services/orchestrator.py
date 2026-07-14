@@ -241,12 +241,83 @@ class GatewayOrchestrator:
             )
         return self.fallback_orchestrator
 
+    async def _run_preflight_checks(
+        self,
+        auth: ResolvedApiKey,
+        ctx: RequestContext,
+        session: "AsyncSession | None",
+    ) -> None:
+        """Shared pre-provider admission checks for BOTH the streaming
+        and non-streaming chat paths.
+
+        Runs rate limit (Redis sliding window) + daily quota + budget +
+        portal credit. Any breach raises the same exception the
+        non-streaming path has always raised
+        (RateLimitExceededError / QuotaExceededError / credit error), so
+        clients get an identical error response regardless of the
+        ``stream`` flag. Keeping this in one place is what prevents the
+        two paths from silently diverging (a stream request used to skip
+        rate/quota/budget entirely).
+
+        Rate limiting always runs (Redis only, no session). Quota,
+        budget and portal credit run only when a DB session is present,
+        mirroring the historical non-streaming behaviour.
+        """
+        # 1b. Rate limit check (Redis sliding window — per key, project, tenant)
+        with record_phase("rate_limit"), REDIS_COMMAND_DURATION.labels(
+            operation="rate_limit_pipeline"
+        ).time():
+            # Per-end-user bucket for trusted shared-key traffic (web-chat);
+            # falls back to ``auth.key_id`` for everything else. Cost /
+            # audit attribution below still keys on ``auth.key_id``.
+            rl = await self.rate_limit_service.check_all_async(
+                key_id=str(
+                    getattr(auth, "rate_limit_key_id", None) or auth.key_id
+                ),
+                project_id=str(ctx.project_id),
+                tenant_id=str(ctx.tenant_id),
+            )
+        if not rl["allowed"]:
+            retry_after = max(1, rl["reset_at"] - int(time.time()))
+            raise RateLimitExceededError(
+                f"Rate limit exceeded for {rl['scope']} ({rl['limit']} req/min).",
+                details={
+                    "scope": rl["scope"],
+                    "limit": rl["limit"],
+                    "remaining": rl["remaining"],
+                    "reset_at": rl["reset_at"],
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        # 1c. Quota + budget checks (DB-backed). Both raise on breach.
+        if session is not None:
+            await self.quota_service.check_request_quota_async(
+                session, ctx.project_id
+            )
+            await self.budget_service.check_budget_async(session, ctx.project_id)
+
+        # 1d. Portal credit check — no-op for admin/tenant keys.
+        # Runs BEFORE DLP so a suspended/zero-balance portal user doesn't
+        # waste CPU on entity detection + provider calls. See
+        # app.services.gateway.portal_credit_check for the policy.
+        if session is not None:
+            from app.services.gateway.portal_credit_check import (
+                check_portal_credit_async,
+            )
+            await check_portal_credit_async(
+                session,
+                str(auth.key_id),
+                portal_user_id=getattr(auth, "portal_user_id", None),
+            )
+
     async def handle_chat_completion(
         self,
         auth: ResolvedApiKey,
         payload: ChatCompletionsRequest,
         session: "AsyncSession | None" = None,
         out_meta: dict | None = None,
+        _preflight_done: bool = False,
     ) -> ChatCompletionsResponse:
         request_id = f"req_{uuid.uuid4().hex}"
         t_start = time.perf_counter()
@@ -308,54 +379,16 @@ class GatewayOrchestrator:
             log.warning("dlp_audit_encrypt_failed", error=str(exc)[:200])
             input_raw_encrypted = None
 
-        # 1b. Rate limit check (Redis sliding window — per key, project, tenant)
-        with record_phase("rate_limit"), REDIS_COMMAND_DURATION.labels(
-            operation="rate_limit_pipeline"
-        ).time():
-            # Per-end-user bucket for trusted shared-key traffic (web-chat);
-            # falls back to ``auth.key_id`` for everything else. Cost /
-            # audit attribution below still keys on ``auth.key_id``.
-            rl = await self.rate_limit_service.check_all_async(
-                key_id=str(
-                    getattr(auth, "rate_limit_key_id", None) or auth.key_id
-                ),
-                project_id=str(ctx.project_id),
-                tenant_id=str(ctx.tenant_id),
-            )
-        if not rl["allowed"]:
-            retry_after = max(1, rl["reset_at"] - int(time.time()))
-            raise RateLimitExceededError(
-                f"Rate limit exceeded for {rl['scope']} ({rl['limit']} req/min).",
-                details={
-                    "scope": rl["scope"],
-                    "limit": rl["limit"],
-                    "remaining": rl["remaining"],
-                    "reset_at": rl["reset_at"],
-                },
-                headers={"Retry-After": str(retry_after)},
-            )
-
-        # 1c. Quota + budget checks (DB-backed). Grouped into one thread
-        # hop — both raise on breach, which propagates through to_thread.
-        if session is not None:
-            await self.quota_service.check_request_quota_async(
-                session, ctx.project_id
-            )
-            await self.budget_service.check_budget_async(session, ctx.project_id)
-
-        # 1d. Portal credit check — no-op for admin/tenant keys.
-        # Runs BEFORE DLP so a suspended/zero-balance portal user doesn't
-        # waste CPU on entity detection + provider calls. See
-        # app.services.gateway.portal_credit_check for the policy.
-        if session is not None:
-            from app.services.gateway.portal_credit_check import (
-                check_portal_credit_async,
-            )
-            await check_portal_credit_async(
-                session,
-                str(auth.key_id),
-                portal_user_id=getattr(auth, "portal_user_id", None),
-            )
+        # 1b-1d. Shared admission checks: rate limit + quota + budget +
+        # portal credit. Delegated to the same helper the streaming path
+        # (resolve_streaming_context) calls so the two can't diverge — a
+        # stream request used to skip all of these. See
+        # _run_preflight_checks. ``_preflight_done`` is set only when the
+        # streaming path already ran preflight and is falling back here
+        # for a non-streaming adapter, so we don't double-count the
+        # rate-limit window for a single request.
+        if not _preflight_done:
+            await self._run_preflight_checks(auth, ctx, session)
 
         # Resolve policy profile: project-level → settings default → "default"
         profile_id = ctx.policy_profile_id or settings.dlp_default_profile
@@ -468,6 +501,7 @@ class GatewayOrchestrator:
                         session,
                         RequestRecord(
                             request_id=request_id,
+                            user_id=ctx.user_id,
                             tenant_id=ctx.tenant_id,
                             project_id=ctx.project_id,
                             provider="",
@@ -663,6 +697,7 @@ class GatewayOrchestrator:
                         session,
                         RequestRecord(
                             request_id=request_id,
+                            user_id=ctx.user_id,
                             tenant_id=ctx.tenant_id,
                             project_id=ctx.project_id,
                             provider="",
@@ -741,6 +776,7 @@ class GatewayOrchestrator:
                                 session,
                                 RequestRecord(
                                     request_id=request_id,
+                                    user_id=ctx.user_id,
                                     tenant_id=ctx.tenant_id,
                                     project_id=ctx.project_id,
                                     provider="",
@@ -997,6 +1033,7 @@ class GatewayOrchestrator:
                         session,
                         RequestRecord(
                             request_id=request_id,
+                            user_id=ctx.user_id,
                             tenant_id=ctx.tenant_id,
                             project_id=ctx.project_id,
                             provider=route.provider_name,
@@ -1390,6 +1427,7 @@ class GatewayOrchestrator:
                             session,
                             RequestRecord(
                                 request_id=request_id,
+                                user_id=ctx.user_id,
                                 tenant_id=ctx.tenant_id,
                                 project_id=ctx.project_id,
                                 provider=route.provider_name,
@@ -1730,6 +1768,7 @@ class GatewayOrchestrator:
                             session,
                             RequestRecord(
                                 request_id=request_id,
+                                user_id=ctx.user_id,
                                 tenant_id=ctx.tenant_id,
                                 project_id=ctx.project_id,
                                 provider=route.provider_name,
@@ -1934,6 +1973,7 @@ class GatewayOrchestrator:
 
             record = RequestRecord(
                 request_id=request_id,
+                user_id=ctx.user_id,
                 tenant_id=ctx.tenant_id,
                 project_id=ctx.project_id,
                 provider=route.provider_name,
@@ -2707,19 +2747,14 @@ class GatewayOrchestrator:
             request_id=request_id,
             policy_profile_override=payload.policy_profile_id,
         )
+        # Preflight parity with the non-streaming path (1b-1d): rate
+        # limit + daily quota + budget + portal credit ALL run here,
+        # BEFORE DLP / router / provider work, so a streaming request
+        # can no longer bypass the admission controls the non-streaming
+        # path enforces. Same helper, same exceptions. Rate limiting
+        # runs even when ``session`` is None (Redis only).
+        await self._run_preflight_checks(auth, ctx, session)
         if session is not None:
-            # Portal credit gate — streaming parity with the
-            # non-streaming preflight (1d): a suspended or zero-balance
-            # billable user is rejected BEFORE DLP / provider work so
-            # provider cost can't accumulate on an exhausted balance.
-            from app.services.gateway.portal_credit_check import (
-                check_portal_credit_async,
-            )
-            await check_portal_credit_async(
-                session,
-                str(auth.key_id),
-                portal_user_id=getattr(auth, "portal_user_id", None),
-            )
             stream_log = logger.bind(
                 request_id=request_id,
                 tenant_id=ctx.tenant_id,

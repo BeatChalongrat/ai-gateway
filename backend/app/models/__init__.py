@@ -9,6 +9,7 @@ from app.models.ai_review import (
 )
 from app.models.alert_rule import AlertEventORM, AlertRuleORM
 from app.models.api_key import ApiKeyORM
+from app.models.connector_token import ConnectorTokenORM
 from app.models.credit_transaction import CreditTransactionORM
 from app.models.custom_detector import CustomDetectorORM
 from app.models.dlp_audit_log import DlpRuleAuditLogORM
@@ -34,7 +35,7 @@ __all__ = [
     "AdminAuditLogORM", "AdminUserORM", "AiReviewFindingORM",
     "AiReviewScanRunORM", "AiReviewSettingsORM",
     "AlertEventORM", "AlertRuleORM",
-    "ApiKeyORM", "CreditTransactionORM", "CustomDetectorORM",
+    "ApiKeyORM", "ConnectorTokenORM", "CreditTransactionORM", "CustomDetectorORM",
     "DlpRuleAuditLogORM", "GenerationJobORM", "KeywordRuleORM",
     "ModelConfigORM",
     "OrgSettingsORM", "PolicyORM", "PolicyProfileORM",

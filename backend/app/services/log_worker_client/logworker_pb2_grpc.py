@@ -32,7 +32,7 @@ if _version_not_supported:
 
 class LogWorkerServiceStub(object):
     """LogWorkerService — the async sink for request_logs.
-
+    
     The Python gateway dispatches one Enqueue RPC per request when
     LOG_WORKER_ENGINE=go. The server channels the record onto an
     in-memory buffer; a background goroutine flushes batches of up to
@@ -63,7 +63,7 @@ class LogWorkerServiceStub(object):
 
 class LogWorkerServiceServicer(object):
     """LogWorkerService — the async sink for request_logs.
-
+    
     The Python gateway dispatches one Enqueue RPC per request when
     LOG_WORKER_ENGINE=go. The server channels the record onto an
     in-memory buffer; a background goroutine flushes batches of up to
@@ -109,7 +109,7 @@ def add_LogWorkerServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class LogWorkerService(object):
     """LogWorkerService — the async sink for request_logs.
-
+    
     The Python gateway dispatches one Enqueue RPC per request when
     LOG_WORKER_ENGINE=go. The server channels the record onto an
     in-memory buffer; a background goroutine flushes batches of up to

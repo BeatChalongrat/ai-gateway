@@ -57,24 +57,78 @@ async def validate_model_capability(
     return mc
 
 
-async def scan_media_prompt_with_profile(prompt: str, db: AsyncSession) -> None:
+async def scan_media_prompt_with_profile(
+    prompt: str,
+    db: AsyncSession,
+    *,
+    tenant_id: str | None = None,
+    project_id: str = "",
+    user_id: str | None = None,
+) -> None:
     """MEDIA_GEN DLP scan; raise 403 on BLOCK (secret/credential).
 
     Identity-class PII PASSES through (MEDIA_GEN profile). No-op when DLP
     is disabled.
+
+    Phase 9: when ``tenant_id`` is provided, the tenant's
+    ``media_pii_egress`` policy applies — ``block`` fails closed on ANY
+    identity PII (403); the default ``allow`` keeps the pass-through
+    behavior byte-for-byte but writes a ``raw_egress`` audit row when
+    identity PII actually egresses raw.
     """
     if not settings.dlp_enabled:
         return
+    from app.services.dlp.egress_policy import (
+        assert_egress_allowed,
+        audit_raw_egress,
+    )
+
+    assert_egress_allowed("media_gen")
     orch = GatewayOrchestrator()
     profile = await get_runtime_profile_async(db, "media_gen")
+
+    # Phase 10 (A2): resolve the tenant's egress policy BEFORE the scan —
+    # a "block" tenant promises fail-closed on ANY identity PII, and names
+    # are NER-only findings, so the block path must scan with NER enabled.
+    # The default "allow" path (and the legacy no-tenant path) keeps the
+    # cheap regex-only scan (only the credential class matters there).
+    tenant = None
+    if tenant_id is not None:
+        from app.models.tenant import TenantORM
+
+        tenant = await db.get(TenantORM, tenant_id)
+    policy_blocks = tenant is not None and str(
+        getattr(tenant, "media_pii_egress", "allow") or "allow"
+    ) == "block"
+
     detection = await orch._scan_text_as_result_async(
-        prompt, direction="input", ner_enabled=False
+        prompt, direction="input", ner_enabled=policy_blocks
     )
     enforcement = orch._scan_and_evaluate(detection, profile)
     if enforcement.is_blocked:
         raise HTTPException(status_code=403, detail="prompt blocked by DLP policy")
     if content_policy_blocked(prompt, profile):
         raise HTTPException(status_code=403, detail="prompt blocked by content policy")
+
+    if not enforcement.match_actions or tenant_id is None:
+        return
+
+    if policy_blocks:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "prompt contains personal data and this tenant's policy "
+                "blocks unmasked media-generation egress"
+            ),
+        )
+    await audit_raw_egress(
+        db,
+        channel="media_gen",
+        tenant_id=tenant_id,
+        project_id=project_id,
+        user_id=user_id,
+        detection=detection,
+    )
 
 
 def content_policy_blocked(prompt: str, profile) -> bool:

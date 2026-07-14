@@ -54,6 +54,8 @@ from app.schemas.admin import (
     TenantCreate,
     TenantResponse,
     TenantUpdate,
+    UsageByModelItem,
+    UsageByProjectItem,
     UsageSummary,
 )
 from app.schemas.common import ErrorResponse
@@ -1106,6 +1108,200 @@ def usage_summary(
     else:
         data = svc.usage_summary_by_project(session, project_id)
     return UsageSummary(**data)
+
+
+@router.get("/usage/by-project", response_model=list[UsageByProjectItem])
+def usage_by_project(
+    session: Session = Depends(get_db_session),
+) -> list[UsageByProjectItem]:
+    """All-time usage aggregated per project (Usage & Cost bar chart)."""
+    rows = session.execute(
+        sa.select(
+            RequestLogORM.project_id,
+            ProjectORM.name,
+            sa.func.count().label("requests"),
+            sa.func.coalesce(sa.func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+            sa.func.coalesce(sa.func.sum(RequestLogORM.estimated_cost_usd), 0.0).label("cost"),
+        )
+        .select_from(RequestLogORM)
+        # Outer join so logs whose project was since deleted still count
+        # (shown under their raw project_id).
+        .join(ProjectORM, ProjectORM.project_id == RequestLogORM.project_id, isouter=True)
+        .group_by(RequestLogORM.project_id, ProjectORM.name)
+        .order_by(sa.desc("tokens"))
+    ).all()
+    return [
+        UsageByProjectItem(
+            projectId=pid,
+            projectName=name or pid,
+            requests=int(requests),
+            tokens=int(tokens),
+            cost=round(float(cost), 6),
+        )
+        for pid, name, requests, tokens, cost in rows
+    ]
+
+
+@router.get("/usage/by-model", response_model=list[UsageByModelItem])
+def usage_by_model(
+    session: Session = Depends(get_db_session),
+) -> list[UsageByModelItem]:
+    """All-time usage aggregated per provider/model (Usage & Cost donut)."""
+    rows = session.execute(
+        sa.select(
+            RequestLogORM.provider,
+            RequestLogORM.model,
+            sa.func.count().label("requests"),
+            sa.func.coalesce(sa.func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+            sa.func.coalesce(sa.func.sum(RequestLogORM.estimated_cost_usd), 0.0).label("cost"),
+        )
+        .group_by(RequestLogORM.provider, RequestLogORM.model)
+        .order_by(sa.desc("tokens"))
+    ).all()
+    return [
+        UsageByModelItem(
+            provider=provider or "unknown",
+            model=model or "unknown",
+            requests=int(requests),
+            tokens=int(tokens),
+            cost=round(float(cost), 6),
+        )
+        for provider, model, requests, tokens, cost in rows
+    ]
+
+
+@router.get("/usage/by-user")
+def usage_by_user(
+    projectId: str = Query("all"),
+    tenant_id: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Top users by token usage (Usage & Cost user-breakdown table).
+
+    Attribution merges two sources (never double-counting a row):
+
+    * **Strategy A** — ``request_logs.user_id`` (migration 062): every
+      row written after the orchestrator started stamping the resolved
+      portal identity.
+    * **Strategy B** — legacy rows (``user_id IS NULL``) joined through
+      ``credit_transactions`` (type='usage'), which has carried
+      user_id + request_id for every billable request all along.
+
+    Requests from admin/tenant keys with no portal owner appear in
+    neither source and are intentionally excluded.
+    """
+    from app.models.credit_transaction import CreditTransactionORM
+    from app.models.portal_user import PortalUserORM
+
+    now = datetime.utcnow()
+    start = start_date or (now - timedelta(days=30))
+    end = end_date or now
+
+    def _filters() -> list:
+        f = [
+            RequestLogORM.created_at >= start,
+            RequestLogORM.created_at <= end,
+        ]
+        if projectId not in ("all", ""):
+            f.append(RequestLogORM.project_id == projectId)
+        if tenant_id:
+            f.append(RequestLogORM.tenant_id == tenant_id)
+        return f
+
+    agg = [
+        sa.func.count().label("requests"),
+        sa.func.coalesce(sa.func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+        sa.func.coalesce(sa.func.sum(RequestLogORM.prompt_tokens), 0).label("prompt"),
+        sa.func.coalesce(sa.func.sum(RequestLogORM.completion_tokens), 0).label("completion"),
+        sa.func.coalesce(sa.func.sum(RequestLogORM.estimated_cost_usd), 0.0).label("cost"),
+        sa.func.max(RequestLogORM.created_at).label("last_active"),
+    ]
+
+    rows_a = session.execute(
+        sa.select(RequestLogORM.user_id, *agg)
+        .where(RequestLogORM.user_id.is_not(None), *_filters())
+        .group_by(RequestLogORM.user_id)
+    ).all()
+
+    rows_b = session.execute(
+        sa.select(CreditTransactionORM.user_id, *agg)
+        .select_from(CreditTransactionORM)
+        .join(
+            RequestLogORM,
+            RequestLogORM.request_id == CreditTransactionORM.request_id,
+        )
+        .where(
+            CreditTransactionORM.type == "usage",
+            RequestLogORM.user_id.is_(None),
+            *_filters(),
+        )
+        .group_by(CreditTransactionORM.user_id)
+    ).all()
+
+    merged: dict[str, dict[str, Any]] = {}
+    for uid, requests, tokens, prompt, completion, cost, last_active in [
+        *rows_a,
+        *rows_b,
+    ]:
+        m = merged.setdefault(
+            uid,
+            {
+                "requests": 0,
+                "tokens": 0,
+                "prompt": 0,
+                "completion": 0,
+                "cost": 0.0,
+                "last_active": None,
+            },
+        )
+        m["requests"] += int(requests)
+        m["tokens"] += int(tokens)
+        m["prompt"] += int(prompt)
+        m["completion"] += int(completion)
+        m["cost"] += float(cost)
+        if last_active is not None and (
+            m["last_active"] is None or last_active > m["last_active"]
+        ):
+            m["last_active"] = last_active
+
+    profiles: dict[str, PortalUserORM] = {}
+    if merged:
+        profiles = {
+            u.id: u
+            for u in session.execute(
+                sa.select(PortalUserORM).where(PortalUserORM.id.in_(list(merged)))
+            ).scalars()
+        }
+
+    ranked = sorted(merged.items(), key=lambda kv: kv[1]["tokens"], reverse=True)[:20]
+    users = []
+    for uid, m in ranked:
+        profile = profiles.get(uid)
+        users.append(
+            {
+                "userId": uid,
+                "displayName": (
+                    (profile.display_name or profile.email) if profile else uid
+                ),
+                "email": profile.email if profile else "",
+                "requestCount": m["requests"],
+                "totalTokens": m["tokens"],
+                "promptTokens": m["prompt"],
+                "completionTokens": m["completion"],
+                "totalCostUsd": round(m["cost"], 6),
+                "lastActive": (
+                    m["last_active"].isoformat() if m["last_active"] else None
+                ),
+            }
+        )
+
+    return {
+        "users": users,
+        "period": {"start": start.isoformat(), "end": end.isoformat()},
+        "totalUsers": len(merged),
+    }
 
 
 # ---------------------------------------------------------------------------

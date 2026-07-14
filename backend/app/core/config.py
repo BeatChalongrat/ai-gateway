@@ -146,6 +146,18 @@ class Settings(BaseSettings):
     oauth_github_client_id: str = ""
     oauth_github_client_secret: str = ""
 
+    # Connector OAuth broker (Desktop Phase 7). SEPARATE OAuth apps from
+    # the login flow above: login only proves identity; connectors ask
+    # for data scopes (Gmail/Drive/Calendar/Slack/GitHub). Empty values
+    # mean the matching connector's /oauth/start bounces the browser
+    # back to the desktop with reason=not_configured.
+    connector_oauth_google_client_id: str = ""
+    connector_oauth_google_client_secret: str = ""
+    connector_oauth_slack_client_id: str = ""
+    connector_oauth_slack_client_secret: str = ""
+    connector_oauth_github_client_id: str = ""
+    connector_oauth_github_client_secret: str = ""
+
     # Provider API keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""

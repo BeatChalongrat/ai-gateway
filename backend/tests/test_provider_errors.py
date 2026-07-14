@@ -16,6 +16,7 @@ import pytest
 import respx
 
 from app.core.exceptions import (
+    ContextLengthExceededError,
     ProviderError,
     ProviderTimeoutError,
     ProviderUnavailableError,
@@ -115,6 +116,97 @@ class TestMapProviderError:
         exc = RuntimeError("unexpected")
         result = map_provider_error(exc, "openai")
         assert isinstance(result, ProviderError)
+
+
+# ---------------------------------------------------------------------------
+# Context-length detection (typed context_length_exceeded on provider 400)
+# ---------------------------------------------------------------------------
+
+
+def _http_error(status: int, body) -> httpx.HTTPStatusError:
+    resp = (
+        httpx.Response(status, json=body)
+        if isinstance(body, dict)
+        else httpx.Response(status, text=body)
+    )
+    req = httpx.Request("POST", "https://x.com")
+    return httpx.HTTPStatusError(str(status), request=req, response=resp)
+
+
+class TestContextLengthDetection:
+    def test_openai_error_code(self):
+        body = {
+            "error": {
+                "code": "context_length_exceeded",
+                "message": "This model's maximum context length is 128000 tokens. "
+                           "However, your messages resulted in 131072 tokens.",
+                "type": "invalid_request_error",
+            }
+        }
+        result = map_provider_error(_http_error(400, body), "openai")
+        assert isinstance(result, ContextLengthExceededError)
+        assert result.code == "context_length_exceeded"
+        assert result.details["provider"] == "openai"
+        assert "maximum context length" in result.details["provider_message"]
+
+    def test_openai_message_without_code(self):
+        body = {"error": {"message": "Your input exceeds the context window of this model (tokens: 200123)."}}
+        result = map_provider_error(_http_error(400, body), "openrouter")
+        assert isinstance(result, ContextLengthExceededError)
+
+    def test_anthropic_prompt_too_long(self):
+        body = {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "prompt is too long: 210834 tokens > 200000 maximum",
+            },
+        }
+        result = map_provider_error(_http_error(400, body), "anthropic")
+        assert isinstance(result, ContextLengthExceededError)
+        assert result.details["provider"] == "anthropic"
+        assert "prompt is too long" in result.details["provider_message"]
+
+    def test_gemini_token_count_exceeds(self):
+        body = {
+            "error": {
+                "code": 400,
+                "message": "The input token count (1200000) exceeds the maximum "
+                           "number of tokens allowed (1048576).",
+                "status": "INVALID_ARGUMENT",
+            }
+        }
+        result = map_provider_error(_http_error(400, body), "google")
+        assert isinstance(result, ContextLengthExceededError)
+
+    def test_detection_is_case_insensitive(self):
+        body = {"error": {"message": "Prompt Is Too Long for this model."}}
+        result = map_provider_error(_http_error(400, body), "anthropic")
+        assert isinstance(result, ContextLengthExceededError)
+
+    def test_unrelated_400_still_upstream_bad_response(self):
+        body = {"error": {"code": "invalid_request_error", "message": "Unknown parameter: 'foo'."}}
+        result = map_provider_error(_http_error(400, body), "openai")
+        assert isinstance(result, UpstreamBadResponseError)
+        assert result.code == "upstream_bad_response"
+
+    def test_500_with_context_text_is_not_matched(self):
+        # Status-400-only rule: a 5xx mentioning tokens is a server fault.
+        body = {"error": {"message": "internal error while sizing context window tokens"}}
+        result = map_provider_error(_http_error(500, body), "openai")
+        assert isinstance(result, ProviderError)
+        assert not isinstance(result, ContextLengthExceededError)
+
+    def test_plain_text_400_body_matched(self):
+        result = map_provider_error(
+            _http_error(400, "request exceeds the maximum number of tokens"), "google"
+        )
+        assert isinstance(result, ContextLengthExceededError)
+
+    def test_not_fallback_eligible(self):
+        from app.services.gateway.fallback_orchestrator import is_fallback_eligible
+
+        assert not is_fallback_eligible(ContextLengthExceededError())
 
 
 # ---------------------------------------------------------------------------

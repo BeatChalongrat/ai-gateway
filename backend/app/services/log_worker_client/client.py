@@ -123,6 +123,8 @@ def record_to_proto(record: "RequestRecord") -> Any:
         # gap where the Go COPY path wrote 0 instead of the real values.
         reasoning_tokens=int(record.reasoning_tokens or 0),
         reasoning_cost=float(record.reasoning_cost or 0.0),
+        # Portal-user attribution (migration 062). "" → NULL in Go.
+        user_id=record.user_id or "",
     )
 
 
