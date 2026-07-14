@@ -1,4 +1,4 @@
-.PHONY: up prod prod-desktop down logs seed clean clean-portal-users fresh test test-unit test-all typecheck go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
+.PHONY: up prod prod-desktop down logs seed clean clean-portal-users fresh test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -74,10 +74,18 @@ test-all: ## Full backend suite (includes integration — needs the live stack)
 typecheck: ## TypeScript typecheck for the web-chat frontend
 	cd apps/web-chat && npx tsc --noEmit
 
+web-test: ## Vitest unit lanes for the three web apps (runs on the HOST — node_modules in Docker is a named volume the host can't reach)
+	cd apps/web-chat && npm test
+	cd portal && npm test
+	cd admin-ui && npm test
+
+web-e2e: ## Playwright happy path for web-chat (backends mocked; boots its own dev server on :3102)
+	cd apps/web-chat && npm run test:e2e
+
 go-test: ## Vet + test the chat-edge-api Go service
 	cd services/chat-edge-api && go vet ./... && go test ./...
 
-ci: test-unit typecheck go-test ## Run the full local CI gate before pushing (mirrors .github/workflows/ci.yml)
+ci: test-unit typecheck web-test go-test ## Run the full local CI gate before pushing (mirrors .github/workflows/ci.yml)
 
 build: ## Build all images without starting
 	docker compose build
