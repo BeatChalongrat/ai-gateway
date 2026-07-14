@@ -51,6 +51,9 @@ jobs:
         run: pytest tests/test_dlp_egress_invariant.py --tb=short
 
   frontend-typecheck:
+    # Job name kept stable (possible required-check reference); the lane
+    # now ALSO runs the vitest unit suite (SSE parser, chatStore
+    # streaming/optimistic-rollback, 401→refresh single-flight).
     name: web-chat (tsc --noEmit)
     runs-on: ubuntu-latest
     defaults:
@@ -65,6 +68,68 @@ jobs:
           cache-dependency-path: apps/web-chat/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      - name: Unit tests (vitest)
+        run: npm test
+
+  web-unit-test:
+    # Vitest unit lanes for the other two Next.js apps. portal pins the
+    # 401→refresh→retry single-flight; admin-ui pins the double-submit
+    # CSRF header attach + 401 session clear.
+    name: ${{ matrix.app }} (vitest)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [portal, admin-ui]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  web-e2e:
+    # ────────────────────────────────────────────────────────────────
+    # ⚠ NON-REQUIRED LANE — continue-on-error: true. This job may be
+    # flaky (browser download, dev-server boot timing) and MUST NOT
+    # gate merges. Do not add it to required status checks; do not
+    # remove continue-on-error without team sign-off. The fast vitest
+    # lanes above are the merge gate for web code.
+    # ────────────────────────────────────────────────────────────────
+    # Playwright happy path for web-chat: login handoff → send message
+    # → streamed tokens render. All backends are mocked via route
+    # interception (see tests/e2e), so it needs NO gateway/chat-edge/DB;
+    # the Playwright webServer boots `next dev` on :3102 from source.
+    name: web-chat e2e (Playwright, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: apps/web-chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web-chat/package-lock.json
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/web-chat/test-results/
+          retention-days: 7
 
   go-test:
     name: chat-edge-api (go vet + test)
