@@ -900,6 +900,30 @@ func (g *GatewayClient) ProxyPublicMedia(
 	return resp.StatusCode, respBody, nil
 }
 
+// ProxyPublicMediaOutput opens a streaming GET against the gateway's PUBLIC
+// media route (``/jobs/{id}/output``) as a trusted internal caller carrying
+// the end-user's identity. Unlike ProxyPublicMedia this does NOT buffer the
+// body — finished artifacts are videos/audio that can run to tens of MB —
+// the caller relays resp.Body and MUST close it.
+func (g *GatewayClient) ProxyPublicMediaOutput(
+	ctx context.Context,
+	callCtx GatewayCallContext,
+	subpath string,
+) (*http.Response, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, g.BaseURL+subpath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build media output request: %w", err)
+	}
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return nil, err
+	}
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	return resp, nil
+}
+
 // SubmitVideoJob enqueues an async video-generation job on the backend and
 // returns the job id. The provider runs out-of-band (job loop); poll with
 // PollVideoJob until terminal.

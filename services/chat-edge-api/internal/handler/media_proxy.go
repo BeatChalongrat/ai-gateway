@@ -13,6 +13,8 @@ package handler
 //	POST /api/v1/videos/generations -> gateway POST /v1/videos/generations
 //	POST /api/v1/audio/generations  -> gateway POST /v1/audio/generations
 //	GET  /api/v1/jobs/{id}          -> gateway GET  /v1/jobs/{id}
+//	POST /api/v1/jobs/{id}/cancel   -> gateway POST /v1/jobs/{id}/cancel
+//	GET  /api/v1/jobs/{id}/output   -> gateway GET  /v1/jobs/{id}/output (streamed)
 
 import (
 	"io"
@@ -88,4 +90,32 @@ func (h *MediaProxyHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 func (h *MediaProxyHandler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	h.forward(w, r, http.MethodPost, "/jobs/"+id+"/cancel")
+}
+
+// JobOutput proxies GET /jobs/{id}/output — the finished artifact bytes.
+// Phase 11 A3: web-chat plays generated video/audio through the authed
+// client (blob → object URL), so the artifact must be reachable on the
+// chat-edge origin with cookie auth. Unlike the JSON proxies above this
+// STREAMS the upstream body (artifacts can run to tens of MB) and relays
+// the media headers instead of stamping application/json.
+func (h *MediaProxyHandler) JobOutput(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	resp, err := h.gw.ProxyPublicMediaOutput(
+		r.Context(), h.callCtx(r), "/jobs/"+id+"/output",
+	)
+	if err != nil {
+		WriteError(
+			w, http.StatusBadGateway, "MEDIA_PROXY_FAILED",
+			"media generation service unavailable",
+		)
+		return
+	}
+	defer resp.Body.Close()
+	for _, k := range []string{"Content-Type", "Content-Length", "Content-Disposition"} {
+		if v := resp.Header.Get(k); v != "" {
+			w.Header().Set(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }
