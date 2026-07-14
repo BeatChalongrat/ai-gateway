@@ -1,0 +1,664 @@
+<UserControl x:Class="SranDesktop.Presentation.Controls.MessageBubble"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:controls="clr-namespace:SranDesktop.Presentation.Controls"
+             xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
+             xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
+             xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:MessageViewModel}">
+
+    <UserControl.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <Style x:Key="NullCollapsedText" TargetType="TextBlock">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusText}" Value="{x:Null}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="PulsingDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="6" />
+            <Setter Property="Height" Value="6" />
+            <Setter Property="Fill" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Opacity" Value="0.3" />
+        </Style>
+
+        <!-- Small icon action button used in the hover rows -->
+        <Style x:Key="ActionIconButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="controls:ButtonHelper.CornerRadius" Value="4" />
+        </Style>
+    </UserControl.Resources>
+
+    <!-- Entrance animation is CODE-DRIVEN (Phase 8 Task 3): only messages
+         with AnimateEntrance (live appends) animate; history loads, scroll
+         re-realization and recycled containers render at rest. The old
+         Loaded EventTrigger animated all three. -->
+    <Grid Margin="0,8" Background="Transparent" x:Name="Root"
+          RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+            <TranslateTransform x:Name="AppearTranslate" Y="0" />
+        </Grid.RenderTransform>
+
+        <!-- ══ User message: gray pill, right-aligned ══ -->
+        <StackPanel HorizontalAlignment="Right" MaxWidth="653"
+                    Visibility="{Binding IsUser, Converter={StaticResource BoolToVisibility}}">
+            <!-- attached images echoed inline (R9 D5) -->
+            <ItemsControl ItemsSource="{Binding InlineImages}" HorizontalAlignment="Right"
+                          Margin="0,0,0,4">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:InlineAttachmentViewModel}">
+                        <Border CornerRadius="10" Margin="4,0,0,4" ClipToBounds="True">
+                            <Border.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="{loc:T gen.saveImage}"
+                                              Command="{Binding SaveAsCommand}" />
+                                </ContextMenu>
+                            </Border.ContextMenu>
+                            <Image Source="{Binding ImageSource}" MaxWidth="200" MaxHeight="200"
+                                   Stretch="Uniform" StretchDirection="DownOnly"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Border Background="{DynamicResource UserBubbleBrush}"
+                    CornerRadius="20"
+                    Padding="16,10"
+                    HorizontalAlignment="Right"
+                    Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                <Border.Effect>
+                    <DropShadowEffect ShadowDepth="1" BlurRadius="3" Opacity="0.08" Color="Black" />
+                </Border.Effect>
+                <TextBlock Text="{Binding Content}"
+                           TextWrapping="Wrap"
+                           FontSize="15" LineHeight="24"
+                           LineStackingStrategy="BlockLineHeight"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+            </Border>
+
+            <!-- inline edit mode (R9 F4): editing forks a new branch -->
+            <Border Background="{DynamicResource BgSecondaryBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1" CornerRadius="14" Padding="12,10"
+                    MinWidth="320"
+                    Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBox Text="{Binding EditingText, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True" TextWrapping="Wrap"
+                             MinHeight="40" MaxHeight="160"
+                             Background="Transparent" BorderThickness="0"
+                             FontSize="14"
+                             Foreground="{DynamicResource TextPrimaryBrush}"
+                             CaretBrush="{DynamicResource TextPrimaryBrush}"
+                             VerticalScrollBarVisibility="Auto" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                        <Button Style="{DynamicResource PillButton}" Padding="12,4" Margin="0,0,6,0"
+                                Command="{Binding DataContext.CancelEditMessageCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                                CommandParameter="{Binding}">
+                            <TextBlock Text="{loc:T common.cancel}" FontSize="12" />
+                        </Button>
+                        <Button Style="{DynamicResource AccentButton}" Padding="12,4"
+                                Command="{Binding DataContext.SubmitEditMessageCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                                CommandParameter="{Binding}">
+                            <TextBlock Text="{loc:T input.send}" FontSize="12" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- branch navigation ◀ n/m ▶ (R9 F3) -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,2,0"
+                        Visibility="{Binding HasBranches, Converter={StaticResource BoolToVisibility}}">
+                <Button Style="{DynamicResource IconButton}" Width="22" Height="22"
+                        AutomationProperties.Name="{loc:T msg.branchPrev}"
+                        Command="{Binding DataContext.PreviousBranchCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                        CommandParameter="{Binding}">
+                    <controls:IconView Geometry="{StaticResource Geo_ChevronLeft}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="11" Height="11" />
+                </Button>
+                <TextBlock Text="{Binding BranchDisplay}" FontSize="11" Margin="4,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
+                <Button Style="{DynamicResource IconButton}" Width="22" Height="22"
+                        AutomationProperties.Name="{loc:T msg.branchNext}"
+                        Command="{Binding DataContext.NextBranchCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                        CommandParameter="{Binding}">
+                    <controls:IconView Geometry="{StaticResource Geo_ChevronRight}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="11" Height="11" />
+                </Button>
+            </StackPanel>
+
+            <!-- user hover actions: copy, edit-in-place -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,3,2,0"
+                        Visibility="{Binding IsMouseOver, ElementName=Root, Converter={StaticResource BoolToVisibility}}">
+                <Button Style="{StaticResource ActionIconButton}" ToolTip="{loc:T msg.copy}" Margin="0,0,2,0"
+                        AutomationProperties.Name="{loc:T msg.copy}"
+                        Click="CopyButton_Click">
+                    <controls:IconView Geometry="{StaticResource Geo_Copy}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="18" Height="18" />
+                </Button>
+                <Button Style="{StaticResource ActionIconButton}" ToolTip="{loc:T message.edit}"
+                        AutomationProperties.Name="{loc:T message.edit}"
+                        Command="{Binding DataContext.BeginEditMessageCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                        CommandParameter="{Binding}">
+                    <controls:IconView Geometry="{StaticResource Geo_Edit}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="18" Height="18" />
+                </Button>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- ══ Assistant / system: no avatar, no bubble, full-width prose ══ -->
+        <StackPanel HorizontalAlignment="Left" MaxWidth="768"
+                    Visibility="{Binding IsUser, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+
+            <!-- phase marker (Thinking… / Searching…) -->
+            <TextBlock Text="{Binding StatusText}"
+                       Margin="0,0,0,4"
+                       FontStyle="Italic"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       Style="{StaticResource NullCollapsedText}" />
+
+            <!-- collapsible reasoning -->
+            <Expander Margin="0,0,0,4"
+                      Foreground="{DynamicResource TextSecondaryBrush}">
+                <Expander.Style>
+                    <Style TargetType="Expander">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Reasoning}" Value="">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Expander.Style>
+                <Expander.Header>
+                    <TextBlock Text="{Binding ReasoningHeader}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                </Expander.Header>
+                <Border Background="{DynamicResource BgSecondaryBrush}"
+                        CornerRadius="8" Padding="10" Margin="0,4,0,0">
+                    <TextBlock Text="{Binding Reasoning}" TextWrapping="Wrap" FontSize="12.5"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                </Border>
+            </Expander>
+
+            <!-- Inline tool activity: one collapsible row per tool call (Claude-style) -->
+            <ItemsControl ItemsSource="{Binding ToolExecutions}" Margin="0,0,0,4">
+                <ItemsControl.Style>
+                    <Style TargetType="ItemsControl">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ToolExecutions.Count}" Value="0">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ItemsControl.Style>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:ToolExecutionItemViewModel}">
+                        <!-- R9 E2: collapsible tool card — icon + name + duration header,
+                             expandable input/output, screenshot preview, error state -->
+                        <Border BorderThickness="1" CornerRadius="10" Margin="0,3" Padding="10,8"
+                                Background="{DynamicResource BgSecondaryBrush}">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource AccentRedBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel>
+                                <!-- header -->
+                                <DockPanel>
+                                    <ToggleButton DockPanel.Dock="Right"
+                                                  AutomationProperties.Name="{loc:T tool.toggleDetails}"
+                                                  IsChecked="{Binding IsExpanded}"
+                                                  Width="22" Height="22"
+                                                  Background="Transparent" BorderThickness="0"
+                                                  Cursor="Hand">
+                                        <controls:IconView Geometry="{StaticResource Geo_ChevronDown}"
+                                                           Stroke="{DynamicResource TextTertiaryBrush}"
+                                                           Width="12" Height="12"
+                                                           RenderTransformOrigin="0.5,0.5">
+                                            <controls:IconView.Style>
+                                                <Style TargetType="controls:IconView">
+                                                    <Setter Property="RenderTransform">
+                                                        <Setter.Value>
+                                                            <RotateTransform Angle="0" />
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                            <Setter Property="RenderTransform">
+                                                                <Setter.Value>
+                                                                    <RotateTransform Angle="180" />
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </controls:IconView.Style>
+                                        </controls:IconView>
+                                    </ToggleButton>
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding DurationText}"
+                                               FontSize="11" Margin="8,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    <!-- status: pulsing dot / check / cross -->
+                                    <Grid DockPanel.Dock="Right" Width="14" Height="14"
+                                          Margin="8,0,0,0" VerticalAlignment="Center">
+                                        <Ellipse Width="8" Height="8"
+                                                 Fill="{DynamicResource TextSecondaryBrush}"
+                                                 Visibility="{Binding IsPending, Converter={StaticResource BoolToVisibility}}">
+                                            <Ellipse.Triggers>
+                                                <EventTrigger RoutedEvent="Loaded">
+                                                    <BeginStoryboard>
+                                                        <Storyboard RepeatBehavior="Forever">
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                             From="0.3" To="1" Duration="0:0:0.6"
+                                                                             AutoReverse="True" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </EventTrigger>
+                                            </Ellipse.Triggers>
+                                        </Ellipse>
+                                        <controls:IconView Geometry="{StaticResource Geo_Check}"
+                                                           Stroke="{DynamicResource AccentGreenBrush}"
+                                                           Width="14" Height="14"
+                                                           Visibility="{Binding IsOk, Converter={StaticResource BoolToVisibility}}" />
+                                        <controls:IconView Geometry="{StaticResource Geo_Close}"
+                                                           Stroke="{DynamicResource AccentRedBrush}"
+                                                           Width="13" Height="13"
+                                                           Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+                                    <StackPanel Orientation="Horizontal">
+                                        <controls:IconView Geometry="{Binding IconGeometry}"
+                                                           Stroke="{DynamicResource TextSecondaryBrush}"
+                                                           Width="14" Height="14" Margin="0,0,8,0"
+                                                           VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding FriendlyName}" FontSize="13" FontWeight="Medium"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{Binding ArgsSummary}" FontSize="11.5"
+                                                   Margin="8,0,0,0" MaxWidth="380"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <!-- running indicator -->
+                                <ProgressBar Height="2" IsIndeterminate="True" Margin="0,6,0,0"
+                                             Visibility="{Binding IsPending, Converter={StaticResource BoolToVisibility}}" />
+
+                                <!-- expanded: input + output + screenshot + error -->
+                                <StackPanel Margin="0,8,0,0"
+                                            Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="{loc:T tool.input}" FontSize="11"
+                                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
+                                            Padding="8" Margin="0,4,0,8">
+                                        <TextBlock Text="{Binding InputJson}" FontFamily="Consolas" FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </Border>
+                                    <TextBlock Text="{loc:T tool.output}" FontSize="11"
+                                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
+                                            Padding="8" Margin="0,4,0,0">
+                                        <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto">
+                                            <TextBlock Text="{Binding FullResult}" FontFamily="Consolas" FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        </ScrollViewer>
+                                    </Border>
+                                    <Image Source="{Binding ScreenshotPreview}" MaxWidth="400" MaxHeight="300"
+                                           Margin="0,8,0,0" Stretch="Uniform" HorizontalAlignment="Left"
+                                           Visibility="{Binding HasScreenshot, Converter={StaticResource BoolToVisibility}}" />
+                                    <!-- error + retry (retry = regenerate the turn) -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
+                                                Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibility}}">
+                                        <Button Style="{DynamicResource PillButton}" Padding="10,3"
+                                                Command="{Binding DataContext.RegenerateCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}">
+                                            <TextBlock Text="{loc:T tool.retry}" FontSize="11.5" />
+                                        </Button>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- Web-search source cards (R9 C5) -->
+            <ItemsControl ItemsSource="{Binding Sources}" Margin="0,4,0,0">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:SourceViewModel}">
+                        <Button Command="{Binding OpenCommand}" Cursor="Hand"
+                                Background="Transparent" BorderThickness="0" Padding="0"
+                                Margin="0,0,6,6" MaxWidth="240"
+                                HorizontalContentAlignment="Stretch">
+                            <Border CornerRadius="8" BorderThickness="1" Padding="10,8"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    Background="{DynamicResource BgSecondaryBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="{Binding Domain}" FontSize="10.5" Margin="0,2,0,0"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    <TextBlock Text="{Binding Snippet}" FontSize="11" Margin="0,3,0,0"
+                                               TextWrapping="Wrap" MaxHeight="42"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- pulsing typing dots before the first token -->
+            <StackPanel Orientation="Horizontal" Margin="2,4"
+                        Visibility="{Binding ShowTypingIndicator, Converter={StaticResource BoolToVisibility}}">
+                <Ellipse x:Name="Dot1" Style="{StaticResource PulsingDot}" Margin="0,0,4,0">
+                    <Ellipse.Triggers>
+                        <EventTrigger RoutedEvent="Loaded">
+                            <BeginStoryboard>
+                                <Storyboard RepeatBehavior="Forever">
+                                    <DoubleAnimation Storyboard.TargetName="Dot1"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.3" To="1" Duration="0:0:0.6" AutoReverse="True" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Ellipse.Triggers>
+                </Ellipse>
+                <Ellipse x:Name="Dot2" Style="{StaticResource PulsingDot}" Margin="0,0,4,0">
+                    <Ellipse.Triggers>
+                        <EventTrigger RoutedEvent="Loaded">
+                            <BeginStoryboard>
+                                <Storyboard RepeatBehavior="Forever" BeginTime="0:0:0.2">
+                                    <DoubleAnimation Storyboard.TargetName="Dot2"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.3" To="1" Duration="0:0:0.6" AutoReverse="True" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Ellipse.Triggers>
+                </Ellipse>
+                <Ellipse x:Name="Dot3" Style="{StaticResource PulsingDot}">
+                    <Ellipse.Triggers>
+                        <EventTrigger RoutedEvent="Loaded">
+                            <BeginStoryboard>
+                                <Storyboard RepeatBehavior="Forever" BeginTime="0:0:0.4">
+                                    <DoubleAnimation Storyboard.TargetName="Dot3"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.3" To="1" Duration="0:0:0.6" AutoReverse="True" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Ellipse.Triggers>
+                </Ellipse>
+            </StackPanel>
+
+            <!-- error renders plain + red -->
+            <TextBlock Text="{Binding Content}"
+                       TextWrapping="Wrap" FontSize="16" LineHeight="28"
+                       Foreground="{DynamicResource AccentRedBrush}"
+                       Visibility="{Binding IsError, Converter={StaticResource BoolToVisibility}}" />
+
+            <!-- Markdown, streaming AND done (Phase 4): the viewer renders
+                 progressively while streaming (block-level diff; plan/artifact
+                 fences hidden behind an indicator chip) — no more plain-text
+                 → markdown pop at completion. Plan fences are stripped from
+                 RenderContent once the turn completes. -->
+            <controls:MarkdownViewer Markdown="{Binding RenderContent}"
+                                     IsStreaming="{Binding IsStreaming}">
+                <controls:MarkdownViewer.Style>
+                    <Style TargetType="controls:MarkdownViewer">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsError}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </controls:MarkdownViewer.Style>
+            </controls:MarkdownViewer>
+
+            <!-- Generating placeholders (R7 A2 / B2) -->
+            <controls:ImageGeneratingPlaceholder
+                Visibility="{Binding IsGeneratingImage, Converter={StaticResource BoolToVisibility}}" />
+            <controls:VideoGeneratingPlaceholder
+                Visibility="{Binding IsGeneratingVideo, Converter={StaticResource BoolToVisibility}}" />
+
+            <!-- Inline generated media (R7 A3 / B3) -->
+            <ItemsControl ItemsSource="{Binding InlineAttachments}" Margin="0,4,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:InlineAttachmentViewModel}">
+                        <StackPanel>
+                            <!-- Image -->
+                            <Border CornerRadius="12" Margin="0,4"
+                                    MaxWidth="512" MaxHeight="512"
+                                    HorizontalAlignment="Left"
+                                    ClipToBounds="True"
+                                    Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}">
+                                <Border.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="{loc:T gen.saveImage}"
+                                                  Command="{Binding SaveAsCommand}" />
+                                    </ContextMenu>
+                                </Border.ContextMenu>
+                                <Image Source="{Binding ImageSource}"
+                                       Stretch="Uniform" StretchDirection="DownOnly"
+                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                            </Border>
+
+                            <!-- Video (MediaElement + play/pause overlay) -->
+                            <Grid MaxWidth="480" HorizontalAlignment="Left" Margin="0,4"
+                                  Visibility="{Binding IsVideo, Converter={StaticResource BoolToVisibility}}">
+                                <Grid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="{loc:T gen.saveVideo}"
+                                                  Command="{Binding SaveAsCommand}" />
+                                    </ContextMenu>
+                                </Grid.ContextMenu>
+                                <Border CornerRadius="12" ClipToBounds="True"
+                                        Background="Black">
+                                    <MediaElement Source="{Binding VideoFilePath}"
+                                                  LoadedBehavior="Manual"
+                                                  Stretch="Uniform"
+                                                  MaxHeight="320"
+                                                  MediaEnded="Video_MediaEnded"
+                                                  MediaOpened="Video_MediaOpened" />
+                                </Border>
+                                <!-- play/pause overlay -->
+                                <Button Click="VideoPlayPause_Click"
+                                        AutomationProperties.Name="{loc:T media.playPause}"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Width="52" Height="52"
+                                        Cursor="Hand"
+                                        Background="#66000000" BorderThickness="0"
+                                        controls:ButtonHelper.CornerRadius="26">
+                                    <Path Fill="White" Stretch="Uniform" Width="18" Height="18"
+                                          Margin="3,0,0,0">
+                                        <Path.Style>
+                                            <Style TargetType="Path">
+                                                <Setter Property="Data" Value="M0,0 L12,7 0,14 Z" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                        <Setter Property="Data" Value="M2,0 H5 V14 H2 Z M9,0 H12 V14 H9 Z" />
+                                                        <Setter Property="Margin" Value="0" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Path.Style>
+                                    </Path>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- Document plan cards (R7 C) -->
+            <ItemsControl ItemsSource="{Binding PlanBlocks}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:PlanBlockViewModel}">
+                        <controls:PlanCard />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- Live artifacts (R9 A5) -->
+            <ItemsControl ItemsSource="{Binding Artifacts}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:ArtifactViewModel}">
+                        <controls:ArtifactControl />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- assistant action row: hover-only, but the LAST reply keeps it always
+                 visible (web parity Fix 2). Opacity (not Visibility) keeps the row's
+                 layout height reserved so hovering doesn't jitter the conversation. -->
+            <StackPanel Orientation="Horizontal" Margin="-4,8,0,0">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Setter Property="Opacity" Value="0" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsMouseOver, ElementName=Root}" Value="True">
+                                <Setter Property="Opacity" Value="1" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsLastAssistantMessage}" Value="True">
+                                <Setter Property="Opacity" Value="1" />
+                            </DataTrigger>
+                            <!-- Phase 8 Task 5: keyboard focus reveals the row too -->
+                            <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=Root}" Value="True">
+                                <Setter Property="Opacity" Value="1" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsStreaming}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsError}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+
+                <!-- Web order: Copy, ThumbUp, ThumbDown, Regenerate; gap 2px between buttons -->
+                <Button Style="{StaticResource ActionIconButton}" ToolTip="{loc:T msg.copy}" AutomationProperties.Name="{loc:T msg.copy}" Margin="0,0,2,0"
+                        Click="CopyButton_Click">
+                    <controls:IconView Geometry="{StaticResource Geo_Copy}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="18" Height="18" />
+                </Button>
+                <Button Style="{StaticResource ActionIconButton}" ToolTip="{loc:T msg.goodResponse}" AutomationProperties.Name="{loc:T msg.goodResponse}" Margin="0,0,2,0"
+                        Command="{Binding DataContext.ThumbUpCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                        CommandParameter="{Binding}">
+                    <controls:IconView Geometry="{StaticResource Geo_ThumbUp}"
+                                       Width="18" Height="18">
+                        <controls:IconView.Style>
+                            <Style TargetType="controls:IconView">
+                                <Setter Property="Stroke" Value="{DynamicResource TextSecondaryBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsThumbUp}" Value="True">
+                                        <Setter Property="Stroke" Value="{DynamicResource AccentGreenBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </controls:IconView.Style>
+                    </controls:IconView>
+                </Button>
+                <Button Style="{StaticResource ActionIconButton}" ToolTip="{loc:T msg.badResponse}" AutomationProperties.Name="{loc:T msg.badResponse}" Margin="0,0,2,0"
+                        Command="{Binding DataContext.ThumbDownCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                        CommandParameter="{Binding}">
+                    <controls:IconView Geometry="{StaticResource Geo_ThumbDown}"
+                                       Width="18" Height="18">
+                        <controls:IconView.Style>
+                            <Style TargetType="controls:IconView">
+                                <Setter Property="Stroke" Value="{DynamicResource TextSecondaryBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsThumbDown}" Value="True">
+                                        <Setter Property="Stroke" Value="{DynamicResource AccentRedBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </controls:IconView.Style>
+                    </controls:IconView>
+                </Button>
+                <!-- Read aloud (R9 J2) -->
+                <Button Style="{StaticResource ActionIconButton}" Margin="0,0,2,0"
+                        ToolTip="{loc:T voice.readAloud}" AutomationProperties.Name="{loc:T voice.readAloud}"
+                        Command="{Binding DataContext.ReadAloudCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                        CommandParameter="{Binding}">
+                    <controls:IconView Geometry="{StaticResource Geo_Volume}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="18" Height="18" />
+                </Button>
+                <!-- Regenerate: last assistant reply only (web parity Fix 2a) -->
+                <Button ToolTip="{loc:T msg.regenerate}" AutomationProperties.Name="{loc:T msg.regenerate}"
+                        Command="{Binding DataContext.RegenerateCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ActionIconButton}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsLastAssistantMessage}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <controls:IconView Geometry="{StaticResource Geo_Regenerate}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="18" Height="18" />
+                </Button>
+
+                <TextBlock Text="{Binding MetaLine}" FontSize="11" VerticalAlignment="Center"
+                           Margin="6,0,0,0"
+                           Foreground="{DynamicResource TextTertiaryBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding MetaLine}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</UserControl>

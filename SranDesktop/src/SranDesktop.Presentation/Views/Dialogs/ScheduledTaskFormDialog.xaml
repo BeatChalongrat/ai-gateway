@@ -1,0 +1,50 @@
+<Window x:Class="SranDesktop.Presentation.Views.Dialogs.ScheduledTaskFormDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
+        Title="{loc:T task.create}"
+        Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BgPrimaryBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <StackPanel Margin="24,20">
+        <TextBlock Text="{loc:T task.name}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <TextBox x:Name="NameBox" Margin="0,0,0,12" TextChanged="Fields_Changed" />
+
+        <TextBlock Text="{loc:T task.prompt}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <TextBox x:Name="PromptBox" AcceptsReturn="True" TextWrapping="Wrap"
+                 MinHeight="70" MaxHeight="150"
+                 VerticalScrollBarVisibility="Auto"
+                 Margin="0,0,0,12" TextChanged="Fields_Changed" />
+
+        <TextBlock Text="{loc:T task.schedule}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <ComboBox x:Name="PresetBox" Margin="0,0,0,8"
+                  SelectionChanged="Preset_Changed">
+            <ComboBoxItem Content="{loc:T task.preset.hourly}" Tag="0 * * * *" />
+            <ComboBoxItem Content="{loc:T task.preset.daily}" Tag="0 6 * * *" IsSelected="True" />
+            <ComboBoxItem Content="{loc:T task.preset.weekly}" Tag="0 6 * * 1" />
+            <ComboBoxItem Content="{loc:T task.preset.custom}" Tag="" />
+        </ComboBox>
+        <TextBox x:Name="CronBox" Text="0 6 * * *"
+                 FontFamily="Consolas"
+                 Margin="0,0,0,4" TextChanged="Fields_Changed" />
+        <TextBlock x:Name="CronHint" Text=""
+                   FontSize="11" Margin="0,0,0,14"
+                   Foreground="{DynamicResource TextTertiaryBrush}" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="{loc:T common.cancel}" IsCancel="True"
+                    Padding="16,6" Margin="0,0,8,0" />
+            <Button x:Name="SaveButton" Content="{loc:T common.save}"
+                    Style="{DynamicResource AccentButton}"
+                    Padding="16,6" IsDefault="True"
+                    Click="Save_Click" IsEnabled="False" />
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -1,0 +1,149 @@
+<Window x:Class="SranDesktop.Presentation.Views.ScheduledTasksView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
+        xmlns:controls="clr-namespace:SranDesktop.Presentation.Controls"
+        xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
+        xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:ScheduledTasksViewModel}"
+        Title="{loc:T task.title}"
+        Width="600" Height="560"
+        MinWidth="460" MinHeight="380"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Background="{DynamicResource BgPrimaryBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <Window.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <DockPanel Grid.Row="0" Margin="24,24,24,12">
+            <Button DockPanel.Dock="Right" Style="{DynamicResource AccentButton}" Padding="12,6"
+                    VerticalAlignment="Top"
+                    Command="{Binding CreateCommand}">
+                <StackPanel Orientation="Horizontal">
+                    <controls:IconView Geometry="{StaticResource Geo_Plus}"
+                                       Stroke="{DynamicResource OnAccentBrush}"
+                                       Width="13" Height="13" Margin="0,0,6,0" />
+                    <TextBlock Text="{loc:T task.create}" FontSize="12.5" />
+                </StackPanel>
+            </Button>
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <controls:IconView Geometry="{StaticResource Geo_Calendar}"
+                                       Stroke="{DynamicResource TextPrimaryBrush}"
+                                       Width="20" Height="20" Margin="0,0,10,0"
+                                       VerticalAlignment="Center" />
+                    <TextBlock Text="{loc:T task.title}" FontSize="18" FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="{loc:T task.subtitle}" FontSize="12.5" Margin="0,4,0,0"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+            </StackPanel>
+        </DockPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="24,0,24,16">
+            <StackPanel>
+                <TextBlock Text="{loc:T task.empty}" FontSize="13" Margin="0,24"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource TextTertiaryBrush}"
+                           Visibility="{Binding IsListEmpty, Converter={StaticResource BoolToVisibility}}" />
+
+                <ItemsControl ItemsSource="{Binding Tasks}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ScheduledTaskItemViewModel}">
+                            <Border Background="{DynamicResource BgSecondaryBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="12"
+                                    Padding="14,12" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                            <!-- enabled toggle -->
+                                            <CheckBox IsChecked="{Binding IsEnabled}"
+                                                      VerticalAlignment="Center" Margin="0,0,8,0" />
+                                            <Button Style="{DynamicResource PillButton}" Padding="10,4"
+                                                    Command="{Binding RunNowCommand}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <ProgressBar Width="30" Height="3" IsIndeterminate="True"
+                                                                 Margin="0,0,6,0" VerticalAlignment="Center"
+                                                                 Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+                                                    <TextBlock Text="{loc:T task.runNow}" FontSize="12" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{DynamicResource IconButton}" Width="26" Height="26"
+                                                    Margin="4,0,0,0" ToolTip="{loc:T common.edit}" AutomationProperties.Name="{loc:T common.edit}"
+                                                    Command="{Binding EditCommand}">
+                                                <controls:IconView Geometry="{StaticResource Geo_Edit}"
+                                                                   Stroke="{DynamicResource TextSecondaryBrush}"
+                                                                   Width="13" Height="13" />
+                                            </Button>
+                                            <Button Style="{DynamicResource IconButton}" Width="26" Height="26"
+                                                    ToolTip="{loc:T common.delete}" AutomationProperties.Name="{loc:T common.delete}"
+                                                    Command="{Binding DeleteCommand}">
+                                                <controls:IconView Geometry="{StaticResource Geo_Trash}"
+                                                                   Stroke="{DynamicResource AccentRedBrush}"
+                                                                   Width="13" Height="13" />
+                                            </Button>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <controls:IconView Geometry="{StaticResource Geo_Calendar}"
+                                                               Stroke="{DynamicResource AccentBrush}"
+                                                               Width="15" Height="15" Margin="0,0,8,0"
+                                                               VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        </StackPanel>
+                                    </DockPanel>
+
+                                    <TextBlock Text="{Binding Prompt}" FontSize="12" Margin="23,3,0,0"
+                                               TextTrimming="CharacterEllipsis" MaxHeight="34" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+
+                                    <StackPanel Orientation="Horizontal" Margin="23,5,0,0">
+                                        <Border Background="{DynamicResource BgSelectedBrush}" CornerRadius="4"
+                                                Padding="6,2" Margin="0,0,8,0">
+                                            <TextBlock Text="{Binding CronExpression}" FontSize="10.5"
+                                                       FontFamily="Consolas"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        </Border>
+                                        <TextBlock Text="{Binding NextRunText}" FontSize="11" Margin="0,0,10,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+                                        <TextBlock Text="{Binding LastRunText}" FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    </StackPanel>
+
+                                    <!-- last result preview -->
+                                    <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
+                                            Padding="8,6" Margin="23,7,0,0"
+                                            Visibility="{Binding HasLastResult, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{Binding LastResult}" FontSize="11.5"
+                                                   TextWrapping="Wrap" MaxHeight="60"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>SranDesktop.Presentation</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SranDesktop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+    <PackageReference Include="Markdig" Version="0.37.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.*" />
+    <!-- R9: artifact rendering (WebView2). Speech moved to Infrastructure (R10). -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
+    <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\sran-logo.png" />
+    <Resource Include="Assets\sran-logo-white.png" />
+  </ItemGroup>
+
+  <!-- Phase 6 Task 3: artifact JS libs bundled offline (no CDN supply chain).
+       Served to the WebView2 via SetVirtualHostNameToFolderMapping. Copied to
+       the build output so ArtifactControl can map the folder at runtime. -->
+  <ItemGroup>
+    <Content Include="Assets\WebLibs\*.js" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
