@@ -76,6 +76,9 @@ type Handlers struct {
 	// proxy forwarding /videos|audio/generations + /jobs/{id} to the
 	// gateway's public media routes. Optional (nil when not wired).
 	MediaProxy *handler.MediaProxyHandler
+	// Import — desktop agent-conversation backup mirror (migration 026).
+	// Optional; no sendRateLimit (nothing here reaches an LLM).
+	Import *handler.ImportHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -149,6 +152,15 @@ func New(
 				r.Delete("/folders/{id}", h.Folder.Delete)
 				// Conversation → folder membership.
 				r.Put("/conversations/{id}/folder", h.Folder.MoveConversation)
+			}
+
+			// Desktop import — idempotent backup mirror of agent-mode
+			// chats. NOT rate-limited (no LLM cost; a first sync bursts
+			// legitimately). chi matches the literal "import" segment
+			// before the {id} routes.
+			if h.Import != nil {
+				r.Post("/conversations/import", h.Import.ImportConversation)
+				r.Post("/conversations/{id}/messages/import", h.Import.ImportMessages)
 			}
 
 			// Cancel — interrupts the in-flight stream for a

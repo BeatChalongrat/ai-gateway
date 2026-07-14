@@ -48,6 +48,85 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 	return c, nil
 }
 
+// CreateImported inserts a desktop-imported conversation keyed by the
+// client's local id (migration 026). ``ON CONFLICT DO NOTHING`` against the
+// partial unique index makes concurrent imports of the same client_id
+// converge on a single row: returns true when this call inserted the row,
+// false on conflict (the caller resolves the winner via GetByClientID).
+// ``createdAt`` is the desktop's historical timestamp — preserved, never
+// re-stamped; nil falls back to NOW().
+func (r *ConversationRepo) CreateImported(
+	ctx context.Context, c *model.Conversation, clientID string, createdAt *time.Time,
+) (bool, error) {
+	const q = `
+		INSERT INTO chat.conversations
+			(tenant_id, user_id, model_id, title, client_id, origin, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'desktop_agent', COALESCE($6, NOW()), COALESCE($6, NOW()))
+		ON CONFLICT (tenant_id, user_id, client_id) WHERE client_id IS NOT NULL
+		DO NOTHING
+		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at,
+		          knowledge_base_id, memory_enabled, reasoning_enabled, reasoning_mode,
+		          show_reasoning_summary, locked_model, is_pinned, folder_id
+	`
+	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID, c.Title, clientID, createdAt).Scan(
+		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
+		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil // conflict — a row with this client_id already exists
+		}
+		return false, fmt.Errorf("create imported conversation: %w", err)
+	}
+	return true, nil
+}
+
+// GetByClientID resolves an imported conversation by its desktop-side id.
+// Deliberately does NOT filter is_deleted: the desktop mirror must be able
+// to find (and resurrect) a web-deleted copy — see ImportService.
+func (r *ConversationRepo) GetByClientID(
+	ctx context.Context, tenantID, userID uuid.UUID, clientID string,
+) (*model.Conversation, error) {
+	const q = `
+		SELECT id, tenant_id, user_id, title, model_id, message_count,
+		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id
+		FROM chat.conversations
+		WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+	`
+	c := &model.Conversation{}
+	err := r.db.QueryRow(ctx, q, tenantID, userID, clientID).Scan(
+		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
+		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
+		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get conversation by client id: %w", err)
+	}
+	return c, nil
+}
+
+// Restore reverses a soft-delete. Used by the desktop import path: the
+// desktop is authoritative for its own backup mirror, so re-importing a
+// conversation whose mirror was deleted on the web resurrects it (otherwise
+// the client could never sync that conversation again).
+func (r *ConversationRepo) Restore(ctx context.Context, tenantID, convID uuid.UUID) error {
+	const q = `
+		UPDATE chat.conversations
+		SET is_deleted = false, deleted_at = NULL, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2
+	`
+	if _, err := r.db.Exec(ctx, q, convID, tenantID); err != nil {
+		return fmt.Errorf("restore conversation: %w", err)
+	}
+	return nil
+}
+
 // GetByID returns the conversation only when the tenant scope
 // matches AND the row isn't soft-deleted. The combined predicate
 // keeps the ownership and lifecycle gates in a single round-trip
