@@ -258,3 +258,188 @@ class TestStreamingCleanMessagePassesThrough:
         events = _parse_sse(resp.content)
         full = _full_content(events)
         assert "4" in full
+
+
+# ---------------------------------------------------------------------------
+# Phase 11 Part D — credential head-hold guard.
+#
+# The rolling MIN_TAIL_CHARS (120) tail only protects patterns whose full
+# match fits inside the retained window. A credential-class pattern LONGER
+# than the tail (PEM key material, a long ``postgres://user:pass@...`` URL,
+# a multi-KB JWT) could have its leading fragment emitted raw before the
+# detector ever saw the completed match. These tests pin the guarantee that
+# a boundary-split credential is never partially emitted, while normal
+# prose and identity-class content keep streaming incrementally.
+# ---------------------------------------------------------------------------
+
+_PEM_KEY = (
+    "-----BEGIN RSA PRIVATE KEY-----\n"
+    "MIIEpAIBAAKCAQEA7Zx9kQhtbW5uYmFzZTY0Ym9keWxpbmUxMjM0NTY3ODkwYWJj\n"
+    "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZ\n"
+    "WjAxMjM0NTY3ODkwYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo1NDMyMWZlZGNi\n"
+    "-----END RSA PRIVATE KEY-----"
+)
+
+_LONG_CONN_STRING = (
+    "postgresql://svc_reporting:sup3rS3cretPassw0rdWithLotsOfEntropy1234567890"
+    "@db-primary.internal.example.com:5432/production_analytics_warehouse"
+)
+
+
+def _chunks_of(text: str, size: int) -> list[str]:
+    """Split ``text`` into consecutive ``size``-char provider chunks."""
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def _content_deltas(events: list[dict]) -> list[str]:
+    """Each non-empty delta.content payload, in emission order."""
+    out: list[str] = []
+    for ev in events:
+        delta = ev.get("choices", [{}])[0].get("delta", {})
+        content = delta.get("content")
+        if isinstance(content, str) and content:
+            out.append(content)
+    return out
+
+
+def _leaked_fragments(
+    deltas: list[str], secret: str, min_len: int = 8
+) -> list[str]:
+    """Return every ``min_len``-char slice of ``secret`` that appears
+    inside ANY individual emitted chunk. Checking per-chunk (not just the
+    concatenation) catches a partial head emitted before the full match
+    formed — the exact leak shape this guard closes.
+    """
+    probes = {
+        secret[i : i + min_len] for i in range(0, len(secret) - min_len + 1)
+    }
+    leaks: list[str] = []
+    for d in deltas:
+        for probe in probes:
+            if probe in d:
+                leaks.append(probe)
+                break
+    return leaks
+
+
+class TestStreamingPemKeyNeverPartiallyEmitted:
+    def test_pem_private_key_split_across_chunks_never_leaks(self, monkeypatch):
+        """A >120-char PEM private key split into many small SSE chunks
+        must never reach the client raw — not even a fragment. The
+        private_key detector only matches the BEGIN header, so the base64
+        body relies entirely on the streaming guard holding + dropping
+        the key material.
+        """
+        assert len(_PEM_KEY) > 120
+        prose_head = (
+            "Sure — here is the generated deploy key for the staging box:\n"
+        )
+        prose_tail = (
+            "\nStore it in your secrets manager and never commit it to the "
+            "repository. Rotate it every 90 days per the security policy."
+        )
+        full = prose_head + _PEM_KEY + prose_tail
+        _install_stream_spy(monkeypatch, chunks=_chunks_of(full, 13))
+
+        resp = _chat_stream("give me the deploy key")
+
+        assert resp.status_code == 200
+        deltas = _content_deltas(_parse_sse(resp.content))
+        leaks = _leaked_fragments(deltas, _PEM_KEY)
+        assert not leaks, f"raw PEM fragments leaked: {leaks[:3]}"
+        joined = "".join(deltas)
+        # Key material is masked or absent — never raw.
+        assert "MIIEpAIBAAKCAQEA" not in joined
+        assert "PRIVATE KEY-----" not in joined
+        # Surrounding prose still streams through.
+        assert "deploy key for the staging box" in joined
+        assert "Rotate it every 90 days" in joined
+
+
+class TestStreamingLongConnStringNeverPartiallyEmitted:
+    def test_long_db_connection_string_split_across_chunks_never_leaks(
+        self, monkeypatch
+    ):
+        """A >120-char ``postgresql://user:pass@host/db`` URL split across
+        small chunks: before the guard, the leading fragment exited the
+        120-char tail (raw) before the ``@host`` part completed the match.
+        No emitted chunk may carry any fragment of it.
+        """
+        conn = _LONG_CONN_STRING
+        assert len(conn) > 120
+        # Prose deliberately shares no 8-char substring with the secret,
+        # so every probe hit is a genuine leak.
+        prose_head = "Sure — connect using the following data source locator: "
+        prose_tail = " — remember to rotate those credentials afterwards."
+        full = prose_head + conn + prose_tail
+        _install_stream_spy(monkeypatch, chunks=_chunks_of(full, 11))
+
+        resp = _chat_stream("how do I connect to the data source?")
+
+        assert resp.status_code == 200
+        deltas = _content_deltas(_parse_sse(resp.content))
+        leaks = _leaked_fragments(deltas, conn)
+        assert not leaks, f"raw connection-string fragments leaked: {leaks[:3]}"
+        joined = "".join(deltas)
+        assert "sup3rS3cret" not in joined
+        assert "db-primary.internal" not in joined
+        # Surrounding prose still streams through.
+        assert "data source locator" in joined
+        assert "rotate those credentials" in joined
+
+
+class TestStreamingProseStillIncremental:
+    def test_prose_streams_incrementally_not_one_flush(self, monkeypatch):
+        """The guard must not turn ordinary prose into full-response
+        buffering — multiple content deltas must reach the wire, and the
+        reassembled text must be byte-identical to the provider output.
+        """
+        prose = (
+            "The quarterly report shows steady growth across all regions. "
+            "Sales in the northern region rose by twelve percent, while the "
+            "southern region held flat. Customer retention improved again "
+            "and the support backlog dropped for the third month running."
+        )
+        _install_stream_spy(monkeypatch, chunks=_chunks_of(prose, 20))
+
+        resp = _chat_stream("summarise the quarterly report")
+
+        assert resp.status_code == 200
+        deltas = _content_deltas(_parse_sse(resp.content))
+        assert len(deltas) >= 2, (
+            f"streaming collapsed into a single flush: {deltas!r}"
+        )
+        assert "".join(deltas) == prose
+
+
+class TestStreamingIdentityClassLatencyUnchanged:
+    def test_email_streams_and_masks_same_as_before(self, monkeypatch):
+        """Identity-class content (an email) keeps the pre-guard behavior:
+        masked via the normal 120-char rolling tail, no extra hold, and
+        the stream stays incremental.
+        """
+        pre = (
+            "Thanks for reaching out about the onboarding schedule. The best "
+            "person to help you with the rollout details is our coordinator "
+        )
+        post = (
+            " who replies within one business day. Feel free to mention this "
+            "conversation when you write to her office anytime this week."
+        )
+        full = pre + "jane@example.com" + post
+        _install_stream_spy(monkeypatch, chunks=_chunks_of(full, 20))
+
+        resp = _chat_stream("who should I contact?")
+
+        assert resp.status_code == 200
+        deltas = _content_deltas(_parse_sse(resp.content))
+        joined = "".join(deltas)
+        # Same contract as TestStreamingProviderPiiMaskedUnderDefault:
+        # value masked/absent, no bare token, no sentinel.
+        assert "jane@example.com" not in joined
+        assert "<r" not in joined
+        assert "[REDACTED]" not in joined
+        # Identity handling must not degrade streaming into one flush.
+        assert len(deltas) >= 2
+        assert "onboarding schedule" in joined
+        assert "one business day" in joined

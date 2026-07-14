@@ -37,6 +37,31 @@ strictly additive; it's intentionally omitted here to keep the portal
 flow simple, with Lax as the load-bearing defence. If portal and api ever
 move to a cross-SITE topology (different registrable domains, requiring
 ``SameSite=None``), a CSRF token MUST be reintroduced.
+
+TODO(Phase 11 E5 — DEFERRED): extending the admin double-submit CSRF
+(app/middleware/csrf.py) to ``/portal/*`` mutations was assessed and
+deliberately NOT implemented, because it is not contained to the portal:
+
+  * The SRAN Desktop WPF client authenticates with these same cookies
+    (tokens are Set-Cookie-only per the portal auth contract) and calls
+    mutating portal routes (``/portal/auth/*``, ``/portal/projects/*``
+    agent-key provisioning) with no CSRF header — enforcement would 403
+    every desktop install in the field.
+  * web-chat (:3002) calls the gateway's ``/portal/auth/refresh`` +
+    ``/portal/auth/logout`` cross-origin; a JS-readable csrf_token
+    cookie scoped to the gateway host is not readable from the web-chat
+    origin unless AUTH_COOKIE_DOMAIN-style scoping is added for it too.
+
+Migration sketch, when needed: (1) mint a JS-readable ``portal_csrf``
+cookie in ``set_auth_cookies`` (same Domain/Secure attrs, httponly=False);
+(2) widen CsrfMiddleware to ``/portal/`` mutations, exempting
+``/portal/auth/*`` (bootstrap endpoints — no cookie yet) and requests
+authenticated by non-cookie means (Authorization header / internal-trust
+headers) so desktop + service callers keep working; (3) echo the cookie
+as ``X-CSRF-Token`` in portal/lib/api.ts and web-chat's lib/api.ts +
+lib/auth.ts. Until then Lax remains the load-bearing defence, and the
+startup guard in config.validate_secrets() blocks any SameSite=None
+deploy that would silently void it.
 """
 
 from __future__ import annotations

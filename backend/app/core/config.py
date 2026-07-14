@@ -721,6 +721,42 @@ class Settings(BaseSettings):
             except ValueError:
                 issues.append("PROVIDER_KEY_MASTER_KEY must be valid hex (64 hex chars)")
 
+        # Phase 11 A2 — cross-origin auth-cookie correctness. web-chat has
+        # NO Bearer fallback: every authed fetch (files, media playback,
+        # SSE streams) depends on the portal_* cookies reaching the
+        # chat-edge/gateway origins. A misconfigured cookie scope doesn't
+        # error loudly at runtime — it just 401s every request — so we
+        # fail startup instead. See app/services/portal/cookies.py.
+        samesite = (self.auth_cookie_samesite or "").strip().lower()
+        if samesite not in ("lax", "strict", "none"):
+            issues.append(
+                "AUTH_COOKIE_SAMESITE must be one of lax|strict|none "
+                f"(got {self.auth_cookie_samesite!r})"
+            )
+        if samesite == "none":
+            # Cross-SITE cookie mode: the web apps and the API live on
+            # different registrable domains. A host-only cookie can never
+            # reach the other origin, and browsers reject SameSite=None
+            # without Secure — both must be configured explicitly.
+            if not (self.auth_cookie_domain or "").strip():
+                issues.append(
+                    "AUTH_COOKIE_SAMESITE=none (cross-origin cookie mode) "
+                    "requires AUTH_COOKIE_DOMAIN to be set to the shared "
+                    'parent domain (e.g. ".yourdomain.com") — without it the '
+                    "login cookies never reach the chat/API origins and every "
+                    "authed fetch 401s. NOTE: SameSite=None also removes the "
+                    "portal's CSRF defence (SameSite=Lax) — a CSRF token MUST "
+                    "be introduced for /portal mutations before deploying "
+                    "cross-site (see app/services/portal/cookies.py)."
+                )
+            if not self.cookie_secure_effective:
+                issues.append(
+                    "AUTH_COOKIE_SAMESITE=none requires Secure cookies — "
+                    "browsers reject SameSite=None without Secure. Remove "
+                    "AUTH_COOKIE_SECURE=false (Secure auto-enables outside "
+                    "dev/test)."
+                )
+
         if issues:
             raise RuntimeError(
                 "STARTUP BLOCKED — insecure secrets detected:\n"
