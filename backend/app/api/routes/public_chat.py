@@ -6,7 +6,11 @@ Streaming requests resolve context via the orchestrator, run the same
 inbound DLP mask, then stream from the provider adapter INCREMENTALLY:
 each chunk is DLP-scanned and restored against a rolling masked tail
 (MIN_TAIL_CHARS = 120) so token boundaries are never split across SSE
-frames, and emitted to the client as it arrives. The client sees tokens
+frames, and emitted to the client as it arrives. Credential-class
+patterns longer than the tail are covered by a raw-side
+``CredentialStreamGuard`` (Phase 11 Part D) that holds a credential
+head signature until the candidate completes, so a boundary-split
+secret is never partially emitted. The client sees tokens
 in real time — this is NOT full-response buffering (an earlier Phase-2C
 build buffered the whole body; that was replaced by the incremental
 generator below — see event_generator).
@@ -57,6 +61,7 @@ from app.schemas.public import (
     FeedbackRequest,
     FeedbackResponse,
 )
+from app.services.dlp.stream_guard import CredentialStreamGuard
 from app.services.orchestrator import GatewayOrchestrator
 from app.services.policy.profile_service import (
     get_runtime_profile,
@@ -1169,18 +1174,43 @@ async def chat_completions(
         #   emit everything EXCEPT the last MIN_TAIL_CHARS chars of
         #   the masked window; keep the last MIN_TAIL_CHARS as tail.
         #
-        # Trade-off: patterns longer than MIN_TAIL_CHARS spanning chunk
-        # boundaries in a way that their leading fragment individually
-        # is NOT a match could leak. In practice, DLP detectors don't
-        # match partial patterns (an email regex needs the full `@...`),
-        # so emails/phones/SSNs/credit-cards are safe at N=120.
-        # Sized to cover the longest sensitive pattern we detect —
-        # ``db_connection_string`` matches up to ~100 chars
-        # (``postgresql://user:pwd@host:5432/db?sslmode=require…``).
-        # 120 = ~100 + 20-char safety margin for variants like long
-        # Thai-address blocks and the base64 tail of a PEM private key
-        # header line, while still keeping per-chunk emit latency low.
+        # The 120-char tail covers every IDENTITY-class pattern (an
+        # email/phone/SSN match is far shorter than 120 chars, and a
+        # detector never matches a partial pattern), keeping per-chunk
+        # emit latency low for normal prose.
+        #
+        # Phase 11 Part D — the tail alone does NOT cover credential-
+        # class patterns LONGER than 120 chars (PEM key material, long
+        # ``postgres://user:pass@host/db`` URLs, multi-KB JWTs, long
+        # ``password=...`` values): their leading fragment is not
+        # individually a match, so it used to exit the tail raw before
+        # the full pattern completed. ``CredentialStreamGuard`` (one
+        # instance per channel, content + reasoning) now sits on the
+        # RAW side of the scan: once a credential head signature
+        # (``-----BEGIN``, a DB URI scheme, ``sk-``/``eyJ``/``AKIA``/…,
+        # ``Bearer``/password labels) appears, everything from that
+        # point is held until the candidate completes, is ruled out, or
+        # the stream ends — then it is released as ONE unit so the
+        # window scan sees the complete pattern and the normal policy
+        # decision applies. PEM bodies (no detector covers the base64
+        # material — only the header matches) are dropped outright by
+        # the guard; the header still flows through the scan so policy
+        # action + findings accounting are unchanged. Identity-class
+        # latency is untouched (no identity triggers); trigger-free
+        # prose only pays the guard's 32-char chunk-boundary retention,
+        # strictly smaller than this 120-char tail.
         MIN_TAIL_CHARS = 120
+
+        # Guards are active exactly when the outbound scan is active —
+        # with response scanning off the guard is a passthrough, so a
+        # DLP-disabled deployment streams byte-identically to before.
+        _outbound_scan_active = bool(
+            settings.dlp_enabled
+            and settings.dlp_scan_responses
+            and profile.scan_responses
+        )
+        _stream_cred_guard = CredentialStreamGuard(enabled=_outbound_scan_active)
+        _reasoning_cred_guard = CredentialStreamGuard(enabled=_outbound_scan_active)
 
         tail_masked = ""
         cumulative_raw = ""
@@ -1957,37 +1987,46 @@ async def chat_completions(
                                 # ``<...>``) mirrors the content path so
                                 # an already-masked placeholder is never
                                 # split mid-stream.
-                                r_window = _reasoning_tail_masked + chunk.reasoning_delta
-                                r_masked_window, r_actions = await _dlp_scan_and_mask(r_window)
-                                if r_actions:
-                                    accumulated_outbound_actions.extend(r_actions)
-                                if len(r_masked_window) > MIN_TAIL_CHARS:
-                                    r_safe = r_masked_window[:-MIN_TAIL_CHARS]
-                                    _reasoning_tail_masked = r_masked_window[-MIN_TAIL_CHARS:]
-                                    # Pull a trailing ``<<...`` (no
-                                    # matching ``>>``) back into the tail
-                                    # so we never split a pseudonym token.
-                                    _last_dbl_open = r_safe.rfind("<<")
-                                    _last_dbl_close = r_safe.rfind(">>")
-                                    if (
-                                        _last_dbl_open != -1
-                                        and _last_dbl_close < _last_dbl_open
-                                    ):
-                                        _reasoning_tail_masked = (
-                                            r_safe[_last_dbl_open:] + _reasoning_tail_masked
-                                        )
-                                        r_safe = r_safe[:_last_dbl_open]
-                                    # Same guard for legacy ``<rN>`` shape.
-                                    _last_lt = r_safe.rfind("<")
-                                    if _last_lt != -1 and r_safe.rfind(">") < _last_lt:
-                                        _reasoning_tail_masked = (
-                                            r_safe[_last_lt:] + _reasoning_tail_masked
-                                        )
-                                        r_safe = r_safe[:_last_lt]
-                                    if r_safe:
-                                        yield _emit_reasoning_chunk(r_safe)
-                                else:
-                                    _reasoning_tail_masked = r_masked_window
+                                # Phase 11 Part D — same raw-side credential
+                                # head-hold as the content channel, on this
+                                # channel's OWN guard instance (the two
+                                # channels stream interleaved fragments and
+                                # must not share hold state).
+                                _r_released = _reasoning_cred_guard.feed(
+                                    chunk.reasoning_delta
+                                )
+                                if _r_released:
+                                    r_window = _reasoning_tail_masked + _r_released
+                                    r_masked_window, r_actions = await _dlp_scan_and_mask(r_window)
+                                    if r_actions:
+                                        accumulated_outbound_actions.extend(r_actions)
+                                    if len(r_masked_window) > MIN_TAIL_CHARS:
+                                        r_safe = r_masked_window[:-MIN_TAIL_CHARS]
+                                        _reasoning_tail_masked = r_masked_window[-MIN_TAIL_CHARS:]
+                                        # Pull a trailing ``<<...`` (no
+                                        # matching ``>>``) back into the tail
+                                        # so we never split a pseudonym token.
+                                        _last_dbl_open = r_safe.rfind("<<")
+                                        _last_dbl_close = r_safe.rfind(">>")
+                                        if (
+                                            _last_dbl_open != -1
+                                            and _last_dbl_close < _last_dbl_open
+                                        ):
+                                            _reasoning_tail_masked = (
+                                                r_safe[_last_dbl_open:] + _reasoning_tail_masked
+                                            )
+                                            r_safe = r_safe[:_last_dbl_open]
+                                        # Same guard for legacy ``<rN>`` shape.
+                                        _last_lt = r_safe.rfind("<")
+                                        if _last_lt != -1 and r_safe.rfind(">") < _last_lt:
+                                            _reasoning_tail_masked = (
+                                                r_safe[_last_lt:] + _reasoning_tail_masked
+                                            )
+                                            r_safe = r_safe[:_last_lt]
+                                        if r_safe:
+                                            yield _emit_reasoning_chunk(r_safe)
+                                    else:
+                                        _reasoning_tail_masked = r_masked_window
                         # Analysis-status transition: any non-reasoning
                         # signal (content delta / tool_calls / finish)
                         # arriving after reasoning started flips us into
@@ -2010,11 +2049,27 @@ async def chat_completions(
 
                         if chunk.delta:
                             cumulative_raw += chunk.delta
-                            # Combine retained masked tail + new raw chunk text.
-                            # The scanner won't re-match already-masked placeholders
-                            # (`<EMAIL_1>` is not a valid email), so keeping masked
-                            # text in the tail is safe and deduplication-friendly.
-                            window = tail_masked + chunk.delta
+                        # Phase 11 Part D — raw-side credential head-hold.
+                        # The guard releases text only once no credential
+                        # head signature could still be growing past the
+                        # buffered end, so a >MIN_TAIL_CHARS credential is
+                        # always presented to the window scan as ONE
+                        # complete unit (and PEM key material is dropped,
+                        # header kept — see stream_guard module doc). May
+                        # return "" while holding; the audit trail above
+                        # (``cumulative_raw``) still sees every raw byte.
+                        _released_delta = (
+                            _stream_cred_guard.feed(chunk.delta)
+                            if chunk.delta
+                            else ""
+                        )
+                        if _released_delta:
+                            # Combine retained masked tail + newly released
+                            # raw text. The scanner won't re-match already-
+                            # masked placeholders (`<EMAIL_1>` is not a valid
+                            # email), so keeping masked text in the tail is
+                            # safe and deduplication-friendly.
+                            window = tail_masked + _released_delta
                             masked_window, actions = await _dlp_scan_and_mask(window)
                             # Drop ``[[CAT_N]]`` shapes the model invented. Runs on
                             # the full window (which already buffers split tokens
@@ -2304,6 +2359,36 @@ async def chat_completions(
         except GeneratorExit:
             _finalize_stream(client_disconnected=True)
             raise
+
+        # Phase 11 Part D — force-resolve anything the credential guard
+        # is still holding (a candidate that was still growing when the
+        # stream ended; a completed PEM block's body is dropped inside
+        # the guard, never returned). The released text has NOT been
+        # scanned yet, so run it through the normal window scan and fold
+        # the result into the tail; the tail flush below then applies
+        # the usual sanitize + restore + orphan-redact passes before
+        # anything reaches the wire. Runs BEFORE ``_finalize_stream`` so
+        # the extra findings land in the persisted DLP summary.
+        _guard_rest = _stream_cred_guard.flush()
+        if _guard_rest:
+            _final_window = tail_masked + _guard_rest
+            _final_masked, _final_actions = await _dlp_scan_and_mask(_final_window)
+            if _final_actions:
+                accumulated_outbound_actions.extend(_final_actions)
+            tail_masked = _final_masked
+        # Same force-resolve for the reasoning channel's guard. Only the
+        # BUFFER is updated here — the reasoning tail is emitted at its
+        # usual place after the content flush, so frame ordering on the
+        # wire is unchanged.
+        if _show_reasoning:
+            _r_guard_rest = _reasoning_cred_guard.flush()
+            if _r_guard_rest:
+                _r_final_masked, _r_final_actions = await _dlp_scan_and_mask(
+                    _reasoning_tail_masked + _r_guard_rest
+                )
+                if _r_final_actions:
+                    accumulated_outbound_actions.extend(_r_final_actions)
+                _reasoning_tail_masked = _r_final_masked
 
         # Flush the remaining tail. The tail already went through a
         # DLP scan in its most recent iteration; no need to re-mask.

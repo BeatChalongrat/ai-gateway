@@ -27,6 +27,12 @@ def _prod_settings(**overrides):
         # every pre-existing "happy path" test keeps passing; tests
         # that specifically target the Resend gate override this.
         resend_api_key="re_strong_test_key",
+        # Later prod gates (Safe Trace audit key, provider-key master
+        # key) — same pattern as the Resend default above: strong values
+        # so the happy-path tests keep passing; the gates' own tests
+        # override these with empty/weak values.
+        dlp_audit_key="a" * 64,
+        provider_key_master_key="b" * 64,
     )
     defaults.update(overrides)
     return Settings(**defaults)
@@ -149,3 +155,73 @@ class TestSessionSigningSecrets:
         assert "JWT_SECRET" in msg
         assert "MASTER_ENCRYPTION_KEY" in msg
         assert "SESSION_SIGNING_SECRETS is empty" in msg
+
+
+class TestAuthCookieProdValidation:
+    """Phase 11 A2 — cross-origin auth-cookie startup guard.
+
+    web-chat has no Bearer fallback: every authed fetch rides the
+    ``portal_*`` HttpOnly cookies. A production deploy in cross-SITE
+    cookie mode (SameSite=None) without a shared cookie Domain (or
+    without Secure) silently 401s every request, so startup must fail
+    LOUDLY instead.
+    """
+
+    @staticmethod
+    def _settings(**overrides):
+        """_prod_settings + strong values for the newer prod-required
+        secrets (DLP_AUDIT_KEY / PROVIDER_KEY_MASTER_KEY) that the shared
+        helper predates — so the happy paths here isolate the COOKIE
+        checks instead of tripping unrelated gates."""
+        defaults = dict(
+            dlp_audit_key="a" * 64,
+            provider_key_master_key="b" * 64,
+        )
+        defaults.update(overrides)
+        return _prod_settings(**defaults)
+
+    def test_default_lax_single_domain_passes(self):
+        # The documented single-domain topology (nginx front door) needs
+        # no cookie overrides at all.
+        s = self._settings()
+        s.validate_secrets()  # should not raise
+
+    def test_lax_with_shared_parent_domain_passes(self):
+        s = self._settings(auth_cookie_domain=".yourcompany.com")
+        s.validate_secrets()  # should not raise
+
+    def test_samesite_none_without_domain_blocks_startup(self):
+        s = _prod_settings(auth_cookie_samesite="none")
+        with pytest.raises(RuntimeError, match="AUTH_COOKIE_DOMAIN"):
+            s.validate_secrets()
+
+    def test_samesite_none_with_domain_and_secure_passes(self):
+        # Secure auto-enables in production (auth_cookie_secure=None).
+        s = self._settings(
+            auth_cookie_samesite="none",
+            auth_cookie_domain=".yourcompany.com",
+        )
+        s.validate_secrets()  # should not raise
+
+    def test_samesite_none_with_secure_disabled_blocks_startup(self):
+        s = _prod_settings(
+            auth_cookie_samesite="none",
+            auth_cookie_domain=".yourcompany.com",
+            auth_cookie_secure=False,
+        )
+        with pytest.raises(RuntimeError, match="Secure"):
+            s.validate_secrets()
+
+    def test_invalid_samesite_value_blocks_startup(self):
+        s = _prod_settings(auth_cookie_samesite="nnone")
+        with pytest.raises(RuntimeError, match="AUTH_COOKIE_SAMESITE"):
+            s.validate_secrets()
+
+    def test_dev_env_is_not_gated(self):
+        # Dev keeps its zero-ceremony behaviour (validate_secrets early-
+        # returns) — the guard is a production-deploy tripwire only.
+        s = Settings(
+            _env_file=None, postgres_password="x",
+            app_env="development", auth_cookie_samesite="none",
+        )
+        s.validate_secrets()  # should not raise
