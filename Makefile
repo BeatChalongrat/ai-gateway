@@ -1,4 +1,4 @@
-.PHONY: up prod down logs seed clean clean-portal-users fresh test test-unit test-all typecheck go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate
+.PHONY: up prod prod-desktop down logs seed clean clean-portal-users fresh test test-unit test-all typecheck go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -99,3 +99,22 @@ shell-portal: ## Exec into the portal container
 
 chat-edge-migrate: ## Apply chat-edge SQL migrations to the running postgres-webchat (idempotent; needed after pulling new migrations because docker initdb only runs on first volume init)
 	bash services/chat-edge-api/scripts/apply_migrations.sh
+
+# ── Desktop production deploy (R11 B6) ─────────────────────────────
+prod-desktop: ## Deploy the full stack with desktop support (chat-edge + MCP + nginx; profile "desktop")
+	@test -f .env || (echo "ERROR: .env not found. Copy infra/production/.env.production.template to .env and fill it in." && exit 1)
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile desktop up -d --build
+	@echo ""
+	@echo "Stack is up (all behind nginx :80/:443). Public paths:"
+	@echo "  Gateway:       https://<host>/v1/          (+ /__gw/health)"
+	@echo "  Chat Edge API: https://<host>/api/v1/      (+ /api/v1/health)"
+	@echo "  Portal:        https://<host>/"
+	@echo "  Admin:         https://<host>/admin/"
+	@echo "  MCP catalog:   https://<host>/mcp/catalog.json"
+	@echo "  Releases:      https://<host>/desktop/latest.json"
+	@echo ""
+	@echo "Desktop app: enter https://<host> as the server URL in first-run setup."
+	@echo "Fresh DB? Run 'make seed'. Pulled new chat-edge migrations? Run 'make chat-edge-migrate-main'."
+
+chat-edge-migrate-main: ## Apply chat-edge SQL migrations to the MAIN-stack postgres (the init hook only runs on first volume init)
+	bash scripts/apply_chat_edge_migrations_main.sh
