@@ -435,6 +435,10 @@ func main() {
 		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
 		// GatewayClient (and its internal-trust headers) as the video tool.
 		MediaProxy: handler.NewMediaProxyHandler(gateway),
+		// Phase 3 — desktop agent-conversation backup mirror (migration 026).
+		Import: handler.NewImportHandler(
+			service.NewImportService(pool, conversations, messages, conversationSvc),
+		),
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a

@@ -382,54 +382,61 @@ func (h *MessageHandler) sendNonStream(w http.ResponseWriter, r *http.Request, i
 // The handler MUST flush after every event so the browser sees
 // incremental output; chi's default ResponseWriter implements
 // http.Flusher.
-func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in service.SendInput) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
-		return
-	}
 
-	stream, err := h.messages.SendStream(r.Context(), in)
-	if err != nil {
-		h.writeSendError(w, err)
-		return
-	}
+// streamDrainResult carries what drainStreamEvents accumulated so
+// the caller can persist the turn (StreamHandle.Finish) and emit its
+// message_complete terminator.
+type streamDrainResult struct {
+	content      string
+	reasoning    string
+	finishReason string
+	usage        *service.GatewayChatUsage
+	err          error
+}
 
-	// SSE headers — must be set BEFORE any write, and BEFORE the
-	// first flush.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
-	writeSSEEvent(w, flusher, "message_start", map[string]any{
-		"message_id":      stream.AssistantID.String(),
-		"conversation_id": stream.ConversationID.String(),
-	})
-
+// drainStreamEvents forwards service stream updates to the browser
+// as SSE frames until the events channel yields Done, an error, or
+// closes. Shared by sendStream, Regenerate and Edit — the three
+// loops were byte-identical.
+//
+// “done“ is the request context's Done channel. When it fires
+// (client disconnected) the loop cancels the upstream call ONCE and
+// then sets “done“ to nil: a cancelled context's Done channel is
+// permanently ready in select, so continuing to select on it would
+// busy-spin at 100% CPU (calling cancel every iteration) until the
+// service pump emits its terminal event — one full upstream
+// round-trip. A nil channel blocks forever in select, so after the
+// first cancel only “events“ drives the drain. The drain always
+// terminates: pumpStreamWithTools sends a terminal update (Err or
+// Done) and defer-closes the channel on every exit path.
+func drainStreamEvents(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	done <-chan struct{},
+	events <-chan service.StreamUpdate,
+	cancel func(),
+) streamDrainResult {
 	var (
-		content      strings.Builder
-		reasoning    strings.Builder
-		finalUsage   *service.GatewayChatUsage
-		finishReason string
-		gotErr       error
+		content   strings.Builder
+		reasoning strings.Builder
+		res       streamDrainResult
 	)
-
 Loop:
 	for {
 		select {
-		case <-r.Context().Done():
+		case <-done:
 			// Client disconnected — tell the service to cancel the
 			// upstream call, drain any pending event, then persist
-			// what we have.
-			stream.Cancel()
-		case ev, ok := <-stream.Events:
+			// what we have. Stop watching ``done`` after the first
+			// cancel (see doc comment: nil channel = no busy-spin).
+			cancel()
+			done = nil
+		case ev, ok := <-events:
 			if !ok {
 				break Loop
 			}
 			if ev.Err != nil {
-				gotErr = ev.Err
+				res.err = ev.Err
 				writeSSEEvent(w, flusher, "error", map[string]any{
 					"code":    CodeInternalError,
 					"message": fmt.Sprintf("stream error: %v", ev.Err),
@@ -480,9 +487,9 @@ Loop:
 			// an ``error`` event so the client renders an error bubble
 			// rather than ending blank. Not a ``break`` — the Gateway
 			// closes the stream after, which yields the synthetic Done +
-			// message_complete terminator below.
+			// message_complete terminator in the caller.
 			if ev.ProviderError != nil {
-				gotErr = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
+				res.err = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
 				writeSSEEvent(w, flusher, "error", map[string]any{
 					"code":     ev.ProviderError.Code,
 					"message":  ev.ProviderError.Message,
@@ -495,25 +502,57 @@ Loop:
 				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
 			}
 			if ev.FinishReason != "" {
-				finishReason = ev.FinishReason
+				res.finishReason = ev.FinishReason
 			}
 			if ev.Usage != nil {
-				finalUsage = ev.Usage
+				res.usage = ev.Usage
 			}
 			if ev.Done {
 				break Loop
 			}
 		}
 	}
+	res.content = content.String()
+	res.reasoning = reasoning.String()
+	return res
+}
+
+func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in service.SendInput) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
+
+	stream, err := h.messages.SendStream(r.Context(), in)
+	if err != nil {
+		h.writeSendError(w, err)
+		return
+	}
+
+	// SSE headers — must be set BEFORE any write, and BEFORE the
+	// first flush.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeSSEEvent(w, flusher, "message_start", map[string]any{
+		"message_id":      stream.AssistantID.String(),
+		"conversation_id": stream.ConversationID.String(),
+	})
+
+	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, stream.Cancel)
 
 	// Persist via the handle's finish callback. Uses
 	// context.Background() internally so the write completes even
 	// after the request context is cancelled (client disconnected).
-	persistFinishReason := finishReason
-	if gotErr != nil && persistFinishReason == "" {
+	persistFinishReason := res.finishReason
+	if res.err != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
+	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
 	h.writeMessageFiles(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
 	h.writeMessageSources(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
 
@@ -523,15 +562,15 @@ Loop:
 	completeData := map[string]any{
 		"message_id": stream.AssistantID.String(),
 	}
-	if finalUsage != nil {
+	if res.usage != nil {
 		tokenUsage := map[string]int{
-			"input":  finalUsage.PromptTokens,
-			"output": finalUsage.CompletionTokens,
+			"input":  res.usage.PromptTokens,
+			"output": res.usage.CompletionTokens,
 		}
 		// T4: surface reasoning_tokens when the Gateway broke it out
 		// (OpenAI o-series / Anthropic estimate / Gemini thoughts).
-		if finalUsage.ReasoningTokens > 0 {
-			tokenUsage["reasoning"] = finalUsage.ReasoningTokens
+		if res.usage.ReasoningTokens > 0 {
+			tokenUsage["reasoning"] = res.usage.ReasoningTokens
 		}
 		completeData["token_usage"] = tokenUsage
 	}
@@ -723,95 +762,24 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 		"conversation_id": stream.ConversationID.String(),
 	})
 
-	var (
-		content      strings.Builder
-		reasoning    strings.Builder
-		finalUsage   *service.GatewayChatUsage
-		finishReason string
-		gotErr       error
-	)
-Loop:
-	for {
-		select {
-		case <-r.Context().Done():
-			stream.Cancel()
-		case ev, ok := <-stream.Events:
-			if !ok {
-				break Loop
-			}
-			if ev.Err != nil {
-				gotErr = ev.Err
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":    CodeInternalError,
-					"message": fmt.Sprintf("stream error: %v", ev.Err),
-				})
-				break Loop
-			}
-			if ev.Delta != "" {
-				content.WriteString(ev.Delta)
-				writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": ev.Delta})
-			}
-			// T4: reasoning delta + analysis status — see sendStream
-			// docstring above for the contract.
-			if ev.ReasoningDelta != "" {
-				reasoning.WriteString(ev.ReasoningDelta)
-				writeSSEEvent(w, flusher, "reasoning_delta", map[string]any{"delta": ev.ReasoningDelta})
-			}
-			if ev.AnalysisStatus != "" {
-				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
-			}
-			if ev.ImageStatus != "" {
-				writeSSEEvent(w, flusher, "image_generating", map[string]any{"status": ev.ImageStatus})
-			}
-			if ev.VideoStatus != "" {
-				writeSSEEvent(w, flusher, "video_generating", map[string]any{"status": ev.VideoStatus})
-			}
-			if ev.SearchStatus != "" {
-				writeSSEEvent(w, flusher, "search_status", map[string]any{"status": ev.SearchStatus})
-			}
-			// B1: forward a Gateway provider-error frame as an ``error``
-			// event (see sendStream above for the full rationale).
-			if ev.ProviderError != nil {
-				gotErr = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":     ev.ProviderError.Code,
-					"message":  ev.ProviderError.Message,
-					"details":  ev.ProviderError.Details,
-					"attempts": ev.ProviderError.Attempts,
-				})
-			}
-			// B2: forward a fallback notice.
-			if ev.FallbackInfo != nil {
-				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
-			}
-			if ev.FinishReason != "" {
-				finishReason = ev.FinishReason
-			}
-			if ev.Usage != nil {
-				finalUsage = ev.Usage
-			}
-			if ev.Done {
-				break Loop
-			}
-		}
-	}
+	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, stream.Cancel)
 
-	persistFinishReason := finishReason
-	if gotErr != nil && persistFinishReason == "" {
+	persistFinishReason := res.finishReason
+	if res.err != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
+	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
 	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
-	if finalUsage != nil {
+	if res.usage != nil {
 		tokenUsage := map[string]int{
-			"input":  finalUsage.PromptTokens,
-			"output": finalUsage.CompletionTokens,
+			"input":  res.usage.PromptTokens,
+			"output": res.usage.CompletionTokens,
 		}
-		if finalUsage.ReasoningTokens > 0 {
-			tokenUsage["reasoning"] = finalUsage.ReasoningTokens
+		if res.usage.ReasoningTokens > 0 {
+			tokenUsage["reasoning"] = res.usage.ReasoningTokens
 		}
 		completeData["token_usage"] = tokenUsage
 	}
@@ -877,94 +845,24 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		"user_message_id": stream.UserMessage.ID.String(),
 	})
 
-	var (
-		content      strings.Builder
-		reasoning    strings.Builder
-		finalUsage   *service.GatewayChatUsage
-		finishReason string
-		gotErr       error
-	)
-Loop:
-	for {
-		select {
-		case <-r.Context().Done():
-			stream.Cancel()
-		case ev, ok := <-stream.Events:
-			if !ok {
-				break Loop
-			}
-			if ev.Err != nil {
-				gotErr = ev.Err
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":    CodeInternalError,
-					"message": fmt.Sprintf("stream error: %v", ev.Err),
-				})
-				break Loop
-			}
-			if ev.Delta != "" {
-				content.WriteString(ev.Delta)
-				writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": ev.Delta})
-			}
-			// T4: reasoning delta + analysis status — see sendStream
-			// docstring above for the contract.
-			if ev.ReasoningDelta != "" {
-				reasoning.WriteString(ev.ReasoningDelta)
-				writeSSEEvent(w, flusher, "reasoning_delta", map[string]any{"delta": ev.ReasoningDelta})
-			}
-			if ev.AnalysisStatus != "" {
-				writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": ev.AnalysisStatus})
-			}
-			if ev.ImageStatus != "" {
-				writeSSEEvent(w, flusher, "image_generating", map[string]any{"status": ev.ImageStatus})
-			}
-			if ev.VideoStatus != "" {
-				writeSSEEvent(w, flusher, "video_generating", map[string]any{"status": ev.VideoStatus})
-			}
-			if ev.SearchStatus != "" {
-				writeSSEEvent(w, flusher, "search_status", map[string]any{"status": ev.SearchStatus})
-			}
-			// B1: forward a Gateway provider-error frame as an ``error``
-			// event (see sendStream above for the full rationale).
-			if ev.ProviderError != nil {
-				gotErr = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":     ev.ProviderError.Code,
-					"message":  ev.ProviderError.Message,
-					"details":  ev.ProviderError.Details,
-					"attempts": ev.ProviderError.Attempts,
-				})
-			}
-			// B2: forward a fallback notice.
-			if ev.FallbackInfo != nil {
-				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
-			}
-			if ev.FinishReason != "" {
-				finishReason = ev.FinishReason
-			}
-			if ev.Usage != nil {
-				finalUsage = ev.Usage
-			}
-			if ev.Done {
-				break Loop
-			}
-		}
-	}
-	persistFinishReason := finishReason
-	if gotErr != nil && persistFinishReason == "" {
+	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, stream.Cancel)
+
+	persistFinishReason := res.finishReason
+	if res.err != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(content.String(), reasoning.String(), persistFinishReason, finalUsage)
+	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
 	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
-	if finalUsage != nil {
+	if res.usage != nil {
 		tokenUsage := map[string]int{
-			"input":  finalUsage.PromptTokens,
-			"output": finalUsage.CompletionTokens,
+			"input":  res.usage.PromptTokens,
+			"output": res.usage.CompletionTokens,
 		}
-		if finalUsage.ReasoningTokens > 0 {
-			tokenUsage["reasoning"] = finalUsage.ReasoningTokens
+		if res.usage.ReasoningTokens > 0 {
+			tokenUsage["reasoning"] = res.usage.ReasoningTokens
 		}
 		completeData["token_usage"] = tokenUsage
 	}
