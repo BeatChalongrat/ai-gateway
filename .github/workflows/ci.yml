@@ -41,6 +41,14 @@ jobs:
         env:
           APP_ENV: test
         run: pytest -m "not integration" --tb=short
+      - name: DLP egress-invariant gate (Phase 9 drift guard)
+        # Already part of the unit lane above; this named step re-runs it
+        # so the gate fails LOUDLY and independently if the module is ever
+        # added to the integration exclusion list or deselected by a
+        # marker change. Must never be skipped.
+        env:
+          APP_ENV: test
+        run: pytest tests/test_dlp_egress_invariant.py --tb=short
 
   frontend-typecheck:
     name: web-chat (tsc --noEmit)
@@ -88,6 +96,48 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  mcp-gateway-test:
+    name: mcp-gateway (node --test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/mcp-gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the service's Dockerfile (node:20-alpine).
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: services/mcp-gateway/package-lock.json
+      - run: npm ci
+      # Tests fake the child-process/JWT/upstream seams — no secrets, no
+      # network beyond a loopback express upstream.
+      - run: npm test
+
+  desktop-test:
+    name: SranDesktop (dotnet build + test, Windows)
+    # net8.0-windows / WPF cannot build on Linux — this job MUST stay on
+    # a Windows runner.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('SranDesktop/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Build (Release, warnings-as-informative but 0-error bar)
+        run: dotnet build SranDesktop/SranDesktop.sln -c Release
+      - name: Test
+        # Suite is self-contained: sqlite in temp dirs, loopback
+        # HttpListener fakes for MCP dials — no secrets, no live services.
+        run: dotnet test SranDesktop/SranDesktop.sln -c Release --no-build
+
   secret-leak-guard:
     name: No NEXT_PUBLIC secrets
     runs-on: ubuntu-latest
@@ -132,12 +182,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: npm audit (all three apps)
+      - name: npm audit (three apps + mcp-gateway)
         # --audit-level=critical only fails the build on CRITICAL advisories
         # for now; lower the threshold to high/moderate once the backlog is
         # clean. Audits from each app's committed package-lock.json.
         run: |
-          for app in admin-ui portal apps/web-chat; do
+          for app in admin-ui portal apps/web-chat services/mcp-gateway; do
             echo "=== npm audit: $app ==="
             ( cd "$app" && npm audit --audit-level=critical )
           done
