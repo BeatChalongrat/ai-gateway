@@ -4,10 +4,11 @@
 // a user message. Images get an inline preview that opens in the
 // global lightbox on click; everything else gets a download pill.
 //
-// Both images and download pills go through the authenticated file
-// endpoint (api.fileObjectUrl / api.downloadFile) rather than a bare
-// <img src>/<a download>, because that route requires the Portal JWT
-// in the Authorization header — see AuthedImage for the full why.
+// Both images and download pills go through the authed client
+// (api.fileObjectUrl / api.downloadFile) rather than a bare
+// <img src>/<a download>: auth is the HttpOnly portal cookie, and only
+// the client path gets the 401 → silent-refresh → retry treatment —
+// see AuthedImage for the full why.
 
 import { useRef, useState } from "react";
 
@@ -87,8 +88,9 @@ function ImageThumb({ file }: { file: FileAttachment }) {
 }
 
 // Non-image attachment → a clean download card (icon + name + size +
-// download affordance). Download rides the authenticated blob fetch
-// (api.downloadFile), so it survives portal_access_token cookie expiry.
+// download affordance). Download rides the cookie-authed blob fetch
+// (api.downloadFile), whose 401 → refresh → retry survives
+// portal_access_token expiry where a bare <a download> could not.
 function FileCard({ file }: { file: FileAttachment }) {
   const [busy, setBusy] = useState(false);
   return (

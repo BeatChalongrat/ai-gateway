@@ -112,11 +112,12 @@ class ApiClient {
   }
 
   // ----- Direct-dispatch media generation (Sprint 2A.5) -----
-  // PROXY-PENDING: these direct-dispatch endpoints live on the BACKEND
-  // (/v1/videos|audio/generations, /v1/jobs/{id}), NOT chat-edge. There is
-  // no chat-edge proxy for them yet — these typed methods are wired for the
-  // UI build; the runtime path (a chat-edge proxy or a backend-direct base)
-  // is completed + verified in the E2E phase. Until then the calls will 404.
+  // These ride the chat-edge media proxy (router.go MediaProxy block):
+  // POST /videos|audio/generations, GET /jobs/{id}, POST /jobs/{id}/cancel,
+  // GET /jobs/{id}/output. chat-edge forwards to the gateway's public media
+  // routes as a trusted internal caller; the gateway enforces auth, DLP,
+  // balance, and the feature gate. The route contract test
+  // (services/chat-edge-api/internal/router/contract_test.go) pins both sides.
   submitVideoGen(input: VideoGenInput) {
     return this.json<MediaGenSubmitResponse>("/videos/generations", {
       method: "POST",
@@ -139,6 +140,21 @@ class ApiClient {
     return this.json<MediaJobStatus>(`/jobs/${jobId}/cancel`, {
       method: "POST",
     });
+  }
+  /** Fetch a finished media job's artifact bytes through the authed
+   *  cookie-carrying client (raw() → credentials:"include" + the
+   *  401→refresh→retry contract) and return an object URL for
+   *  <video>/<audio> playback. A bare src pointing at the gateway
+   *  URL can't authenticate (and the job status' output_url is a
+   *  gateway-relative path that doesn't even resolve from this
+   *  origin). Caller owns the URL and must URL.revokeObjectURL()
+   *  it when done — mirror AuthedImage/VideoPlayer. */
+  async mediaJobOutputObjectUrl(jobId: string): Promise<string> {
+    const res = await this.raw(`/jobs/${jobId}/output`);
+    if (!res.ok) {
+      throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+    }
+    return URL.createObjectURL(await res.blob());
   }
 
   // ----- Usage & credits ------------------------------------
@@ -355,13 +371,14 @@ class ApiClient {
   downloadUrl(fileId: string): string {
     return `${API_BASE}/files/${fileId}/download`;
   }
-  /** Fetch a file's bytes WITH the Authorization header and return an
-   *  object URL. Unlike ``downloadUrl`` (which an <img>/<a download>
-   *  loads with cookie-only auth — the portal_access_token cookie
-   *  expires after ~1h and is dropped on cross-site subresource loads
-   *  in production), this rides the same Bearer token as every JSON
-   *  call, so it works regardless of cookie state. The caller owns the
-   *  returned URL and must URL.revokeObjectURL() it when done. */
+  /** Fetch a file's bytes through the authed client and return an
+   *  object URL. There is NO Bearer token in this app — auth is the
+   *  HttpOnly ``portal_access_token`` cookie, sent cross-origin via
+   *  raw()'s ``credentials: "include"``. Unlike ``downloadUrl`` (a
+   *  bare <img>/<a download> URL), this path benefits from raw()'s
+   *  401 → silent-refresh → retry, so it survives access-token expiry
+   *  instead of rendering a broken image. The caller owns the returned
+   *  URL and must URL.revokeObjectURL() it when done. */
   async fileObjectUrl(fileId: string): Promise<string> {
     const res = await this.raw(`/files/${fileId}/download`);
     if (!res.ok) {
@@ -369,10 +386,10 @@ class ApiClient {
     }
     return URL.createObjectURL(await res.blob());
   }
-  /** Authenticated download: fetch the blob with the Bearer header,
-   *  then trigger a browser save via a transient object URL. Replaces
-   *  the bare <a href download> which only worked while the cookie
-   *  was alive. */
+  /** Authenticated download: fetch the blob through the cookie-authed
+   *  client (with its 401 → refresh → retry), then trigger a browser
+   *  save via a transient object URL. Replaces the bare <a href
+   *  download> which broke the moment the access cookie lapsed. */
   async downloadFile(fileId: string, filename: string): Promise<void> {
     const url = await this.fileObjectUrl(fileId);
     const a = document.createElement("a");
@@ -571,8 +588,8 @@ class ApiClient {
     }>("/account/export-memories", { method: "POST" });
   }
   /** Absolute URL the browser hits to stream the export file —
-   *  hits /account/exports/{id}/download with the bearer token
-   *  carried via the same auth layer the rest of the client uses. */
+   *  /account/exports/{id}/download, authenticated by the HttpOnly
+   *  session cookie like every other request. */
   exportDownloadUrl(exportID: string): string {
     return `${API_BASE}/account/exports/${encodeURIComponent(exportID)}/download`;
   }

@@ -46,9 +46,40 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<MediaGenErrorCode | null>(null);
+  // Authed playback: fetch the finished artifact through the cookie-
+  // authed client and play from an object URL (mirrors AuthedImage /
+  // VideoPlayer). A bare <audio src={output_url}> can't authenticate —
+  // output_url is a gateway-relative path.
+  const [outputUrl, setOutputUrl] = useState<string | null>(null);
+  const [outputFailed, setOutputFailed] = useState(false);
   const pollRef = useRef<number | null>(null);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "owner";
+
+  useEffect(() => {
+    if (phase !== "done" || !job?.output_url) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setOutputUrl(null);
+    setOutputFailed(false);
+    api
+      .mediaJobOutputObjectUrl(job.job_id)
+      .then((u) => {
+        if (cancelled) {
+          URL.revokeObjectURL(u);
+          return;
+        }
+        objectUrl = u;
+        setOutputUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setOutputFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [phase, job?.job_id, job?.output_url]);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -65,6 +96,10 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
     setError(null);
     setErrorCode(null);
     setCost(null);
+    // The playback effect's cleanup revokes the object URL when the
+    // phase leaves "done"; just drop the local references here.
+    setOutputUrl(null);
+    setOutputFailed(false);
   }
 
   function startPolling(jobId: string) {
@@ -209,10 +244,21 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
 
       {phase === "done" && job?.output_url ? (
         <div className="flex flex-col items-start gap-3">
-          {/* PROXY-PENDING: output_url is a backend URL; auth/proxy wiring
-              for the direct-dispatch download lands in the E2E phase. */}
-          <audio src={job.output_url} controls className="w-full max-w-[480px]" />
-          {job.provenance ? <ProvenanceBadge provenance={job.provenance} /> : null}
+          {/* Bytes come through the authed client (object URL) — never a
+              bare gateway URL, which cannot authenticate. */}
+          {outputUrl ? (
+            <audio src={outputUrl} controls className="w-full max-w-[480px]" />
+          ) : outputFailed ? (
+            <p className="text-sm text-status-danger">
+              Couldn&apos;t load the generated audio. Try again.
+            </p>
+          ) : (
+            <div
+              className="h-12 w-full max-w-[480px] animate-pulse rounded-lg bg-bg-elevated"
+              aria-label="Loading generated audio"
+            />
+          )}
+          {outputUrl && job.provenance ? <ProvenanceBadge provenance={job.provenance} /> : null}
           <button
             type="button"
             onClick={reset}

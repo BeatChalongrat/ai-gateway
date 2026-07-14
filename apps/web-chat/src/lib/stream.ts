@@ -24,6 +24,11 @@ export interface StreamEvent<T = unknown> {
   data: T;
 }
 
+// Blank line separating SSE frames — LF or CRLF line endings (the
+// spec allows both; chat-edge emits LF but a proxy may normalise to
+// CRLF). Not global/sticky: we always re-match from the buffer head.
+const FRAME_BOUNDARY = /\r?\n\r?\n/;
+
 export async function* parseSSE<T = unknown>(
   response: Response,
   signal?: AbortSignal,
@@ -46,14 +51,16 @@ export async function* parseSSE<T = unknown>(
       buffer += decoder.decode(value, { stream: true });
 
       // Split on blank-line frames. Keep the trailing partial frame
-      // in buffer so a flush mid-line doesn't lose data.
-      let frameEnd = buffer.indexOf("\n\n");
-      while (frameEnd !== -1) {
-        const frame = buffer.slice(0, frameEnd);
-        buffer = buffer.slice(frameEnd + 2);
+      // in buffer so a flush mid-line doesn't lose data. Per the SSE
+      // spec a frame boundary is a blank line with either LF or CRLF
+      // line endings — accept \n\n, \r\n\r\n, and the mixed forms.
+      let boundary = buffer.match(FRAME_BOUNDARY);
+      while (boundary && boundary.index !== undefined) {
+        const frame = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary[0].length);
         const evt = parseFrame<T>(frame);
         if (evt) yield evt;
-        frameEnd = buffer.indexOf("\n\n");
+        boundary = buffer.match(FRAME_BOUNDARY);
       }
     }
     // Handle any trailing frame without a final blank line.
@@ -73,7 +80,7 @@ export async function* parseSSE<T = unknown>(
 function parseFrame<T>(raw: string): StreamEvent<T> | null {
   let eventName = "message";
   const dataLines: string[] = [];
-  for (const line of raw.split("\n")) {
+  for (const line of raw.split(/\r?\n/)) {
     if (line.startsWith("event:")) {
       eventName = line.slice(6).trim();
     } else if (line.startsWith("data:")) {
