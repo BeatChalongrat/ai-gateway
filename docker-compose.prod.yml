@@ -108,3 +108,32 @@ services:
     ports: !override
       - "127.0.0.1:3001:3001"
     restart: always
+
+  # R11 B1: chat-edge behind nginx only; all traffic enters via :80/:443.
+  chat-edge-api:
+    environment:
+      CHAT_EDGE_DEV: ""
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?SERVICE_JWT_SECRET must be set for prod (openssl rand -hex 32)}
+      USER_JWT_SECRET: ${USER_JWT_SECRET:?USER_JWT_SECRET must be set for prod}
+      CSRF_SECRET: ${CSRF_SECRET:?CSRF_SECRET must be set for prod}
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?PORTAL_JWT_SECRET must be set for prod}
+      CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:?CHAT_EDGE_ADMIN_API_KEY must be set for prod}
+      CORS_ALLOW_ORIGINS: ${CHAT_CORS_ORIGINS:?CHAT_CORS_ORIGINS must be set for prod}
+    ports: !override
+      - "127.0.0.1:4000:4000"
+    restart: always
+
+  # R11 B2: MCP servers reachable only through nginx path routing.
+  # Phase 10 C1: everything flows through :3200's JWT-verified proxy; the
+  # per-child ports (:3201/:3202 and the dynamic per-user range) stay
+  # container-internal.
+  mcp-gateway:
+    environment:
+      MCP_PUBLIC_BASE: ${MCP_PUBLIC_BASE:?MCP_PUBLIC_BASE must be set for prod (e.g. https://sran.yourcompany.com)}
+      MCP_PUBLIC_MODE: path
+    ports: !override
+      - "127.0.0.1:3200:3200"
+    restart: always
+
+  nginx:
+    restart: always

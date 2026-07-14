@@ -104,3 +104,62 @@ jobs:
             exit 1
           fi
           echo "OK: no NEXT_PUBLIC_ secret leaks in tracked files."
+
+  security-audit:
+    name: dependency audit (pip / npm / go / cargo)
+    runs-on: ubuntu-latest
+    # Gate on known-vulnerable dependencies across every ecosystem. This
+    # is the lane that would have caught CVE-2025-29927 (Next.js) before
+    # it landed. SAST (bandit/semgrep) is intentionally out of scope for
+    # this first pass — dependency audit only.
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Python (backend) ---
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (backend/requirements.txt)
+        # Add `--ignore-vuln <ID>` here for any advisory triaged as an
+        # accepted risk so the gate stays meaningful rather than muted.
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt
+
+      # --- Node (admin-ui / portal / web-chat) ---
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit (all three apps)
+        # --audit-level=critical only fails the build on CRITICAL advisories
+        # for now; lower the threshold to high/moderate once the backlog is
+        # clean. Audits from each app's committed package-lock.json.
+        run: |
+          for app in admin-ui portal apps/web-chat; do
+            echo "=== npm audit: $app ==="
+            ( cd "$app" && npm audit --audit-level=critical )
+          done
+
+      # --- Go (log-worker / chat-edge-api / gateway) ---
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: govulncheck (all Go modules)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          for dir in log-worker services/chat-edge-api services/gateway; do
+            echo "=== govulncheck: $dir ==="
+            ( cd "$dir" && govulncheck ./... )
+          done
+
+      # --- Rust (dlp-sidecar / rate-limiter) ---
+      - name: cargo audit (all Rust crates)
+        run: |
+          cargo install cargo-audit --locked
+          for dir in dlp-sidecar rate-limiter; do
+            echo "=== cargo audit: $dir ==="
+            ( cd "$dir" && cargo audit )
+          done

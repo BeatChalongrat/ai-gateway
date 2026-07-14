@@ -143,6 +143,23 @@ Environment variables:
 
 It does **not** contain `matched_text`. The raw sensitive value exists only in transient memory during the request lifecycle and is never written to any log, database, or external system.
 
+## Intentional raw egress (Phase 9)
+
+Two channels — and only two — send user content to third-party providers **without identity-PII masking**, because masking would break the feature itself:
+
+- **Web search** (`POST /v1/search` → Tavily/Brave/SerpAPI/Google/Bing): the real query is required for useful results. A masked query ("prognosis for `<PERSON_1>`") returns garbage.
+- **Media generation** (`/v1/images|videos|audio/generations` + the chat-edge media tool path → OpenAI/Replicate/ElevenLabs): the prompt is the creative intent; masking a name yields the wrong image/voice/video.
+
+This pass-through is deliberate and bounded:
+
+1. **The credential/secret class is always withheld.** Both channels run the `media_gen` DLP profile before egress; API keys, bearer tokens, private keys, DB connection strings, and financial instruments block the request (403 `search_query_blocked` / DLP 403). A search never needs a leaked API key to be useful.
+2. **Per-tenant control.** `tenants.search_pii_egress` and `tenants.media_pii_egress` (`allow` | `block`, default `allow`). Under `block`, ANY identity PII in a search query or media prompt fails the request closed — for compliance-strict tenants (e.g. healthcare).
+3. **Audited.** Every allowed raw egress that actually carried identity PII writes a `request_logs` row with `policy_action = raw_egress_allow`, the channel, and detection **category counts only** — never the query/prompt text or matched values. A tenant's compliance view can answer "which searches/prompts left unmasked."
+4. **No raw text in our own stores.** The search credit-ledger row carries a query hash, not the query.
+5. **Machine-checked.** The whitelist is a single constant (`app/services/dlp/egress_policy.py::RAW_EGRESS_ALLOWED = {"web_search", "media_gen"}`) and `tests/test_dlp_egress_invariant.py` fails CI if any new outbound-HTTP module is added without being classified as masked, whitelisted, or user-content-free.
+
+Enterprise/PDPA customers should be shown this section as the disclosure they consent to.
+
 ## Adding a New Detector
 
 1. Create `app/services/dlp/detectors/your_detector.py`

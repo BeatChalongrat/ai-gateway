@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:16
+    # pgvector build of PG16 (R11 B1): chat-edge-api's KB embeddings need the
+    # vector extension. Data-directory compatible with the previous postgres:16.
+    image: pgvector/pgvector:pg16
     # Phase-1 tuning. Two motivations:
     #   1. max_connections=200 — backend (4 workers × pool 30) + admin-ui +
     #      portal + alembic + ad-hoc psql must coexist below the cap.
@@ -31,10 +33,17 @@ services:
       # .env (and docker-compose.prod.yml's binding to 127.0.0.1 keeps
       # the port off the public interface either way).
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    ports:
-      - "5432:5432"
+    # No host port: Postgres is reached over the docker network by
+    # service name. Removes the direct-to-DB attack surface the log-worker
+    # superuser DSN would otherwise expose on the host. For local psql,
+    # add a port mapping in a personal docker-compose.override.yml.
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # R11 B1: create the chat-edge database + apply its migrations on FIRST
+      # volume init (fresh deploys). Existing volumes: run
+      # scripts/apply_chat_edge_migrations_main.sh (or make chat-edge-migrate-main).
+      - ./infra/postgres/init-chat-edge-db.sh:/docker-entrypoint-initdb.d/02-chat-edge.sh:ro
+      - ./services/chat-edge-api/migrations:/chat-edge-migrations:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -48,11 +57,23 @@ services:
     # The image default is maxmemory=0 (unlimited) / noeviction, under which
     # an OOM makes writes fail; allkeys-lru evicts cold keys instead. Tune
     # the ceiling via REDIS_MAXMEMORY.
-    command: redis-server --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy allkeys-lru
-    ports:
-      - "6379:6379"
+    # --requirepass enforces AUTH on every connection — base parity with
+    # docker-compose.prod.yml. REDIS_PASSWORD is required (set it in .env;
+    # see .env.example). Every consumer passes the same secret: backend
+    # folds it into redis_url (config.py), rate-limiter via REDIS_URL,
+    # redis-exporter via REDIS_PASSWORD. No host port is published — the
+    # session store / DLP token vault / rate-limit state stay on the
+    # internal docker network only.
+    command: >
+      redis-server
+      --maxmemory ${REDIS_MAXMEMORY:-512mb}
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # redis-cli ping returns NOAUTH once --requirepass is on, so auth.
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -136,8 +157,9 @@ services:
     environment:
       GRPC_PORT: "50051"
       METRICS_PORT: "9102"
+    # gRPC 50051 is internal-only (backend reaches it via the docker
+    # network). Metrics port stays published for local Prometheus.
     ports:
-      - "50051:50051"
       - "9102:9102"
     deploy:
       resources:
@@ -161,11 +183,14 @@ services:
       context: ./rate-limiter
     image: ai-gateway-rate-limiter:latest
     environment:
-      REDIS_URL: "redis://redis:6379"
+      # REDIS_PASSWORD required (redis --requirepass). Folded into the
+      # URL the deadpool-redis pool reads (main.rs).
+      REDIS_URL: "redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379"
       GRPC_PORT: "50053"
       METRICS_PORT: "9101"
+    # gRPC 50053 is internal-only (reached via the docker network by the
+    # backend). Metrics port stays published for local Prometheus.
     ports:
-      - "50053:50053"
       - "9101:9101"
     deploy:
       resources:
@@ -203,8 +228,9 @@ services:
       BATCH_SIZE: ${LOG_WORKER_BATCH_SIZE:-100}
       FLUSH_INTERVAL_MS: ${LOG_WORKER_FLUSH_INTERVAL_MS:-100}
       QUEUE_BUFFER: ${LOG_WORKER_QUEUE_BUFFER:-50000}
+    # gRPC 50052 is internal-only (backend reaches it via the docker
+    # network). Metrics port stays published for local Prometheus.
     ports:
-      - "50052:50052"
       - "9100:9100"
     depends_on:
       postgres:
@@ -260,6 +286,96 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  # Chat Edge API (R11 B1) — conversations, messages, memory, KB/RAG, files,
+  # web search, share links. The desktop app and web chat both talk to this
+  # service. Shares the main postgres (dedicated database, created by
+  # infra/postgres/init-chat-edge-db.sh) and the main redis (db 2).
+  # NOTE: the Go binary does NOT run migrations itself — it fail-closed
+  # verifies them. Fresh volumes get them via the postgres init hook; after
+  # pulling new migrations run scripts/apply_chat_edge_migrations_main.sh.
+  chat-edge-api:
+    build:
+      context: ./services/chat-edge-api
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${CHAT_EDGE_DB:-sran_chat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/2
+      GATEWAY_API_URL: http://gateway:8080/v1
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}
+      USER_JWT_SECRET: ${USER_JWT_SECRET:-dev-user-jwt-secret-change-in-prod}
+      CSRF_SECRET: ${CSRF_SECRET:-dev-csrf-secret-change-in-prod}
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      PORT: "4000"
+      CHAT_EDGE_DEV: ${CHAT_EDGE_DEV:-1}
+      CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
+      CORS_ALLOW_ORIGINS: ${CHAT_CORS_ORIGINS:-http://localhost:3002}
+      MAX_CONTEXT_MESSAGES: ${MAX_CONTEXT_MESSAGES:-1000}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-sran-chat-files}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-1}
+      CHAT_EDGE_IMAGE_TIMEOUT_SECONDS: ${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}
+    volumes:
+      - chat_edge_uploads:/app/data/uploads
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      # chat-edge serves GET /health at the router root (NOT /api/v1/health).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    profiles: ["desktop"]
+
+  # MCP Gateway (R11 B2 + Phase 10 C1) — hosts stdio MCP servers behind
+  # streamable-HTTP via supergateway; the desktop app reads /catalog.json to
+  # discover them. ALL servers (built-in filesystem/memory included) are
+  # reached through :3200's JWT-verified per-user proxy — the old shared,
+  # unauthenticated children on :3201/:3202 are gone.
+  mcp-gateway:
+    build:
+      context: ./services/mcp-gateway
+    environment:
+      # Dev: catalog advertises http://localhost:3200/mcp/servers/{id}.
+      # Prod: set MCP_PUBLIC_BASE=https://sran.yourcompany.com and
+      # MCP_PUBLIC_MODE=path → URLs become {base}/mcp/servers/{id} (nginx routes).
+      MCP_PUBLIC_BASE: ${MCP_PUBLIC_BASE:-http://localhost}
+      MCP_PUBLIC_MODE: ${MCP_PUBLIC_MODE:-port}
+      # Phase 7: per-user oauth2 connector instances. The gateway verifies
+      # the caller's portal JWT (same HS256 secret the backend signs with)
+      # and fetches the user's provider token from the backend broker.
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      BACKEND_BASE: http://backend:8080
+      # Slack workspace id for the slack connector (deployment-level).
+      MCP_SLACK_TEAM_ID: ${MCP_SLACK_TEAM_ID:-}
+    ports:
+      - "3200:3200"
+    volumes:
+      - mcp_workspace:/data/workspace
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3200/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    profiles: ["desktop"]
 
   backend:
     build:
@@ -485,6 +601,8 @@ services:
     image: oliver006/redis_exporter:v1.61.0
     environment:
       REDIS_ADDR: redis://redis:6379
+      # Redis now requires AUTH (--requirepass) — the exporter must send it.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     expose:
       - "9121"
     depends_on:
@@ -541,21 +659,31 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # TLS front door for the gateway (catch-all, SSE-safe). Adds host :80.
+  # Unified reverse proxy (R11 B3): one domain + TLS in front of the whole
+  # stack, path-routed for the desktop app's single-URL mode. Kept behind
+  # profiles so dev `make up` doesn't grab :80; `make prod-desktop` enables it.
   nginx:
-    profiles: ["scaling"]
+    profiles: ["scaling", "desktop"]
     image: nginx:1.27-alpine
     volumes:
-      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # - ./infra/nginx/certs:/etc/nginx/certs:ro   # mount certs for TLS (443)
+      - ./infra/nginx/sran-desktop.conf:/etc/nginx/conf.d/default.conf:ro
+      # .inc (not .conf): nginx auto-includes conf.d/*.conf, which would
+      # double-load the location blocks outside a server{} and fail.
+      - ./infra/nginx/sran-routes.inc:/etc/nginx/conf.d/sran-routes.inc:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - ./releases:/var/www/releases:ro # desktop installer + update manifest
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
-      # - "443:443"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     depends_on:
       - gateway
+      - chat-edge-api
+      - portal
     restart: unless-stopped
 
 volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  chat_edge_uploads:
+  mcp_workspace:
