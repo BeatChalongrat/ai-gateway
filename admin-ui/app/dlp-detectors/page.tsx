@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
 import Modal from "../../components/ui/Modal";
+import PageHeader from "../../components/ui/PageHeader";
 import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import { Icon } from "../../components/ui/Icon";
@@ -127,41 +128,43 @@ export default function DlpDetectorsPage() {
 
   return (
     <div style={{ padding: "28px 32px", maxWidth: 1200, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>
-            Custom DLP Detectors
-          </h1>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "4px 0 0" }}>
-            Define detectors that run alongside the built-ins. Changes hot-reload instantly.
-          </p>
-        </div>
-        <button style={primaryBtn} onClick={() => { setCreating(true); setSelected(null); }}>
-          + New detector
-        </button>
+      <PageHeader
+        title="Custom DLP Detectors"
+        subtitle="Define detectors that run alongside the built-ins. Changes hot-reload instantly."
+        action={
+          <button style={primaryBtn} onClick={() => { setCreating(true); setSelected(null); }}>
+            + New detector
+          </button>
+        }
+      />
+
+      {/* status tabs — pill filters matching the /audit-log period buttons:
+          active = semi-transparent accent (not solid fill). */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        {STATUS_TABS.map((t) => {
+          const active = tab === t;
+          return (
+            <button key={t} onClick={() => setTab(t)} style={{
+              padding: "5px 14px", fontSize: 12, fontWeight: 500, borderRadius: 100, cursor: "pointer",
+              textTransform: "capitalize", fontFamily: "inherit",
+              border: `1px solid ${active ? "rgb(30, 58, 95)" : "var(--border-default)"}`,
+              background: active ? "rgba(30, 58, 95, 0.12)" : "var(--color-surface-primary)",
+              color: active ? "var(--text-primary)" : "var(--text-secondary)",
+              transition: "background 120ms, border-color 120ms",
+            }}>{t}</button>
+          );
+        })}
       </div>
 
-      {/* status tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {STATUS_TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: "6px 14px", fontSize: 13, fontWeight: 600, borderRadius: 6, cursor: "pointer",
-            border: "1px solid var(--border-default)", textTransform: "capitalize",
-            background: tab === t ? "var(--accent-primary)" : "transparent",
-            color: tab === t ? "#fff" : "var(--text-secondary)",
-          }}>{t}</button>
-        ))}
-      </div>
-
-      <div style={{ display: "flex", gap: 20 }}>
+      <div>
         {/* list */}
-        <div style={{ flex: 1 }}>
+        <div>
           {error && <div style={{ color: "var(--color-status-error)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
           {loading ? (
             <SkeletonTable rows={6} cols={6} />
           ) : rows.length === 0 ? (
             <EmptyState
-              icon={<Icon name="shield" size={22} />}
+              icon={<Icon name="scan" size={22} />}
               message={tab === "all" ? "No custom detectors yet" : `No ${tab} detectors`}
               action={
                 tab === "all" ? (
@@ -214,35 +217,38 @@ export default function DlpDetectorsPage() {
           )}
         </div>
 
-        {/* detail / create panel */}
-        {(creating || selected) && (
-          <div style={{ width: 460, border: "1px solid var(--border-default)", borderRadius: 10, padding: 18, background: "var(--bg-surface)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
-                {creating ? "New detector" : selected?.name}
-              </h2>
-              <button style={miniBtn} onClick={() => { setCreating(false); setSelected(null); }}>Close</button>
-            </div>
-            {creating ? (
-              <CustomDetectorForm onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />
-            ) : selected ? (
-              <>
-                <CustomDetectorForm
-                  initial={selected as DetectorInitial}
-                  onCancel={() => setSelected(null)}
-                  onSaved={() => { load(); openDetail(selected); }}
-                />
-                <div style={{ marginTop: 22 }}>
-                  <h3 style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 10 }}>
-                    History
-                  </h3>
-                  <AuditLogTimeline entries={audit} />
-                </div>
-              </>
-            ) : null}
-          </div>
-        )}
       </div>
+
+      {/* create / edit modal */}
+      <Modal
+        open={creating || !!selected}
+        onClose={() => { setCreating(false); setSelected(null); }}
+        maxWidth="640px"
+        title={
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Icon name="scan" size={18} />
+            {creating ? "New detector" : selected?.name}
+          </span>
+        }
+      >
+        {creating ? (
+          <CustomDetectorForm onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />
+        ) : selected ? (
+          <>
+            <CustomDetectorForm
+              initial={selected as DetectorInitial}
+              onCancel={() => setSelected(null)}
+              onSaved={() => { load(); openDetail(selected); }}
+            />
+            <div style={{ marginTop: 22 }}>
+              <h3 style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 10 }}>
+                History
+              </h3>
+              <AuditLogTimeline entries={audit} />
+            </div>
+          </>
+        ) : null}
+      </Modal>
 
       <Modal
         open={!!disableTarget}
@@ -313,8 +319,10 @@ export default function DlpDetectorsPage() {
 const th: React.CSSProperties = { padding: "6px 8px", fontWeight: 700 };
 const td: React.CSSProperties = { padding: "8px", color: "var(--text-primary)" };
 const primaryBtn: React.CSSProperties = {
-  padding: "8px 16px", fontSize: 13, fontWeight: 600, borderRadius: 6, cursor: "pointer",
-  border: "none", background: "var(--accent-primary)", color: "#fff",
+  padding: "8px 18px", fontSize: 13, fontWeight: 500, borderRadius: 8, cursor: "pointer",
+  border: "none", color: "#fff",
+  background: "rgb(30, 58, 95)",
+  boxShadow: "0 2px 8px rgba(30, 58, 95, 0.3)",
 };
 const miniBtn: React.CSSProperties = {
   padding: "4px 10px", fontSize: 12, fontWeight: 600, borderRadius: 5, cursor: "pointer",

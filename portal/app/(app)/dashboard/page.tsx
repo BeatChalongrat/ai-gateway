@@ -14,6 +14,7 @@ import {
   MessageSquare,
   ScrollText,
   Sparkles,
+  Users,
   Zap,
 } from "lucide-react";
 
@@ -204,6 +205,8 @@ export default function DashboardPage() {
         keyCount={keyCount}
         keyCountPartial={keyCountPartial}
       />
+
+      <TeamUsageSection role={user?.tenant_role} />
 
       <RecentActivitySection recent={recent} totalRequests={totalRequests} />
     </div>
@@ -839,6 +842,275 @@ function StatPanel({
     );
   }
   return body;
+}
+
+/* -------------------------------------------------------------------- */
+/* Team usage — owner/admin only                                         */
+/* -------------------------------------------------------------------- */
+
+interface TeamUsageMember {
+  userId: string;
+  displayName: string;
+  email: string;
+  tenantRole: string;
+  totalTokens: number;
+  requestCount: number;
+  lastActive: string | null;
+  sharePercent: number;
+}
+
+interface TeamUsageResp {
+  members: TeamUsageMember[];
+  teamTotal: number;
+  memberCount: number;
+}
+
+// One gradient per row index — the avatar and its usage bar share the
+// same fill so a member's colour reads as "theirs" across the row.
+const MEMBER_GRADIENTS = [
+  "linear-gradient(135deg, #3B82F6, #06B6D4)",
+  "linear-gradient(135deg, #10B981, #34D399)",
+  "linear-gradient(135deg, #8B5CF6, #A78BFA)",
+  "linear-gradient(135deg, #F59E0B, #FBBF24)",
+  "linear-gradient(135deg, #EC4899, #F472B6)",
+];
+
+function TeamUsageSection({ role }: { role?: string | null }) {
+  const canView = role === "owner" || role === "admin";
+  const [data, setData] = useState<TeamUsageResp | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!canView) return;
+    let alive = true;
+    api
+      .get<TeamUsageResp>("/portal/me/team/usage")
+      .then((resp) => {
+        if (alive) setData(resp);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [canView]);
+
+  // Members never see the section; errors degrade to nothing rather
+  // than an error box — the dashboard stays usable either way.
+  if (!canView || failed) return null;
+
+  const cardStyle: React.CSSProperties = {
+    background: "linear-gradient(180deg, var(--bg-surface), var(--bg-surface-2))",
+    border: "1px solid var(--border-default)",
+    borderRadius: 10,
+    padding: 20,
+  };
+
+  if (loading) {
+    return (
+      <div style={cardStyle} aria-hidden>
+        <div className="skeleton" style={{ height: 18, width: 140, borderRadius: 6, marginBottom: 14 }} />
+        <div className="space-y-2">
+          <div className="skeleton" style={{ height: 44, borderRadius: 8 }} />
+          <div className="skeleton" style={{ height: 44, borderRadius: 8 }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!data || data.members.length === 0) return null;
+
+  return (
+    <div style={cardStyle}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 6,
+        }}
+      >
+        <h2
+          className="font-heading"
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            margin: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <Users size={15} strokeWidth={1.8} style={{ color: "var(--accent-primary)" }} />
+          Team usage
+        </h2>
+        <Link
+          href="/team"
+          style={{
+            fontSize: 12,
+            color: "var(--accent-primary)",
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          View all in Team <ArrowRight size={12} />
+        </Link>
+      </div>
+
+      {data.members.map((m, i) => (
+        <div
+          key={m.userId}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "10px 0",
+            borderBottom:
+              i === data.members.length - 1
+                ? "none"
+                : "0.5px solid rgba(31,42,85,0.5)",
+          }}
+        >
+          {/* Avatar — initial on the member's gradient */}
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              background: MEMBER_GRADIENTS[i % MEMBER_GRADIENTS.length],
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#FFFFFF",
+              flexShrink: 0,
+            }}
+          >
+            {(m.displayName || m.email || "?").charAt(0).toUpperCase()}
+          </div>
+
+          {/* Name + email */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "var(--text-primary)",
+              }}
+            >
+              <span
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {m.displayName}
+              </span>
+              {m.tenantRole === "owner" ? (
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    background: "rgba(245,158,11,0.15)",
+                    color: "#FCD34D",
+                    padding: "1px 6px",
+                    borderRadius: 4,
+                    flexShrink: 0,
+                  }}
+                >
+                  Owner
+                </span>
+              ) : null}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--text-tertiary)",
+                marginTop: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {m.email}
+            </div>
+          </div>
+
+          {/* Usage bar */}
+          <div style={{ width: 180, flexShrink: 0 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                justifyContent: "space-between",
+                marginBottom: 4,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {formatTokens(m.totalTokens)} tokens
+              </span>
+              <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
+                {m.sharePercent}%
+              </span>
+            </div>
+            <div
+              style={{
+                height: 6,
+                background: "rgba(31,42,85,0.8)",
+                borderRadius: 3,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${Math.min(100, Math.max(0, m.sharePercent))}%`,
+                  background: MEMBER_GRADIENTS[i % MEMBER_GRADIENTS.length],
+                  borderRadius: 3,
+                }}
+              />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 4,
+                fontSize: 9,
+                color: "var(--text-tertiary)",
+              }}
+            >
+              <span>{m.requestCount} request{m.requestCount === 1 ? "" : "s"}</span>
+              <span>
+                {m.lastActive
+                  ? `Last active: ${relativeTime(m.lastActive)}`
+                  : "No activity yet"}
+              </span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /* -------------------------------------------------------------------- */

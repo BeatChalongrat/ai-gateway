@@ -477,7 +477,6 @@ export default function AiReviewPage() {
 
   return (
     <>
-      <style>{`.air-td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--color-border-default); }`}</style>
       <PageHeader title="AI Sensitive Data Reviewer" subtitle="Scans AI provider responses for sensitive data that DLP filters may have missed on the way out" />
 
       {error && <div className="sran-card" style={{ marginBottom: "1rem" }}><ErrorState message={error} onRetry={reloadAll} /></div>}

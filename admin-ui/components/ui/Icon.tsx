@@ -39,7 +39,8 @@ export type IconName =
   | "folder"
   | "inbox"
   | "git-merge"
-  | "bell";
+  | "bell"
+  | "scan";
 
 const PATHS: Record<IconName, ReactNode> = {
   dollar: (
@@ -205,6 +206,15 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
       <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </>
+  ),
+  scan: (
+    <>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+      <line x1="7" y1="12" x2="17" y2="12" />
     </>
   ),
 };

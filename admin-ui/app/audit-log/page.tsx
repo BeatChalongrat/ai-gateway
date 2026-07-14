@@ -1,18 +1,22 @@
 "use client";
 
 /**
- * /audit-log — Admin Actions page (GCP / Datadog-style audit viewer).
+ * /audit-log — Admin Actions page.
  *
  * Surfaces ``admin_audit_log`` — who did what to which resource, when,
  * from where, with what outcome. Distinct from /requests, which shows
  * gateway traffic.
  *
  * Data model: the backend returns a flat list of AuditRow records.
- * This page fetches up to 500 at a time (filtered server-side) and
- * does everything else client-side: summary KPIs, severity stripes,
- * day grouping, inline expansion, linked-entity click-to-filter,
- * quick-chip time windows. CSV export hits the same endpoint with
- * format=csv so the column set stays in one place.
+ * This page fetches up to 500 at a time (filtered server-side) and does
+ * everything else client-side: stat cards, the stacked activity
+ * timeline, quick/stat/search refinement, day grouping, inline
+ * expansion. CSV export hits the same endpoint with format=csv so the
+ * column set stays in one place.
+ *
+ * Visual language matches the Routing / Usage & Cost redesigns: white
+ * cards on the light base, top accent lines, navy #1E3A5F primary
+ * buttons and pills (no accent-primary / violet anywhere).
  */
 
 import {
@@ -35,138 +39,58 @@ import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
 
 // -----------------------------------------------------------------------
-// Theme tokens
+// Constants + palettes
 // -----------------------------------------------------------------------
 
-const T = {
-  bg: "var(--bg-base)",
-  card: "var(--bg-surface)",
-  elev: "var(--bg-elevated)",
-  bl: "var(--border-default)",
-  tp: "var(--text-primary)",
-  ts: "var(--text-secondary)",
-  tt: "var(--text-muted)",
-  accent: "var(--accent-primary)",
-  green: "var(--accent-success)",
-  red: "var(--accent-danger)",
-  amber: "var(--accent-warning, #d97706)",
-  mono: "'JetBrains Mono','Fira Code',monospace",
-  dark: "#1a1d27",
-};
+const NAVY = "#1E3A5F";
+const MONO = "'JetBrains Mono','Fira Code',monospace";
 
-// Severity palette — each lookup returns (fg, bg, stripe). Kept in
-// one place so the pill, the row stripe, and the summary KPI all
-// stay in sync. Any action with outcome NULL gets neutral — we only
-// color when we know the outcome.
-const SEVERITY: Record<
-  "success" | "failure" | "warning" | "neutral",
-  { fg: string; bg: string; stripe: string }
-> = {
-  success: { fg: "#059669", bg: "rgba(16,185,129,0.08)", stripe: "#10b981" },
-  failure: { fg: "#dc2626", bg: "rgba(239,68,68,0.08)", stripe: "#ef4444" },
-  warning: { fg: "#b45309", bg: "rgba(217,119,6,0.08)",  stripe: "#d97706" },
-  neutral: { fg: "var(--text-muted)", bg: "rgba(107,114,128,0.08)", stripe: "#9ca3af" },
-};
+const PAGE_SIZE = 50;
+const FETCH_LIMIT = 500; // stats + timeline + table share one fetch
 
-function severityOf(outcome: string | null): keyof typeof SEVERITY {
+function severityOf(outcome: string | null): "success" | "failure" | "neutral" {
   if (!outcome) return "neutral";
   const v = outcome.toLowerCase();
   if (v === "success" || v === "ok") return "success";
   if (v === "denied" || v === "error" || v === "fail" || v === "failed") return "failure";
-  if (v === "warning" || v === "warn") return "warning";
   return "neutral";
 }
 
-// -----------------------------------------------------------------------
-// Action categorization (icon + category color + label).
-// Action names are free-form strings from the backend, so we match
-// prefixes rather than maintaining a hard-coded registry. New action
-// types the backend emits will fall into "other" until explicitly
-// categorized here — safer than breaking on unknown actions.
-// -----------------------------------------------------------------------
-
-type Category = "key" | "tenant" | "cross-tenant" | "session" | "policy" | "other";
-
-const CATEGORIES: Record<
-  Category,
-  { label: string; color: string; Icon: (p: { size?: number }) => ReactNode }
-> = {
-  key: {
-    label: "Key ops",
-    color: "#06b6d4",
-    Icon: ({ size = 13 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-      </svg>
-    ),
-  },
-  tenant: {
-    label: "Tenant",
-    color: "#6366f1",
-    Icon: ({ size = 13 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-        <polyline points="9 22 9 12 15 12 15 22" />
-      </svg>
-    ),
-  },
-  "cross-tenant": {
-    label: "Cross-tenant",
-    color: "#d97706",
-    Icon: ({ size = 13 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 00-3-3.87" />
-        <path d="M16 3.13a4 4 0 010 7.75" />
-      </svg>
-    ),
-  },
-  session: {
-    label: "Session",
-    color: "#8b5cf6",
-    Icon: ({ size = 13 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4" />
-        <polyline points="10 17 15 12 10 7" />
-        <line x1="15" y1="12" x2="3" y2="12" />
-      </svg>
-    ),
-  },
-  policy: {
-    label: "Policy",
-    color: "#10b981",
-    Icon: ({ size = 13 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      </svg>
-    ),
-  },
-  other: {
-    label: "Other",
-    color: "#6b7280",
-    Icon: ({ size = 13 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <circle cx="12" cy="12" r="9" />
-      </svg>
-    ),
-  },
+// Table category pills.
+type TableCat = "other" | "auth" | "key" | "dlp";
+const TABLE_CATS: Record<TableCat, { label: string; bg: string; fg: string }> = {
+  other: { label: "Other", bg: "var(--bg-subtle)", fg: "var(--text-secondary)" },
+  auth: { label: "Auth", bg: "#ECFDF5", fg: "#059669" },
+  key: { label: "Key", bg: "#FFFBEB", fg: "#92600A" },
+  dlp: { label: "DLP", bg: "#EEF4FF", fg: "#3B82F6" },
 };
 
-function categoryOf(action: string): Category {
+function tableCatOf(action: string): TableCat {
   const a = action.toLowerCase();
-  if (a.includes("cross_tenant") || a.includes("cross-tenant")) return "cross-tenant";
-  if (a.startsWith("key_") || a.includes("api_key")) return "key";
-  if (a.startsWith("tenant_")) return "tenant";
-  if (a.startsWith("session_") || a.startsWith("login") || a.startsWith("logout")) return "session";
-  if (a.startsWith("policy_") || a.startsWith("keyword_")) return "policy";
+  if (a.includes("key")) return "key";
+  if (a.includes("dlp") || a.includes("trace")) return "dlp";
+  if (a.includes("session") || a.includes("login") || a.includes("logout") || a.includes("auth")) return "auth";
   return "other";
 }
 
-// Pretty-print an action name for display:
-//   key_create             → Key · Create
-//   cross_tenant_access    → Cross-tenant access
-//   session_login_success  → Session · Login success
+// Timeline stacking categories (spec order: key → dlp/trace → failed → auth).
+type TimelineCat = "dlp" | "auth" | "key" | "failed";
+const TIMELINE_CATS: { key: TimelineCat; label: string; color: string }[] = [
+  { key: "dlp", label: "DLP / Trace", color: "#3B82F6" },
+  { key: "auth", label: "Auth", color: "#10B981" },
+  { key: "key", label: "Key ops", color: "#F59E0B" },
+  { key: "failed", label: "Failed", color: "#EF4444" },
+];
+
+function timelineCatOf(r: AuditRow): TimelineCat {
+  const a = r.action.toLowerCase();
+  if (a.includes("key")) return "key";
+  if (a.includes("dlp") || a.includes("trace")) return "dlp";
+  if (severityOf(r.outcome) === "failure") return "failed";
+  return "auth";
+}
+
+// key_create → Key Create; cross_tenant_access → Cross-tenant Access
 function formatActionLabel(action: string): string {
   return action
     .replace(/_/g, " ")
@@ -220,320 +144,9 @@ const EMPTY_FILTERS: Filters = {
   q: "",
 };
 
-const PAGE_SIZE = 50;
-const FETCH_LIMIT = 500;  // summary + table share one fetch
-
-// -----------------------------------------------------------------------
-// Small presentational helpers
-// -----------------------------------------------------------------------
-
-function KpiCard({
-  label,
-  value,
-  accent,
-  subtitle,
-}: {
-  label: string;
-  value: string | number;
-  accent: string;
-  subtitle?: string;
-}) {
-  return (
-    <div
-      style={{
-        background: T.card,
-        border: `1px solid ${T.bl}`,
-        borderRadius: 12,
-        padding: "14px 16px",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: 3,
-          height: "100%",
-          background: accent,
-          borderRadius: "0 2px 2px 0",
-        }}
-      />
-      <div
-        style={{
-          fontSize: 10.5,
-          fontWeight: 700,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          color: T.tt,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 24,
-          fontWeight: 700,
-          color: T.tp,
-          marginTop: 4,
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {value}
-      </div>
-      {subtitle ? (
-        <div style={{ fontSize: 11, color: T.tt, marginTop: 2 }}>{subtitle}</div>
-      ) : null}
-    </div>
-  );
-}
-
-// 24-bucket sparkline of event counts over the last 24h.
-function Sparkline24h({ rows }: { rows: AuditRow[] }) {
-  const now = Date.now();
-  const buckets = useMemo(() => {
-    const b = Array.from({ length: 24 }, () => ({ success: 0, failure: 0, other: 0 }));
-    rows.forEach((r) => {
-      if (!r.timestamp) return;
-      const age = now - new Date(r.timestamp).getTime();
-      const hour = Math.floor(age / (60 * 60 * 1000));
-      if (hour < 0 || hour >= 24) return;
-      const idx = 23 - hour;
-      const sev = severityOf(r.outcome);
-      if (sev === "success") b[idx].success++;
-      else if (sev === "failure") b[idx].failure++;
-      else b[idx].other++;
-    });
-    return b;
-  }, [rows, now]);
-
-  const max = Math.max(1, ...buckets.map((b) => b.success + b.failure + b.other));
-
-  return (
-    <div
-      style={{
-        background: T.card,
-        border: `1px solid ${T.bl}`,
-        borderRadius: 12,
-        padding: "14px 16px",
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        minHeight: 72,
-      }}
-    >
-      <span
-        style={{
-          fontSize: 10.5,
-          fontWeight: 700,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          color: T.tt,
-          flexShrink: 0,
-        }}
-      >
-        24h
-      </span>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          gap: 3,
-          height: 40,
-          flex: 1,
-        }}
-      >
-        {buckets.map((b, i) => {
-          const total = b.success + b.failure + b.other;
-          const h = total > 0 ? Math.max(4, Math.round((total / max) * 40)) : 2;
-          const hasFailure = b.failure > 0;
-          const onlyNeutral = total > 0 && b.success === 0 && b.failure === 0;
-          const color = hasFailure
-            ? SEVERITY.failure.stripe
-            : onlyNeutral
-              ? SEVERITY.neutral.stripe
-              : SEVERITY.success.stripe;
-          return (
-            <div
-              key={i}
-              title={`${23 - i}h ago · ${total} events`}
-              style={{
-                flex: 1,
-                minWidth: 3,
-                height: h,
-                borderRadius: "3px 3px 0 0",
-                background: total > 0 ? color : "rgba(156,163,175,0.15)",
-                opacity: 0.85,
-              }}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// A small action-category chip: icon + label, colored by category.
-function CategoryBadge({ category }: { category: Category }) {
-  const c = CATEGORIES[category];
-  const Icon = c.Icon;
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px",
-        borderRadius: 100,
-        background: `${c.color}18`,
-        color: c.color,
-        fontSize: 11,
-        fontWeight: 600,
-      }}
-    >
-      <Icon />
-      {c.label}
-    </span>
-  );
-}
-
-function OutcomePill({ outcome }: { outcome: string | null }) {
-  const sev = severityOf(outcome);
-  const p = SEVERITY[sev];
-  const label = outcome || "—";
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        borderRadius: 4,
-        fontSize: 12,
-        fontFamily: T.mono,
-        fontWeight: 500,
-        color: p.fg,
-        background: p.bg,
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-// Active filter chips: the currently-applied filters rendered as
-// removable tags. ×  clears just that one filter and re-applies.
-function ActiveFilterChip({
-  label,
-  value,
-  onRemove,
-}: {
-  label: string;
-  value: string;
-  onRemove: () => void;
-}) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "4px 4px 4px 10px",
-        borderRadius: 100,
-        background: "rgba(99,102,241,0.10)",
-        color: "var(--accent-primary)",
-        border: `1px solid rgba(99,102,241,0.25)`,
-        fontSize: 12,
-        fontWeight: 500,
-      }}
-    >
-      <span style={{ opacity: 0.7 }}>{label}:</span> {value}
-      <button
-        onClick={onRemove}
-        aria-label={`Remove ${label} filter`}
-        style={{
-          border: "none",
-          background: "transparent",
-          color: "inherit",
-          cursor: "pointer",
-          fontSize: 14,
-          lineHeight: 1,
-          padding: "0 4px",
-          fontFamily: "inherit",
-        }}
-      >
-        ×
-      </button>
-    </span>
-  );
-}
-
-function QuickChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "5px 11px",
-        borderRadius: 100,
-        fontSize: 12,
-        fontWeight: 500,
-        border: `1px solid ${active ? "var(--accent-primary)" : T.bl}`,
-        background: active ? "rgba(99,102,241,0.12)" : T.card,
-        color: active ? "var(--accent-primary)" : T.ts,
-        cursor: "pointer",
-        fontFamily: "inherit",
-        transition: "background 120ms, border-color 120ms",
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-// JSON rendering for the expanded row panel.
-function JsonBlock({ data }: { data: unknown }) {
-  const json = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-  const html = json
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"([^"]+)":/g, '<span style="color:rgba(255,255,255,0.35)">"$1"</span>:')
-    .replace(/: "([^"]*)"/g, ': <span style="color:#10b981">"$1"</span>')
-    .replace(/: (\d+\.?\d*)/g, ': <span style="color:#06b6d4">$1</span>')
-    .replace(/: (true|false|null)/g, ': <span style="color:#f59e0b">$1</span>');
-  return (
-    <pre
-      style={{
-        background: T.dark,
-        borderRadius: 8,
-        padding: "12px 14px",
-        margin: 0,
-        fontFamily: T.mono,
-        fontSize: "11px",
-        lineHeight: 1.65,
-        color: "rgba(255,255,255,0.8)",
-        overflowX: "auto",
-        maxHeight: 360,
-      }}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}
-
-// -----------------------------------------------------------------------
-// Main page
-// -----------------------------------------------------------------------
-
 type TimeWindow = "1h" | "24h" | "7d" | "30d" | "all";
-type QuickCategoryFilter = "" | "failed" | "key" | "cross-tenant";
+type QuickCat = "" | "failed" | "key" | "cross-tenant";
+type StatFilter = "" | "success" | "failed" | "key";
 
 const TIME_WINDOW_LABELS: Record<TimeWindow, string> = {
   "1h": "Last hour",
@@ -557,12 +170,192 @@ function windowToDateFrom(w: TimeWindow): string {
   return new Date(now - ms).toISOString();
 }
 
+// How many day-bars the timeline shows for each period.
+function timelineDayCount(w: TimeWindow): number {
+  if (w === "30d") return 30;
+  if (w === "7d") return 7;
+  if (w === "all") return 14;
+  return 2; // 1h / 24h still span up to two calendar days
+}
+
+// -----------------------------------------------------------------------
+// Shared small styles (advanced filter fields)
+// -----------------------------------------------------------------------
+
+const fieldLabel: React.CSSProperties = {
+  display: "block",
+  fontSize: 10,
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: "0.3px",
+  color: "var(--text-muted)",
+  marginBottom: 3,
+};
+
+const fieldInput: React.CSSProperties = {
+  width: "100%",
+  fontSize: 13,
+  padding: "6px 10px",
+  border: "1px solid var(--border-color)",
+  borderRadius: 6,
+  background: "var(--bg-subtle)",
+  color: "var(--text-primary)",
+  fontFamily: "inherit",
+  boxSizing: "border-box",
+};
+
+const whiteCard: React.CSSProperties = {
+  background: "var(--bg-card)",
+  border: "1px solid var(--border-color)",
+  borderRadius: 10,
+};
+
+// -----------------------------------------------------------------------
+// Mini icons
+// -----------------------------------------------------------------------
+
+function MiniIcon({ d, size = 14 }: { d: ReactNode; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {d}
+    </svg>
+  );
+}
+
+const ICON_LIST = <><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></>;
+const ICON_CHECK = <polyline points="20 6 9 17 4 12" />;
+const ICON_ALERT = <><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>;
+const ICON_KEY = <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />;
+const ICON_DOWNLOAD = <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>;
+const ICON_CHEVRON = <polyline points="9 18 15 12 9 6" />;
+
+// -----------------------------------------------------------------------
+// Presentational pieces
+// -----------------------------------------------------------------------
+
+function StatCard({
+  accent,
+  iconBg,
+  iconColor,
+  icon,
+  label,
+  value,
+  sub,
+  active,
+  onClick,
+}: {
+  accent: string;
+  iconBg: string;
+  iconColor: string;
+  icon: ReactNode;
+  label: string;
+  value: string;
+  sub: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`audit-stat-card${active ? " active" : ""}`}
+      onClick={onClick}
+      style={{ ["--stat-accent" as string]: accent }}
+    >
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: 12,
+          right: 12,
+          width: 28,
+          height: 28,
+          borderRadius: 6,
+          background: iconBg,
+          color: iconColor,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {icon}
+      </span>
+      <span style={{ display: "block", fontSize: 11, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>
+        {label}
+      </span>
+      <span style={{ display: "block", fontSize: 24, fontWeight: 700, color: "var(--text-primary)", marginTop: 4, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>
+        {value}
+      </span>
+      <span style={{ display: "block", fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>{sub}</span>
+    </button>
+  );
+}
+
+function CatBadge({ cat }: { cat: TableCat }) {
+  const c = TABLE_CATS[cat];
+  return (
+    <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 10, fontSize: 10, fontWeight: 600, background: c.bg, color: c.fg }}>
+      {c.label}
+    </span>
+  );
+}
+
+function OutcomeBadge({ outcome }: { outcome: string | null }) {
+  if (!outcome) return <span style={{ color: "var(--text-muted)", fontSize: 14 }}>—</span>;
+  const sev = severityOf(outcome);
+  const [label, bg, fg] =
+    sev === "success"
+      ? ["Success", "#ECFDF5", "#059669"]
+      : sev === "failure"
+        ? ["Denied", "#FEF2F2", "#DC2626"]
+        : [outcome, "var(--bg-subtle)", "var(--text-secondary)"];
+  return (
+    <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 10, fontSize: 10, fontWeight: 600, background: bg, color: fg }}>
+      {label}
+    </span>
+  );
+}
+
+// JSON rendering for the expanded row panel.
+function JsonBlock({ data }: { data: unknown }) {
+  const json = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  const html = json
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"([^"]+)":/g, '<span style="color:rgba(255,255,255,0.35)">"$1"</span>:')
+    .replace(/: "([^"]*)"/g, ': <span style="color:#10b981">"$1"</span>')
+    .replace(/: (\d+\.?\d*)/g, ': <span style="color:#06b6d4">$1</span>')
+    .replace(/: (true|false|null)/g, ': <span style="color:#f59e0b">$1</span>');
+  return (
+    <pre
+      style={{
+        background: "#1a1d27",
+        borderRadius: 8,
+        padding: "12px 14px",
+        margin: 0,
+        fontFamily: MONO,
+        fontSize: 11,
+        lineHeight: 1.65,
+        color: "rgba(255,255,255,0.8)",
+        overflowX: "auto",
+        maxHeight: 360,
+      }}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+// -----------------------------------------------------------------------
+// Main page
+// -----------------------------------------------------------------------
+
 export default function AuditLogPage() {
   const { toast } = useToast();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("7d");
-  const [quickCat, setQuickCat] = useState<QuickCategoryFilter>("");
+  const [quickCat, setQuickCat] = useState<QuickCat>("");
+  const [statFilter, setStatFilter] = useState<StatFilter>("");
+  const [search, setSearch] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [groupByDay, setGroupByDay] = useState(true);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -576,24 +369,17 @@ export default function AuditLogPage() {
 
   // ---------------------------------------------------------------------
   // The request the backend sees: appliedFilters + time-window date_from
-  // + quick-category's outcome/action hint. Quick filters translate to
-  // concrete backend params so server-side counts stay accurate.
+  // + quick-category's outcome hint. "key"/"cross-tenant" quick pills
+  // are refined client-side below (no single backend param maps to them).
   // ---------------------------------------------------------------------
   const effectiveFilters = useMemo<Filters>(() => {
     const eff = { ...appliedFilters };
-    // Time window override — the chip always wins over any blank
-    // date_from; a manually-entered date_from in the advanced form
-    // overrides the chip.
     if (!eff.date_from && timeWindow !== "all") {
       eff.date_from = windowToDateFrom(timeWindow);
     }
-    // Quick-category chips map to concrete params.
     if (quickCat === "failed" && !eff.outcome) {
       eff.outcome = "denied";
     }
-    // "key" and "cross-tenant" map to action substrings. The backend
-    // expects exact action match; for those we filter client-side by
-    // leaving eff.action empty and post-filtering the result.
     return eff;
   }, [appliedFilters, timeWindow, quickCat]);
 
@@ -614,10 +400,8 @@ export default function AuditLogPage() {
     setLoading(true);
     setError(null);
     try {
-      const body = (await api.get(
-        `/admin/audit-log?${queryString}`,
-      )) as AuditListResponse;
-      if (reqRef.current !== reqId) return;  // stale response — drop
+      const body = (await api.get(`/admin/audit-log?${queryString}`)) as AuditListResponse;
+      if (reqRef.current !== reqId) return; // stale response — drop
       setRows(body.items ?? []);
       setTotal(body.total ?? 0);
     } catch (err) {
@@ -638,61 +422,106 @@ export default function AuditLogPage() {
     load();
   }, [load]);
 
-  // Reset pagination whenever the query changes.
+  // Reset pagination + expansion whenever any refinement changes.
   useEffect(() => {
     setPage(1);
     setExpanded(new Set());
-  }, [queryString]);
+  }, [queryString, quickCat, statFilter, search]);
 
   // ---------------------------------------------------------------------
-  // Client-side post-filter for quick-category chips that don't map to
-  // a single backend param (key ops, cross-tenant), plus free-text
-  // refinement when quick-category isn't set.
+  // Refinement chain:
+  //   rows (server-filtered)
+  //   → quick-category pills (key / cross-tenant need client filtering)
+  //   → live search box
+  //   =: scopeRows — feeds stat cards + timeline
+  //   → stat-card subset
+  //   =: tableRows — feeds the table
   // ---------------------------------------------------------------------
-  const refinedRows = useMemo(() => {
+  const scopeRows = useMemo(() => {
+    let out = rows;
     if (quickCat === "key") {
-      return rows.filter((r) => categoryOf(r.action) === "key");
+      out = out.filter((r) => r.action.toLowerCase().includes("key"));
+    } else if (quickCat === "cross-tenant") {
+      out = out.filter((r) => r.action.toLowerCase().includes("cross_tenant") || r.action.toLowerCase().includes("cross-tenant"));
     }
-    if (quickCat === "cross-tenant") {
-      return rows.filter((r) => categoryOf(r.action) === "cross-tenant");
+    if (search.trim()) {
+      const s = search.trim().toLowerCase();
+      out = out.filter((r) =>
+        `${r.action} ${r.actor_key_id} ${r.tenant_id} ${r.resource_type}/${r.resource_id}`.toLowerCase().includes(s),
+      );
     }
-    return rows;
-  }, [rows, quickCat]);
+    return out;
+  }, [rows, quickCat, search]);
 
-  const totalFiltered = refinedRows.length;
-
-  // Summary stats computed over the full filtered fetch (not just the
-  // visible page) so the KPIs reflect the scope the user has selected.
-  const summary = useMemo(() => {
-    const s = {
-      total: refinedRows.length,
-      success: 0,
-      failure: 0,
-      warning: 0,
-      neutral: 0,
-      categories: { key: 0, tenant: 0, "cross-tenant": 0, session: 0, policy: 0, other: 0 } as Record<Category, number>,
-    };
-    refinedRows.forEach((r) => {
+  const stats = useMemo(() => {
+    let success = 0;
+    let failed = 0;
+    let key = 0;
+    scopeRows.forEach((r) => {
       const sev = severityOf(r.outcome);
-      s[sev]++;
-      s.categories[categoryOf(r.action)]++;
+      if (sev === "success") success++;
+      else if (sev === "failure") failed++;
+      if (r.action.toLowerCase().includes("key")) key++;
     });
-    return s;
-  }, [refinedRows]);
+    return { total: scopeRows.length, success, failed, key };
+  }, [scopeRows]);
 
+  const successRate = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0;
+
+  const tableRows = useMemo(
+    () =>
+      scopeRows.filter((r) =>
+        statFilter === "success"
+          ? severityOf(r.outcome) === "success"
+          : statFilter === "failed"
+            ? severityOf(r.outcome) === "failure"
+            : statFilter === "key"
+              ? r.action.toLowerCase().includes("key")
+              : true,
+      ),
+    [scopeRows, statFilter],
+  );
+
+  // ---------------------------------------------------------------------
+  // Activity timeline buckets — one bar per day, stacked by category.
+  // ---------------------------------------------------------------------
+  const timeline = useMemo(() => {
+    const n = timelineDayCount(timeWindow);
+    const days = Array.from({ length: n }, (_, i) => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - (n - 1 - i));
+      return d;
+    });
+    return days.map((d) => {
+      const counts: Record<TimelineCat, number> = { dlp: 0, auth: 0, key: 0, failed: 0 };
+      scopeRows.forEach((r) => {
+        if (!r.timestamp) return;
+        const t = new Date(r.timestamp);
+        if (t.getFullYear() === d.getFullYear() && t.getMonth() === d.getMonth() && t.getDate() === d.getDate()) {
+          counts[timelineCatOf(r)]++;
+        }
+      });
+      return { day: d, counts, total: 0 };
+    }).map((b) => ({ ...b, total: b.counts.dlp + b.counts.auth + b.counts.key + b.counts.failed }));
+  }, [scopeRows, timeWindow]);
+
+  const timelineMax = Math.max(1, ...timeline.map((b) => b.total));
+  const labelEvery = Math.max(1, Math.ceil(timeline.length / 10));
+
+  // ---------------------------------------------------------------------
+  // Table pagination + day grouping
+  // ---------------------------------------------------------------------
+  const totalFiltered = tableRows.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
   const pageStart = (page - 1) * PAGE_SIZE;
-  const pageRows = refinedRows.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageRows = tableRows.slice(pageStart, pageStart + PAGE_SIZE);
 
-  // Day-grouping the visible page. Returns a list of either a "header"
-  // marker or a row, so the render loop can emit day headers inline.
-  type Row = { kind: "header"; key: string; day: string; count: number }
-           | { kind: "row"; row: AuditRow };
-  const grouped: Row[] = useMemo(() => {
+  type RenderRow = { kind: "header"; key: string; day: string; count: number } | { kind: "row"; row: AuditRow };
+  const grouped: RenderRow[] = useMemo(() => {
     if (!groupByDay) return pageRows.map((row) => ({ kind: "row" as const, row }));
-    const out: Row[] = [];
+    const out: RenderRow[] = [];
     let lastDay = "";
-    // Tally counts per day for the header.
     const dayCount = new Map<string, number>();
     for (const r of pageRows) {
       const day = r.timestamp ? r.timestamp.slice(0, 10) : "—";
@@ -701,12 +530,7 @@ export default function AuditLogPage() {
     for (const r of pageRows) {
       const day = r.timestamp ? r.timestamp.slice(0, 10) : "—";
       if (day !== lastDay) {
-        out.push({
-          kind: "header",
-          key: `h-${day}`,
-          day,
-          count: dayCount.get(day) ?? 0,
-        });
+        out.push({ kind: "header", key: `h-${day}`, day, count: dayCount.get(day) ?? 0 });
         lastDay = day;
       }
       out.push({ kind: "row", row: r });
@@ -723,29 +547,9 @@ export default function AuditLogPage() {
     setAppliedFilters(filters);
   }
 
-  function handleClearAll() {
+  function handleClearAdvanced() {
     setFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
-    setTimeWindow("all");
-    setQuickCat("");
-  }
-
-  function removeFilter(key: keyof Filters) {
-    const next = { ...appliedFilters, [key]: "" };
-    setAppliedFilters(next);
-    setFilters(next);
-  }
-
-  function setFilterAndApply(patch: Partial<Filters>) {
-    const next = { ...appliedFilters, ...patch };
-    setAppliedFilters(next);
-    setFilters(next);
-    // Scroll to top of the page on filter-by-click so the user sees
-    // the summary bar update in place instead of the click vanishing
-    // mid-scroll.
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
   }
 
   function toggleExpand(id: number) {
@@ -774,12 +578,7 @@ export default function AuditLogPage() {
         if (v) params.set(k, v);
       }
       params.set("format", "csv");
-      // The admin-UI reads backend via process.env.NEXT_PUBLIC_API_BASE_URL
-      // on the browser; the original code path used a relative URL
-      // which 404'd against the admin-UI's own origin. Match the
-      // lib/api.ts convention so CSV actually hits the backend.
-      const base =
-        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
+      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
       const res = await fetch(`${base}/admin/audit-log?${params.toString()}`, {
         credentials: "include",
       });
@@ -800,9 +599,6 @@ export default function AuditLogPage() {
     }
   }
 
-  // Parse details column into structured JSON when possible — the
-  // backend stores it as a text blob; expanding treats it like JSON
-  // if it parses, else shows the raw string.
   function parseDetails(details: string | null): unknown {
     if (!details) return null;
     try {
@@ -812,36 +608,17 @@ export default function AuditLogPage() {
     }
   }
 
-  const activeFilterEntries = useMemo(() => {
-    const e: { key: keyof Filters; label: string; value: string }[] = [];
-    if (appliedFilters.q) e.push({ key: "q", label: "Search", value: appliedFilters.q });
-    if (appliedFilters.action) e.push({ key: "action", label: "Action", value: appliedFilters.action });
-    if (appliedFilters.tenant_id) e.push({ key: "tenant_id", label: "Tenant", value: appliedFilters.tenant_id });
-    if (appliedFilters.actor_key_id) e.push({ key: "actor_key_id", label: "Actor", value: appliedFilters.actor_key_id });
-    if (appliedFilters.outcome) e.push({ key: "outcome", label: "Outcome", value: appliedFilters.outcome });
-    if (appliedFilters.date_from) e.push({ key: "date_from", label: "From", value: appliedFilters.date_from });
-    if (appliedFilters.date_to) e.push({ key: "date_to", label: "To", value: appliedFilters.date_to });
-    return e;
-  }, [appliedFilters]);
-
   // ---------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------
 
   return (
     <div className="p-4 sm:p-6 lg:p-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
-      {/* Header */}
-      <div
-        className="sran-page-header"
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
+      {/* 1. Page header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div>
-          <h1 className="sran-page-title">Admin Actions</h1>
-          <p className="sran-page-subtitle">
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>Admin actions</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: "var(--text-secondary)", margin: "3px 0 0" }}>
             Who did what, when, and where. Click any row for full context.
           </p>
         </div>
@@ -850,481 +627,387 @@ export default function AuditLogPage() {
             onClick={handleExport}
             disabled={exporting || totalFiltered === 0}
             style={{
-              padding: "7px 13px",
-              fontSize: 12.5,
-              fontWeight: 500,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: 600,
               borderRadius: 6,
-              border: `1px solid ${T.bl}`,
-              background: T.card,
-              color: exporting || totalFiltered === 0 ? T.tt : T.ts,
+              border: "1px solid var(--border-color)",
+              background: "var(--bg-card)",
+              color: "var(--text-secondary)",
               cursor: exporting || totalFiltered === 0 ? "not-allowed" : "pointer",
+              opacity: exporting || totalFiltered === 0 ? 0.6 : 1,
               fontFamily: "inherit",
             }}
           >
+            <MiniIcon d={ICON_DOWNLOAD} size={13} />
             {exporting ? "Exporting…" : "Export CSV"}
           </button>
           <ThemeToggle />
         </div>
       </div>
 
-      {/* Summary KPIs + sparkline */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-          gap: 10,
-          marginTop: 14,
-        }}
-      >
-        <KpiCard
+      {/* 2. Stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
+        <StatCard
+          accent="#3B82F6"
+          iconBg="var(--icon-bg-blue)"
+          iconColor="#3B82F6"
+          icon={<MiniIcon d={ICON_LIST} />}
           label="Total events"
-          value={summary.total.toLocaleString()}
-          accent={SEVERITY.neutral.stripe}
-          subtitle={TIME_WINDOW_LABELS[timeWindow]}
+          value={stats.total.toLocaleString()}
+          sub={TIME_WINDOW_LABELS[timeWindow]}
+          active={statFilter === ""}
+          onClick={() => setStatFilter("")}
         />
-        <KpiCard
+        <StatCard
+          accent="#10B981"
+          iconBg="var(--icon-bg-green)"
+          iconColor="#10B981"
+          icon={<MiniIcon d={ICON_CHECK} />}
           label="Success"
-          value={summary.success.toLocaleString()}
-          accent={SEVERITY.success.stripe}
+          value={stats.success.toLocaleString()}
+          sub={`${successRate}% success rate`}
+          active={statFilter === "success"}
+          onClick={() => setStatFilter(statFilter === "success" ? "" : "success")}
         />
-        <KpiCard
-          label="Failure / denied"
-          value={summary.failure.toLocaleString()}
-          accent={SEVERITY.failure.stripe}
+        <StatCard
+          accent="#EF4444"
+          iconBg="var(--icon-bg-red)"
+          iconColor="#EF4444"
+          icon={<MiniIcon d={ICON_ALERT} />}
+          label="Failed / denied"
+          value={stats.failed.toLocaleString()}
+          sub={stats.failed === 0 ? "No failures" : `${stats.failed.toLocaleString()} failures`}
+          active={statFilter === "failed"}
+          onClick={() => setStatFilter(statFilter === "failed" ? "" : "failed")}
         />
-        <KpiCard
-          label="Key ops"
-          value={summary.categories.key.toLocaleString()}
-          accent={CATEGORIES.key.color}
-        />
-        <KpiCard
-          label="Cross-tenant"
-          value={summary.categories["cross-tenant"].toLocaleString()}
-          accent={CATEGORIES["cross-tenant"].color}
-        />
-        <KpiCard
-          label="Session events"
-          value={summary.categories.session.toLocaleString()}
-          accent={CATEGORIES.session.color}
+        <StatCard
+          accent="#F59E0B"
+          iconBg="var(--icon-bg-amber)"
+          iconColor="#F59E0B"
+          icon={<MiniIcon d={ICON_KEY} />}
+          label="Key operations"
+          value={stats.key.toLocaleString()}
+          sub="API key changes"
+          active={statFilter === "key"}
+          onClick={() => setStatFilter(statFilter === "key" ? "" : "key")}
         />
       </div>
 
-      <div style={{ marginTop: 10 }}>
-        <Sparkline24h rows={refinedRows} />
-      </div>
-
-      {/* Quick-filter chip strip */}
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          marginTop: 14,
-          alignItems: "center",
-        }}
-      >
-        <span
-          style={{
-            fontSize: 10.5,
-            fontWeight: 700,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            color: T.tt,
-            marginRight: 4,
-          }}
-        >
-          Period
-        </span>
-        {(["1h", "24h", "7d", "30d", "all"] as TimeWindow[]).map((w) => (
-          <QuickChip
-            key={w}
-            active={timeWindow === w}
-            onClick={() => setTimeWindow(w)}
-          >
-            {TIME_WINDOW_LABELS[w]}
-          </QuickChip>
-        ))}
-        <span
-          style={{
-            width: 1,
-            height: 20,
-            background: T.bl,
-            margin: "0 4px",
-          }}
-        />
-        <QuickChip active={quickCat === "failed"} onClick={() => setQuickCat(quickCat === "failed" ? "" : "failed")}>
-          Failed only
-        </QuickChip>
-        <QuickChip active={quickCat === "key"} onClick={() => setQuickCat(quickCat === "key" ? "" : "key")}>
-          Key operations
-        </QuickChip>
-        <QuickChip active={quickCat === "cross-tenant"} onClick={() => setQuickCat(quickCat === "cross-tenant" ? "" : "cross-tenant")}>
-          Cross-tenant
-        </QuickChip>
-      </div>
-
-      {/* Active filter chips (only when any advanced filter is set) */}
-      {activeFilterEntries.length > 0 ? (
-        <div
-          style={{
-            display: "flex",
-            gap: 6,
-            flexWrap: "wrap",
-            marginTop: 10,
-            alignItems: "center",
-          }}
-        >
-          {activeFilterEntries.map((f) => (
-            <ActiveFilterChip
-              key={f.key}
-              label={f.label}
-              value={f.value}
-              onRemove={() => removeFilter(f.key)}
-            />
+      {/* 3. Activity timeline */}
+      <div style={{ ...whiteCard, padding: "14px 16px", marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Activity timeline</div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 80 }}>
+          {timeline.map((b, i) => (
+            <div
+              key={i}
+              title={`${b.day.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${b.total} events`}
+              style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%", minWidth: 4 }}
+            >
+              {b.total === 0 ? (
+                <div style={{ height: 2, borderRadius: 1, background: "var(--bg-subtle)" }} />
+              ) : (
+                TIMELINE_CATS.map((c) =>
+                  b.counts[c.key] > 0 ? (
+                    <div
+                      key={c.key}
+                      style={{
+                        height: Math.max(2, Math.round((b.counts[c.key] / timelineMax) * 76)),
+                        background: c.color,
+                        borderRadius: 1,
+                        marginTop: 1,
+                      }}
+                    />
+                  ) : null,
+                )
+              )}
+            </div>
           ))}
-          <button
-            onClick={handleClearAll}
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: T.ts,
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              textDecoration: "underline",
-              padding: "0 4px",
-              fontFamily: "inherit",
-            }}
-          >
-            Clear all
-          </button>
         </div>
-      ) : null}
-
-      {/* Advanced filter form — collapsible */}
-      <details
-        open={advancedOpen}
-        onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
-        style={{
-          marginTop: 14,
-          background: T.card,
-          border: `1px solid ${T.bl}`,
-          borderRadius: 12,
-        }}
-      >
-        <summary
-          style={{
-            padding: "10px 14px",
-            fontSize: 12,
-            fontWeight: 500,
-            color: T.ts,
-            cursor: "pointer",
-            listStyle: "none",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            style={{
-              transform: advancedOpen ? "rotate(90deg)" : "rotate(0)",
-              transition: "transform 120ms",
-            }}
-          >
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          Advanced filters
-        </summary>
-        <form
-          onSubmit={handleApply}
-          style={{
-            padding: "0 14px 14px",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 10,
-          }}
-        >
-          <FilterInput
-            label="Search"
-            placeholder="resource id, action…"
-            value={filters.q}
-            onChange={(v) => setFilters({ ...filters, q: v })}
-          />
-          <FilterInput
-            label="Action"
-            placeholder="e.g. key_create"
-            value={filters.action}
-            onChange={(v) => setFilters({ ...filters, action: v })}
-          />
-          <FilterInput
-            label="Tenant"
-            value={filters.tenant_id}
-            onChange={(v) => setFilters({ ...filters, tenant_id: v })}
-          />
-          <FilterInput
-            label="Actor"
-            value={filters.actor_key_id}
-            onChange={(v) => setFilters({ ...filters, actor_key_id: v })}
-          />
-          <FilterSelect
-            label="Outcome"
-            value={filters.outcome}
-            options={[
-              ["", "All"],
-              ["success", "Success"],
-              ["denied", "Denied"],
-              ["error", "Error"],
-            ]}
-            onChange={(v) => setFilters({ ...filters, outcome: v })}
-          />
-          <FilterInput
-            label="From"
-            type="datetime-local"
-            value={filters.date_from}
-            onChange={(v) => setFilters({ ...filters, date_from: v })}
-          />
-          <FilterInput
-            label="To"
-            type="datetime-local"
-            value={filters.date_to}
-            onChange={(v) => setFilters({ ...filters, date_to: v })}
-          />
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
-            <button
-              type="submit"
-              style={{
-                padding: "8px 14px",
-                fontSize: 13,
-                fontWeight: 500,
-                borderRadius: 6,
-                border: "none",
-                background: T.accent,
-                color: "white",
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              Apply
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setFilters(EMPTY_FILTERS);
-                setAppliedFilters(EMPTY_FILTERS);
-              }}
-              style={{
-                padding: "8px 14px",
-                fontSize: 13,
-                fontWeight: 500,
-                borderRadius: 6,
-                border: `1px solid ${T.bl}`,
-                background: T.card,
-                color: T.ts,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              Clear
-            </button>
-          </div>
-        </form>
-      </details>
-
-      {/* View-mode toggle */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginTop: 14,
-        }}
-      >
-        <div style={{ fontSize: 12, color: T.tt }}>
-          {loading
-            ? "Loading…"
-            : totalFiltered > 0
-              ? `${totalFiltered.toLocaleString()} event${totalFiltered === 1 ? "" : "s"} in scope`
-              : ""}
-          {total > FETCH_LIMIT ? (
-            <span style={{ color: T.amber, marginLeft: 6 }}>
-              · showing first {FETCH_LIMIT.toLocaleString()} of {total.toLocaleString()} — narrow filters for full view
+        <div style={{ display: "flex", gap: 3, marginTop: 3 }}>
+          {timeline.map((b, i) => (
+            <div key={i} style={{ flex: 1, fontSize: 10, color: "var(--text-muted)", textAlign: "center", minWidth: 4, whiteSpace: "nowrap", overflow: "hidden" }}>
+              {i % labelEvery === 0 ? b.day.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid var(--border-color)" }}>
+          {TIMELINE_CATS.map((c) => (
+            <span key={c.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-secondary)" }}>
+              <span style={{ width: 7, height: 7, background: c.color, borderRadius: 1, flexShrink: 0 }} />
+              {c.label}
             </span>
-          ) : null}
+          ))}
         </div>
-        <label
+      </div>
+
+      {/* 4. Filter bar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>Period:</span>
+        {(["1h", "24h", "7d", "30d", "all"] as TimeWindow[]).map((w) => {
+          const active = timeWindow === w;
+          return (
+            <button
+              key={w}
+              onClick={() => setTimeWindow(w)}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 12,
+                fontSize: 11,
+                fontWeight: active ? 600 : 500,
+                border: "none",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                background: active ? NAVY : "var(--bg-subtle)",
+                color: active ? "#fff" : "var(--text-secondary)",
+              }}
+            >
+              {w === "all" ? "All" : w}
+            </button>
+          );
+        })}
+        <span style={{ width: 6 }} />
+        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>Quick:</span>
+        {(
+          [
+            ["failed", "Failed only", "chip-danger"],
+            ["key", "Key ops", "chip-warning"],
+            ["cross-tenant", "Cross-tenant", "chip-neutral"],
+          ] as [QuickCat, string, string][]
+        ).map(([key, label, chipClass]) => {
+          const active = quickCat === key;
+          return (
+            <button
+              key={key}
+              className={chipClass}
+              onClick={() => setQuickCat(active ? "" : key)}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 12,
+                fontSize: 11,
+                fontWeight: active ? 700 : 500,
+                border: `1px solid ${active ? "currentColor" : "transparent"}`,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search actions, actors..."
           style={{
-            fontSize: 12,
-            color: T.ts,
+            marginLeft: "auto",
+            fontSize: 13,
+            padding: "6px 12px",
+            border: "1px solid var(--border-color)",
+            borderRadius: 6,
+            width: 220,
+            background: "var(--bg-subtle)",
+            color: "var(--text-primary)",
+            fontFamily: "inherit",
+          }}
+        />
+      </div>
+
+      {/* 5. Advanced filters — collapsible */}
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
+        <button
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen}
+          style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: 6,
+            gap: 5,
+            fontSize: 12,
+            fontWeight: 500,
+            color: "var(--text-secondary)",
+            background: "none",
+            border: "none",
             cursor: "pointer",
+            padding: 0,
+            fontFamily: "inherit",
           }}
         >
-          <input
-            type="checkbox"
-            checked={groupByDay}
-            onChange={(e) => setGroupByDay(e.target.checked)}
-          />
-          Group by day
-        </label>
-      </div>
-
-      {/* Results */}
-      <div style={{ marginTop: 10 }}>
-        {loading ? (
-          <div
-            style={{
-              background: T.card,
-              borderRadius: 12,
-              border: `1px solid ${T.bl}`,
-              padding: 20,
-            }}
-          >
-            <SkeletonTable rows={10} cols={6} />
-          </div>
-        ) : error ? (
-          <div
-            style={{
-              background: T.card,
-              borderRadius: 12,
-              border: `1px solid ${T.bl}`,
-              padding: 20,
-            }}
-          >
-            <ErrorState message={error} onRetry={load} />
-          </div>
-        ) : totalFiltered === 0 ? (
-          <div
-            style={{
-              background: T.card,
-              borderRadius: 12,
-              border: `1px solid ${T.bl}`,
-              padding: 20,
-            }}
-          >
-            <EmptyState
-              message={
-                activeFilterEntries.length === 0 && quickCat === "" && timeWindow === "all"
-                  ? "No admin actions recorded yet."
-                  : "No actions match the current filter."
-              }
-              icon={<Icon name="shield" size={22} />}
-            />
-          </div>
-        ) : (
-          <div
-            style={{
-              background: T.card,
-              borderRadius: 12,
-              border: `1px solid ${T.bl}`,
-              overflow: "hidden",
-            }}
-          >
-            <div style={{ overflowX: "auto" }}>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 13,
-                }}
+          <span style={{ display: "inline-flex", transform: advancedOpen ? "rotate(90deg)" : "none", transition: "transform 120ms" }}>
+            <MiniIcon d={ICON_CHEVRON} size={14} />
+          </span>
+          Advanced filters
+        </button>
+        {advancedOpen ? (
+          <form onSubmit={handleApply} style={{ marginTop: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 0.8fr 1.2fr", gap: 6 }}>
+              <label>
+                <span style={fieldLabel}>Search</span>
+                <input style={fieldInput} placeholder="resource id, action..." value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+              </label>
+              <label>
+                <span style={fieldLabel}>Action</span>
+                <input style={fieldInput} placeholder="e.g. key_create" value={filters.action} onChange={(e) => setFilters({ ...filters, action: e.target.value })} />
+              </label>
+              <label>
+                <span style={fieldLabel}>Tenant</span>
+                <input style={fieldInput} placeholder="tenant name" value={filters.tenant_id} onChange={(e) => setFilters({ ...filters, tenant_id: e.target.value })} />
+              </label>
+              <label>
+                <span style={fieldLabel}>Actor</span>
+                <input style={fieldInput} placeholder="actor id" value={filters.actor_key_id} onChange={(e) => setFilters({ ...filters, actor_key_id: e.target.value })} />
+              </label>
+              <label>
+                <span style={fieldLabel}>Outcome</span>
+                <select style={fieldInput} value={filters.outcome} onChange={(e) => setFilters({ ...filters, outcome: e.target.value })}>
+                  <option value="">All</option>
+                  <option value="success">Success</option>
+                  <option value="denied">Denied</option>
+                  <option value="error">Error</option>
+                </select>
+              </label>
+              <label>
+                <span style={fieldLabel}>From</span>
+                <input style={fieldInput} type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "flex-end" }}>
+              <label>
+                <span style={fieldLabel}>To</span>
+                <input style={{ ...fieldInput, width: 160 }} type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
+              </label>
+              <button
+                type="submit"
+                style={{ padding: "6px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, border: "none", background: NAVY, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}
               >
-                <thead style={{ background: T.elev }}>
-                  <tr>
-                    <Th style={{ width: 8 }} />{/* severity stripe column */}
-                    <Th>Timestamp</Th>
-                    <Th>Category</Th>
-                    <Th>Action</Th>
-                    <Th>Actor</Th>
-                    <Th>Tenant</Th>
-                    <Th>Resource</Th>
-                    <Th>Outcome</Th>
-                    <Th>IP</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {grouped.map((g) =>
-                    g.kind === "header" ? (
-                      <tr key={g.key} style={{ background: "var(--bg-elevated)" }}>
-                        <td
-                          colSpan={9}
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            letterSpacing: "0.08em",
-                            textTransform: "uppercase",
-                            color: T.tt,
-                            borderTop: `1px solid ${T.bl}`,
-                            borderBottom: `1px solid ${T.bl}`,
-                          }}
-                        >
-                          {formatDayHeader(g.day)}
-                          <span style={{ fontWeight: 500, marginLeft: 8, color: T.tt }}>
-                            {g.count} event{g.count === 1 ? "" : "s"}
-                          </span>
-                        </td>
-                      </tr>
-                    ) : (
-                      <AuditRowView
-                        key={g.row.id}
-                        row={g.row}
-                        expanded={expanded.has(g.row.id)}
-                        onToggle={() => toggleExpand(g.row.id)}
-                        onFilterBy={setFilterAndApply}
-                        onCopyJson={() => handleCopyJson(g.row)}
-                        parseDetails={parseDetails}
-                      />
-                    ),
-                  )}
-                </tbody>
-              </table>
+                Apply
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAdvanced}
+                style={{ padding: "6px 16px", borderRadius: 6, fontSize: 13, fontWeight: 500, border: "1px solid var(--border-color)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                Clear
+              </button>
             </div>
+          </form>
+        ) : null}
+      </div>
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "10px 14px",
-                borderTop: `1px solid ${T.bl}`,
-                fontSize: 12,
-                color: T.tt,
-                fontFamily: T.mono,
-              }}
-            >
-              <span>
-                {totalFiltered > 0
-                  ? `${pageStart + 1}-${Math.min(pageStart + PAGE_SIZE, totalFiltered)} of ${totalFiltered.toLocaleString()}`
-                  : "0 results"}
-              </span>
-              <div style={{ display: "flex", gap: 6 }}>
-                <PaginationButton
-                  disabled={page <= 1}
-                  onClick={() => setPage(page - 1)}
-                >
-                  Prev
-                </PaginationButton>
-                <span style={{ padding: "4px 6px" }}>
-                  {page}/{totalPages}
+      {/* 6. Event table */}
+      {loading ? (
+        <div style={{ ...whiteCard, padding: 20 }}>
+          <SkeletonTable rows={10} cols={6} />
+        </div>
+      ) : error ? (
+        <div style={{ ...whiteCard, padding: 20 }}>
+          <ErrorState message={error} onRetry={load} />
+        </div>
+      ) : totalFiltered === 0 ? (
+        <div style={{ ...whiteCard, padding: 20 }}>
+          <EmptyState
+            message={
+              rows.length === 0 && timeWindow === "all"
+                ? "No admin actions recorded yet."
+                : "No actions match the current filter."
+            }
+            icon={<Icon name="shield" size={22} />}
+          />
+        </div>
+      ) : (
+        <div style={{ ...whiteCard, overflow: "hidden" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid var(--border-color)" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+              {totalFiltered.toLocaleString()} event{totalFiltered === 1 ? "" : "s"} in scope
+              {total > FETCH_LIMIT ? (
+                <span style={{ fontWeight: 400, color: "#B45309", marginLeft: 6 }}>
+                  (first {FETCH_LIMIT} of {total.toLocaleString()} loaded — narrow filters for full view)
                 </span>
-                <PaginationButton
-                  disabled={page >= totalPages}
-                  onClick={() => setPage(page + 1)}
-                >
-                  Next
-                </PaginationButton>
-              </div>
+              ) : null}
+            </span>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-secondary)", cursor: "pointer" }}>
+              <input type="checkbox" checked={groupByDay} onChange={(e) => setGroupByDay(e.target.checked)} style={{ width: 16, height: 16 }} />
+              Group by day
+            </label>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, color: "var(--text-primary)" }}>
+              <thead>
+                <tr>
+                  {(
+                    [
+                      ["Time", 65],
+                      ["Category", 55],
+                      ["Action", undefined],
+                      ["Actor", undefined],
+                      ["Tenant", 65],
+                      ["Resource", undefined],
+                      ["Outcome", 50],
+                    ] as [string, number | undefined][]
+                  ).map(([h, w]) => (
+                    <th
+                      key={h}
+                      style={{
+                        width: w,
+                        textAlign: h === "Outcome" ? "right" : "left",
+                        padding: "6px 16px",
+                        fontSize: 9,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.54px",
+                        color: "var(--text-secondary)",
+                        fontWeight: 600,
+                        background: "var(--bg-elevated)",
+                        borderBottom: "1px solid var(--border-color)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {grouped.map((g) =>
+                  g.kind === "header" ? (
+                    <tr key={g.key} style={{ background: "var(--bg-subtle)" }}>
+                      <td colSpan={7} style={{ padding: "8px 16px", borderTop: "1px solid var(--border-color)", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                        {formatDayHeader(g.day)}
+                        <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-muted)", marginLeft: 8 }}>
+                          {g.count} event{g.count === 1 ? "" : "s"}
+                        </span>
+                      </td>
+                    </tr>
+                  ) : (
+                    <AuditRowView
+                      key={g.row.id}
+                      row={g.row}
+                      grouped={groupByDay}
+                      expanded={expanded.has(g.row.id)}
+                      onToggle={() => toggleExpand(g.row.id)}
+                      onCopyJson={() => handleCopyJson(g.row)}
+                      parseDetails={parseDetails}
+                    />
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", borderTop: "1px solid var(--border-color)" }}>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
+              {pageStart + 1}-{Math.min(pageStart + PAGE_SIZE, totalFiltered)} of {totalFiltered.toLocaleString()}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <PaginationButton disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</PaginationButton>
+              <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{page}/{totalPages}</span>
+              <PaginationButton disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</PaginationButton>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1335,29 +1018,35 @@ export default function AuditLogPage() {
 
 function AuditRowView({
   row,
+  grouped,
   expanded,
   onToggle,
-  onFilterBy,
   onCopyJson,
   parseDetails,
 }: {
   row: AuditRow;
+  grouped: boolean;
   expanded: boolean;
   onToggle: () => void;
-  onFilterBy: (patch: Partial<Filters>) => void;
   onCopyJson: () => void;
   parseDetails: (d: string | null) => unknown;
 }) {
-  const sev = severityOf(row.outcome);
-  const cat = categoryOf(row.action);
-  const sevPalette = SEVERITY[sev];
-
   const handleKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       onToggle();
     }
   };
+
+  const ts = row.timestamp ? new Date(row.timestamp) : null;
+  const timeLabel = !ts
+    ? "—"
+    : grouped
+      ? ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+      : `${ts.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+
+  const actorKind = row.session_id_prefix ? "Session" : "API key";
+  const td: React.CSSProperties = { padding: "8px 16px", borderBottom: "1px solid var(--border-color)", verticalAlign: "middle" };
 
   return (
     <>
@@ -1367,122 +1056,44 @@ function AuditRowView({
         tabIndex={0}
         role="button"
         aria-expanded={expanded}
-        style={{
-          borderBottom: `1px solid ${T.bl}`,
-          cursor: "pointer",
-          background: expanded ? "rgba(99,102,241,0.04)" : undefined,
-        }}
+        style={{ cursor: "pointer", background: expanded ? "rgba(30,58,95,0.04)" : undefined }}
       >
-        {/* Severity stripe column — 4px colored bar */}
-        <td
-          style={{
-            padding: 0,
-            borderLeft: `4px solid ${sevPalette.stripe}`,
-            width: 8,
-          }}
-        />
-        <Td mono>
-          {row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}
-        </Td>
-        <Td>
-          <CategoryBadge category={cat} />
-        </Td>
-        <Td>
-          <span style={{ fontWeight: 500, color: T.tp }}>
-            {formatActionLabel(row.action)}
+        <td style={{ ...td, fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{timeLabel}</td>
+        <td style={td}>
+          <CatBadge cat={tableCatOf(row.action)} />
+        </td>
+        <td style={{ ...td, fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>{formatActionLabel(row.action)}</td>
+        <td style={td}>
+          <span style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>{actorKind}</span>
+          <span
+            title={row.actor_key_id}
+            style={{ display: "block", fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {row.actor_key_id}
           </span>
-        </Td>
-        <Td>
-          <LinkedEntity
-            value={row.actor_key_id}
-            onClick={() => onFilterBy({ actor_key_id: row.actor_key_id })}
-            title="Filter by this actor"
-          />
-        </Td>
-        <Td>
-          <LinkedEntity
-            value={row.tenant_id}
-            onClick={() => onFilterBy({ tenant_id: row.tenant_id })}
-            title="Filter by this tenant"
-          />
-        </Td>
-        <Td>
-          <span style={{ color: T.ts, marginRight: 2 }}>
-            {row.resource_type}/
+        </td>
+        <td style={{ ...td, fontSize: 11, color: "var(--text-primary)" }}>{row.tenant_id || "—"}</td>
+        <td style={td}>
+          <span
+            title={`${row.resource_type}/${row.resource_id}`}
+            style={{ display: "block", fontSize: 10, fontFamily: MONO, color: "var(--text-secondary)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {row.resource_type}/{row.resource_id}
           </span>
-          <LinkedEntity
-            value={row.resource_id}
-            onClick={() =>
-              onFilterBy({ q: row.resource_id })
-            }
-            title="Filter by this resource"
-          />
-        </Td>
-        <Td>
-          <OutcomePill outcome={row.outcome} />
-        </Td>
-        <Td mono>{row.ip_address || "—"}</Td>
+        </td>
+        <td style={{ ...td, textAlign: "right" }}>
+          <OutcomeBadge outcome={row.outcome} />
+        </td>
       </tr>
 
       {expanded ? (
-        <tr style={{ background: "rgba(99,102,241,0.03)" }}>
-          <td
-            style={{
-              padding: 0,
-              borderLeft: `4px solid ${sevPalette.stripe}`,
-              width: 8,
-            }}
-          />
-          <td colSpan={8} style={{ padding: "16px 18px" }}>
-            <ExpandedDetail
-              row={row}
-              parseDetails={parseDetails}
-              onCopyJson={onCopyJson}
-            />
+        <tr style={{ background: "rgba(30,58,95,0.03)" }}>
+          <td colSpan={7} style={{ padding: "12px 14px", borderBottom: "1px solid var(--border-color)" }}>
+            <ExpandedDetail row={row} parseDetails={parseDetails} onCopyJson={onCopyJson} />
           </td>
         </tr>
       ) : null}
     </>
-  );
-}
-
-function LinkedEntity({
-  value,
-  onClick,
-  title,
-}: {
-  value: string;
-  onClick: () => void;
-  title: string;
-}) {
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      title={title}
-      style={{
-        background: "none",
-        border: "none",
-        padding: 0,
-        fontFamily: T.mono,
-        fontSize: 12,
-        color: T.tp,
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.textDecoration = "underline";
-        e.currentTarget.style.color = "var(--accent-primary)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.textDecoration = "none";
-        e.currentTarget.style.color = T.tp;
-      }}
-    >
-      {value}
-    </button>
   );
 }
 
@@ -1513,41 +1124,15 @@ function ExpandedDetail({
 
   return (
     <div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: "8px 24px",
-          marginBottom: 14,
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "6px 20px", marginBottom: 10 }}>
         <DetailField label="User-Agent" value={row.user_agent || "—"} mono />
-        <DetailField
-          label="Session prefix"
-          value={row.session_id_prefix || "—"}
-          mono
-        />
+        <DetailField label="Session prefix" value={row.session_id_prefix || "—"} mono />
         <DetailField label="Resource type" value={row.resource_type} mono />
         <DetailField label="IP address" value={row.ip_address || "—"} mono />
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 6,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            color: T.tt,
-          }}
-        >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)" }}>
           Full event JSON
         </span>
         <button
@@ -1555,16 +1140,7 @@ function ExpandedDetail({
             e.stopPropagation();
             onCopyJson();
           }}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            fontSize: 11,
-            fontWeight: 600,
-            color: T.accent,
-            padding: 0,
-            fontFamily: "inherit",
-          }}
+          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, color: NAVY, padding: 0, fontFamily: "inherit" }}
         >
           Copy JSON
         </button>
@@ -1574,37 +1150,11 @@ function ExpandedDetail({
   );
 }
 
-function DetailField({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
+function DetailField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
-      <div
-        style={{
-          fontSize: 10.5,
-          fontWeight: 600,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: T.tt,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 12.5,
-          color: T.tp,
-          fontFamily: mono ? T.mono : "inherit",
-          marginTop: 2,
-          wordBreak: "break-all",
-        }}
-      >
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.3px", textTransform: "uppercase", color: "var(--text-muted)" }}>{label}</div>
+      <div style={{ fontSize: 12, color: "var(--text-primary)", fontFamily: mono ? MONO : "inherit", marginTop: 2, wordBreak: "break-all" }}>
         {value}
       </div>
     </div>
@@ -1615,151 +1165,12 @@ function DetailField({
 // Misc helpers
 // -----------------------------------------------------------------------
 
+// "2026-06-29" → "Mon, Jun 29"
 function formatDayHeader(iso: string): string {
   if (iso === "—") return "Unknown date";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const today = new Date();
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const iso2 = (x: Date) => x.toISOString().slice(0, 10);
-  if (iso === iso2(today)) return "Today";
-  if (iso === iso2(yesterday)) return "Yesterday";
-  return d.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
-  });
-}
-
-function FilterInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-}) {
-  return (
-    <label style={{ display: "block" }}>
-      <span
-        style={{
-          display: "block",
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: T.tt,
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </span>
-      <input
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="sran-input"
-        style={{ width: "100%" }}
-      />
-    </label>
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: [string, string][];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label style={{ display: "block" }}>
-      <span
-        style={{
-          display: "block",
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: T.tt,
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="sran-input"
-        style={{ width: "100%" }}
-      >
-        {options.map(([k, v]) => (
-          <option key={k} value={k}>
-            {v}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function Th({
-  children,
-  style,
-}: {
-  children?: ReactNode;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <th
-      style={{
-        padding: "10px 12px",
-        fontSize: 11,
-        fontWeight: 600,
-        textAlign: "left",
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        color: T.ts,
-        whiteSpace: "nowrap",
-        ...style,
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  mono = false,
-}: {
-  children: ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <td
-      style={{
-        padding: "10px 12px",
-        color: T.tp,
-        fontFamily: mono ? T.mono : "inherit",
-        fontSize: mono ? 12 : 13,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </td>
-  );
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 function PaginationButton({
@@ -1777,12 +1188,12 @@ function PaginationButton({
       onClick={onClick}
       style={{
         padding: "4px 10px",
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: 500,
-        borderRadius: 6,
-        border: `1px solid ${T.bl}`,
-        background: T.card,
-        color: disabled ? T.tt : T.ts,
+        borderRadius: 5,
+        border: "1px solid var(--border-color)",
+        background: "var(--bg-card)",
+        color: "var(--text-secondary)",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,
         fontFamily: "inherit",
