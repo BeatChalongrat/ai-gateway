@@ -198,6 +198,10 @@ func New(
 				r.With(sendRateLimit).Post("/audio/generations", h.MediaProxy.SubmitAudio)
 				r.Get("/jobs/{id}", h.MediaProxy.GetJob)
 				r.Post("/jobs/{id}/cancel", h.MediaProxy.CancelJob)
+				// Finished artifact bytes — streamed, cookie-authed. The
+				// web-chat media forms play video/audio from this via a
+				// blob object URL (Phase 11 A3).
+				r.Get("/jobs/{id}/output", h.MediaProxy.JobOutput)
 			}
 
 			// Usage — credit balance + per-model breakdown (proxied
