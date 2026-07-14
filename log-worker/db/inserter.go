@@ -56,6 +56,7 @@ var requestLogColumns = []string{
 	"input_raw_encrypted",
 	"reasoning_tokens",
 	"reasoning_cost",
+	"user_id",
 }
 
 // InsertBatch streams ``batch`` into ``request_logs`` via COPY.
@@ -145,6 +146,7 @@ func rowArgs(r *pb.LogRecord) []any {
 		emptyToNil(r.GetInputRawEncrypted()),
 		r.GetReasoningTokens(),
 		r.GetReasoningCost(),
+		emptyToNil(r.GetUserId()),
 	}
 }
 

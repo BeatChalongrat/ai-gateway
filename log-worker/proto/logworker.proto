@@ -65,6 +65,9 @@ message LogRecord {
   // persists the real values once reasoning models are provisioned).
   int32 reasoning_tokens = 31;
   double reasoning_cost = 32;
+  // Portal-user attribution (migration 062). Empty string → SQL NULL
+  // via emptyToNil (admin/tenant keys with no portal owner).
+  string user_id = 33;
 }
 
 message EnqueueResponse {
