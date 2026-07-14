@@ -105,8 +105,9 @@ export function ConversationFiles({ conversationId }: Props) {
 
 // One row in the files popup. Images show a real (authenticated)
 // thumbnail; everything else shows the monochrome FileTypeBadge.
-// Download goes through api.downloadFile so it carries the Bearer
-// token (a bare <a download> only worked while the cookie was alive).
+// Download goes through api.downloadFile — cookie-authed with the
+// 401 → silent-refresh → retry contract (a bare <a download> broke
+// the moment the access cookie lapsed).
 function FileRow({ file }: { file: FileAttachment }) {
   const [busy, setBusy] = useState(false);
   const isImage = isImageMime(file.content_type);

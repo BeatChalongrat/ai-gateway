@@ -9,3 +9,6 @@ out/
 .env*.local
 *.tsbuildinfo
 next-env.d.ts.bak
+# Playwright output (e2e lane)
+test-results/
+playwright-report/

@@ -60,9 +60,40 @@ export function VideoGenForm({ model, conversationId }: Props) {
   // Job reserved by submit() and awaiting confirm (or being polled).
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<Date | null>(null);
+  // Authed playback: the finished artifact's bytes are fetched through
+  // the cookie-authed client and played from an object URL (mirrors
+  // AuthedImage/VideoPlayer). A bare <video src={output_url}> can't
+  // authenticate — output_url is a gateway-relative path.
+  const [outputUrl, setOutputUrl] = useState<string | null>(null);
+  const [outputFailed, setOutputFailed] = useState(false);
   const pollRef = useRef<number | null>(null);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "owner";
+
+  useEffect(() => {
+    if (phase !== "done" || !job?.output_url) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setOutputUrl(null);
+    setOutputFailed(false);
+    api
+      .mediaJobOutputObjectUrl(job.job_id)
+      .then((u) => {
+        if (cancelled) {
+          URL.revokeObjectURL(u);
+          return;
+        }
+        objectUrl = u;
+        setOutputUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setOutputFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [phase, job?.job_id, job?.output_url]);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -81,6 +112,10 @@ export function VideoGenForm({ model, conversationId }: Props) {
     setCost(null);
     setPendingJobId(null);
     setStartedAt(null);
+    // The playback effect's cleanup revokes the object URL when the
+    // phase leaves "done"; just drop the local references here.
+    setOutputUrl(null);
+    setOutputFailed(false);
   }
 
   function startPolling(jobId: string) {
@@ -287,16 +322,27 @@ export function VideoGenForm({ model, conversationId }: Props) {
 
       {phase === "done" && job?.output_url ? (
         <div className="flex flex-col items-center gap-3">
-          {/* PROXY-PENDING: output_url is a backend URL; auth/proxy wiring
-              for the direct-dispatch download lands in the E2E phase. */}
+          {/* Bytes come through the authed client (object URL) — never a
+              bare gateway URL, which cannot authenticate. */}
           <div className="relative w-full max-w-[480px]">
-            <video
-              src={job.output_url}
-              controls
-              preload="metadata"
-              className="w-full rounded-lg border border-border bg-black"
-            />
-            {job.provenance ? (
+            {outputUrl ? (
+              <video
+                src={outputUrl}
+                controls
+                preload="metadata"
+                className="w-full rounded-lg border border-border bg-black"
+              />
+            ) : outputFailed ? (
+              <p className="py-4 text-center text-sm text-status-danger">
+                Couldn&apos;t load the generated video. Try again.
+              </p>
+            ) : (
+              <div
+                className="aspect-video w-full animate-pulse rounded-lg bg-bg-elevated"
+                aria-label="Loading generated video"
+              />
+            )}
+            {outputUrl && job.provenance ? (
               <div className="absolute bottom-2 right-2">
                 <ProvenanceBadge provenance={job.provenance} />
               </div>

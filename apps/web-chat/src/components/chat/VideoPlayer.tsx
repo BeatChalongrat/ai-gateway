@@ -1,10 +1,12 @@
 "use client";
 
 // Renders a video served by the authenticated chat-edge file endpoint.
-// Same reasoning as AuthedImage: a bare <video src> can't send the
-// Authorization header, so we fetch the bytes with the Bearer token
-// (api.fileObjectUrl) and play the resulting object URL, then revoke it
-// on unmount. Used for AI-generated videos delivered via message.files[].
+// Same reasoning as AuthedImage: auth is the HttpOnly portal cookie
+// (no Bearer token exists in this app), and a bare <video src> can't
+// recover from access-token expiry. We fetch the bytes through the
+// cookie-authed client (api.fileObjectUrl, with 401 → refresh → retry)
+// and play the resulting object URL, then revoke it on unmount. Used
+// for AI-generated videos delivered via message.files[].
 
 import { useEffect, useState } from "react";
 

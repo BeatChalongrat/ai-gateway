@@ -40,6 +40,12 @@ import type {
 // and the pending list is cleared.
 const IMAGE_GENERATION_TIMEOUT_MS = 180_000;
 
+// Collision-proof optimistic ids. `Date.now()` collided when two sends
+// landed in the same millisecond (rapid double-send / same-tick calls),
+// which made every later map-by-id update touch BOTH placeholder rows.
+// crypto.randomUUID() is available in all target browsers and jsdom.
+const tmpId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
 export interface PendingFile {
   /** Client-only id used to address the card before the server
    *  knows about it. */
@@ -562,13 +568,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // folder's count so the sidebar "(N)" stays accurate without a
       // refetch — mirrors the count adjust in moveConversationToFolder.
       const insideFolderId = s.conversations.find((c) => c.id === id)?.folder_id ?? null;
-      // [DEBUG delete] temporary instrumentation — remove after diagnosis.
-      console.log(
-        "[DEBUG delete] id=", id,
-        "| beforeFolderId (get, pre-await)=", beforeFolderId,
-        "| insideFolderId (s, post-await)=", insideFolderId,
-        "| all folder ids=", s.folders.map((f) => f.id),
-      );
       // Prefer the pre-await value; fall back to the in-set lookup.
       const deletedFolderId = beforeFolderId ?? insideFolderId;
       return {
@@ -794,8 +793,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
       return;
     }
-    const tempUserId = `tmp-user-${Date.now()}`;
-    const tempAsstId = `tmp-asst-${Date.now()}`;
+    const tempUserId = tmpId("tmp-user");
+    const tempAsstId = tmpId("tmp-asst");
 
     // Auto-title heuristic: if this is the first message in the
     // conversation we'll PATCH a generated title once the stream
@@ -933,6 +932,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
       }
     } catch (err) {
+      // consumeStream may have swapped the placeholder id for the
+      // persisted row id (message_start). Finalize whichever id is
+      // CURRENT — finalizing the stale temp id would leave the message
+      // stuck in status "streaming" after a cancel/error.
+      const streamingId = get().streamingAssistantId[convId] ?? tempAsstId;
       if ((err as Error).name === "AbortError") {
         if (imageTimedOut) {
           const localized = localizeErrorCode("image_timeout");
@@ -942,7 +946,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               messages: {
                 ...s.messages,
                 [convId]: list.map((m) =>
-                  m.id === tempAsstId
+                  m.id === streamingId
                     ? {
                         ...m,
                         error_code: "image_timeout",
@@ -954,14 +958,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
           get().setError(localized);
-          finalizeMessage(set, get, convId, tempAsstId, "error");
+          finalizeMessage(set, get, convId, streamingId, "error");
           return;
         }
-        finalizeMessage(set, get, convId, tempAsstId, "cancelled");
+        finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
       get().setError("Network error during streaming.");
-      finalizeMessage(set, get, convId, tempAsstId, "error");
+      finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
       if (imageTimeout != null) {
         window.clearTimeout(imageTimeout);
@@ -1006,7 +1010,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().conversations.find((c) => c.id === convId)?.model_id ?? null;
 
     // Mark the old one regenerated, insert a fresh placeholder.
-    const tempAsstId = `tmp-regen-${Date.now()}`;
+    const tempAsstId = tmpId("tmp-regen");
     set((s) => {
       const list = s.messages[convId] ?? [];
       const updated = list.map((m, i) =>
@@ -1040,12 +1044,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
     } catch (err) {
+      // Same stale-id guard as sendMessage: message_start may have
+      // swapped the temp id for the persisted one.
+      const streamingId = get().streamingAssistantId[convId] ?? tempAsstId;
       if ((err as Error).name === "AbortError") {
-        finalizeMessage(set, get, convId, tempAsstId, "cancelled");
+        finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
       get().setError("Network error during regenerate.");
-      finalizeMessage(set, get, convId, tempAsstId, "error");
+      finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
       set((s) => {
         const aborts = { ...s.abortControllers };
@@ -1070,7 +1077,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const convModelId =
       get().conversations.find((c) => c.id === convId)?.model_id ?? null;
-    const tempAsstId = `tmp-edit-asst-${Date.now()}`;
+    const tempAsstId = tmpId("tmp-edit-asst");
 
     // Optimistic: replace the edited user message's content + clear
     // everything after it. The server-side fork sends back the same
@@ -1117,12 +1124,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         /* non-fatal */
       }
     } catch (err) {
+      // Same stale-id guard as sendMessage: message_start may have
+      // swapped the temp id for the persisted one.
+      const streamingId = get().streamingAssistantId[convId] ?? tempAsstId;
       if ((err as Error).name === "AbortError") {
-        finalizeMessage(set, get, convId, tempAsstId, "cancelled");
+        finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
       get().setError("Network error during edit.");
-      finalizeMessage(set, get, convId, tempAsstId, "error");
+      finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
       set((s) => {
         const aborts = { ...s.abortControllers };

@@ -1,14 +1,16 @@
 "use client";
 
 // Renders an image served by the authenticated chat-edge file
-// endpoint. That route is behind RequireAuth and accepts the Portal
-// JWT via the Authorization header — but a plain <img src> can't send
-// a header, so it would fall back to the portal_access_token cookie,
-// which expires after ~1h and is dropped on cross-site subresource
-// loads in production. We instead fetch the bytes with the Bearer
-// token (api.fileObjectUrl) and render the resulting object URL, then
-// revoke it on unmount. This is why uploaded images now show instead
-// of a broken-image icon.
+// endpoint. Auth is the HttpOnly ``portal_access_token`` cookie (there
+// is no Bearer token in this app). A plain <img src> would send that
+// cookie too, but it can't recover when the ~1h access token lapses —
+// the load just 401s into a broken-image icon. We instead fetch the
+// bytes through the authed client (api.fileObjectUrl → credentials:
+// "include" + the 401 → silent-refresh → retry contract) and render
+// the resulting object URL, then revoke it on unmount. In production
+// the cookie reaches the chat-edge origin only when the deploy sets
+// the documented cross-origin cookie envs (AUTH_COOKIE_DOMAIN etc.) —
+// see backend/app/services/portal/cookies.py.
 
 import { useEffect, useRef, useState } from "react";
 
