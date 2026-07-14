@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { getSession } from "next-auth/react";
 import { Suspense, useEffect, useState } from "react";
 
 import { AlertCircle } from "lucide-react";
@@ -9,18 +8,14 @@ import { AlertCircle } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { Spinner } from "@/components/Spinner";
 
-// Landing page for a successful NextAuth OAuth sign-in. Reads the
-// portal tokens that the signIn/jwt/session callbacks stashed on the
-// NextAuth session and POSTs them once to the backend cookie-exchange
-// endpoint, which re-issues them as HttpOnly cookies (the same place
-// password login lands). After this the session is cookie-based and JS
-// never touches the tokens again. Then forwards to ``?redirect=`` (if
-// safe) or /dashboard.
-
-interface PortalSession {
-  portal_access_token?: string;
-  portal_refresh_token?: string;
-}
+// Landing page for a successful NextAuth OAuth sign-in. Phase 11 E3:
+// the portal tokens never touch client JS any more. This page fires a
+// single tokenless POST to the server-side cookie-bridge route
+// (/api/oauth/cookie-bridge), which decodes the HttpOnly NextAuth JWT
+// with getToken(), exchanges the tokens with the backend cookie-
+// exchange endpoint, and relays the HttpOnly portal cookies onto the
+// response — same place password login lands. Then forwards to
+// ``?redirect=`` (if safe) or /dashboard.
 
 // Same allowlist semantics as LoginForm's safeRedirectTarget — kept
 // in lock-step so social login and password login behave identically
@@ -105,26 +100,20 @@ function OAuthCompleteInner() {
 
   useEffect(() => {
     (async () => {
-      const session = (await getSession()) as PortalSession | null;
-      if (!session?.portal_access_token || !session?.portal_refresh_token) {
-        setError(
-          "We couldn't complete your sign-in. Please try again, or use email / password."
-        );
-        return;
+      // Server-side bridge: no tokens in the request, none in the
+      // response body — the NextAuth JWT cookie authenticates us and
+      // the portal cookies come back as Set-Cookie headers.
+      let ok = false;
+      try {
+        const exchange = await fetch("/api/oauth/cookie-bridge", {
+          method: "POST",
+          credentials: "include",
+        });
+        ok = exchange.ok;
+      } catch {
+        ok = false;
       }
-
-      // Exchange the NextAuth-held tokens for HttpOnly cookies. After
-      // this the session is cookie-based — same as password login.
-      const exchange = await fetch("/api/portal/auth/cookie-exchange", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({
-          access_token: session.portal_access_token,
-          refresh_token: session.portal_refresh_token,
-        }),
-      });
-      if (!exchange.ok) {
+      if (!ok) {
         setError(
           "We couldn't complete your sign-in. Please try again, or use email / password."
         );

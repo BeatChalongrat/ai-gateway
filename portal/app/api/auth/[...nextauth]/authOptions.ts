@@ -3,12 +3,12 @@
 // The /auth/oauth-complete page imports ``authOptions`` from here when
 // it needs the shared session type.
 
-import { type NextAuthOptions, type Session } from "next-auth";
+import { type NextAuthOptions } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import GitHubProvider from "next-auth/providers/github";
 import GoogleProvider from "next-auth/providers/google";
 
-type PortalTokens = {
+export type PortalTokens = {
   portal_access_token?: string;
   portal_refresh_token?: string;
   portal_user?: unknown;
@@ -131,10 +131,15 @@ export const authOptions: NextAuthOptions = {
       }
       return token as JWT & PortalTokens;
     },
-    async session({ session, token }) {
-      const t = token as JWT & PortalTokens;
-      (session as Session & PortalTokens).portal_access_token = t.portal_access_token;
-      (session as Session & PortalTokens).portal_refresh_token = t.portal_refresh_token;
+    async session({ session }) {
+      // Phase 11 E3: the portal tokens are deliberately NOT copied onto
+      // the session. The session object is client-readable (any script
+      // can GET /api/auth/session), which used to expose the raw
+      // access + refresh tokens to JS during the OAuth completion
+      // window. The tokens now live only inside the encrypted HttpOnly
+      // NextAuth JWT; the server-side cookie-bridge route
+      // (app/api/oauth/cookie-bridge) reads them via getToken() and
+      // exchanges them for the portal's HttpOnly session cookies.
       return session;
     },
   },
