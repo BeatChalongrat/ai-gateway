@@ -397,11 +397,7 @@ function OutboundCell({ value, inherited }: { value: Action; inherited: boolean 
 function DetectorsTab() {
   const { data: detectorData, loading: dL, error: dE, refetch: dR } = useApi<{ items: Detector[] }>("/admin/dlp/detectors");
   const { data: profileData, loading: pL } = useApi<{ items: Profile[] }>("/admin/policy-profiles");
-  const { data: nerData } = useApi<NerStatus>("/admin/ner/status");
-  const nerEnabled = nerData?.ner_enabled ?? false;
 
-  const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
-  const [overrides, setOverrides] = useState<Record<string, Action>>({});
   const [search, setSearch] = useState("");
 
   const defaultProfile = profileData?.items.find((p) => p.profile_id === "default") ?? null;
@@ -410,20 +406,11 @@ function DetectorsTab() {
   if (dE) return <div style={{ padding: 20 }}><ErrorState message={dE} onRetry={dR} /></div>;
   if (!detectorData?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No detectors registered" icon={<Icon name="shield" size={22} />} /></div>;
 
-  const actionFor = (det: Detector): Action => {
-    if (overrides[det.category]) return overrides[det.category];
-    return (defaultProfile?.category_actions[det.category] as Action) ?? "allow";
-  };
-
-  const onAction = async (cat: string, act: Action) => {
-    setOverrides((o) => ({ ...o, [cat]: act }));
-    setSaveState((s) => ({ ...s, [cat]: "saving" }));
-    try {
-      await api.patch("/admin/policy-profiles/default/category-actions", { category: cat, action: act });
-      setSaveState((s) => ({ ...s, [cat]: "saved" }));
-      setTimeout(() => setSaveState((s) => ({ ...s, [cat]: "idle" })), 1500);
-    } catch { setSaveState((s) => ({ ...s, [cat]: "error" })); }
-  };
+  // Detectors tab is a read-only view of the built-in detector registry.
+  // The "Default Action" column shows the action inherited from the default
+  // policy profile; it is edited on the Policy Profiles tab, not here.
+  const actionFor = (det: Detector): Action =>
+    (defaultProfile?.category_actions[det.category] as Action) ?? "allow";
 
   const filtered = search
     ? detectorData.items.filter((d) => d.name.toLowerCase().includes(search.toLowerCase()) || d.category.toLowerCase().includes(search.toLowerCase()))
@@ -462,13 +449,11 @@ function DetectorsTab() {
             <th style={{ paddingLeft: 18 }}>Detector</th>
             <th>Category</th><th>Severity</th>
             <th style={{ textAlign: "center", width: 72 }}>Enabled</th>
-            <th style={{ width: 130 }}>Default Action</th>
-            <th style={{ width: 80, textAlign: "center" }}>Status</th>
+            <th style={{ width: 150 }}>Default Action <span style={{ fontSize: 11, fontWeight: 400, color: C.textTertiary, textTransform: "none", letterSpacing: 0 }}>(read-only)</span></th>
           </tr></thead>
           <tbody>
             {filtered.map((det, i) => {
               const isNer = det.is_ner || det.category === "ner";
-              const dis = isNer && !nerEnabled;
               return (
                 <tr key={det.name} className="dlp-row" style={{ animationDelay: `${0.05 + i * 0.03}s` }}>
                   <td style={{ paddingLeft: 18 }}>
@@ -491,8 +476,7 @@ function DetectorsTab() {
                       {det.enabled ? "Enabled" : "Disabled"}
                     </span>
                   </td>
-                  <td><span title={dis ? "Enable NER stage to configure" : undefined} style={{ display: "inline-block" }}><ActionSel value={actionFor(det)} onChange={(a) => onAction(det.category, a)} disabled={dis} /></span></td>
-                  <td style={{ textAlign: "center" }}><SaveDot state={saveState[det.category] ?? "idle"} /></td>
+                  <td><span title="Inherited from the default policy profile — edit on the Policy Profiles tab." style={{ display: "inline-block" }}><ActionSel value={actionFor(det)} onChange={() => {}} disabled /></span></td>
                 </tr>
               );
             })}

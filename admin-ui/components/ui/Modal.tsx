@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  title: string;
+  title: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
   // Larger modals (like project-detail) need more horizontal room —
@@ -29,9 +30,23 @@ export default function Modal({
     }
   }, [open]);
 
-  if (!open) return null;
+  // Escape closes the modal (standard dialog UX).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
-  return (
+  // Portal into <body> so the fixed overlay escapes the scrollable <main>
+  // (and any future transformed ancestor) and covers the full viewport.
+  // mounted gates the portal to the client so SSR/hydration stays clean.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!open || !mounted) return null;
+
+  return createPortal(
     <div
       onClick={onClose}
       style={{
@@ -61,6 +76,8 @@ export default function Modal({
         <div style={{
           padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--color-border-default)",
           display: "flex", justifyContent: "space-between", alignItems: "center",
+          position: "sticky", top: 0, zIndex: 1, background: "var(--bg-surface)",
+          borderTopLeftRadius: "var(--radius-xl)", borderTopRightRadius: "var(--radius-xl)",
         }}>
           <h2 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: 0 }}>{title}</h2>
           <button
@@ -83,6 +100,7 @@ export default function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

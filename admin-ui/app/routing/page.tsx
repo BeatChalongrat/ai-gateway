@@ -156,12 +156,12 @@ function IconTrash2() {
   );
 }
 
-function IconGitMerge() {
+// 22px area-line chart glyph for the stats empty state.
+function IconChartArea() {
   return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="18" cy="18" r="3" />
-      <circle cx="6" cy="6" r="3" />
-      <path d="M6 21V9a9 9 0 0 0 9 9" />
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18" />
+      <path d="M7 15l4-6 4 3 5-7" />
     </svg>
   );
 }
@@ -196,9 +196,9 @@ function IconCpu() {
 }
 
 // ---------------------------------------------------------------------------
-// Stat sub-component — icon + value + label, with a bottom accent line
-// in the tile's accent colour. Card surface + thin border for the
-// "premium" depth treatment (was flat secondary-surface before).
+// Stat sub-component — icon + badge on the top row, value + label below,
+// with a 2px accent line across the top of the card (the ::before on
+// .routing-stat-card in globals.css, tinted via --stat-accent).
 // ---------------------------------------------------------------------------
 
 function StatTile({
@@ -206,44 +206,54 @@ function StatTile({
   label,
   value,
   accentColor,
-  iconBg,
-  iconColor,
+  chipClass,
+  badgeText,
   loading,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   accentColor: string;
-  iconBg: string;
-  iconColor: string;
+  // chip-* class from globals.css — carries both the light pastel and
+  // the dark semi-transparent fill for the icon square + corner badge.
+  chipClass: string;
+  badgeText: string;
   loading?: boolean;
 }) {
   return (
-    <div
-      style={{
-        position: "relative",
-        overflow: "hidden",
-        padding: "1rem 1.125rem",
-        background: "var(--color-bg-surface)",
-        border: "0.5px solid var(--color-border-default)",
-        borderRadius: "var(--radius-lg)",
-      }}
-    >
-      {/* Icon — accent-tinted square sitting above the number. */}
+    <div className="routing-stat-card" style={{ ["--stat-accent" as string]: accentColor }}>
       <div
         style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          background: iconBg,
-          color: iconColor,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
           marginBottom: 12,
         }}
       >
-        {icon}
+        <div
+          className={chipClass}
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 10,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {icon}
+        </div>
+        <span
+          className={chipClass}
+          style={{
+            padding: "2px 8px",
+            borderRadius: 6,
+            fontSize: 10,
+            fontWeight: 600,
+          }}
+        >
+          {badgeText}
+        </span>
       </div>
       {loading ? (
         <div className="sran-skeleton" style={{ width: "60%", height: "28px" }} />
@@ -251,7 +261,7 @@ function StatTile({
         <div
           style={{
             fontSize: "28px",
-            fontWeight: 500,
+            fontWeight: 700,
             color: "var(--color-text-primary)",
             lineHeight: 1.1,
             fontVariantNumeric: "tabular-nums",
@@ -269,18 +279,49 @@ function StatTile({
       >
         {label}
       </div>
-      {/* 2px accent line at the bottom — fades to transparent so it
-          reads as a subtle highlight rather than a hard border. */}
+    </div>
+  );
+}
+
+// Centered empty-state block shared by the stats card and keyword rules.
+function EmptyState({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        textAlign: "center",
+        padding: "2.5rem 1.5rem",
+      }}
+    >
       <div
         style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 2,
-          background: `linear-gradient(90deg, ${accentColor}, transparent)`,
+          width: 48,
+          height: 48,
+          borderRadius: 12,
+          background: "var(--bg-subtle)",
+          color: "var(--text-muted)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 12,
         }}
-      />
+      >
+        {icon}
+      </div>
+      <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", margin: "0 0 4px" }}>{title}</p>
+      <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0, maxWidth: 260, lineHeight: 1.5 }}>
+        {description}
+      </p>
     </div>
   );
 }
@@ -450,13 +491,22 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // Routing stats — read-only sub-component
 // ---------------------------------------------------------------------------
 
-function RoutingStatsSection() {
+function RoutingStatsSection({
+  rules,
+  rulesLoading,
+  refetchRules,
+}: {
+  rules: KeywordRuleListResponse | null;
+  rulesLoading: boolean;
+  refetchRules: () => void;
+}) {
   const { data, loading, error, refetch } = useApi<RoutingStats>("/admin/routing/stats");
   const [refreshing, setRefreshing] = useState(false);
 
   async function handleRefresh() {
     setRefreshing(true);
     await refetch();
+    refetchRules();
     setRefreshing(false);
   }
 
@@ -478,162 +528,173 @@ function RoutingStatsSection() {
   const hasData = data && (data.models.length > 0 || data.routers.length > 0);
 
   return (
-    <section style={{ marginBottom: "2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <div>
-          <h2 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: 0, color: "var(--color-text-primary)" }}>
-            Routing Stats
+    <section style={{ marginBottom: 20 }}>
+      {/* Title + Refresh share one row so they align exactly; the
+          subtitle sits below the row instead of stretching it. */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ fontSize: 13, fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
+            Routing stats
           </h2>
-          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
-            Traffic overview for the last 24 hours
-          </p>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.375rem",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              color: "var(--text-secondary)",
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 600,
+              padding: "6px 12px",
+              cursor: refreshing ? "default" : "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            <IconRotateCw spinning={refreshing} />
+            Refresh
+          </button>
         </div>
-        <button
-          className="sran-btn sran-btn-secondary sran-btn-sm"
-          onClick={handleRefresh}
-          disabled={refreshing}
-          style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
-        >
-          <IconRotateCw spinning={refreshing} />
-          Refresh
-        </button>
+        <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
+          Traffic overview for the last 24 hours
+        </p>
       </div>
 
-      {/* Stat tiles — accent icon + bottom gradient line per tile. */}
-      <div className="routing-metrics-grid" style={{ marginBottom: "1.5rem" }}>
+      {/* Stat tiles — icon + range badge on top, value + label below,
+          top accent line per tile. */}
+      <div className="routing-metrics-grid" style={{ marginBottom: 20 }}>
         <StatTile
           icon={<IconChartBar />}
           label="Requests"
           value={loading ? "—" : totalRequests.toLocaleString()}
-          accentColor="#534AB7"
-          iconBg="rgba(83, 74, 183, 0.12)"
-          iconColor="#7F77DD"
+          accentColor="#3B82F6"
+          chipClass="chip-blue"
+          badgeText="24h"
           loading={loading}
         />
         <StatTile
           icon={<IconCpu />}
           label="Active models"
           value={loading ? "—" : activeModels.toString()}
-          accentColor="#1D9E75"
-          iconBg="rgba(29, 158, 117, 0.12)"
-          iconColor="#5DCAA5"
+          accentColor="#10B981"
+          chipClass="chip-green"
+          badgeText="Active"
           loading={loading}
         />
-        {/* Success-rate tile removed (F6): its value was hardcoded "99.2%".
-            Re-add when a real success metric is exposed by the API. */}
+        <StatTile
+          icon={<Icon name="key" size={16} />}
+          label="Keyword rules"
+          value={rulesLoading ? "—" : (rules?.items.length ?? 0).toLocaleString()}
+          accentColor="#1E3A5F"
+          chipClass="chip-navy"
+          badgeText="Total"
+          loading={rulesLoading}
+        />
       </div>
 
-      {/* Breakdown rows */}
-      {loading ? (
-        <div className="routing-charts-grid">
-          <div>
-            <SectionLabel>By model</SectionLabel>
-            <div
-              style={{
-                padding: "1.25rem",
-                background: "var(--color-bg-surface)",
-                border: "0.5px solid var(--color-border-default)",
-                borderRadius: "var(--radius-lg)",
-              }}
-            >
-              <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+      {/* Request volume — single card: header bar (title + range pills)
+          with the breakdown lists / empty state in the body. */}
+      <div
+        style={{
+          background: "var(--color-bg-surface)",
+          border: "0.5px solid var(--color-border-default)",
+          borderRadius: 12,
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 20px",
+            borderBottom: "1px solid var(--color-border-subtle, rgba(0,0,0,0.06))",
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Request volume</span>
+        </div>
+
+        <div style={{ padding: "18px 20px" }}>
+          {loading ? (
+            <div className="routing-charts-grid">
+              <div>
+                <SectionLabel>By model</SectionLabel>
+                <div className="sran-skeleton" style={{ width: "100%", height: "8rem", borderRadius: 12 }} />
+              </div>
+              <div>
+                <SectionLabel>By router</SectionLabel>
+                <div className="sran-skeleton" style={{ width: "100%", height: "8rem", borderRadius: 12 }} />
+              </div>
             </div>
-          </div>
-          <div>
-            <SectionLabel>By router</SectionLabel>
-            <div
-              style={{
-                padding: "1.25rem",
-                background: "var(--color-bg-surface)",
-                border: "0.5px solid var(--color-border-default)",
-                borderRadius: "var(--radius-lg)",
-              }}
-            >
-              <div className="sran-skeleton" style={{ width: "100%", height: "8rem" }} />
+          ) : error ? (
+            <div style={{ padding: "1.5rem", textAlign: "center" }}>
+              <p style={{ color: "var(--color-status-error)", marginBottom: "0.75rem" }}>{error}</p>
+              <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={handleRefresh}>Retry</button>
             </div>
-          </div>
-        </div>
-      ) : error ? (
-        <div className="sran-card" style={{ padding: "2rem", textAlign: "center" }}>
-          <p style={{ color: "var(--color-status-error)", marginBottom: "0.75rem" }}>{error}</p>
-          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={handleRefresh}>Retry</button>
-        </div>
-      ) : !hasData ? (
-        <div className="sran-card" style={{ padding: "3rem", textAlign: "center" }}>
-          <div style={{ color: "var(--color-text-muted)", marginBottom: "0.75rem" }}>
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-              <path d="M3 3v18h18" />
-              <path d="M18 17V9" />
-              <path d="M13 17V5" />
-              <path d="M8 17v-3" />
-            </svg>
-          </div>
-          <p style={{ fontSize: "var(--font-size-base)", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "0.25rem" }}>
-            No requests in the last 24 hours
-          </p>
-          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: 0 }}>
-            Routing statistics will appear here once traffic starts flowing through the gateway.
-          </p>
-        </div>
-      ) : (
-        <div className="routing-charts-grid">
-          <div>
-            <SectionLabel>By model</SectionLabel>
-            <div
-              style={{
-                padding: "0.25rem 0",
-                background: "var(--color-bg-surface)",
-                border: "0.5px solid var(--color-border-default)",
-                borderRadius: "var(--radius-lg)",
-              }}
-            >
-              {(data?.models ?? []).length === 0 ? (
-                <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
-                  No model data
+          ) : !hasData ? (
+            <EmptyState
+              icon={<IconChartArea />}
+              title="No requests in the last 24 hours"
+              description="Routing statistics will appear here once traffic starts flowing through the gateway."
+            />
+          ) : (
+            <div className="routing-charts-grid">
+              <div>
+                <SectionLabel>By model</SectionLabel>
+                <div
+                  style={{
+                    padding: "0.25rem 0",
+                    border: "1px solid var(--color-border-subtle, rgba(0,0,0,0.06))",
+                    borderRadius: 12,
+                  }}
+                >
+                  {(data?.models ?? []).length === 0 ? (
+                    <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
+                      No model data
+                    </div>
+                  ) : (
+                    (data?.models ?? []).map((m, i, arr) => (
+                      <ModelRow
+                        key={m.model || `unknown-${i}`}
+                        model={m.model}
+                        count={m.count}
+                        totalRequests={totalRequests}
+                        index={i}
+                        isLast={i === arr.length - 1}
+                      />
+                    ))
+                  )}
                 </div>
-              ) : (
-                (data?.models ?? []).map((m, i, arr) => (
-                  <ModelRow
-                    key={m.model || `unknown-${i}`}
-                    model={m.model}
-                    count={m.count}
-                    totalRequests={totalRequests}
-                    index={i}
-                    isLast={i === arr.length - 1}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-          <div>
-            <SectionLabel>By router</SectionLabel>
-            <div
-              style={{
-                padding: "0.25rem 0",
-                background: "var(--color-bg-surface)",
-                border: "0.5px solid var(--color-border-default)",
-                borderRadius: "var(--radius-lg)",
-              }}
-            >
-              {(data?.routers ?? []).length === 0 ? (
-                <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
-                  No router data
+              </div>
+              <div>
+                <SectionLabel>By router</SectionLabel>
+                <div
+                  style={{
+                    padding: "0.25rem 0",
+                    border: "1px solid var(--color-border-subtle, rgba(0,0,0,0.06))",
+                    borderRadius: 12,
+                  }}
+                >
+                  {(data?.routers ?? []).length === 0 ? (
+                    <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
+                      No router data
+                    </div>
+                  ) : (
+                    (data?.routers ?? []).map((r, i, arr) => (
+                      <RouterRow
+                        key={r.router ?? `_null-${i}`}
+                        router={r.router}
+                        count={r.count}
+                        maxCount={maxRouterCount}
+                        isLast={i === arr.length - 1}
+                      />
+                    ))
+                  )}
                 </div>
-              ) : (
-                (data?.routers ?? []).map((r, i, arr) => (
-                  <RouterRow
-                    key={r.router ?? `_null-${i}`}
-                    router={r.router}
-                    count={r.count}
-                    maxCount={maxRouterCount}
-                    isLast={i === arr.length - 1}
-                  />
-                ))
-              )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -642,8 +703,17 @@ function RoutingStatsSection() {
 // Keyword rules CRUD — sub-component
 // ---------------------------------------------------------------------------
 
-function KeywordRulesSection() {
-  const { data, loading, error, refetch } = useApi<KeywordRuleListResponse>("/admin/keyword-rules");
+function KeywordRulesSection({
+  data,
+  loading,
+  error,
+  refetch,
+}: {
+  data: KeywordRuleListResponse | null;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+}) {
   const { toast } = useToast();
 
   const [editing, setEditing] = useState<KeywordRule | null>(null);
@@ -820,23 +890,23 @@ function KeywordRulesSection() {
 
   return (
     <section>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <div>
-          <h2 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: 0, color: "var(--color-text-primary)" }}>
-            Keyword Rules
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ fontSize: 13, fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
+            Keyword rules
           </h2>
-          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
-            Route requests to specific models based on keyword matching
-          </p>
+          <button
+            className="sran-btn sran-btn-primary"
+            onClick={openCreate}
+            style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
+          >
+            <IconPlus />
+            New Rule
+          </button>
         </div>
-        <button
-          className="sran-btn sran-btn-primary"
-          onClick={openCreate}
-          style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
-        >
-          <IconPlus />
-          New Rule
-        </button>
+        <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
+          Route requests to specific models based on keyword matching
+        </p>
       </div>
 
       {loading ? (
@@ -869,21 +939,19 @@ function KeywordRulesSection() {
           <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={refetch}>Retry</button>
         </div>
       ) : !hasRules ? (
-        <div className="sran-card" style={{ padding: "3rem", textAlign: "center" }}>
-          <div style={{
-            color: "var(--color-text-muted)",
-            marginBottom: "0.75rem",
-            display: "flex",
-            justifyContent: "center",
-          }}>
-            <IconGitMerge />
-          </div>
-          <p style={{ fontSize: "var(--font-size-base)", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "0.375rem" }}>
-            No keyword rules configured yet
-          </p>
-          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: 0, maxWidth: "320px", marginLeft: "auto", marginRight: "auto" }}>
-            Keyword rules route requests to specific models when the prompt contains matching keywords or patterns.
-          </p>
+        <div
+          style={{
+            background: "var(--color-bg-surface)",
+            border: "1px dashed var(--color-border-default)",
+            borderRadius: 12,
+            padding: "18px 20px",
+          }}
+        >
+          <EmptyState
+            icon={<Icon name="key" size={22} />}
+            title="No keyword rules configured yet"
+            description="Keyword rules route requests to specific models when the prompt contains matching keywords or patterns."
+          />
         </div>
       ) : (
         <div className="sran-card routing-metric-card" style={{ padding: 0, overflow: "hidden" }}>
@@ -1033,40 +1101,23 @@ function KeywordRulesSection() {
 // ---------------------------------------------------------------------------
 
 export default function RoutingPage() {
+  // Keyword rules are fetched once here so the "Keyword rules" stat tile
+  // and the rules table below always show the same list.
+  const rulesApi = useApi<KeywordRuleListResponse>("/admin/keyword-rules");
   return (
     <>
       <PageHeader title="Routing" subtitle="Routing decisions and keyword overrides" />
-      <style>{`
-        .routing-metrics-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 0.75rem;
-        }
-        .routing-charts-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 1rem;
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @media (max-width: 1024px) {
-          .routing-metrics-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-        @media (max-width: 640px) {
-          .routing-metrics-grid {
-            grid-template-columns: 1fr;
-          }
-          .routing-charts-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-      <RoutingStatsSection />
-      <KeywordRulesSection />
+      <RoutingStatsSection
+        rules={rulesApi.data}
+        rulesLoading={rulesApi.loading}
+        refetchRules={rulesApi.refetch}
+      />
+      <KeywordRulesSection
+        data={rulesApi.data}
+        loading={rulesApi.loading}
+        error={rulesApi.error}
+        refetch={rulesApi.refetch}
+      />
     </>
   );
 }

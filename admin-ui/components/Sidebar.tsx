@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getSession, refreshSession, clearSession, ROLE_NAV, type AdminSession } from "../lib/auth";
 
 const S = { w: 15, h: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -78,13 +78,37 @@ export default function Sidebar({
   const router = useRouter();
   const [session, setSessionState] = useState<AdminSession | null>(null);
 
+  // User avatar — a base64 data URL picked via the hidden file input and
+  // persisted client-side only (localStorage; there is no upload API).
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     // First paint: render from the cached role so the UI doesn't flash.
     setSessionState(getSession());
+    setAvatar(localStorage.getItem("user-avatar"));
     // Then revalidate against the backend; this also catches session
     // expiry while the tab is open.
     refreshSession().then((s) => setSessionState(s));
   }, []);
+
+  function handleAvatarPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      try {
+        localStorage.setItem("user-avatar", reader.result);
+      } catch {
+        // Storage quota exceeded (very large image) — still show it for
+        // this session, it just won't survive a reload.
+      }
+      setAvatar(reader.result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
 
   const allowedPaths = session ? ROLE_NAV[session.role] : [];
 
@@ -164,27 +188,48 @@ export default function Sidebar({
       <div className="sran-sidebar-footer">
         {session ? (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
-              <div style={{ width: "26px", height: "26px", borderRadius: "5px", background: "linear-gradient(135deg, #1a3570 0%, #2850a8 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.6rem", fontWeight: 700, color: "rgba(200,220,255,0.85)", letterSpacing: "0.02em", flexShrink: 0, border: "1px solid rgba(80,130,240,0.18)" }}>
-                {session?.name?.charAt(0)?.toUpperCase() || "U"}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+              <div
+                className="sran-sidebar-avatar"
+                role="button"
+                tabIndex={0}
+                title="Change avatar"
+                onClick={() => avatarInputRef.current?.click()}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); avatarInputRef.current?.click(); } }}
+              >
+                {avatar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={avatar} alt="User avatar" />
+                ) : (
+                  session?.name?.charAt(0)?.toUpperCase() || "U"
+                )}
+                <span className="sran-sidebar-avatar-cam" aria-hidden>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#E2E8F0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </span>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarPick}
+                  style={{ display: "none" }}
+                />
               </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: "0.6875rem", fontWeight: 600, color: "rgba(215,228,250,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "0.005em" }}>
-                  {session.name}
-                </div>
-                <div className="sran-badge-role" style={{ display: "inline-block", marginTop: "1px" }}>
-                  {session.role.replace("_", " ").toUpperCase()}
-                </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="sran-sidebar-username">{session.name}</div>
+                <div className="sran-sidebar-email">{session.email || `${session.name}@sran.ai`}</div>
               </div>
             </div>
             <button
               onClick={handleLogout}
               title="Sign out"
-              style={{ background: "none", border: "1px solid rgba(100,140,220,0.2)", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "rgba(160,190,255,0.6)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(100,140,220,0.5)"; e.currentTarget.style.color = "rgba(200,220,255,0.9)"; e.currentTarget.style.background = "rgba(100,140,220,0.08)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(100,140,220,0.2)"; e.currentTarget.style.color = "rgba(160,190,255,0.6)"; e.currentTarget.style.background = "none"; }}
+              style={{ background: "none", border: "none", padding: 5, cursor: "pointer", color: "rgba(140,160,200,0.4)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "color 0.2s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(200,210,230,0.7)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(140,160,200,0.4)"; }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </button>
           </>
         ) : (

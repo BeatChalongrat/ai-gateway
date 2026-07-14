@@ -43,11 +43,11 @@ export default function LoginPage() {
 
   const inputStyle: React.CSSProperties = {
     width: "100%",
-    padding: "0.65rem 0.875rem",
-    background: "var(--bg-surface)",
-    border: "1px solid var(--border-default)",
+    padding: "14px 16px",
+    // background/border/color come from the .login-input rules in
+    // globals.css — an inline background/color here would beat the class
+    // and break the Chrome-autofill override that lives there.
     borderRadius: "7px",
-    color: "var(--text-primary)",
     fontSize: "0.875rem",
     outline: "none",
     boxSizing: "border-box",
@@ -59,7 +59,7 @@ export default function LoginPage() {
     display: "block",
     fontSize: "0.72rem",
     fontWeight: 600,
-    color: "var(--text-secondary)",
+    color: "#8B96BA",
     marginBottom: "0.45rem",
     letterSpacing: "0.08em",
     textTransform: "uppercase",
@@ -68,9 +68,12 @@ export default function LoginPage() {
   return (
     <div style={{
       minHeight: "100vh",
-      // Theme-token backdrop so the login respects the user's marked theme
-      // (navy-ish in dark, light in light) — the grid + glow overlays below
-      // keep a subtle brand texture on both. Sidebar/brand stays navy regardless.
+      // The login is always dark-navy regardless of the app's data-theme —
+      // --bg-base/--text-primary are re-declared here (scoped) so the global
+      // light/dark tokens in globals.css stay untouched for the rest of the
+      // app. #0A1230 matches the dark theme's --bg-base (Dashboard et al).
+      ["--bg-base" as string]: "#0A1230",
+      ["--text-primary" as string]: "#E8E9ED",
       background: "var(--bg-base)",
       display: "flex",
       alignItems: "center",
@@ -79,18 +82,9 @@ export default function LoginPage() {
       position: "relative",
       overflow: "hidden",
     }}>
-      {/* Keyboard-focus ring on the inputs (the inline onFocus only swaps the
-          border colour; this adds a visible focus-visible outline). */}
-      <style>{`
-        .login-input:focus-visible {
-          outline: 2px solid var(--accent-primary);
-          outline-offset: 2px;
-        }
-      `}</style>
-
       {/* Grid pattern */}
       <div style={{
-        position: "absolute", inset: 0, opacity: 0.03,
+        position: "absolute", inset: 0, opacity: 0.06,
         backgroundImage: "linear-gradient(rgba(100,160,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(100,160,255,1) 1px, transparent 1px)",
         backgroundSize: "40px 40px",
         pointerEvents: "none",
@@ -100,11 +94,11 @@ export default function LoginPage() {
       <div style={{
         position: "absolute", top: "-100px", right: "-100px",
         width: "400px", height: "400px",
-        background: "radial-gradient(circle, rgba(60,100,220,0.12) 0%, transparent 70%)",
+        background: "radial-gradient(circle, rgba(60,100,220,0.08) 0%, transparent 70%)",
         pointerEvents: "none",
       }} />
 
-      <div style={{ width: "100%", maxWidth: "420px", padding: "0 1.25rem", position: "relative", zIndex: 1, margin: "0 auto" }}>
+      <div style={{ width: "100%", maxWidth: "400px", padding: "0 1.25rem", position: "relative", zIndex: 1, margin: "0 auto" }}>
         {/* Logo + Title */}
         <div style={{ textAlign: "center", marginBottom: "2rem" }}>
           <img
@@ -116,26 +110,27 @@ export default function LoginPage() {
               boxShadow: "0 0 30px rgba(80,130,255,0.25), 0 8px 24px rgba(0,0,0,0.4)",
             }}
           />
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--text-primary)", margin: "0 0 0.35rem", letterSpacing: "0.05em" }}>
+          <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#E8E9ED", margin: "0 0 0.35rem", letterSpacing: "0.05em" }}>
             SRAN AI Gateway
           </h1>
-          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: 0, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          <p style={{ fontSize: "0.75rem", color: "rgba(160, 170, 200, 0.6)", margin: 0, letterSpacing: "0.08em", textTransform: "uppercase" }}>
             Admin Console
           </p>
         </div>
 
         {/* Form card */}
         <div style={{
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-default)",
-          borderRadius: "14px",
-          padding: "2rem 2rem",
-          backdropFilter: "blur(8px)",
+          background: "rgba(15, 20, 35, 0.4)",
+          border: "1px solid rgba(100, 130, 255, 0.12)",
+          borderRadius: "16px",
+          padding: "40px 36px",
+          backdropFilter: "blur(12px)",
+          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
           width: "100%",
           boxSizing: "border-box" as const,
         }}>
           <form onSubmit={handleSubmit} style={{ width: "100%" }}>
-            <div style={{ marginBottom: "1.25rem" }}>
+            <div style={{ marginBottom: "24px" }}>
               <label style={labelStyle}>Username or email</label>
               <input
                 type="text"
@@ -147,12 +142,10 @@ export default function LoginPage() {
                 aria-invalid={error ? true : undefined}
                 className="login-input"
                 style={inputStyle}
-                onFocus={(e) => { e.target.style.borderColor = "var(--accent-primary)"; }}
-                onBlur={(e) => { e.target.style.borderColor = "var(--border-default)"; }}
               />
             </div>
 
-            <div style={{ marginBottom: "1.5rem" }}>
+            <div style={{ marginBottom: "24px" }}>
               <label style={labelStyle}>Password</label>
               <input
                 type="password"
@@ -164,8 +157,6 @@ export default function LoginPage() {
                 aria-invalid={error ? true : undefined}
                 className="login-input"
                 style={inputStyle}
-                onFocus={(e) => { e.target.style.borderColor = "var(--accent-primary)"; }}
-                onBlur={(e) => { e.target.style.borderColor = "var(--border-default)"; }}
               />
             </div>
 
@@ -177,7 +168,7 @@ export default function LoginPage() {
                 borderRadius: "6px",
                 color: "var(--color-status-error)",
                 fontSize: "0.8rem",
-                marginBottom: "1.25rem",
+                marginBottom: "24px",
               }}>
                 {error}
               </div>
@@ -186,11 +177,12 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
+              className="login-submit"
               style={{
                 width: "100%",
-                padding: "0.7rem",
-                background: loading ? "var(--bg-elevated)" : "var(--color-sran-700)",
-                border: "1px solid var(--color-sran-800)",
+                padding: "14px",
+                background: loading ? "rgba(30, 58, 95, 0.6)" : "#1E3A5F",
+                border: "1px solid #254A78",
                 borderRadius: "7px",
                 color: "#ffffff",
                 fontSize: "0.875rem",
@@ -207,7 +199,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p style={{ textAlign: "center", fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "1.5rem", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        <p style={{ textAlign: "center", fontSize: "0.65rem", color: "rgba(120, 130, 160, 0.4)", letterSpacing: "0.06em", textTransform: "uppercase", margin: "1.5rem 0 0" }}>
           SRAN AI Gateway v0.1.0
         </p>
       </div>
