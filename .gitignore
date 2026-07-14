@@ -67,3 +67,19 @@ dlp-sidecar/target/
 # UAT seed output — contains raw API keys printed once by 02_seed_uat.py.
 # Keep on disk only until copied into the customer's secret manager.
 uat-seed-output.txt
+
+# Secrets & local state (cross-cutting; defense in depth)
+*.pem
+*.key
+credentials.dat
+*.db
+*.sqlite
+*.sqlite-journal
+Thumbs.db
+.vs/
+
+# SranDesktop's Inno Setup script lives in build/ — a required build
+# input, not an output. Re-include it past the generic ``build/`` rule
+# above (dir first, then contents — same pattern as internal/storage).
+!SranDesktop/build/
+!SranDesktop/build/**

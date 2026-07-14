@@ -1,0 +1,14 @@
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+publish/
+installer/
+
+# Local databases (app state lives in %APPDATA%, but never risk a stray copy)
+*.db
+*.sqlite*
+
+# Debug/audit screenshots — dev artifacts, not project sources
+audit-screenshots/
