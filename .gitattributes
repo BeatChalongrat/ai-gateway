@@ -1,0 +1,51 @@
+# Line-ending policy: normalize everything to LF in the repository,
+# check out native unless a rule below says otherwise.
+* text=auto
+
+# --- Windows-toolchain files: CRLF working copies (VS/MSBuild/Inno expect it)
+*.sln text eol=crlf
+*.csproj text eol=crlf
+*.xaml text eol=crlf
+*.props text eol=crlf
+*.targets text eol=crlf
+*.pubxml text eol=crlf
+*.iss text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# --- Cross-platform source/scripts: LF everywhere (formatters/interpreters expect it)
+*.sh text eol=lf
+*.go text eol=lf
+*.py text eol=lf
+*.rs text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.sql text eol=lf
+*.proto text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+
+# --- Binaries: git must never touch bytes (placed after *.js so *.min.js wins)
+*.min.js binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp4 binary
+*.exe binary
+*.dll binary
