@@ -125,6 +125,7 @@ async def _persist(
             session,
             RequestRecord(
                 request_id=request_id,
+                user_id=getattr(auth, "log_user_id", None),
                 tenant_id=auth.tenant_id,
                 project_id=auth.project_id,
                 provider="openai",
@@ -196,8 +197,22 @@ async def generate_images(
         # subject), while credentials/secrets/financial hard-BLOCK. Swapped
         # from the DEFAULT profile, which masked identity.
         profile = await get_runtime_profile_async(session, "media_gen")
+
+        # Phase 10 (A2): resolve the tenant's egress policy BEFORE the
+        # scan — a "block" tenant promises fail-closed on ANY identity
+        # PII, and names are NER-only findings, so the block path must
+        # scan with NER enabled. The default "allow" path keeps the cheap
+        # regex-only scan (image prompts legitimately name their subjects;
+        # only the credential class matters there).
+        from app.models.tenant import TenantORM
+
+        tenant = await session.get(TenantORM, auth.tenant_id)
+        egress_policy_blocks = tenant is not None and str(
+            getattr(tenant, "media_pii_egress", "allow") or "allow"
+        ) == "block"
+
         detection = await orch._scan_text_as_result_async(
-            payload.prompt, direction="input", ner_enabled=False
+            payload.prompt, direction="input", ner_enabled=egress_policy_blocks
         )
         enforcement = orch._scan_and_evaluate(detection, profile)
         dlp_findings = len(enforcement.match_actions)
@@ -236,6 +251,43 @@ async def generate_images(
             raise DLPViolationError(
                 "Image prompt blocked by content policy.",
                 details={"direction": "input", "categories": ["CONTENT_POLICY"]},
+            )
+
+        # Phase 9 (A4): identity PII passing through raw is subject to the
+        # tenant's media_pii_egress policy — "block" fails closed; the
+        # default "allow" proceeds but flags the request's OWN log row
+        # (below, via dlp_action) as a raw egress for the compliance view.
+        if enforcement.match_actions and not enforcement.requires_transformation:
+            from app.services.dlp.egress_policy import (
+                RAW_EGRESS_POLICY_ACTION,
+                audit_raw_egress,
+            )
+
+            if egress_policy_blocks:
+                await _persist(
+                    orch, session, request_id=request_id, auth=auth, model=model,
+                    status=RequestStatus.BLOCKED,
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                    cost_usd=0.0, policy_action="block", dlp_findings=dlp_findings,
+                    input_masked="[BLOCKED_BY_TENANT_EGRESS_POLICY]",
+                )
+                raise DLPViolationError(
+                    "Image prompt contains personal data and this tenant's "
+                    "policy blocks unmasked media-generation egress.",
+                    details={"direction": "input", "policy": "block"},
+                )
+            dlp_action = RAW_EGRESS_POLICY_ACTION
+            # Phase 10 (A3): itemized raw-egress audit row — the same
+            # ``audit_raw_egress`` helper the search/media channels use,
+            # so all three channels write identical, category-itemized
+            # findings JSON (counts only, never values).
+            await audit_raw_egress(
+                session,
+                channel="media_gen",
+                tenant_id=str(auth.tenant_id),
+                project_id=str(getattr(auth, "project_id", "") or ""),
+                user_id=getattr(auth, "log_user_id", None),
+                detection=detection,
             )
 
         if enforcement.requires_transformation:

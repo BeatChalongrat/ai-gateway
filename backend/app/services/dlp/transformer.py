@@ -603,10 +603,18 @@ SECRET_DETECTORS: set[str] = {
 }
 
 # Detectors whose findings are NOT masked at all — the original value
-# survives untouched. Used so the LLM can do arithmetic on values like
-# income figures that are sensitive in aggregate but useless to the
-# assistant without the number.
-BYPASS_DETECTORS: set[str] = {"income"}
+# survives untouched.
+#
+# ``income`` was previously bypassed so the LLM could do arithmetic on
+# salary figures. That coupled two decisions unsafely: it relied on name
+# masking to unlink identity from the raw salary, but Thai-name coverage
+# is far below the level that assumption needs, so a bypassed salary and
+# a leaked name reached the provider in the same span (re-linkable). The
+# ``income`` detector only fires on an explicit salary/income label (not
+# on product prices like "ราคา 500 บาท"), so masking it is safe. Secure-
+# calc (which computes on the raw value server-side) remains the path for
+# legitimate salary arithmetic when enabled.
+BYPASS_DETECTORS: set[str] = set()
 
 # Phase 2A.1 — V2 numeric metadata accessors + message-index binding.
 _POLICY_V2_KEY = "policy_v2"

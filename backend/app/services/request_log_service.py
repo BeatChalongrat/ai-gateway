@@ -21,6 +21,7 @@ def _build_request_log_orm(record: RequestRecord) -> RequestLogORM:
         request_id=record.request_id,
         tenant_id=record.tenant_id,
         project_id=record.project_id,
+        user_id=record.user_id,
         provider=record.provider,
         model=record.model,
         status=record.status.value if hasattr(record.status, "value") else str(record.status),

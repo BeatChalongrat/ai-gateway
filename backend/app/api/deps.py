@@ -53,6 +53,17 @@ class ResolvedApiKey:
     # always ``None`` — a public client's header is ignored, exactly like
     # ``X-User-ID``. This is an opaque locator, NOT proof of ownership.
     trusted_conversation_id: str | None = None
+    # Owning portal user of the API key itself (``api_keys.portal_user_id``,
+    # already loaded during verification — zero extra queries). Used with
+    # ``portal_user_id`` for request-log attribution; the resolution order
+    # (owner first, trusted end-user second) mirrors the billing layer's
+    # ``portal_credit_check._resolve_billable_user``.
+    key_owner_portal_user_id: str | None = None
+
+    @property
+    def log_user_id(self) -> str | None:
+        """Portal user this request should be attributed to, or None."""
+        return self.key_owner_portal_user_id or self.portal_user_id
 
 
 def get_db_session() -> Generator[Session, None, None]:
@@ -258,6 +269,7 @@ def get_resolved_api_key(
             portal_user_id=portal_user_id,
             internal_trusted=_internal_trusted,
             trusted_conversation_id=_trusted_conv_id,
+            key_owner_portal_user_id=getattr(api_key, "portal_user_id", None),
         )
         session.commit()
         return resolved

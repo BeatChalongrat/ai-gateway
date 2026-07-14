@@ -13,6 +13,14 @@ class RequestLogORM(Base):
     request_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(36), index=True)
     project_id: Mapped[str] = mapped_column(String(36), index=True)
+    # Portal user this request is attributed to (migration 062):
+    # api_keys.portal_user_id for portal-owned keys, or the trusted
+    # X-User-ID behind a shared web-chat key. NULL for admin/tenant
+    # keys — intentionally NOT a FK so log writes never fail on a
+    # deleted user.
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     provider: Mapped[str] = mapped_column(String(100))
     model: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50))

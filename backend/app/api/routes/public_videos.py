@@ -86,7 +86,12 @@ async def generate_video(
     user_id, _balance = await _resolve_user(auth, session)
 
     mc = await validate_model_capability(session, payload.model, "supports_video_gen")
-    await scan_media_prompt_with_profile(payload.prompt, session)
+    await scan_media_prompt_with_profile(
+        payload.prompt, session,
+        tenant_id=auth.tenant_id,
+        project_id=str(getattr(auth, "project_id", "") or ""),
+        user_id=user_id,
+    )
 
     duration = max(1, min(int(payload.duration_sec or 5), _max_video_seconds()))
     meta = {
@@ -262,8 +267,10 @@ async def get_job_output(
     path = meta.get("output_path")
     if job.status != "done" or not path or not os.path.exists(path):
         raise HTTPException(status_code=404, detail="no output available")
+    # Phase 10 (A1): the persisted artifact carries the correct extension
+    # for its modality (mp4/mp3/wav/…) — surface that name on download.
     return FileResponse(
         path,
-        media_type=meta.get("content_type", "video/mp4"),
-        filename=f"{job_id}.{ 'mp4' if str(meta.get('content_type','')).startswith('video') else 'bin'}",
+        media_type=meta.get("content_type", "application/octet-stream"),
+        filename=os.path.basename(path),
     )

@@ -11,6 +11,7 @@ import asyncio
 import httpx
 
 from app.core.exceptions import (
+    ContextLengthExceededError,
     ProviderError,
     ProviderTimeoutError,
     ProviderUnavailableError,
@@ -20,6 +21,41 @@ from app.core.exceptions import (
 
 # HTTP status codes that are retryable
 _RETRYABLE_STATUS = {429, 500, 502, 503}
+
+# Context-window-exceeded signatures, matched case-insensitively against a
+# provider 400 body (and ONLY a 400 — a 5xx that mentions tokens is a server
+# fault, not an oversized prompt). Each entry is a tuple of substrings that
+# must ALL appear. Extend here when a new provider phrasing shows up.
+CONTEXT_LENGTH_SIGNATURES: tuple[tuple[str, ...], ...] = (
+    ("maximum context length",),                 # OpenAI-compatible
+    ("context window", "token"),                 # OpenAI-compatible variants
+    ("prompt is too long",),                     # Anthropic
+    ("exceeds the maximum number of tokens",),   # Google / Gemini
+    ("input token count", "exceeds"),            # Google / Gemini
+)
+
+# OpenAI-compatible providers also send a machine-readable error code.
+_CONTEXT_LENGTH_ERROR_CODE = "context_length_exceeded"
+
+
+def _is_context_length_error(body: dict | str) -> bool:
+    """True when a provider 400 body carries a context-window signature."""
+    if isinstance(body, dict):
+        error = body.get("error")
+        code = error.get("code") if isinstance(error, dict) else None
+        if isinstance(code, str) and code.lower() == _CONTEXT_LENGTH_ERROR_CODE:
+            return True
+    lowered = str(body).lower()
+    return any(all(part in lowered for part in sig) for sig in CONTEXT_LENGTH_SIGNATURES)
+
+
+def _provider_message(body: dict | str) -> str:
+    """Extract the provider's human-readable error message from its body."""
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"][:500]
+    return str(body)[:500]
 
 
 def map_provider_error(exc: Exception, provider_name: str) -> Exception:
@@ -91,6 +127,16 @@ def map_provider_error(exc: Exception, provider_name: str) -> Exception:
             )
 
         if status >= 400:
+            if status == 400 and _is_context_length_error(body):
+                # Typed so clients can trim and retry instead of guessing
+                # from a generic 502. NOT fallback-eligible by design —
+                # a too-long prompt fails on every provider.
+                return ContextLengthExceededError(
+                    details={
+                        "provider": provider_name,
+                        "provider_message": _provider_message(body),
+                    },
+                )
             return UpstreamBadResponseError(
                 f"Provider '{provider_name}' rejected request ({status}).",
                 details={"provider": provider_name, "status": status, "body": body},

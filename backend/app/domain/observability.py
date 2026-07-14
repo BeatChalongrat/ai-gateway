@@ -115,6 +115,13 @@ class RequestRecord:
     original_provider: str | None = None
     original_model: str | None = None
 
+    # Portal user attribution (migration 062) — resolved by the auth
+    # layer (api_keys.portal_user_id first, trusted X-User-ID second)
+    # and threaded through RequestContext.user_id. None when the caller
+    # isn't bound to a portal user (admin/tenant keys, admin JWT).
+    # Declared LAST so every positional call site keeps working.
+    user_id: str | None = None
+
     def complete(
         self,
         status: RequestStatus = RequestStatus.SUCCESS,

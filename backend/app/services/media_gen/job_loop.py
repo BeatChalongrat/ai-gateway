@@ -140,6 +140,88 @@ async def _claim_one(session) -> str | None:
         await session.commit()
 
 
+# --- Output extension / MIME resolution (Phase 10, A1) ---------------------
+#
+# The artifact filename and stored content_type must match the job's
+# modality: a ``replicate_music`` / TTS result persisted as ``<id>.mp4`` +
+# ``video/mp4`` breaks downstream players and downloads. Precedence:
+#   1. the adapter's ``result_metadata["content_type"]`` (TTS adapters set
+#      ``audio/mpeg``; the mock video adapter sets ``video/mp4``);
+#   2. the result URL's file extension (Replicate delivery URLs end in
+#      ``.mp3`` / ``.wav`` / ``.mp4``);
+#   3. a per-``job_type`` default (video → mp4, music/audio_tts → mp3).
+
+_EXT_BY_CONTENT_TYPE: dict[str, str] = {
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/ogg": ".ogg",
+    "audio/flac": ".flac",
+    "audio/x-flac": ".flac",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
+    "audio/webm": ".weba",
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+}
+
+_DEFAULT_BY_JOB_TYPE: dict[str, tuple[str, str]] = {
+    "video": ("video/mp4", ".mp4"),
+    "music": ("audio/mpeg", ".mp3"),
+    "audio_tts": ("audio/mpeg", ".mp3"),
+}
+
+
+def resolve_output_ext_and_type(
+    job_type: str,
+    result_meta: dict | None = None,
+    result_url: str | None = None,
+) -> tuple[str, str]:
+    """Return ``(extension, content_type)`` for a finished job's artifact.
+
+    Shared by the job-loop and the Replicate-webhook persistence paths so
+    both write identical filenames/MIME for the same job. Never raises —
+    an unknown job type with no adapter hint falls back to
+    ``application/octet-stream`` / ``.bin`` rather than mislabeling the
+    bytes as video.
+    """
+    # 1. Adapter-reported content type wins.
+    ct = str((result_meta or {}).get("content_type") or "").strip().lower()
+    ct = ct.split(";", 1)[0].strip()  # drop any "; charset=..." suffix
+    if ct:
+        ext = _EXT_BY_CONTENT_TYPE.get(ct)
+        if ext is None:
+            import mimetypes
+
+            ext = mimetypes.guess_extension(ct) or ".bin"
+        return ext, ct
+
+    # 2. Derive from the result URL's file extension.
+    if result_url:
+        from urllib.parse import urlsplit
+
+        path = urlsplit(str(result_url)).path
+        _, dot, url_ext = path.rpartition(".")
+        if dot and 0 < len(url_ext) <= 5 and url_ext.isalnum():
+            import mimetypes
+
+            guessed, _enc = mimetypes.guess_type(f"x.{url_ext.lower()}")
+            if guessed:
+                return f".{url_ext.lower()}", guessed
+
+    # 3. Per-job_type default.
+    default_ct, default_ext = _DEFAULT_BY_JOB_TYPE.get(
+        job_type, ("application/octet-stream", ".bin")
+    )
+    return default_ext, default_ct
+
+
 def _coerce_meta(meta) -> dict:
     if isinstance(meta, dict):
         return meta
@@ -230,7 +312,12 @@ async def _process_job(session, job_id: str) -> None:
                 await asyncio.sleep(interval)
 
         data = await adapter.fetch_result_bytes(result_url)
-        out_path = os.path.join(_output_dir(), f"{job_id}.mp4")
+        # Phase 10 (A1): derive extension + MIME from the job type / adapter
+        # result — a music/TTS artifact must not be persisted as ``.mp4``.
+        ext, content_type = resolve_output_ext_and_type(
+            job.job_type, result_meta, result_url
+        )
+        out_path = os.path.join(_output_dir(), f"{job_id}{ext}")
         with open(out_path, "wb") as fh:
             fh.write(data)
 
@@ -244,7 +331,7 @@ async def _process_job(session, job_id: str) -> None:
 
         job.output_metadata = {
             "output_path": out_path,
-            "content_type": (result_meta or {}).get("content_type", "video/mp4"),
+            "content_type": content_type,
             "size": len(data),
             "provenance": build_provenance(provider, job.model_id, result_meta),
         }

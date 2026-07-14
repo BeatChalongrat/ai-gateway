@@ -185,8 +185,12 @@ class TestPseudonymForceMask:
         monkeypatch.setattr(cfg.settings, "dlp_policy_engine_v2_shadow", True)
         monkeypatch.setattr(cfg.settings, "dlp_pseudonym_mode", True)
         out = _mask_multi([("user", "เงินเดือน 50000")])
-        # Legacy + pseudonym bypass → value survives (unchanged behavior).
-        assert out[0] == "เงินเดือน 50000"
+        # Legacy + pseudonym: shadow V2 does not change the authoritative
+        # decision. The income value is now MASKED (BYPASS_DETECTORS was
+        # emptied — the old raw-salary bypass is gone), so the raw number
+        # must not survive.
+        assert out[0] != "เงินเดือน 50000"
+        assert "50000" not in out[0]
 
 
 # ---------------------------------------------------------------------------

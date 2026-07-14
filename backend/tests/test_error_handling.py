@@ -17,6 +17,7 @@ from app.core.exceptions import (
     AuthenticationError,
     AuthorizationError,
     ConflictError,
+    ContextLengthExceededError,
     DLPViolationError,
     GatewayError,
     InternalServiceError,
@@ -108,6 +109,13 @@ async def _raise_unavailable():
 @_test_router.get("/upstream_bad_response")
 async def _raise_upstream():
     raise UpstreamBadResponseError()
+
+
+@_test_router.get("/context_length")
+async def _raise_context_length():
+    raise ContextLengthExceededError(
+        details={"provider": "openai", "provider_message": "maximum context length is 128000 tokens"},
+    )
 
 
 @_test_router.get("/internal")
@@ -202,6 +210,7 @@ _EXCEPTION_STATUS_CASES = [
     ("provider_timeout", 504),
     ("provider_unavailable", 503),
     ("upstream_bad_response", 502),
+    ("context_length", 400),
     ("internal", 500),
 ]
 
@@ -254,6 +263,15 @@ class TestResponseEnvelope:
         resp = client.get("/_test_errors/authentication")
         body = resp.json()
         assert "details" not in body["error"]
+
+    def test_context_length_envelope(self):
+        resp = client.get("/_test_errors/context_length")
+        body = resp.json()
+        assert resp.status_code == 400
+        assert body["error"]["code"] == "context_length_exceeded"
+        assert "context window" in body["error"]["message"]
+        assert body["error"]["details"]["provider"] == "openai"
+        assert "provider_message" in body["error"]["details"]
 
 
 # ---------------------------------------------------------------------------

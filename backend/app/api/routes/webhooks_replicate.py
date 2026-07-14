@@ -99,7 +99,13 @@ async def replicate_webhook(
         except Exception:  # noqa: BLE001 — leave the job in-flight for the poll fallback
             log.exception("replicate webhook: fetch failed for job %s", job.id)
             return _OK
-        out_path = os.path.join(_output_dir(), f"{job.id}.mp4")
+        # Phase 10 (A1): derive extension + MIME from the job type / result
+        # URL — a ``replicate_music`` artifact must not be persisted as
+        # ``.mp4`` + ``video/mp4``. Same helper as the job-loop path.
+        from app.services.media_gen.job_loop import resolve_output_ext_and_type
+
+        ext, content_type = resolve_output_ext_and_type(job.job_type, None, url)
+        out_path = os.path.join(_output_dir(), f"{job.id}{ext}")
         with open(out_path, "wb") as fh:
             fh.write(data)
         actual = int(job.estimated_cost_credits)
@@ -107,7 +113,7 @@ async def replicate_webhook(
         job.progress_pct = 100
         job.output_metadata = {
             "output_path": out_path,
-            "content_type": "video/mp4",
+            "content_type": content_type,
             "size": len(data),
         }
         job.actual_cost_credits = actual

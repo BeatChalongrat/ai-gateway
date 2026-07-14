@@ -145,8 +145,11 @@ def test_secret_class_keeps_rN(pseudonym_on):
 # ---------------------------------------------------------------------------
 
 
-def test_income_bypassed(pseudonym_on):
-    """Income findings are NOT masked — value reaches the LLM untouched."""
+def test_income_masked(pseudonym_on):
+    """Income findings ARE masked now — the raw-salary bypass was removed
+    (BYPASS_DETECTORS emptied) because relying on name masking to unlink
+    identity from a raw salary was unsafe at the current Thai-name
+    coverage. The value must not reach the LLM."""
     text = "เงินเดือน 85,000 บาท"
     amount_start = text.index("85,000")
     actions = [
@@ -161,10 +164,8 @@ def test_income_bypassed(pseudonym_on):
     ]
     masked, span_map, _ = DLPTransformer().mask_text(text, actions)
 
-    assert "85,000" in masked
-    assert "<r0>" not in masked
-    assert "<<INCOME_1>>" not in masked
-    assert span_map == {}
+    assert "85,000" not in masked
+    assert span_map != {}
 
 
 # ---------------------------------------------------------------------------

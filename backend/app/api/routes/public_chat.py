@@ -526,6 +526,7 @@ async def chat_completions(
                         session,
                         RequestRecord(
                             request_id=ctx.request_id or "",
+                            user_id=ctx.user_id,
                             tenant_id=ctx.tenant_id,
                             project_id=ctx.project_id,
                             provider="",
@@ -756,6 +757,7 @@ async def chat_completions(
                     session,
                     RequestRecord(
                         request_id=ctx.request_id or "",
+                        user_id=ctx.user_id,
                         tenant_id=ctx.tenant_id,
                         project_id=ctx.project_id,
                         provider="",
@@ -832,6 +834,7 @@ async def chat_completions(
                             session,
                             RequestRecord(
                                 request_id=ctx.request_id or "",
+                                user_id=ctx.user_id,
                                 tenant_id=ctx.tenant_id,
                                 project_id=ctx.project_id,
                                 provider="",
@@ -920,8 +923,11 @@ async def chat_completions(
     # non-streaming model).
     adapter = orchestrator.provider_dispatcher.adapters.get(route.provider_name)
     if adapter is None or not adapter.supports_streaming:
+        # Preflight (rate/quota/budget/credit) already ran in
+        # resolve_streaming_context above — skip it here so this single
+        # request doesn't consume two rate-limit slots.
         return await orchestrator.handle_chat_completion(
-            auth=auth, payload=payload, session=session
+            auth=auth, payload=payload, session=session, _preflight_done=True
         )
 
     # 4. Resolve provider API key.
@@ -1081,6 +1087,7 @@ async def chat_completions(
                     session,
                     RequestRecord(
                         request_id=ctx.request_id or "",
+                        user_id=ctx.user_id,
                         tenant_id=ctx.tenant_id,
                         project_id=ctx.project_id,
                         provider="secure_calc",
@@ -1181,6 +1188,9 @@ async def chat_completions(
         emitted_parts: list[str] = []
         accumulated_outbound_actions = []
         counters_mut = dict(inbound_counters)
+        _stream_finalized = False
+        ai_to_service_masked = ""
+        full_text = ""
         # 4A.1.2: gateway-minted outbound stream tokens (provenance set).
         # Reserved from the scoped counter under V2; NEVER restored.
         outbound_generated_tokens: set[str] = set()
@@ -1655,385 +1665,645 @@ async def chat_completions(
             yield _emit_fallback_info()
             _fallback_notice_emitted = True
 
-        while True:
+        def _finalize_stream(client_disconnected: bool):
+            nonlocal _stream_finalized, ai_to_service_masked, full_text
+            if _stream_finalized:
+                return
+            _stream_finalized = True
             try:
-                async for chunk in stream_adapter.stream_chat(
-                    payload, messages_to_send,
-                    resolved_model=route.model_name,
-                    api_key=stream_api_key,
-                ):
-                    # Reasoning / thinking branch (T2). Runs before the
-                    # content / tool_calls branches because Anthropic
-                    # emits thinking blocks BEFORE the visible text;
-                    # processing reasoning first keeps the
-                    # ``analysis_status: started → completed`` ordering
-                    # natural. Always accumulate reasoning text for
-                    # the post-stream usage estimate even when the
-                    # caller didn't opt in to ``show_summary`` — the
-                    # token count is part of billing and must reflect
-                    # actual model spend.
-                    if chunk.reasoning_delta:
-                        _reasoning_text_total += chunk.reasoning_delta
-                        if _show_reasoning:
-                            if not _reasoning_started:
-                                _reasoning_started = True
-                                yield _emit_analysis_status("started")
-                                first_chunk_yielded = True
-                            # T3 rolling-window DLP. Same pattern as
-                            # the content channel: scan
-                            # tail+new_chunk together, emit everything
-                            # except the last MIN_TAIL_CHARS, retain
-                            # the tail so PII spanning a chunk
-                            # boundary still matches when the second
-                            # half arrives. Boundary-split protection
-                            # for masked tokens (``<<...>>`` and
-                            # ``<...>``) mirrors the content path so
-                            # an already-masked placeholder is never
-                            # split mid-stream.
-                            r_window = _reasoning_tail_masked + chunk.reasoning_delta
-                            r_masked_window, r_actions = await _dlp_scan_and_mask(r_window)
-                            if r_actions:
-                                accumulated_outbound_actions.extend(r_actions)
-                            if len(r_masked_window) > MIN_TAIL_CHARS:
-                                r_safe = r_masked_window[:-MIN_TAIL_CHARS]
-                                _reasoning_tail_masked = r_masked_window[-MIN_TAIL_CHARS:]
-                                # Pull a trailing ``<<...`` (no
-                                # matching ``>>``) back into the tail
-                                # so we never split a pseudonym token.
-                                _last_dbl_open = r_safe.rfind("<<")
-                                _last_dbl_close = r_safe.rfind(">>")
+                if client_disconnected:
+                    log.info(
+                        "stream_client_disconnected",
+                        request_id=ctx.request_id or "",
+                    )
+                # Capture DLP trace + build the response-enforcement summary
+                # from the per-chunk match actions we accumulated. overall_action
+                # is computed from match_actions automatically.
+                output_raw = cumulative_raw
+                ai_to_service_masked = "".join(masked_provider_parts)
+                full_text = "".join(emitted_parts)
+                response_enforcement = EnforcementDecision(
+                    match_actions=accumulated_outbound_actions,
+                    policy_profile_id=profile.profile_id,
+                )
+
+                # 4. Persist DLP summary + basic request metrics. Mirrors the
+                # fields populated by GatewayOrchestrator.handle_chat_completion.
+                # The dependency-injected `session` is closed by the time this
+                # generator runs (route returned StreamingResponse → get_db_session
+                # already hit its finally block), so we mint a fresh session via
+                # the per-request factory captured at route entry (see #6 note
+                # at chat_completions where ``log_session_factory`` is bound).
+
+                overall_action = max(
+                    input_enforcement.overall_action,
+                    response_enforcement.overall_action,
+                )
+
+                # Admin Secure Trace is request-process memory only. It must never be
+                # written to request_logs or emitted to app logs.
+                try:
+                    from app.services.secure_trace_store import (
+                        SecureTraceRecord,
+                        secure_trace_store,
+                    )
+
+                    secure_trace_store.put(
+                        SecureTraceRecord(
+                            request_id=ctx.request_id or "",
+                            tenant_id=ctx.tenant_id,
+                            project_id=ctx.project_id,
+                            user_to_service=input_raw,
+                            service_to_ai=input_masked,
+                            ai_to_service=ai_to_service_masked,
+                            service_to_user=full_text,
+                            policy_action=overall_action.name.lower(),
+                            findings_count=(
+                                len(input_enforcement.match_actions)
+                                + len(response_enforcement.match_actions)
+                            ),
+                            detectors=sorted(
+                                {
+                                    ma.match.detector_name
+                                    for ma in (
+                                        input_enforcement.match_actions
+                                        + response_enforcement.match_actions
+                                    )
+                                }
+                            ),
+                            created_at=time.time(),
+                        )
+                    )
+                except Exception as exc:
+                    log.warning("secure_trace_capture_failed", **_safe_exc(exc, "secure_trace_capture"))
+                dlp_categories = sorted(
+                    {ma.match.category for ma in input_enforcement.match_actions}
+                    | {ma.match.category for ma in response_enforcement.match_actions}
+                )
+
+                # Resolve usage: prefer provider-reported counts (from the trailing
+                # usage chunk under stream_options.include_usage); fall back to the
+                # heuristic estimator when the provider didn't surface them.
+                # T3: reasoning_tokens resolution mirrors the non-stream
+                # orchestrator path — provider-reported takes precedence; fall
+                # back to a length estimate on the streamed reasoning text
+                # (~4 chars/token) for Anthropic which folds thinking into
+                # ``output_tokens``. Result is plumbed onto UsageInfo and into
+                # the request_log row so the admin dashboard can attribute
+                # spend to reasoning separately from regular completion.
+                _stream_reasoning_tok = 0
+                if provider_usage is not None and provider_usage.reasoning_tokens:
+                    _stream_reasoning_tok = provider_usage.reasoning_tokens
+                elif _reasoning_text_total:
+                    _stream_reasoning_tok = max(1, len(_reasoning_text_total) // 4)
+                # Cap at completion_tokens so the reasoning_cost attribution can
+                # never exceed the completion cost it is a subset of (non-additive
+                # — estimated_cost_usd is the all-in total). Mirrors the
+                # non-streaming orchestrator path.
+                if provider_usage is not None and provider_usage.completion_tokens:
+                    _stream_reasoning_tok = min(
+                        _stream_reasoning_tok, provider_usage.completion_tokens
+                    )
+
+                if provider_usage is not None:
+                    from app.services.currency_service import currency_service
+                    _usd = _estimate_cost(
+                        route.model_name,
+                        provider_usage.prompt_tokens,
+                        provider_usage.completion_tokens,
+                        provider_usage.cached_prompt_tokens,
+                        # P1 Item 4 — Anthropic cache-write tokens (1.25× input).
+                        getattr(provider_usage, "cache_creation_prompt_tokens", 0),
+                    )
+                    _cost_info = currency_service.format_cost(_usd)
+                    usage = UsageInfo(
+                        prompt_tokens=provider_usage.prompt_tokens,
+                        completion_tokens=provider_usage.completion_tokens,
+                        total_tokens=provider_usage.total_tokens,
+                        estimated_cost_usd=_usd,
+                        cost_thb=_cost_info["thb"],
+                        cost_display=_cost_info["display"],
+                        reasoning_tokens=_stream_reasoning_tok or None,
+                    )
+                else:
+                    usage = orchestrator.usage_service.estimate(
+                        payload=payload,
+                        response_text=full_text,
+                        model_name=route.model_name,
+                    )
+                    if _stream_reasoning_tok:
+                        usage = usage.model_copy(update={
+                            "reasoning_tokens": _stream_reasoning_tok,
+                        })
+
+                latency_ms = int((time.perf_counter() - t_start) * 1000)
+
+                # Serialize the streaming fallback attempt log (if any) for
+                # the request_log row. The JSONB column on RequestLogORM
+                # serializes the list itself — keep it as a Python list here
+                # to match the non-streaming orchestrator's contract and
+                # avoid double-encoding.
+                _stream_fallback_attempts_list: list[dict] | None = (
+                    _stream_fallback_attempts if _stream_fallback_attempts else None
+                )
+
+                log_session = log_session_factory()
+                try:
+                    orchestrator.request_log_service.persist(
+                        log_session,
+                        RequestRecord(
+                            request_id=ctx.request_id or "",
+                            user_id=ctx.user_id,
+                            tenant_id=ctx.tenant_id,
+                            project_id=ctx.project_id,
+                            provider=route.provider_name,
+                            # ``final_model`` tracks the chunk-reported model;
+                            # resolves the OpenRouter fallback "auto" sentinel
+                            # so usage aggregation never shows "auto" rows.
+                            model=resolved_log_model(route.model_name, final_model),
+                            status=RequestStatus.SUCCESS,
+                            policy_action=overall_action.name.lower(),
+                            policy_profile_id=profile.profile_id,
+                            latency_ms=latency_ms,
+                            prompt_tokens=usage.prompt_tokens,
+                            completion_tokens=usage.completion_tokens,
+                            total_tokens=usage.total_tokens,
+                            estimated_cost_usd=usage.estimated_cost_usd,
+                            # T3: persist reasoning attribution. Defaults to 0
+                            # on non-reasoning streams so the request_log row
+                            # is byte-identical to the pre-T3 shape.
+                            reasoning_tokens=_stream_reasoning_tok,
+                            reasoning_cost=_estimate_reasoning_cost(
+                                route.model_name, _stream_reasoning_tok
+                            ),
+                            fallback_used=_stream_fallback_used,
+                            fallback_attempts=_stream_fallback_attempts_list,
+                            original_provider=_stream_original_provider,
+                            original_model=_stream_original_model,
+                            dlp_input_findings=len(input_enforcement.match_actions),
+                            dlp_input_action=input_enforcement.overall_action.name.lower(),
+                            dlp_output_findings=len(response_enforcement.match_actions),
+                            dlp_categories=dlp_categories,
+                            router_used=router_used,
+                            # 4-stage DLP trace — see orchestrator success path
+                            # for column semantics. Streaming captures the
+                            # outbound-masked AI text in ``ai_to_service_masked``
+                            # (joined ``masked_provider_parts``); ``full_text`` is
+                            # the post-restore content the user actually saw.
+                            input_raw=safe_input_snapshot(
+                                input_raw, input_masked, input_enforcement
+                            ),
+                            input_masked=safe_input_masked_snapshot(
+                                input_masked, input_enforcement
+                            ),
+                            output_raw=safe_output_raw_snapshot(
+                                ai_to_service_masked, response_enforcement
+                            ),
+                            # 4A.2.3 — provider-safe (masked) only; never the
+                            # restored ``full_text`` display.
+                            output_final=safe_output_final_snapshot(
+                                ai_to_service_masked, response_enforcement
+                            ),
+                            input_raw_encrypted=input_raw_encrypted,
+                            dlp_findings_json=build_dlp_findings_json(
+                                input_enforcement.match_actions,
+                                response_enforcement.match_actions,
+                                span_map=span_map,
+                            ),
+                        ),
+                    )
+                    log_session.commit()
+
+                    # Alert evaluation moved OFF the request path (Phase-1 B6) — a
+                    # periodic background sweep (lifespan _alert_evaluation_sweep)
+                    # runs AlertEvaluator.evaluate_all instead, so the streaming
+                    # completion no longer pays the enabled-rules SELECT + the
+                    # get_by_id read-back + window aggregates on the loop.
+                except Exception:
+                    # Logging failures must never break the stream.
+                    log_session.rollback()
+                finally:
+                    log_session.close()
+
+                # Portal credit deduction — cost-based, mirrors the non-stream
+                # orchestrator hook (10b): real USD cost × tenant markup ×
+                # USAGE_CREDITS_PER_USD (min 1 credit). Debits the key's owning
+                # portal user, or the TRUSTED end-user behind a shared key
+                # (web-chat). Own short session — a ledger failure must never
+                # break the already-delivered stream.
+                try:
+                    from app.services.gateway.portal_credit_check import (
+                        deduct_portal_credit,
+                    )
+
+                    credit_session = log_session_factory()
+                    try:
+                        deduct_portal_credit(
+                            credit_session,
+                            str(auth.key_id) if auth else "",
+                            ctx.request_id or "",
+                            cost_usd=float(usage.estimated_cost_usd or 0.0),
+                            tokens_used=int(usage.total_tokens or 0),
+                            tenant_id=str(ctx.tenant_id),
+                            portal_user_id=getattr(auth, "portal_user_id", None),
+                        )
+                        credit_session.commit()
+                    except Exception:
+                        credit_session.rollback()
+                        raise
+                    finally:
+                        credit_session.close()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("portal_credit_deduct_failed", error=str(exc))
+            except Exception as exc:
+                log.warning(
+                    "stream_finalize_failed",
+                    **_safe_exc(exc, "stream_finalize"),
+                )
+
+        try:
+            while True:
+                try:
+                    async for chunk in stream_adapter.stream_chat(
+                        payload, messages_to_send,
+                        resolved_model=route.model_name,
+                        api_key=stream_api_key,
+                    ):
+                        # Reasoning / thinking branch (T2). Runs before the
+                        # content / tool_calls branches because Anthropic
+                        # emits thinking blocks BEFORE the visible text;
+                        # processing reasoning first keeps the
+                        # ``analysis_status: started → completed`` ordering
+                        # natural. Always accumulate reasoning text for
+                        # the post-stream usage estimate even when the
+                        # caller didn't opt in to ``show_summary`` — the
+                        # token count is part of billing and must reflect
+                        # actual model spend.
+                        if chunk.reasoning_delta:
+                            _reasoning_text_total += chunk.reasoning_delta
+                            if _show_reasoning:
+                                if not _reasoning_started:
+                                    _reasoning_started = True
+                                    yield _emit_analysis_status("started")
+                                    first_chunk_yielded = True
+                                # T3 rolling-window DLP. Same pattern as
+                                # the content channel: scan
+                                # tail+new_chunk together, emit everything
+                                # except the last MIN_TAIL_CHARS, retain
+                                # the tail so PII spanning a chunk
+                                # boundary still matches when the second
+                                # half arrives. Boundary-split protection
+                                # for masked tokens (``<<...>>`` and
+                                # ``<...>``) mirrors the content path so
+                                # an already-masked placeholder is never
+                                # split mid-stream.
+                                r_window = _reasoning_tail_masked + chunk.reasoning_delta
+                                r_masked_window, r_actions = await _dlp_scan_and_mask(r_window)
+                                if r_actions:
+                                    accumulated_outbound_actions.extend(r_actions)
+                                if len(r_masked_window) > MIN_TAIL_CHARS:
+                                    r_safe = r_masked_window[:-MIN_TAIL_CHARS]
+                                    _reasoning_tail_masked = r_masked_window[-MIN_TAIL_CHARS:]
+                                    # Pull a trailing ``<<...`` (no
+                                    # matching ``>>``) back into the tail
+                                    # so we never split a pseudonym token.
+                                    _last_dbl_open = r_safe.rfind("<<")
+                                    _last_dbl_close = r_safe.rfind(">>")
+                                    if (
+                                        _last_dbl_open != -1
+                                        and _last_dbl_close < _last_dbl_open
+                                    ):
+                                        _reasoning_tail_masked = (
+                                            r_safe[_last_dbl_open:] + _reasoning_tail_masked
+                                        )
+                                        r_safe = r_safe[:_last_dbl_open]
+                                    # Same guard for legacy ``<rN>`` shape.
+                                    _last_lt = r_safe.rfind("<")
+                                    if _last_lt != -1 and r_safe.rfind(">") < _last_lt:
+                                        _reasoning_tail_masked = (
+                                            r_safe[_last_lt:] + _reasoning_tail_masked
+                                        )
+                                        r_safe = r_safe[:_last_lt]
+                                    if r_safe:
+                                        yield _emit_reasoning_chunk(r_safe)
+                                else:
+                                    _reasoning_tail_masked = r_masked_window
+                        # Analysis-status transition: any non-reasoning
+                        # signal (content delta / tool_calls / finish)
+                        # arriving after reasoning started flips us into
+                        # the "completed" state exactly once. Gated on
+                        # ``_show_reasoning`` so we don't emit a phantom
+                        # ``completed`` to clients that never saw the
+                        # ``started`` event.
+                        if (
+                            _show_reasoning
+                            and _reasoning_started
+                            and not _reasoning_completed
+                            and (
+                                chunk.delta
+                                or chunk.tool_calls
+                                or chunk.finish_reason
+                            )
+                        ):
+                            _reasoning_completed = True
+                            yield _emit_analysis_status("completed")
+
+                        if chunk.delta:
+                            cumulative_raw += chunk.delta
+                            # Combine retained masked tail + new raw chunk text.
+                            # The scanner won't re-match already-masked placeholders
+                            # (`<EMAIL_1>` is not a valid email), so keeping masked
+                            # text in the tail is safe and deduplication-friendly.
+                            window = tail_masked + chunk.delta
+                            masked_window, actions = await _dlp_scan_and_mask(window)
+                            # Drop ``[[CAT_N]]`` shapes the model invented. Runs on
+                            # the full window (which already buffers split tokens
+                            # via ``tail_masked``) so a double-bracket spanning two
+                            # chunks is still caught when the closing ``]]`` lands.
+                            masked_window = sanitize_hallucinated_brackets(masked_window, span_map)
+                            if actions:
+                                accumulated_outbound_actions.extend(actions)
+
+                            if len(masked_window) > MIN_TAIL_CHARS:
+                                safe = masked_window[:-MIN_TAIL_CHARS]
+                                tail_masked = masked_window[-MIN_TAIL_CHARS:]
+                                # Guard against splitting an already-masked
+                                # token at the safe/tail boundary. Two
+                                # shapes to protect:
+                                #
+                                #   1. ``<<CAT_N>>`` (pseudonym mode) —
+                                #      could split as ``<<EMAI`` + ``L_1>>``
+                                #      OR as ``<<EMAIL_1>`` + ``>`` (just
+                                #      the closing ``>>`` split). Check for
+                                #      a trailing ``<<…`` with no matching
+                                #      ``>>`` after it.
+                                #   2. ``<rN>`` (legacy) — could split as
+                                #      ``<r`` + ``0>``. Check for a
+                                #      trailing single ``<`` with no
+                                #      matching ``>`` after it.
+                                #
+                                # Pass 1 must run first because case 2's
+                                # logic would only push from the second
+                                # ``<`` of ``<<`` and leak the first one.
+                                _last_dbl_open = safe.rfind("<<")
+                                _last_dbl_close = safe.rfind(">>")
                                 if (
                                     _last_dbl_open != -1
                                     and _last_dbl_close < _last_dbl_open
                                 ):
-                                    _reasoning_tail_masked = (
-                                        r_safe[_last_dbl_open:] + _reasoning_tail_masked
-                                    )
-                                    r_safe = r_safe[:_last_dbl_open]
-                                # Same guard for legacy ``<rN>`` shape.
-                                _last_lt = r_safe.rfind("<")
-                                if _last_lt != -1 and r_safe.rfind(">") < _last_lt:
-                                    _reasoning_tail_masked = (
-                                        r_safe[_last_lt:] + _reasoning_tail_masked
-                                    )
-                                    r_safe = r_safe[:_last_lt]
-                                if r_safe:
-                                    yield _emit_reasoning_chunk(r_safe)
-                            else:
-                                _reasoning_tail_masked = r_masked_window
-                    # Analysis-status transition: any non-reasoning
-                    # signal (content delta / tool_calls / finish)
-                    # arriving after reasoning started flips us into
-                    # the "completed" state exactly once. Gated on
-                    # ``_show_reasoning`` so we don't emit a phantom
-                    # ``completed`` to clients that never saw the
-                    # ``started`` event.
-                    if (
-                        _show_reasoning
-                        and _reasoning_started
-                        and not _reasoning_completed
-                        and (
-                            chunk.delta
-                            or chunk.tool_calls
-                            or chunk.finish_reason
-                        )
-                    ):
-                        _reasoning_completed = True
-                        yield _emit_analysis_status("completed")
-
-                    if chunk.delta:
-                        cumulative_raw += chunk.delta
-                        # Combine retained masked tail + new raw chunk text.
-                        # The scanner won't re-match already-masked placeholders
-                        # (`<EMAIL_1>` is not a valid email), so keeping masked
-                        # text in the tail is safe and deduplication-friendly.
-                        window = tail_masked + chunk.delta
-                        masked_window, actions = await _dlp_scan_and_mask(window)
-                        # Drop ``[[CAT_N]]`` shapes the model invented. Runs on
-                        # the full window (which already buffers split tokens
-                        # via ``tail_masked``) so a double-bracket spanning two
-                        # chunks is still caught when the closing ``]]`` lands.
-                        masked_window = sanitize_hallucinated_brackets(masked_window, span_map)
-                        if actions:
-                            accumulated_outbound_actions.extend(actions)
-
-                        if len(masked_window) > MIN_TAIL_CHARS:
-                            safe = masked_window[:-MIN_TAIL_CHARS]
-                            tail_masked = masked_window[-MIN_TAIL_CHARS:]
-                            # Guard against splitting an already-masked
-                            # token at the safe/tail boundary. Two
-                            # shapes to protect:
-                            #
-                            #   1. ``<<CAT_N>>`` (pseudonym mode) —
-                            #      could split as ``<<EMAI`` + ``L_1>>``
-                            #      OR as ``<<EMAIL_1>`` + ``>`` (just
-                            #      the closing ``>>`` split). Check for
-                            #      a trailing ``<<…`` with no matching
-                            #      ``>>`` after it.
-                            #   2. ``<rN>`` (legacy) — could split as
-                            #      ``<r`` + ``0>``. Check for a
-                            #      trailing single ``<`` with no
-                            #      matching ``>`` after it.
-                            #
-                            # Pass 1 must run first because case 2's
-                            # logic would only push from the second
-                            # ``<`` of ``<<`` and leak the first one.
-                            _last_dbl_open = safe.rfind("<<")
-                            _last_dbl_close = safe.rfind(">>")
-                            if (
-                                _last_dbl_open != -1
-                                and _last_dbl_close < _last_dbl_open
-                            ):
-                                tail_masked = safe[_last_dbl_open:] + tail_masked
-                                safe = safe[:_last_dbl_open]
-                            _last_lt = safe.rfind("<")
-                            if _last_lt != -1 and safe.rfind(">") < _last_lt:
-                                tail_masked = safe[_last_lt:] + tail_masked
-                                safe = safe[:_last_lt]
-                            masked_provider_parts.append(safe)
-                            # When a conversation_id is bound, every emit
-                            # needs the vault resolver so a token echoed from
-                            # an earlier turn is unmasked even though the
-                            # per-window scan returned no new findings.
-                            emit_text = _stream_restore(safe)
-                            # Strip any orphan ``<rN>`` the model invented
-                            # before the chunk hits the wire. Counter-mode
-                            # tokens (``<r5>``, ``<r12>``) are easy to
-                            # hallucinate, and the non-streaming path
-                            # already strips them at section P3 — without
-                            # this per-chunk pass the streaming user sees
-                            # bare ``<rN>`` placeholders the rest of the
-                            # pipeline would have removed. The 120-char
-                            # rolling tail upstream guarantees ``safe`` is
-                            # past the split-token risk window.
-                            from app.services.dlp.transformer import (
-                                redact_orphan_tokens as _stream_orphan_redact,
-                            )
-                            # Use the secret-stripped span_map so any
-                            # LLM-echoed credential token (``<r0>``)
-                            # falls into the orphan path and gets
-                            # deleted, matching the non-stream P3.
-                            emit_text = _stream_orphan_redact(
-                                emit_text, _redact_span_map,
-                            )
-                            if emit_text:
-                                emitted_parts.append(emit_text)
-                                yield _emit_chunk(emit_text)
-                                first_chunk_yielded = True
-                        else:
-                            tail_masked = masked_window
-
-                    # Tool-call deltas — independent of content text.
-                    # A chunk MAY carry both ``delta`` (text) and
-                    # ``tool_calls`` (e.g. a model that narrates "Let
-                    # me check the weather…" then invokes the function
-                    # in the same chunk), in which case both branches
-                    # fire and we emit two SSE frames for that chunk —
-                    # one content delta, one tool_calls delta. The
-                    # client merges them by ``choices[0].index`` /
-                    # ``delta.tool_calls[].index`` per the OpenAI
-                    # streaming contract.
-                    if chunk.tool_calls:
-                        # Phase 1 — streaming tool-call argument parity.
-                        # Do NOT forward raw argument fragments. Accumulate
-                        # the complete arguments per index and emit a
-                        # one-time HEADER frame (id + function.name, empty
-                        # arguments) so the client knows the call started.
-                        # The complete arguments are DLP-enforced and
-                        # emitted MASKED after the stream closes (post-loop
-                        # tool-call block), mirroring orchestrator section
-                        # 8d which masks/blocks before any byte leaves the
-                        # gateway.
-                        _header_frames: list[dict] = []
-                        for _tc in chunk.tool_calls:
-                            if not isinstance(_tc, dict):
-                                continue
-                            _idx = _tc.get("index")
-                            if _idx is None:
-                                continue
-                            _bucket = _streaming_tool_call_args.setdefault(
-                                _idx, {"id": "", "name": "", "args": ""}
-                            )
-                            if _tc.get("id"):
-                                _bucket["id"] = _tc["id"]
-                            _fn = _tc.get("function") or {}
-                            if _fn.get("name"):
-                                _bucket["name"] = _fn["name"]
-                            _arg_fragment = _fn.get("arguments")
-                            if isinstance(_arg_fragment, str) and _arg_fragment:
-                                _bucket["args"] += _arg_fragment
-                            # Emit the header exactly once per index, as
-                            # soon as we know id/name. Argument bytes are
-                            # withheld until enforcement runs.
-                            if _idx not in _emitted_tool_call_headers and (
-                                _bucket["id"] or _bucket["name"]
-                            ):
-                                _emitted_tool_call_headers.add(_idx)
-                                _header_frames.append(
-                                    {
-                                        "index": _idx,
-                                        "id": _bucket["id"],
-                                        "type": "function",
-                                        "function": {
-                                            "name": _bucket["name"],
-                                            "arguments": "",
-                                        },
-                                    }
+                                    tail_masked = safe[_last_dbl_open:] + tail_masked
+                                    safe = safe[:_last_dbl_open]
+                                _last_lt = safe.rfind("<")
+                                if _last_lt != -1 and safe.rfind(">") < _last_lt:
+                                    tail_masked = safe[_last_lt:] + tail_masked
+                                    safe = safe[:_last_lt]
+                                masked_provider_parts.append(safe)
+                                # When a conversation_id is bound, every emit
+                                # needs the vault resolver so a token echoed from
+                                # an earlier turn is unmasked even though the
+                                # per-window scan returned no new findings.
+                                emit_text = _stream_restore(safe)
+                                # Strip any orphan ``<rN>`` the model invented
+                                # before the chunk hits the wire. Counter-mode
+                                # tokens (``<r5>``, ``<r12>``) are easy to
+                                # hallucinate, and the non-streaming path
+                                # already strips them at section P3 — without
+                                # this per-chunk pass the streaming user sees
+                                # bare ``<rN>`` placeholders the rest of the
+                                # pipeline would have removed. The 120-char
+                                # rolling tail upstream guarantees ``safe`` is
+                                # past the split-token risk window.
+                                from app.services.dlp.transformer import (
+                                    redact_orphan_tokens as _stream_orphan_redact,
                                 )
-                        if _header_frames:
-                            first_chunk_yielded = True
-                            yield _emit_tool_calls_chunk(_header_frames)
+                                # Use the secret-stripped span_map so any
+                                # LLM-echoed credential token (``<r0>``)
+                                # falls into the orphan path and gets
+                                # deleted, matching the non-stream P3.
+                                emit_text = _stream_orphan_redact(
+                                    emit_text, _redact_span_map,
+                                )
+                                if emit_text:
+                                    emitted_parts.append(emit_text)
+                                    yield _emit_chunk(emit_text)
+                                    first_chunk_yielded = True
+                            else:
+                                tail_masked = masked_window
 
-                    if chunk.model:
-                        final_model = chunk.model
-                    if chunk.finish_reason is not None:
-                        final_finish_reason = chunk.finish_reason
-                    if chunk.usage is not None:
-                        provider_usage = chunk.usage
-                # Stream completed successfully — clear the health
-                # marker for the provider that just answered so the
-                # next request's pre-check stops skipping it.
-                await _clear_health(route.provider_name)
-                break
-            except Exception as stream_exc:  # noqa: BLE001
-                from app.core.exceptions import GatewayError as _GwErr
+                        # Tool-call deltas — independent of content text.
+                        # A chunk MAY carry both ``delta`` (text) and
+                        # ``tool_calls`` (e.g. a model that narrates "Let
+                        # me check the weather…" then invokes the function
+                        # in the same chunk), in which case both branches
+                        # fire and we emit two SSE frames for that chunk —
+                        # one content delta, one tool_calls delta. The
+                        # client merges them by ``choices[0].index`` /
+                        # ``delta.tool_calls[].index`` per the OpenAI
+                        # streaming contract.
+                        if chunk.tool_calls:
+                            # Phase 1 — streaming tool-call argument parity.
+                            # Do NOT forward raw argument fragments. Accumulate
+                            # the complete arguments per index and emit a
+                            # one-time HEADER frame (id + function.name, empty
+                            # arguments) so the client knows the call started.
+                            # The complete arguments are DLP-enforced and
+                            # emitted MASKED after the stream closes (post-loop
+                            # tool-call block), mirroring orchestrator section
+                            # 8d which masks/blocks before any byte leaves the
+                            # gateway.
+                            _header_frames: list[dict] = []
+                            for _tc in chunk.tool_calls:
+                                if not isinstance(_tc, dict):
+                                    continue
+                                _idx = _tc.get("index")
+                                if _idx is None:
+                                    continue
+                                _bucket = _streaming_tool_call_args.setdefault(
+                                    _idx, {"id": "", "name": "", "args": ""}
+                                )
+                                if _tc.get("id"):
+                                    _bucket["id"] = _tc["id"]
+                                _fn = _tc.get("function") or {}
+                                if _fn.get("name"):
+                                    _bucket["name"] = _fn["name"]
+                                _arg_fragment = _fn.get("arguments")
+                                if isinstance(_arg_fragment, str) and _arg_fragment:
+                                    _bucket["args"] += _arg_fragment
+                                # Emit the header exactly once per index, as
+                                # soon as we know id/name. Argument bytes are
+                                # withheld until enforcement runs.
+                                if _idx not in _emitted_tool_call_headers and (
+                                    _bucket["id"] or _bucket["name"]
+                                ):
+                                    _emitted_tool_call_headers.add(_idx)
+                                    _header_frames.append(
+                                        {
+                                            "index": _idx,
+                                            "id": _bucket["id"],
+                                            "type": "function",
+                                            "function": {
+                                                "name": _bucket["name"],
+                                                "arguments": "",
+                                            },
+                                        }
+                                    )
+                            if _header_frames:
+                                first_chunk_yielded = True
+                                yield _emit_tool_calls_chunk(_header_frames)
 
-                # Mid-stream errors cannot be recovered — headers and
-                # part of the body are already on the wire. Log and
-                # close the SSE gracefully; the client sees the partial
-                # response with no extra error frame.
-                if first_chunk_yielded:
-                    log.warning(
-                        "stream_mid_stream_error",
-                        provider=route.provider_name,
-                        model=route.model_name,
-                        error=str(stream_exc)[:200],
-                    )
-                    if isinstance(stream_exc, _GwErr) and _is_fallback_eligible(
+                        if chunk.model:
+                            final_model = chunk.model
+                        if chunk.finish_reason is not None:
+                            final_finish_reason = chunk.finish_reason
+                        if chunk.usage is not None:
+                            provider_usage = chunk.usage
+                    # Stream completed successfully — clear the health
+                    # marker for the provider that just answered so the
+                    # next request's pre-check stops skipping it.
+                    await _clear_health(route.provider_name)
+                    break
+                except Exception as stream_exc:  # noqa: BLE001
+                    from app.core.exceptions import GatewayError as _GwErr
+
+                    # Mid-stream errors cannot be recovered — headers and
+                    # part of the body are already on the wire. Log and
+                    # close the SSE gracefully; the client sees the partial
+                    # response with no extra error frame.
+                    if first_chunk_yielded:
+                        log.warning(
+                            "stream_mid_stream_error",
+                            provider=route.provider_name,
+                            model=route.model_name,
+                            error=str(stream_exc)[:200],
+                        )
+                        if isinstance(stream_exc, _GwErr) and _is_fallback_eligible(
+                            stream_exc
+                        ):
+                            await _mark_unhealthy(route.provider_name)
+                        # B1: surface a mid-stream failure as an error frame so
+                        # the client can append an error notice to the partial
+                        # message instead of silently truncating.
+                        yield _emit_error(
+                            code=getattr(stream_exc, "code", "provider_error"),
+                            message="The response was interrupted, please try again",
+                            details=(dict(getattr(stream_exc, "details", None) or {})
+                                     or None),
+                        )
+                        return
+
+                    # Pre-yield error → eligible for body-level fallback.
+                    # A non-eligible error (bad request, auth that the chain
+                    # can't route around, etc.) is terminal; emit an error
+                    # frame instead of raising (which, post-headers, would just
+                    # truncate the stream into a blank screen). B1.
+                    if not isinstance(stream_exc, _GwErr) or not _is_fallback_eligible(
                         stream_exc
                     ):
-                        await _mark_unhealthy(route.provider_name)
-                    # B1: surface a mid-stream failure as an error frame so
-                    # the client can append an error notice to the partial
-                    # message instead of silently truncating.
-                    yield _emit_error(
-                        code=getattr(stream_exc, "code", "provider_error"),
-                        message="The response was interrupted, please try again",
-                        details=(dict(getattr(stream_exc, "details", None) or {})
-                                 or None),
-                    )
-                    return
+                        yield _emit_error(
+                            code=getattr(stream_exc, "code", "provider_error"),
+                            message="Model unavailable, please try again",
+                            details=(dict(getattr(stream_exc, "details", None) or {})
+                                     or None),
+                        )
+                        return
 
-                # Pre-yield error → eligible for body-level fallback.
-                # A non-eligible error (bad request, auth that the chain
-                # can't route around, etc.) is terminal; emit an error
-                # frame instead of raising (which, post-headers, would just
-                # truncate the stream into a blank screen). B1.
-                if not isinstance(stream_exc, _GwErr) or not _is_fallback_eligible(
-                    stream_exc
-                ):
-                    yield _emit_error(
-                        code=getattr(stream_exc, "code", "provider_error"),
-                        message="Model unavailable, please try again",
-                        details=(dict(getattr(stream_exc, "details", None) or {})
-                                 or None),
+                    failed_provider = route.provider_name
+                    _stream_fallback_attempts.append(
+                        {
+                            "provider": failed_provider,
+                            "model": route.model_name,
+                            "error_code": getattr(
+                                stream_exc, "code", "provider_error"
+                            ),
+                            "error_message": str(stream_exc)[:200],
+                            "latency_ms": 0.0,
+                            "attempted_at": _dt.now(_tz.utc).isoformat(),
+                        }
                     )
-                    return
+                    await _mark_unhealthy(failed_provider)
+                    skip_providers.add(failed_provider)
 
-                failed_provider = route.provider_name
-                _stream_fallback_attempts.append(
-                    {
-                        "provider": failed_provider,
-                        "model": route.model_name,
-                        "error_code": getattr(
-                            stream_exc, "code", "provider_error"
-                        ),
-                        "error_message": str(stream_exc)[:200],
-                        "latency_ms": 0.0,
-                        "attempted_at": _dt.now(_tz.utc).isoformat(),
-                    }
-                )
-                await _mark_unhealthy(failed_provider)
-                skip_providers.add(failed_provider)
+                    if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
+                        # B3: the fallback chain is exhausted. Emit an
+                        # ``all_models_failed`` frame carrying the per-model
+                        # attempt log so the client can render a real error
+                        # bubble (which model was tried, why each failed)
+                        # instead of a blank screen.
+                        log.warning(
+                            "stream_all_models_failed",
+                            attempts=len(_stream_fallback_attempts),
+                            reason="max_streaming_fallbacks_exceeded",
+                        )
+                        yield _emit_error(
+                            code="all_models_failed",
+                            message="Unable to get a response right now",
+                            attempts=list(_stream_fallback_attempts),
+                        )
+                        return
 
-                if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
-                    # B3: the fallback chain is exhausted. Emit an
-                    # ``all_models_failed`` frame carrying the per-model
-                    # attempt log so the client can render a real error
-                    # bubble (which model was tried, why each failed)
-                    # instead of a blank screen.
-                    log.warning(
-                        "stream_all_models_failed",
-                        attempts=len(_stream_fallback_attempts),
-                        reason="max_streaming_fallbacks_exceeded",
-                    )
-                    yield _emit_error(
-                        code="all_models_failed",
-                        message="Unable to get a response right now",
-                        attempts=list(_stream_fallback_attempts),
-                    )
-                    return
+                    fb_runner = orchestrator._get_fallback_orchestrator()
+                    # Mint a fresh session for the key lookup — the
+                    # dependency-injected ``session`` is already closed by
+                    # the time the generator runs (FastAPI's
+                    # ``get_db_session`` finally-block fires as soon as the
+                    # route handler returns ``StreamingResponse``).
+                    # ``select_streaming_candidate`` is sync; use a short-lived
+                    # SYNC session for this rare streaming-fallback key lookup
+                    # (the sync engine is retained for admin/portal/background)
+                    # rather than cascading async into the selector.
+                    from app.core.db import SessionLocal as _SyncSessionLocal
+                    _lookup_session = _SyncSessionLocal()
+                    try:
+                        fb_candidate = fb_runner.select_streaming_candidate(
+                            original_provider=_stream_original_provider,
+                            original_model=_stream_original_model,
+                            session=_lookup_session,
+                            skip_providers=skip_providers,
+                            required=_stream_required_caps,
+                        )
+                    finally:
+                        _lookup_session.close()
 
-                fb_runner = orchestrator._get_fallback_orchestrator()
-                # Mint a fresh session for the key lookup — the
-                # dependency-injected ``session`` is already closed by
-                # the time the generator runs (FastAPI's
-                # ``get_db_session`` finally-block fires as soon as the
-                # route handler returns ``StreamingResponse``).
-                # ``select_streaming_candidate`` is sync; use a short-lived
-                # SYNC session for this rare streaming-fallback key lookup
-                # (the sync engine is retained for admin/portal/background)
-                # rather than cascading async into the selector.
-                from app.core.db import SessionLocal as _SyncSessionLocal
-                _lookup_session = _SyncSessionLocal()
-                try:
-                    fb_candidate = fb_runner.select_streaming_candidate(
-                        original_provider=_stream_original_provider,
-                        original_model=_stream_original_model,
-                        session=_lookup_session,
-                        skip_providers=skip_providers,
-                        required=_stream_required_caps,
-                    )
-                finally:
-                    _lookup_session.close()
+                    if fb_candidate is None:
+                        # No further cross-provider candidate — chain exhausted.
+                        # B3: emit ``all_models_failed`` with the attempt log.
+                        log.warning(
+                            "stream_all_models_failed",
+                            attempts=len(_stream_fallback_attempts),
+                            reason="no_fallback_candidate",
+                        )
+                        yield _emit_error(
+                            code="all_models_failed",
+                            message="Unable to get a response right now",
+                            attempts=list(_stream_fallback_attempts),
+                        )
+                        return
 
-                if fb_candidate is None:
-                    # No further cross-provider candidate — chain exhausted.
-                    # B3: emit ``all_models_failed`` with the attempt log.
-                    log.warning(
-                        "stream_all_models_failed",
-                        attempts=len(_stream_fallback_attempts),
-                        reason="no_fallback_candidate",
+                    log.info(
+                        "stream_in_generator_fallback",
+                        from_provider=failed_provider,
+                        to_provider=fb_candidate["provider"],
+                        to_model=fb_candidate["model"],
                     )
-                    yield _emit_error(
-                        code="all_models_failed",
-                        message="Unable to get a response right now",
-                        attempts=list(_stream_fallback_attempts),
-                    )
-                    return
-
-                log.info(
-                    "stream_in_generator_fallback",
-                    from_provider=failed_provider,
-                    to_provider=fb_candidate["provider"],
-                    to_model=fb_candidate["model"],
-                )
-                route.provider_name = fb_candidate["provider"]
-                route.model_name = fb_candidate["model"]
-                stream_adapter = orchestrator.provider_dispatcher.adapters[
-                    fb_candidate["provider"]
-                ]
-                stream_api_key = fb_candidate["api_key"]
-                _stream_fallback_used = True
-                _stream_attempt_number += 1
-                # B2: announce the swap before the fallback model's content.
-                # Safe to emit here — the in-generator fallback only fires
-                # while ``first_chunk_yielded`` is False, so no content has
-                # reached the wire yet for this answer.
-                if not _fallback_notice_emitted:
-                    yield _emit_fallback_info()
-                    _fallback_notice_emitted = True
-                continue
+                    route.provider_name = fb_candidate["provider"]
+                    route.model_name = fb_candidate["model"]
+                    stream_adapter = orchestrator.provider_dispatcher.adapters[
+                        fb_candidate["provider"]
+                    ]
+                    stream_api_key = fb_candidate["api_key"]
+                    _stream_fallback_used = True
+                    _stream_attempt_number += 1
+                    # B2: announce the swap before the fallback model's content.
+                    # Safe to emit here — the in-generator fallback only fires
+                    # while ``first_chunk_yielded`` is False, so no content has
+                    # reached the wire yet for this answer.
+                    if not _fallback_notice_emitted:
+                        yield _emit_fallback_info()
+                        _fallback_notice_emitted = True
+                    continue
+        except GeneratorExit:
+            _finalize_stream(client_disconnected=True)
+            raise
 
         # Flush the remaining tail. The tail already went through a
         # DLP scan in its most recent iteration; no need to re-mask.
@@ -2269,244 +2539,7 @@ async def chat_completions(
                     }
                 yield _emit_tool_calls_chunk([_arg_frame])
 
-        # Capture DLP trace + build the response-enforcement summary
-        # from the per-chunk match actions we accumulated. overall_action
-        # is computed from match_actions automatically.
-        output_raw = cumulative_raw
-        ai_to_service_masked = "".join(masked_provider_parts)
-        full_text = "".join(emitted_parts)
-        response_enforcement = EnforcementDecision(
-            match_actions=accumulated_outbound_actions,
-            policy_profile_id=profile.profile_id,
-        )
-
-        # 4. Persist DLP summary + basic request metrics. Mirrors the
-        # fields populated by GatewayOrchestrator.handle_chat_completion.
-        # The dependency-injected `session` is closed by the time this
-        # generator runs (route returned StreamingResponse → get_db_session
-        # already hit its finally block), so we mint a fresh session via
-        # the per-request factory captured at route entry (see #6 note
-        # at chat_completions where ``log_session_factory`` is bound).
-
-        overall_action = max(
-            input_enforcement.overall_action,
-            response_enforcement.overall_action,
-        )
-
-        # Admin Secure Trace is request-process memory only. It must never be
-        # written to request_logs or emitted to app logs.
-        try:
-            from app.services.secure_trace_store import (
-                SecureTraceRecord,
-                secure_trace_store,
-            )
-
-            secure_trace_store.put(
-                SecureTraceRecord(
-                    request_id=ctx.request_id or "",
-                    tenant_id=ctx.tenant_id,
-                    project_id=ctx.project_id,
-                    user_to_service=input_raw,
-                    service_to_ai=input_masked,
-                    ai_to_service=ai_to_service_masked,
-                    service_to_user=full_text,
-                    policy_action=overall_action.name.lower(),
-                    findings_count=(
-                        len(input_enforcement.match_actions)
-                        + len(response_enforcement.match_actions)
-                    ),
-                    detectors=sorted(
-                        {
-                            ma.match.detector_name
-                            for ma in (
-                                input_enforcement.match_actions
-                                + response_enforcement.match_actions
-                            )
-                        }
-                    ),
-                    created_at=time.time(),
-                )
-            )
-        except Exception as exc:
-            log.warning("secure_trace_capture_failed", **_safe_exc(exc, "secure_trace_capture"))
-        dlp_categories = sorted(
-            {ma.match.category for ma in input_enforcement.match_actions}
-            | {ma.match.category for ma in response_enforcement.match_actions}
-        )
-
-        # Resolve usage: prefer provider-reported counts (from the trailing
-        # usage chunk under stream_options.include_usage); fall back to the
-        # heuristic estimator when the provider didn't surface them.
-        # T3: reasoning_tokens resolution mirrors the non-stream
-        # orchestrator path — provider-reported takes precedence; fall
-        # back to a length estimate on the streamed reasoning text
-        # (~4 chars/token) for Anthropic which folds thinking into
-        # ``output_tokens``. Result is plumbed onto UsageInfo and into
-        # the request_log row so the admin dashboard can attribute
-        # spend to reasoning separately from regular completion.
-        _stream_reasoning_tok = 0
-        if provider_usage is not None and provider_usage.reasoning_tokens:
-            _stream_reasoning_tok = provider_usage.reasoning_tokens
-        elif _reasoning_text_total:
-            _stream_reasoning_tok = max(1, len(_reasoning_text_total) // 4)
-        # Cap at completion_tokens so the reasoning_cost attribution can
-        # never exceed the completion cost it is a subset of (non-additive
-        # — estimated_cost_usd is the all-in total). Mirrors the
-        # non-streaming orchestrator path.
-        if provider_usage is not None and provider_usage.completion_tokens:
-            _stream_reasoning_tok = min(
-                _stream_reasoning_tok, provider_usage.completion_tokens
-            )
-
-        if provider_usage is not None:
-            from app.services.currency_service import currency_service
-            _usd = _estimate_cost(
-                route.model_name,
-                provider_usage.prompt_tokens,
-                provider_usage.completion_tokens,
-                provider_usage.cached_prompt_tokens,
-                # P1 Item 4 — Anthropic cache-write tokens (1.25× input).
-                getattr(provider_usage, "cache_creation_prompt_tokens", 0),
-            )
-            _cost_info = currency_service.format_cost(_usd)
-            usage = UsageInfo(
-                prompt_tokens=provider_usage.prompt_tokens,
-                completion_tokens=provider_usage.completion_tokens,
-                total_tokens=provider_usage.total_tokens,
-                estimated_cost_usd=_usd,
-                cost_thb=_cost_info["thb"],
-                cost_display=_cost_info["display"],
-                reasoning_tokens=_stream_reasoning_tok or None,
-            )
-        else:
-            usage = orchestrator.usage_service.estimate(
-                payload=payload,
-                response_text=full_text,
-                model_name=route.model_name,
-            )
-            if _stream_reasoning_tok:
-                usage = usage.model_copy(update={
-                    "reasoning_tokens": _stream_reasoning_tok,
-                })
-
-        latency_ms = int((time.perf_counter() - t_start) * 1000)
-
-        # Serialize the streaming fallback attempt log (if any) for
-        # the request_log row. The JSONB column on RequestLogORM
-        # serializes the list itself — keep it as a Python list here
-        # to match the non-streaming orchestrator's contract and
-        # avoid double-encoding.
-        _stream_fallback_attempts_list: list[dict] | None = (
-            _stream_fallback_attempts if _stream_fallback_attempts else None
-        )
-
-        log_session = log_session_factory()
-        try:
-            orchestrator.request_log_service.persist(
-                log_session,
-                RequestRecord(
-                    request_id=ctx.request_id or "",
-                    tenant_id=ctx.tenant_id,
-                    project_id=ctx.project_id,
-                    provider=route.provider_name,
-                    # ``final_model`` tracks the chunk-reported model;
-                    # resolves the OpenRouter fallback "auto" sentinel
-                    # so usage aggregation never shows "auto" rows.
-                    model=resolved_log_model(route.model_name, final_model),
-                    status=RequestStatus.SUCCESS,
-                    policy_action=overall_action.name.lower(),
-                    policy_profile_id=profile.profile_id,
-                    latency_ms=latency_ms,
-                    prompt_tokens=usage.prompt_tokens,
-                    completion_tokens=usage.completion_tokens,
-                    total_tokens=usage.total_tokens,
-                    estimated_cost_usd=usage.estimated_cost_usd,
-                    # T3: persist reasoning attribution. Defaults to 0
-                    # on non-reasoning streams so the request_log row
-                    # is byte-identical to the pre-T3 shape.
-                    reasoning_tokens=_stream_reasoning_tok,
-                    reasoning_cost=_estimate_reasoning_cost(
-                        route.model_name, _stream_reasoning_tok
-                    ),
-                    fallback_used=_stream_fallback_used,
-                    fallback_attempts=_stream_fallback_attempts_list,
-                    original_provider=_stream_original_provider,
-                    original_model=_stream_original_model,
-                    dlp_input_findings=len(input_enforcement.match_actions),
-                    dlp_input_action=input_enforcement.overall_action.name.lower(),
-                    dlp_output_findings=len(response_enforcement.match_actions),
-                    dlp_categories=dlp_categories,
-                    router_used=router_used,
-                    # 4-stage DLP trace — see orchestrator success path
-                    # for column semantics. Streaming captures the
-                    # outbound-masked AI text in ``ai_to_service_masked``
-                    # (joined ``masked_provider_parts``); ``full_text`` is
-                    # the post-restore content the user actually saw.
-                    input_raw=safe_input_snapshot(
-                        input_raw, input_masked, input_enforcement
-                    ),
-                    input_masked=safe_input_masked_snapshot(
-                        input_masked, input_enforcement
-                    ),
-                    output_raw=safe_output_raw_snapshot(
-                        ai_to_service_masked, response_enforcement
-                    ),
-                    # 4A.2.3 — provider-safe (masked) only; never the
-                    # restored ``full_text`` display.
-                    output_final=safe_output_final_snapshot(
-                        ai_to_service_masked, response_enforcement
-                    ),
-                    input_raw_encrypted=input_raw_encrypted,
-                    dlp_findings_json=build_dlp_findings_json(
-                        input_enforcement.match_actions,
-                        response_enforcement.match_actions,
-                        span_map=span_map,
-                    ),
-                ),
-            )
-            log_session.commit()
-
-            # Alert evaluation moved OFF the request path (Phase-1 B6) — a
-            # periodic background sweep (lifespan _alert_evaluation_sweep)
-            # runs AlertEvaluator.evaluate_all instead, so the streaming
-            # completion no longer pays the enabled-rules SELECT + the
-            # get_by_id read-back + window aggregates on the loop.
-        except Exception:
-            # Logging failures must never break the stream.
-            log_session.rollback()
-        finally:
-            log_session.close()
-
-        # Portal credit deduction — cost-based, mirrors the non-stream
-        # orchestrator hook (10b): real USD cost × tenant markup ×
-        # USAGE_CREDITS_PER_USD (min 1 credit). Debits the key's owning
-        # portal user, or the TRUSTED end-user behind a shared key
-        # (web-chat). Own short session — a ledger failure must never
-        # break the already-delivered stream.
-        try:
-            from app.services.gateway.portal_credit_check import (
-                deduct_portal_credit,
-            )
-
-            credit_session = log_session_factory()
-            try:
-                deduct_portal_credit(
-                    credit_session,
-                    str(auth.key_id) if auth else "",
-                    ctx.request_id or "",
-                    cost_usd=float(usage.estimated_cost_usd or 0.0),
-                    tokens_used=int(usage.total_tokens or 0),
-                    tenant_id=str(ctx.tenant_id),
-                    portal_user_id=getattr(auth, "portal_user_id", None),
-                )
-                credit_session.commit()
-            except Exception:
-                credit_session.rollback()
-                raise
-            finally:
-                credit_session.close()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("portal_credit_deduct_failed", error=str(exc))
+        _finalize_stream(client_disconnected=False)
 
         # Realtime AI review hook — Phase 1 egress fix: pass the
         # POST-DLP, PRE-RESTORE sanitized output (``ai_to_service_masked``)

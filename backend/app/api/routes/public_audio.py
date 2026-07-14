@@ -79,7 +79,12 @@ async def generate_audio(
     else:
         raise HTTPException(status_code=400, detail="mode must be 'tts' or 'music'")
 
-    await scan_media_prompt_with_profile(payload.prompt, session)
+    await scan_media_prompt_with_profile(
+        payload.prompt, session,
+        tenant_id=auth.tenant_id,
+        project_id=str(getattr(auth, "project_id", "") or ""),
+        user_id=user_id,
+    )
 
     user = await session.get(PortalUserORM, user_id)
     _balance = int(user.credit_balance or 0) if user is not None else 0

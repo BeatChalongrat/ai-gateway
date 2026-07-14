@@ -89,6 +89,27 @@ class UsageSummary(BaseModel):
     total_estimated_cost_usd: float
 
 
+# Usage breakdown items for the admin Usage & Cost page. Field names are
+# camelCase — these three endpoints were specced against the chart
+# components' prop shape rather than the API's usual snake_case.
+
+
+class UsageByProjectItem(BaseModel):
+    projectId: str
+    projectName: str
+    requests: int
+    tokens: int
+    cost: float
+
+
+class UsageByModelItem(BaseModel):
+    provider: str
+    model: str
+    requests: int
+    tokens: int
+    cost: float
+
+
 # --- Tenant CRUD ---
 
 
