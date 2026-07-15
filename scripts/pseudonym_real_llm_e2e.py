@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 
 import requests
 
 API = "http://localhost:8080/v1/chat/completions"
-KEY = "REMOVED_CREDENTIAL"
+KEY = os.environ.get("GW_API_KEY")
+if not KEY:
+    sys.exit("GW_API_KEY is not set — export a gateway API key before running this script")
 MODEL = "gpt-4o-mini"
 
 CASES: dict[str, dict] = {
