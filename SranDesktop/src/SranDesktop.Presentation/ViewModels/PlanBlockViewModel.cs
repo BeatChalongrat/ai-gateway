@@ -154,7 +154,12 @@ public partial class PlanBlockViewModel : ObservableObject
 
     private string BuildLocalOutputFilename()
     {
-        var ext = PlanType == "excel" ? ".xlsx" : ".docx";
+        var ext = PlanType switch
+        {
+            "excel" => ".xlsx",
+            "pptx" => ".pptx",
+            _ => ".docx",
+        };
         var name = System.IO.Path.GetFileName(OutputFilename ?? "").Trim();
         if (string.IsNullOrEmpty(name) || name == ext)
             name = "output" + ext;
@@ -235,6 +240,8 @@ public partial class PlanResultViewModel : ObservableObject
         {
             if (stats.TryGetValue("sheets", out var sheets))
                 parts.Add($"{sheets} {LocaleService.Instance.T("plan.result.sheets")}");
+            if (stats.TryGetValue("slides", out var slides))
+                parts.Add($"{slides} {LocaleService.Instance.T("plan.result.slides")}");
             if (stats.TryGetValue("charts", out var charts) && charts > 0)
                 parts.Add($"{charts} {LocaleService.Instance.T("plan.result.charts")}");
             if (stats.TryGetValue("page_count", out var pages) && pages > 0)

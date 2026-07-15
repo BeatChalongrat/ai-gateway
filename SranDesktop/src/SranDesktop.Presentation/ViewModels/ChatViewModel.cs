@@ -28,6 +28,19 @@ public partial class ChatViewModel : ObservableObject
     private readonly ILogger<ChatViewModel> _logger;
     private readonly IReadOnlyList<ILocalPlanExecutor> _localPlanExecutors;
 
+    /// <summary>Phase 16 A: the run_subagent tool, when it exposes live nested
+    /// progress. Subscribed once (both this VM and the tool are singletons).</summary>
+    private readonly ISupportsNestedProgress? _nestedProgressTool;
+
+    /// <summary>The assistant message whose tool loop is currently streaming —
+    /// the target for nested sub-agent progress events (they arrive off-band of
+    /// the main event loop). Set for the duration of a gateway agent turn.</summary>
+    private MessageViewModel? _activeAgentMessage;
+
+    /// <summary>run_subagent's tool name; matched to route nested progress to
+    /// the right parent card without a reference to the Infrastructure project.</summary>
+    private const string SubAgentToolName = "run_subagent";
+
     private CancellationTokenSource? _streamCts;
     private readonly System.Diagnostics.Stopwatch _uiThrottle = new();
 
@@ -452,7 +465,8 @@ public partial class ChatViewModel : ObservableObject
         ISettingsService settings,
         IAgentConversationSyncService agentSync,
         ILogger<ChatViewModel> logger,
-        IEnumerable<ILocalPlanExecutor>? localPlanExecutors = null)
+        IEnumerable<ILocalPlanExecutor>? localPlanExecutors = null,
+        IMcpToolHost? toolHost = null)
     {
         _api = api;
         _gateway = gateway;
@@ -465,9 +479,45 @@ public partial class ChatViewModel : ObservableObject
         _settings = settings;
         _agentSync = agentSync;
         _logger = logger;
-        // Phase 12 E: on-device excel/doc plan executors; pptx has none and
-        // always goes through chat-edge.
+        // Phase 12 E: on-device excel/doc/pptx plan executors; anything they
+        // can't reproduce falls back to chat-edge.
         _localPlanExecutors = localPlanExecutors?.ToList() ?? new List<ILocalPlanExecutor>();
+
+        // Phase 16 A: surface nested sub-agent tool activity live under the
+        // parent run_subagent card. Opt-in through the IMcpTool boundary — only
+        // the tool that implements ISupportsNestedProgress is wired, no other
+        // tool's signature is touched.
+        _nestedProgressTool = toolHost?.GetRegisteredTools()
+            .OfType<ISupportsNestedProgress>().FirstOrDefault();
+        if (_nestedProgressTool is not null)
+            _nestedProgressTool.NestedProgress += OnNestedProgress;
+    }
+
+    /// <summary>
+    /// Route a nested sub-agent event to the currently in-flight run_subagent
+    /// card. Tools execute sequentially and depth is 1, so at most one
+    /// run_subagent card is pending when these fire; the first pending one is
+    /// the executing delegate. Marshalled to the UI thread — the event can
+    /// arrive on a gateway stream continuation thread.
+    /// </summary>
+    private void OnNestedProgress(AgentStreamEvent evt)
+    {
+        var message = _activeAgentMessage;
+        if (message is null)
+            return;
+
+        void Route()
+        {
+            var parent = message.ToolExecutions
+                .FirstOrDefault(t => t.ToolName == SubAgentToolName && t.IsPending);
+            parent?.RouteNestedEvent(evt);
+        }
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+            Route();
+        else
+            dispatcher.Invoke(Route);
     }
 
     // ── Project context (R9 Feature B6) ─────────────────────────────────────
@@ -951,6 +1001,8 @@ public partial class ChatViewModel : ObservableObject
         }
 
         _orchestrator.ConsentRequested += OnConsentRequested;
+        // Phase 16 A: nested sub-agent progress routes to this message's cards.
+        _activeAgentMessage = assistantMessage;
         try
         {
             var modelId = ResolveModel(conversation);
@@ -1045,6 +1097,7 @@ public partial class ChatViewModel : ObservableObject
         finally
         {
             _orchestrator.ConsentRequested -= OnConsentRequested;
+            _activeAgentMessage = null;
         }
     }
 

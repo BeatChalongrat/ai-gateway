@@ -133,6 +133,7 @@ public static class Dict
         ["plan.result.download"] = "Download File",
         ["plan.result.sheets"] = "sheets",
         ["plan.result.charts"] = "charts",
+        ["plan.result.slides"] = "slides",
 
         // Knowledge Base management
         ["kb.title"] = "Knowledge Base",
@@ -195,6 +196,8 @@ public static class Dict
         ["status.stopped"] = "Stopped",
         ["agent.contextTrimmed"] = "Older messages were trimmed to fit the model's context window.",
         ["agent.contextTooLong"] = "This conversation is too long for the model. Start a new chat for best results.",
+        // Phase 16 A — sub-agent nested tool activity
+        ["subagent.nestedSteps"] = "Sub-agent steps",
 
         // Phase 4 — streaming fence indicator chips
         ["stream.preparingDoc"] = "Preparing a document…",
@@ -523,6 +526,7 @@ public static class Dict
         ["plan.result.download"] = "ดาวน์โหลดไฟล์",
         ["plan.result.sheets"] = "ชีต",
         ["plan.result.charts"] = "แผนภูมิ",
+        ["plan.result.slides"] = "สไลด์",
 
         // Knowledge Base management
         ["kb.title"] = "ฐานความรู้",
@@ -585,6 +589,8 @@ public static class Dict
         ["status.stopped"] = "หยุดแล้ว",
         ["agent.contextTrimmed"] = "ตัดข้อความเก่าบางส่วนออกเพื่อให้พอดีกับหน้าต่างบริบทของโมเดล",
         ["agent.contextTooLong"] = "บทสนทนานี้ยาวเกินขีดจำกัดของโมเดลแล้ว แนะนำให้เริ่มแชทใหม่",
+        // Phase 16 A — sub-agent nested tool activity
+        ["subagent.nestedSteps"] = "ขั้นตอนของเอเจนต์ย่อย",
 
         // Phase 4 — streaming fence indicator chips
         ["stream.preparingDoc"] = "กำลังเตรียมเอกสาร…",
