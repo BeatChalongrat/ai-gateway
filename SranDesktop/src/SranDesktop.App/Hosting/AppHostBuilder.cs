@@ -170,6 +170,10 @@ public static class AppHostBuilder
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SranDesktop.Infrastructure.Services.SkillManager>>()));
                 // R10 Fix 2: composite speech — Azure (Thai) when a key is stored, Windows otherwise.
                 services.AddSingleton<ISpeechService, SranDesktop.Infrastructure.Speech.CompositeSpeechService>();
+                // Phase 12 E: on-device Office plan executors (opt-in via
+                // Settings → PreferLocalOfficeGeneration; pptx stays server-side).
+                services.AddSingleton<ILocalPlanExecutor, SranDesktop.Infrastructure.Office.LocalExcelPlanExecutor>();
+                services.AddSingleton<ILocalPlanExecutor, SranDesktop.Infrastructure.Office.LocalDocPlanExecutor>();
                 // R11 A1: auto-update (manifest URL is deploy-time config).
                 services.AddSingleton<IUpdateService>(sp =>
                     new SranDesktop.Infrastructure.Services.UpdateService(

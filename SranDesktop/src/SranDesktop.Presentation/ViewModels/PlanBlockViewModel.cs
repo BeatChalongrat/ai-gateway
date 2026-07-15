@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
 using SranDesktop.Presentation.Localization;
@@ -11,13 +12,19 @@ namespace SranDesktop.Presentation.ViewModels;
 /// <summary>
 /// One :::excel-plan / :::doc-plan / :::pptx-plan fence parsed out of an
 /// assistant message (R7 Feature C). Executes via chat-edge and swaps itself
-/// into a result card.
+/// into a result card. When Settings → "generate locally" is on and the plan
+/// is fully supported on-device, execution runs through the matching
+/// <see cref="ILocalPlanExecutor"/> instead (Phase 12 E); any local failure
+/// or unsupported plan falls back to the chat-edge path transparently.
 /// </summary>
 public partial class PlanBlockViewModel : ObservableObject
 {
     private readonly IChatEdgeApiClient _api;
     private readonly string _conversationId;
     private readonly JsonElement _plan;
+    private readonly ILocalPlanExecutor? _localExecutor;
+    private readonly ISettingsService? _settings;
+    private readonly ILogger? _logger;
 
     /// <summary>"excel" | "doc" | "pptx".</summary>
     public string PlanType { get; }
@@ -51,11 +58,16 @@ public partial class PlanBlockViewModel : ObservableObject
     private string? _errorMessage;
 
     public PlanBlockViewModel(
-        IChatEdgeApiClient api, string conversationId, string planType, JsonElement plan)
+        IChatEdgeApiClient api, string conversationId, string planType, JsonElement plan,
+        ILocalPlanExecutor? localExecutor = null, ISettingsService? settings = null,
+        ILogger? logger = null)
     {
         _api = api;
         _conversationId = conversationId;
         _plan = plan;
+        _localExecutor = localExecutor;
+        _settings = settings;
+        _logger = logger;
         PlanType = planType;
 
         Description = GetString(plan, "description");
@@ -72,6 +84,9 @@ public partial class PlanBlockViewModel : ObservableObject
         ErrorMessage = null;
         try
         {
+            if (await TryExecuteLocallyAsync())
+                return;
+
             var sourceFileId = GetString(_plan, "source_file_id");
             var result = PlanType == "excel"
                 ? await _api.ExecuteExcelPlanAsync(_conversationId,
@@ -92,6 +107,60 @@ public partial class PlanBlockViewModel : ObservableObject
         {
             IsExecuting = false;
         }
+    }
+
+    /// <summary>
+    /// On-device execution attempt (Phase 12 E). True = handled (Result set);
+    /// false = caller must run the server path — either the setting is off,
+    /// the plan isn't fully supported locally, or local execution failed
+    /// (logged; the fallback keeps the click working transparently).
+    /// </summary>
+    private async Task<bool> TryExecuteLocallyAsync()
+    {
+        if (_settings?.Current.PreferLocalOfficeGeneration != true
+            || _localExecutor is null || !_localExecutor.CanExecute(_plan))
+            return false;
+
+        try
+        {
+            // Staged under temp until the user clicks Download — the same UX
+            // as the server path, where bytes only land via the save dialog.
+            var outputPath = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), "SranDesktop", "plans",
+                Guid.NewGuid().ToString("N"), BuildLocalOutputFilename());
+            var local = await _localExecutor.ExecuteAsync(_plan, outputPath);
+
+            // Version 0 on purpose: local files sit outside the server's
+            // DB-backed version lineage (a stated tradeoff of the setting).
+            Result = new PlanResultViewModel(
+                _api,
+                new PlanExecutionResult(
+                    new PlanFileDto(
+                        "local", System.IO.Path.GetFileName(local.OutputPath), null,
+                        local.FileSizeBytes, null, 0),
+                    new PlanValidationDto(true, null, null, null, local.Stats),
+                    local.Changes),
+                local.OutputPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex,
+                "Local {PlanType} plan execution failed — falling back to chat-edge",
+                PlanType);
+            return false;
+        }
+    }
+
+    private string BuildLocalOutputFilename()
+    {
+        var ext = PlanType == "excel" ? ".xlsx" : ".docx";
+        var name = System.IO.Path.GetFileName(OutputFilename ?? "").Trim();
+        if (string.IsNullOrEmpty(name) || name == ext)
+            name = "output" + ext;
+        if (!name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            name += ext;
+        return name;
     }
 
     /// <summary>Human-readable one-liners for the card's action list.</summary>
@@ -140,13 +209,19 @@ public partial class PlanResultViewModel : ObservableObject
     public string MetaLine { get; }
     public IReadOnlyList<string> Changes { get; }
 
+    /// <summary>Set when the file was generated on-device (Phase 12 E):
+    /// Download copies this staged file instead of fetching from chat-edge.</summary>
+    public string? LocalFilePath { get; }
+
     [ObservableProperty]
     private bool _isDownloading;
 
-    public PlanResultViewModel(IChatEdgeApiClient api, PlanExecutionResult result)
+    public PlanResultViewModel(
+        IChatEdgeApiClient api, PlanExecutionResult result, string? localFilePath = null)
     {
         _api = api;
         _file = result.File;
+        LocalFilePath = localFilePath;
 
         Filename = _file is null
             ? "output"
@@ -181,7 +256,7 @@ public partial class PlanResultViewModel : ObservableObject
     [RelayCommand]
     private async Task DownloadAsync()
     {
-        if (_file?.DownloadUrl is null)
+        if (_file is null || (_file.DownloadUrl is null && LocalFilePath is null))
             return;
 
         var ext = System.IO.Path.GetExtension(_file.Filename);
@@ -198,8 +273,17 @@ public partial class PlanResultViewModel : ObservableObject
         IsDownloading = true;
         try
         {
-            var bytes = await _api.DownloadFileAsync(_file.DownloadUrl);
-            await System.IO.File.WriteAllBytesAsync(dialog.FileName, bytes);
+            if (LocalFilePath is not null)
+            {
+                // Locally generated file — copy out of the temp staging dir.
+                var source = LocalFilePath;
+                await Task.Run(() => System.IO.File.Copy(source, dialog.FileName, true));
+            }
+            else
+            {
+                var bytes = await _api.DownloadFileAsync(_file.DownloadUrl!);
+                await System.IO.File.WriteAllBytesAsync(dialog.FileName, bytes);
+            }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.IO.IOException)
         {

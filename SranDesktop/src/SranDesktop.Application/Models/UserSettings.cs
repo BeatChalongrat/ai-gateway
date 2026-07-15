@@ -68,6 +68,15 @@ public sealed class UserSettings
     [JsonPropertyName("sync_agent_conversations")]
     public bool SyncAgentConversations { get; set; } = true;
 
+    /// <summary>Generate Excel/Word plan files on this device when the plan is
+    /// fully supported locally (Phase 12 E). Default OFF for parity: the
+    /// server path stays authoritative until local generation is proven.
+    /// Local files keep content on-device but skip the server-side validator
+    /// and version lineage; unsupported plans (pptx, pdf, charts, edits of
+    /// uploaded files, headers/footers) always use the server.</summary>
+    [JsonPropertyName("prefer_local_office_generation")]
+    public bool PreferLocalOfficeGeneration { get; set; }
+
     /// <summary>Extra folders the agent's file tools may reach, beyond the
     /// built-in user-profile + temp roots (Phase 6 Task 1). Each is validated
     /// (existing directory, not a drive/system root) before being applied.</summary>

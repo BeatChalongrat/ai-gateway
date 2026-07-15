@@ -358,6 +358,10 @@ public static class Dict
         ["settings.syncAgentChats"] = "Back up agent chats to your account",
         ["settings.syncAgentChatsHint"] = "Conversation text only — tool activity and screenshots stay on this device.",
 
+        // Phase 12 E — on-device Office file generation
+        ["settings.localOfficeGen"] = "Generate Excel/Word files on this device when possible",
+        ["settings.localOfficeGenHint"] = "Supported plan cards build the file locally, so document content never leaves this device. PowerPoint, PDF, charts and edits of uploaded files still use the server, and locally built files skip server-side version history.",
+
         // Phase 6 — folder access
         ["settings.folderAccess"] = "Folder access",
         ["settings.folderAccessHint"] = "The agent can read and write inside folders you grant here (in addition to your user profile and temp folder). It still asks before each write or command.",
@@ -743,6 +747,10 @@ public static class Dict
         // Phase 3 — agent-chat backup
         ["settings.syncAgentChats"] = "สำรองแชทโหมดเอเจนต์ไปยังบัญชีของคุณ",
         ["settings.syncAgentChatsHint"] = "สำรองเฉพาะข้อความสนทนาเท่านั้น — ประวัติการใช้เครื่องมือและภาพหน้าจอยังอยู่ในเครื่องนี้",
+
+        // Phase 12 E — on-device Office file generation
+        ["settings.localOfficeGen"] = "สร้างไฟล์ Excel/Word บนเครื่องนี้เมื่อทำได้",
+        ["settings.localOfficeGenHint"] = "การ์ดแผนงานที่รองรับจะสร้างไฟล์ในเครื่อง เนื้อหาเอกสารจึงไม่ออกจากเครื่องนี้ ส่วน PowerPoint, PDF, แผนภูมิ และการแก้ไขไฟล์ที่อัปโหลดยังใช้เซิร์ฟเวอร์ และไฟล์ที่สร้างในเครื่องจะไม่มีประวัติเวอร์ชันฝั่งเซิร์ฟเวอร์",
 
         // Phase 6 — folder access
         ["settings.folderAccess"] = "การเข้าถึงโฟลเดอร์",

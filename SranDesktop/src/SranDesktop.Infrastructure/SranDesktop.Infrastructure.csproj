@@ -27,6 +27,9 @@
     <!-- R10 Fix 2: speech backends (Windows built-in + Azure AI Speech) -->
     <PackageReference Include="System.Speech" Version="8.0.*" />
     <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.*" />
+    <!-- Phase 12 E: local Office-plan executors (both MIT-licensed) -->
+    <PackageReference Include="ClosedXML" Version="0.104.*" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.*" />
   </ItemGroup>
 
   <ItemGroup>

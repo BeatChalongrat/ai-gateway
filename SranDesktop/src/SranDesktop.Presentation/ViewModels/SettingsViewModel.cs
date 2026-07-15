@@ -52,6 +52,11 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _syncAgentConversations = true;
 
+    /// <summary>Generate Excel/Word plan files on-device when supported
+    /// (Phase 12 E). Default OFF — server path stays authoritative.</summary>
+    [ObservableProperty]
+    private bool _preferLocalOfficeGeneration;
+
     /// <summary>Folders the agent's file tools may reach beyond the built-in
     /// roots (Phase 6 Task 1). Persisted on Save; consent still gates writes.</summary>
     public ObservableCollection<string> GrantedFolders { get; } = new();
@@ -90,6 +95,7 @@ public partial class SettingsViewModel : ObservableObject
         MinimizeToTray = current.MinimizeToTray;
         CrashReportingEnabled = current.CrashReportingEnabled;
         SyncAgentConversations = current.SyncAgentConversations;
+        PreferLocalOfficeGeneration = current.PreferLocalOfficeGeneration;
         GrantedFolders.Clear();
         foreach (var folder in current.GrantedFolders)
             GrantedFolders.Add(folder);
@@ -125,6 +131,7 @@ public partial class SettingsViewModel : ObservableObject
         updated.StartWithWindows = StartWithWindows;
         updated.CrashReportingEnabled = CrashReportingEnabled;
         updated.SyncAgentConversations = SyncAgentConversations;
+        updated.PreferLocalOfficeGeneration = PreferLocalOfficeGeneration;
         updated.GrantedFolders = GrantedFolders.ToList();
         if (!string.IsNullOrWhiteSpace(SelectedModelId))
             updated.DefaultModel = SelectedModelId;
