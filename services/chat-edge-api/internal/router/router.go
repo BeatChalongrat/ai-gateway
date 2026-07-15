@@ -314,7 +314,9 @@ func New(
 
 			// Phase 13 Part B — run_python code interpreter for the
 			// desktop agent. Rate-limited like Send (a sandbox run is
-			// expensive). Only registered when the sandbox is available.
+			// expensive). ALWAYS registered so the desktop client/server
+			// contract is stable; the handler answers 503 (not 404) when
+			// the sandbox is disabled (SANDBOX_ENABLED=0).
 			if h.Code != nil {
 				r.With(sendRateLimit).Post("/code/run", h.Code.Run)
 			}

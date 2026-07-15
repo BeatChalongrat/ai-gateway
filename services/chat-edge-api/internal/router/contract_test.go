@@ -88,6 +88,7 @@ func buildRouteTable(t *testing.T) map[routeKey]bool {
 		Usage:        &handler.UsageHandler{},
 		MediaProxy:   &handler.MediaProxyHandler{},
 		Import:       &handler.ImportHandler{},
+		Code:         &handler.CodeHandler{},
 	}
 
 	mux := router.New(&config.Config{}, h, "", nil, nil)

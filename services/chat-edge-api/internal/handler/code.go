@@ -11,8 +11,9 @@
 // summarised (a headless agent run has no conversation to attach them to).
 //
 // File inputs are optional and resolved by CALLER (tenant+user) ownership
-// only — never another user's file. The route is only registered when the
-// sandbox is available (SANDBOX_ENABLED=1); otherwise it 404s.
+// only — never another user's file. The route is ALWAYS registered so the
+// client/server contract is stable; when the sandbox is disabled the
+// interpreter is nil and Run answers 503 (feature off), not 404.
 package handler
 
 import (
@@ -72,6 +73,16 @@ const (
 
 func (h *CodeHandler) Run(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
+
+	// The route is always registered so the contract between the desktop
+	// client and this service is stable; when the sandbox is disabled
+	// (SANDBOX_ENABLED=0) the interpreter is nil and we answer 503, never
+	// 404 — a 503 tells the client "endpoint exists, feature off" rather
+	// than "unknown server". No model code runs in-process here.
+	if h.interp == nil {
+		WriteError(w, http.StatusServiceUnavailable, CodeInternalError, "code interpreter is disabled on this server")
+		return
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxCodeRequestBytes)
 	var req runCodeRequest
