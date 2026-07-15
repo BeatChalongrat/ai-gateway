@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
 using System.Windows.Media;
@@ -47,6 +48,50 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     public bool IsOk => State == "ok";
     public bool IsFailed => State == "failed";
     public bool HasScreenshot => ScreenshotPreview is not null;
+
+    /// <summary>
+    /// Nested tool cards (Phase 16 A): populated for a run_subagent card from
+    /// the nested run's live tool activity, using the SAME pending→ok/failed
+    /// lifecycle as top-level cards. Empty for every other tool.
+    /// </summary>
+    public ObservableCollection<ToolExecutionItemViewModel> Children { get; } = new();
+
+    public bool HasChildren => Children.Count > 0;
+
+    /// <summary>The indented child list defaults to expanded while the
+    /// sub-agent works, so its activity is visible without a click.</summary>
+    [ObservableProperty] private bool _isChildListExpanded = true;
+
+    /// <summary>
+    /// Route one nested <see cref="AgentStreamEvent"/> into <see cref="Children"/>,
+    /// reusing the top-level mapping: a tool-call opens a pending child card, a
+    /// tool-result completes it (ok/failed). Only these two event kinds reach
+    /// here (the publisher filters), and run_subagent never appears — depth-1.
+    /// </summary>
+    public void RouteNestedEvent(AgentStreamEvent evt)
+    {
+        switch (evt)
+        {
+            case AgentToolCallsEvent calls:
+                foreach (var call in calls.ToolCalls)
+                    Children.Add(new ToolExecutionItemViewModel(
+                        call.Id, call.Function.Name, call.Function.Arguments));
+                OnPropertyChanged(nameof(HasChildren));
+                break;
+
+            case AgentToolResultEvent result:
+                var child = Children.FirstOrDefault(c => c.ToolCallId == result.ToolCallId);
+                if (child is null)
+                {
+                    child = new ToolExecutionItemViewModel(
+                        result.ToolCallId, result.ToolName, result.ArgumentsJson);
+                    Children.Add(child);
+                    OnPropertyChanged(nameof(HasChildren));
+                }
+                child.Complete(result);
+                break;
+        }
+    }
 
     public ToolExecutionItemViewModel(string toolCallId, string toolName, string argumentsJson)
     {

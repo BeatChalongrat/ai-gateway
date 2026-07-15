@@ -345,6 +345,77 @@
                                         </Button>
                                     </StackPanel>
                                 </StackPanel>
+
+                                <!-- Phase 16 A: nested sub-agent tool activity — indented,
+                                     collapsible child list mirroring the parent card. Only a
+                                     run_subagent card ever populates Children; depth cap 1 means
+                                     these compact child cards never nest further. -->
+                                <Border Margin="6,6,0,0" Padding="10,2,0,0"
+                                        BorderThickness="2,0,0,0"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        Visibility="{Binding HasChildren, Converter={StaticResource BoolToVisibility}}">
+                                    <StackPanel>
+                                        <ToggleButton IsChecked="{Binding IsChildListExpanded}"
+                                                      Background="Transparent" BorderThickness="0"
+                                                      Cursor="Hand" Padding="0" Margin="0,0,0,2"
+                                                      HorizontalContentAlignment="Left"
+                                                      AutomationProperties.Name="{loc:T subagent.nestedSteps}">
+                                            <TextBlock Text="{loc:T subagent.nestedSteps}" FontSize="11"
+                                                       FontWeight="Medium"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}" />
+                                        </ToggleButton>
+                                        <ItemsControl ItemsSource="{Binding Children}"
+                                                      Visibility="{Binding IsChildListExpanded, Converter={StaticResource BoolToVisibility}}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type vm:ToolExecutionItemViewModel}">
+                                                    <Border BorderThickness="1" CornerRadius="8" Margin="0,3" Padding="8,6"
+                                                            Background="{DynamicResource BgPrimaryBrush}">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                                                        <Setter Property="BorderBrush" Value="{DynamicResource AccentRedBrush}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding DurationText}"
+                                                                       FontSize="10.5" Margin="8,0" VerticalAlignment="Center"
+                                                                       Foreground="{DynamicResource TextTertiaryBrush}" />
+                                                            <Grid DockPanel.Dock="Right" Width="13" Height="13"
+                                                                  Margin="8,0,0,0" VerticalAlignment="Center">
+                                                                <Ellipse Width="7" Height="7"
+                                                                         Fill="{DynamicResource TextSecondaryBrush}"
+                                                                         Visibility="{Binding IsPending, Converter={StaticResource BoolToVisibility}}" />
+                                                                <controls:IconView Geometry="{StaticResource Geo_Check}"
+                                                                                   Stroke="{DynamicResource AccentGreenBrush}"
+                                                                                   Width="13" Height="13"
+                                                                                   Visibility="{Binding IsOk, Converter={StaticResource BoolToVisibility}}" />
+                                                                <controls:IconView Geometry="{StaticResource Geo_Close}"
+                                                                                   Stroke="{DynamicResource AccentRedBrush}"
+                                                                                   Width="12" Height="12"
+                                                                                   Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibility}}" />
+                                                            </Grid>
+                                                            <controls:IconView Geometry="{Binding IconGeometry}"
+                                                                               Stroke="{DynamicResource TextSecondaryBrush}"
+                                                                               Width="13" Height="13" Margin="0,0,7,0"
+                                                                               VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding FriendlyName}" FontSize="12.5"
+                                                                       FontWeight="Medium" VerticalAlignment="Center"
+                                                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                            <TextBlock Text="{Binding ArgsSummary}" FontSize="11"
+                                                                       Margin="8,0,0,0" TextTrimming="CharacterEllipsis"
+                                                                       VerticalAlignment="Center"
+                                                                       Foreground="{DynamicResource TextTertiaryBrush}" />
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Border>
                     </DataTemplate>

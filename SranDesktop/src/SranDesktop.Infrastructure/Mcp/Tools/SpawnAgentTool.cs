@@ -30,9 +30,17 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 ///   handler (headless), Ask-level tools are denied — same safe default as a
 ///   top-level turn.
 /// </summary>
-public sealed class SpawnAgentTool : IMcpTool
+public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
 {
     public const string ToolName = "run_subagent";
+
+    /// <summary>
+    /// Phase 16 A: nested tool activity, surfaced live to whoever subscribes
+    /// (ChatViewModel wires the parent tool card's child list). Only
+    /// tool-call / tool-result events are published, and never for
+    /// run_subagent itself — depth cap 1 stays enforced at the source.
+    /// </summary>
+    public event Action<AgentStreamEvent>? NestedProgress;
 
     /// <summary>
     /// Nested caps, deliberately tighter than the parent's (25 steps / 10 min):
@@ -166,6 +174,12 @@ public sealed class SpawnAgentTool : IMcpTool
         {
             await foreach (var evt in nested.RunAsync(model, messages, conversationId, null, linked.Token))
             {
+                // Live progress (Phase 16 A), additive to the final-text/trace
+                // aggregation below — publish only tool-call / tool-result
+                // events, filtering out run_subagent so the parent's child card
+                // list can never show a (would-be) recursive spawn (depth cap 1).
+                PublishNestedProgress(evt);
+
                 switch (evt)
                 {
                     case AgentStatusEvent:
@@ -214,6 +228,35 @@ public sealed class SpawnAgentTool : IMcpTool
             ? finalText.ToString()
             : "(the sub-agent finished without a text answer)";
         return ToolResult.Ok(answer + traceSummary);
+    }
+
+    /// <summary>
+    /// Forward a nested tool-call / tool-result event to subscribers, dropping
+    /// any run_subagent mention. run_subagent is unresolvable in the nested run
+    /// (FilteredToolHost), so its only possible appearance is an "unknown tool"
+    /// result — filtering it keeps the parent card's child list free of a
+    /// phantom recursive spawn while depth cap 1 stays enforced.
+    /// </summary>
+    private void PublishNestedProgress(AgentStreamEvent evt)
+    {
+        if (NestedProgress is not { } handler)
+            return;
+
+        switch (evt)
+        {
+            case AgentToolCallsEvent calls:
+                var visible = calls.ToolCalls
+                    .Where(c => !string.Equals(c.Function.Name, ToolName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (visible.Count > 0)
+                    handler(new AgentToolCallsEvent(visible));
+                break;
+
+            case AgentToolResultEvent result
+                when !string.Equals(result.ToolName, ToolName, StringComparison.OrdinalIgnoreCase):
+                handler(result);
+                break;
+        }
     }
 
     private static HashSet<string>? ReadAllowlist(JsonElement args)
