@@ -2,9 +2,19 @@ using System.Text.Json.Serialization;
 
 namespace SranDesktop.Application.Models;
 
-/// <summary>A remote MCP connector catalog entry (R9 Feature I).</summary>
+/// <summary>A remote MCP connector catalog entry (R9 Feature I). Phase 12 D
+/// adds local-process (stdio) connectors: transport "stdio" + command/args/env
+/// instead of a server_url.</summary>
 public sealed class McpConnector
 {
+    /// <summary>Remote MCP server over streamable HTTP (the default —
+    /// every pre-Phase-12 connector deserializes to this).</summary>
+    public const string TransportHttp = "http";
+
+    /// <summary>Local child process speaking newline-delimited JSON-RPC
+    /// over stdin/stdout (the MCP stdio transport).</summary>
+    public const string TransportStdio = "stdio";
+
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 
@@ -29,6 +39,26 @@ public sealed class McpConnector
     /// <summary>Tool names this connector contributes.</summary>
     [JsonPropertyName("tools")]
     public List<string> Tools { get; set; } = new();
+
+    /// <summary>"http" | "stdio" (Phase 12 D). Absent in legacy JSON →
+    /// defaults to http, so existing connectors keep behaving identically.</summary>
+    [JsonPropertyName("transport")]
+    public string Transport { get; set; } = TransportHttp;
+
+    /// <summary>stdio only: executable to spawn (absolute path or on PATH).</summary>
+    [JsonPropertyName("command")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Command { get; set; }
+
+    /// <summary>stdio only: arguments for <see cref="Command"/>.</summary>
+    [JsonPropertyName("args")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Args { get; set; }
+
+    /// <summary>stdio only: extra environment variables for the process.</summary>
+    [JsonPropertyName("env")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string>? Env { get; set; }
 }
 
 /// <summary>Locally persisted install record for a connector.</summary>
@@ -58,4 +88,12 @@ public sealed class InstalledConnector
     /// api_key/DPAPI so pre-Phase-7 records keep working).</summary>
     [JsonPropertyName("auth_mode")]
     public string? AuthMode { get; set; }
+
+    /// <summary>Phase 12 D: full definition of a locally-added connector
+    /// (typically transport "stdio") that exists in no catalog. Null for
+    /// catalog installs — and omitted when writing connectors.json so
+    /// pre-existing records re-serialize byte-identically.</summary>
+    [JsonPropertyName("custom")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public McpConnector? Custom { get; set; }
 }
