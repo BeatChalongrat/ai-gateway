@@ -151,3 +151,78 @@ func sizeOf(fi os.FileInfo) int64 {
 	}
 	return fi.Size()
 }
+
+// networkValues scans a docker argv for every `--network <value>` pair and
+// returns the values in order. It is deliberately dumb (positional) so it
+// mirrors exactly what the docker CLI sees.
+func networkValues(args []string) []string {
+	var vals []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--network" {
+			if i+1 < len(args) {
+				vals = append(vals, args[i+1])
+			} else {
+				vals = append(vals, "")
+			}
+		}
+		// Also catch the fused `--network=none` spelling if a future edit
+		// switches styles, so this guard can't be trivially bypassed.
+		if strings.HasPrefix(args[i], "--network=") {
+			vals = append(vals, strings.TrimPrefix(args[i], "--network="))
+		}
+	}
+	return vals
+}
+
+// TestSandbox_DockerArgsAlwaysNoNetwork is the Part C egress-invariant unit
+// test: it pins the no-third-party-network guarantee at the code level. It
+// needs NO docker/image (pure arg-builder assertion), so it runs in CI.
+//
+// The sandbox is an INTERNAL trust boundary (see docs/DLP_ARCHITECTURE.md
+// "Code interpreter sandbox"): it runs on RAW user data but has no network
+// egress, so results only reach a provider via the masked completion
+// pipeline. If a future change removes `--network none` (or swaps it for
+// bridge/host), this test fails — the egress invariant is enforced by the
+// build, not by convention.
+func TestSandbox_DockerArgsAlwaysNoNetwork(t *testing.T) {
+	r := New(Config{
+		WorkDir:     "/work",
+		HostWorkDir: "/work",
+		SeccompPath: "/work/seccomp.json",
+	})
+
+	// Exercise the builder across default, custom, and clamp-forced limits,
+	// with and without a seccomp path, so no reachable branch can widen the
+	// network mode.
+	cases := []struct {
+		name   string
+		cfg    Config
+		limits Limits
+	}{
+		{"default", r.cfg, DefaultLimits},
+		{"custom-limits", r.cfg, Limits{Wall: 30 * time.Second, MemoryMB: 256, PidsLimit: 64, CPUs: "0.5", ScratchMB: 64, FileSizeB: 1 << 20}.withDefaults()},
+		{"over-cap-clamped", r.cfg, Limits{MemoryMB: 999999, PidsLimit: 999999, ScratchMB: 999999, FileSizeB: 1 << 40}.withDefaults()},
+		{"no-seccomp", Config{WorkDir: "/work", HostWorkDir: "/work"}, DefaultLimits},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := &Runner{cfg: tc.cfg}
+			if rr.cfg.Image == "" {
+				rr.cfg.Image = "ai-gateway-sandbox:latest"
+			}
+			args := rr.dockerArgs(tc.limits, "/work/in", "/work/out", "sbx-test")
+
+			vals := networkValues(args)
+			if len(vals) != 1 {
+				t.Fatalf("expected exactly one --network flag, got %d (%v) in args=%v",
+					len(vals), vals, args)
+			}
+			if vals[0] != "none" {
+				t.Fatalf("sandbox docker args set --network=%q; the egress "+
+					"invariant requires 'none' (no third-party network path). args=%v",
+					vals[0], args)
+			}
+		})
+	}
+}

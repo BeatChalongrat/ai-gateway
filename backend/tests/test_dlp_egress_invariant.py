@@ -158,6 +158,94 @@ def test_classified_modules_still_exist():
     assert not missing, f"Classified modules no longer exist: {missing}"
 
 
+# ---------------------------------------------------------------------------
+# 2b. Code-interpreter sandbox (Phase 13) — an INTERNAL trust boundary.
+#
+# The run_python / plan-exec code interpreter is NOT a Python-backend egress
+# channel: it lives entirely in chat-edge (Go) plus an in-container Python
+# runner, with ZERO representation under backend/app/. So the httpx sweep
+# above never sees it, and it must NOT be forced into EGRESS_CLASSIFICATION
+# (a fake key there would fail test_classified_modules_still_exist).
+#
+# Its classification is INTERNAL, like the NER sidecar: the interpreter runs
+# on RAW user data but has NO third-party network egress (docker --network
+# none + a seccomp profile with every networking syscall removed), so results
+# reach a provider ONLY through the masked completion pipeline. It is
+# therefore correctly ABSENT from RAW_EGRESS_ALLOWED (it is not a raw egress
+# path at all — it is a no-egress path).
+#
+# The substantive proof lives in the Go arg-builder test
+# (services/chat-edge-api/internal/sandbox/sandbox_test.go::
+# TestSandbox_DockerArgsAlwaysNoNetwork). The two tests below pin that proof
+# from the Python gate so the guarantee cannot be silently removed on the Go
+# side without a red test on this side too.
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+SANDBOX_GO = (
+    REPO_ROOT / "services" / "chat-edge-api" / "internal" / "sandbox" / "sandbox.go"
+)
+SANDBOX_GO_TEST = (
+    REPO_ROOT / "services" / "chat-edge-api" / "internal" / "sandbox" / "sandbox_test.go"
+)
+SANDBOX_SECCOMP = (
+    REPO_ROOT / "services" / "chat-edge-api" / "sandbox" / "seccomp.json"
+)
+
+
+def test_code_interpreter_is_not_a_raw_egress_channel():
+    """The sandbox is internal (no third-party egress), so it must never be
+    added to the raw-egress whitelist. If someone reclassifies it as a raw
+    egress channel, that is a conscious product/compliance decision that must
+    update this test and the disclosure doc together — same contract as the
+    two real raw channels."""
+    assert "code_interpreter" not in RAW_EGRESS_ALLOWED
+    assert "sandbox" not in RAW_EGRESS_ALLOWED
+    assert "run_python" not in RAW_EGRESS_ALLOWED
+
+
+def test_code_interpreter_egress_is_go_side_and_network_locked():
+    """The code-interpreter egress path is Go-side + internal. Pin the actual
+    no-third-party-network guarantee from PART A/C at the source level so a
+    Go-side edit that weakens it also reddens the Python egress gate.
+
+    We assert three things about the checked-in sandbox:
+      1. dockerArgs pins `--network` immediately followed by `"none"`.
+      2. no OTHER --network value (bridge/host/container) appears anywhere.
+      3. the Go arg-builder no-network unit test exists.
+    Plus: the seccomp profile removes networking syscalls (defence in depth).
+    """
+    src = SANDBOX_GO.read_text(encoding="utf-8")
+
+    # 1. The exact adjacent `--network`, `none` argv pair the daemon sees.
+    assert '"--network", "none"' in src, (
+        "sandbox.go no longer pins '--network', 'none' in the docker arg "
+        "builder — the code-interpreter egress invariant is broken."
+    )
+
+    # 2. No reachable widening of the network mode.
+    for bad in ('"--network", "bridge"', '"--network", "host"',
+                '"--network", "container', '"--network=bridge"',
+                '"--network=host"'):
+        assert bad not in src, f"sandbox.go reaches a non-'none' network mode: {bad}"
+
+    # 3. The substantive Go proof is present.
+    test_src = SANDBOX_GO_TEST.read_text(encoding="utf-8")
+    assert "TestSandbox_DockerArgsAlwaysNoNetwork" in test_src, (
+        "the Go arg-builder no-network unit test is missing — the sandbox "
+        "egress invariant has no code-level guard."
+    )
+
+    # Defence in depth: seccomp default-denies and never allow-lists socket.
+    seccomp = SANDBOX_SECCOMP.read_text(encoding="utf-8")
+    assert '"defaultAction": "SCMP_ACT_ERRNO"' in seccomp
+    for netcall in ('"socket"', '"connect"', '"bind"', '"sendto"', '"recvfrom"'):
+        assert netcall not in seccomp, (
+            f"seccomp profile now allow-lists a networking syscall ({netcall}); "
+            "the sandbox could open a socket despite --network none."
+        )
+
+
 def test_raw_call_sites_are_guarded():
     """Structural pin: the routes feeding the raw channels run the
     credential-blocking scan BEFORE the egress."""
