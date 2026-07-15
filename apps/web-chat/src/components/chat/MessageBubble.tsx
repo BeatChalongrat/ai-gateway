@@ -7,17 +7,17 @@
 // never per-message. User messages stay as a soft gray pill aligned
 // to the right.
 //
-// TODO(phase2.session2): add LaTeX support via remark-math + rehype-katex.
-// Skipped here to avoid pulling katex's 100kB+ stylesheet into the chat
-// bundle for a feature most prompts don't need.
+// Markdown (incl. LaTeX via remark-math + rehype-katex, Phase 12) is
+// rendered through the shared <Markdown> component — plugins, component
+// overrides, citation pills, and the KaTeX stylesheet all live in
+// Markdown.tsx so this file only decides WHEN to render markdown, not
+// HOW. (The old TODO deferred KaTeX over stylesheet bundle weight; the
+// shared component imports the CSS in its own module so only markdown-
+// rendering routes pay for it — see Markdown.tsx for the rationale.)
 
 import { memo, useEffect, useRef, useState } from "react";
 
 import { useRouter } from "next/navigation";
-
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
 
 import type { FallbackAttempt, Message } from "@/lib/types";
 import { fallbackNotice } from "@/lib/errorMessages";
@@ -26,13 +26,13 @@ import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
 import { BranchNavigator } from "./BranchNavigator";
-import { CodeBlock } from "./CodeBlock";
 import { DocPlanCard } from "./DocPlanCard";
 import type { DocPlan } from "./DocPlanCard";
 import { ExcelPlanCard } from "./ExcelPlanCard";
 import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { ImageGeneratingPlaceholder } from "./ImageGeneratingPlaceholder";
+import { Markdown } from "./Markdown";
 import { VideoGeneratingPlaceholder } from "./VideoGeneratingPlaceholder";
 import { SearchCitations } from "./SearchCitations";
 import { SearchingIndicator } from "./SearchingIndicator";
@@ -58,69 +58,6 @@ interface Props {
 // here rather than dropping the data. Flip to ``true`` to bring the rail
 // back without touching the SourcesCard wiring below.
 const SHOW_SOURCES_RAIL = false;
-
-// Citation marker — RAG context tells the model to cite sources using
-// the literal pattern ``[Source: <filename>]``. We post-process the
-// assistant text to convert that pattern into a markdown link with a
-// special internal href scheme; the custom anchor renderer below
-// detects that scheme and renders a pill instead of a regular link.
-//
-// Why a hidden link scheme? It survives every place ReactMarkdown
-// passes children through (paragraphs, list items, table cells)
-// without us re-implementing the renderer for each node type.
-const CITATION_PREFIX = "#__rag_citation:";
-const CITATION_PATTERN = /\[Source:\s*([^\]]+?)\]/g;
-
-function renderCitations(text: string): string {
-  // Escape any existing parentheses inside the filename so the markdown
-  // link grammar parses cleanly. We don't try to be clever — citations
-  // come from the indexer which already sanitizes filenames, so the
-  // edge cases here are vanishingly rare.
-  return text.replace(CITATION_PATTERN, (_, raw: string) => {
-    const filename = raw.trim();
-    const safe = filename
-      .replace(/\(/g, "%28")
-      .replace(/\)/g, "%29");
-    return `[__RAG_CITATION__${filename}](${CITATION_PREFIX}${safe})`;
-  });
-}
-
-const markdownComponents = {
-  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
-    const href = props.href ?? "";
-    if (href.startsWith(CITATION_PREFIX)) {
-      const filename = decodeURIComponent(href.slice(CITATION_PREFIX.length));
-      return <CitationPill filename={filename} />;
-    }
-    return <a {...props} target="_blank" rel="noopener noreferrer" />;
-  },
-  pre: (props: { children?: React.ReactNode }) => <CodeBlock {...props} />,
-};
-
-function CitationPill({ filename }: { filename: string }) {
-  return (
-    <span
-      title={`From knowledge base: ${filename}`}
-      className="mx-0.5 inline-flex items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-0.5 align-baseline text-[11px] font-medium text-text-secondary"
-    >
-      <svg
-        width={10}
-        height={10}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-        <path d="M14 3v6h6" />
-      </svg>
-      {filename}
-    </span>
-  );
-}
 
 function MessageBubbleImpl({
   message,
@@ -671,8 +608,8 @@ function RegenerateIcon() {
   );
 }
 // StreamingMarkdown renders an in-flight assistant message through the
-// SAME ReactMarkdown pipeline (and same markdownComponents) as completed
-// messages (Fix 2) so bullets / lists / headings / tables format live as
+// SAME shared <Markdown> pipeline (plugins + component overrides) as
+// completed messages (Fix 2) so bullets / lists / headings / tables format live as
 // tokens arrive instead of showing raw "-", "#", "**", "|" that only snap
 // into elements — reflowing the whole block — when the stream ends.
 // remark-gfm tolerates incomplete syntax (an unclosed ** stays literal,
@@ -691,13 +628,7 @@ const StreamingMarkdown = memo(function StreamingMarkdown({
 }) {
   return (
     <div className="streaming-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={markdownComponents}
-      >
-        {renderCitations(content)}
-      </ReactMarkdown>
+      <Markdown citations>{content}</Markdown>
       <span className="streaming-cursor-block" aria-hidden />
     </div>
   );
@@ -740,7 +671,7 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
   // segment renders independently so the card mounts inline wherever
   // the AI placed the fenced block. :::excel-plan, :::doc-plan, and
   // :::pptx-plan are all recognised; everything else passes through
-  // to ReactMarkdown.
+  // to the shared <Markdown> component.
   const segments = parsePlanSegments(message.content || "");
   return (
     <>
@@ -755,14 +686,9 @@ function AssistantContent({ message, convId }: { message: Message; convId: strin
           return <PptxPlanCard key={i} convId={convId} plan={seg.plan} />;
         }
         return (
-          <ReactMarkdown
-            key={i}
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={markdownComponents}
-          >
-            {renderCitations(seg.text)}
-          </ReactMarkdown>
+          <Markdown key={i} citations>
+            {seg.text}
+          </Markdown>
         );
       })}
     </>

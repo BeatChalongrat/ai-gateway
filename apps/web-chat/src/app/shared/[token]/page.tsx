@@ -8,22 +8,11 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
-
 import { AssistantAvatar } from "@/components/chat/AssistantAvatar";
-import { CodeBlock } from "@/components/chat/CodeBlock";
+import { Markdown } from "@/components/chat/Markdown";
 import { Spinner } from "@/components/ui/Spinner";
 import { fetchPublicShared, type PublicSharedView } from "@/lib/api";
 import { formatBytes, iconEmojiFor, iconKindFor, isImageMime } from "@/lib/fileUtil";
-
-const markdownComponents = {
-  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a {...props} target="_blank" rel="noopener noreferrer" />
-  ),
-  pre: (props: { children?: React.ReactNode }) => <CodeBlock {...props} />,
-};
 
 export default function SharedConversationPage() {
   const params = useParams();
@@ -139,13 +128,7 @@ export default function SharedConversationPage() {
                         {m.content}
                       </span>
                     ) : (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeHighlight]}
-                        components={markdownComponents}
-                      >
-                        {m.content || ""}
-                      </ReactMarkdown>
+                      <Markdown>{m.content || ""}</Markdown>
                     )}
                   </div>
                   {m.files && m.files.length > 0 ? (
