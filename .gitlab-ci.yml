@@ -1,12 +1,31 @@
-# GitLab CI — mirror of .github/workflows/ci.yml.
+# GitLab CI — parity mirror of .github/workflows/ci.yml.
 #
-# Test gate only (no build / deploy): three independent jobs run on every
-# push to main and every merge request targeting main. Versions match the
-# GitHub Actions workflow exactly (Python 3.11, Node 20, Go 1.24) so a green
-# run on one host means a green run on the other.
+# Test gate only (no build / deploy). GitLab is the PRIMARY remote, so every
+# Linux-runnable lane from the GitHub Actions workflow is reproduced here with
+# IDENTICAL commands. Versions match GitHub exactly (Python 3.11, Node 20,
+# Go 1.24, .NET 8) so a green run on one host means a green run on the other.
+#
+# Lane parity map (GitHub job -> GitLab job):
+#   backend-test            -> backend-test (+ dlp-egress-invariant gate step)
+#   frontend-typecheck      -> frontend-typecheck (web-chat tsc + vitest)
+#   web-unit-test [matrix]  -> web-unit-test (parallel:matrix portal, admin-ui)
+#   web-e2e                 -> web-e2e (allow_failure — mirrors continue-on-error)
+#   go-test                 -> go-test (chat-edge-api)
+#   gateway-test            -> gateway-test (services/gateway)
+#   mcp-gateway-test        -> mcp-gateway-test
+#   secret-leak-guard       -> secret-leak-guard
+#   security-audit          -> audit:pip / audit:npm / audit:go / audit:cargo
+#   desktop-test (Windows)  -> desktop-test (tags:[windows], manual+allow_failure)
 
 stages:
   - test
+  - e2e
+  - audit
+
+# A newer pipeline on the same ref cancels in-flight jobs — the GitLab
+# equivalent of GitHub's `concurrency: cancel-in-progress: true`.
+default:
+  interruptible: true
 
 # Pipeline-level gate (equivalent to GitHub's `on: push:[main] / PR:[main]`).
 # Runs for: a push to main, OR a merge request targeting main. Limiting it
@@ -16,7 +35,9 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
 
-# backend (pytest, unit lane)
+# ─────────────────────────────────────────────────────────────────────────
+# backend (pytest, unit lane) + Phase 9 DLP egress-invariant drift guard
+# ─────────────────────────────────────────────────────────────────────────
 backend-test:
   stage: test
   image: python:3.11
@@ -41,8 +62,16 @@ backend-test:
     # limiter, live/e2e, container .env) is excluded via the `integration`
     # marker + conftest auto-tag. This gate must stay green.
     - pytest -m "not integration" --tb=short
+    # DLP egress-invariant gate (Phase 9 drift guard). Already part of the
+    # unit lane above; this named step re-runs it so the gate fails LOUDLY
+    # and independently if the module is ever added to the integration
+    # exclusion list or deselected by a marker change. Must never be skipped.
+    - echo "=== DLP egress-invariant gate (Phase 9 drift guard) ==="
+    - pytest tests/test_dlp_egress_invariant.py --tb=short
 
-# web-chat (tsc --noEmit)
+# ─────────────────────────────────────────────────────────────────────────
+# web-chat (tsc --noEmit + vitest unit suite)
+# ─────────────────────────────────────────────────────────────────────────
 frontend-typecheck:
   stage: test
   image: node:20
@@ -57,8 +86,33 @@ frontend-typecheck:
     - npm ci
   script:
     - npx tsc --noEmit
+    # SSE parser, chatStore streaming/optimistic-rollback, 401->refresh
+    # single-flight. Mirrors the GitHub frontend-typecheck vitest step.
+    - npm test
 
+# ─────────────────────────────────────────────────────────────────────────
+# portal + admin-ui vitest (matrix, mirrors GitHub web-unit-test)
+# ─────────────────────────────────────────────────────────────────────────
+web-unit-test:
+  stage: test
+  image: node:20
+  parallel:
+    matrix:
+      - APP: portal
+      - APP: admin-ui
+  cache:
+    key: "web-unit-$APP"
+    paths:
+      - $APP/node_modules
+  before_script:
+    - cd $APP
+    - npm ci
+  script:
+    - npm test
+
+# ─────────────────────────────────────────────────────────────────────────
 # chat-edge-api (go vet + test)
+# ─────────────────────────────────────────────────────────────────────────
 go-test:
   stage: test
   image: golang:1.24
@@ -73,5 +127,179 @@ go-test:
   before_script:
     - cd services/chat-edge-api
   script:
+    # The import e2e test self-skips without a DB — no service container needed.
     - go vet ./...
     - go test ./...
+
+# ─────────────────────────────────────────────────────────────────────────
+# gateway (go vet + test)
+# ─────────────────────────────────────────────────────────────────────────
+gateway-test:
+  stage: test
+  image: golang:1.24
+  variables:
+    GOPATH: "$CI_PROJECT_DIR/.cache/go"
+  cache:
+    key:
+      files:
+        - services/gateway/go.sum
+    paths:
+      - .cache/go/pkg/mod
+  before_script:
+    - cd services/gateway
+  script:
+    - go vet ./...
+    - go test ./...
+
+# ─────────────────────────────────────────────────────────────────────────
+# mcp-gateway (node --test)
+# ─────────────────────────────────────────────────────────────────────────
+mcp-gateway-test:
+  stage: test
+  image: node:20
+  cache:
+    key:
+      files:
+        - services/mcp-gateway/package-lock.json
+    paths:
+      - services/mcp-gateway/node_modules
+  before_script:
+    - cd services/mcp-gateway
+    - npm ci
+  script:
+    # Tests fake the child-process/JWT/upstream seams — no secrets, no
+    # network beyond a loopback express upstream.
+    - npm test
+
+# ─────────────────────────────────────────────────────────────────────────
+# secret-leak-guard — reject NEXT_PUBLIC_ secrets in tracked files
+# ─────────────────────────────────────────────────────────────────────────
+secret-leak-guard:
+  stage: test
+  # Debian-based image so `git grep -P` (PCRE) is available, matching the
+  # GitHub ubuntu runner. Alpine git is frequently built without PCRE.
+  image: python:3.11
+  script:
+    # NEXT_PUBLIC_ vars are compiled into client JS by Next.js, so a
+    # NEXT_PUBLIC_*API_KEY / *SECRET would ship a credential to the browser
+    # (the P0-2 leak). Markdown docs and the CI files (which necessarily
+    # contain the pattern) are excluded.
+    - |
+      if git grep -lP 'NEXT_PUBLIC_\w*(SECRET|API_KEY)' -- ':!.github/workflows/ci.yml' ':!.gitlab-ci.yml' ':!*.md'; then
+        echo "ERROR: Found NEXT_PUBLIC_ secret references in tracked files — these get bundled into client-side JS."
+        exit 1
+      fi
+      echo "OK: no NEXT_PUBLIC_ secret leaks in tracked files."
+
+# ─────────────────────────────────────────────────────────────────────────
+# web-e2e (Playwright) — NON-BLOCKING, mirrors GitHub continue-on-error: true
+# ─────────────────────────────────────────────────────────────────────────
+# ⚠ This lane may be flaky (browser download, dev-server boot timing) and MUST
+# NOT gate merges. allow_failure: true is the GitLab equivalent of GitHub's
+# continue-on-error. All backends are mocked via route interception (see
+# apps/web-chat/tests/e2e), so it needs NO gateway/chat-edge/DB; the Playwright
+# webServer boots `next dev` from source.
+web-e2e:
+  stage: e2e
+  image: node:20
+  allow_failure: true
+  cache:
+    key:
+      files:
+        - apps/web-chat/package-lock.json
+    paths:
+      - apps/web-chat/node_modules
+  before_script:
+    - cd apps/web-chat
+    - npm ci
+  script:
+    - npx playwright install --with-deps chromium
+    - npm run test:e2e
+  artifacts:
+    when: on_failure
+    paths:
+      - apps/web-chat/test-results/
+    expire_in: 7 days
+
+# ─────────────────────────────────────────────────────────────────────────
+# security-audit — dependency audit across every ecosystem.
+# GitHub runs one job with four setup-* actions; GitLab has no single image
+# with all four toolchains, so it is split into four per-ecosystem jobs with
+# IDENTICAL commands and audit levels. All four are blocking (GitHub's
+# security-audit has no continue-on-error).
+# ─────────────────────────────────────────────────────────────────────────
+audit:pip:
+  stage: audit
+  image: python:3.11
+  script:
+    # Add `--ignore-vuln <ID>` for any advisory triaged as an accepted risk
+    # so the gate stays meaningful rather than muted.
+    - pip install pip-audit
+    - pip-audit -r backend/requirements.txt
+
+audit:npm:
+  stage: audit
+  image: node:20
+  script:
+    # --audit-level=critical only fails the build on CRITICAL advisories for
+    # now; lower to high/moderate once the backlog is clean. Audits from each
+    # app's committed package-lock.json (no install needed).
+    - |
+      for app in admin-ui portal apps/web-chat services/mcp-gateway; do
+        echo "=== npm audit: $app ==="
+        ( cd "$app" && npm audit --audit-level=critical )
+      done
+
+audit:go:
+  stage: audit
+  image: golang:1.24
+  variables:
+    GOPATH: "$CI_PROJECT_DIR/.cache/go"
+  cache:
+    key: audit-go
+    paths:
+      - .cache/go/pkg/mod
+  script:
+    - go install golang.org/x/vuln/cmd/govulncheck@latest
+    - export PATH="$PATH:$(go env GOPATH)/bin"
+    - |
+      for dir in log-worker services/chat-edge-api services/gateway; do
+        echo "=== govulncheck: $dir ==="
+        ( cd "$dir" && govulncheck ./... )
+      done
+
+audit:cargo:
+  stage: audit
+  image: rust:latest
+  script:
+    - cargo install cargo-audit --locked
+    - |
+      for dir in dlp-sidecar rate-limiter; do
+        echo "=== cargo audit: $dir ==="
+        ( cd "$dir" && cargo audit )
+      done
+
+# ─────────────────────────────────────────────────────────────────────────
+# desktop-test (SranDesktop, WINDOWS) — net8.0-windows / WPF CANNOT build on
+# Linux, so this job REQUIRES a Windows GitLab runner tagged `windows`.
+#
+# ⚠ ACTION REQUIRED: a Windows GitLab runner must be REGISTERED with the
+# `windows` tag for this job to execute. Until then it is a MANUAL job and is
+# allow_failure: true, so a MISSING Windows runner does NOT red the pipeline
+# and does NOT silently drop desktop coverage — the job stays visible in the
+# pipeline as a manual/optional lane. Once a runner exists, promote it to a
+# normal blocking lane (remove `when: manual` / `allow_failure`).
+# ─────────────────────────────────────────────────────────────────────────
+desktop-test:
+  stage: test
+  tags:
+    - windows
+  when: manual
+  allow_failure: true
+  # image intentionally omitted — a Windows shell/dotnet runner is expected to
+  # provide the toolchain (the GitHub lane uses windows-latest + setup-dotnet).
+  script:
+    # Suite is self-contained: sqlite in temp dirs, loopback HttpListener fakes
+    # for MCP dials — no secrets, no live services.
+    - dotnet build SranDesktop/SranDesktop.sln -c Release
+    - dotnet test SranDesktop/SranDesktop.sln -c Release --no-build
