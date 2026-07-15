@@ -40,3 +40,15 @@ public sealed record ExecuteDocumentPlanRequest(
     [property: JsonPropertyName("format")] string Format,
     [property: JsonPropertyName("output_filename")] string? OutputFilename,
     [property: JsonPropertyName("plan")] JsonElement Plan);
+
+/// <summary>
+/// Result of an on-device plan execution (Phase 12 E). Changes mirrors the
+/// server executors' change_log phrasing; Stats feeds the result card's meta
+/// line (excel: sheets/charts). No version number: local files sit outside
+/// the server's DB-backed version lineage by design.
+/// </summary>
+public sealed record LocalPlanExecutionResult(
+    string OutputPath,
+    long FileSizeBytes,
+    List<string> Changes,
+    Dictionary<string, int> Stats);

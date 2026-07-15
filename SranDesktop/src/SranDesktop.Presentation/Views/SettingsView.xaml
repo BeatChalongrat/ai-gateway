@@ -107,6 +107,13 @@
                         <TextBlock Text="{loc:T settings.syncAgentChatsHint}"
                                    FontSize="12" Margin="24,0,0,8" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <!-- On-device Office file generation (Phase 12 E) -->
+                        <CheckBox IsChecked="{Binding PreferLocalOfficeGeneration}" Margin="0,0,0,2">
+                            <TextBlock Text="{loc:T settings.localOfficeGen}" />
+                        </CheckBox>
+                        <TextBlock Text="{loc:T settings.localOfficeGenHint}"
+                                   FontSize="12" Margin="24,0,0,8" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiaryBrush}" />
 
                         <TextBlock Text="Global hotkey" Style="{StaticResource FieldLabel}" />
                         <TextBlock Text="Ctrl + Shift + Space (show / hide from anywhere)"

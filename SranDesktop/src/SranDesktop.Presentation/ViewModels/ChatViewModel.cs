@@ -26,6 +26,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly IAgentConversationSyncService _agentSync;
     private readonly ILogger<ChatViewModel> _logger;
+    private readonly IReadOnlyList<ILocalPlanExecutor> _localPlanExecutors;
 
     private CancellationTokenSource? _streamCts;
     private readonly System.Diagnostics.Stopwatch _uiThrottle = new();
@@ -450,7 +451,8 @@ public partial class ChatViewModel : ObservableObject
         ISpeechService speech,
         ISettingsService settings,
         IAgentConversationSyncService agentSync,
-        ILogger<ChatViewModel> logger)
+        ILogger<ChatViewModel> logger,
+        IEnumerable<ILocalPlanExecutor>? localPlanExecutors = null)
     {
         _api = api;
         _gateway = gateway;
@@ -463,6 +465,9 @@ public partial class ChatViewModel : ObservableObject
         _settings = settings;
         _agentSync = agentSync;
         _logger = logger;
+        // Phase 12 E: on-device excel/doc plan executors; pptx has none and
+        // always goes through chat-edge.
+        _localPlanExecutors = localPlanExecutors?.ToList() ?? new List<ILocalPlanExecutor>();
     }
 
     // ── Project context (R9 Feature B6) ─────────────────────────────────────
@@ -1339,7 +1344,9 @@ public partial class ChatViewModel : ObservableObject
             {
                 using var doc = JsonDocument.Parse(match.Groups[2].Value);
                 message.PlanBlocks.Add(new PlanBlockViewModel(
-                    _api, conversationId, planType, doc.RootElement.Clone()));
+                    _api, conversationId, planType, doc.RootElement.Clone(),
+                    _localPlanExecutors.FirstOrDefault(e => e.PlanType == planType),
+                    _settings, _logger));
             }
             catch (JsonException ex)
             {
