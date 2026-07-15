@@ -293,6 +293,33 @@ def _normalize_tokens(text: str, span_map: dict[str, str]) -> str:
     return _FUZZY_PSEUDONYM_RE.sub(replacer_pseudo, result)
 
 
+def _substitute_tokens_single_pass(text: str, token_map: dict[str, str]) -> str:
+    """Replace every ``token_map`` key in *text* with its value — ONE scan.
+
+    Phase 12 A3. The naive per-token ``str.replace`` loop re-scans the
+    accumulating result after every substitution, so a restored VALUE
+    that itself contains a still-pending token literal (e.g. the value
+    bound to ``<<PERSON_A>>`` is ``"call <<EMAIL_1>> later"`` while
+    ``<<EMAIL_1>>`` is also in the map) gets double-substituted and the
+    user's original data is corrupted. A single compiled alternation
+    with a callback consumes each source occurrence exactly once and
+    never looks inside replacement values.
+
+    Ordering: alternatives are sorted longest-first because Python's
+    ``re`` picks the FIRST alternative that matches at a position —
+    without the sort, ``<r1>`` would shadow ``<r10>`` (prefix tokens),
+    which is the same guarantee the old loop got from its
+    ``sorted(key=len, reverse=True)``.
+    """
+    if not text or not token_map:
+        return text
+    tokens = [t for t in sorted(token_map, key=len, reverse=True) if t]
+    if not tokens:
+        return text
+    pattern = re.compile("|".join(re.escape(t) for t in tokens))
+    return pattern.sub(lambda m: token_map[m.group(0)], text)
+
+
 # Descriptive placeholder tokens. Keyed on DetectionMatch.detector_name so
 # the model (and the caller) sees "[EMAIL]" instead of "*****ple.com", which
 # preserves enough context for the model to respond sensibly about the
@@ -1510,9 +1537,13 @@ class DLPTransformer:
     ) -> str:
         """Reverse indexed masking by replacing each token with its original.
 
-        Processes longer tokens first so that ``[EMAIL_10]`` is replaced
-        before ``[EMAIL_1]`` — otherwise the shorter token would match
-        the prefix of the longer one and corrupt the output.
+        Single-pass substitution (Phase 12 A3): one compiled alternation
+        over the escaped token set, ordered longest-first so ``<r10>``
+        wins over its ``<r1>`` prefix at the same position. One scan
+        means a restored VALUE is never re-visited — the old per-token
+        ``str.replace`` loop re-scanned the whole string after every
+        replacement, so a value that happened to contain another
+        still-pending token literal was corrupted by a later pass.
 
         ``vault_resolver`` is an optional callable
         ``(list[str]) -> dict[str, str]`` that the caller wires to a
@@ -1548,16 +1579,22 @@ class DLPTransformer:
         )
         if active_span_map:
             # Canonicalise lowercase / whitespace-padded variants the
-            # model may have echoed back before the exact-match replace
-            # loop runs — otherwise ``[ EMAIL_0 ]`` would never match the
-            # ``[EMAIL_0]`` key and would leak as a literal token.
+            # model may have echoed back before the exact-match
+            # substitution runs — otherwise ``[ EMAIL_0 ]`` would never
+            # match the ``[EMAIL_0]`` key and would leak as a literal
+            # token.
             result = _normalize_tokens(result, active_span_map)
-            for token in sorted(active_span_map, key=len, reverse=True):
-                result = result.replace(token, active_span_map[token])
+            result = _substitute_tokens_single_pass(result, active_span_map)
         # Orphan detection runs whether or not span_map was empty: a
         # bracketed [DETECTOR_N] surviving to this point is suspicious
         # either way.
         orphans = set(_MASK_TOKEN_RE.findall(result))
+        # A token-shaped literal that is a KEY of ``active_span_map`` can
+        # only survive the single pass above as part of a restored VALUE
+        # (every occurrence in the source text was consumed). It is the
+        # user's original data, not an orphan — never re-substitute it
+        # via the vault path or warn about it.
+        orphans -= set(active_span_map)
         # Diagnostic snapshot AFTER restore — same purpose as the
         # _start event above.
         logger.debug(
@@ -1579,13 +1616,17 @@ class DLPTransformer:
                     error=str(exc)[:200],
                 )
                 resolved = {}
-            for token, value in resolved.items():
-                result = result.replace(token, value)
+            # Same single-pass discipline as the main substitution above:
+            # a vault-restored value containing another pending orphan
+            # token literal must not be corrupted by a later replace.
+            result = _substitute_tokens_single_pass(result, resolved)
+            for token in resolved:
                 logger.info(
                     "dlp_orphan_resolved_from_vault",
                     token=token,
                 )
             orphans = set(_MASK_TOKEN_RE.findall(result))
+            orphans -= set(active_span_map) | set(resolved)
             if orphans:
                 logger.warning(
                     "dlp_orphan_unresolvable",

@@ -257,11 +257,58 @@ async def lifespan(app: FastAPI):
     executor.shutdown(wait=False)
 
 
+# --- Startup seed serialization (Phase 12 A1) ------------------------------
+# Advisory-lock ids for the one-time startup seed/import steps below. Chosen
+# in the 9000xx block the other singleton jobs already use: worker.py owns
+# 900001-900003 and the media-generation job loop owns 900004 (see
+# app/services/media_gen/job_loop.py) — grep for "pg_advisory" before adding
+# a new id. Scope note: the job loops take SESSION-level
+# ``pg_try_advisory_lock`` because a claim spans several transactions; each
+# seed step below runs its whole check-then-insert inside ONE transaction,
+# so the transaction-scoped ``pg_advisory_xact_lock`` is the right variant —
+# a second worker blocks until the first worker's COMMIT makes the seeded
+# row visible, and the lock releases automatically with the transaction (no
+# cross-connection unlock bookkeeping after the pool recycles the
+# connection).
+STARTUP_LOCK_SEED_ADMIN = 900005
+STARTUP_LOCK_ENV_KEY_IMPORT = 900006
+
+
+def _acquire_startup_lock(session, lock_id: int) -> None:
+    """Serialize a startup check-then-insert step across workers.
+
+    Blocks on ``pg_advisory_xact_lock`` so only one of the N gunicorn
+    workers runs the seed/import at a time; the others wait, then see
+    the committed row and no-op. Without this, 4 workers booting on a
+    fresh DB all pass the "does the row exist?" check before any of
+    them commits, and the losers double-insert (or crash into the
+    unique constraint and abort the whole import batch).
+
+    On non-Postgres dialects (SQLite tests) advisory locks don't
+    exist, so this is a no-op — tests simulate the mutual exclusion
+    by monkeypatching this helper.
+    """
+    from sqlalchemy import text
+
+    try:
+        dialect = session.bind.dialect.name
+    except Exception:  # noqa: BLE001 — best-effort dialect probe
+        return
+    if dialect != "postgresql":
+        return
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(:id)"), {"id": lock_id}
+    )
+
+
 def _seed_admin_user() -> None:
     """Sync function — runs in a thread via asyncio.to_thread.
 
     Auto-seeds an admin row on first boot of an empty DB so a fresh
     `docker compose up` is usable without a separate `make seed`.
+    Serialized across workers via advisory lock 900005 (see
+    ``_acquire_startup_lock``) so a 4-worker boot on a fresh DB seeds
+    exactly once.
 
     Outside of APP_ENV=development this is gated on
     INITIAL_ADMIN_PASSWORD being set in the environment. If it's not
@@ -293,6 +340,9 @@ def _seed_admin_user() -> None:
 
     session = SessionLocal()
     try:
+        # Take the transaction-scoped advisory lock BEFORE the existence
+        # check; released automatically at COMMIT/ROLLBACK (Phase 12 A1).
+        _acquire_startup_lock(session, STARTUP_LOCK_SEED_ADMIN)
         existing = session.execute(
             select(AdminUserORM).limit(1)
         ).scalar_one_or_none()
@@ -338,6 +388,10 @@ def _import_env_provider_keys() -> None:
 
     Keys are inserted with no test status; the admin UI's Test button
     populates ``last_test_status`` on demand.
+
+    Serialized across workers via advisory lock 900006 (see
+    ``_acquire_startup_lock``) so concurrent fresh-DB boots import each
+    env key exactly once instead of racing the check-then-insert.
     """
     from app.core.db import SessionLocal
     from app.repositories.provider_key_repository import ProviderKeyRepository
@@ -355,6 +409,10 @@ def _import_env_provider_keys() -> None:
 
     session = SessionLocal()
     try:
+        # Serialize across workers (Phase 12 A1) — the whole import runs
+        # in one transaction, so the xact-scoped lock covers every
+        # provider's check-then-insert and releases at COMMIT/ROLLBACK.
+        _acquire_startup_lock(session, STARTUP_LOCK_ENV_KEY_IMPORT)
         svc = ProviderKeyService()
         repo = ProviderKeyRepository(session)
         imported: list[str] = []

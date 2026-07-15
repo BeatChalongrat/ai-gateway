@@ -76,23 +76,39 @@ def tenant_limit_default() -> int:
     )
 
 # --- Conservative in-process limiter (Redis-outage fallback) ----------
-# Used ONLY when Redis is unreachable AND
-# settings.rate_limit_redis_outage_mode == "conservative". Per-worker
-# (not shared across workers/pods), best-effort: the goal is a cheap cost
-# cap during an outage, not exact global enforcement. Default = fail-open
-# (historical behaviour) when the mode is anything else.
+# Used when Redis is unreachable, in two distinct ways (Phase 12 A4):
+#   * GENERAL traffic limiters (this service): only when
+#     settings.rate_limit_redis_outage_mode == "conservative"; default
+#     stays fail-open (historical behaviour).
+#   * CREDENTIAL-guarding limiters (admin login in
+#     app/services/admin/login_service.py, portal password reset in
+#     app/services/portal/password_reset_service.py): ALWAYS — they call
+#     ``_conservative_allow`` directly on outage regardless of the
+#     outage-mode setting, because failing open there would hand out a
+#     free brute-force window on every Redis blip.
+# Per-worker (not shared across workers/pods), best-effort: the goal is
+# a cheap cap during an outage, not exact global enforcement.
 _CONSERVATIVE_LIMIT = 10  # admits per window, per scope key
 _CONSERVATIVE_WINDOW = 60  # seconds
 _conservative_hits: dict[str, list[float]] = defaultdict(list)
 
 
-def _conservative_allow(scope_key: str) -> bool:
-    """Per-worker sliding-window admit check for the Redis-outage path."""
+def _conservative_allow(
+    scope_key: str,
+    limit: int = _CONSERVATIVE_LIMIT,
+    window_sec: int = _CONSERVATIVE_WINDOW,
+) -> bool:
+    """Per-worker sliding-window admit check for the Redis-outage path.
+
+    ``limit`` / ``window_sec`` default to the general-traffic values;
+    credential-guarding callers pass their own ceilings (e.g. the
+    password-reset 3/hour cap).
+    """
     now = time.monotonic()
-    cutoff = now - _CONSERVATIVE_WINDOW
+    cutoff = now - window_sec
     hits = _conservative_hits[scope_key]
     hits[:] = [t for t in hits if t > cutoff]
-    if len(hits) >= _CONSERVATIVE_LIMIT:
+    if len(hits) >= limit:
         return False
     hits.append(now)
     return True
