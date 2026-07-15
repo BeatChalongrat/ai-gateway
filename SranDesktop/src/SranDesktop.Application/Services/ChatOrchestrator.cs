@@ -20,8 +20,14 @@ namespace SranDesktop.Application.Services;
 /// </summary>
 public sealed class ChatOrchestrator : IChatOrchestrator
 {
-    private const int MaxIterations = 25;
-    private static readonly TimeSpan MaxDuration = TimeSpan.FromMinutes(10);
+    /// <summary>Default safety caps for a top-level turn. A nested run
+    /// (run_subagent, Phase 12 F) constructs its own instance with tighter
+    /// caps via the optional constructor parameters.</summary>
+    public const int DefaultMaxIterations = 25;
+    public static readonly TimeSpan DefaultMaxDuration = TimeSpan.FromMinutes(10);
+
+    private readonly int _maxIterations;
+    private readonly TimeSpan _maxDuration;
 
     /// <summary>Assumed context window when the model catalog has none.</summary>
     private const int FallbackContextWindow = 100_000;
@@ -29,8 +35,8 @@ public sealed class ChatOrchestrator : IChatOrchestrator
     /// <summary>Output cap sent as max_tokens and reserved by the budgeter.</summary>
     private const int DefaultMaxOutputTokens = 8192;
 
-    private static string TimeLimitMessage =>
-        $"Stopped: the {MaxDuration.TotalMinutes:0} minute time limit was reached.";
+    private string TimeLimitMessage =>
+        $"Stopped: the {_maxDuration.TotalMinutes:0} minute time limit was reached.";
 
     private readonly IGatewayApiClient _gateway;
     private readonly IMcpToolHost _toolHost;
@@ -40,18 +46,28 @@ public sealed class ChatOrchestrator : IChatOrchestrator
 
     public event Func<ToolConsentRequest, Task<ToolConsentResponse>>? ConsentRequested;
 
+    /// <inheritdoc />
+    public Func<ToolConsentRequest, Task<ToolConsentResponse>>? ConsentHandler => ConsentRequested;
+
     public ChatOrchestrator(
         IGatewayApiClient gateway,
         IMcpToolHost toolHost,
         IPermissionService permissions,
         IConversationStore store,
-        ILogger<ChatOrchestrator> logger)
+        ILogger<ChatOrchestrator> logger,
+        int maxIterations = DefaultMaxIterations,
+        TimeSpan? maxDuration = null)
     {
+        if (maxIterations < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxIterations), "At least one iteration is required.");
+
         _gateway = gateway;
         _toolHost = toolHost;
         _permissions = permissions;
         _store = store;
         _logger = logger;
+        _maxIterations = maxIterations;
+        _maxDuration = maxDuration ?? DefaultMaxDuration;
     }
 
     public async IAsyncEnumerable<AgentStreamEvent> RunAsync(
@@ -62,18 +78,18 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var tools = _toolHost.GetToolDefinitions();
-        var deadline = DateTimeOffset.UtcNow + MaxDuration;
+        var deadline = DateTimeOffset.UtcNow + _maxDuration;
         var window = contextWindow ?? FallbackContextWindow;
         var contextRetryUsed = false;
         var iteration = 0;
 
-        while (iteration < MaxIterations && DateTimeOffset.UtcNow < deadline)
+        while (iteration < _maxIterations && DateTimeOffset.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
             iteration++;
             yield return new AgentStatusEvent(
                 iteration == 1 ? "thinking" : $"continuing (step {iteration})",
-                iteration, MaxIterations);
+                iteration, _maxIterations);
 
             // Keep the request inside the model's context window: old
             // screenshots become placeholders, then whole history groups are
@@ -203,8 +219,8 @@ public sealed class ChatOrchestrator : IChatOrchestrator
             }
         }
 
-        yield return new AgentErrorEvent(iteration >= MaxIterations
-            ? $"Stopped: reached the {MaxIterations}-step tool limit."
+        yield return new AgentErrorEvent(iteration >= _maxIterations
+            ? $"Stopped: reached the {_maxIterations}-step tool limit."
             : TimeLimitMessage);
     }
 
