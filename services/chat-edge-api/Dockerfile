@@ -17,7 +17,13 @@ FROM alpine:3.20
 #
 # Phase 4 Session 2 adds: reportlab (PDF generation) + pypdf
 # (cleaner PDF metadata API than pypdfium2 for the inspector).
-RUN apk add --no-cache ca-certificates python3 py3-pip py3-openpyxl py3-lxml \
+#
+# Phase 13/15: docker-cli is required by the code-interpreter sandbox
+# (SANDBOX_ENABLED=1) — internal/sandbox shells out to `docker run` to
+# launch each per-exec ai-gateway-sandbox container. Harmless when the
+# sandbox is OFF (the default): the CLI just sits unused. Baking it in
+# makes `make sandbox-up` turnkey (no manual Dockerfile edit).
+RUN apk add --no-cache ca-certificates python3 py3-pip py3-openpyxl py3-lxml docker-cli \
     && apk add --no-cache --virtual .build-deps build-base python3-dev \
     && pip install --no-cache-dir --break-system-packages \
         pdfplumber python-docx reportlab pypdf python-pptx \

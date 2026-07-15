@@ -1,4 +1,4 @@
-.PHONY: up prod prod-desktop down logs seed clean clean-portal-users fresh test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
+.PHONY: up prod prod-desktop down logs seed clean clean-portal-users fresh bootstrap sandbox-up health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -6,6 +6,13 @@
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Deployment shapes (they intentionally differ — do NOT merge the compose files):"
+	@echo "  dev           make bootstrap   first-run: gen .env + up + health-gate + migrate + seed"
+	@echo "                make up          start the dev stack (hot-reload; ports on 0.0.0.0)"
+	@echo "  prod-desktop  make prod-desktop  dev-set + chat-edge + mcp-gateway + nginx (:80/:443, --profile desktop)"
+	@echo "  webchat       docker compose -f docker-compose.webchat.yml up -d   SEPARATE stack + its OWN postgres:5433 / redis:6380 / web-chat:3002"
+	@echo "  sandbox       make sandbox-up  overlay: enable the hardened code-interpreter (docker-socket opt-in)"
 
 up: ## Start the full stack in DEV mode (hot-reload, ports bound to 0.0.0.0)
 	docker compose up -d
@@ -18,6 +25,12 @@ up: ## Start the full stack in DEV mode (hot-reload, ports bound to 0.0.0.0)
 	@echo "Redis:     localhost:6379"
 	@echo ""
 	@echo "Run 'make seed' once to create admin + test portal users."
+
+bootstrap: ## FIRST-RUN (idempotent): generate .env + up + health-gate + chat-edge migrate + seed. Safe to re-run.
+	bash scripts/bootstrap.sh
+
+health: ## Actively poll the dev stack until postgres/redis/backend/gateway are ready (read-only; safe on a live stack)
+	bash scripts/wait_for_health.sh
 
 prod: ## Start the stack in PROD mode (binds 127.0.0.1; requires REDIS_PASSWORD, CORS_ORIGINS, PORTAL_PUBLIC_URL, INITIAL_ADMIN_PASSWORD in .env)
 	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
@@ -48,7 +61,7 @@ clean-portal-users: ## Delete portal users that aren't part of the seed set (kee
 fresh: clean ## NUCLEAR reset — wipe volumes + rebuild images + start + seed. Use this after adding/removing Next.js routes (stale .next cache survives plain restart and caused MODULE_NOT_FOUND on /requests post-UX-cleanup).
 	docker compose build --no-cache admin-ui portal
 	docker compose up -d
-	@sleep 10
+	@bash scripts/wait_for_health.sh
 	@$(MAKE) seed
 	@echo ""
 	@echo "System fresh. Open http://localhost:3000"
@@ -126,3 +139,32 @@ prod-desktop: ## Deploy the full stack with desktop support (chat-edge + MCP + n
 
 chat-edge-migrate-main: ## Apply chat-edge SQL migrations to the MAIN-stack postgres (the init hook only runs on first volume init)
 	bash scripts/apply_chat_edge_migrations_main.sh
+
+# ── Code-interpreter sandbox overlay (Phase 13 / 15) ───────────────
+# The sandbox overlay adds env + the docker-socket mount to chat-edge-api.
+# We layer it on the WEBCHAT stack (which owns the running
+# ai-gateway-chat-edge-api container) — NOT the base file: base marks
+# chat-edge-api `profiles:[desktop]`, so base+webchat is an invalid project
+# (web-chat then "depends on undefined service chat-edge-api"). Same project
+# name (ai-gateway) so this recreates the existing container in place; other
+# services are left untouched (no --remove-orphans).
+SANDBOX_COMPOSE := -f docker-compose.webchat.yml -f docker-compose.sandbox.yml
+
+sandbox-up: ## Enable the hardened run_python sandbox on chat-edge (builds sandbox image, layers docker-compose.sandbox.yml, SANDBOX_ENABLED=1). OPTS INTO the docker-socket mount.
+	@test -f .env || (echo "ERROR: .env not found. Run 'make bootstrap' first." && exit 1)
+	@echo "════════════════════════════════════════════════════════════════"
+	@echo " DOCKER-SOCKET PRIVILEGE WARNING (conscious opt-in)"
+	@echo " sandbox-up bind-mounts /var/run/docker.sock into chat-edge — that"
+	@echo " is HOST-ROOT-EQUIVALENT. It is acceptable ONLY because the docker"
+	@echo " run argv is built entirely from trusted server constants; no model"
+	@echo " input ever reaches it (model code runs INSIDE the no-privilege"
+	@echo " sandbox). See docker-compose.sandbox.yml header for the details."
+	@echo "════════════════════════════════════════════════════════════════"
+	@mkdir -p ./data/sandbox-runs
+	@echo "[sandbox] 1/3 Building the per-run sandbox image (ai-gateway-sandbox:latest)..."
+	docker build -f services/chat-edge-api/sandbox/Dockerfile.sandbox -t ai-gateway-sandbox:latest services/chat-edge-api
+	@echo "[sandbox] 2/3 Rebuilding chat-edge-api (image now bundles docker-cli)..."
+	docker compose -p ai-gateway $(SANDBOX_COMPOSE) build chat-edge-api
+	@echo "[sandbox] 3/3 (Re)starting chat-edge-api with the sandbox overlay..."
+	docker compose -p ai-gateway $(SANDBOX_COMPOSE) up -d chat-edge-api
+	@bash scripts/sandbox_healthcheck.sh
