@@ -145,13 +145,37 @@ public static class AppHostBuilder
                     registry.Register(new ComputerScrollTool());
                     registry.Register(new ComputerDragTool());
                     registry.Register(new OpenApplicationTool());
+                    // Phase 12 F: sub-agent delegation. DefaultPermission is
+                    // AllowAlways because the tool only delegates — every tool
+                    // the nested run calls still goes through the shared
+                    // PermissionService + the parent turn's consent handler.
+                    // The tool host / orchestrator accessors are lazy Funcs to
+                    // break the construction cycle (registry → this tool →
+                    // orchestrator → tool host → registry); they resolve only
+                    // at execution time, when everything is built.
+                    registry.Register(new SpawnAgentTool(
+                        sp.GetRequiredService<IGatewayApiClient>(),
+                        sp.GetRequiredService<IPermissionService>(),
+                        sp.GetRequiredService<IConversationStore>(),
+                        () => sp.GetRequiredService<IMcpToolHost>(),
+                        () => sp.GetRequiredService<IChatOrchestrator>(),
+                        sp.GetRequiredService<ISettingsService>(),
+                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()));
                     return registry;
                 });
                 services.AddSingleton<IMcpToolHost>(sp => new McpToolHost(
                     sp.GetRequiredService<McpToolRegistry>(),
                     sp.GetRequiredService<IMcpConnectorService>()));
                 services.AddSingleton<IPermissionService, PermissionService>();
-                services.AddSingleton<IChatOrchestrator, ChatOrchestrator>();
+                // Explicit factory: the ctor's optional cap parameters (used by
+                // run_subagent's nested instance) must stay at their defaults
+                // for the app-wide singleton.
+                services.AddSingleton<IChatOrchestrator>(sp => new ChatOrchestrator(
+                    sp.GetRequiredService<IGatewayApiClient>(),
+                    sp.GetRequiredService<IMcpToolHost>(),
+                    sp.GetRequiredService<IPermissionService>(),
+                    sp.GetRequiredService<IConversationStore>(),
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatOrchestrator>>()));
 
                 // Application services
                 services.AddSingleton<IAuthService, AuthService>();
