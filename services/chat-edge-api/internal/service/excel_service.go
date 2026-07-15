@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
 
@@ -108,7 +110,18 @@ type ExcelService struct {
 
 	pythonBin  string
 	scriptsDir string // dir containing excel_*.py; falls back to "scripts"
+
+	// sandbox, when non-nil, routes the plan-executor (model-authored
+	// plan) through the hardened Phase 13 sandbox instead of running
+	// python in-process-with-secrets. Injected via SetSandbox from
+	// main.go when SANDBOX_ENABLED. nil → legacy in-process path.
+	sandbox *sandbox.Runner
 }
+
+// SetSandbox migrates the plan-executor into the Phase 13 hardened
+// sandbox. Nil-safe: leaving it unset keeps the legacy in-process
+// behaviour (dev without docker-in-docker wiring).
+func (s *ExcelService) SetSandbox(r *sandbox.Runner) { s.sandbox = r }
 
 func NewExcelService(
 	files *repository.FileRepo, store storage.Backend, pythonBin, scriptsDir string,
@@ -287,7 +300,7 @@ func (s *ExcelService) ExecutePlan(
 	}
 
 	outPath := filepath.Join(tmp, "output.xlsx")
-	out, err := s.runScript(ctx, executorScript, executorTimeout, planPath, srcPath, outPath)
+	out, err := s.runExecutor(ctx, planBytes, planPath, srcPath, outPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrExcelExecutorFailed, err)
 	}
@@ -374,6 +387,64 @@ func (s *ExcelService) ExecutePlan(
 		return nil, nil, fmt.Errorf("persist generated row: %w", err)
 	}
 	return row, validation, nil
+}
+
+// runExecutor runs the excel plan-executor. When a sandbox is wired it
+// runs inside the Phase 13 hardened container (no network, non-root,
+// seccomp, read-only rootfs, stripped env) with the plan + source mounted
+// read-only and the output collected from the per-run scratch. Otherwise
+// it falls back to the legacy in-process python exec. Either way it
+// returns the executor's stdout (the ExecutionResult JSON) and leaves the
+// generated workbook at outPath, so the surrounding ExecutePlan
+// validate/upload/versioning flow is UNCHANGED.
+func (s *ExcelService) runExecutor(
+	ctx context.Context, planBytes []byte, planPath, srcPath, outPath string,
+) ([]byte, error) {
+	if s.sandbox == nil {
+		return s.runScript(ctx, executorScript, executorTimeout, planPath, srcPath, outPath)
+	}
+	res, err := s.sandbox.Execute(ctx, sandbox.Spec{
+		Mode:   sandbox.ModeScript,
+		Script: "excel_executor.py",
+		Args:   []string{"plan.json", "source.xlsx", "out/output.xlsx"},
+		Inputs: []sandbox.InputFile{
+			{Name: "plan.json", Bytes: planBytes},
+			{Name: "source.xlsx", LocalPath: srcPath},
+		},
+		Limits: sandbox.Limits{Wall: executorTimeout},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer res.Cleanup()
+	art := res.Artifact("output.xlsx")
+	if art == nil {
+		return nil, fmt.Errorf("sandbox produced no output.xlsx (stderr: %s)", strings.TrimSpace(string(res.Stderr)))
+	}
+	if err := copyFile(art.Path, outPath); err != nil {
+		return nil, err
+	}
+	return res.Stdout, nil
+}
+
+// copyFile copies src→dst, creating dst. Used to lift a sandbox artifact
+// out of the per-run scratch (cleaned up on Result.Cleanup) into the
+// caller's temp dir where the existing upload flow expects it.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("copy artifact open: %w", err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("copy artifact create: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("copy artifact write: %w", err)
+	}
+	return out.Close()
 }
 
 // ---------------------------------------------------------------------------

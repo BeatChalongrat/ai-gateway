@@ -37,6 +37,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/handler"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/router"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
@@ -259,6 +260,31 @@ func main() {
 	// (the conv ownership check gates Rollback/Compare/ListGenerated);
 	// the handler is a thin HTTP shim per the existing handler pattern.
 	workspaceSvc := service.NewWorkspaceService(filesRepo, conversations, storageBackend, cfg.ExtractPythonBinary, "scripts")
+
+	// Phase 13 Part A — migrate the plan-executor + doc generators into
+	// the hardened sandbox when enabled. Model-authored plans then run
+	// with no network, non-root, seccomp, read-only rootfs and a stripped
+	// env — never again in this secret-bearing process. Fail LOUD if
+	// enabled-but-unavailable so a misconfig can't silently fall back to
+	// the in-process path in prod.
+	if cfg.SandboxEnabled {
+		sbx := sandbox.New(sandbox.Config{
+			Image:       cfg.SandboxImage,
+			SeccompPath: cfg.SandboxSeccompPath,
+			WorkDir:     cfg.SandboxWorkDir,
+			HostWorkDir: cfg.SandboxHostWorkDir,
+		})
+		if err := sbx.Available(context.Background()); err != nil {
+			slog.Error("sandbox enabled but unavailable — refusing to run plan-exec in-process", "err", err)
+			os.Exit(1)
+		}
+		excelSvc.SetSandbox(sbx)
+		docSvc.SetSandbox(sbx)
+		slog.Info("plan-exec sandbox active", "image", cfg.SandboxImage)
+	} else {
+		slog.Warn("SANDBOX_ENABLED=0 — plan-exec runs IN-PROCESS (Phase 13: enable in prod)")
+	}
+
 	fileSvc.SetExcelService(excelSvc)
 	fileSvc.SetDocService(docSvc)
 	messageSvc.SetExcelLookup(filesRepo)
