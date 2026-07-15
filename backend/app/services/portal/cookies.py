@@ -38,30 +38,54 @@ flow simple, with Lax as the load-bearing defence. If portal and api ever
 move to a cross-SITE topology (different registrable domains, requiring
 ``SameSite=None``), a CSRF token MUST be reintroduced.
 
-TODO(Phase 11 E5 — DEFERRED): extending the admin double-submit CSRF
-(app/middleware/csrf.py) to ``/portal/*`` mutations was assessed and
-deliberately NOT implemented, because it is not contained to the portal:
+DEFERRED — portal double-submit CSRF (tracked in docs/DEFERRED_WORK.md).
+Extending the admin double-submit CSRF (app/middleware/csrf.py) to
+``/portal/*`` mutations is a deliberate, first-class deferral — NOT an
+oversight and NOT an open hole. Current posture:
 
-  * The SRAN Desktop WPF client authenticates with these same cookies
-    (tokens are Set-Cookie-only per the portal auth contract) and calls
-    mutating portal routes (``/portal/auth/*``, ``/portal/projects/*``
-    agent-key provisioning) with no CSRF header — enforcement would 403
-    every desktop install in the field.
+  * The CSRF vector is ALREADY blocked. Portal/chat session cookies are
+    ``SameSite=Lax`` (see ``_common_kwargs``), which withholds the cookie
+    on cross-SITE state-changing requests — the exact CSRF vector.
+  * There is no silent-exposure window. ``config.validate_secrets()``
+    FAIL-CLOSES production startup if ``AUTH_COOKIE_SAMESITE=none`` is set
+    without ``AUTH_COOKIE_DOMAIN`` + Secure, so Lax can't be voided by a
+    misconfigured deploy without the process refusing to boot.
+
+Adding a portal double-submit token is therefore DEFENCE-IN-DEPTH
+CONSISTENCY with the admin domain, not closing an open hole. It is
+deferred because it CANNOT ship as a portal-only change — it touches four
+clients and must land ATOMICALLY or it breaks installs in the field:
+
+  * The SRAN Desktop WPF client (AgentKeyProvider.cs) calls mutating
+    portal routes (``/portal/projects``, ``/portal/projects/*/keys``)
+    authenticated by ``Authorization: Bearer <portal-JWT>`` (AuthTokenHandler),
+    with no CSRF header. ``get_portal_user`` accepts cookie-first then
+    Bearer, so desktop is a Bearer caller — a naive middleware that
+    enforced on all ``/portal/*`` mutations would 403 every desktop install.
   * web-chat (:3002) calls the gateway's ``/portal/auth/refresh`` +
     ``/portal/auth/logout`` cross-origin; a JS-readable csrf_token
     cookie scoped to the gateway host is not readable from the web-chat
     origin unless AUTH_COOKIE_DOMAIN-style scoping is added for it too.
 
-Migration sketch, when needed: (1) mint a JS-readable ``portal_csrf``
-cookie in ``set_auth_cookies`` (same Domain/Secure attrs, httponly=False);
-(2) widen CsrfMiddleware to ``/portal/`` mutations, exempting
-``/portal/auth/*`` (bootstrap endpoints — no cookie yet) and requests
-authenticated by non-cookie means (Authorization header / internal-trust
-headers) so desktop + service callers keep working; (3) echo the cookie
-as ``X-CSRF-Token`` in portal/lib/api.ts and web-chat's lib/api.ts +
-lib/auth.ts. Until then Lax remains the load-bearing defence, and the
-startup guard in config.validate_secrets() blocks any SameSite=None
-deploy that would silently void it.
+ATOMIC-ROLLOUT CHECKLIST (all five land in ONE change + a desktop
+regression test, else desktop installs 403):
+  (a) mint a JS-readable ``portal_csrf`` cookie in ``set_auth_cookies``
+      (same Domain/Secure attrs, ``httponly=False``);
+  (b) widen ``CsrfMiddleware`` to ``/portal/`` mutations, exempting
+      ``/portal/auth/*`` (bootstrap — no cookie yet) AND requests
+      authenticated by non-cookie means (``Authorization: Bearer`` /
+      internal-trust headers) so desktop + service callers keep working;
+  (c) echo the cookie as ``X-CSRF-Token`` in portal/lib/api.ts;
+  (d) echo it in apps/web-chat/src/lib/api.ts (+ lib/auth.ts);
+  (e) echo it in the DESKTOP client (AgentKeyProvider / the portal HTTP
+      path) — or keep desktop on the Bearer exemption from (b) — plus a
+      desktop regression test proving it still authenticates.
+
+Until then Lax remains the load-bearing defence and the
+``config.validate_secrets()`` startup guard blocks any SameSite=None
+deploy that would silently void it. Do NOT partially enable any of
+(a)-(e) on its own — a half-ship either does nothing (no enforcement) or
+403s live clients (enforcement without the echo).
 """
 
 from __future__ import annotations
