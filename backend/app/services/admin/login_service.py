@@ -47,20 +47,28 @@ class LoginRateLimiter:
         per_email_window_seconds: int,
         per_ip_limit: int,
         per_ip_window_seconds: int,
+        email_key_prefix: str = "login_attempts:",
+        ip_key_prefix: str = "admin_login_ip:",
     ) -> None:
+        # Key prefixes default to the historical admin values so admin
+        # behaviour (and any live Redis counters) are untouched. Other
+        # credential surfaces (Phase 13 D: portal login/signup) pass
+        # their own prefixes so admin + portal never share counters.
         self._redis = redis_client
         self._email_limit = per_email_limit
         self._email_window = per_email_window_seconds
         self._ip_limit = per_ip_limit
         self._ip_window = per_ip_window_seconds
+        self._email_prefix = email_key_prefix
+        self._ip_prefix = ip_key_prefix
 
     # ------------------------------------------------------------------
     # Pre-check — called before we run bcrypt, to short-circuit abuse.
     # ------------------------------------------------------------------
 
     def check(self, *, email: str, ip: str) -> RateLimitDecision:
-        email_key = f"login_attempts:{email.lower()}"
-        ip_key = f"admin_login_ip:{ip}"
+        email_key = f"{self._email_prefix}{email.lower()}"
+        ip_key = f"{self._ip_prefix}{ip}"
 
         try:
             email_count = int(self._redis.get(email_key) or 0)
@@ -125,18 +133,18 @@ class LoginRateLimiter:
     # ------------------------------------------------------------------
 
     def record_failure(self, *, email: str, ip: str) -> None:
-        self._incr_with_ttl(f"login_attempts:{email.lower()}", self._email_window)
-        self._incr_with_ttl(f"admin_login_ip:{ip}", self._ip_window)
+        self._incr_with_ttl(f"{self._email_prefix}{email.lower()}", self._email_window)
+        self._incr_with_ttl(f"{self._ip_prefix}{ip}", self._ip_window)
 
     def record_success(self, *, email: str, ip: str) -> None:
         """Clear per-email counter; keep the per-IP counter running."""
         try:
-            self._redis.delete(f"login_attempts:{email.lower()}")
+            self._redis.delete(f"{self._email_prefix}{email.lower()}")
         except Exception:
             pass
         # IP counter is NOT cleared — a single successful login mustn't
         # reset abuse-detection for that IP.
-        self._incr_with_ttl(f"admin_login_ip:{ip}", self._ip_window)
+        self._incr_with_ttl(f"{self._ip_prefix}{ip}", self._ip_window)
 
     # ------------------------------------------------------------------
     # internals

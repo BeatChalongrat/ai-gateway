@@ -232,6 +232,56 @@ main_app.dependency_overrides[get_db_session] = _integration_db_session
 
 
 # ---------------------------------------------------------------------------
+# Phase 13 D — portal credential rate limiters (login / signup).
+# Every TestClient request shares ip="testclient", so the real Redis (or
+# outage-conservative) counters would throttle the suite after a handful of
+# portal signups/logins. Neutralise by handing each request a limiter backed
+# by a FRESH fakeredis — counters can never accumulate. The dedicated tests
+# (test_portal_auth_rate_limit.py) override these deps again with a
+# persistent limiter to exercise the real behaviour.
+# ---------------------------------------------------------------------------
+
+import fakeredis as _fakeredis  # noqa: E402
+
+from app.api.routes import portal_auth as _portal_auth_routes  # noqa: E402
+from app.services.admin.login_service import (  # noqa: E402
+    LoginRateLimiter as _PortalLoginRateLimiter,
+)
+
+
+def _fresh_portal_login_limiter():
+    return _PortalLoginRateLimiter(
+        redis_client=_fakeredis.FakeRedis(decode_responses=True),
+        per_email_limit=5,
+        per_email_window_seconds=15 * 60,
+        per_ip_limit=30,
+        per_ip_window_seconds=15 * 60,
+        email_key_prefix="portal_login_attempts:",
+        ip_key_prefix="portal_login_ip:",
+    )
+
+
+def _fresh_portal_signup_limiter():
+    return _PortalLoginRateLimiter(
+        redis_client=_fakeredis.FakeRedis(decode_responses=True),
+        per_email_limit=5,
+        per_email_window_seconds=60 * 60,
+        per_ip_limit=10,
+        per_ip_window_seconds=60 * 60,
+        email_key_prefix="portal_signup_attempts:",
+        ip_key_prefix="portal_signup_ip:",
+    )
+
+
+main_app.dependency_overrides[
+    _portal_auth_routes.get_portal_login_rate_limiter
+] = _fresh_portal_login_limiter
+main_app.dependency_overrides[
+    _portal_auth_routes.get_portal_signup_rate_limiter
+] = _fresh_portal_signup_limiter
+
+
+# ---------------------------------------------------------------------------
 # Track A — async integration engine (aiosqlite) on the SAME sqlite file.
 # After the AsyncSession flip the chat hot path depends on
 # ``app.core.db.get_async_db``; route it (and any code that opens its own

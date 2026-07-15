@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session
 from app.api.portal_scope import public_portal_route
-from app.core.exceptions import AuthenticationError, ValidationError
+from app.core.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    ConflictError,
+    RateLimitExceededError,
+    ValidationError,
+)
+from app.services.admin.login_service import LoginRateLimiter
 from app.services.admin.session_service import _build_redis_client
 from app.services.portal import (
     auth_service,
@@ -56,6 +63,91 @@ def _portal_redis_client():
     routes) so login/refresh/logout can depend on it.
     """
     return _build_redis_client()
+
+
+# ---------------------------------------------------------------------------
+# Phase 13 D — credential-route rate limiting.
+#
+# Mirrors the admin login gate (admin_session.py + LoginRateLimiter) with
+# portal-scoped Redis key prefixes so admin and portal counters never mix.
+# The limiter inherits the Phase 12 A4 posture unconditionally: on a Redis
+# outage it falls back to the bounded in-process conservative window
+# (~10 attempts/min per scope key) instead of failing open — these are
+# credential routes, so an outage must never be a free brute-force window.
+# ---------------------------------------------------------------------------
+
+_portal_login_rate_limiter: LoginRateLimiter | None = None
+_portal_signup_rate_limiter: LoginRateLimiter | None = None
+
+
+def get_portal_login_rate_limiter() -> LoginRateLimiter:
+    """FastAPI dep: lazy singleton limiter for POST /portal/auth/login.
+
+    5 failed attempts / 15 min per email — mirrors the admin gate
+    (Beat's P1 locked spec); cleared on a successful login.
+    30 attempts / 15 min per IP — roomier than admin's 5 because the
+    portal is multi-user (office NAT / shared egress) and successful
+    logins also count against the IP window; 2/min sustained still
+    stops credential stuffing cold.
+    """
+    global _portal_login_rate_limiter
+    if _portal_login_rate_limiter is None:
+        _portal_login_rate_limiter = LoginRateLimiter(
+            redis_client=_build_redis_client(),
+            per_email_limit=5,
+            per_email_window_seconds=15 * 60,
+            per_ip_limit=30,
+            per_ip_window_seconds=15 * 60,
+            email_key_prefix="portal_login_attempts:",
+            ip_key_prefix="portal_login_ip:",
+        )
+    return _portal_login_rate_limiter
+
+
+def get_portal_signup_rate_limiter() -> LoginRateLimiter:
+    """FastAPI dep: lazy singleton limiter for POST /portal/auth/signup.
+
+    5 failed attempts / hour per email — throttles duplicate-email
+    probing (the 409 is a user-existence oracle by design; this caps
+    how fast it can be farmed).
+    10 attempts / hour per IP, successes included — signup is a rare,
+    heavyweight action (creates a tenant + grants free-trial credit),
+    so 10/hour/IP caps mass account farming without bothering a real
+    team onboarding a handful of users.
+    """
+    global _portal_signup_rate_limiter
+    if _portal_signup_rate_limiter is None:
+        _portal_signup_rate_limiter = LoginRateLimiter(
+            redis_client=_build_redis_client(),
+            per_email_limit=5,
+            per_email_window_seconds=60 * 60,
+            per_ip_limit=10,
+            per_ip_window_seconds=60 * 60,
+            email_key_prefix="portal_signup_attempts:",
+            ip_key_prefix="portal_signup_ip:",
+        )
+    return _portal_signup_rate_limiter
+
+
+def _client_ip(request: Request) -> str:
+    """Same trust model as admin login (admin_session._client_ip):
+    first X-Forwarded-For hop when a reverse proxy fronts us, else the
+    direct peer."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _raise_429(decision, *, code: str) -> None:
+    raise RateLimitExceededError(
+        "Too many attempts. Try again later.",
+        code=code,
+        details={
+            "retry_after_seconds": decision.retry_after_seconds,
+            "scope": decision.scope or "unknown",
+        },
+    )
 
 
 def _auth_fail_response(request: Request, message: str, code: str) -> JSONResponse:
@@ -123,17 +215,37 @@ class CookieExchangeRequest(BaseModel):
 @public_portal_route
 def signup(
     body: SignupRequest,
+    request: Request,
     response: Response,
     session: Session = Depends(get_db_session),
+    rate_limiter: LoginRateLimiter = Depends(get_portal_signup_rate_limiter),
 ):
-    tokens = auth_service.signup(
-        session,
-        email=body.email,
-        password=body.password,
-        display_name=body.display_name,
-        invite_code=body.invite_code,
-        tenant_name=body.tenant_name,
-    )
+    # Rate-limit BEFORE any DB/bcrypt work (Phase 13 D) — same order as
+    # admin login. Keyed on the normalised email + client IP.
+    email_norm = (body.email or "").strip().lower()
+    ip = _client_ip(request)
+    decision = rate_limiter.check(email=email_norm, ip=ip)
+    if not decision.allowed:
+        _raise_429(decision, code="signup_rate_limited")
+
+    try:
+        tokens = auth_service.signup(
+            session,
+            email=body.email,
+            password=body.password,
+            display_name=body.display_name,
+            invite_code=body.invite_code,
+            tenant_name=body.tenant_name,
+        )
+    except (ConflictError, ValidationError):
+        # Failed signup (duplicate email, weak password, bad invite…)
+        # counts against both windows — throttles enumeration via the
+        # 409/422 responses.
+        rate_limiter.record_failure(email=email_norm, ip=ip)
+        raise
+    # Success clears the per-email counter but still bumps the per-IP
+    # window — mass account creation from one IP is the abuse vector.
+    rate_limiter.record_success(email=email_norm, ip=ip)
     # Auto-login after signup (preserves prior behaviour) — set cookies.
     set_auth_cookies(
         response,
@@ -147,10 +259,33 @@ def signup(
 @public_portal_route
 def login(
     body: LoginRequest,
+    request: Request,
     response: Response,
     session: Session = Depends(get_db_session),
+    rate_limiter: LoginRateLimiter = Depends(get_portal_login_rate_limiter),
 ):
-    tokens = auth_service.login(session, email=body.email, password=body.password)
+    # Phase 13 D — mirror of the admin login gate (admin_session.py):
+    # check BEFORE bcrypt so attackers can't spend our CPU, record the
+    # outcome after. Keyed on the normalised email + client IP.
+    email_norm = (body.email or "").strip().lower()
+    ip = _client_ip(request)
+    decision = rate_limiter.check(email=email_norm, ip=ip)
+    if not decision.allowed:
+        _raise_429(decision, code="login_rate_limited")
+
+    try:
+        tokens = auth_service.login(session, email=body.email, password=body.password)
+    except AuthenticationError:
+        rate_limiter.record_failure(email=email_norm, ip=ip)
+        raise
+    except AuthorizationError:
+        # email_not_verified fires AFTER the password verified — the
+        # caller proved the credential, so this isn't a guessing signal.
+        # Treat like a success for the limiter (clears the email window,
+        # still bumps the IP window).
+        rate_limiter.record_success(email=email_norm, ip=ip)
+        raise
+    rate_limiter.record_success(email=email_norm, ip=ip)
     set_auth_cookies(
         response,
         access_token=tokens["access_token"],
