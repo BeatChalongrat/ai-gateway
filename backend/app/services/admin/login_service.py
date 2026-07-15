@@ -12,10 +12,18 @@ Two sliding windows on Redis counters:
 Both counters auto-expire after their window so no cleanup is needed.
 
 The limiter never raises exceptions — callers are expected to compare
-the returned ``allowed`` flag and decide whether to 429. A Redis
-outage degrades to "allow" because the password check is still the
-backstop; failing closed on Redis would turn a Redis blip into an
-admin lockout.
+the returned ``allowed`` flag and decide whether to 429.
+
+Redis outage (Phase 12 A4): login guards CREDENTIALS, so it must never
+fail open — every outage minute would otherwise be a free brute-force
+window. ``check`` falls back to the small in-process per-key cap shared
+with the general limiter's conservative mode
+(``rate_limit_service._conservative_allow``). This is NOT configurable
+via ``RATE_LIMIT_REDIS_OUTAGE_MODE`` on purpose — that knob only
+governs general traffic limiters (chat/image/media). The fallback is
+per-worker (best-effort: N workers × cap), but it is bounded, which
+fail-open is not; legitimate admins get ~10 attempts/minute during the
+blip, so an outage still cannot lock a real operator out.
 """
 
 from __future__ import annotations
@@ -58,7 +66,11 @@ class LoginRateLimiter:
             email_count = int(self._redis.get(email_key) or 0)
             ip_count = int(self._redis.get(ip_key) or 0)
         except Exception:
-            return RateLimitDecision(allowed=True, scope=None, retry_after_seconds=0)
+            # Redis unreachable → conservative in-process cap, ALWAYS
+            # (never fail-open; see module docstring — Phase 12 A4).
+            return self._conservative_outage_check(
+                email_key=email_key, ip_key=ip_key
+            )
 
         if email_count >= self._email_limit:
             ttl = self._ttl(email_key, self._email_window)
@@ -71,6 +83,42 @@ class LoginRateLimiter:
                 allowed=False, scope="ip", retry_after_seconds=ttl
             )
         return RateLimitDecision(allowed=True, scope=None, retry_after_seconds=0)
+
+    def _conservative_outage_check(
+        self, *, email_key: str, ip_key: str
+    ) -> RateLimitDecision:
+        """Redis-outage fallback: bounded in-process cap, never fail-open.
+
+        Counts THIS attempt against both scopes (``check`` is called
+        exactly once per login attempt, so the count stays accurate
+        while Redis is down). Uses the shared per-worker sliding window
+        from ``rate_limit_service`` — ~10 attempts/minute per email and
+        per IP — and meters denials on the same conservative-deny
+        counter so an outage-time brute-force attempt is alertable.
+        """
+        from app.observability.metrics import (
+            RATE_LIMIT_CONSERVATIVE_DENY_TOTAL,
+        )
+        from app.services.rate_limit_service import (
+            _CONSERVATIVE_WINDOW,
+            _conservative_allow,
+        )
+
+        email_ok = _conservative_allow(email_key)
+        ip_ok = _conservative_allow(ip_key)
+        if email_ok and ip_ok:
+            return RateLimitDecision(
+                allowed=True, scope=None, retry_after_seconds=0
+            )
+        try:
+            RATE_LIMIT_CONSERVATIVE_DENY_TOTAL.inc()
+        except Exception:  # noqa: BLE001 — metrics must never block auth
+            pass
+        return RateLimitDecision(
+            allowed=False,
+            scope="email" if not email_ok else "ip",
+            retry_after_seconds=_CONSERVATIVE_WINDOW,
+        )
 
     # ------------------------------------------------------------------
     # Counter updates

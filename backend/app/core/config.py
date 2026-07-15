@@ -57,10 +57,21 @@ class Settings(BaseSettings):
     # blocks startup when it's missing or not 32 bytes of hex.
     provider_key_master_key: str = ""
 
-    # Rate-limit behaviour when Redis is unreachable. "fail_open" (default)
-    # admits unlimited — rate limiting is a safety net, not an auth gate.
-    # "conservative" applies a small in-process per-key limit instead, for
-    # deployments where cost control outweighs availability during an outage.
+    # Rate-limit behaviour when Redis is unreachable — GENERAL TRAFFIC
+    # limiters only (the chat request limiter and the image/media window
+    # limiters in rate_limit_service.py). "fail_open" (default) admits
+    # unlimited: for those paths availability beats throttling during an
+    # outage — chat should not 429 because Redis blipped, the upstream
+    # providers enforce their own limits, and the media paths keep their
+    # spend guards. "conservative" applies a small in-process per-key
+    # limit instead, for deployments where cost control outweighs
+    # availability.
+    # NOT governed by this knob (Phase 12 A4): credential-guarding
+    # limiters — admin login (services/admin/login_service.py) and portal
+    # password reset (services/portal/password_reset_service.py) — ALWAYS
+    # fall back to the in-process conservative cap during an outage;
+    # failing open there would turn every Redis blip into a free
+    # brute-force window.
     rate_limit_redis_outage_mode: str = "fail_open"
 
     # --- Rate-limit ceilings (env-overridable; Growth-tier defaults) -----
@@ -216,6 +227,20 @@ class Settings(BaseSettings):
     replicate_webhook_base_url: str = ""
     replicate_poll_interval_sec_no_webhook: int = 5
     replicate_poll_interval_sec_with_webhook: int = 15
+    # SSRF guard (Phase 12 A2). Result "output" URLs arrive in Replicate
+    # webhook BODIES and poll responses, and the gateway fetches them
+    # server-side (``fetch_result_bytes``). Only https URLs whose host is
+    # one of these hostnames (exact match or any subdomain) are fetched;
+    # everything else — http, IP-literal hosts (loopback/private/link-
+    # local/metadata included), internal service names, unknown CDNs — is
+    # rejected BEFORE any HTTP request is made. Replicate serves
+    # prediction artifacts from ``replicate.delivery`` (see the poll /
+    # webhook fixtures in tests/unit/test_replicate_adapter.py), hence the
+    # default. Because only allowlisted hostnames are ever resolved, DNS
+    # rebinding is moot: an attacker-supplied URL never reaches DNS unless
+    # its host is already an allowlisted Replicate CDN name.
+    # Comma-separated hostnames.
+    replicate_delivery_allowed_hosts: str = "replicate.delivery"
 
     # Provider timeouts and retry
     provider_timeout_connect: float = 5.0
@@ -628,6 +653,15 @@ class Settings(BaseSettings):
             for k, v in data.items()
             if isinstance(v, (str,)) and v
         }
+
+    @property
+    def replicate_delivery_allowed_hosts_list(self) -> list[str]:
+        """Parsed, lowercased SSRF allowlist for provider result URLs."""
+        return [
+            h.strip().lower().strip(".")
+            for h in self.replicate_delivery_allowed_hosts.split(",")
+            if h.strip().strip(".")
+        ]
 
     @property
     def dlp_disabled_detectors_list(self) -> list[str]:

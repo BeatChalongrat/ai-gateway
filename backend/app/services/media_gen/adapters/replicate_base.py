@@ -71,6 +71,60 @@ def _safe_detail(resp: httpx.Response) -> str:
         return "content policy violation"
 
 
+def _validate_result_url(result_url: str) -> None:
+    """SSRF guard for provider-supplied artifact URLs (Phase 12 A2).
+
+    ``result_url`` comes from data the gateway does not control: the
+    Replicate webhook BODY (reachable by anyone holding the webhook
+    secret) and the poll-response ``output`` field. Fetching it without
+    validation is a classic SSRF — ``http://169.254.169.254/...`` reads
+    cloud metadata, ``http://localhost:8080/...`` reaches internal
+    services. Policy, checked BEFORE any HTTP client is constructed:
+
+      * scheme MUST be ``https``;
+      * host MUST NOT be an IP literal — this rejects every loopback /
+        private / link-local / metadata address by construction (the
+        allowlist below is hostname-only, so an IP could never pass it
+        anyway; the explicit check gives a clear rejection reason);
+      * host MUST match ``REPLICATE_DELIVERY_ALLOWED_HOSTS`` (exact
+        hostname or any subdomain; default ``replicate.delivery`` — the
+        CDN Replicate serves prediction artifacts from).
+
+    The hostname allowlist also neutralises DNS rebinding: the gateway
+    never resolves an attacker-controlled name at all, so there is no
+    resolve-then-connect gap to race — only Replicate's own delivery
+    hosts are ever looked up.
+
+    Raises ``ValueError`` — the same local-guard error class the size
+    cap uses, so both call sites (webhook + job-loop poll) already
+    handle the failure without recording a provider API error.
+    """
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(str(result_url or "").strip())
+    if parts.scheme.lower() != "https":
+        raise ValueError(
+            f"result url rejected: scheme must be https, got {parts.scheme!r}"
+        )
+    host = (parts.hostname or "").strip().strip(".").lower()
+    if not host:
+        raise ValueError("result url rejected: missing host")
+    is_ip_literal = True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        is_ip_literal = False
+    if is_ip_literal:
+        raise ValueError(f"result url rejected: IP-literal host {host!r}")
+    for allowed in settings.replicate_delivery_allowed_hosts_list:
+        if host == allowed or host.endswith("." + allowed):
+            return
+    raise ValueError(
+        f"result url rejected: host {host!r} is not on the delivery allowlist"
+    )
+
+
 class ReplicateAdapterBase(MediaGenAdapter):
     provider_name = "replicate"
 
@@ -211,6 +265,10 @@ class ReplicateAdapterBase(MediaGenAdapter):
         return resp.status_code == 200
 
     async def fetch_result_bytes(self, result_url: str) -> bytes:
+        # SSRF guard (Phase 12 A2): validated here — the shared seam for
+        # BOTH untrusted-URL fetch paths (the webhook route's inline fetch
+        # and the job-loop poll fallback) — so no caller can skip it.
+        _validate_result_url(result_url)
         try:
             async with httpx.AsyncClient(
                 timeout=float(settings.replicate_request_timeout_sec)

@@ -10,9 +10,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import httpx
 import pytest
 import pytest_asyncio
 import redis.asyncio as aioredis
+import respx
 from starlette.testclient import TestClient
 
 from app.core.config import settings
@@ -57,7 +59,9 @@ def _session_key():
     return spend_guard.SESSION_KEY.format(date=spend_guard._today())
 
 
-async def _insert_job(async_db, *, ext, status="processing", estimate="0.35"):
+async def _insert_job(
+    async_db, *, ext, status="processing", estimate="0.35", provider="mock"
+):
     uid = f"u-{uuid.uuid4().hex[:8]}"
     async_db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x"))
     jid = str(uuid.uuid4())
@@ -67,7 +71,7 @@ async def _insert_job(async_db, *, ext, status="processing", estimate="0.35"):
             tenant_id="test-tenant",
             user_id=uid,
             job_type="video",
-            provider="mock",  # fetch_result_bytes returns the bundled sample.mp4
+            provider=provider,  # "mock" → fetch_result_bytes returns the bundled sample.mp4
             model_id="kwaivgi/kling-v1.5-pro",
             status=status,
             external_job_id=ext,
@@ -138,3 +142,29 @@ async def test_failed_refunds_session_budget(async_db, rr):
 async def test_unknown_prediction_is_noop_200(async_db):
     r = _post({"id": "pred_nonexistent", "status": "succeeded", "output": ["http://x/o.mp4"]})
     assert r.status_code == 200  # NOT 404 — avoids Replicate retry storms
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ssrf_output_url_is_never_fetched(async_db):
+    """Phase 12 A2 — a webhook body pointing ``output`` at an internal
+    address must not trigger ANY server-side HTTP request. The guard in
+    ``ReplicateAdapterBase.fetch_result_bytes`` raises before a client is
+    built; the webhook logs the failure and leaves the job in-flight for
+    the poll fallback."""
+    jid = await _insert_job(async_db, ext="pred_ssrf", provider="replicate")
+    spy = respx.route().mock(
+        return_value=httpx.Response(200, content=b"should-never-be-fetched")
+    )
+    r = _post(
+        {
+            "id": "pred_ssrf",
+            "status": "succeeded",
+            "output": ["http://169.254.169.254/latest/meta-data/"],
+        }
+    )
+    assert r.status_code == 200  # never a retry-storm status
+    assert spy.call_count == 0, "webhook fetched an internal URL (SSRF)"
+    job = await async_db.get(GenerationJobORM, jid)
+    await async_db.refresh(job)
+    assert job.status == "processing"  # not finalized off attacker data

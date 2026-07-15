@@ -67,7 +67,12 @@ def _rate_limit_check_and_bump(redis_client, *, email_norm: str) -> None:
     the 429 shape is identical regardless of existence — same no-
     oracle guarantee as the request endpoint itself.
 
-    Redis outage → allow (same fail-open policy as LoginRateLimiter).
+    Redis outage (Phase 12 A4): password reset is credential-guarding
+    (and every admitted request can dispatch an email), so it never
+    fails open. Falls back to the shared in-process per-worker window
+    (``rate_limit_service._conservative_allow``) with the SAME 3/hour
+    ceiling — not configurable via ``RATE_LIMIT_REDIS_OUTAGE_MODE``,
+    which only governs general traffic limiters.
     """
     key = f"{_RATE_LIMIT_PREFIX}{email_norm}"
     try:
@@ -76,7 +81,19 @@ def _rate_limit_check_and_bump(redis_client, *, email_norm: str) -> None:
             # First hit in this window — set TTL.
             redis_client.expire(key, _RATE_LIMIT_WINDOW_SECONDS)
     except Exception:
-        return  # fail-open
+        from app.services.rate_limit_service import _conservative_allow
+
+        if _conservative_allow(
+            key,
+            limit=_RATE_LIMIT_MAX,
+            window_sec=_RATE_LIMIT_WINDOW_SECONDS,
+        ):
+            return
+        raise RateLimitExceededError(
+            "Too many password reset requests for this email. "
+            "Try again later.",
+            details={"retry_after_seconds": _RATE_LIMIT_WINDOW_SECONDS},
+        )
     if count > _RATE_LIMIT_MAX:
         try:
             ttl = int(redis_client.ttl(key) or 0)
