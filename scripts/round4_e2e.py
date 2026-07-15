@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import time
 
@@ -12,7 +13,9 @@ import requests
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 API = "http://localhost:8080/v1/chat/completions"
-KEY = "gw_4be1832b1f6f844256e8423a271f9b6f66304228aba5c42e"
+KEY = os.environ.get("GW_API_KEY")
+if not KEY:
+    sys.exit("GW_API_KEY is not set — export a gateway API key before running this script")
 MODEL = "gpt-4o-mini"
 nonce = int(time.time())
 

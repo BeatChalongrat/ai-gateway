@@ -13,6 +13,7 @@ Run inside the backend container:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -24,7 +25,9 @@ from app.models.request_log import RequestLogORM  # noqa: E402
 
 import requests  # noqa: E402
 
-KEY = "gw_9a5b8f8133b03a955fdc1ce9f8e52512512dd6b58f364894"
+KEY = os.environ.get("GW_API_KEY")
+if not KEY:
+    sys.exit("GW_API_KEY is not set — export a gateway API key before running this script")
 URL = "http://localhost:8080/v1/chat/completions"
 HEADERS = {
     "Authorization": f"Bearer {KEY}",
