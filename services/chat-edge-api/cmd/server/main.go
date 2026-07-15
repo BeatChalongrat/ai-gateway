@@ -482,12 +482,12 @@ func main() {
 		),
 	}
 
-	// Phase 13 Part B — register the /code/run endpoint only when the
-	// code interpreter is wired (sandbox available). nil leaves the route
-	// unregistered so a misconfigured stack 404s rather than 500s.
-	if codeInterp != nil {
-		handlers.Code = handler.NewCodeHandler(codeInterp, fileSvc)
-	}
+	// Phase 13 Part B — the /code/run endpoint is ALWAYS registered so the
+	// desktop client/server contract stays stable across sandbox on/off
+	// deployments. codeInterp is nil when SANDBOX_ENABLED=0; the handler
+	// then answers 503 ("feature off"), never 404. No model code runs
+	// in-process — a nil interpreter simply refuses the request.
+	handlers.Code = handler.NewCodeHandler(codeInterp, fileSvc)
 
 	// CORS origins — default to the web-chat Next.js dev origin so a
 	// fresh checkout works without ceremony. Production sets the
