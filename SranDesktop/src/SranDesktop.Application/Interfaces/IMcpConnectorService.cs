@@ -28,6 +28,14 @@ public interface IMcpConnectorService
     /// tool calls authenticate with the live portal JWT instead.</summary>
     Task InstallAsync(string connectorId, string? apiToken = null, string? authMode = null, CancellationToken ct = default);
 
+    /// <summary>Phase 12 D: install a locally-defined connector that exists in
+    /// no catalog — typically a stdio MCP server (transport "stdio" +
+    /// command/args/env). The full definition is persisted in connectors.json.
+    /// Its tools flow through the SAME remote-tool consent path as catalog
+    /// connectors (RemoteMcpTool → PermissionLevel.Ask): nothing a local
+    /// process exposes can auto-run.</summary>
+    Task InstallCustomAsync(McpConnector connector, CancellationToken ct = default);
+
     Task UninstallAsync(string connectorId, CancellationToken ct = default);
 
     bool IsInstalled(string connectorId);

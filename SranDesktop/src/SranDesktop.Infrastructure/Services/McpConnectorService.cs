@@ -123,6 +123,30 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
         await ConnectOneAsync(connectorId, ct);
     }
 
+    /// <summary>Phase 12 D: locally-defined connector (typically stdio). The
+    /// whole definition rides in connectors.json (record.Custom); catalog
+    /// lookups are bypassed for it. Its tools land in the same remote-tool
+    /// cache, so they resolve as RemoteMcpTool → consent-gated Ask.</summary>
+    public async Task InstallCustomAsync(McpConnector connector, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(connector.Id))
+            throw new ArgumentException("Custom connector requires an id", nameof(connector));
+
+        var state = LoadState();
+        var record = state.FirstOrDefault(c => c.Id == connector.Id);
+        if (record is null)
+        {
+            record = new InstalledConnector { Id = connector.Id };
+            state.Add(record);
+        }
+        record.Custom = connector;
+        SaveState(state);
+        _logger.LogInformation("Custom connector {Id} installed (transport={Transport})",
+            connector.Id, connector.Transport);
+
+        await ConnectOneAsync(connector.Id, ct);
+    }
+
     public async Task UninstallAsync(string connectorId, CancellationToken ct = default)
     {
         var state = LoadState();
@@ -187,8 +211,8 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
 
     private async Task ConnectOneAsync(string connectorId, CancellationToken ct)
     {
-        var connector = (await ListAvailableAsync(ct)).FirstOrDefault(c => c.Id == connectorId);
-        if (connector is null || string.IsNullOrEmpty(connector.ServerUrl))
+        var connector = await FindConnectorAsync(connectorId, ct);
+        if (connector is null || !HasEndpoint(connector))
         {
             SetStatus(connectorId, ConnectorStatus.NotConfigured);
             return;
@@ -223,17 +247,61 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
                 return existing;
         }
 
-        var client = new McpRemoteClient(connector.ServerUrl, ResolveTokenProvider(connector));
+        var client = new McpRemoteClient(CreateTransport(connector));
         await client.InitializeAsync(ct);
         lock (_remoteLock)
         {
             // A racing dial may have won; keep the first.
             if (_clients.TryGetValue(connector.Id, out var raced))
+            {
+                // Dispose the loser — for stdio that kills its orphan process.
+                _ = client.DisposeAsync();
                 return raced;
+            }
             _clients[connector.Id] = client;
         }
         return client;
     }
+
+    /// <summary>Phase 12 D transport selection: "stdio" spawns a local server
+    /// process; everything else (including every legacy connector, which has
+    /// no transport field) keeps the streamable-HTTP path unchanged.
+    /// Internal for tests.</summary>
+    internal IMcpTransport CreateTransport(McpConnector connector)
+    {
+        if (connector.Transport == McpConnector.TransportStdio)
+        {
+            var transport = new StdioMcpTransport(
+                connector.Command ?? "", connector.Args, connector.Env, _logger);
+            var connectorId = connector.Id;
+            // Process crash/exit surfaces as Disconnected through the SAME
+            // StatusChanged path an HTTP connector going dark uses.
+            transport.Exited += (_, _) => _ = HandleStdioExitAsync(connectorId);
+            return transport;
+        }
+        return new HttpMcpTransport(connector.ServerUrl, ResolveTokenProvider(connector));
+    }
+
+    private async Task HandleStdioExitAsync(string connectorId)
+    {
+        _logger.LogWarning("Connector {Id}: local MCP server process exited", connectorId);
+        await DropClientAsync(connectorId);
+        SetStatus(connectorId, ConnectorStatus.Disconnected);
+    }
+
+    /// <summary>Custom (locally-defined) connectors win over the catalog.</summary>
+    private async Task<McpConnector?> FindConnectorAsync(string connectorId, CancellationToken ct)
+    {
+        var custom = LoadState().FirstOrDefault(c => c.Id == connectorId)?.Custom;
+        if (custom is not null)
+            return custom;
+        return (await ListAvailableAsync(ct)).FirstOrDefault(c => c.Id == connectorId);
+    }
+
+    private static bool HasEndpoint(McpConnector connector) =>
+        connector.Transport == McpConnector.TransportStdio
+            ? !string.IsNullOrEmpty(connector.Command)
+            : !string.IsNullOrEmpty(connector.ServerUrl);
 
     /// <summary>Phase 10 C1: built-in (auth_type "none") gateway servers now
     /// REQUIRE the portal JWT — the mcp-gateway rejects anonymous calls and
@@ -335,7 +403,7 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
         if (!TryResolveRemoteTool(toolName, out var connectorId))
             return ToolResult.Fail($"Unknown remote tool '{toolName}'.");
 
-        var connector = (await ListAvailableAsync(ct)).FirstOrDefault(c => c.Id == connectorId);
+        var connector = await FindConnectorAsync(connectorId, ct);
         if (connector is null)
             return ToolResult.Fail($"Connector '{connectorId}' is no longer available.");
 
@@ -359,8 +427,8 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
 
     public async Task<bool> PingAsync(string connectorId, CancellationToken ct = default)
     {
-        var connector = (await ListAvailableAsync(ct)).FirstOrDefault(c => c.Id == connectorId);
-        if (connector is null || string.IsNullOrEmpty(connector.ServerUrl))
+        var connector = await FindConnectorAsync(connectorId, ct);
+        if (connector is null || !HasEndpoint(connector))
         {
             SetStatus(connectorId, ConnectorStatus.NotConfigured);
             return false;
