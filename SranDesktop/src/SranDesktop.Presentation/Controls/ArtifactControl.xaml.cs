@@ -17,8 +17,6 @@ namespace SranDesktop.Presentation.Controls;
 /// </summary>
 public partial class ArtifactControl : UserControl
 {
-    private static Task<CoreWebView2Environment>? _environmentTask;
-
     private ArtifactViewModel? _viewModel;
     private bool _webViewReady;
     private Window? _fullscreenWindow;
@@ -31,14 +29,6 @@ public partial class ArtifactControl : UserControl
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
-    }
-
-    private static Task<CoreWebView2Environment> GetEnvironmentAsync()
-    {
-        return _environmentTask ??= CoreWebView2Environment.CreateAsync(
-            userDataFolder: Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SRAN Desktop", "WebView2"));
     }
 
     private async void ArtifactControl_Loaded(object sender, RoutedEventArgs e)
@@ -59,7 +49,9 @@ public partial class ArtifactControl : UserControl
             return;
         try
         {
-            var environment = await GetEnvironmentAsync();
+            // Shared with MathBlockControl (Phase 12 C) — one browser
+            // process pool for every embedded surface.
+            var environment = await WebView2Environments.GetSharedAsync();
             await ArtifactWebView.EnsureCoreWebView2Async(environment);
             var core = ArtifactWebView.CoreWebView2;
             var settings = core.Settings;

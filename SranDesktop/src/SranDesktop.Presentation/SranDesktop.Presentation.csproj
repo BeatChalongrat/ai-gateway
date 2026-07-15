@@ -35,6 +35,11 @@
        the build output so ArtifactControl can map the folder at runtime. -->
   <ItemGroup>
     <Content Include="Assets\WebLibs\*.js" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Phase 12 C: KaTeX 0.16.21 (pinned — see MathHtmlBuilder.KatexVersion),
+         vendored from the npm "katex" dist: katex.min.js + katex.min.css +
+         fonts/*.woff2 (WebView2 is Chromium, so woff2 alone suffices).
+         Rendered offline by MathBlockControl via the same virtual host. -->
+    <Content Include="Assets\WebLibs\katex\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
