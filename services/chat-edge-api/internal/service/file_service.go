@@ -530,6 +530,144 @@ func (s *FileService) SaveGeneratedVideo(
 	return row, nil
 }
 
+// ---------------------------------------------------------------------------
+// Code interpreter (Phase 13 Part B) — file resolution + artifact save
+// ---------------------------------------------------------------------------
+
+// OpenConversationFileCopy materialises a conversation file to a local
+// path for the code-interpreter sandbox, enforcing that the caller owns
+// it (tenant + user) AND that it belongs to the named conversation. This
+// is the ownership gate for run_python's optional file inputs: the model
+// may only feed the sandbox files from ITS OWN conversation owned by ITS
+// user. Cross-user / cross-conversation ids return ErrFileNotFound
+// (existence never leaked), BEFORE any sandbox call.
+//
+// Returns the local path, the file's display name (basename the sandbox
+// mounts read-only at /job/in), and a cleanup func the caller MUST invoke.
+func (s *FileService) OpenConversationFileCopy(
+	ctx context.Context, tenantID, userID, convID, fileID uuid.UUID,
+) (path, name string, cleanup func(), err error) {
+	f, err := s.Get(ctx, tenantID, userID, fileID) // tenant + user scoped
+	if err != nil {
+		return "", "", nil, err
+	}
+	if f.ConversationID != convID {
+		// A file the caller owns but from a DIFFERENT conversation — the
+		// model must not reach across conversations. Same not-found leak
+		// posture as the user-scope gate.
+		return "", "", nil, ErrFileNotFound
+	}
+	return s.openFileLocalCopy(ctx, f)
+}
+
+// OpenUserFileCopy is the conversation-agnostic variant for the desktop
+// /code/run endpoint: it enforces caller (tenant + user) ownership only,
+// since a desktop agent run is not bound to a server conversation.
+func (s *FileService) OpenUserFileCopy(
+	ctx context.Context, tenantID, userID, fileID uuid.UUID,
+) (path, name string, cleanup func(), err error) {
+	f, err := s.Get(ctx, tenantID, userID, fileID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return s.openFileLocalCopy(ctx, f)
+}
+
+func (s *FileService) openFileLocalCopy(
+	ctx context.Context, f *model.ConversationFile,
+) (path, name string, cleanup func(), err error) {
+	p, cl, err := s.storage.OpenLocalCopy(ctx, f.StoragePath)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return "", "", nil, ErrFileNotFound
+		}
+		return "", "", nil, fmt.Errorf("open file copy: %w", err)
+	}
+	return p, sanitizeFilename(f.OriginalFilename), cl, nil
+}
+
+// GeneratedFileInput carries a sandbox-produced artifact (chart png,
+// xlsx, csv, …) to persist as a ConversationFile attached to an assistant
+// message. Generalises GeneratedImageInput for arbitrary content types so
+// run_python's outputs flow through the SAME message.files[] pipeline
+// images/videos use (rendered inline for images, download chip otherwise).
+type GeneratedFileInput struct {
+	TenantID       uuid.UUID
+	UserID         uuid.UUID
+	ConversationID uuid.UUID
+	MessageID      uuid.UUID
+	RequestID      string
+	Data           []byte
+	ContentType    string
+	// OriginalFilename is the display/download name (the sandbox artifact
+	// basename, e.g. "chart.png"). Sanitised here.
+	OriginalFilename string
+}
+
+// SaveGeneratedFile stores an arbitrary generated artifact and creates a
+// ConversationFile row linked to the assistant message, flagged
+// IsGenerated. Mirrors SaveGeneratedImage but without the image-only
+// assumptions, so run_python can persist png charts AND xlsx/csv outputs
+// through one path.
+func (s *FileService) SaveGeneratedFile(
+	ctx context.Context, in GeneratedFileInput,
+) (*model.ConversationFile, error) {
+	if len(in.Data) == 0 {
+		return nil, ErrFileEmpty
+	}
+	ct := strings.ToLower(strings.TrimSpace(in.ContentType))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	display := sanitizeFilename(in.OriginalFilename)
+	if display == "" {
+		display = "output"
+	}
+	storageName := fmt.Sprintf("%s_%s", uuid.New().String(), display)
+	key := storage.JoinKey(
+		conversationFilesKeyPrefix,
+		in.TenantID.String(),
+		in.ConversationID.String(),
+		storageName,
+	)
+	if err := s.storage.Upload(ctx, key, bytes.NewReader(in.Data), ct, int64(len(in.Data))); err != nil {
+		return nil, fmt.Errorf("storage upload: %w", err)
+	}
+
+	var msgID *uuid.UUID
+	if in.MessageID != uuid.Nil {
+		m := in.MessageID
+		msgID = &m
+	}
+	row, err := s.files.Create(ctx, &model.ConversationFile{
+		ConversationID:   in.ConversationID,
+		MessageID:        msgID,
+		TenantID:         in.TenantID,
+		UserID:           in.UserID,
+		Filename:         storageName,
+		OriginalFilename: display,
+		ContentType:      ct,
+		FileSizeBytes:    int64(len(in.Data)),
+		StoragePath:      key,
+		ExtractionStatus: "completed", // sandbox artifacts carry no extractable text
+		IsGenerated:      true,
+		Version:          1,
+	})
+	if err != nil {
+		_ = s.storage.Delete(ctx, key)
+		return nil, err
+	}
+	slog.Info("generated_file_attachment_saved",
+		"request_id", in.RequestID,
+		"conversation_id", in.ConversationID.String(),
+		"message_id", in.MessageID.String(),
+		"file_id", row.ID.String(),
+		"mime_type", row.ContentType,
+		"file_size_bytes", row.FileSizeBytes,
+	)
+	return row, nil
+}
+
 // generatedImageFilename builds a friendly download label from the
 // prompt. The on-disk name is the UUID-prefixed storageName; this is
 // only the display filename. Rune-sliced so multibyte (Thai) prompts

@@ -500,6 +500,17 @@ func (s *MessageService) SetWebSearch(searcher webSearcher, saver searchSourcesS
 	}
 }
 
+// SetCodeInterpreter wires the Phase-13-B run_python tool onto the
+// ToolExecutor: the sandbox-backed interpreter, the ownership-checked file
+// resolver, and the artifact saver. Optional — when unset, run_python is
+// hidden. Callers wire this ONLY when the sandbox is available
+// (SANDBOX_ENABLED=1); run_python never runs model code in-process.
+func (s *MessageService) SetCodeInterpreter(ci *CodeInterpreter, files codeFileResolver, saver generatedFileSaver) {
+	if s.toolExec != nil {
+		s.toolExec.SetCodeInterpreter(ci, files, saver)
+	}
+}
+
 // SetToolCapabilityChecker wires a model-id -> tool-capable lookup used by
 // Phase D image routing to decide whether to override a non-tool model for
 // an image-generation turn. Optional — when unset, no override happens.

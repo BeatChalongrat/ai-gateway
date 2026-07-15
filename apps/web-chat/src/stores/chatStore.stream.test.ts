@@ -284,6 +284,55 @@ describe("sendMessage / consumeStream", () => {
     await done;
   });
 
+  // Phase 13 Part B — run_python artifacts reuse the existing
+  // message_files seam: a chart png / generated file the sandbox produced
+  // is attached to the assistant message and the generating flags clear.
+  // No dedicated run_python case is needed — this pins that reuse.
+  it("attaches run_python artifacts (image + file) via message_files and clears generating flags", async () => {
+    const s = makeStream();
+    mockApi.openMessageStream.mockResolvedValue(s.response);
+    seedConversation("c1", [userMsg("u0")]);
+
+    const done = useChatStore.getState().sendMessage("c1", "plot it");
+    await tick();
+    s.push(frame("message_start", { message_id: "real-1", conversation_id: "c1" }));
+    await tick();
+
+    const files = [
+      {
+        id: "art-img",
+        original_filename: "chart.png",
+        content_type: "image/png",
+        is_generated: true,
+        download_url: "/api/v1/files/art-img/download",
+      },
+      {
+        id: "art-xlsx",
+        original_filename: "report.xlsx",
+        content_type:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        is_generated: true,
+        download_url: "/api/v1/files/art-xlsx/download",
+      },
+    ];
+    s.push(frame("message_files", { message_id: "real-1", files }));
+    await tick();
+
+    const msg = messagesOf("c1").at(-1);
+    expect(msg?.files).toHaveLength(2);
+    expect(msg?.files?.[0]).toMatchObject({
+      content_type: "image/png",
+      original_filename: "chart.png",
+    });
+    expect(msg?.files?.[1]?.original_filename).toBe("report.xlsx");
+    expect(msg?.is_generating_image).toBe(false);
+    expect(msg?.is_generating_video).toBe(false);
+
+    s.push(frame("message_complete", { message_id: "real-1" }));
+    s.close();
+    await done;
+  });
+
   it("terminal error frame marks the message error, localizes the code, and raises the banner", async () => {
     const s = makeStream();
     mockApi.openMessageStream.mockResolvedValue(s.response);

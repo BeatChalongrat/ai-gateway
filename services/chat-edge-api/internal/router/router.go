@@ -79,6 +79,11 @@ type Handlers struct {
 	// Import — desktop agent-conversation backup mirror (migration 026).
 	// Optional; no sendRateLimit (nothing here reaches an LLM).
 	Import *handler.ImportHandler
+	// Code — Phase 13 Part B run_python endpoint for the desktop agent's
+	// thin-client tool. Optional: wired ONLY when the hardened sandbox is
+	// available (SANDBOX_ENABLED=1). Rate-limited (a sandbox run is
+	// expensive). nil → route not registered (404).
+	Code *handler.CodeHandler
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -305,6 +310,13 @@ func New(
 			// user scoping happens inside SearchService.
 			if h.Search != nil {
 				r.Get("/search", h.Search.Search)
+			}
+
+			// Phase 13 Part B — run_python code interpreter for the
+			// desktop agent. Rate-limited like Send (a sandbox run is
+			// expensive). Only registered when the sandbox is available.
+			if h.Code != nil {
+				r.With(sendRateLimit).Post("/code/run", h.Code.Run)
 			}
 
 			// S9 — Account data management. Export generates a JSON

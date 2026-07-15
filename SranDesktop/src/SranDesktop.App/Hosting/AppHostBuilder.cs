@@ -145,6 +145,12 @@ public static class AppHostBuilder
                     registry.Register(new ComputerScrollTool());
                     registry.Register(new ComputerDragTool());
                     registry.Register(new OpenApplicationTool());
+                    // Phase 13 Part B: code interpreter. Thin client → chat-edge's
+                    // /code/run (server-side hardened sandbox). DefaultPermission
+                    // is Ask (deny-without-handler): it runs model code + can read
+                    // conversation files, but never touches the real machine.
+                    registry.Register(new RunPythonTool(
+                        sp.GetRequiredService<IChatEdgeApiClient>()));
                     // Phase 12 F: sub-agent delegation. DefaultPermission is
                     // AllowAlways because the tool only delegates — every tool
                     // the nested run calls still goes through the shared
