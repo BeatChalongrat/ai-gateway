@@ -345,6 +345,65 @@ public class ChatOrchestratorTests
         events.Last().Should().BeOfType<AgentStreamDoneEvent>();
     }
 
+    private static async Task RunToEndAsync(
+        ChatOrchestrator orchestrator, List<GatewayMessage> messages, int contextWindow)
+    {
+        await foreach (var _ in orchestrator.RunAsync(
+                           "gpt-4o-mini", messages, "conv-1", contextWindow))
+        {
+        }
+    }
+
+    [Fact]
+    public async Task Main_Loop_Keeps_Four_Screenshots_For_A_Large_Window()
+    {
+        var (orchestrator, gateway, _, _) = Create();
+        gateway.Enqueue(ContentFrame("ok"), StopFrame, "[DONE]");
+
+        var messages = new List<GatewayMessage> { new() { Role = "user", Content = "look" } };
+        for (var i = 1; i <= 6; i++)
+            messages.Add(ScreenshotMessage.Create("computer_screenshot", $"data:image/png;base64,IMG{i}"));
+
+        await RunToEndAsync(orchestrator, messages, contextWindow: 200_000);
+
+        // KeepLatestFor(200_000) == 4 → two oldest of six pruned, four survive.
+        messages.Count(ScreenshotMessage.IsScreenshotMessage).Should().Be(4);
+    }
+
+    [Fact]
+    public async Task Main_Loop_Keeps_Two_Screenshots_For_A_Small_Window()
+    {
+        var (orchestrator, gateway, _, _) = Create();
+        gateway.Enqueue(ContentFrame("ok"), StopFrame, "[DONE]");
+
+        var messages = new List<GatewayMessage> { new() { Role = "user", Content = "look" } };
+        for (var i = 1; i <= 6; i++)
+            messages.Add(ScreenshotMessage.Create("computer_screenshot", $"data:image/png;base64,IMG{i}"));
+
+        await RunToEndAsync(orchestrator, messages, contextWindow: 40_000);
+
+        // KeepLatestFor(40_000) == 2 → the same input keeps fewer on a small window.
+        messages.Count(ScreenshotMessage.IsScreenshotMessage).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Context_Error_Recovery_Still_Prunes_To_A_Single_Screenshot()
+    {
+        var (orchestrator, gateway, _, _) = Create();
+        gateway.Enqueue(ContextErrorFrame);
+        gateway.Enqueue(ContentFrame("Recovered"), StopFrame, "[DONE]");
+
+        var messages = new List<GatewayMessage> { new() { Role = "user", Content = "hi" } };
+        for (var i = 1; i <= 5; i++)
+            messages.Add(ScreenshotMessage.Create("computer_screenshot", $"data:image/png;base64,IMG{i}"));
+
+        // Large window so the main loop would keep four — the recovery path must
+        // still clamp to one screenshot under context pressure.
+        await RunToEndAsync(orchestrator, messages, contextWindow: 200_000);
+
+        messages.Count(ScreenshotMessage.IsScreenshotMessage).Should().Be(1);
+    }
+
     [Fact]
     public async Task Cancellation_Propagates()
     {

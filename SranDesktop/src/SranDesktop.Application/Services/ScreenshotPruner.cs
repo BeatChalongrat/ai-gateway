@@ -15,6 +15,27 @@ public static class ScreenshotPruner
         "[An earlier screenshot was removed to save context space. " +
         "Take a new screenshot if you need to see the current state.]";
 
+    /// <summary>
+    /// Maps a model's context window to how many recent screenshots to keep in
+    /// the main agent loop (Phase 14 B). Each screenshot costs ~1100 tokens
+    /// (see <see cref="TokenEstimator"/>), so even the ceiling of 4 is only a
+    /// few thousand tokens — a small fraction of a large window — while giving
+    /// the model more recent visual context to reason over. Small windows keep
+    /// just the latest two to leave room for the conversation itself. The 1–5
+    /// clamp is a guardrail so an odd catalog value can never keep zero (the
+    /// model would lose all visual state) or an unbounded number.
+    /// </summary>
+    public static int KeepLatestFor(int contextWindow)
+    {
+        var keep = contextWindow switch
+        {
+            < 50_000 => 2,
+            < 200_000 => 3,
+            _ => 4,
+        };
+        return Math.Clamp(keep, 1, 5);
+    }
+
     /// <summary>Prunes all screenshot messages except the latest
     /// <paramref name="keepLatest"/>. Returns whether anything was pruned.</summary>
     public static bool Prune(List<GatewayMessage> messages, int keepLatest = 2)

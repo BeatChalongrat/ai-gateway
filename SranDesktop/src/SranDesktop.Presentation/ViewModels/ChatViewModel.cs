@@ -716,6 +716,12 @@ public partial class ChatViewModel : ObservableObject
         var attachedNames = readyFiles.Where(f => !f.IsImage).Select(f => f.Name).ToList();
         PendingFiles.Clear();
 
+        // Record every attachment in the conversation's file manifest (Phase 14
+        // A) BEFORE the turn runs, so this turn's system prompt already lists
+        // them and they survive context trimming forever after. Best-effort:
+        // a manifest write must never fail the turn.
+        await RecordAttachmentsInManifestAsync(conversation.Id, readyFiles);
+
         var bubbleText = attachedNames.Count > 0
             ? (text.Length > 0 ? $"{text}\n" : "") + string.Join("\n", attachedNames.Select(n => $"• {n}"))
             : text;
@@ -1194,6 +1200,14 @@ public partial class ChatViewModel : ObservableObject
             }
         }
 
+        // Conversation file manifest (Phase 14 A). A durable, size-bounded list
+        // of every file attached to this conversation so the model never
+        // "forgets" a file just because its earlier turn scrolled out of the
+        // context window. Rides the never-trimmed system prompt; lists paths and
+        // metadata only — a file's contents still enter solely via read_file's
+        // masked pipeline (DLP unchanged), and PathGuard still governs access.
+        await AppendFileManifestAsync(sb);
+
         // Skills (R9 H3 fast-path + Phase 6 Task 2 model-driven catalog).
         // Trigger-matched skills are inlined in full (cheap, high-precision);
         // every enabled skill also appears in a compact catalog so the model
@@ -1229,6 +1243,121 @@ public partial class ChatViewModel : ObservableObject
 
         return sb.ToString();
     }
+
+    /// <summary>Newest-first cap on the manifest so a long-lived conversation's
+    /// file list can never itself balloon the never-trimmed system prompt.</summary>
+    private const int MaxManifestFiles = 20;
+
+    /// <summary>
+    /// Persists this turn's attachments into the conversation's `files` table
+    /// (Phase 14 A). Deduped by (conversation, local path) via a deterministic
+    /// id, so re-sending the same file updates rather than duplicates its row.
+    /// Fully best-effort — every failure is logged and swallowed so a manifest
+    /// write can never fail the turn.
+    /// </summary>
+    private async Task RecordAttachmentsInManifestAsync(
+        string conversationId, IReadOnlyList<PendingFileViewModel> files)
+    {
+        foreach (var file in files)
+        {
+            try
+            {
+                long size = 0;
+                try { size = new FileInfo(file.LocalPath).Length; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+
+                await _store.UpsertFileAsync(new Domain.Entities.FileAttachment
+                {
+                    Id = ManifestFileId(conversationId, file.LocalPath),
+                    ConversationId = conversationId,
+                    Name = file.Name,
+                    MimeType = file.IsImage
+                        ? GuessImageContentType(file.LocalPath)
+                        : GuessMimeType(file.LocalPath),
+                    SizeBytes = size,
+                    LocalPath = file.LocalPath,
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not record attachment {Path} in manifest", file.LocalPath);
+            }
+        }
+    }
+
+    /// <summary>Deterministic id from (conversation, local path) so the same
+    /// file re-sent lands on the same row (ON CONFLICT update) instead of a
+    /// duplicate. Not security-sensitive — just a stable dedup key.</summary>
+    private static string ManifestFileId(string conversationId, string localPath)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(conversationId + " " + localPath));
+        return "file-" + Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
+    }
+
+    /// <summary>Appends the `## Files in this conversation` block (newest first,
+    /// capped) to the per-turn system extras. Never inlines content — only
+    /// names, paths and tiny metadata; the model uses read_file to view a file.
+    /// Best-effort: a store hiccup just omits the block, never throws.</summary>
+    private async Task AppendFileManifestAsync(System.Text.StringBuilder sb)
+    {
+        if (Conversation?.Id is not { } conversationId)
+            return;
+        try
+        {
+            var files = await _store.GetFilesAsync(conversationId);
+            if (files.Count == 0)
+                return;
+
+            var ordered = files.OrderByDescending(f => f.CreatedAt).ToList();
+            sb.Append("\n\n## Files in this conversation\n")
+              .Append("These files were attached to this conversation and remain available. ")
+              .Append("Use read_file with the local path to view a file's current contents — ")
+              .Append("even if the file does not appear earlier in the messages above. ")
+              .Append("(A file may have moved or been deleted since; read_file simply fails if so.)\n");
+
+            foreach (var file in ordered.Take(MaxManifestFiles))
+            {
+                sb.Append("- ").Append(file.Name)
+                  .Append(" (").Append(FormatSize(file.SizeBytes)).Append(", attached)");
+                if (!string.IsNullOrEmpty(file.LocalPath))
+                    sb.Append(" — ").Append(file.LocalPath);
+                sb.Append('\n');
+            }
+
+            var overflow = ordered.Count - MaxManifestFiles;
+            if (overflow > 0)
+                sb.Append("(+").Append(overflow).Append(" more)\n");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not build file manifest for {Id}", conversationId);
+        }
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes <= 0) return "size unknown";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#} KB";
+        return $"{bytes / (1024.0 * 1024.0):0.#} MB";
+    }
+
+    private static string GuessMimeType(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            ".csv" => "text/csv",
+            ".json" => "application/json",
+            ".xml" => "application/xml",
+            ".yaml" or ".yml" => "application/yaml",
+            ".pdf" => "application/pdf",
+            ".doc" or ".docx" => "application/msword",
+            ".xls" or ".xlsx" => "application/vnd.ms-excel",
+            _ => "application/octet-stream"
+        };
 
     private string? TryReadSmallTextFile(string path)
     {

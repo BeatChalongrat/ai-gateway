@@ -94,7 +94,9 @@ public sealed class ChatOrchestrator : IChatOrchestrator
             // Keep the request inside the model's context window: old
             // screenshots become placeholders, then whole history groups are
             // trimmed oldest-first if the estimate still exceeds the budget.
-            ScreenshotPruner.Prune(messages, keepLatest: 2);
+            // How many recent screenshots to keep scales with the window
+            // (Phase 14 B) — bigger windows can afford more visual context.
+            ScreenshotPruner.Prune(messages, ScreenshotPruner.KeepLatestFor(window));
             var budget = ContextBudgeter.FitToBudget(messages, window, DefaultMaxOutputTokens);
             if (budget.Trimmed)
                 yield return new AgentContextTrimmedEvent(budget.OmittedMessages);

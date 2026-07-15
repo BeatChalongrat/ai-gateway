@@ -27,6 +27,12 @@ public class ContextBudgeterTests
     private static bool IsTrimNote(GatewayMessage m) =>
         m is { Role: "user", Content: string text } && text.StartsWith("[Note: ");
 
+    private static bool IsSummary(GatewayMessage m) =>
+        m is { Role: "user", Content: string text } && text.StartsWith("[Summary of earlier turn: ");
+
+    private static bool Heads(GatewayMessage m, string prefix) =>
+        m.Content is string s && s.StartsWith(prefix);
+
     [Fact]
     public void Under_Budget_Is_Untouched()
     {
@@ -55,9 +61,15 @@ public class ContextBudgeterTests
         IsTrimNote(messages[1]).Should().BeTrue();
         ((string)messages[1].Content!).Should().Contain("4 earlier messages");
         messages.Count(IsTrimNote).Should().Be(1);
-        // Oldest two groups gone, the rest (incl. the final group) intact.
-        messages.Should().HaveCount(1 + 1 + 8);
-        ((string)messages[2].Content!).Should().StartWith("u3:");
+        // The two dropped groups each leave a structural summary behind
+        // (Phase 14 C) — additional to, not a replacement for, the note.
+        messages.Count(IsSummary).Should().Be(2);
+        // system + note + 2 summaries + the 8 surviving messages.
+        messages.Should().HaveCount(1 + 1 + 2 + 8);
+        // Oldest two groups gone; the rest (incl. the final group) intact.
+        messages.Should().NotContain(m => Heads(m, "u1:"));
+        messages.Should().NotContain(m => Heads(m, "u2:"));
+        messages.Should().Contain(m => Heads(m, "u3:"));
         ((string)messages[^2].Content!).Should().StartWith("u6:");
         ((string)messages[^1].Content!).Should().StartWith("a6:");
     }
@@ -114,8 +126,67 @@ public class ContextBudgeterTests
         result.OmittedMessages.Should().Be(4); // the whole first group
         messages.Should().NotContain(m => m.Role == "tool");
         messages.Should().NotContain(m => m.ToolCalls != null);
+        // The dropped tool-call group is replaced by a deterministic summary
+        // naming the user's ask, the tool it ran, and the file path it touched.
+        var summary = messages.Should()
+            .ContainSingle(m => IsSummary(m)).Which.Content as string;
+        summary.Should().Contain("u1:");
+        summary.Should().Contain("read_file");
+        summary.Should().Contain("files touched: x");
         ((string)messages[^2].Content!).Should().StartWith("u2:");
         ((string)messages[^1].Content!).Should().StartWith("a2:");
+    }
+
+    [Fact]
+    public void Group_Summary_Is_Far_Smaller_Than_The_Dropped_Group()
+    {
+        // A group whose tool result alone is ~2000 chars.
+        var messages = new List<GatewayMessage>
+        {
+            System_("sys"),
+            User("u1: analyze the report " + new string('u', 400)),
+            new()
+            {
+                Role = "assistant",
+                ToolCalls = new List<GatewayToolCall>
+                {
+                    new()
+                    {
+                        Id = "call_1",
+                        Function = new GatewayToolCallFunction
+                            { Name = "read_file", Arguments = """{"path":"report.csv"}""" }
+                    }
+                }
+            },
+            new() { Role = "tool", ToolCallId = "call_1", Name = "read_file", Content = new string('t', 2000) },
+            Assistant("a1: done " + new string('a', 400)),
+            User("u2: final question"),
+            Assistant("a2: final answer"),
+        };
+
+        ContextBudgeter.FitToBudget(messages, 500, outputReserve: 0);
+
+        var summary = (string)messages.Single(IsSummary).Content!;
+        summary.Length.Should().BeLessThan(300);
+        summary.Should().Contain("report.csv");
+    }
+
+    [Fact]
+    public void Retained_Summaries_Are_Capped_Under_Heavy_Trimming()
+    {
+        // Ten groups, tiny budget → most are dropped; retained summaries must
+        // stay bounded (the older ones fold into the cumulative note).
+        var messages = History(10);
+
+        var result = ContextBudgeter.FitToBudget(messages, 400, outputReserve: 0);
+
+        result.Trimmed.Should().BeTrue();
+        result.OmittedMessages.Should().BeGreaterThan(6); // many groups dropped
+        messages.Count(IsSummary).Should().BeLessThanOrEqualTo(3);
+        messages.Count(IsTrimNote).Should().Be(1);
+        // The final group always survives.
+        ((string)messages[^2].Content!).Should().StartWith("u10:");
+        ((string)messages[^1].Content!).Should().StartWith("a10:");
     }
 
     [Fact]

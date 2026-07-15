@@ -63,6 +63,29 @@ public class ScreenshotPrunerTests
         ScreenshotMessage.IsScreenshotMessage(messages[1]).Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData(0, 2)]        // clamps up from below the floor
+    [InlineData(8_000, 2)]    // small window → keep two
+    [InlineData(49_999, 2)]
+    [InlineData(50_000, 3)]   // mid window → keep three
+    [InlineData(128_000, 3)]
+    [InlineData(199_999, 3)]
+    [InlineData(200_000, 4)]  // large window → keep four
+    [InlineData(1_000_000, 4)]
+    public void KeepLatestFor_Maps_Window_To_Retention(int window, int expected)
+    {
+        ScreenshotPruner.KeepLatestFor(window).Should().Be(expected);
+    }
+
+    [Fact]
+    public void KeepLatestFor_Never_Returns_Zero()
+    {
+        // Even a nonsensical window keeps at least the newest screenshot so the
+        // model is never left blind to the current screen state.
+        ScreenshotPruner.KeepLatestFor(int.MinValue).Should().BeGreaterThanOrEqualTo(1);
+        ScreenshotPruner.KeepLatestFor(-1).Should().BeInRange(1, 5);
+    }
+
     [Fact]
     public void Non_Screenshot_Multimodal_User_Message_Is_Untouched()
     {
