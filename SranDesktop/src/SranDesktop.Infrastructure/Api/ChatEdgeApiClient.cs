@@ -332,6 +332,25 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
         return await ReadAsync<PlanExecutionResult>(response, deadline.Token);
     }
 
+    // ── Code interpreter (Phase 13 Part B) ──────────────────────────────────
+
+    public async Task<CodeExecutionResult> RunPythonAsync(
+        string code, IReadOnlyList<string>? fileIds = null, CancellationToken ct = default)
+    {
+        // A sandbox run is bounded server-side (60s wall); allow generous
+        // client headroom for container start + teardown.
+        using var deadline = Deadline(ct, TimeSpan.FromMinutes(2));
+        using var response = await _http.PostAsJsonAsync(
+            "api/v1/code/run",
+            new Dictionary<string, object?>
+            {
+                ["code"] = code,
+                ["files"] = fileIds ?? new List<string>(),
+            },
+            JsonOptions, deadline.Token);
+        return await ReadAsync<CodeExecutionResult>(response, deadline.Token);
+    }
+
     // ── Knowledge base management (R7 Feature D) ────────────────────────────
 
     public async Task<KnowledgeBaseDetailListResponse> ListKnowledgeBasesDetailedAsync(CancellationToken ct = default)

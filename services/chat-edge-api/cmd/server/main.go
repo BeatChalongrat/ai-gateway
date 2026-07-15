@@ -267,8 +267,9 @@ func main() {
 	// env — never again in this secret-bearing process. Fail LOUD if
 	// enabled-but-unavailable so a misconfig can't silently fall back to
 	// the in-process path in prod.
+	var sbx *sandbox.Runner
 	if cfg.SandboxEnabled {
-		sbx := sandbox.New(sandbox.Config{
+		sbx = sandbox.New(sandbox.Config{
 			Image:       cfg.SandboxImage,
 			SeccompPath: cfg.SandboxSeccompPath,
 			WorkDir:     cfg.SandboxWorkDir,
@@ -340,6 +341,20 @@ func main() {
 	// the gateway reports the tenant enabled search + has a provider.
 	messageSvc.SetWebSearch(gateway, messageSvc)
 	messageSvc.SetSearchConfigChecker(gateway)
+	// Phase 13 Part B — run_python code interpreter. Wired ONLY when the
+	// hardened sandbox is available: run_python must never execute
+	// model-authored code in this secret-bearing process. The interpreter
+	// runs ModeCode in the same locked-down container as plan-exec; the
+	// file service resolves (ownership-checked) file inputs + persists
+	// produced artifacts as ConversationFiles on the assistant message.
+	var codeInterp *service.CodeInterpreter
+	if sbx != nil {
+		codeInterp = service.NewCodeInterpreter(sbx)
+		messageSvc.SetCodeInterpreter(codeInterp, fileSvc, fileSvc)
+		slog.Info("run_python code interpreter active")
+	} else {
+		slog.Warn("SANDBOX_ENABLED=0 — run_python code interpreter DISABLED")
+	}
 	// S7 — wire the source-attribution repo so per-turn sources
 	// (memory + state + compaction + search) get persisted to
 	// chat.response_context_sources after each assistant turn
@@ -465,6 +480,13 @@ func main() {
 		Import: handler.NewImportHandler(
 			service.NewImportService(pool, conversations, messages, conversationSvc),
 		),
+	}
+
+	// Phase 13 Part B — register the /code/run endpoint only when the
+	// code interpreter is wired (sandbox available). nil leaves the route
+	// unregistered so a misconfigured stack 404s rather than 500s.
+	if codeInterp != nil {
+		handlers.Code = handler.NewCodeHandler(codeInterp, fileSvc)
 	}
 
 	// CORS origins — default to the web-chat Next.js dev origin so a

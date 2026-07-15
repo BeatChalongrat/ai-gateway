@@ -129,6 +129,15 @@ public interface IChatEdgeApiClient
     Task<PlanExecutionResult> ExecuteDocumentPlanAsync(
         string conversationId, ExecuteDocumentPlanRequest request, CancellationToken ct = default);
 
+    // ── Code interpreter (Phase 13 Part B) ──────────────────────────────────
+
+    /// <summary>POST api/v1/code/run — runs Python in chat-edge's hardened
+    /// sandbox (no network, non-root, seccomp, resource-capped) and returns
+    /// stdout/stderr + any produced artifacts. <paramref name="fileIds"/> are
+    /// optional caller-owned conversation files mounted read-only in the box.</summary>
+    Task<CodeExecutionResult> RunPythonAsync(
+        string code, IReadOnlyList<string>? fileIds = null, CancellationToken ct = default);
+
     // ── Knowledge base management (R7 Feature D) ────────────────────────────
 
     Task<KnowledgeBaseDetailListResponse> ListKnowledgeBasesDetailedAsync(CancellationToken ct = default);

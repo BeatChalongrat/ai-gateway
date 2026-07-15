@@ -42,6 +42,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
 )
 
 // ---------------------------------------------------------------------------
@@ -282,6 +283,31 @@ type ToolExecutor struct {
 	// the handler stays unit-testable without a live gateway / DB.
 	webSearch   webSearcher
 	searchSaver searchSourcesSaver
+	// Phase 13 Part B — run_python code interpreter. When all three are
+	// wired the executor exposes run_python: resolve optional file inputs
+	// (ownership-checked), materialise them into the hardened sandbox,
+	// run model-authored python under Part A's lockdown, and persist any
+	// produced artifacts (png charts / xlsx / csv) as ConversationFiles
+	// attached to the assistant message. Interfaces so the handler stays
+	// unit-testable without docker. Only wired when SANDBOX_ENABLED=1 —
+	// run_python NEVER runs model code in-process.
+	codeInterp *CodeInterpreter
+	codeFiles  codeFileResolver
+	codeSaver  generatedFileSaver
+}
+
+// codeFileResolver resolves + materialises a run_python file input to a
+// local path, ENFORCING that the file belongs to the caller's user AND
+// the current conversation. Backed by *FileService.OpenConversationFileCopy.
+type codeFileResolver interface {
+	OpenConversationFileCopy(ctx context.Context, tenantID, userID, convID, fileID uuid.UUID) (path, name string, cleanup func(), err error)
+}
+
+// generatedFileSaver persists a sandbox-produced artifact as a
+// ConversationFile attached to the assistant message. Backed by
+// *FileService.SaveGeneratedFile.
+type generatedFileSaver interface {
+	SaveGeneratedFile(ctx context.Context, in GeneratedFileInput) (*model.ConversationFile, error)
 }
 
 // imageGenerator is the subset of *GatewayClient the image tool needs.
@@ -364,6 +390,22 @@ func (e *ToolExecutor) HasWebSearch() bool {
 	return e.webSearch != nil && e.searchSaver != nil
 }
 
+// SetCodeInterpreter wires the Phase-13-B run_python tool: the sandbox-
+// backed interpreter, the ownership-checked file resolver, and the
+// artifact saver. Optional — when any is nil, run_python is hidden. Must
+// run after SetMemoryService (the executor is created there). Callers
+// wire this ONLY when the sandbox is available.
+func (e *ToolExecutor) SetCodeInterpreter(ci *CodeInterpreter, files codeFileResolver, saver generatedFileSaver) {
+	e.codeInterp = ci
+	e.codeFiles = files
+	e.codeSaver = saver
+}
+
+// HasCodeInterpreter reports whether run_python is wired.
+func (e *ToolExecutor) HasCodeInterpreter() bool {
+	return e.codeInterp != nil && e.codeFiles != nil && e.codeSaver != nil
+}
+
 // SetConversationStateService wires the S3 state layer. Optional
 // so unit tests that don't exercise the state path stay decoupled.
 func (e *ToolExecutor) SetConversationStateService(s *ConversationStateService) {
@@ -417,6 +459,12 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	if e.HasWebSearch() {
 		defs = append(defs, webSearchToolDef())
 	}
+	// Phase 13 Part B — run_python. Not gated on MemoryEnabled (running
+	// analysis code doesn't write user memory); offered in every
+	// conversation where the sandbox-backed interpreter is wired.
+	if e.HasCodeInterpreter() {
+		defs = append(defs, runPythonToolDef())
+	}
 	return defs
 }
 
@@ -459,6 +507,8 @@ func (e *ToolExecutor) Execute(
 		return e.execGenerateVideo(ctx, call.Function.Arguments, ec)
 	case "web_search":
 		return e.execWebSearch(ctx, call.Function.Arguments, ec)
+	case "run_python":
+		return e.execRunPython(ctx, call.Function.Arguments, ec)
 	default:
 		return fmt.Sprintf("Unknown tool %q.", call.Function.Name)
 	}
@@ -1183,8 +1233,227 @@ func (e *ToolExecutor) execWebSearch(
 }
 
 // ---------------------------------------------------------------------------
+// run_python (Phase 13 Part B — sandboxed code interpreter)
+// ---------------------------------------------------------------------------
+
+// runPythonToolDef is the code-interpreter tool. The description steers
+// the model to WRITE-then-RUN: emit self-contained python, read the
+// returned stdout/stderr, and iterate. Charts (matplotlib savefig to the
+// current dir) + generated files attach to the reply automatically.
+func runPythonToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "run_python",
+			Description: "Execute Python code in a secure, isolated sandbox (no network access) and " +
+				"return its stdout/stderr. Use this to do real computation, data analysis, math, or to " +
+				"generate charts and files — instead of guessing an answer. numpy, pandas, matplotlib, " +
+				"openpyxl are available (use matplotlib.use('Agg') for headless plotting). print() " +
+				"anything you want to see in the result. " +
+				"IMPORTANT: to attach a chart or file to your reply, WRITE IT TO THE /job/out/ DIRECTORY — " +
+				"e.g. plt.savefig('/job/out/chart.png') or df.to_excel('/job/out/report.xlsx'). Files " +
+				"written anywhere else are discarded. Anything you write to /job/out/ is attached to your " +
+				"reply automatically. After it runs, read the output and either refine the code and run " +
+				"again, or explain the result to the user. Do NOT invent output you did not see; run the " +
+				"code to find out. To read files the user attached to this conversation, pass their " +
+				"file_id(s) in 'files' — each is mounted read-only at /job/in/<original_filename>.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"code": map[string]any{
+						"type":        "string",
+						"description": "The Python source to run. Self-contained; use print() to surface results.",
+					},
+					"files": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Optional file_ids of conversation files to mount read-only in ./in/. Only files from THIS conversation are accessible.",
+					},
+				},
+				"required": []string{"code"},
+			},
+		},
+	}
+}
+
+type runPythonArgs struct {
+	Code  string   `json:"code"`
+	Files []string `json:"files"`
+}
+
+func (e *ToolExecutor) execRunPython(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if !e.HasCodeInterpreter() {
+		return "The code interpreter isn't available right now."
+	}
+	var args runPythonArgs
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return "I couldn't parse the run_python arguments."
+	}
+	code := strings.TrimSpace(args.Code)
+	if code == "" {
+		return "I need Python code to run."
+	}
+	if len(code) > maxCodeBytes {
+		return fmt.Sprintf("The code is too large (max %d KB).", maxCodeBytes>>10)
+	}
+
+	// Resolve + materialise each requested file input. Ownership +
+	// conversation scope are enforced by the resolver BEFORE any sandbox
+	// call — a cross-user / cross-conversation id is rejected here and the
+	// sandbox never runs (fail-closed).
+	var inputs []sandbox.InputFile
+	var cleanups []func()
+	defer func() {
+		for _, cl := range cleanups {
+			cl()
+		}
+	}()
+	seen := make(map[string]bool)
+	for _, raw := range args.Files {
+		fid, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Sprintf("The file id %q isn't valid.", raw)
+		}
+		if seen[fid.String()] {
+			continue
+		}
+		seen[fid.String()] = true
+		path, name, cleanup, err := e.codeFiles.OpenConversationFileCopy(
+			ctx, ec.TenantID, ec.UserID, ec.ConversationID, fid,
+		)
+		if err != nil {
+			// ErrFileNotFound covers "doesn't exist", "another user's",
+			// and "another conversation's" — never leak which.
+			slog.Info("run_python_file_denied",
+				"file_id", fid.String(),
+				"conversation_id", ec.ConversationID.String(),
+			)
+			return fmt.Sprintf("I can't access file %s. It must be a file from this conversation.", fid.String())
+		}
+		cleanups = append(cleanups, cleanup)
+		inputs = append(inputs, sandbox.InputFile{Name: name, LocalPath: path})
+	}
+
+	res, err := e.codeInterp.Run(ctx, code, inputs)
+	if err != nil {
+		if errors.Is(err, sandbox.ErrUnavailable) {
+			slog.Error("run_python_sandbox_unavailable", "error", err.Error())
+			return "The code interpreter is temporarily unavailable. Please try again."
+		}
+		if res != nil {
+			defer res.Cleanup()
+		}
+		// ErrJobFailed (bad spec / internal runner error) — surface stderr.
+		slog.Error("run_python_job_failed", "error", err.Error())
+		return "The code interpreter couldn't run that. " + firstNonEmpty(strings.TrimSpace(string(resStderr(res))), "Please try again.")
+	}
+	defer res.Cleanup()
+
+	// Persist artifacts as ConversationFiles attached to the assistant
+	// message (streaming path only — the non-stream tool loop has no
+	// message id yet). They render through the same message_files SSE
+	// path images/videos use: png charts inline, other files as chips.
+	var savedImages, savedFiles []string
+	if ec.MessageID != uuid.Nil {
+		for i, art := range res.Artifacts {
+			if i >= maxArtifacts {
+				break
+			}
+			data, rerr := ReadArtifact(art.Path)
+			if rerr != nil {
+				slog.Warn("run_python_artifact_read_failed", "name", art.Name, "err", rerr)
+				continue
+			}
+			if _, serr := e.codeSaver.SaveGeneratedFile(ctx, GeneratedFileInput{
+				TenantID:         ec.TenantID,
+				UserID:           ec.UserID,
+				ConversationID:   ec.ConversationID,
+				MessageID:        ec.MessageID,
+				Data:             data,
+				ContentType:      ArtifactContentType(art.Name),
+				OriginalFilename: art.Name,
+			}); serr != nil {
+				slog.Warn("run_python_artifact_save_failed", "name", art.Name, "err", serr)
+				continue
+			}
+			if IsImageArtifact(art.Name) {
+				savedImages = append(savedImages, art.Name)
+			} else {
+				savedFiles = append(savedFiles, art.Name)
+			}
+		}
+	}
+
+	return formatRunPythonResult(res, savedImages, savedFiles, ec.MessageID == uuid.Nil)
+}
+
+// resStderr safely reads stderr off a possibly-nil result.
+func resStderr(res *sandbox.Result) []byte {
+	if res == nil {
+		return nil
+	}
+	return res.Stderr
+}
+
+// formatRunPythonResult builds the text result fed back to the model. It
+// carries the exit code, stdout, and (on non-zero / stderr) the stderr, so
+// the model can debug + iterate; plus a note about attached artifacts so
+// it acknowledges them without fabricating links.
+func formatRunPythonResult(res *sandbox.Result, images, files []string, noMessageID bool) string {
+	var b strings.Builder
+	if res.TimedOut {
+		b.WriteString("[The code timed out and was stopped.]\n")
+	}
+	fmt.Fprintf(&b, "Exit code: %d\n", res.Exit)
+
+	stdout := strings.TrimRight(string(res.Stdout), "\n")
+	if stdout != "" {
+		b.WriteString("\nstdout:\n")
+		b.WriteString(stdout)
+		b.WriteString("\n")
+	}
+	stderr := strings.TrimRight(string(res.Stderr), "\n")
+	if stderr != "" && (res.Exit != 0 || stdout == "") {
+		b.WriteString("\nstderr:\n")
+		b.WriteString(stderr)
+		b.WriteString("\n")
+	}
+	if res.Truncated {
+		b.WriteString("\n[output truncated]\n")
+	}
+	if stdout == "" && stderr == "" {
+		b.WriteString("\n(no output was printed)\n")
+	}
+
+	switch {
+	case len(images) > 0 || len(files) > 0:
+		b.WriteString("\nAttached to your reply automatically")
+		if len(images) > 0 {
+			fmt.Fprintf(&b, " — image(s): %s", strings.Join(images, ", "))
+		}
+		if len(files) > 0 {
+			fmt.Fprintf(&b, " — file(s): %s", strings.Join(files, ", "))
+		}
+		b.WriteString(". Do NOT fabricate a URL or markdown link — they display automatically. " +
+			"Briefly explain the result to the user.")
+	case noMessageID:
+		b.WriteString("\n(Any generated files can't be attached on this path.)")
+	}
+	return b.String()
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
 
 func nilOrUUID(u uuid.UUID) *uuid.UUID {
 	if u == uuid.Nil {
