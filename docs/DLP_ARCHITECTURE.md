@@ -160,6 +160,19 @@ This pass-through is deliberate and bounded:
 
 Enterprise/PDPA customers should be shown this section as the disclosure they consent to.
 
+## Code interpreter sandbox (Phase 13) — an internal trust boundary
+
+The gateway runs a code interpreter: the model can author Python (the `run_python` tool) and the plan-exec workspaces (Excel/Doc/Pptx) run generated code against the user's own files. Unlike the two raw-egress channels above, **this is not an egress channel at all** — it is an *internal trust boundary*, the same class as the NER sidecar. The interpreter processes RAW user data, but nothing it touches can reach a third party from inside the boundary.
+
+The boundary is enforced by the sandbox, not by convention. Every run is a per-run ephemeral `docker run --rm` of the dedicated `ai-gateway-sandbox` image, launched by trusted Go in chat-edge (`services/chat-edge-api/internal/sandbox/sandbox.go`) with a fixed lockdown flag set — no model input ever reaches the `docker run` argv:
+
+1. **No network egress — proven at two layers.** The container is launched with `--network none` (no route to postgres/redis/gateway/internet), and the seccomp profile (`services/chat-edge-api/sandbox/seccomp.json`) is default-deny (`SCMP_ACT_ERRNO`) with **every networking syscall removed** — `socket`/`connect`/`bind`/`listen`/`accept`/`sendto`/`recvfrom`/… are absent, so model-authored code cannot even create a socket. The raw user data inside the interpreter has no path out.
+2. **No secrets in the boundary.** The container inherits none of chat-edge's env — no API keys, DB strings, or provider credentials cross into the code that runs on user data (`--cap-drop ALL`, `--user 65534:65534`, `--security-opt no-new-privileges`, read-only rootfs, resource caps).
+3. **Results reach a provider ONLY through the masked completion pipeline.** The interpreter's stdout and produced artifacts come back to chat-edge, are surfaced to the user, and on the next turn are fed to the model as ordinary conversation content — which means they pass through the same DLP mask → guardrail → dispatch pipeline (`orchestrator.py`) as any other message before any provider adapter sees them. The model's authored code and its stdout are DLP-masked like all other content; identity PII the code printed is masked before egress, and the credential/secret class blocks.
+4. **Machine-checked, both languages.** The no-third-party-network guarantee is pinned by a Go unit test (`internal/sandbox/sandbox_test.go::TestSandbox_DockerArgsAlwaysNoNetwork`) that fails if the arg builder ever emits a `--network` value other than `none`. The Python egress gate (`tests/test_dlp_egress_invariant.py`) cross-pins that proof and the seccomp no-socket property, and asserts the interpreter is correctly **absent** from `RAW_EGRESS_ALLOWED` — it is a no-egress path, not a raw one.
+
+**Why this is stronger than a typical hosted code interpreter (e.g. ChatGPT Advanced Data Analysis).** In ADA-style designs the sandbox runs the user's data and the *same* provider that hosts the sandbox also hosts the model — there is no masking layer between the analyzed data and the model provider, so raw data (names, IDs, secrets in a spreadsheet) is visible to the provider by construction. Here the sandbox is ours, network-isolated, and its output re-enters the model only after DLP masking. **Raw user data processed by the interpreter never reaches a third party through code execution**; the only provider-bound representation of that data is the masked completion.
+
 ## Adding a New Detector
 
 1. Create `app/services/dlp/detectors/your_detector.py`
