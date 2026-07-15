@@ -1,0 +1,61 @@
+# Phase 13 Part A — hardened code-interpreter sandbox: chat-edge wiring.
+#
+# Apply ON TOP of the base + webchat compose to let chat-edge spawn
+# per-run sandbox containers:
+#
+#   docker compose -p ai-gateway \
+#     -f docker-compose.yml -f docker-compose.webchat.yml -f docker-compose.sandbox.yml \
+#     up -d chat-edge-api
+#
+# PREREQUISITES (one-time):
+#   1. Build the sandbox image so the daemon can run it per-exec:
+#        docker build -f services/chat-edge-api/sandbox/Dockerfile.sandbox \
+#          -t ai-gateway-sandbox:latest services/chat-edge-api
+#   2. chat-edge must contain the `docker` CLI. Add to
+#      services/chat-edge-api/Dockerfile's runtime stage:
+#        RUN apk add --no-cache docker-cli
+#      and COPY the seccomp profile in:
+#        COPY --from=builder /app/sandbox/seccomp.json /sandbox/seccomp.json
+#      (or mount it as below), then rebuild chat-edge-api.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# DOCKER-SOCKET PRIVILEGE — READ THIS.
+# Mounting /var/run/docker.sock gives chat-edge the ability to control the
+# Docker daemon = effectively host root. That is a real privilege increase.
+# It is acceptable ONLY because the docker `run` argv is built entirely by
+# trusted Go (internal/sandbox) from server constants — NO model input ever
+# reaches it; the model only supplies a plan/code FILE that runs INSIDE the
+# no-privilege sandbox. For a hardened prod posture, replace this socket
+# mount with a minimal BROKER service that owns the socket and exposes only
+# execute(job); then a chat-edge RCE still cannot issue arbitrary docker
+# commands. This overlay is the pragmatic single-host form.
+# ─────────────────────────────────────────────────────────────────────────
+
+services:
+  chat-edge-api:
+    environment:
+      SANDBOX_ENABLED: "1"
+      SANDBOX_IMAGE: "ai-gateway-sandbox:latest"
+      # Path INSIDE the chat-edge container where the docker CLI reads the
+      # seccomp profile (the CLI reads it and ships JSON to the daemon).
+      SANDBOX_SECCOMP_PATH: "/sandbox/seccomp.json"
+      # Per-run staging root as chat-edge writes it.
+      SANDBOX_WORKDIR: "/sandbox-runs"
+      # SAME root as the DAEMON sees it for -v bind mounts. On Docker
+      # Desktop / a single host this is the host path the named volume or
+      # bind resolves to. With a bind mount (below) both sides agree, so we
+      # point HostWorkDir at the same in-container path only when the daemon
+      # shares the mount namespace; otherwise set the host path explicitly.
+      SANDBOX_HOST_WORKDIR: "/sandbox-runs"
+    volumes:
+      # Daemon control socket (see privilege note above).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared staging dir. MUST be a bind to a real host path so the
+      # per-run in/out dirs chat-edge writes are the SAME inodes the daemon
+      # bind-mounts into the sandbox container. A named volume would NOT
+      # work here (the daemon can't -v a path that only exists inside
+      # another container's volume).
+      - ${SANDBOX_HOST_DIR:-./data/sandbox-runs}:/sandbox-runs
+      # Seccomp profile available to the CLI inside chat-edge (alternative
+      # to baking it into the image in the Dockerfile).
+      - ./services/chat-edge-api/sandbox/seccomp.json:/sandbox/seccomp.json:ro

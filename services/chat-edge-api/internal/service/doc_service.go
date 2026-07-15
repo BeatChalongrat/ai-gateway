@@ -36,6 +36,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
 
@@ -148,7 +149,16 @@ type DocService struct {
 
 	pythonBin  string
 	scriptsDir string
+
+	// sandbox, when non-nil, routes the docx/pdf/pptx generators (which
+	// apply the model-authored plan) through the Phase 13 hardened
+	// sandbox. nil → legacy in-process path. See ExcelService.SetSandbox.
+	sandbox *sandbox.Runner
 }
+
+// SetSandbox migrates the doc generators into the Phase 13 hardened
+// sandbox. Nil-safe.
+func (s *DocService) SetSandbox(r *sandbox.Runner) { s.sandbox = r }
 
 // NewDocService constructs the service. The conversations repo is
 // used to assert caller ownership of in.ConversationID on the
@@ -352,21 +362,21 @@ func (s *DocService) ExecutePlan(
 		script = pptxGeneratorScript
 	}
 
-	args := []string{planPath, outPath}
 	// docx + pptx support an optional source argument for the edit
 	// path (the script copies the source then mutates / appends).
 	// pdf is always create-from-scratch — the user can re-feed an
 	// existing PDF's inspection back to the LLM to regenerate.
+	var srcPath string
 	if (format == "docx" || format == "pptx") && source != nil {
-		srcPath, cleanup, err := s.storage.OpenLocalCopy(ctx, source.StoragePath)
+		sp, cleanup, err := s.storage.OpenLocalCopy(ctx, source.StoragePath)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("source download: %w", err)
 		}
 		defer cleanup()
-		args = append(args, srcPath)
+		srcPath = sp
 	}
 
-	out, err := s.runScript(ctx, script, docGeneratorTimeout, args...)
+	out, err := s.runGenerator(ctx, script, planBytes, planPath, srcPath, outPath, format)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%w: %v", ErrDocGeneratorFailed, err)
 	}
@@ -474,6 +484,55 @@ func (s *DocService) ExecutePlan(
 		return nil, nil, nil, fmt.Errorf("persist generated row: %w", err)
 	}
 	return row, validation, &genResult, nil
+}
+
+// runGenerator runs a docx/pdf/pptx generator. When a sandbox is wired it
+// runs inside the Phase 13 hardened container with the plan (+ optional
+// source) mounted read-only and the output collected from the per-run
+// scratch; otherwise it falls back to the legacy in-process python exec.
+// Returns the generator's stdout (the DocGenerationResult JSON) and leaves
+// the generated file at outPath — the surrounding validate/upload/
+// versioning flow is UNCHANGED.
+//
+// scriptName is the "scripts/xxx_generator.py" const; the sandbox path
+// takes just its basename (the script is baked into the image).
+func (s *DocService) runGenerator(
+	ctx context.Context, scriptName string, planBytes []byte, planPath, srcPath, outPath, format string,
+) ([]byte, error) {
+	if s.sandbox == nil {
+		args := []string{planPath, outPath}
+		if srcPath != "" {
+			args = append(args, srcPath)
+		}
+		return s.runScript(ctx, scriptName, docGeneratorTimeout, args...)
+	}
+	outName := "output." + format
+	inputs := []sandbox.InputFile{{Name: "plan.json", Bytes: planBytes}}
+	sbArgs := []string{"plan.json", "out/" + outName}
+	if srcPath != "" {
+		srcName := "source." + format
+		inputs = append(inputs, sandbox.InputFile{Name: srcName, LocalPath: srcPath})
+		sbArgs = append(sbArgs, srcName)
+	}
+	res, err := s.sandbox.Execute(ctx, sandbox.Spec{
+		Mode:   sandbox.ModeScript,
+		Script: filepath.Base(scriptName),
+		Args:   sbArgs,
+		Inputs: inputs,
+		Limits: sandbox.Limits{Wall: docGeneratorTimeout},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer res.Cleanup()
+	art := res.Artifact(outName)
+	if art == nil {
+		return nil, fmt.Errorf("sandbox produced no %s (stderr: %s)", outName, strings.TrimSpace(string(res.Stderr)))
+	}
+	if err := copyFile(art.Path, outPath); err != nil {
+		return nil, err
+	}
+	return res.Stdout, nil
 }
 
 // ---------------------------------------------------------------------------

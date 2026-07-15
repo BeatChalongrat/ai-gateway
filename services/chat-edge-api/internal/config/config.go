@@ -128,6 +128,24 @@ type Config struct {
 	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
 	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`
 
+	// Phase 13 Part A — hardened code-interpreter sandbox. When
+	// SANDBOX_ENABLED=1 the plan-executor (excel) + doc generators run
+	// inside a locked-down `docker run` of SANDBOX_IMAGE instead of
+	// in-process-with-secrets. Requires the chat-edge container to reach
+	// a Docker daemon (socket bind-mount) and a WORKDIR shared with the
+	// daemon's host namespace (see docker-compose). Unset → legacy
+	// in-process exec (dev without docker-in-docker).
+	SandboxEnabled     bool   `env:"SANDBOX_ENABLED" envDefault:"false"`
+	SandboxImage       string `env:"SANDBOX_IMAGE" envDefault:"ai-gateway-sandbox:latest"`
+	SandboxSeccompPath string `env:"SANDBOX_SECCOMP_PATH" envDefault:"/sandbox/seccomp.json"`
+	// SandboxWorkDir is the per-run staging root as chat-edge writes it.
+	SandboxWorkDir string `env:"SANDBOX_WORKDIR" envDefault:"/sandbox-runs"`
+	// SandboxHostWorkDir is the SAME root as the Docker daemon sees it for
+	// bind mounts (host path). Equal to SandboxWorkDir only when chat-edge
+	// shares the daemon's mount namespace; otherwise set to the host path
+	// the shared volume is bound from.
+	SandboxHostWorkDir string `env:"SANDBOX_HOST_WORKDIR" envDefault:""`
+
 	// Phase B — the gateway image model the generate_image tool calls.
 	// gpt-image-1 is OpenAI's current image model (DALL-E is retiring).
 	ImageGenModel string `env:"IMAGE_GEN_MODEL" envDefault:"gpt-image-1"`

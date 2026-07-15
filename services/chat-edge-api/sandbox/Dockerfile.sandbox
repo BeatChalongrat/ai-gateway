@@ -1,0 +1,40 @@
+# Phase 13 Part A — hardened code-interpreter sandbox image.
+#
+# This image runs model-INFLUENCED code (plan-exec today, free-form
+# run_python in Part B). It holds NO secrets and is NEVER given the
+# chat-edge env. Isolation is enforced at `docker run` time by the Go
+# caller (internal/sandbox): --network none, --user, --cap-drop ALL,
+# --security-opt no-new-privileges, --security-opt seccomp=…,
+# --read-only rootfs, tmpfs scratch, and memory/pids/cpu/ulimit caps.
+# The image itself only needs: a python runtime, the compute+office
+# libs the workloads use, the plan-exec scripts, and the runner.
+#
+# Build (context = services/chat-edge-api):
+#   docker build -f sandbox/Dockerfile.sandbox -t ai-gateway-sandbox:latest .
+FROM python:3.12-slim AS base
+
+# Office/data libs. openpyxl/python-docx/reportlab/pypdf/python-pptx/
+# pdfplumber+lxml back the existing plan-exec scripts; numpy/pandas/
+# matplotlib are the compute stack Part B's run_python needs. Pinned
+# loosely; the sandbox is disposable so a wheel refresh is harmless.
+RUN pip install --no-cache-dir \
+        openpyxl python-docx reportlab pypdf python-pptx pdfplumber lxml \
+        numpy pandas matplotlib \
+    && find /usr/local/lib/python3.12 -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && rm -rf /root/.cache
+
+# Bake the plan-exec scripts (excel_executor.py, docx/pdf/pptx_generator.py,
+# inspectors, validators, fonts) and the runner into the image. They are
+# owned by root and world-readable but NOT writable by the runtime user
+# (which is nobody via --user 65534) — combined with --read-only rootfs
+# the scripts cannot be mutated between runs.
+WORKDIR /sandbox
+COPY scripts/ /sandbox/scripts/
+COPY sandbox/runner/sandbox_runner.py /sandbox/sandbox_runner.py
+
+# Drop privileges by default too (belt-and-braces; the Go caller also
+# passes --user 65534:65534). matplotlib/openpyxl write only to the
+# tmpfs HOME the runner points at, never into the image.
+USER 65534:65534
+
+ENTRYPOINT ["python3", "/sandbox/sandbox_runner.py"]
