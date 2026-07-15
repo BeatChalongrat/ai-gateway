@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using Markdig;
+using Markdig.Extensions.Mathematics;
 using Markdig.Extensions.Tables;
 using Markdig.Extensions.TaskLists;
 using Markdig.Syntax;
@@ -25,11 +26,19 @@ public sealed class MarkdownRenderer
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
+        // Math ($...$/$$...$$ → MathInline/MathBlock) ships inside
+        // UseAdvancedExtensions; the explicit call is idempotent and pins the
+        // dependency in case a future Markdig slims the advanced set.
+        .UseMathematics()
         .Build();
 
     // Match web's JetBrains Mono vibe with fonts that ship on Windows.
     private static readonly FontFamily MonoFont =
         new("Cascadia Code, Cascadia Mono, JetBrains Mono, Consolas, Courier New");
+
+    // Inline math + streamed math source: serif italic reads as math without
+    // Cambria Math's oversized line metrics.
+    private static readonly FontFamily MathFont = new("Cambria, Georgia, Segoe UI");
 
     private static readonly Geometry CopyGeometry = Geometry.Parse(
         "M20 8H10a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2Z " +
@@ -81,7 +90,10 @@ public sealed class MarkdownRenderer
     internal FrameworkElement? RenderBlock(Block block, bool streaming = false) => block switch
     {
         HeadingBlock heading => RenderHeading(heading),
-        ParagraphBlock paragraph => RenderParagraph(paragraph),
+        ParagraphBlock paragraph => RenderParagraph(paragraph, streaming),
+        // MathBlock DERIVES from FencedCodeBlock — it must match first or
+        // $$…$$ silently renders as a code block again.
+        MathBlock math => RenderMathBlock(math, streaming),
         FencedCodeBlock code => RenderCodeBlock(code.Lines.ToString(), (code.Info ?? "").Trim(), streaming),
         CodeBlock code => RenderCodeBlock(code.Lines.ToString(), "", streaming),
         ListBlock list => RenderList(list, streaming),
@@ -109,12 +121,49 @@ public sealed class MarkdownRenderer
         return text;
     }
 
-    private TextBlock RenderParagraph(ParagraphBlock paragraph)
+    private FrameworkElement RenderParagraph(ParagraphBlock paragraph, bool streaming = false)
     {
+        // A paragraph that IS a single $$…$$ (the one-line display form
+        // models usually emit) upgrades to the display-math surface. Not
+        // while streaming — mid-stream it stays styled text, exactly like
+        // RenderMathBlock (see MathGuard.ShouldRenderKatex for why).
+        if (!streaming && MathGuard.AsDisplayMath(paragraph) is { } display)
+            return RenderKatexBlock(display.Content.ToString());
+
         var text = NewTextBlock();
         text.Margin = new Thickness(0, 0, 0, 16);
         if (paragraph.Inline is not null)
             AddInlines(text.Inlines, paragraph.Inline);
+        return text;
+    }
+
+    /// <summary>$$…$$ display block. A complete block in a FINISHED message
+    /// renders through the bundled KaTeX in a sandboxed WebView2
+    /// (<see cref="MathBlockControl"/>). While streaming — or while the
+    /// closing $$ hasn't arrived — the TeX shows as styled plain text
+    /// instead: the progressive renderer re-builds the trailing block every
+    /// tick, and browser instances there would churn and flash half-typed
+    /// math. The authoritative post-stream render swaps in KaTeX once.</summary>
+    private FrameworkElement RenderMathBlock(MathBlock math, bool streaming)
+    {
+        var tex = math.Lines.ToString();
+        return MathGuard.ShouldRenderKatex(math, streaming)
+            ? RenderKatexBlock(tex)
+            : RenderMathSourceText(tex);
+    }
+
+    private static FrameworkElement RenderKatexBlock(string tex) =>
+        new MathBlockControl(tex) { Margin = new Thickness(0, 8, 0, 16) };
+
+    /// <summary>Streamed / unterminated math: readable styled text, never a
+    /// half-typed KaTeX render.</summary>
+    private static TextBlock RenderMathSourceText(string tex)
+    {
+        var text = NewTextBlock();
+        text.Margin = new Thickness(0, 8, 0, 16);
+        text.FontFamily = MathFont;
+        text.FontStyle = FontStyles.Italic;
+        text.Text = MathTex.ToInlineText(tex);
         return text;
     }
 
@@ -462,6 +511,16 @@ public sealed class MarkdownRenderer
                     };
                     codeRun.SetResourceReference(TextElement.BackgroundProperty, "BgSecondaryBrush");
                     target.Add(codeRun);
+                    break;
+
+                case MathInline math:
+                    // Inline math is a styled Run, never a WebView2 — a
+                    // message can carry dozens of $x$ formulas (see MathTex).
+                    target.Add(new Run(MathTex.ToInlineText(math.Content.ToString()))
+                    {
+                        FontFamily = MathFont,
+                        FontStyle = FontStyles.Italic
+                    });
                     break;
 
                 case LinkInline { IsImage: true } image:

@@ -36,6 +36,7 @@ Makefile text eol=lf
 
 # --- Binaries: git must never touch bytes (placed after *.js so *.min.js wins)
 *.min.js binary
+*.min.css binary
 *.png binary
 *.jpg binary
 *.jpeg binary
