@@ -196,6 +196,18 @@ class Settings(BaseSettings):
     cohere_api_key: str = ""
     perplexity_api_key: str = ""
 
+    # Utility OpenAI endpoints proxied by the gateway so chat-edge never
+    # calls OpenAI directly (FIX 2 — closes the embeddings/voice DLP
+    # bypass). All three run BEHIND the DLP raw-egress gate
+    # (app.services.dlp.egress_policy). ``openai_utility_base_url`` is
+    # OpenAI-compatible (override for Azure OpenAI / self-hosted). Empty
+    # ``openai_api_key`` disables these routes (503), same as the old
+    # chat-edge behaviour.
+    openai_utility_base_url: str = "https://api.openai.com/v1"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_whisper_model: str = "whisper-1"
+    openai_tts_model: str = "tts-1"
+
     # Usage-display credit conversion (USAGE_CREDITS_PER_USD env).
     # The portal's per-model usage breakdown converts each model's real
     # logged cost (request_logs.estimated_cost_usd) into display

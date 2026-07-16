@@ -42,14 +42,23 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import SearchQueryBlockedError
+from app.core.exceptions import RawEgressBlockedError, SearchQueryBlockedError
 
 logger = structlog.get_logger(__name__)
 
 # The ONLY channels allowed to send raw (unmasked) user content to a
 # third party. Referenced by the egress scans below AND by the CI gate
 # in tests/test_dlp_egress_invariant.py — edit both deliberately.
-RAW_EGRESS_ALLOWED: frozenset[str] = frozenset({"web_search", "media_gen"})
+#
+# FIX 2 added ``embeddings`` (KB indexing + RAG query text) and ``voice``
+# (TTS input text + STT audio): the gateway now fronts these so chat-edge
+# stops calling OpenAI directly, and they run behind the same
+# credential-block + per-tenant-PII + audit gate as search/media. Like a
+# masked query, a masked embedding of "<PERSON_1>" or masked audio is
+# useless — so these channels send raw, but never the credential class.
+RAW_EGRESS_ALLOWED: frozenset[str] = frozenset(
+    {"web_search", "media_gen", "embeddings", "voice"}
+)
 
 # Marker written into request_logs.policy_action / dlp_input_action for
 # an allowed raw egress that carried identity PII.
@@ -73,28 +82,27 @@ def _category_counts(detection: Any) -> dict[str, int]:
     return dict(Counter(m.category for m in getattr(detection, "matches", [])))
 
 
-async def audit_raw_egress(
+async def _persist_raw_egress_audit(
     db: AsyncSession,
     *,
     channel: str,
     tenant_id: str,
     project_id: str,
     user_id: str | None,
-    detection: Any,
+    counts: dict[str, int],
 ) -> None:
-    """Best-effort audit row for an ALLOWED raw egress carrying identity PII.
+    """Write one best-effort audit row for an ALLOWED raw egress.
 
     Reuses the request-log mechanism DLP block events already use (the
     image route persists BLOCKED RequestRecords the same way). The row
     carries the channel, category names + counts, and the
-    ``raw_egress_allow`` marker — no query/prompt text, no matched
-    values. Failure to audit never fails the request.
+    ``raw_egress_allow`` marker — no query/prompt/transcript text, no
+    matched values. Failure to audit never fails the request.
     """
     try:
         from app.domain.observability import RequestRecord, RequestStatus
         from app.services.orchestrator import GatewayOrchestrator
 
-        counts = _category_counts(detection)
         record = RequestRecord(
             request_id=str(uuid.uuid4()),
             tenant_id=tenant_id,
@@ -121,6 +129,212 @@ async def audit_raw_egress(
         )
     except Exception as exc:  # noqa: BLE001 — audit must never fail the request
         logger.warning("raw_egress_audit_failed", channel=channel, error=str(exc))
+
+
+async def audit_raw_egress(
+    db: AsyncSession,
+    *,
+    channel: str,
+    tenant_id: str,
+    project_id: str,
+    user_id: str | None,
+    detection: Any,
+) -> None:
+    """Best-effort audit row for an ALLOWED raw egress carrying identity PII.
+
+    Thin wrapper over :func:`_persist_raw_egress_audit` that derives the
+    category counts from a DLP detection result. Used by every text-based
+    raw-egress scan (search, embeddings, voice-TTS). Never fails the request.
+    """
+    await _persist_raw_egress_audit(
+        db,
+        channel=channel,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        user_id=user_id,
+        counts=_category_counts(detection),
+    )
+
+
+async def _scan_raw_egress_text(
+    text: str,
+    db: AsyncSession,
+    tenant: Any,
+    *,
+    channel: str,
+    policy_attr: str,
+    project_id: str = "",
+    user_id: str | None = None,
+) -> None:
+    """Shared credential-block + per-tenant-PII + audit gate for a raw-egress
+    TEXT channel. Channel-parameterised twin of :func:`scan_search_query`
+    (which predates this and is kept verbatim for stability).
+
+    The text is deliberately NOT masked — the feature needs the real content
+    (a masked embedding / masked TTS input is meaningless). Instead:
+
+    * credential/secret(/financial) detections → ``RawEgressBlockedError``
+      (403), via the ``media_gen`` profile whose explicit ALLOW on the
+      identity classes beats the CRITICAL severity threshold;
+    * identity PII passes through RAW under the default tenant policy, with
+      an audit row recording that it did;
+    * tenant ``<policy_attr> = "block"`` fails closed on ANY identity PII.
+
+    No-op when DLP is disabled or the text is empty.
+    """
+    if not settings.dlp_enabled:
+        return
+    assert_egress_allowed(channel)
+
+    text = (text or "").strip()
+    if not text:
+        return
+
+    from app.services.orchestrator import GatewayOrchestrator
+    from app.services.policy.profile_service import get_runtime_profile_async
+
+    orch = GatewayOrchestrator()
+    profile = await get_runtime_profile_async(db, "media_gen")
+    # A tenant on the "block" policy promises fail-closed on ANY identity
+    # PII — names are NER-only findings, so the block path must scan with
+    # NER enabled or a bare name produces zero detections and slips
+    # through. The default "allow" path keeps the cheap regex-only scan
+    # (only the credential class matters there). Mirrors scan_search_query.
+    policy_blocks = (
+        str(getattr(tenant, policy_attr, "allow") or "allow") == "block"
+    )
+    detection = await orch._scan_text_as_result_async(
+        text, direction="input", ner_enabled=policy_blocks
+    )
+    enforcement = orch._scan_and_evaluate(detection, profile)
+
+    if enforcement.is_blocked:
+        raise RawEgressBlockedError(
+            "Content contains credential/secret material and was not sent.",
+            details={
+                "channel": channel,
+                "categories": sorted(
+                    {ma.match.category for ma in enforcement.match_actions}
+                ),
+            },
+        )
+
+    if not enforcement.match_actions:
+        return  # clean text — nothing to police or audit
+
+    # Identity-class findings only from here on (blocked classes raised).
+    tenant_id = str(getattr(tenant, "tenant_id", "") or "")
+    if policy_blocks:
+        raise RawEgressBlockedError(
+            "Content contains personal data and this tenant's policy blocks "
+            "unmasked egress on this channel.",
+            details={"channel": channel, "policy": "block"},
+        )
+
+    await audit_raw_egress(
+        db,
+        channel=channel,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        user_id=user_id,
+        detection=detection,
+    )
+
+
+async def scan_embedding_text(
+    text: str,
+    db: AsyncSession,
+    tenant: Any,
+    *,
+    project_id: str = "",
+    user_id: str | None = None,
+) -> None:
+    """DLP egress gate for the embeddings channel (FIX 2).
+
+    Covers both raw-egress embedding paths: KB **document chunks** on index
+    and the **RAG query** text on search. Credential/secret → 403; identity
+    PII passes raw (audited) unless the tenant's ``kb_pii_egress`` is
+    ``block``. No-op when DLP is disabled.
+    """
+    await _scan_raw_egress_text(
+        text,
+        db,
+        tenant,
+        channel="embeddings",
+        policy_attr="kb_pii_egress",
+        project_id=project_id,
+        user_id=user_id,
+    )
+
+
+async def scan_voice_text(
+    text: str,
+    db: AsyncSession,
+    tenant: Any,
+    *,
+    project_id: str = "",
+    user_id: str | None = None,
+) -> None:
+    """DLP egress gate for voice TTS input text (FIX 2).
+
+    The text-to-speak may carry PII/secrets. Credential/secret → 403;
+    identity PII passes raw (audited) unless ``voice_pii_egress`` is
+    ``block``. No-op when DLP is disabled.
+    """
+    await _scan_raw_egress_text(
+        text,
+        db,
+        tenant,
+        channel="voice",
+        policy_attr="voice_pii_egress",
+        project_id=project_id,
+        user_id=user_id,
+    )
+
+
+async def assert_stt_egress_allowed(
+    db: AsyncSession,
+    tenant: Any,
+    *,
+    project_id: str = "",
+    user_id: str | None = None,
+) -> None:
+    """DLP egress gate for voice speech-to-text — the RAW AUDIO path (FIX 2).
+
+    Audio cannot be secret/PII-scanned before transcription (there is no
+    text to scan yet — a documented limitation), so this gate is coarser
+    than the text channels:
+
+    * tenant ``voice_pii_egress = "block"`` → refuse STT outright (fail
+      closed: a strict tenant cannot guarantee the audio is PII-free);
+    * otherwise the raw-audio egress is audit-flagged (channel ``voice``,
+      category marker ``audio`` — no content, no transcript) so a
+      compliance view can see that unscannable audio left.
+
+    The credential class cannot be enforced on opaque audio here; it IS
+    enforced downstream — the transcript re-enters the MASKED chat
+    completion pipeline. No-op when DLP is disabled.
+    """
+    if not settings.dlp_enabled:
+        return
+    assert_egress_allowed("voice")
+    policy_blocks = (
+        str(getattr(tenant, "voice_pii_egress", "allow") or "allow") == "block"
+    )
+    if policy_blocks:
+        raise RawEgressBlockedError(
+            "This tenant's policy blocks unmasked voice egress and speech "
+            "audio cannot be scanned before transcription.",
+            details={"channel": "voice", "policy": "block", "reason": "stt_audio"},
+        )
+    await _persist_raw_egress_audit(
+        db,
+        channel="voice",
+        tenant_id=str(getattr(tenant, "tenant_id", "") or ""),
+        project_id=project_id,
+        user_id=user_id,
+        counts={"audio": 1},
+    )
 
 
 async def scan_search_query(

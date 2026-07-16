@@ -200,10 +200,14 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, tenantID, kbID uui
 type UploadDocumentInput struct {
 	TenantID        uuid.UUID
 	KnowledgeBaseID uuid.UUID
-	OriginalName    string
-	ContentType     string
-	Size            int64
-	Body            multipart.File
+	// UserID is the uploading end-user (FIX 2) — forwarded to the gateway
+	// so the embedding egress is attributed/audited to them. May be Nil
+	// for system callers (indexDocument falls back to the tenant marker).
+	UserID       uuid.UUID
+	OriginalName string
+	ContentType  string
+	Size         int64
+	Body         multipart.File
 }
 
 // UploadDocument validates + persists the blob, creates the row, and
@@ -257,7 +261,7 @@ func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocument
 	// Run the indexer synchronously per Phase 3 contract. Errors are
 	// recorded on the row but we still return success — the user can
 	// see "failed" in the UI and retry via reindex.
-	if err := s.indexDocument(ctx, kb, doc); err != nil {
+	if err := s.indexDocument(ctx, kb, doc, in.UserID); err != nil {
 		slog.Warn("kb index failed", "doc_id", doc.ID.String(), "err", err)
 	}
 	// Re-fetch so the response carries post-index state.
@@ -316,7 +320,9 @@ func (s *KnowledgeService) ReindexDocument(ctx context.Context, tenantID, kbID, 
 		return nil, err
 	}
 	_ = s.repo.UpdateDocumentStatus(ctx, doc.ID, "processing", nil, 0, 0)
-	if err := s.indexDocument(ctx, kb, doc); err != nil {
+	// Reindex has no end-user context (may be admin/background); indexDocument
+	// falls back to the tenant marker for the embedding egress identity.
+	if err := s.indexDocument(ctx, kb, doc, uuid.Nil); err != nil {
 		slog.Warn("kb reindex failed", "doc_id", doc.ID.String(), "err", err)
 	}
 	return s.repo.GetDocument(ctx, tenantID, doc.ID)
@@ -332,7 +338,11 @@ func (s *KnowledgeService) ReindexDocument(ctx context.Context, tenantID, kbID, 
 // telemetry but the caller treats it as informational.
 func (s *KnowledgeService) indexDocument(
 	ctx context.Context, kb *model.KnowledgeBase, doc *model.KnowledgeDocument,
+	userID uuid.UUID,
 ) error {
+	// FIX 2 — embeddings egress through the gateway, attributed to the
+	// uploading end-user (or the tenant marker for system reindex).
+	callCtx := embeddingCallCtx(doc.TenantID, userID)
 	fail := func(msg string) error {
 		e := msg
 		_ = s.repo.UpdateDocumentStatus(ctx, doc.ID, "failed", &e, 0, 0)
@@ -366,7 +376,7 @@ func (s *KnowledgeService) indexDocument(
 		batch := chunks[i:end]
 		rows := make([]model.KnowledgeChunk, 0, len(batch))
 		for j, c := range batch {
-			emb, err := s.embedder.GenerateEmbedding(ctx, c)
+			emb, err := s.embedder.GenerateEmbedding(ctx, callCtx, c)
 			if err != nil {
 				return fail("embedding failed: " + err.Error())
 			}

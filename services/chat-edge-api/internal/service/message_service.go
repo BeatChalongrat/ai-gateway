@@ -204,7 +204,7 @@ type PreferencesReader interface {
 // user content; the returned string (possibly empty) is folded into
 // the system prompt prefix.
 type RAGReader interface {
-	BuildContext(ctx context.Context, tenantID uuid.UUID, kbID uuid.UUID, query string) string
+	BuildContext(ctx context.Context, tenantID, userID, kbID uuid.UUID, query string) string
 }
 
 // MemoryReader is the slice of MemoryService the message flow needs.
@@ -1633,7 +1633,7 @@ func (s *MessageService) fileContext(ctx context.Context, tenantID, convID uuid.
 // isn't configured, or retrieval came back empty. Errors are
 // swallowed for the same reason file_context does — never block the
 // reply because retrieval stuttered.
-func (s *MessageService) ragContext(ctx context.Context, conv *model.Conversation, query string) string {
+func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv *model.Conversation, query string) string {
 	if s.ragSvc == nil || conv == nil || conv.KnowledgeBaseID == nil {
 		return ""
 	}
@@ -1641,7 +1641,9 @@ func (s *MessageService) ragContext(ctx context.Context, conv *model.Conversatio
 	if q == "" {
 		return ""
 	}
-	return s.ragSvc.BuildContext(ctx, conv.TenantID, *conv.KnowledgeBaseID, q)
+	// FIX 2 — forward the end-user so the query-embedding egress (through
+	// the gateway) is attributed/audited to them.
+	return s.ragSvc.BuildContext(ctx, conv.TenantID, userID, *conv.KnowledgeBaseID, q)
 }
 
 // buildSystemPrefix concatenates the user's custom instructions, the
@@ -1697,7 +1699,7 @@ func (s *MessageService) buildSystemPrefixWithSources(
 	// Layer 13 inputs — built with the file/KB repos and gated exactly
 	// as before (each returns "" when its precondition isn't met).
 	if conv != nil {
-		in.RAGContext = s.ragContext(ctx, conv, ragQuery)
+		in.RAGContext = s.ragContext(ctx, userID, conv, ragQuery)
 		in.FileContext = s.fileContext(ctx, tenantID, conv.ID)
 		in.ExcelContext = s.excelContext(ctx, tenantID, conv.ID)
 		in.DocContext = s.docContext(ctx, tenantID, conv.ID)

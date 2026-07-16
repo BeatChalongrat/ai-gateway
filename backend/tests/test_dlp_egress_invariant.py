@@ -28,11 +28,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.exceptions import SearchQueryBlockedError
+from app.core.exceptions import RawEgressBlockedError, SearchQueryBlockedError
 from app.services.dlp.egress_policy import (
     RAW_EGRESS_ALLOWED,
     assert_egress_allowed,
+    assert_stt_egress_allowed,
+    scan_embedding_text,
     scan_search_query,
+    scan_voice_text,
 )
 
 APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
@@ -66,13 +69,18 @@ EGRESS_CLASSIFICATION: dict[str, str] = {
     # AI review — reviews masked-at-rest request-log snapshots and has its
     # own egress host gate (review_egress_allowed).
     "services/ai_review_provider.py": "masked",
-    # THE two intentional raw channels.
+    # THE intentional raw channels.
     "services/search/providers.py": "raw_whitelisted",
     "services/media_gen/base.py": "raw_whitelisted",
     "services/media_gen/adapters/replicate_base.py": "raw_whitelisted",
     "services/media_gen/adapters/elevenlabs_tts.py": "raw_whitelisted",
     "services/media_gen/adapters/openai_tts.py": "raw_whitelisted",
     "services/providers/openai_images_client.py": "raw_whitelisted",
+    # FIX 2 — gateway-fronted embeddings + voice (chat-edge no longer calls
+    # OpenAI directly). RAW user content by design, gated by the whitelisted
+    # embeddings / voice channels (credential-blocked + per-tenant PII + audit).
+    "services/embeddings/openai_embeddings_client.py": "raw_whitelisted",
+    "services/voice/openai_voice_client.py": "raw_whitelisted",
     # No user-authored content egresses here.
     "services/currency_service.py": "no_user_content",       # FX rates
     "services/discovery/pricing_fetcher.py": "no_user_content",
@@ -100,10 +108,14 @@ IDENTITY_FIXTURES = [PII_NAME, PII_PHONE, PII_EMAIL, PII_THAI_ID]
 # ---------------------------------------------------------------------------
 
 
-def test_raw_egress_whitelist_is_exactly_search_and_media():
+def test_raw_egress_whitelist_is_exactly_the_four_channels():
     """Adding a channel here is a CONSCIOUS product/compliance decision —
-    update RAW_EGRESS_ALLOWED, this test, and the disclosure doc together."""
-    assert RAW_EGRESS_ALLOWED == frozenset({"web_search", "media_gen"})
+    update RAW_EGRESS_ALLOWED, this test, and the disclosure doc together.
+    FIX 2 added embeddings + voice (gateway-fronted; chat-edge no longer
+    calls OpenAI directly)."""
+    assert RAW_EGRESS_ALLOWED == frozenset(
+        {"web_search", "media_gen", "embeddings", "voice"}
+    )
 
 
 def test_unlisted_channel_is_rejected_loudly():
@@ -111,9 +123,11 @@ def test_unlisted_channel_is_rejected_loudly():
     immediately (this simulates the 'fake new path' drill)."""
     with pytest.raises(RuntimeError, match="not whitelisted"):
         assert_egress_allowed("my_new_integration")
-    # The two real channels pass.
+    # The real channels pass.
     assert_egress_allowed("web_search")
     assert_egress_allowed("media_gen")
+    assert_egress_allowed("embeddings")
+    assert_egress_allowed("voice")
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +206,54 @@ SANDBOX_SECCOMP = (
     REPO_ROOT / "services" / "chat-edge-api" / "sandbox" / "seccomp.json"
 )
 
+# FIX 2 — chat-edge's embeddings + voice paths (Go). These MUST route through
+# the gateway (which runs the DLP raw-egress gate), NOT call OpenAI directly.
+CHAT_EDGE_EMBEDDING_GO = (
+    REPO_ROOT / "services" / "chat-edge-api" / "internal" / "service"
+    / "embedding_service.go"
+)
+CHAT_EDGE_VOICE_GO = (
+    REPO_ROOT / "services" / "chat-edge-api" / "internal" / "handler" / "voice.go"
+)
+CHAT_EDGE_GATEWAY_CLIENT_GO = (
+    REPO_ROOT / "services" / "chat-edge-api" / "internal" / "service"
+    / "gateway_client.go"
+)
+
+
+def test_chat_edge_embeddings_voice_route_through_gateway_not_openai():
+    """Drift guard for the FIX 2 bypass removal (Go side). chat-edge used to
+    call OpenAI embeddings/Whisper/TTS directly, bypassing DLP. It must now
+    forward to the gateway (which fronts the DLP raw-egress gate). If a future
+    edit re-adds a direct OpenAI call on these paths, this test reddens on the
+    Python side too — mirroring the sandbox pin above.
+    """
+    emb = CHAT_EDGE_EMBEDDING_GO.read_text(encoding="utf-8")
+    voice = CHAT_EDGE_VOICE_GO.read_text(encoding="utf-8")
+
+    # No direct OpenAI egress on either path.
+    for src, name in ((emb, "embedding_service.go"), (voice, "voice.go")):
+        assert "api.openai.com" not in src, (
+            f"{name} references api.openai.com — the FIX 2 bypass removal "
+            "regressed (it must route through the gateway)."
+        )
+        assert "/audio/transcriptions" not in src
+        assert "/audio/speech" not in src
+
+    # Both forward through the gateway client.
+    assert "s.gateway.GenerateEmbedding(" in emb, (
+        "embedding_service.go no longer forwards to the gateway"
+    )
+    assert "h.gw.VoiceTranscribe(" in voice and "h.gw.VoiceSynthesize(" in voice, (
+        "voice.go no longer forwards to the gateway"
+    )
+
+    # The gateway client targets the gateway's whitelisted routes.
+    gw = CHAT_EDGE_GATEWAY_CLIENT_GO.read_text(encoding="utf-8")
+    assert 'g.BaseURL+"/embeddings"' in gw
+    assert 'g.BaseURL+"/voice/transcribe"' in gw
+    assert 'g.BaseURL+"/voice/synthesize"' in gw
+
 
 def test_code_interpreter_is_not_a_raw_egress_channel():
     """The sandbox is internal (no third-party egress), so it must never be
@@ -265,6 +327,23 @@ def test_raw_call_sites_are_guarded():
     images_src = (APP_DIR / "api/routes/public_images.py").read_text(encoding="utf-8")
     assert '"media_gen"' in images_src  # media_gen profile scan
 
+    # FIX 2 — embeddings + voice routes run their egress scan BEFORE calling
+    # the OpenAI utility client (scan-then-egress ordering).
+    emb_src = (APP_DIR / "api/routes/public_embeddings.py").read_text(encoding="utf-8")
+    assert "scan_embedding_text" in emb_src
+    assert emb_src.index("scan_embedding_text(") < emb_src.index("generate_embedding(")
+
+    voice_src = (APP_DIR / "api/routes/public_voice.py").read_text(encoding="utf-8")
+    # STT: policy/audit gate before reading + forwarding audio. Anchor on the
+    # `await` call sites (the def names contain "transcribe("/"synthesize(").
+    assert "assert_stt_egress_allowed" in voice_src
+    assert voice_src.index("assert_stt_egress_allowed(") < voice_src.index(
+        "await transcribe("
+    )
+    # TTS: text scan before synthesis.
+    assert "scan_voice_text" in voice_src
+    assert voice_src.index("scan_voice_text(") < voice_src.index("await synthesize(")
+
 
 # ---------------------------------------------------------------------------
 # 3. Behavioral seed-PII checks
@@ -330,3 +409,61 @@ async def test_media_channel_blocks_secret_allows_identity(async_db):
         await scan_media_prompt_with_profile(
             f"a portrait of {fixture}", async_db
         )
+
+
+# ---------------------------------------------------------------------------
+# 3b. FIX 2 — embeddings + voice channels (same contract as search/media).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_embeddings_channel_blocks_secret_allows_identity(async_db):
+    tenant = SimpleNamespace(tenant_id="t-emb", kb_pii_egress="allow")
+
+    # A KB doc / query carrying a secret must never be embedded.
+    with pytest.raises(RawEgressBlockedError):
+        await scan_embedding_text(f"api key is {SECRET_API_KEY}", async_db, tenant)
+
+    # Identity fixtures pass (raw by design — a masked embedding is useless).
+    for fixture in IDENTITY_FIXTURES:
+        await scan_embedding_text(f"notes about {fixture}", async_db, tenant)
+
+
+@pytest.mark.asyncio
+async def test_embeddings_channel_block_policy_fails_closed(async_db):
+    # Use a regex-detectable identity fixture (email) so the block-policy
+    # assertion holds regardless of NER availability in the test env.
+    tenant = SimpleNamespace(tenant_id="t-emb-strict", kb_pii_egress="block")
+    with pytest.raises(RawEgressBlockedError):
+        await scan_embedding_text(f"email {PII_EMAIL}", async_db, tenant)
+
+
+@pytest.mark.asyncio
+async def test_voice_channel_blocks_secret_allows_identity(async_db):
+    tenant = SimpleNamespace(tenant_id="t-voice", voice_pii_egress="allow")
+
+    # A spoken/typed command carrying a secret must never reach TTS.
+    with pytest.raises(RawEgressBlockedError):
+        await scan_voice_text(f"read my key {SECRET_API_KEY}", async_db, tenant)
+
+    for fixture in IDENTITY_FIXTURES:
+        await scan_voice_text(f"say hello to {fixture}", async_db, tenant)
+
+
+@pytest.mark.asyncio
+async def test_voice_channel_block_policy_fails_closed(async_db):
+    tenant = SimpleNamespace(tenant_id="t-voice-strict", voice_pii_egress="block")
+    with pytest.raises(RawEgressBlockedError):
+        await scan_voice_text(f"call {PII_EMAIL}", async_db, tenant)
+
+
+@pytest.mark.asyncio
+async def test_stt_block_policy_refuses_unscannable_audio(async_db):
+    # STT audio can't be scanned; a "block" tenant is refused outright.
+    strict = SimpleNamespace(tenant_id="t-stt-strict", voice_pii_egress="block")
+    with pytest.raises(RawEgressBlockedError):
+        await assert_stt_egress_allowed(async_db, strict)
+
+    # An "allow" tenant is permitted (the audit row is best-effort).
+    allow = SimpleNamespace(tenant_id="t-stt-allow", voice_pii_egress="allow")
+    await assert_stt_egress_allowed(async_db, allow)

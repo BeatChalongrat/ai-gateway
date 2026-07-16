@@ -906,6 +906,12 @@ from app.api.routes.public_audio import router as public_audio_router  # noqa: E
 app.include_router(public_videos_router, prefix="/v1")  # /v1/videos/generations + /v1/jobs/{id}
 app.include_router(public_audio_router, prefix="/v1")  # /v1/audio/generations
 app.include_router(public_search_router, prefix="/v1")  # /v1/search + /v1/search/config
+# FIX 2 — gateway-fronted embeddings + voice so chat-edge stops calling OpenAI
+# directly (both run behind the DLP raw-egress gate).
+from app.api.routes.public_embeddings import router as public_embeddings_router  # noqa: E402
+from app.api.routes.public_voice import router as public_voice_router  # noqa: E402
+app.include_router(public_embeddings_router, prefix="/v1")  # /v1/embeddings
+app.include_router(public_voice_router, prefix="/v1")  # /v1/voice/{transcribe,synthesize}
 app.include_router(admin_router, prefix="/admin")
 
 # Portal (self-service) — separate JWT secret; see portal_auth.py
