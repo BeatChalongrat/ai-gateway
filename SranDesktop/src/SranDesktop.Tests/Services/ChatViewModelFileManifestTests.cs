@@ -183,6 +183,26 @@ public class ChatViewModelFileManifestTests : IDisposable
         LastSystemPrompt().Should().NotContain("## Files in this conversation");
     }
 
+    // FIX 7 — the base system prompt (never trimmed) must carry the
+    // respond-in-the-user's-language instruction (Part A, the P0) and the
+    // act-with-tools proactivity instruction (Part B).
+    [Fact]
+    public async Task System_Prompt_Includes_Language_And_Proactivity_Instructions()
+    {
+        _vm.Conversation = await SeedConversationAsync();
+        _vm.InputText = "hi";
+        await _vm.SendCommand.ExecuteAsync(null);
+
+        var prompt = LastSystemPrompt();
+        // Part A — respond in the user's language. (Single-line substrings:
+        // the prompt hard-wraps, so phrases must not span a line break.)
+        prompt.Should().Contain("SAME language the user writes in");
+        prompt.Should().Contain("Match the user's language every turn");
+        // Part B — act with tools, don't just describe.
+        prompt.Should().Contain("do NOT just describe the command");
+        prompt.Should().Contain("Acting is the default");
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
