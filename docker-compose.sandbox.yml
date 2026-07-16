@@ -39,23 +39,37 @@ services:
       # Path INSIDE the chat-edge container where the docker CLI reads the
       # seccomp profile (the CLI reads it and ships JSON to the daemon).
       SANDBOX_SECCOMP_PATH: "/sandbox/seccomp.json"
-      # Per-run staging root as chat-edge writes it.
+      # ── HOST-vs-CONTAINER PATH — READ THIS (subtle, easy to invert) ──────
+      # chat-edge is ITSELF a container, but the per-run sandbox is launched
+      # by the HOST docker daemon. So there are TWO distinct paths:
+      #
+      #   SANDBOX_WORKDIR      = the IN-CONTAINER staging root (the bind mount
+      #                          target below) where chat-edge writes per-run
+      #                          in/out dirs.
+      #   SANDBOX_HOST_WORKDIR = the SAME dir AS THE DAEMON SEES IT — i.e. the
+      #                          HOST side of the bind mount, used to build the
+      #                          `docker run -v <host>:/job/out` source.
+      #
+      # These are NOT the same value. Setting SANDBOX_HOST_WORKDIR to the
+      # in-container path ("/sandbox-runs") makes the daemon -v a path that
+      # only exists inside chat-edge → it creates an empty root-owned dir on
+      # the host, the uid-65534 sandbox can't write __meta.json → "no result
+      # sidecar" → every run_python 503s. So HOST_WORKDIR must equal the bind
+      # SOURCE (an ABSOLUTE host path the daemon can resolve).
       SANDBOX_WORKDIR: "/sandbox-runs"
-      # SAME root as the DAEMON sees it for -v bind mounts. On Docker
-      # Desktop / a single host this is the host path the named volume or
-      # bind resolves to. With a bind mount (below) both sides agree, so we
-      # point HostWorkDir at the same in-container path only when the daemon
-      # shares the mount namespace; otherwise set the host path explicitly.
-      SANDBOX_HOST_WORKDIR: "/sandbox-runs"
+      SANDBOX_HOST_WORKDIR: "${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}"
     volumes:
       # Daemon control socket (see privilege note above).
       - /var/run/docker.sock:/var/run/docker.sock
-      # Shared staging dir. MUST be a bind to a real host path so the
-      # per-run in/out dirs chat-edge writes are the SAME inodes the daemon
-      # bind-mounts into the sandbox container. A named volume would NOT
-      # work here (the daemon can't -v a path that only exists inside
-      # another container's volume).
-      - ${SANDBOX_HOST_DIR:-./data/sandbox-runs}:/sandbox-runs
+      # Shared staging dir. MUST be a bind to a real, ABSOLUTE host path so
+      # the per-run in/out dirs chat-edge writes are the SAME inodes the
+      # daemon bind-mounts into the sandbox container, AND so SANDBOX_HOST_DIR
+      # (used as the -v source above) is a path the daemon can resolve. A
+      # named volume would NOT work (the daemon can't -v a path that only
+      # exists inside another container's volume); a RELATIVE path would not
+      # resolve for `docker run -v`. ${PWD} makes the default absolute and
+      # equal to how compose resolves ./data/sandbox-runs from the repo root.
+      - ${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}:/sandbox-runs
       # Seccomp profile available to the CLI inside chat-edge (alternative
       # to baking it into the image in the Dockerfile).
       - ./services/chat-edge-api/sandbox/seccomp.json:/sandbox/seccomp.json:ro
