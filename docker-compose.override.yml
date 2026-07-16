@@ -16,6 +16,11 @@ services:
       # from backend/ can resolve the path inside the container.
       - ./docs:/docs:ro
     environment:
+      # Schema-drift guard (FIX 3): dev hot-reloads source, so code can
+      # advance past a long-lived container's schema. autoupgrade runs
+      # 'alembic upgrade head' in-process (advisory-locked) on boot so the
+      # drift self-heals instead of 500ing every request on a missing column.
+      SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-autoupgrade}
       # watchfiles polls on the Windows-to-container bridge — docker
       # inotify events don't always propagate through the Hyper-V layer.
       WATCHFILES_FORCE_POLLING: "true"

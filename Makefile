@@ -1,4 +1,4 @@
-.PHONY: up prod prod-desktop down logs seed clean clean-portal-users fresh bootstrap sandbox-up health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
+.PHONY: up prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -51,6 +51,9 @@ logs: ## Tail logs from all services
 
 seed: ## Seed tenants + projects + API keys + admin user + portal users
 	docker compose exec backend python -m scripts.seed_audit_data
+
+migrate: ## Apply pending BACKEND (gateway) Alembic migrations to the running postgres. Run this when a long-lived container outlived a new migration (schema-drift guard names the gap).
+	docker compose exec backend python -m alembic upgrade head
 
 clean: ## Stop the stack AND remove volumes (wipes DB + redis data)
 	docker compose down -v
