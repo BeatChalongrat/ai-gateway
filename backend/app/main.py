@@ -90,6 +90,15 @@ async def lifespan(app: FastAPI):
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
     asyncio.get_event_loop().set_default_executor(executor)
 
+    # Schema-drift guard (FIX 3) — BEFORE any DB-dependent startup work or
+    # serving traffic. If the DB schema is behind the code's Alembic head
+    # (the hot-reload drift that made every request 500 on a missing
+    # column), either auto-upgrade in-process (dev, advisory-locked) or
+    # refuse to start with a named, actionable error (prod). Runs in a
+    # thread — it uses the sync engine + Alembic's sync command API.
+    from app.core.schema_guard import run_schema_guard
+    await asyncio.to_thread(run_schema_guard)
+
     # Seed admin user (runs blocking bcrypt in thread)
     await asyncio.to_thread(_seed_admin_user)
 

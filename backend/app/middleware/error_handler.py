@@ -185,11 +185,60 @@ async def handle_http_exception(
     )
 
 
+# Postgres SQLSTATEs that mean "the schema is behind the code" — a pending
+# migration wasn't applied (FIX 3, Part C: defense-in-depth if the startup
+# guard is disabled/bypassed). 42703 = undefined_column, 42P01 = undefined_table.
+_SCHEMA_DRIFT_SQLSTATES = frozenset({"42703", "42P01"})
+
+
+def _is_schema_out_of_date(exc: BaseException) -> bool:
+    """Walk the exception chain (cause/context + SQLAlchemy ``.orig``) for a
+    Postgres undefined-column/table error — the signature of a stale schema."""
+    seen: set[int] = set()
+    stack: list[BaseException | None] = [exc]
+    while stack:
+        cur = stack.pop()
+        if cur is None or id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        code = getattr(cur, "sqlstate", None) or getattr(cur, "pgcode", None)
+        if code in _SCHEMA_DRIFT_SQLSTATES:
+            return True
+        stack.append(getattr(cur, "orig", None))
+        stack.append(getattr(cur, "__cause__", None))
+        stack.append(getattr(cur, "__context__", None))
+    return False
+
+
 async def handle_unhandled_exception(
     request: Request, exc: Exception
 ) -> JSONResponse:
     """Catch-all for unexpected errors.  Never leak internals."""
     request_id = _get_request_id(request)
+
+    # FIX 3, Part C — a missing column/table means a migration is pending.
+    # Surface a clear, diagnosable error instead of an opaque internal_error.
+    if _is_schema_out_of_date(exc):
+        logger.error(
+            "schema_out_of_date",
+            exc_type=type(exc).__name__,
+            request_id=request_id,
+            path=request.url.path,
+            method=request.method,
+        )
+        return JSONResponse(
+            status_code=500,
+            content=_build_body(
+                code="schema_out_of_date",
+                message=(
+                    "Database schema is out of date — a pending migration must "
+                    "be applied. Run 'alembic upgrade head' (or 'make migrate')."
+                ),
+                details=None,
+                request_id=request_id,
+            ),
+        )
+
     logger.error(
         "unhandled_exception",
         exc_type=type(exc).__name__,

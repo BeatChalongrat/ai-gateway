@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     app_name: str = "secure-ai-gateway"
     app_env: str = "development"
     app_port: int = 8080
+    # Startup schema-drift guard (FIX 3). Empty = auto by env
+    # (development → "autoupgrade", otherwise → "failclosed"). Explicit
+    # values: "autoupgrade" | "failclosed" | "warn" | "off". See
+    # app/core/schema_guard.py + .env.example.
+    schema_drift_mode: str = ""
     log_level: str = "INFO"
     # 3000 = admin-ui, 3001 = portal, 3002 = web-chat, 5173 = legacy vite.
     # allow_credentials=True (main.py) requires explicit origins — "*" is
@@ -633,6 +638,23 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def schema_drift_mode_effective(self) -> str:
+        """Resolve the startup schema-drift behaviour (FIX 3).
+
+        An explicit ``SCHEMA_DRIFT_MODE`` wins; otherwise default by env —
+        dev/test auto-upgrade the hot-reloaded schema in-process, prod fails
+        closed so a stale-schema deploy refuses to boot instead of 500ing.
+        An unrecognised explicit value falls back to the safe ``failclosed``.
+        """
+        explicit = (self.schema_drift_mode or "").strip().lower()
+        if explicit in {"autoupgrade", "failclosed", "warn", "off"}:
+            return explicit
+        if explicit:
+            # Set but unrecognised — be safe, don't silently disable the guard.
+            return "failclosed"
+        return "autoupgrade" if self.app_env.lower() in _DEV_ENVS else "failclosed"
 
     @property
     def cookie_secure_effective(self) -> bool:

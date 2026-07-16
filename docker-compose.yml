@@ -391,6 +391,11 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       APP_ENV: ${APP_ENV:-development}
+      # Schema-drift guard (FIX 3). Base stack defaults to failclosed: the
+      # Dockerfile CMD migrates before gunicorn, so a stale schema at boot
+      # means the migrate step was bypassed — refuse to start (named error)
+      # rather than serve 500s. The dev override flips this to autoupgrade.
+      SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-failclosed}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
