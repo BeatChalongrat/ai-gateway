@@ -17,6 +17,7 @@ public partial class MainViewModel : ObservableObject
     private readonly ITaskSchedulerService _scheduler;
     private readonly IMcpConnectorService _connectors;
     private readonly IUpdateService _updates;
+    private readonly IDialogService _dialogs;
     private readonly ILogger<MainViewModel> _logger;
     private DateTimeOffset _usageFetchedAt = DateTimeOffset.MinValue;
 
@@ -117,6 +118,7 @@ public partial class MainViewModel : ObservableObject
         LoginViewModel loginViewModel,
         ConversationListViewModel conversationListViewModel,
         ChatViewModel chatViewModel,
+        IDialogService dialogs,
         ILogger<MainViewModel> logger)
     {
         _authService = authService;
@@ -126,6 +128,7 @@ public partial class MainViewModel : ObservableObject
         _scheduler = scheduler;
         _connectors = connectors;
         _updates = updates;
+        _dialogs = dialogs;
         _logger = logger;
         _isDarkTheme = !string.Equals(settings.Current.Theme, "Light", StringComparison.OrdinalIgnoreCase);
         Login = loginViewModel;
@@ -307,7 +310,7 @@ public partial class MainViewModel : ObservableObject
         if (project is null)
             return;
 
-        var detail = new ProjectDetailViewModel(_projects, project, _logger);
+        var detail = new ProjectDetailViewModel(_projects, project, _logger, _dialogs);
         detail.StartChatRequested = async p =>
         {
             await Conversations.CreateNewConversationAsync();

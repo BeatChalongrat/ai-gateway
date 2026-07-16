@@ -23,13 +23,19 @@ public partial class ScheduledTasksViewModel : ObservableObject
 
     public bool IsListEmpty => HasLoaded && Tasks.Count == 0;
 
+    private readonly IDialogService _dialogs;
+
+    /// <summary>Themed confirm/error dialogs (Phase C.5), shared with item VMs.</summary>
+    internal IDialogService Dialogs => _dialogs;
+
     public ScheduledTasksViewModel(
         IScheduledTaskStore store, ITaskSchedulerService scheduler,
-        ILogger<ScheduledTasksViewModel> logger)
+        ILogger<ScheduledTasksViewModel> logger, IDialogService dialogs)
     {
         _store = store;
         _scheduler = scheduler;
         _logger = logger;
+        _dialogs = dialogs;
     }
 
     [RelayCommand]
@@ -165,11 +171,9 @@ public partial class ScheduledTaskItemViewModel : ObservableObject
     [RelayCommand]
     private async Task DeleteAsync()
     {
-        var confirmed = System.Windows.MessageBox.Show(
-            LocaleService.Instance.T("task.deleteConfirm", Name),
+        var confirmed = await _parent.Dialogs.ConfirmAsync(
             LocaleService.Instance.T("task.title"),
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            LocaleService.Instance.T("task.deleteConfirm", Name));
         if (!confirmed)
             return;
 

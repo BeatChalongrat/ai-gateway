@@ -98,9 +98,8 @@ public partial class InlineAttachmentViewModel : ObservableObject
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                System.Windows.MessageBox.Show(ex.Message,
-                    LocaleService.Instance.T("common.save"),
-                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                Application.Services.ToastService.Instance.Show(
+                    Application.Interfaces.ToastKind.Error, "dialog.error", ex.Message);
             }
         }
     }

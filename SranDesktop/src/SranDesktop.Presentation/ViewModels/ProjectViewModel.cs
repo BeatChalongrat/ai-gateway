@@ -29,11 +29,14 @@ public partial class ProjectDetailViewModel : ObservableObject
     /// <summary>MainViewModel hooks this to refresh the sidebar after delete.</summary>
     public event EventHandler? ProjectDeleted;
 
-    public ProjectDetailViewModel(IProjectStore store, Project project, ILogger logger)
+    private readonly IDialogService _dialogs;
+
+    public ProjectDetailViewModel(IProjectStore store, Project project, ILogger logger, IDialogService dialogs)
     {
         _store = store;
         Project = project;
         _logger = logger;
+        _dialogs = dialogs;
         _name = project.Name;
         _instructions = project.Instructions ?? "";
         foreach (var file in project.Files)
@@ -94,11 +97,9 @@ public partial class ProjectDetailViewModel : ObservableObject
     [RelayCommand]
     private async Task DeleteAsync()
     {
-        var confirmed = System.Windows.MessageBox.Show(
-            LocaleService.Instance.T("project.deleteConfirm", Name),
+        var confirmed = await _dialogs.ConfirmAsync(
             LocaleService.Instance.T("project.delete"),
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            LocaleService.Instance.T("project.deleteConfirm", Name));
         if (!confirmed)
             return;
 

@@ -27,7 +27,7 @@ public class SearchHitPullTests
         _settings.SetupGet(s => s.Current).Returns(new UserSettings());
         return new ConversationListViewModel(
             _api.Object, _store.Object, _sync.Object, _agentSync.Object,
-            _settings.Object, NullLogger<ConversationListViewModel>.Instance);
+            _settings.Object, Mock.Of<IDialogService>(), NullLogger<ConversationListViewModel>.Instance);
     }
 
     private static ConversationDto Dto(string id) => new(

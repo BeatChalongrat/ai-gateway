@@ -57,6 +57,10 @@ public static class AppHostBuilder
                 // Toasts (Phase 8): one app-wide queue; the same instance backs
                 // the static ToastService.Instance used by UI code-behind.
                 services.AddSingleton<IToastService>(ToastService.Instance);
+                // Themed confirm/error dialogs (Phase C.5) — VMs depend on the
+                // interface, not System.Windows.MessageBox.
+                services.AddSingleton<IDialogService,
+                    SranDesktop.Presentation.Services.WpfDialogService>();
 
                 // Storage + auth session
                 services.AddSingleton<ICredentialStore, DpapiCredentialStore>();

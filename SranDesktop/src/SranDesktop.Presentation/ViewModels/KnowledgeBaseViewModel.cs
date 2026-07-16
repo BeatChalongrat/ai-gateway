@@ -41,10 +41,16 @@ public partial class KnowledgeBaseViewModel : ObservableObject
     [ObservableProperty]
     private string _newDescription = string.Empty;
 
-    public KnowledgeBaseViewModel(IChatEdgeApiClient api, ILogger<KnowledgeBaseViewModel> logger)
+    private readonly IDialogService _dialogs;
+
+    /// <summary>Themed confirm/error dialogs (Phase C.5), shared with item VMs.</summary>
+    internal IDialogService Dialogs => _dialogs;
+
+    public KnowledgeBaseViewModel(IChatEdgeApiClient api, ILogger<KnowledgeBaseViewModel> logger, IDialogService dialogs)
     {
         _api = api;
         _logger = logger;
+        _dialogs = dialogs;
     }
 
     [RelayCommand]
@@ -112,6 +118,10 @@ public partial class KnowledgeBaseItemViewModel : ObservableObject
     private readonly KnowledgeBaseViewModel _parent;
     private readonly IChatEdgeApiClient _api;
     private readonly ILogger _logger;
+
+    /// <summary>Themed dialogs (Phase C.5), forwarded from the list VM to the
+    /// document child VMs.</summary>
+    internal IDialogService Dialogs => _parent.Dialogs;
 
     public string Id { get; }
 
@@ -196,11 +206,9 @@ public partial class KnowledgeBaseItemViewModel : ObservableObject
     [RelayCommand]
     private async Task DeleteAsync()
     {
-        var confirmed = System.Windows.MessageBox.Show(
-            LocaleService.Instance.T("kb.deleteConfirm", Name),
+        var confirmed = await _parent.Dialogs.ConfirmAsync(
             LocaleService.Instance.T("kb.title"),
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            LocaleService.Instance.T("kb.deleteConfirm", Name));
         if (!confirmed)
             return;
 
@@ -242,9 +250,7 @@ public partial class KnowledgeBaseItemViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
         {
             _logger.LogWarning(ex, "KB upload failed for {Id}", Id);
-            System.Windows.MessageBox.Show(ex.Message,
-                LocaleService.Instance.T("kb.uploadDocument"),
-                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            _parent.Dialogs.NotifyError(ex.Message);
         }
         finally
         {
@@ -340,11 +346,9 @@ public partial class KbDocumentViewModel : ObservableObject
     [RelayCommand]
     private async Task DeleteAsync()
     {
-        var confirmed = System.Windows.MessageBox.Show(
-            LocaleService.Instance.T("kb.deleteDocConfirm", Filename),
+        var confirmed = await _parent.Dialogs.ConfirmAsync(
             LocaleService.Instance.T("kb.title"),
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            LocaleService.Instance.T("kb.deleteDocConfirm", Filename));
         if (!confirmed)
             return;
 

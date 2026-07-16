@@ -22,6 +22,7 @@ public partial class ConversationListViewModel : ObservableObject
     private readonly IConversationSyncService _syncService;
     private readonly IAgentConversationSyncService _agentSync;
     private readonly ISettingsService _settings;
+    private readonly IDialogService _dialogs;
     private readonly ILogger<ConversationListViewModel> _logger;
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = new();
@@ -66,6 +67,7 @@ public partial class ConversationListViewModel : ObservableObject
         IConversationSyncService syncService,
         IAgentConversationSyncService agentSync,
         ISettingsService settings,
+        IDialogService dialogs,
         ILogger<ConversationListViewModel> logger)
     {
         _api = api;
@@ -73,6 +75,7 @@ public partial class ConversationListViewModel : ObservableObject
         _syncService = syncService;
         _agentSync = agentSync;
         _settings = settings;
+        _dialogs = dialogs;
         _logger = logger;
         DefaultModelId = settings.Current.DefaultModel;
         settings.SettingsChanged += (_, _) => DefaultModelId = settings.Current.DefaultModel;
@@ -478,12 +481,10 @@ public partial class ConversationListViewModel : ObservableObject
         if (folder is null)
             return;
 
-        var confirm = System.Windows.MessageBox.Show(
-            $"Delete folder \"{folder.Name}\"? Chats inside move back to the main list.",
-            "Delete folder",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning);
-        if (confirm != System.Windows.MessageBoxResult.Yes)
+        var confirmed = await _dialogs.ConfirmAsync(
+            Localization.LocaleService.Instance.T("confirm.deleteFolderTitle"),
+            Localization.LocaleService.Instance.T("confirm.deleteFolder", folder.Name));
+        if (!confirmed)
             return;
 
         try
@@ -749,20 +750,15 @@ public partial class ConversationListViewModel : ObservableObject
 
         if (candidates.Count == 0)
         {
-            System.Windows.MessageBox.Show(
-                "No empty conversations to clean up.",
-                "Clean up empty chats",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Information);
+            Application.Services.ToastService.Instance.Show(
+                Application.Interfaces.ToastKind.Info, "cleanup.noneFound");
             return;
         }
 
-        var confirm = System.Windows.MessageBox.Show(
-            $"Delete {candidates.Count} empty conversation(s)? This cannot be undone.",
-            "Clean up empty chats",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning);
-        if (confirm != System.Windows.MessageBoxResult.Yes)
+        var confirmed = await _dialogs.ConfirmAsync(
+            Localization.LocaleService.Instance.T("confirm.deleteEmptyTitle"),
+            Localization.LocaleService.Instance.T("confirm.deleteEmpty", candidates.Count));
+        if (!confirmed)
             return;
 
         var removed = 0;
@@ -818,12 +814,10 @@ public partial class ConversationListViewModel : ObservableObject
     {
         if (item is null) return;
 
-        var confirm = System.Windows.MessageBox.Show(
-            $"Delete \"{item.DisplayTitle}\"? This cannot be undone.",
-            "Delete chat",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning);
-        if (confirm != System.Windows.MessageBoxResult.Yes)
+        var confirmed = await _dialogs.ConfirmAsync(
+            Localization.LocaleService.Instance.T("confirm.deleteChatTitle"),
+            Localization.LocaleService.Instance.T("confirm.deleteChat", item.DisplayTitle));
+        if (!confirmed)
             return;
 
         try
