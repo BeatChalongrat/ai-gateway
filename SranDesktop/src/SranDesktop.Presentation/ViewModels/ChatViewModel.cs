@@ -1484,6 +1484,12 @@ public partial class ChatViewModel : ObservableObject
         // masked pipeline (DLP unchanged), and PathGuard still governs access.
         await AppendFileManifestAsync(sb);
 
+        // Cross-session agent memory (Phase B PART 3): durable notes the model
+        // saved earlier ("builds with dotnet build src/X.sln", discovered paths).
+        // Rides the never-trimmed prologue, size-bounded like the manifest, and
+        // is conversation-scoped — never global, so notes can't leak across chats.
+        await AppendNotesAsync(sb);
+
         // Skills (R9 H3 fast-path + Phase 6 Task 2 model-driven catalog).
         // Trigger-matched skills are inlined in full (cheap, high-precision);
         // every enabled skill also appears in a compact catalog so the model
@@ -1609,6 +1615,26 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Could not build file manifest for {Id}", conversationId);
+        }
+    }
+
+    /// <summary>Appends the `## Notes` block (Phase B PART 3) from the durable,
+    /// conversation-scoped agent notes. Size-bounded by the formatter; a store
+    /// hiccup just omits the block, never throws.</summary>
+    private async Task AppendNotesAsync(System.Text.StringBuilder sb)
+    {
+        if (Conversation?.Id is not { } conversationId)
+            return;
+        try
+        {
+            var notes = await _store.GetNotesAsync(conversationId);
+            var block = Application.Services.AgentNotesFormatter.BuildBlock(notes);
+            if (block is not null)
+                sb.Append(block);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not build notes block for {Id}", conversationId);
         }
     }
 
@@ -1888,6 +1914,7 @@ public partial class ChatViewModel : ObservableObject
         "computer_drag" => "Dragging...",
         "open_application" => "Opening an application...",
         "update_plan" => "Updating the plan...",
+        "remember" => Localization.LocaleService.Instance.T("tool.remembering"),
         "read_file" => "Reading a file...",
         "write_file" => "Writing a file...",
         "edit_file" => "Editing a file...",
@@ -1951,6 +1978,12 @@ public partial class ChatViewModel : ObservableObject
             - For knowledge questions, conversation, or creative writing — just respond directly, no tools needed.
             - For tasks involving files, the screen, running commands, or interacting with applications — use the appropriate tools.
             - You decide autonomously. Never ask "should I use tools?" — just use them when needed.
+
+            ## Remembering across sessions
+            - When you discover a durable fact worth keeping — the build/test command, where a key file
+              lives, a user preference — call remember with a one-sentence note. Saved notes are scoped
+              to this conversation and reappear in later turns and after a restart, so you don't
+              re-discover them. Don't note transient details or anything the user didn't share.
 
             ## Planning multi-step work
             - For a task with several steps (edit → build → fix, multi-file changes, research + apply),

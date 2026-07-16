@@ -147,6 +147,11 @@ public static class AppHostBuilder
                     // Phase A PART 5: model-maintained plan / todo (side-effect
                     // free → AllowAlways; renders as a live checklist).
                     registry.Register(new UpdatePlanTool());
+                    // Phase B PART 3: cross-session agent memory notes (durable,
+                    // conversation-scoped; reads the ambient conversation id).
+                    registry.Register(new RememberTool(
+                        sp.GetRequiredService<IConversationStore>(),
+                        sp.GetRequiredService<ShellSession>()));
                     // Web search proxies to the gateway's /v1/search (R9 C);
                     // only listed while the composer toggle is on.
                     registry.Register(new WebSearchTool(
