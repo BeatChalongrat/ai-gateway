@@ -118,13 +118,44 @@ public partial class ToastHost : UserControl
     /// snaps instantly when the OS reduced-motion setting is on.</summary>
     private void Card_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not Border card || card.RenderTransform is not TranslateTransform translate)
-            return;
+        if (sender is Border card)
+            RunEntranceAnimation(card);
+    }
+
+    /// <summary>A toast is cosmetic — this must never throw. The template's
+    /// transform can be a frozen shared Freezable (see
+    /// <see cref="PrepareEntranceTransform"/>); if anything still can't be
+    /// animated, the card snaps to rest instead of crashing the app.</summary>
+    internal static void RunEntranceAnimation(Border card)
+    {
         var duration = MotionSettings.Toast;
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        card.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(0, 1, duration) { EasingFunction = ease });
-        translate.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(10, 0, duration) { EasingFunction = ease });
+        try
+        {
+            card.BeginAnimation(UIElement.OpacityProperty,
+                new DoubleAnimation(0, 1, duration) { EasingFunction = ease });
+            var translate = PrepareEntranceTransform(card);
+            translate.BeginAnimation(TranslateTransform.YProperty,
+                new DoubleAnimation(10, 0, duration) { EasingFunction = ease });
+        }
+        catch (Exception)
+        {
+            card.Opacity = 1;
+            if (card.RenderTransform is TranslateTransform { IsFrozen: false } rest)
+                rest.Y = 0;
+        }
+    }
+
+    /// <summary>WPF freezes a constant <c>&lt;TranslateTransform /&gt;</c>
+    /// declared in a DataTemplate and shares one instance across all cards;
+    /// calling BeginAnimation on it throws InvalidOperationException. Always
+    /// hand the animation a transform this card owns and can animate.</summary>
+    internal static TranslateTransform PrepareEntranceTransform(Border card)
+    {
+        if (card.RenderTransform is TranslateTransform existing && !existing.IsFrozen)
+            return existing;
+        var fresh = new TranslateTransform();
+        card.RenderTransform = fresh;
+        return fresh;
     }
 }
