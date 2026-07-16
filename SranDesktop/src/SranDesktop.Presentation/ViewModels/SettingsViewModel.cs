@@ -24,7 +24,8 @@ public partial class SettingsViewModel : ObservableObject
 
     public ObservableCollection<ModelInfo> AvailableModels { get; } = new();
 
-    public string[] Themes { get; } = { "Dark", "Light" };
+    // Phase C PART 5: "System" follows the OS light/dark setting live.
+    public string[] Themes { get; } = { "Dark", "Light", "System" };
 
     [ObservableProperty]
     private string _chatEdgeBaseUrl = string.Empty;
