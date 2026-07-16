@@ -211,6 +211,7 @@ public static class Dict
         // Phase 5 — backend wiring
         ["chat.modelFallback"] = "Answered by {0} — {1} was unavailable",
         ["chat.gettingLong"] = "This chat is getting long — older messages are now summarized before each reply. A new chat will be faster and more precise.",
+        ["chat.jumpToLatest"] = "Jump to latest",
         ["search.inMessages"] = "In messages",
         ["search.untitled"] = "Untitled",
 
@@ -609,6 +610,7 @@ public static class Dict
         // Phase 5 — backend wiring
         ["chat.modelFallback"] = "ตอบโดย {0} — เนื่องจาก {1} ไม่พร้อมใช้งาน",
         ["chat.gettingLong"] = "แชทนี้เริ่มยาวแล้ว ระบบจะสรุปย่อข้อความเก่าก่อนตอบทุกครั้ง เปิดแชทใหม่จะเร็วและแม่นยำกว่า",
+        ["chat.jumpToLatest"] = "ไปยังข้อความล่าสุด",
         ["search.inMessages"] = "ในข้อความ",
         ["search.untitled"] = "ไม่มีชื่อ",
 
