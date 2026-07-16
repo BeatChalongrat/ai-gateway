@@ -201,6 +201,17 @@ public static class Dict
         ["agent.continue"] = "Continue",
         ["agent.plan"] = "Plan",
         ["tool.remembering"] = "Saving a note...",
+        // Phase C PART 3 — capability-specific consent danger banner
+        ["consent.dangerPrefix"] = "This action",
+        ["consent.dangerReview"] = "Review the arguments carefully before allowing.",
+        ["danger.shell"] = "runs a command on your computer",
+        ["danger.computerUse"] = "controls your mouse, keyboard, and screen",
+        ["danger.code"] = "runs code in a sandbox",
+        ["danger.fileWrite"] = "creates or changes files on your computer",
+        ["danger.clipboard"] = "writes to your clipboard",
+        ["danger.browser"] = "opens a link or app",
+        ["danger.connector"] = "calls an external connector",
+        ["danger.generic"] = "can affect your computer or external services",
         // Phase 16 A — sub-agent nested tool activity
         ["subagent.nestedSteps"] = "Sub-agent steps",
 
@@ -600,6 +611,17 @@ public static class Dict
         ["agent.continue"] = "ทำต่อ",
         ["agent.plan"] = "แผนงาน",
         ["tool.remembering"] = "กำลังบันทึกโน้ต...",
+        // Phase C PART 3 — capability-specific consent danger banner
+        ["consent.dangerPrefix"] = "การกระทำนี้",
+        ["consent.dangerReview"] = "โปรดตรวจสอบพารามิเตอร์อย่างรอบคอบก่อนอนุญาต",
+        ["danger.shell"] = "รันคำสั่งบนเครื่องของคุณ",
+        ["danger.computerUse"] = "ควบคุมเมาส์ คีย์บอร์ด และหน้าจอของคุณ",
+        ["danger.code"] = "รันโค้ดในแซนด์บ็อกซ์",
+        ["danger.fileWrite"] = "สร้างหรือแก้ไขไฟล์บนเครื่องของคุณ",
+        ["danger.clipboard"] = "เขียนข้อมูลลงคลิปบอร์ดของคุณ",
+        ["danger.browser"] = "เปิดลิงก์หรือแอป",
+        ["danger.connector"] = "เรียกใช้คอนเนกเตอร์ภายนอก",
+        ["danger.generic"] = "อาจส่งผลต่อเครื่องของคุณหรือบริการภายนอก",
         // Phase 16 A — sub-agent nested tool activity
         ["subagent.nestedSteps"] = "ขั้นตอนของเอเจนต์ย่อย",
 
