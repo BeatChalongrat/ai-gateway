@@ -181,9 +181,84 @@ def resolve_rate_limit_key_id(
     return f"{base_key_id}:user:{user}"
 
 
+def _resolve_service_jwt(
+    token: str,
+    *,
+    x_user_id: str | None,
+    x_tenant_id: str | None,
+    trusted_conversation_id: str | None,
+) -> "ResolvedApiKey | None":
+    """Validate a chat-edge SERVICE JWT and resolve the on-behalf-of end user.
+
+    Decouples the chat product from any user-facing ``gw_`` key: chat-edge
+    authenticates to the gateway as a trusted internal service (a short-lived
+    HS256 token, ``iss="chat-edge-api"`` / ``aud="gateway-api"``, signed with
+    ``service_jwt_secret``) and passes the authenticated end user via the
+    already-sent ``X-User-ID`` / ``X-Tenant-ID`` headers.
+
+    Returns ``None`` when the token is NOT a valid service JWT (wrong
+    signature / iss / aud / expired, or the feature is unconfigured) so the
+    caller falls through to the admin-JWT path. Returns a ``ResolvedApiKey``
+    on success.
+
+    FAIL-CLOSED: a valid service JWT with a missing/blank ``X-User-ID`` or
+    ``X-Tenant-ID`` is REJECTED (401) — never downgraded to an anonymous
+    identity. Every completion stays attributable to (and billed to) a real
+    user.
+
+    Trust model: only a holder of ``service_jwt_secret`` can mint a token that
+    passes here, so trusting its ``X-User-ID`` / ``X-Tenant-ID`` mirrors the
+    existing ``X-Internal-Service-Secret`` gate — the signed, short-lived,
+    audience-bound token is the stronger proof. ADDITIVE: this never relaxes
+    ``gw_``/admin auth and never opens an endpoint to anonymous access.
+    """
+    import jwt as _jwt
+
+    from app.core.config import settings
+
+    secret = (settings.service_jwt_secret or "").strip()
+    if not secret:
+        return None  # feature disabled → treat as "not a service JWT"
+
+    try:
+        _jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience="gateway-api",
+            issuer="chat-edge-api",
+            options={"require": ["exp"]},
+        )
+    except _jwt.InvalidTokenError:
+        # Not (a valid) service JWT — fall through so an admin JWT can still be
+        # tried; if nothing validates, the outer path raises 401 (fail-closed).
+        return None
+
+    user = (x_user_id or "").strip()
+    tenant = (x_tenant_id or "").strip()
+    if not user or not tenant:
+        # FAIL-CLOSED: a valid internal token MUST name the end user it acts for.
+        raise AuthenticationError(
+            "Service call is missing the on-behalf-of user/tenant identity"
+        )
+
+    return ResolvedApiKey(
+        key_id=f"svc:{user}",
+        tenant_id=tenant,
+        project_id="__webchat__",
+        key_prefix="svc:chat-edge",
+        role="user",
+        rate_limit_key_id=f"svc:{user}",  # per-end-user bucket
+        portal_user_id=user,  # billed to the end user (credit check reads this)
+        internal_trusted=True,
+        trusted_conversation_id=trusted_conversation_id,
+    )
+
+
 def get_resolved_api_key(
     authorization: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None),
+    x_tenant_id: str | None = Header(default=None),
     x_internal_service_secret: str | None = Header(default=None),
     x_conversation_id: str | None = Header(default=None),
 ) -> ResolvedApiKey:
@@ -227,6 +302,20 @@ def get_resolved_api_key(
     with SessionLocal() as session:
         # JWT tokens start with "eyJ" (base64-encoded JSON header)
         if raw_key.startswith("eyJ"):
+            # Chat-path SERVICE JWT first (decouples chat from gw_ keys). Returns
+            # None when it isn't a valid service token → fall through to the
+            # admin-JWT path. Raises 401 when it IS a service token but names no
+            # end user (fail-closed).
+            svc = _resolve_service_jwt(
+                raw_key,
+                x_user_id=x_user_id,
+                x_tenant_id=x_tenant_id,
+                trusted_conversation_id=_trusted_conv_id,
+            )
+            if svc is not None:
+                session.commit()
+                return svc
+
             resolved = _resolve_jwt_token(raw_key, session)
             session.commit()
             # JWT identity is already per-user; pin the rate-limit bucket

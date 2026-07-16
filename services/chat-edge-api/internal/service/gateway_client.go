@@ -1,11 +1,14 @@
 // HTTP client for the upstream Gateway API.
 //
-// Authentication preference (highest → lowest):
-//  1. “GATEWAY_API_KEY“ env var — sent as Bearer. Used by dev
-//     builds (seeded gateway key) and prod deployments alike.
-//  2. Service JWT (auth.IssueServiceJWT) — minted fresh per
-//     request, 60s TTL. The current gateway-api doesn't recognise
-//     this token format; it's the migration target.
+// Authentication (FIX 1 / Option B — chat decoupled from gw_ keys):
+//  1. Service JWT (auth.IssueServiceJWT) — minted fresh per request, 60s TTL,
+//     iss="chat-edge-api" / aud="gateway-api", signed with SERVICE_JWT_SECRET.
+//     The gateway validates it and resolves the END USER from the X-User-ID /
+//     X-Tenant-ID headers we send (billing that user). This is the credential
+//     for the chat path — so revoking/rotating any developer gw_ key never
+//     affects the chat UI.
+//  2. “GATEWAY_API_KEY“ — LEGACY fallback only when SERVICE_JWT_SECRET is
+//     unset (a config error, since it's required).
 //
 // Every outbound request carries the per-user / per-request context
 // headers so the gateway can attribute costs + audit traces back to
@@ -647,21 +650,30 @@ func (g *GatewayClient) do(
 	return resp, nil
 }
 
-// bearer picks the credential per the auth preference order. Wraps
-// the service-JWT minter so a malformed secret still returns a
-// clean error instead of panic-on-empty.
+// bearer picks the credential for a gateway call.
+//
+// FIX 1 / Option B — the chat path authenticates as a trusted internal
+// SERVICE (a short-lived, audience-bound service JWT), NOT a user-facing
+// ``gw_`` API key. The gateway validates the service JWT and bills the end
+// user from the ``X-User-ID`` / ``X-Tenant-ID`` headers we already send. This
+// DECOUPLES chat from any ``gw_`` key: rotating/revoking a developer key can
+// never break the chat UI. ``SERVICE_JWT_SECRET`` is required, so this branch
+// is always taken; ``GATEWAY_API_KEY`` is a legacy fallback only for the
+// (config-invalid) case where no service secret is set.
 func (g *GatewayClient) bearer() (string, error) {
+	if g.ServiceJWTSecret != "" {
+		tok, err := auth.IssueServiceJWT(g.ServiceJWTSecret, g.ServiceJWTTTL)
+		if err != nil {
+			return "", fmt.Errorf("gateway: mint service jwt: %w", err)
+		}
+		return tok, nil
+	}
+	// Legacy fallback: only when SERVICE_JWT_SECRET is unset (should not
+	// happen — it's required). A static gateway API key.
 	if g.APIKey != "" {
 		return g.APIKey, nil
 	}
-	if g.ServiceJWTSecret == "" {
-		return "", errors.New("gateway: no credential configured (set GATEWAY_API_KEY or SERVICE_JWT_SECRET)")
-	}
-	tok, err := auth.IssueServiceJWT(g.ServiceJWTSecret, g.ServiceJWTTTL)
-	if err != nil {
-		return "", fmt.Errorf("gateway: mint service jwt: %w", err)
-	}
-	return tok, nil
+	return "", errors.New("gateway: no credential configured (set SERVICE_JWT_SECRET)")
 }
 
 // ---------------------------------------------------------------------------
