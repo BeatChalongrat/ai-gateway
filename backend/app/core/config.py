@@ -93,6 +93,17 @@ class Settings(BaseSettings):
     # external API-key client cannot forge its own per-user bucket.
     internal_service_secret: str = ""
 
+    # Service-JWT trust anchor (decouples chat from any user-facing gw_ key).
+    # chat-edge mints a short-lived HS256 JWT (iss="chat-edge-api",
+    # aud="gateway-api") signed with its SERVICE_JWT_SECRET and sends it as the
+    # Bearer for completion calls; the gateway validates it here and then
+    # resolves the END-USER from the trusted X-User-ID / X-Tenant-ID headers
+    # (charging that user's quota). MUST equal chat-edge's SERVICE_JWT_SECRET.
+    # Empty (default) => the service-JWT chat path is DISABLED (feature off);
+    # gw_ keys and admin JWTs are unaffected. This is ADDITIVE: it never
+    # removes gw_/admin auth and never opens an endpoint to anonymous access.
+    service_jwt_secret: str = ""
+
     # Image-generation cost-control ceilings (gpt-image-1 has direct $
     # exposure, so the endpoint must never be unthrottled). Per-end-user
     # hourly + per-tenant daily windows, enforced via the same Redis
