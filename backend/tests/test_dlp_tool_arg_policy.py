@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.services.dlp.tool_arg_policy import (
     dlp_blocked_arguments,
     enforce_tool_arg_safety,
+    is_local_execution_tool,
 )
 
 
@@ -76,6 +79,75 @@ class TestToolArgPolicy:
         obj = json.loads(marker)  # valid JSON
         assert obj["_dlp_blocked"] is True
         assert obj["tool"] == "web_search"
+
+    # ------------------------------------------------------------------
+    # FIX 8 — first-party SRAN Desktop local tools must never be
+    # hard-blocked as "unknown" (they were: run_command with a masked
+    # 127.0.0.1 came back ``unknown_tool_blocked_masked_args`` and the
+    # desktop agent could not run anything).
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "tool",
+        [
+            "run_command",
+            "run_python",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "create_directory",
+            "move_file",
+            "list_directory",
+            "search_files",
+            "computer_screenshot",
+            "computer_click",
+            "computer_type",
+            "computer_key",
+            "computer_scroll",
+            "computer_drag",
+            "open_application",
+            "open_url",
+            "read_clipboard",
+            "write_clipboard",
+            "update_plan",
+            "remember",
+            "use_skill",
+            "run_subagent",
+        ],
+    )
+    def test_desktop_local_tool_with_placeholder_allowed(self, tool):
+        args = '{"command": "ping -n 4 <r0>"}'
+        out, blocked, reason = enforce_tool_arg_safety(tool, args)
+        assert blocked is False
+        assert reason == "local_execution"
+        assert out == args  # args pass through unchanged (restore is the
+        # call sites' job — this gate only decides execute/block)
+        assert is_local_execution_tool(tool) is True
+
+    def test_local_execution_does_not_leak_to_other_tools(self):
+        # web_search is the desktop's external-egress tool — a masked
+        # query must STILL be blocked, and genuinely unknown tools
+        # (e.g. remote MCP connector tools) stay under the conservative
+        # unknown-tool block.
+        assert is_local_execution_tool("web_search") is False
+        assert is_local_execution_tool("some_remote_mcp_tool") is False
+        assert is_local_execution_tool(None) is False
+
+        _, blocked, reason = enforce_tool_arg_safety(
+            "web_search", '{"query": "<r0>"}'
+        )
+        assert blocked is True and reason == "external_egress_blocked_masked_args"
+
+        out, blocked, reason = enforce_tool_arg_safety(
+            "some_remote_mcp_tool", '{"x": "<r0>"}'
+        )
+        assert blocked is True and reason == "unknown_tool_blocked_masked_args"
+        assert _is_blocked_marker(out)
+
+    def test_local_tool_clean_args_untouched(self):
+        args = '{"command": "ping -n 4 localhost"}'
+        out, blocked, reason = enforce_tool_arg_safety("run_command", args)
+        assert out == args and blocked is False and reason is None
 
     def test_stream_and_nonstream_same_decision(self):
         # The same helper is the single decision point used by both

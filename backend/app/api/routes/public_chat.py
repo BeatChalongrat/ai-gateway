@@ -2581,6 +2581,36 @@ async def chat_completions(
                         ),
                     )
 
+                # FIX 8 — first-party LOCAL tools (SRAN Desktop) get the
+                # same provenance-aware restore the streamed text got:
+                # their arguments are client-bound and execute on the
+                # user's own machine, so a token the output policy says
+                # RESTORE (never credential/secret — Layer 2 strips those
+                # from ``restore_allowed_tokens``; Vault V2 provenance
+                # excludes outbound-minted tokens) goes back as the
+                # user's own value instead of a dead ``<rN>`` that breaks
+                # the command.
+                from app.services.dlp.tool_arg_policy import (
+                    enforce_tool_arg_safety,
+                    is_local_execution_tool,
+                )
+                from app.services.dlp.transformer import (
+                    contains_mask_token as _has_mask_token,
+                )
+
+                if (
+                    is_local_execution_tool(_bucket.get("name"))
+                    and _has_mask_token(_final_args)
+                ):
+                    _restored_args = _stream_restore(_final_args)
+                    if _restored_args != _final_args:
+                        _final_args = _restored_args
+                        log.info(
+                            "dlp_tool_arg_local_restore_streaming",
+                            tool_call_id=_bucket.get("id"),
+                            tool_name=_bucket.get("name"),
+                        )
+
                 # B2 — tool-argument placeholder safety (parity with the
                 # non-streaming path, orchestrator section 8d). If the
                 # masked arguments still carry a ``<rN>`` placeholder, only
@@ -2589,8 +2619,6 @@ async def chat_completions(
                 # with a PII-free, valid-JSON marker, so the executor never
                 # runs on a placeholder and the client gets an explicit
                 # blocked signal (not a silent header-only call).
-                from app.services.dlp.tool_arg_policy import enforce_tool_arg_safety
-
                 _final_args, _arg_blocked, _arg_reason = enforce_tool_arg_safety(
                     _bucket.get("name"), _final_args
                 )

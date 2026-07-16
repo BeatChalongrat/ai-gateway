@@ -1738,6 +1738,37 @@ class GatewayOrchestrator:
                             await conversation_vault.extend_async(
                                 conversation_id, outbound_arg_span_map
                             )
+                # FIX 8 — first-party LOCAL tools (SRAN Desktop) get the
+                # same emit-side restore the response text got at 8b:
+                # their arguments are client-bound and execute on the
+                # user's own machine, so a token the output policy says
+                # RESTORE (never credential/secret — Layer 2 strips
+                # those from ``restore_allowed_tokens``) goes back as
+                # the user's own value instead of a dead ``<rN>`` that
+                # breaks the command. Inbound tokens only; outbound
+                # tool-arg masks minted above use fresh counters and are
+                # not in ``restore_allowed_tokens``.
+                from app.services.dlp.tool_arg_policy import (
+                    is_local_execution_tool,
+                )
+                from app.services.dlp.transformer import contains_mask_token
+                _args_now = fn.get("arguments", "") or ""
+                if (
+                    restore_allowed_tokens
+                    and is_local_execution_tool(fn.get("name"))
+                    and contains_mask_token(_args_now)
+                ):
+                    _restored_args = self.transformer.restore(
+                        _args_now, span_map,
+                        allowed_tokens=restore_allowed_tokens,
+                    )
+                    if _restored_args != _args_now:
+                        fn["arguments"] = _restored_args
+                        log.info(
+                            "dlp_tool_arg_local_restore",
+                            tool_call_id=new_tc.get("id"),
+                            tool_name=fn.get("name"),
+                        )
                 # B2 — tool-argument placeholder safety. If the (now
                 # masked) arguments still carry a ``<rN>`` placeholder,
                 # only tools explicitly classified ``placeholder_safe``
