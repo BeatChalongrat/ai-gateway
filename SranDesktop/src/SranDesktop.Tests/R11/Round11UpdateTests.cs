@@ -111,6 +111,29 @@ public class UpdateServiceTests
             () => service.DownloadUpdateAsync(badResult));
     }
 
+    [Fact]
+    public void Shipped_Release_Manifest_Pins_A_Sha256()
+    {
+        // 17E: an empty sha256 makes VerifyHash accept ANY downloaded file
+        // (VerifyHash returns true when the manifest pins no hash). The shipped
+        // manifest must therefore always carry a real hash — guard against a
+        // regression back to "".
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? manifest = null;
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, "releases", "latest.json");
+            if (File.Exists(candidate)) { manifest = candidate; break; }
+            dir = dir.Parent;
+        }
+        Assert.NotNull(manifest);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifest!));
+        var sha = doc.RootElement.GetProperty("sha256").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(sha));
+        Assert.Equal(64, sha!.Length); // hex-encoded SHA-256
+    }
+
     [Theory]
     [InlineData("1.2.0", true, "1.2.0")]
     [InlineData("1.2.0-beta+sha123", true, "1.2.0")]
