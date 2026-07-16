@@ -432,6 +432,7 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     [NotifyCanExecuteChangedFor(nameof(CancelStreamingCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ContinueTurnCommand))]
     private bool _isStreaming;
 
     [ObservableProperty]
@@ -540,6 +541,7 @@ public partial class ChatViewModel : ObservableObject
 
         Conversation = conversation;
         Messages.Clear();
+        _agentResume = null; // resume state belongs to the outgoing conversation
         _branchSets.Clear(); // branch sets are per-conversation (R10 Fix 3)
         ErrorMessage = null;
         ContextNudgeMessage = null; // the nudge is per-conversation (Phase 5)
@@ -611,8 +613,17 @@ public partial class ChatViewModel : ObservableObject
                 _logger.LogWarning(ex, "Server messages unavailable for {Id}; using local history", conversation.Id);
             }
 
-            foreach (var local in await _store.GetMessagesAsync(conversation.Id))
+            // Durable tool history (PART 1): the local rows include the agent
+            // tool chain (assistant-with-tool_calls / tool results / screenshot
+            // placeholders). Those are NOT conversation bubbles — regroup them
+            // per assistant turn and skip them from the visible thread; they are
+            // re-attached to their bubble below so the next turn replays them.
+            var localRows = await _store.GetMessagesAsync(conversation.Id);
+            var chainMap = Application.Services.AgentChainCodec.GroupChains(localRows);
+            foreach (var local in localRows)
             {
+                if (Application.Services.AgentChainCodec.IsChainRow(local))
+                    continue;
                 if (local.Role is not (MessageRole.User or MessageRole.Assistant)
                     || string.IsNullOrWhiteSpace(local.Content))
                     continue;
@@ -634,7 +645,18 @@ public partial class ChatViewModel : ObservableObject
                     IsServerMessage = entry.FromServer
                 };
                 if (vm.IsAssistant)
+                {
+                    if (chainMap.TryGetValue(vm.Id, out var chain))
+                    {
+                        vm.AgentToolChain = chain;
+                        // Rebuild the plan checklist (PART 5) from the last
+                        // update_plan call in the persisted chain (PART 1).
+                        var planArgs = LastPlanArgs(chain);
+                        if (planArgs is not null)
+                            vm.UpdatePlan(Application.Services.PlanParser.Parse(planArgs));
+                    }
                     ExtractPlanBlocks(conversation.Id, vm);
+                }
                 Messages.Add(vm);
             }
             await RestoreBranchesAsync(conversation.Id); // R10 Fix 3
@@ -753,6 +775,10 @@ public partial class ChatViewModel : ObservableObject
         var conversation = Conversation!;
         InputText = string.Empty;
         ErrorMessage = null;
+        // A fresh message supersedes any paused turn's Continue (its tool history
+        // still rides along via the bubble's AgentToolChain).
+        _agentResume = null;
+        ContinueTurnCommand.NotifyCanExecuteChanged();
 
         // The text left the composer — its draft is obsolete (C4).
         _draftTimer?.Stop();
@@ -872,18 +898,41 @@ public partial class ChatViewModel : ObservableObject
             await TryGenerateTitleAsync(conversation);
     }
 
-    /// <summary>Best-effort local persistence of a completed exchange. Both
-    /// rows land in ONE SQLite transaction (Phase 3 C3) so a crash can never
-    /// leave the user message without its reply.</summary>
+    /// <summary>Best-effort local persistence of a completed (or paused) agent
+    /// exchange. The user bubble, the FULL tool-history chain (assistant
+    /// messages with tool_calls, role:"tool" results, screenshot placeholders),
+    /// and the final assistant answer all land in ONE SQLite transaction (Phase
+    /// 3 C3), keyed to the conversation with strictly-increasing sort order so a
+    /// reload replays them as a valid provider chain (PART 1). <paramref
+    /// name="user"/> is null when re-persisting a resumed turn (the user row is
+    /// already saved; the chain + answer rows upsert by their stable ids).</summary>
     private async Task PersistTurnAsync(
-        string conversationId, MessageViewModel user, MessageViewModel assistant)
+        string conversationId, MessageViewModel? user, MessageViewModel assistant)
     {
         try
         {
-            var rows = new List<Domain.Entities.Message> { ToEntity(conversationId, user) };
+            var baseSort = await _store.GetNextSortOrderAsync(conversationId);
+            var rows = new List<Domain.Entities.Message>();
+            var sort = baseSort;
+
+            if (user is not null)
+                rows.Add(ToEntity(conversationId, user, sort++));
+
+            // Tool-chain rows (deterministic ids so a Continue re-persist upserts
+            // rather than duplicates; ON CONFLICT keeps each row's first sort).
+            if (assistant.AgentToolChain is { Count: > 0 } chain)
+            {
+                var chainRows = Application.Services.AgentChainCodec.ToRows(
+                    conversationId, assistant.Id, chain, user?.CreatedAt ?? assistant.CreatedAt, sort);
+                rows.AddRange(chainRows);
+                sort += chainRows.Count;
+            }
+
             if (!assistant.IsError && assistant.Content.Length > 0)
-                rows.Add(ToEntity(conversationId, assistant));
-            await _store.UpsertMessagesAsync(rows);
+                rows.Add(ToEntity(conversationId, assistant, sort));
+
+            if (rows.Count > 0)
+                await _store.UpsertMessagesAsync(rows);
         }
         catch (Exception ex)
         {
@@ -891,7 +940,7 @@ public partial class ChatViewModel : ObservableObject
         }
     }
 
-    private static Domain.Entities.Message ToEntity(string conversationId, MessageViewModel vm) => new()
+    private static Domain.Entities.Message ToEntity(string conversationId, MessageViewModel vm, int sortOrder) => new()
     {
         Id = vm.Id,
         ConversationId = conversationId,
@@ -899,7 +948,7 @@ public partial class ChatViewModel : ObservableObject
         Content = vm.Content,
         ModelId = vm.ModelId,
         CreatedAt = vm.CreatedAt,
-        SortOrder = (int)Math.Clamp(vm.CreatedAt.ToUnixTimeSeconds(), 0, int.MaxValue)
+        SortOrder = sortOrder
     };
 
     /// <summary>
@@ -1000,16 +1049,42 @@ public partial class ChatViewModel : ObservableObject
             }
         }
 
+        var modelId = ResolveModel(conversation);
+        // Known context window from the model catalog; null (catalog not loaded
+        // / Auto) lets the orchestrator use its fallback.
+        var contextWindow = AvailableModels.FirstOrDefault(m => m.Id == modelId)?.ContextWindow;
+        // Everything the orchestrator appends past here is this turn's tool chain.
+        var chainStart = gatewayMessages.Count;
+
         _orchestrator.ConsentRequested += OnConsentRequested;
         // Phase 16 A: nested sub-agent progress routes to this message's cards.
         _activeAgentMessage = assistantMessage;
         try
         {
-            var modelId = ResolveModel(conversation);
-            // Known context window from the model catalog; null (catalog not
-            // loaded / Auto) lets the orchestrator use its fallback.
-            var contextWindow = AvailableModels.FirstOrDefault(m => m.Id == modelId)?.ContextWindow;
+            await StreamAgentLoopAsync(
+                assistantMessage, gatewayMessages, modelId, contextWindow, conversation, chainStart, ct);
+        }
+        finally
+        {
+            _orchestrator.ConsentRequested -= OnConsentRequested;
+            _activeAgentMessage = null;
+        }
+    }
 
+    /// <summary>
+    /// Drives one pass of the orchestrator loop, mapping its stream events onto
+    /// the assistant bubble. Extracted so the Continue affordance (PART 1/6) can
+    /// re-enter it with the accumulated message chain to resume a paused task.
+    /// On exit (including cancel) it captures the completed tool steps as the
+    /// bubble's durable history, screenshots collapsed to placeholders.
+    /// </summary>
+    private async Task StreamAgentLoopAsync(
+        MessageViewModel assistantMessage, List<GatewayMessage> gatewayMessages,
+        string modelId, int? contextWindow, ConversationItemViewModel conversation,
+        int chainStart, CancellationToken ct)
+    {
+        try
+        {
             await foreach (var evt in _orchestrator.RunAsync(
                                modelId, gatewayMessages, conversation.Id, contextWindow, ct))
             {
@@ -1031,6 +1106,14 @@ public partial class ChatViewModel : ObservableObject
                     case AgentToolCallsEvent toolCalls:
                         foreach (var call in toolCalls.ToolCalls)
                         {
+                            // The plan renders as its own live checklist (PART 5),
+                            // not as a generic tool card.
+                            if (call.Function.Name == "update_plan")
+                            {
+                                assistantMessage.UpdatePlan(
+                                    Application.Services.PlanParser.Parse(call.Function.Arguments));
+                                continue;
+                            }
                             assistantMessage.ToolExecutions.Add(new ToolExecutionItemViewModel(
                                 call.Id, call.Function.Name, call.Function.Arguments));
                         }
@@ -1045,6 +1128,8 @@ public partial class ChatViewModel : ObservableObject
 
                     case AgentToolResultEvent result:
                         assistantMessage.StatusText = null;
+                        if (result.ToolName == "update_plan")
+                            break; // the checklist already updated on the tool call
                         var item = assistantMessage.ToolExecutions
                             .FirstOrDefault(t => t.ToolCallId == result.ToolCallId);
                         if (item is null)
@@ -1067,6 +1152,10 @@ public partial class ChatViewModel : ObservableObject
                         // call stays as an idempotent safety net.
                         ExtractPlanBlocks(conversation.Id, assistantMessage);
                         assistantMessage.Complete(null);
+                        // The task finished — no resume needed for this bubble.
+                        assistantMessage.CanContinue = false;
+                        if (ReferenceEquals(_agentResume?.Assistant, assistantMessage))
+                            _agentResume = null;
                         break;
 
                     case AgentFallbackEvent fallback:
@@ -1085,6 +1174,20 @@ public partial class ChatViewModel : ObservableObject
                             assistantMessage.MetaLine = notice;
                         break;
 
+                    case AgentPausedEvent paused:
+                        // Checkpoint, not failure: stash the live chain + context
+                        // for Continue and surface the affordance (PART 1/6).
+                        _agentResume = new AgentResumeState(
+                            gatewayMessages, chainStart, assistantMessage,
+                            conversation, modelId, contextWindow);
+                        assistantMessage.CanContinue = true;
+                        var pauseNote = Localization.LocaleService.Instance.T("agent.paused");
+                        if (assistantMessage.Content.Length == 0)
+                            assistantMessage.StatusText = pauseNote;
+                        else
+                            assistantMessage.MetaLine = pauseNote;
+                        break;
+
                     case AgentErrorEvent error:
                         _logger.LogWarning("Turn error: {Message}", error.Message);
                         assistantMessage.SetError(error.Code == "context_length_exceeded"
@@ -1096,8 +1199,91 @@ public partial class ChatViewModel : ObservableObject
         }
         finally
         {
+            // Durable tool history: capture completed steps even on cancel/error
+            // (PART 1). Screenshots collapse to placeholders; the real ones stay
+            // in the live gatewayMessages list for an in-session resume.
+            if (gatewayMessages.Count > chainStart)
+            {
+                var chain = Application.Services.AgentChainCodec.Sanitize(
+                    gatewayMessages.Skip(chainStart));
+                assistantMessage.AgentToolChain = chain.Count > 0 ? chain : null;
+            }
+        }
+    }
+
+    // ── Resume a paused agent turn (PART 1/6) ───────────────────────────────
+
+    /// <summary>Everything needed to re-enter the orchestrator loop and continue
+    /// a task that hit its step/time budget: the accumulated message chain (with
+    /// real screenshots for an in-session resume), where this turn's tool chain
+    /// starts, and the bubble/model/context it belongs to.</summary>
+    private sealed record AgentResumeState(
+        List<GatewayMessage> Chain, int ChainStart, MessageViewModel Assistant,
+        ConversationItemViewModel Conversation, string Model, int? ContextWindow);
+
+    private AgentResumeState? _agentResume;
+
+    private bool CanContinueTurn() => !IsStreaming && _agentResume is not null;
+
+    /// <summary>Continue a paused turn: re-enter the loop with the accumulated
+    /// tool history so the task resumes instead of being abandoned at the cap.</summary>
+    [RelayCommand(CanExecute = nameof(CanContinueTurn))]
+    private async Task ContinueTurnAsync()
+    {
+        if (_agentResume is not { } resume || IsStreaming)
+            return;
+        _agentResume = null;
+
+        var assistant = resume.Assistant;
+        assistant.CanContinue = false;
+        assistant.IsStreaming = true;
+        assistant.MetaLine = null;
+        assistant.StatusText = null;
+
+        IsStreaming = true;
+        _streamCts = new CancellationTokenSource();
+        _orchestrator.ConsentRequested += OnConsentRequested;
+        _activeAgentMessage = assistant;
+        try
+        {
+            await StreamAgentLoopAsync(
+                assistant, resume.Chain, resume.Model, resume.ContextWindow,
+                resume.Conversation, resume.ChainStart, _streamCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            assistant.IsStreaming = false;
+            assistant.MetaLine = Localization.LocaleService.Instance.T("status.stopped");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Continue failed");
+            assistant.SetError(ex.StatusCode is null
+                ? Localization.LocaleService.Instance.T("error.serverUnreachable")
+                : ex.Message);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex, "Continue connection dropped");
+            assistant.SetError(Localization.LocaleService.Instance.T("error.connectionLost"));
+        }
+        finally
+        {
+            IsStreaming = false;
+            assistant.IsStreaming = false;
             _orchestrator.ConsentRequested -= OnConsentRequested;
             _activeAgentMessage = null;
+            _streamCts?.Dispose();
+            _streamCts = null;
+
+            resume.Conversation.UpdatedAt = DateTimeOffset.Now;
+            ExtractPlanBlocks(resume.Conversation.Id, assistant);
+            MessageActivity?.Invoke(this, EventArgs.Empty);
+
+            // The user row was saved on the first pass; re-persist the chain +
+            // (now-complete) answer by their stable ids (upsert).
+            await PersistTurnAsync(resume.Conversation.Id, null, assistant);
+            _agentSync.QueueConversationSync(resume.Conversation.Id);
         }
     }
 
@@ -1664,8 +1850,12 @@ public partial class ChatViewModel : ObservableObject
         "computer_scroll" => "Scrolling...",
         "computer_drag" => "Dragging...",
         "open_application" => "Opening an application...",
+        "update_plan" => "Updating the plan...",
         "read_file" => "Reading a file...",
         "write_file" => "Writing a file...",
+        "edit_file" => "Editing a file...",
+        "create_directory" => "Creating a folder...",
+        "move_file" => "Moving a file...",
         "list_directory" => "Listing a folder...",
         "search_files" => "Searching files...",
         "run_command" => "Running a command...",
@@ -1675,6 +1865,22 @@ public partial class ChatViewModel : ObservableObject
         "web_search" => Localization.LocaleService.Instance.T("tool.searchingWeb"),
         _ => $"Running {toolName}..."
     };
+
+    /// <summary>The arguments of the LAST update_plan call in a persisted tool
+    /// chain, so the plan checklist re-renders after a reload (PART 5/1).</summary>
+    private static string? LastPlanArgs(IReadOnlyList<GatewayMessage> chain)
+    {
+        string? args = null;
+        foreach (var msg in chain)
+        {
+            if (msg.Role != "assistant" || msg.ToolCalls is not { Count: > 0 } calls)
+                continue;
+            foreach (var call in calls)
+                if (call.Function.Name == "update_plan")
+                    args = call.Function.Arguments;
+        }
+        return args;
+    }
 
     private string ResolveModel(ConversationItemViewModel conversation) =>
         string.IsNullOrEmpty(conversation.ModelId) ? "gpt-4o-mini" : conversation.ModelId!;
@@ -1708,6 +1914,20 @@ public partial class ChatViewModel : ObservableObject
             - For knowledge questions, conversation, or creative writing — just respond directly, no tools needed.
             - For tasks involving files, the screen, running commands, or interacting with applications — use the appropriate tools.
             - You decide autonomously. Never ask "should I use tools?" — just use them when needed.
+
+            ## Planning multi-step work
+            - For a task with several steps (edit → build → fix, multi-file changes, research + apply),
+              call update_plan first to lay out the steps, then call it again to mark each step
+              in_progress and done as you go. Keep exactly one step in_progress at a time.
+              The plan is shown to the user as a live checklist. Skip it for a simple one-shot answer.
+
+            ## Editing files
+            - To change part of an EXISTING file, use edit_file (targeted string replacement) — do NOT
+              rewrite the whole file with write_file. Give edit_file enough surrounding context in
+              old_string that it matches exactly one place; set replace_all only to change every occurrence.
+            - Use write_file to create a NEW file or when you intend to replace a file's entire contents.
+            - Use create_directory to make folders and move_file to move or rename. For a build/fix loop:
+              edit the file, run_command to build/test, read the errors, edit again, and repeat.
 
             ## Computer Use
             When the user asks you to interact with an application:
@@ -1768,8 +1988,19 @@ public partial class ChatViewModel : ObservableObject
 
         foreach (var message in Messages)
         {
-            if (ReferenceEquals(message, currentPlaceholder) || message.IsError || message.Content.Length == 0)
+            if (ReferenceEquals(message, currentPlaceholder) || message.IsError)
                 continue;
+
+            // Durable tool history (PART 1): replay the assistant turn's tool
+            // context — the assistant messages that carried tool_calls, the
+            // role:"tool" results, and screenshot placeholders — BEFORE its final
+            // answer, so a new turn continues knowing what the model read/edited/
+            // ran and saw. Phase 2's budgeter/pruner then trims this as usual.
+            if (message.IsAssistant && message.AgentToolChain is { Count: > 0 } chain)
+                gatewayMessages.AddRange(chain);
+
+            if (message.Content.Length == 0)
+                continue; // a paused/tool-only turn may have no final text of its own
 
             gatewayMessages.Add(new GatewayMessage
             {

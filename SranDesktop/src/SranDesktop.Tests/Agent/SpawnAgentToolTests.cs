@@ -371,4 +371,12 @@ public class SpawnAgentToolTests
         SpawnAgentTool.NestedMaxIterations.Should().BeLessThan(ChatOrchestrator.DefaultMaxIterations);
         SpawnAgentTool.NestedMaxDuration.Should().BeLessThan(ChatOrchestrator.DefaultMaxDuration);
     }
+
+    [Fact]
+    public void Nested_Budget_Raised_For_Real_Delegated_Work()
+    {
+        // PART 6: a delegate can do a real build/fix or read-many-files loop.
+        SpawnAgentTool.NestedMaxIterations.Should().BeGreaterThanOrEqualTo(25);
+        SpawnAgentTool.NestedMaxDuration.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMinutes(8));
+    }
 }

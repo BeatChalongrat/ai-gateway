@@ -196,6 +196,10 @@ public static class Dict
         ["status.stopped"] = "Stopped",
         ["agent.contextTrimmed"] = "Older messages were trimmed to fit the model's context window.",
         ["agent.contextTooLong"] = "This conversation is too long for the model. Start a new chat for best results.",
+        // Phase A PART 1/6 — resumable step/time budget
+        ["agent.paused"] = "Paused at the step limit — the tool history is saved. Continue to keep working.",
+        ["agent.continue"] = "Continue",
+        ["agent.plan"] = "Plan",
         // Phase 16 A — sub-agent nested tool activity
         ["subagent.nestedSteps"] = "Sub-agent steps",
 
@@ -589,6 +593,10 @@ public static class Dict
         ["status.stopped"] = "หยุดแล้ว",
         ["agent.contextTrimmed"] = "ตัดข้อความเก่าบางส่วนออกเพื่อให้พอดีกับหน้าต่างบริบทของโมเดล",
         ["agent.contextTooLong"] = "บทสนทนานี้ยาวเกินขีดจำกัดของโมเดลแล้ว แนะนำให้เริ่มแชทใหม่",
+        // Phase A PART 1/6 — resumable step/time budget
+        ["agent.paused"] = "หยุดชั่วคราวที่ขีดจำกัดจำนวนขั้นตอน — บันทึกประวัติการใช้เครื่องมือไว้แล้ว กด \"ทำต่อ\" เพื่อดำเนินการต่อ",
+        ["agent.continue"] = "ทำต่อ",
+        ["agent.plan"] = "แผนงาน",
         // Phase 16 A — sub-agent nested tool activity
         ["subagent.nestedSteps"] = "ขั้นตอนของเอเจนต์ย่อย",
 

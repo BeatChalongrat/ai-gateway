@@ -116,19 +116,35 @@ public static class AppHostBuilder
                         client.Timeout = Timeout.InfiniteTimeSpan; // streaming
                     });
 
+                // Per-conversation shell state (PART 3): retained working dir.
+                services.AddSingleton<ShellSession>();
+                // Folder-scoped consent (PART 4): writes → project folder, shell → cwd.
+                services.AddSingleton<IToolScopeResolver>(sp =>
+                    new FolderScopeResolver(sp.GetRequiredService<ShellSession>()));
+
                 // MCP tools
                 services.AddSingleton(sp =>
                 {
                     var registry = new McpToolRegistry();
                     registry.Register(new ReadFileTool());
                     registry.Register(new WriteFileTool());
+                    // Phase A PART 2: targeted edit + filesystem primitives a real
+                    // agent needs (all PathGuard-confined + consent-gated).
+                    registry.Register(new EditFileTool());
+                    registry.Register(new CreateDirectoryTool());
+                    registry.Register(new MoveFileTool());
                     registry.Register(new ListDirectoryTool());
                     registry.Register(new SearchFilesTool());
                     registry.Register(new OpenUrlTool());
                     registry.Register(new ReadClipboardTool());
                     registry.Register(new WriteClipboardTool());
                     registry.Register(new RunCommandTool(
-                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RunCommandTool>>()));
+                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RunCommandTool>>(),
+                        sp.GetRequiredService<ISettingsService>(),
+                        sp.GetRequiredService<ShellSession>()));
+                    // Phase A PART 5: model-maintained plan / todo (side-effect
+                    // free → AllowAlways; renders as a live checklist).
+                    registry.Register(new UpdatePlanTool());
                     // Web search proxies to the gateway's /v1/search (R9 C);
                     // only listed while the composer toggle is on.
                     registry.Register(new WebSearchTool(
@@ -166,7 +182,9 @@ public static class AppHostBuilder
                         () => sp.GetRequiredService<IMcpToolHost>(),
                         () => sp.GetRequiredService<IChatOrchestrator>(),
                         sp.GetRequiredService<ISettingsService>(),
-                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()));
+                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+                        sp.GetRequiredService<ShellSession>(),
+                        sp.GetRequiredService<IToolScopeResolver>()));
                     return registry;
                 });
                 services.AddSingleton<IMcpToolHost>(sp => new McpToolHost(
@@ -181,7 +199,9 @@ public static class AppHostBuilder
                     sp.GetRequiredService<IMcpToolHost>(),
                     sp.GetRequiredService<IPermissionService>(),
                     sp.GetRequiredService<IConversationStore>(),
-                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatOrchestrator>>()));
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatOrchestrator>>(),
+                    shellSession: sp.GetRequiredService<ShellSession>(),
+                    scopeResolver: sp.GetRequiredService<IToolScopeResolver>()));
 
                 // Application services
                 services.AddSingleton<IAuthService, AuthService>();

@@ -163,6 +163,25 @@ public static class PathGuard
         return null;
     }
 
+    /// <summary>
+    /// The allowed/granted root that contains <paramref name="fullPath"/>, most
+    /// specific first (a granted project folder wins over the broad user-profile
+    /// root). Used ONLY to key folder-scoped consent (PART 4) — it makes no
+    /// access decision; <see cref="Resolve"/> remains the gate. Returns null
+    /// when the path is inside no configured root.
+    /// </summary>
+    public static string? ContainingRoot(string fullPath)
+    {
+        string? best = null;
+        foreach (var root in _grantedRoots.Concat(BuiltInRoots))
+        {
+            var normalized = Path.TrimEndingDirectorySeparator(root);
+            if (IsWithin(fullPath, normalized) && (best is null || normalized.Length > best.Length))
+                best = normalized;
+        }
+        return best;
+    }
+
     /// <summary>True when <paramref name="fullPath"/> is the root itself or a descendant.</summary>
     private static bool IsWithin(string fullPath, string root)
     {

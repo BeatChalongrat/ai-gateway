@@ -199,6 +199,61 @@
                 </Border>
             </Expander>
 
+            <!-- Model-maintained plan checklist (Phase A PART 5) -->
+            <Expander Margin="0,0,0,6" IsExpanded="True"
+                      Visibility="{Binding HasPlan, Converter={StaticResource BoolToVisibility}}">
+                <Expander.Header>
+                    <TextBlock Text="{loc:T agent.plan}" FontSize="12.5" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                </Expander.Header>
+                <Border Background="{DynamicResource BgSecondaryBrush}"
+                        CornerRadius="8" Padding="10,8" Margin="0,4,0,0">
+                    <ItemsControl ItemsSource="{Binding PlanSteps}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <!-- pending ○ / in_progress ◐ / done ✓ -->
+                                    <TextBlock FontSize="13.5" Width="20" VerticalAlignment="Top">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="○" />
+                                                <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsInProgress}" Value="True">
+                                                        <Setter Property="Text" Value="◐" />
+                                                        <Setter Property="Foreground" Value="{DynamicResource AccentBlueBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                        <Setter Property="Text" Value="✓" />
+                                                        <Setter Property="Foreground" Value="{DynamicResource AccentGreenBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="13"
+                                               Foreground="{DynamicResource TextPrimaryBrush}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
+                                                        <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsInProgress}" Value="True">
+                                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+            </Expander>
+
             <!-- Inline tool activity: one collapsible row per tool call (Claude-style) -->
             <ItemsControl ItemsSource="{Binding ToolExecutions}" Margin="0,0,0,4">
                 <ItemsControl.Style>
@@ -730,6 +785,20 @@
                     </TextBlock.Style>
                 </TextBlock>
             </StackPanel>
+
+            <!-- Continue: resume a turn paused at its step/time budget (PART 1/6).
+                 Standalone (not hover-gated) so the checkpoint is always actionable. -->
+            <Button Margin="-4,8,0,0" HorizontalAlignment="Left"
+                    Style="{DynamicResource PillButton}" Padding="12,4"
+                    Visibility="{Binding CanContinue, Converter={StaticResource BoolToVisibility}}"
+                    Command="{Binding DataContext.ContinueTurnCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}">
+                <StackPanel Orientation="Horizontal">
+                    <controls:IconView Geometry="{StaticResource Geo_Regenerate}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="15" Height="15" Margin="0,0,6,0" />
+                    <TextBlock Text="{loc:T agent.continue}" FontSize="12.5" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
         </StackPanel>
     </Grid>
 </UserControl>

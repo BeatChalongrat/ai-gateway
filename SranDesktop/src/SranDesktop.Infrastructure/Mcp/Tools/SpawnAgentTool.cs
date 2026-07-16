@@ -43,14 +43,16 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
     public event Action<AgentStreamEvent>? NestedProgress;
 
     /// <summary>
-    /// Nested caps, deliberately tighter than the parent's (25 steps / 10 min):
-    /// a sub-agent handles ONE delegated task, so 10 steps is generous for a
-    /// focused loop, and 4 minutes keeps a runaway delegate from eating most of
-    /// the parent's own 10-minute deadline (the parent still needs headroom to
-    /// consume the result and answer).
+    /// Nested caps, deliberately tighter than the parent's soft budget (Phase A
+    /// PART 6 raises them so a delegate can do real multi-step work): a sub-agent
+    /// handles ONE focused task, so 25 steps is enough for a build/fix or
+    /// read-many-files loop, and 8 minutes keeps a runaway delegate from eating
+    /// the whole parent turn (the parent still needs headroom to consume the
+    /// result and answer). A sub-agent has no Continue affordance, so these are
+    /// a hard stop — sized generously instead.
     /// </summary>
-    public const int NestedMaxIterations = 10;
-    public static readonly TimeSpan NestedMaxDuration = TimeSpan.FromMinutes(4);
+    public const int NestedMaxIterations = 25;
+    public static readonly TimeSpan NestedMaxDuration = TimeSpan.FromMinutes(8);
 
     /// <summary>Cap on entries in the appended tool-call trace.</summary>
     private const int MaxTraceEntries = 15;
@@ -62,6 +64,8 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
     private readonly Func<IChatOrchestrator?> _parentOrchestrator;
     private readonly ISettingsService _settings;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly ShellSession? _shellSession;
+    private readonly IToolScopeResolver? _scopeResolver;
 
     /// <param name="toolHost">Lazy: the registry that hosts this tool is what the
     /// tool host wraps — resolving eagerly would cycle during DI construction.</param>
@@ -75,7 +79,9 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         Func<IMcpToolHost> toolHost,
         Func<IChatOrchestrator?> parentOrchestrator,
         ISettingsService settings,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        ShellSession? shellSession = null,
+        IToolScopeResolver? scopeResolver = null)
     {
         _gateway = gateway;
         _permissions = permissions;
@@ -84,6 +90,8 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         _parentOrchestrator = parentOrchestrator;
         _settings = settings;
         _loggerFactory = loggerFactory;
+        _shellSession = shellSession;
+        _scopeResolver = scopeResolver;
     }
 
     public string Name => ToolName;
@@ -135,7 +143,7 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         var nested = new ChatOrchestrator(
             _gateway, filteredHost, _permissions, _store,
             _loggerFactory.CreateLogger<ChatOrchestrator>(),
-            NestedMaxIterations, NestedMaxDuration);
+            NestedMaxIterations, NestedMaxDuration, _shellSession, _scopeResolver);
 
         // Consent forwarding: read the parent's handler fresh on every request
         // (the app subscribes/unsubscribes per turn). No handler → Deny, the
@@ -202,6 +210,12 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
 
                     case AgentErrorEvent error:
                         stopReason = error.Message;
+                        break;
+
+                    case AgentPausedEvent paused:
+                        // A sub-agent has no Continue affordance — a hit budget
+                        // means it didn't finish this delegated task.
+                        stopReason = paused.Reason;
                         break;
                 }
             }

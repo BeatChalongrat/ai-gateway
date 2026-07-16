@@ -23,6 +23,21 @@ public partial class MessageViewModel : ObservableObject
     /// <summary>Web-search citations shown as clickable source cards (R9 C5).</summary>
     public System.Collections.ObjectModel.ObservableCollection<SourceViewModel> Sources { get; } = new();
 
+    /// <summary>Model-maintained plan/todo checklist (Phase A PART 5), rendered
+    /// live above the reply and checked off as the agent progresses.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<PlanStepViewModel> PlanSteps { get; } = new();
+
+    public bool HasPlan => PlanSteps.Count > 0;
+
+    /// <summary>Replace the plan with the model's latest task list.</summary>
+    public void UpdatePlan(IReadOnlyList<Application.Services.PlanStep> steps)
+    {
+        PlanSteps.Clear();
+        foreach (var step in steps)
+            PlanSteps.Add(new PlanStepViewModel(step.Step, step.Status));
+        OnPropertyChanged(nameof(HasPlan));
+    }
+
     /// <summary>Live artifacts rendered in WebView2 (R9 A).</summary>
     public System.Collections.ObjectModel.ObservableCollection<ArtifactViewModel> Artifacts { get; } = new();
 
@@ -121,6 +136,27 @@ public partial class MessageViewModel : ObservableObject
     /// set mid-stream; merged into <see cref="MetaLine"/> by Complete so the
     /// "model · N tokens" line can't clobber it.</summary>
     public string? FallbackNotice { get; set; }
+
+    // ── Durable tool history (Phase A PART 1) ───────────────────────────────
+
+    /// <summary>
+    /// The intermediate gateway messages this assistant turn produced — the
+    /// assistant messages that carried tool_calls, every role:"tool" result, and
+    /// screenshot placeholders — in order, WITHOUT this bubble's final answer.
+    /// Kept so the next turn's request can replay the tool context (the model
+    /// remembers what it read/edited/ran and saw), and persisted per turn so it
+    /// survives conversation switches and restarts. Screenshots are stored as
+    /// small placeholders, never raw base64. Null/empty for a plain reply.
+    /// </summary>
+    public List<Application.Models.GatewayMessage>? AgentToolChain { get; set; }
+
+    /// <summary>
+    /// True when this turn hit its step/time budget with the task unfinished
+    /// (PART 1/6): the accumulated tool history is saved and the UI shows a
+    /// "Continue" affordance that re-enters the loop to resume.
+    /// </summary>
+    [ObservableProperty]
+    private bool _canContinue;
 
     // ── Branching (R9 F) ────────────────────────────────────────────────────
 

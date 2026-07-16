@@ -73,7 +73,7 @@ public class ChatOrchestratorTests
         """{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""";
 
     private static (ChatOrchestrator Orchestrator, ScriptedGateway Gateway, FakeTool Tool, Mock<IPermissionService> Permissions)
-        Create(PermissionDecision decision = PermissionDecision.Auto)
+        Create(PermissionDecision decision = PermissionDecision.Auto, int? maxIterations = null)
     {
         var gateway = new ScriptedGateway();
         var tool = new FakeTool();
@@ -94,7 +94,8 @@ public class ChatOrchestratorTests
 
         var orchestrator = new ChatOrchestrator(
             gateway, host.Object, permissions.Object, store.Object,
-            NullLogger<ChatOrchestrator>.Instance);
+            NullLogger<ChatOrchestrator>.Instance,
+            maxIterations ?? ChatOrchestrator.DefaultMaxIterations);
         return (orchestrator, gateway, tool, permissions);
     }
 
@@ -216,19 +217,76 @@ public class ChatOrchestratorTests
     }
 
     [Fact]
-    public async Task Max_Iterations_Cap_Stops_The_Loop()
+    public async Task Max_Iterations_Cap_Pauses_Instead_Of_Abandoning()
     {
-        var (orchestrator, gateway, tool, _) = Create();
-        for (var i = 0; i < 30; i++)
+        var (orchestrator, gateway, tool, _) = Create(maxIterations: 5);
+        for (var i = 0; i < 10; i++)
             gateway.Enqueue(ToolCallFrame($"call_{i}", "fake_tool"), FinishToolCallsFrame, "[DONE]");
 
-        var events = await RunAsync(orchestrator,
-            new List<GatewayMessage> { new() { Role = "user", Content = "loop forever" } });
+        var messages = new List<GatewayMessage> { new() { Role = "user", Content = "loop forever" } };
+        var events = await RunAsync(orchestrator, messages);
 
-        gateway.Requests.Should().HaveCount(25);
-        tool.Executions.Should().Be(25);
-        events.Last().Should().BeOfType<AgentErrorEvent>()
-            .Which.Message.Should().Contain("25-step");
+        gateway.Requests.Should().HaveCount(5);
+        tool.Executions.Should().Be(5);
+        // PART 1/6: the cap is a resumable checkpoint, not a terminal error.
+        events.OfType<AgentErrorEvent>().Should().BeEmpty();
+        events.Last().Should().BeOfType<AgentPausedEvent>()
+            .Which.Reason.Should().Contain("5-step");
+        // The accumulated tool history is intact in the caller's list, ending on
+        // a tool result — a valid chain the loop can be re-entered with.
+        messages.Should().HaveCountGreaterThan(5);
+        messages[^1].Role.Should().Be("tool");
+    }
+
+    [Fact]
+    public async Task Paused_Turn_Resumes_And_Completes_Across_A_Continue()
+    {
+        var (orchestrator, gateway, tool, _) = Create(maxIterations: 5);
+        // 5 tool iterations exhaust the cap → pause with history intact.
+        for (var i = 0; i < 5; i++)
+            gateway.Enqueue(ToolCallFrame($"call_{i}", "fake_tool"), FinishToolCallsFrame, "[DONE]");
+
+        var messages = new List<GatewayMessage> { new() { Role = "user", Content = "long task" } };
+        var first = await RunAsync(orchestrator, messages);
+        first.Last().Should().BeOfType<AgentPausedEvent>();
+
+        // Continue: re-enter the loop with the SAME accumulated chain. This time
+        // the model produces a final answer instead of another tool call.
+        gateway.Enqueue(ContentFrame("All done"), StopFrame, "[DONE]");
+        var second = await RunAsync(orchestrator, messages);
+
+        second.Last().Should().BeOfType<AgentStreamDoneEvent>();
+        string.Concat(second.OfType<AgentContentDeltaEvent>().Select(e => e.Text))
+            .Should().Be("All done");
+        // The resumed request carried the full prior tool history.
+        gateway.Requests.Last().Messages.Count(m => m.Role == "tool").Should().Be(5);
+    }
+
+    [Fact]
+    public void Default_Iteration_Budget_Is_Raised_For_Real_Multi_Step_Work()
+    {
+        // PART 6: a much higher soft ceiling (the cap is now resumable).
+        ChatOrchestrator.DefaultMaxIterations.Should().BeGreaterThanOrEqualTo(100);
+        ChatOrchestrator.DefaultMaxDuration.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMinutes(20));
+    }
+
+    [Fact]
+    public async Task Time_Limit_Zero_Pauses_Before_Any_Request()
+    {
+        var gateway = new ScriptedGateway();
+        var host = new Mock<IMcpToolHost>();
+        host.Setup(h => h.GetToolDefinitions()).Returns(new List<GatewayToolDefinition>());
+        var permissions = new Mock<IPermissionService>();
+        var store = new Mock<IConversationStore>();
+        var orchestrator = new ChatOrchestrator(
+            gateway, host.Object, permissions.Object, store.Object,
+            NullLogger<ChatOrchestrator>.Instance, maxIterations: 25, maxDuration: TimeSpan.Zero);
+
+        var events = await RunAsync(orchestrator,
+            new List<GatewayMessage> { new() { Role = "user", Content = "hi" } });
+
+        gateway.Requests.Should().BeEmpty();
+        events.Should().ContainSingle().Which.Should().BeOfType<AgentPausedEvent>();
     }
 
     [Fact]
