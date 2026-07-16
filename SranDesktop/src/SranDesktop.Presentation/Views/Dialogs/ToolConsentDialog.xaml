@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
         xmlns:controls="clr-namespace:SranDesktop.Presentation.Controls"
+        xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
         xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:ToolConsentViewModel}"
@@ -89,9 +90,16 @@
                                    Stroke="{DynamicResource AccentRedBrush}"
                                    Width="15" Height="15" Margin="0,0,7,0"
                                    VerticalAlignment="Top" />
-                <TextBlock Text="This action modifies your system. Review the arguments carefully."
-                           Foreground="{DynamicResource AccentRedBrush}" FontSize="12"
-                           TextWrapping="Wrap" />
+                <StackPanel>
+                    <!-- Phase C PART 3: say WHY (capability-specific), then review. -->
+                    <TextBlock Foreground="{DynamicResource AccentRedBrush}" FontSize="12.5"
+                               FontWeight="SemiBold" TextWrapping="Wrap">
+                        <Run Text="{loc:T consent.dangerPrefix}" /><Run Text=" " /><Run Text="{Binding DangerReason}" /><Run Text="." />
+                    </TextBlock>
+                    <TextBlock Text="{loc:T consent.dangerReview}"
+                               Foreground="{DynamicResource AccentRedBrush}" FontSize="12"
+                               TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.9" />
+                </StackPanel>
             </StackPanel>
         </Border>
 
