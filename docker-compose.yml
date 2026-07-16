@@ -429,6 +429,13 @@ services:
       # stack's INTERNAL_SERVICE_SECRET. Empty disables the trust
       # (headers are then ignored — safe default).
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-}
+      # FIX 1b — the gateway VERIFIES chat-edge's service JWT with this
+      # secret (deps.py::_resolve_service_jwt). It MUST equal the same var
+      # under chat-edge-api (which SIGNS with it) or every service JWT is
+      # rejected and chat silently falls back to INTERNAL_SERVICE_SECRET —
+      # leaving FIX 1's gw_-key decoupling dormant. One var feeds both so
+      # they always match. Empty = feature disabled (gateway-only deploys).
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}
       # Media generation (Sprint 2A/2A.5). Feature-flagged OFF by default;
       # set VIDEO_GEN_ENABLED=true in the host env to surface dedicated video
       # models in /v1/models + enable the video gen routes/tool. Controlled

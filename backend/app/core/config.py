@@ -728,6 +728,34 @@ class Settings(BaseSettings):
             return "0" * 64
         raise RuntimeError("PROVIDER_KEY_MASTER_KEY is not configured")
 
+    def service_jwt_wiring_issue(self) -> str | None:
+        """FIX 1b — detect the FIX-1 service-JWT decoupling being DORMANT.
+
+        The gateway can't see chat-edge's env directly. The signal that
+        chat-edge is WIRED to this gateway is a non-empty
+        ``internal_service_secret`` (the older header trust anchor both sides
+        share). If chat-edge is wired but ``service_jwt_secret`` is empty,
+        chat-edge mints service JWTs this gateway can never verify — they are
+        rejected and the call silently falls back to the
+        INTERNAL_SERVICE_SECRET header trust, so FIX 1's whole point (chat
+        auth decoupled from gw_ keys) is unmet, silently. Returns a problem
+        string in that case, else None.
+
+        A gateway-only deploy (no chat-edge → no INTERNAL_SERVICE_SECRET)
+        expects no service JWT, so this returns None and never bricks it.
+        """
+        if (self.service_jwt_secret or "").strip():
+            return None  # configured — the service-JWT path is active
+        if (self.internal_service_secret or "").strip():
+            return (
+                "SERVICE_JWT_SECRET is empty but INTERNAL_SERVICE_SECRET is set "
+                "(chat-edge is wired): the service-JWT auth path is DISABLED — "
+                "chat-edge service tokens are rejected and silently fall back to "
+                "the INTERNAL_SERVICE_SECRET header trust. Set SERVICE_JWT_SECRET "
+                "to the SAME value as the chat-edge service."
+            )
+        return None  # gateway-only / chat-edge-less deploy — nothing expected
+
     def validate_secrets(self) -> None:
         """Reject insecure default / too-short secrets outside dev/test.
 
@@ -753,6 +781,15 @@ class Settings(BaseSettings):
         _check("JWT_SECRET", self.jwt_secret)
         _check("MASTER_ENCRYPTION_KEY", self.master_encryption_key)
         _check("PORTAL_JWT_SECRET", self.portal_jwt_secret)
+        # FIX 1b — fail closed on a dormant/weak service-JWT decoupling.
+        # If chat-edge is wired (INTERNAL_SERVICE_SECRET set) but the
+        # verifying secret is empty, refuse to start; if it's set, hold it
+        # to the same strength bar as the other secrets.
+        wiring = self.service_jwt_wiring_issue()
+        if wiring:
+            issues.append(wiring)
+        elif (self.service_jwt_secret or "").strip():
+            _check("SERVICE_JWT_SECRET", self.service_jwt_secret)
         # Required in production so the Safe Trace audit channel is
         # not silently encrypted with an HKDF-of-master fallback that
         # would be invalidated if the master key ever rotated.
