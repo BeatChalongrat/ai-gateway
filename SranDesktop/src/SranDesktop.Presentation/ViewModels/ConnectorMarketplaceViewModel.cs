@@ -100,13 +100,18 @@ public partial class ConnectorItemViewModel : ObservableObject
         }
         : "";
 
-    /// <summary>Health dot (R10 1E): green=Connected, red=Disconnected, grey=NotConfigured.</summary>
+    /// <summary>Health dot (R10 1E): green=Connected, red=Disconnected, grey=NotConfigured.
+    /// Phase C PART 5: resolved from theme brushes so it recolors in light mode
+    /// (was hardcoded Brushes.* that ignored the theme).</summary>
     public System.Windows.Media.Brush StatusBrush => _connectors.GetStatus(_connector.Id) switch
     {
-        ConnectorStatus.Connected => System.Windows.Media.Brushes.MediumSeaGreen,
-        ConnectorStatus.Disconnected => System.Windows.Media.Brushes.IndianRed,
-        _ => System.Windows.Media.Brushes.Gray
+        ConnectorStatus.Connected => ThemeBrush("AccentGreenBrush", System.Windows.Media.Brushes.MediumSeaGreen),
+        ConnectorStatus.Disconnected => ThemeBrush("AccentRedBrush", System.Windows.Media.Brushes.IndianRed),
+        _ => ThemeBrush("TextTertiaryBrush", System.Windows.Media.Brushes.Gray)
     };
+
+    private static System.Windows.Media.Brush ThemeBrush(string key, System.Windows.Media.Brush fallback) =>
+        System.Windows.Application.Current?.TryFindResource(key) as System.Windows.Media.Brush ?? fallback;
 
     public ConnectorItemViewModel(
         IMcpConnectorService connectors, ConnectorOAuthCoordinator oauth, McpConnector connector)
