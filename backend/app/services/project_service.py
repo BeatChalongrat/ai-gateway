@@ -36,6 +36,13 @@ class ProjectService:
             ``ChatCompletionsRequest`` (422 on unknown), so reaching
             this check implies the requested profile is known.
         """
+        # Web-chat / service-JWT path (Bug 1) — see the async variant.
+        if getattr(auth, "internal_trusted", False):
+            return self._tenant_scoped_context(
+                session, auth, request_id,
+                policy_profile_override=policy_profile_override,
+            )
+
         project = session.get(ProjectORM, auth.project_id)
         if project is None:
             raise NotFoundError(
@@ -88,6 +95,71 @@ class ProjectService:
             user_id=getattr(auth, "log_user_id", None),
         )
 
+    # ------------------------------------------------------------------
+    # Bug 1 — tenant-scoped context for the web-chat / service-JWT path
+    # (no project row required; billing hits the user, DLP uses default).
+    # ------------------------------------------------------------------
+
+    _WEBCHAT_DEFAULT_PROFILE = "default"
+
+    def _tenant_scoped_ner(self, tenant, org_settings) -> bool:
+        tenant_ner = bool(getattr(tenant, "ner_enabled", False))
+        org_ner = bool(getattr(org_settings, "ner_enabled", False))
+        return tenant_ner or org_ner
+
+    def _tenant_scoped_profile(self, policy_profile_override: str | None) -> str:
+        """Default DLP profile for web-chat, honoring a permitted override.
+        Web-chat sends no override today; if one arrives it may only tighten."""
+        effective = self._WEBCHAT_DEFAULT_PROFILE
+        if policy_profile_override is not None:
+            if not is_override_permitted(
+                policy_profile_override, self._WEBCHAT_DEFAULT_PROFILE
+            ):
+                raise AuthorizationError(
+                    "Policy profile override not permitted — override would "
+                    "relax restrictions below the default profile.",
+                    details={
+                        "requested": policy_profile_override,
+                        "project_profile": self._WEBCHAT_DEFAULT_PROFILE,
+                    },
+                )
+            effective = policy_profile_override
+        return effective
+
+    def _tenant_scoped_context(
+        self, session: Session, auth: ResolvedApiKey, request_id: str | None,
+        *, policy_profile_override: str | None = None,
+    ) -> RequestContext:
+        tenant = session.get(TenantORM, auth.tenant_id)
+        org_settings = session.get(OrgSettingsORM, 1)
+        return RequestContext(
+            tenant_id=auth.tenant_id,
+            project_id=getattr(auth, "project_id", None),  # user-scoped label; never looked up
+            project_name=None,
+            policy_profile_id=self._tenant_scoped_profile(policy_profile_override),
+            request_id=request_id,
+            region=(tenant.region if tenant else "global"),
+            ner_enabled=self._tenant_scoped_ner(tenant, org_settings),
+            user_id=getattr(auth, "log_user_id", None),
+        )
+
+    async def _tenant_scoped_context_async(
+        self, session: AsyncSession, auth: ResolvedApiKey, request_id: str | None,
+        *, policy_profile_override: str | None = None,
+    ) -> RequestContext:
+        tenant = await session.get(TenantORM, auth.tenant_id)
+        org_settings = await session.get(OrgSettingsORM, 1)
+        return RequestContext(
+            tenant_id=auth.tenant_id,
+            project_id=getattr(auth, "project_id", None),  # user-scoped label; never looked up
+            project_name=None,
+            policy_profile_id=self._tenant_scoped_profile(policy_profile_override),
+            request_id=request_id,
+            region=(tenant.region if tenant else "global"),
+            ner_enabled=self._tenant_scoped_ner(tenant, org_settings),
+            user_id=getattr(auth, "log_user_id", None),
+        )
+
     async def resolve_project_context_async(
         self,
         session: AsyncSession,
@@ -111,6 +183,17 @@ class ProjectService:
             Per-request ``policy_profile_override`` is less restrictive
             than the project's configured profile.
         """
+        # Web-chat / service-JWT path (Bug 1): a user's chat is NOT a developer
+        # project. The service-JWT resolver bills/attributes to the end USER +
+        # tenant (portal_credit_check reads portal_user_id, not project_id), so
+        # there is no project row to require — resolve the request context from
+        # the TENANT + the default DLP profile instead of a phantom project.
+        if getattr(auth, "internal_trusted", False):
+            return await self._tenant_scoped_context_async(
+                session, auth, request_id,
+                policy_profile_override=policy_profile_override,
+            )
+
         project = await session.get(ProjectORM, auth.project_id)
         if project is None:
             raise NotFoundError(

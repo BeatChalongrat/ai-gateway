@@ -290,13 +290,19 @@ func (r *Runner) Execute(ctx context.Context, spec Spec) (*Result, error) {
 	localRun := filepath.Join(r.cfg.WorkDir, runID)
 	localIn := filepath.Join(localRun, "in")
 	localOut := filepath.Join(localRun, "out")
-	if err := os.MkdirAll(localIn, 0o700); err != nil {
+	if err := os.MkdirAll(localIn, 0o755); err != nil {
 		return nil, fmt.Errorf("sandbox: mkdir in: %w", err)
 	}
 	if err := os.MkdirAll(localOut, 0o777); err != nil {
 		return nil, fmt.Errorf("sandbox: mkdir out: %w", err)
 	}
-	// The container's uid 65534 must be able to write /job/out.
+	// The container runs --user 65534:65534, so it must be able to
+	// TRAVERSE+READ /job/in (0755: it only reads the read-only inputs) and
+	// WRITE /job/out (0777). Chmod after MkdirAll defeats the process umask
+	// (MkdirAll applies mode & ~umask, which can strip the group/other bits
+	// uid-65534 needs). Bug 2: 'in' at 0700 made job.json unreadable ->
+	// 'Permission denied: /job/in/job.json' -> 502 on every run.
+	_ = os.Chmod(localIn, 0o755)
 	_ = os.Chmod(localOut, 0o777)
 	cleanup := func() { _ = os.RemoveAll(localRun) }
 

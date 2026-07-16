@@ -36,9 +36,14 @@ services:
       # INTERNAL_SERVICE_SECRET. Empty -> header not sent (shared-key
       # semantics).
       - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-}
-      - SERVICE_JWT_SECRET=dev-service-jwt-secret-change-in-prod
-      - USER_JWT_SECRET=dev-user-jwt-secret-change-in-prod
-      - CSRF_SECRET=dev-csrf-secret-change-in-prod
+      # Bug 3: read the ONE .env value (same var + dev default as the backend
+      # and base chat-edge) so signer and verifier never diverge. Hardcoding
+      # the literal here re-introduced FIX 1's dormancy the moment
+      # SERVICE_JWT_SECRET is set/rotated in .env (backend takes the new value,
+      # this stayed pinned -> mismatch -> silent fallback).
+      - SERVICE_JWT_SECRET=${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}
+      - USER_JWT_SECRET=${USER_JWT_SECRET:-dev-user-jwt-secret-change-in-prod}
+      - CSRF_SECRET=${CSRF_SECRET:-dev-csrf-secret-change-in-prod}
       # Portal-JWT secret — MUST match the FastAPI backend's
       # ``portal_jwt_secret``. Tokens minted by the Portal verify here.
       - PORTAL_JWT_SECRET=${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
