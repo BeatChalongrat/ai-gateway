@@ -18,7 +18,7 @@ struct SubPattern {
 // One entry per Python tuple in ``_PATTERNS``. Order matters for
 // deterministic output — we walk in Python's order so the parity
 // test sees identical sequences.
-static PATTERNS: [SubPattern; 5] = [
+static PATTERNS: [SubPattern; 6] = [
     SubPattern {
         entity_type: "bearer_token",
         // Python: `\bBearer\s+[A-Za-z0-9\-._~+/]+=*\b` with re.ASCII.
@@ -33,9 +33,19 @@ static PATTERNS: [SubPattern; 5] = [
     },
     SubPattern {
         entity_type: "openai_api_key",
+        // Bug 4: match on the sk- PREFIX (the discriminator) with a low body
+        // floor (6) instead of a 20-char length threshold that let a
+        // short-but-real key (sk-test-abc123) egress raw. Mirrors
+        // bearer_token.py — keep the two in lockstep for the parity test.
         re: Lazy::new(|| {
-            Regex::new(r"\bsk-(?!ant-)(?:proj-)?[A-Za-z0-9\-_]{20,}\b").expect("openai")
+            Regex::new(r"\bsk-(?!ant-)(?:proj-|live-)?[A-Za-z0-9\-_]{6,}\b").expect("openai")
         }),
+    },
+    SubPattern {
+        entity_type: "gateway_api_key",
+        // gw_ — this gateway's own API-key prefix; a leaked gw_ key is a
+        // credential. Prefix-match like the sk- family.
+        re: Lazy::new(|| Regex::new(r"\bgw_[A-Za-z0-9\-_]{6,}\b").expect("gateway")),
     },
     SubPattern {
         entity_type: "github_token",

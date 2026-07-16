@@ -1048,6 +1048,16 @@ class GatewayOrchestrator:
                             estimated_cost_usd=0.0,  # cached responses cost nothing
                             dlp_input_findings=len(input_enforcement.match_actions),
                             dlp_input_action=input_enforcement.overall_action.name.lower(),
+                            # Bug 4 (logging): the cache-hit path logged
+                            # findings but dropped the CATEGORY (the fresh
+                            # path sets it at the success persist). That made
+                            # dlp_categories intermittently empty on a masked
+                            # secret — populated on the cache MISS, blank on the
+                            # HIT. Populate it here too (input-only: the cached
+                            # response is already masked, no response scan).
+                            dlp_categories=sorted(
+                                {ma.match.category for ma in input_enforcement.match_actions}
+                            ),
                             input_raw=safe_input_snapshot(
                                 input_raw, input_masked, input_enforcement
                             ),

@@ -72,6 +72,30 @@
       "should_match": false,
       "expected_count": 0,
       "expected_spans": []
+    },
+    {
+      "id": "openai_key_short_prefix",
+      "input": "token sk-test-abc123 here",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "gateway_api_key",
+      "input": "leaked gw_abc123def456 oops",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 22
+        }
+      ]
     }
   ]
 }
