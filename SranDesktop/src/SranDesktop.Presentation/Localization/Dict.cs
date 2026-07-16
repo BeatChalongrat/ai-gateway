@@ -200,6 +200,7 @@ public static class Dict
         ["agent.paused"] = "Paused at the step limit — the tool history is saved. Continue to keep working.",
         ["agent.continue"] = "Continue",
         ["agent.plan"] = "Plan",
+        ["tool.remembering"] = "Saving a note...",
         // Phase 16 A — sub-agent nested tool activity
         ["subagent.nestedSteps"] = "Sub-agent steps",
 
@@ -597,6 +598,7 @@ public static class Dict
         ["agent.paused"] = "หยุดชั่วคราวที่ขีดจำกัดจำนวนขั้นตอน — บันทึกประวัติการใช้เครื่องมือไว้แล้ว กด \"ทำต่อ\" เพื่อดำเนินการต่อ",
         ["agent.continue"] = "ทำต่อ",
         ["agent.plan"] = "แผนงาน",
+        ["tool.remembering"] = "กำลังบันทึกโน้ต...",
         // Phase 16 A — sub-agent nested tool activity
         ["subagent.nestedSteps"] = "ขั้นตอนของเอเจนต์ย่อย",
 

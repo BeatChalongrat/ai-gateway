@@ -49,4 +49,11 @@ public interface IConversationStore
     // lists per tail + the active tail index, so ◀ n/m ▶ survives restarts.
     Task SaveBranchSetAsync(BranchSetRecord record, CancellationToken ct = default);
     Task<IReadOnlyList<BranchSetRecord>> GetBranchSetsAsync(string conversationId, CancellationToken ct = default);
+
+    // Agent memory notes (Phase B PART 3): short durable model-authored hints
+    // scoped to a conversation. AddNoteAsync keeps only the newest N per
+    // conversation (older ones are pruned); GetNotesAsync returns them oldest
+    // first for the ## Notes system-prompt block.
+    Task AddNoteAsync(string conversationId, string content, CancellationToken ct = default);
+    Task<IReadOnlyList<Domain.Entities.AgentNote>> GetNotesAsync(string conversationId, CancellationToken ct = default);
 }

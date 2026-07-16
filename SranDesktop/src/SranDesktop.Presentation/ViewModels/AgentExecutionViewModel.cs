@@ -153,6 +153,7 @@ public partial class ToolExecutionItemViewModel : ObservableObject
         "open_url" => "Geo_Browser",
         "open_application" => "Geo_Monitor",
         "read_clipboard" or "write_clipboard" => "Geo_Copy",
+        "remember" => "Geo_FileText",
         "generate_image" => "Geo_ImageBadge",
         "generate_video" => "Geo_VideoBadge",
         _ => "Geo_Tool"
@@ -178,6 +179,7 @@ public partial class ToolExecutionItemViewModel : ObservableObject
         "open_url" => "Open link",
         "read_clipboard" => "Read clipboard",
         "write_clipboard" => "Write clipboard",
+        "remember" => "Remember",
         "web_search" => "Web search",
         _ => toolName.Replace('_', ' ')
     };
