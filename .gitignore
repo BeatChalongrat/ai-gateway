@@ -18,6 +18,11 @@ coverage/
 .DS_Store
 *.log
 logs/
+
+# Scratch/debug scratchpads — never commit (once held a real admin JWT; see
+# docs/SECURITY_17A_TOKEN_PURGE.md). Ignored everywhere in the tree.
+.tmp_bugs/
+**/.tmp_bugs/
 tmp/
 storage/
 # Track the Go ``internal/storage/`` package — the generic
