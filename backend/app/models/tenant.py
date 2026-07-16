@@ -68,6 +68,20 @@ class TenantORM(Base):
     media_pii_egress: Mapped[str] = mapped_column(
         String(8), nullable=False, server_default="allow"
     )
+    # FIX 2 (migration 065) — per-tenant raw-egress policy for the two
+    # ADDITIONAL intentional unmasked channels the gateway now fronts so
+    # chat-edge stops calling OpenAI directly: ``kb_pii_egress`` governs
+    # embeddings (KB document indexing + RAG query text), ``voice_pii_egress``
+    # governs voice (TTS input text + STT audio). "allow" (default) =
+    # identity PII may egress raw (audited); "block" = fail closed on ANY
+    # identity PII (and, for STT, refuse the un-scannable audio outright).
+    # The credential/secret class blocks regardless.
+    kb_pii_egress: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="allow"
+    )
+    voice_pii_egress: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="allow"
+    )
     monthly_video_quota: Mapped[int | None] = mapped_column(
         sa.Integer, nullable=True
     )

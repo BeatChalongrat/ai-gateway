@@ -76,7 +76,7 @@ func (s *RAGService) Enabled() bool { return s.embedder.Enabled() }
 // QueryKnowledgeBase embeds “query“ and returns the top matching
 // chunks from the named KB. topK == 0 → service default.
 func (s *RAGService) QueryKnowledgeBase(
-	ctx context.Context, tenantID, kbID uuid.UUID, query string, topK int,
+	ctx context.Context, tenantID, userID, kbID uuid.UUID, query string, topK int,
 ) ([]RetrievedChunk, error) {
 	if !s.Enabled() {
 		return nil, ErrEmbeddingDisabled
@@ -84,7 +84,11 @@ func (s *RAGService) QueryKnowledgeBase(
 	if topK <= 0 {
 		topK = s.topK
 	}
-	emb, err := s.embedder.GenerateEmbedding(ctx, query)
+	// FIX 2 — the query embeds via the gateway, attributed to the querying
+	// end-user (falls back to the tenant marker when absent).
+	emb, err := s.embedder.GenerateEmbedding(
+		ctx, embeddingCallCtx(tenantID, userID), query,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -110,9 +114,9 @@ func (s *RAGService) QueryKnowledgeBase(
 // the KB, format the result. Errors are swallowed (returns "") so a
 // retrieval glitch never blocks the reply.
 func (s *RAGService) BuildContext(
-	ctx context.Context, tenantID, kbID uuid.UUID, query string,
+	ctx context.Context, tenantID, userID, kbID uuid.UUID, query string,
 ) string {
-	chunks, err := s.QueryKnowledgeBase(ctx, tenantID, kbID, query, 0)
+	chunks, err := s.QueryKnowledgeBase(ctx, tenantID, userID, kbID, query, 0)
 	if err != nil {
 		return ""
 	}

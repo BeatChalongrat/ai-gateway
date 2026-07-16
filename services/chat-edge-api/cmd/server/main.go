@@ -378,7 +378,7 @@ func main() {
 	// OpenAI" error_message. We wire RAGService into messageSvc
 	// unconditionally so a future env-var flip enables retrieval
 	// without a service restart.
-	embeddingSvc := service.NewEmbeddingService()
+	embeddingSvc := service.NewEmbeddingService(gateway)
 	knowledgeSvc := service.NewKnowledgeService(
 		knowledgeRepo, embeddingSvc, fileSvc, storageBackend,
 		service.KnowledgeServiceKnobs{
@@ -466,7 +466,7 @@ func main() {
 		Share:        shareHandler,
 		Admin:        adminHandler,
 		Knowledge:    handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
-		Voice:        handler.NewVoiceHandler(),
+		Voice:        handler.NewVoiceHandler(gateway),
 		Excel:        handler.NewExcelHandler(excelSvc, filesRepo),
 		Document:     handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
 		Workspace:    handler.NewWorkspaceHandler(filesRepo, workspaceSvc),

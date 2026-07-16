@@ -148,6 +148,23 @@ class SearchQueryBlockedError(GatewayError):
     message = "Search query blocked by DLP egress policy."
 
 
+class RawEgressBlockedError(GatewayError):
+    """Raw-egress content withheld by DLP egress policy (Phase 9 extension,
+    FIX 2 — embeddings + voice channels).
+
+    Raised for the credential/secret class ALWAYS (an API key inside a KB
+    document or a spoken command must never egress), and for identity PII
+    when the tenant's per-channel policy (``kb_pii_egress`` /
+    ``voice_pii_egress``) is ``block``. The content is never masked — a
+    masked embedding or masked TTS input is meaningless — so it is either
+    sent verbatim (identity PII, default policy, audited) or refused
+    outright. ``details['channel']`` carries the raw-egress channel.
+    """
+
+    code = "raw_egress_blocked"
+    message = "Content blocked by DLP egress policy."
+
+
 # --- Provider / Upstream ---
 
 class ProviderError(GatewayError):

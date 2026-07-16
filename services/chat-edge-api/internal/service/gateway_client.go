@@ -24,7 +24,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -1254,6 +1256,163 @@ func (g *GatewayClient) SearchConfig(
 		return nil, fmt.Errorf("gateway: decode search-config: %w", err)
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// Embeddings (gateway /v1/embeddings) — FIX 2
+//
+// chat-edge no longer calls OpenAI /v1/embeddings directly (that bypassed
+// DLP). The gateway fronts it behind the raw-egress gate
+// (scan_embedding_text: credential-block + per-tenant PII + audit), then
+// calls OpenAI. Same trusted-internal auth + identity headers as the media
+// proxy so the gateway attributes/audits the egress to the end user.
+// ---------------------------------------------------------------------------
+
+// GenerateEmbedding requests a single embedding vector from the gateway.
+// The text egresses RAW by design (a masked embedding is useless) but the
+// gateway's DLP gate blocks the credential/secret class and honors the
+// tenant's kb_pii_egress policy — a 403 (raw_egress_blocked) surfaces as a
+// GatewayUnavailableError the indexer records on the document.
+func (g *GatewayClient) GenerateEmbedding(
+	ctx context.Context, callCtx GatewayCallContext, text string,
+) ([]float32, error) {
+	buf, err := json.Marshal(map[string]any{"input": text})
+	if err != nil {
+		return nil, fmt.Errorf("gateway: marshal embedding request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, g.BaseURL+"/embeddings", bytes.NewReader(buf),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build embedding request: %w", err)
+	}
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
+	}
+	var out struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("gateway: decode embedding response: %w", err)
+	}
+	if len(out.Data) == 0 || len(out.Data[0].Embedding) == 0 {
+		return nil, errors.New("gateway: embedding response empty")
+	}
+	return out.Data[0].Embedding, nil
+}
+
+// ---------------------------------------------------------------------------
+// Voice (gateway /v1/voice/{transcribe,synthesize}) — FIX 2
+//
+// chat-edge no longer calls OpenAI Whisper/TTS directly. The gateway fronts
+// both behind the raw-egress gate (scan_voice_text for TTS text;
+// assert_stt_egress_allowed for STT audio) before OpenAI.
+// ---------------------------------------------------------------------------
+
+// VoiceTranscribe forwards audio bytes to the gateway STT route and returns
+// the transcript. The multipart field names match the gateway route
+// (``audio`` file + optional ``language``).
+func (g *GatewayClient) VoiceTranscribe(
+	ctx context.Context, callCtx GatewayCallContext,
+	audio []byte, filename, contentType, language string,
+) (string, error) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	part, err := mw.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": []string{
+			fmt.Sprintf(`form-data; name="audio"; filename=%q`, filename),
+		},
+		"Content-Type": []string{contentType},
+	})
+	if err != nil {
+		return "", fmt.Errorf("gateway: build voice form: %w", err)
+	}
+	if _, err := part.Write(audio); err != nil {
+		return "", fmt.Errorf("gateway: write voice audio: %w", err)
+	}
+	if language != "" {
+		_ = mw.WriteField("language", language)
+	}
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("gateway: close voice form: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, g.BaseURL+"/voice/transcribe", &body,
+	)
+	if err != nil {
+		return "", fmt.Errorf("gateway: build voice request: %w", err)
+	}
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return "", &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return "", &GatewayUnavailableError{Status: resp.StatusCode, Body: string(b)}
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("gateway: decode voice response: %w", err)
+	}
+	return out.Text, nil
+}
+
+// VoiceSynthesize forwards TTS text to the gateway and returns the raw mp3
+// bytes. Returns the upstream status + body inside GatewayUnavailableError on
+// any non-2xx (so a DLP 403 on the text surfaces distinctly).
+func (g *GatewayClient) VoiceSynthesize(
+	ctx context.Context, callCtx GatewayCallContext,
+	text, voice string, speed float64,
+) ([]byte, error) {
+	buf, err := json.Marshal(map[string]any{
+		"text": text, "voice": voice, "speed": speed,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gateway: marshal voice synth: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, g.BaseURL+"/voice/synthesize", bytes.NewReader(buf),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: build voice synth request: %w", err)
+	}
+	if err := g.internalHeaders(httpReq, callCtx); err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.http.Do(httpReq)
+	if err != nil {
+		return nil, &GatewayUnavailableError{Status: 0, Body: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(b)}
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 32*1024*1024))
 }
 
 func truncate(s string, n int) string {

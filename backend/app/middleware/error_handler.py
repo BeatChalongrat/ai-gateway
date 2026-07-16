@@ -29,6 +29,7 @@ from app.core.exceptions import (
     ProviderUnavailableError,
     QuotaExceededError,
     RateLimitExceededError,
+    RawEgressBlockedError,
     SearchDisabledError,
     SearchProvidersUnavailableError,
     SearchQueryBlockedError,
@@ -54,6 +55,8 @@ _STATUS_MAP: dict[type[GatewayError], int] = {
     SearchProvidersUnavailableError: 503,
     # 403 like the other DLP blocks — the query itself is refused.
     SearchQueryBlockedError: 403,
+    # 403 like search — the embedding/voice content itself is refused.
+    RawEgressBlockedError: 403,
     ProviderTimeoutError: 504,
     ProviderUnavailableError: 503,
     ProviderNotImplementedError: 501,

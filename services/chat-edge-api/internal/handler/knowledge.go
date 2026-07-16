@@ -305,6 +305,7 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 	}
 	doc, err := h.svc.UploadDocument(r.Context(), service.UploadDocumentInput{
 		TenantID:        caller.TenantUUID,
+		UserID:          caller.UserID,
 		KnowledgeBaseID: kbID,
 		OriginalName:    header.Filename,
 		ContentType:     ct,
@@ -426,7 +427,7 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	chunks, err := h.rag.QueryKnowledgeBase(r.Context(), caller.TenantUUID, kbID, req.Query, req.TopK)
+	chunks, err := h.rag.QueryKnowledgeBase(r.Context(), caller.TenantUUID, caller.UserID, kbID, req.Query, req.TopK)
 	if err != nil {
 		if errors.Is(err, service.ErrEmbeddingDisabled) {
 			WriteError(w, http.StatusServiceUnavailable, "EMBEDDING_DISABLED",

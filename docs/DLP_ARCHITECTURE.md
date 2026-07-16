@@ -143,20 +143,22 @@ Environment variables:
 
 It does **not** contain `matched_text`. The raw sensitive value exists only in transient memory during the request lifecycle and is never written to any log, database, or external system.
 
-## Intentional raw egress (Phase 9)
+## Intentional raw egress (Phase 9; extended by FIX 2)
 
-Two channels — and only two — send user content to third-party providers **without identity-PII masking**, because masking would break the feature itself:
+Four channels — and only four — send user content to third-party providers **without identity-PII masking**, because masking would break the feature itself:
 
 - **Web search** (`POST /v1/search` → Tavily/Brave/SerpAPI/Google/Bing): the real query is required for useful results. A masked query ("prognosis for `<PERSON_1>`") returns garbage.
 - **Media generation** (`/v1/images|videos|audio/generations` + the chat-edge media tool path → OpenAI/Replicate/ElevenLabs): the prompt is the creative intent; masking a name yields the wrong image/voice/video.
+- **Embeddings** (`POST /v1/embeddings` → OpenAI; used by knowledge-base indexing and RAG retrieval): the embedding vector of a masked chunk ("notes about `<PERSON_1>`") no longer matches the real query, so retrieval breaks. Covers **both** the KB *document content* on index and the *search query* on retrieval. *(FIX 2 — the gateway now fronts this so chat-edge no longer calls OpenAI directly.)*
+- **Voice** (`POST /v1/voice/transcribe` + `/v1/voice/synthesize` → OpenAI Whisper/TTS): STT needs the real audio; TTS needs the real text to speak. *(FIX 2 — likewise gateway-fronted.)*
 
 This pass-through is deliberate and bounded:
 
-1. **The credential/secret class is always withheld.** Both channels run the `media_gen` DLP profile before egress; API keys, bearer tokens, private keys, DB connection strings, and financial instruments block the request (403 `search_query_blocked` / DLP 403). A search never needs a leaked API key to be useful.
-2. **Per-tenant control.** `tenants.search_pii_egress` and `tenants.media_pii_egress` (`allow` | `block`, default `allow`). Under `block`, ANY identity PII in a search query or media prompt fails the request closed — for compliance-strict tenants (e.g. healthcare).
-3. **Audited.** Every allowed raw egress that actually carried identity PII writes a `request_logs` row with `policy_action = raw_egress_allow`, the channel, and detection **category counts only** — never the query/prompt text or matched values. A tenant's compliance view can answer "which searches/prompts left unmasked."
+1. **The credential/secret class is always withheld.** The text channels (search, media, embeddings, TTS text) run the `media_gen` DLP profile before egress; API keys, bearer tokens, private keys, DB connection strings, and financial instruments block the request (403 `search_query_blocked` / `raw_egress_blocked` / DLP 403). A KB document or spoken command containing a secret can never leak it. *(One documented limitation: STT **audio** cannot be scanned before transcription — there is no text yet. A `block`-policy tenant is refused STT outright; otherwise the raw-audio egress is audit-flagged, and the resulting transcript re-enters the **masked** chat pipeline, where the credential class IS enforced.)*
+2. **Per-tenant control.** `tenants.search_pii_egress`, `media_pii_egress`, `kb_pii_egress` (embeddings), and `voice_pii_egress` (`allow` | `block`, default `allow`). Under `block`, ANY identity PII in that channel's content fails the request closed — for compliance-strict tenants (e.g. healthcare). **Deploy note:** the default is `allow` (preserves today's behaviour); a compliance-strict tenant must be switched to `block` per channel.
+3. **Audited.** Every allowed raw egress that actually carried identity PII (or, for STT, any allowed raw-audio egress) writes a `request_logs` row with `policy_action = raw_egress_allow`, the channel, and detection **category counts only** — never the query/prompt/transcript text or matched values. A tenant's compliance view can answer "which searches/prompts/KB-indexing/voice left unmasked."
 4. **No raw text in our own stores.** The search credit-ledger row carries a query hash, not the query.
-5. **Machine-checked.** The whitelist is a single constant (`app/services/dlp/egress_policy.py::RAW_EGRESS_ALLOWED = {"web_search", "media_gen"}`) and `tests/test_dlp_egress_invariant.py` fails CI if any new outbound-HTTP module is added without being classified as masked, whitelisted, or user-content-free.
+5. **Machine-checked.** The whitelist is a single constant (`app/services/dlp/egress_policy.py::RAW_EGRESS_ALLOWED = {"web_search", "media_gen", "embeddings", "voice"}`) and `tests/test_dlp_egress_invariant.py` fails CI if any new outbound-HTTP module is added without being classified as masked, whitelisted, or user-content-free — and additionally pins that chat-edge's embeddings/voice Go paths route through the gateway (not OpenAI directly), so the bypass cannot silently return.
 
 Enterprise/PDPA customers should be shown this section as the disclosure they consent to.
 
