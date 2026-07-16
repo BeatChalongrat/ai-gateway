@@ -379,4 +379,114 @@ public class SpawnAgentToolTests
         SpawnAgentTool.NestedMaxIterations.Should().BeGreaterThanOrEqualTo(25);
         SpawnAgentTool.NestedMaxDuration.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMinutes(8));
     }
+
+    // ---- Phase B PART 2: parallel fan-out --------------------------------------
+
+    /// <summary>Thread-safe gateway that releases all in-flight streams only once
+    /// <paramref name="barrierCount"/> have entered concurrently — so the test
+    /// COMPLETING proves the runs overlapped (a sequential run would deadlock and
+    /// time out).</summary>
+    private sealed class ConcurrencyGateway : IGatewayApiClient
+    {
+        private readonly int _barrierCount;
+        private readonly TaskCompletionSource _barrier = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly object _lock = new();
+        private int _entered;
+        private int _current;
+        public int MaxConcurrent { get; private set; }
+
+        public ConcurrencyGateway(int barrierCount) => _barrierCount = barrierCount;
+
+        public async IAsyncEnumerable<SseFrame> StreamCompletionAsync(
+            GatewayCompletionRequest request, [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            lock (_lock) { _current++; MaxConcurrent = Math.Max(MaxConcurrent, _current); }
+            if (Interlocked.Increment(ref _entered) >= _barrierCount)
+                _barrier.TrySetResult();
+            await _barrier.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+            yield return new SseFrame(null, ContentFrame("done"));
+            yield return new SseFrame(null, StopFrame);
+            lock (_lock) { _current--; }
+        }
+
+        public Task<GatewaySearchResponse> SearchAsync(string query, int maxResults = 5, CancellationToken ct = default) =>
+            Task.FromResult(new GatewaySearchResponse(query, "fake", 0, new List<GatewaySearchResultItem>()));
+    }
+
+    /// <summary>Stateless (thread-safe) gateway: on the first pass (no tool result
+    /// yet) it asks for fake_tool; once a tool result is present it answers. Used
+    /// to prove a fan-out sub-agent can't invoke a consent-requiring tool.</summary>
+    private sealed class ToolAttemptGateway : IGatewayApiClient
+    {
+        public async IAsyncEnumerable<SseFrame> StreamCompletionAsync(
+            GatewayCompletionRequest request, [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            var hasToolResult = request.Messages.Any(m => m.Role == "tool");
+            if (!hasToolResult)
+            {
+                yield return new SseFrame(null, ToolCallFrame("c1", "fake_tool"));
+                yield return new SseFrame(null, FinishToolCallsFrame);
+            }
+            else
+            {
+                yield return new SseFrame(null, ContentFrame("done"));
+                yield return new SseFrame(null, StopFrame);
+            }
+            await Task.Yield();
+        }
+
+        public Task<GatewaySearchResponse> SearchAsync(string query, int maxResults = 5, CancellationToken ct = default) =>
+            Task.FromResult(new GatewaySearchResponse(query, "fake", 0, new List<GatewaySearchResultItem>()));
+    }
+
+    [Fact]
+    public async Task Fanout_Runs_Tasks_Concurrently_And_Combines_Labeled_Results()
+    {
+        var gw = new ConcurrencyGateway(barrierCount: 2);
+        var h = Create(gatewayOverride: gw);
+        var args = Args("""{"tasks":[{"task":"analyze A","label":"Alpha"},{"task":"analyze B","label":"Beta"}]}""");
+
+        var result = await h.Tool.ExecuteAsync(args, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Success.Should().BeTrue();
+        result.Content.Should().Contain("## Alpha").And.Contain("## Beta").And.Contain("done");
+        // The two sub-agents were in flight at the same time (barrier proof).
+        gw.MaxConcurrent.Should().BeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public async Task Fanout_Sub_Agents_Cannot_Invoke_Consent_Requiring_Tools()
+    {
+        var h = Create(gatewayOverride: new ToolAttemptGateway());
+        var args = Args("""{"tasks":[{"task":"a","label":"A"},{"task":"b","label":"B"}]}""");
+
+        var result = await h.Tool.ExecuteAsync(args, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Success.Should().BeTrue();
+        // fake_tool is Ask (not auto-approvable) → excluded from the fan-out host,
+        // so it resolves to "unknown tool" and NEVER executes in a parallel run.
+        h.Fake.Executions.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Fanout_Parent_Cancellation_Aborts_All_Children()
+    {
+        var h = Create(gatewayOverride: new HangingGateway());
+        using var cts = new CancellationTokenSource();
+        var args = Args("""{"tasks":[{"task":"a","label":"A"},{"task":"b","label":"B"}]}""");
+
+        var run = h.Tool.ExecuteAsync(args, cts.Token);
+        cts.CancelAfter(TimeSpan.FromMilliseconds(150));
+
+        var act = async () => await run.WaitAsync(TimeSpan.FromSeconds(10));
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public void Fanout_Concurrency_Is_Bounded()
+    {
+        SpawnAgentTool.MaxConcurrentFanout.Should().BeInRange(2, 3);
+        SpawnAgentTool.MaxFanoutTasks.Should().BeGreaterThanOrEqualTo(SpawnAgentTool.MaxConcurrentFanout);
+    }
 }
