@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -116,6 +117,62 @@ public partial class ComposerControl : UserControl
     {
         if (DataContext is ChatViewModel vm && vm.IsModelPopupOpen)
             vm.IsModelPopupOpen = false;
+    }
+
+    /// <summary>Phase C PART 4: arrow-key / Home-End / Esc navigation of the model
+    /// picker (the rows are Buttons; Enter/Space selects natively when focused).</summary>
+    private void ModelPopup_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            if (DataContext is ChatViewModel vm) vm.IsModelPopupOpen = false;
+            e.Handled = true;
+            return;
+        }
+
+        var nav = e.Key switch
+        {
+            Key.Down => Services.PickerNavKey.Down,
+            Key.Up => Services.PickerNavKey.Up,
+            Key.Home => Services.PickerNavKey.Home,
+            Key.End => Services.PickerNavKey.End,
+            _ => Services.PickerNavKey.None,
+        };
+        if (nav == Services.PickerNavKey.None)
+            return;
+
+        var rows = ModelRowButtons();
+        if (rows.Count == 0)
+            return;
+
+        var focused = Keyboard.FocusedElement as DependencyObject;
+        var current = focused is null ? -1 : rows.FindIndex(b => ReferenceEquals(b, focused));
+        var next = Services.ModelPickerNavigator.NextIndex(current, rows.Count, nav);
+        if (next >= 0)
+        {
+            rows[next].Focus();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>The picker row Buttons in display order (across all groups).</summary>
+    private List<Button> ModelRowButtons()
+    {
+        var result = new List<Button>();
+        CollectModelRowButtons(ModelPopupRoot, result);
+        return result;
+    }
+
+    private static void CollectModelRowButtons(DependencyObject root, List<Button> into)
+    {
+        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is Button { DataContext: ViewModels.ModelItemViewModel } b)
+                into.Add(b);
+            CollectModelRowButtons(child, into);
+        }
     }
 
     private void InputBox_PreviewKeyDown(object sender, KeyEventArgs e)

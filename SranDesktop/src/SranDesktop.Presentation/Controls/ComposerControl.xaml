@@ -415,7 +415,8 @@
                             Background="{DynamicResource BgPrimaryBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="1" CornerRadius="12"
-                            Padding="8" MinWidth="380" MaxWidth="460">
+                            Padding="8" MinWidth="380" MaxWidth="460"
+                            PreviewKeyDown="ModelPopup_PreviewKeyDown">
                         <Border.Effect>
                             <DropShadowEffect BlurRadius="14" ShadowDepth="2"
                                               Opacity="0.35" Color="Black" />
@@ -436,19 +437,15 @@
                                             <TextBlock Text="{Binding DisplayName}" FontSize="13"
                                                        TextTrimming="CharacterEllipsis"
                                                        Foreground="{DynamicResource TextPrimaryBrush}" />
-                                            <TextBlock Text="{Binding Provider}" FontSize="11"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="TextBlock">
-                                                        <Setter Property="Visibility" Value="Visible" />
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding Provider}" Value="{x:Null}">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
+                                            <!-- Phase C PART 4: provider · context window -->
+                                            <TextBlock Text="{Binding MetaLine}" FontSize="11"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                                       Visibility="{Binding HasMetaLine, Converter={StaticResource BoolToVisibility}}" />
+                                            <!-- Phase C PART 4: one-line model description (was unrendered) -->
+                                            <TextBlock Text="{Binding Description}" FontSize="11"
+                                                       TextWrapping="Wrap" MaxWidth="320" Margin="0,1,0,0"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                                       Visibility="{Binding HasDescription, Converter={StaticResource BoolToVisibility}}" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Orientation="Horizontal"
                                                     Margin="8,0,0,0" VerticalAlignment="Center">
