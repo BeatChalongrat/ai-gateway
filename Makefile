@@ -1,4 +1,4 @@
-.PHONY: up prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
+.PHONY: up preflight prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -14,7 +14,10 @@ help: ## Show this help
 	@echo "  webchat       docker compose -f docker-compose.webchat.yml up -d   SEPARATE stack + its OWN postgres:5433 / redis:6380 / web-chat:3002"
 	@echo "  sandbox       make sandbox-up  overlay: enable the hardened code-interpreter (docker-socket opt-in)"
 
-up: ## Start the full stack in DEV mode (hot-reload, ports bound to 0.0.0.0)
+preflight: ## Verify .env has the hard-required vars (REDIS_PASSWORD, ...) before compose up — fails loud with a fix hint
+	bash scripts/preflight.sh
+
+up: preflight ## Start the full stack in DEV mode (hot-reload, ports bound to 0.0.0.0)
 	docker compose up -d
 	@echo ""
 	@echo "Backend:   http://localhost:8080/health"

@@ -20,7 +20,14 @@ echo " SRAN AI Gateway — bootstrap (first-run, idempotent)"
 echo "════════════════════════════════════════════════════════════════"
 
 # 1. .env ------------------------------------------------------------------
+# gen_env creates a fresh .env OR backfills missing required vars into an
+# existing one (FIX 5, Bug B) — so an old .env predating a required var gets
+# unstuck by re-running bootstrap.
 bash scripts/gen_env.sh
+
+# 1b. preflight — fail loud with a fix hint if a required var is still absent
+#     (belt-and-suspenders: gen_env should have ensured them).
+bash scripts/preflight.sh
 
 # 2. bring up the dev stack ------------------------------------------------
 echo ""

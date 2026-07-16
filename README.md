@@ -67,15 +67,21 @@ a .NET 8 WPF desktop client (`SranDesktop/`).
 ```bash
 git clone https://github.com/BeatChalongrat/ai-gateway.git
 cd ai-gateway
-cp .env.example .env
-# REDIS_PASSWORD is MANDATORY — set it in .env (redis + its consumers refuse
-# to start without it). Generate one: openssl rand -base64 32
-make bootstrap      # happy path: build + start + migrate + seed
+make bootstrap      # happy path: gen .env + build + start + migrate + seed
 ```
 
-`make bootstrap` brings up the dev stack, applies migrations, and seeds the admin
-and portal users. `make help` lists every target. If you prefer the raw steps:
-`make up` (start), then `make seed` (create users).
+`make bootstrap` generates `.env` with strong secrets (or **backfills** any
+missing hard-required var — e.g. `REDIS_PASSWORD` — into an existing `.env`,
+never overwriting your values), brings up the dev stack, applies migrations, and
+seeds the admin and portal users. `make help` lists every target. Raw steps:
+`make up` (start) then `make seed` (create users).
+
+> **`REDIS_PASSWORD` is MANDATORY** — redis runs `--requirepass` and its
+> consumers fold it into the `redis://` URL, so the stack refuses to start
+> without it (compose `${REDIS_PASSWORD:?}`). You don't set it by hand:
+> `make bootstrap` generates/backfills it, and `make up` runs a **preflight**
+> that fails loud with a fix hint (rather than a cryptic compose error) if it's
+> ever missing. To set one manually: `openssl rand -hex 32`.
 
 > **`make bootstrap`, `make sandbox-up`, and an expanded `make help`** are landing
 > in a parallel change. If they aren't in your `Makefile` yet, use `make up` +

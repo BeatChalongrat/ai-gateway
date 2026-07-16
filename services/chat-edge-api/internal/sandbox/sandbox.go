@@ -338,12 +338,7 @@ func (r *Runner) Execute(ctx context.Context, spec Spec) (*Result, error) {
 	}
 
 	// Bind-mount source paths as the DAEMON sees them.
-	hostRun := r.cfg.HostWorkDir
-	if hostRun != r.cfg.WorkDir {
-		hostRun = joinHost(r.cfg.HostWorkDir, runID)
-	} else {
-		hostRun = localRun
-	}
+	hostRun := resolveHostRunDir(r.cfg.WorkDir, r.cfg.HostWorkDir, localRun, runID)
 	hostIn := joinHost(hostRun, "in")
 	hostOut := joinHost(hostRun, "out")
 
@@ -483,6 +478,30 @@ func collectArtifacts(localOut, hostOut string) []Artifact {
 	}
 	_ = hostOut
 	return arts
+}
+
+// resolveHostRunDir maps THIS process's per-run staging dir (localRun, under
+// WorkDir) to the path the DOCKER DAEMON must bind-mount with -v.
+//
+// This is the subtle, easy-to-invert distinction that broke the sandbox
+// (Section 5 / run_python 503): SANDBOX_HOST_WORKDIR must be the HOST path the
+// shared volume is bind-mounted FROM (as the daemon sees it), NOT the
+// in-container staging path (== WorkDir). If HostWorkDir is set to the
+// container path, this returns localRun and the daemon -v's a path that only
+// exists inside chat-edge — it then creates an empty root-owned dir on the
+// host, the uid-65534 sandbox can't write __meta.json, and Execute reports
+// "no result sidecar" (503).
+//
+//   - HostWorkDir == WorkDir  (dev/standalone: docker shares this process's
+//     mount namespace) → the paths are identical; use localRun as-is.
+//   - HostWorkDir != WorkDir  (chat-edge is itself a container) → the daemon's
+//     -v source is joinHost(HostWorkDir, runID), i.e. the HOST inode that
+//     backs this container's localRun via the shared bind mount.
+func resolveHostRunDir(workDir, hostWorkDir, localRun, runID string) string {
+	if hostWorkDir != workDir {
+		return joinHost(hostWorkDir, runID)
+	}
+	return localRun
 }
 
 // joinHost joins path segments with forward slashes so a Linux daemon

@@ -184,6 +184,39 @@ func networkValues(args []string) []string {
 // pipeline. If a future change removes `--network none` (or swaps it for
 // bridge/host), this test fails — the egress invariant is enforced by the
 // build, not by convention.
+// TestSandbox_HostRunDirUsesDaemonPath pins the host-vs-container path fix
+// (Bug A). When chat-edge is a container, SANDBOX_HOST_WORKDIR is the HOST
+// path; the daemon's -v source must be under it, NOT the in-container
+// staging path. Inverting this (HostWorkDir == the container WorkDir) is what
+// gave every run_python a 503 ("no result sidecar").
+func TestSandbox_HostRunDirUsesDaemonPath(t *testing.T) {
+	// chat-edge-in-container: HostWorkDir is the host bind source (absolute),
+	// WorkDir is the in-container mount point. The daemon must -v the HOST dir.
+	got := resolveHostRunDir(
+		"/sandbox-runs",                  // WorkDir (in-container)
+		"/abs/host/data/sandbox-runs",    // HostWorkDir (host, as daemon sees it)
+		"/sandbox-runs/RID",              // localRun (in-container)
+		"RID",
+	)
+	if got != "/abs/host/data/sandbox-runs/RID" {
+		t.Fatalf("host run dir = %q, want the DAEMON host path "+
+			"/abs/host/data/sandbox-runs/RID (the -v source the daemon can resolve)", got)
+	}
+
+	// The broken config the bug had: HostWorkDir == the container WorkDir →
+	// the -v source becomes the container path, which the daemon can't back.
+	// Guard that this is NOT what a correct host config produces.
+	if got == "/sandbox-runs/RID" {
+		t.Fatal("host run dir resolved to the in-CONTAINER path — the daemon " +
+			"would create an empty root-owned dir on the host (the 503 bug)")
+	}
+
+	// dev/standalone: identical paths → use localRun verbatim.
+	if d := resolveHostRunDir("/work", "/work", "/work/RID", "RID"); d != "/work/RID" {
+		t.Fatalf("standalone host run dir = %q, want /work/RID", d)
+	}
+}
+
 func TestSandbox_DockerArgsAlwaysNoNetwork(t *testing.T) {
 	r := New(Config{
 		WorkDir:     "/work",
