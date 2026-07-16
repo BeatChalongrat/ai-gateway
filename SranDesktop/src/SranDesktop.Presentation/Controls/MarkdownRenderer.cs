@@ -524,21 +524,36 @@ public sealed class MarkdownRenderer
                     break;
 
                 case LinkInline { IsImage: true } image:
-                    var imageIcon = new System.Windows.Shapes.Path
+                    var alt = LabelOf(image) ?? image.Url ?? "image";
+                    var inlineImage = TryBuildInlineImage(image, alt);
+                    if (inlineImage is not null)
                     {
-                        Data = ImageGeometry,
-                        Stretch = Stretch.Uniform,
-                        Width = 14,
-                        Height = 14,
-                        StrokeThickness = 1.5,
-                        StrokeStartLineCap = PenLineCap.Round,
-                        StrokeEndLineCap = PenLineCap.Round,
-                        StrokeLineJoin = PenLineJoin.Round,
-                        Margin = new Thickness(0, 0, 4, 0)
-                    };
-                    imageIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondaryBrush");
-                    target.Add(new InlineUIContainer(imageIcon) { BaselineAlignment = BaselineAlignment.Center });
-                    target.Add(BuildHyperlink(image, LabelOf(image) ?? image.Url ?? "image"));
+                        // Phase C PART 1: render the actual image (charts, generated
+                        // images) inline instead of an icon + link.
+                        target.Add(new InlineUIContainer(inlineImage)
+                        {
+                            BaselineAlignment = BaselineAlignment.Bottom
+                        });
+                    }
+                    else
+                    {
+                        // file://, local paths, malformed data URIs → icon + link.
+                        var imageIcon = new System.Windows.Shapes.Path
+                        {
+                            Data = ImageGeometry,
+                            Stretch = Stretch.Uniform,
+                            Width = 14,
+                            Height = 14,
+                            StrokeThickness = 1.5,
+                            StrokeStartLineCap = PenLineCap.Round,
+                            StrokeEndLineCap = PenLineCap.Round,
+                            StrokeLineJoin = PenLineJoin.Round,
+                            Margin = new Thickness(0, 0, 4, 0)
+                        };
+                        imageIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondaryBrush");
+                        target.Add(new InlineUIContainer(imageIcon) { BaselineAlignment = BaselineAlignment.Center });
+                        target.Add(BuildHyperlink(image, alt));
+                    }
                     break;
 
                 case LinkInline link:
@@ -578,6 +593,87 @@ public sealed class MarkdownRenderer
                     target.Add(new Run(inline.ToString() ?? string.Empty));
                     break;
             }
+        }
+    }
+
+    /// <summary>Max on-screen size for an inline image — fits the message column
+    /// and constrains decode memory.</summary>
+    private const int InlineImageMaxDip = 480;
+    private const int InlineImageDecodeWidth = 960;
+
+    /// <summary>
+    /// Builds a WPF element rendering an inline markdown image (Phase C PART 1),
+    /// or null to fall back to the icon+link. Only data:/http(s) are loaded
+    /// (never local files). On decode/load failure it swaps to the alt-text link
+    /// so a broken image never leaves a blank gap.
+    /// </summary>
+    private UIElement? TryBuildInlineImage(LinkInline image, string alt)
+    {
+        var plan = Rendering.InlineImageResolver.Plan(image.Url);
+        var bitmap = TryCreateBitmap(plan);
+        if (bitmap is null)
+            return null;
+
+        var element = new System.Windows.Controls.Image
+        {
+            Source = bitmap,
+            Stretch = Stretch.Uniform,
+            StretchDirection = StretchDirection.DownOnly, // never upscale small charts
+            MaxWidth = InlineImageMaxDip,
+            MaxHeight = InlineImageMaxDip,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 4, 0, 4)
+        };
+        System.Windows.Automation.AutomationProperties.SetName(element, alt);
+        element.ToolTip = alt;
+
+        // Fallback: if a remote image fails to load, show the alt-text link.
+        var fallback = new TextBlock { Visibility = Visibility.Collapsed };
+        fallback.Inlines.Add(BuildHyperlink(image, alt));
+
+        var grid = new Grid();
+        grid.Children.Add(element);
+        grid.Children.Add(fallback);
+        element.ImageFailed += (_, _) =>
+        {
+            element.Visibility = Visibility.Collapsed;
+            fallback.Visibility = Visibility.Visible;
+        };
+        return grid;
+    }
+
+    private static System.Windows.Media.Imaging.BitmapImage? TryCreateBitmap(
+        Rendering.InlineImagePlan plan)
+    {
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.DecodePixelWidth = InlineImageDecodeWidth; // cap decoded size (perf/memory)
+            switch (plan.Kind)
+            {
+                case Rendering.InlineImageKind.DataUri when plan.Data is { Length: > 0 }:
+                    bmp.StreamSource = new System.IO.MemoryStream(plan.Data);
+                    break;
+                case Rendering.InlineImageKind.Remote when plan.RemoteUrl is not null:
+                    bmp.UriSource = new Uri(plan.RemoteUrl, UriKind.Absolute);
+                    // Async so a slow/failed http fetch never blocks the UI.
+                    bmp.CreateOptions = System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation;
+                    break;
+                default:
+                    return null;
+            }
+            bmp.EndInit();
+            if (bmp.CanFreeze)
+                bmp.Freeze();
+            return bmp;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or System.IO.FileFormatException
+            or UriFormatException or ArgumentException or System.IO.IOException)
+        {
+            // Undecodable payload / bad URI → fall back to the icon+link.
+            return null;
         }
     }
 
