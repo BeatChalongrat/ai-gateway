@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
@@ -9,7 +7,7 @@ using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
 
-public sealed class RunCommandTool : IMcpTool
+public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
 {
     private const int DefaultTimeoutSeconds = 300;
     private const int MinTimeoutSeconds = 5;
@@ -27,15 +25,21 @@ public sealed class RunCommandTool : IMcpTool
     private readonly ILogger<RunCommandTool> _logger;
     private readonly ISettingsService? _settings;
     private readonly ShellSession? _session;
+    private readonly IProcessRunner _processRunner;
+
+    /// <summary>Live stdout/stderr as the command runs (Phase B PART 1).</summary>
+    public event Action<ToolOutputChunk>? OutputStreamed;
 
     public RunCommandTool(
         ILogger<RunCommandTool> logger,
         ISettingsService? settings = null,
-        ShellSession? session = null)
+        ShellSession? session = null,
+        IProcessRunner? processRunner = null)
     {
         _logger = logger;
         _settings = settings;
         _session = session;
+        _processRunner = processRunner ?? new SystemProcessRunner();
     }
 
     public string Name => "run_command";
@@ -79,56 +83,48 @@ public sealed class RunCommandTool : IMcpTool
 
         var timeout = ResolveTimeout(arguments);
         var (shell, shellArgs) = PickShell(normalized, command);
+        var spec = new ProcessRunSpec(shell, shellArgs, workingDirectory);
 
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo
+        // Bounded so a flooding build can't blow memory/context (head+tail kept).
+        var output = new BoundedOutputBuffer();
+        var gate = new object();
+        void OnLine(string line)
         {
-            FileName = shell,
-            Arguments = shellArgs,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = workingDirectory,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-
-        var output = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
+            lock (gate) output.Append(line);
+            // Live UI: append the line to the run_command card as it arrives.
+            OutputStreamed?.Invoke(new ToolOutputChunk(Name, line));
+        }
 
         _logger.LogInformation("run_command: {Command} (cwd={Cwd}, timeout={Timeout}s)",
             command, workingDirectory, timeout.TotalSeconds);
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
+        int exitCode;
         try
         {
-            await process.WaitForExitAsync(timeoutCts.Token);
+            exitCode = await _processRunner.RunAsync(spec, OnLine, timeoutCts.Token);
         }
         catch (OperationCanceledException)
         {
-            try { process.Kill(entireProcessTree: true); } catch (Exception) { /* already gone */ }
             if (ct.IsCancellationRequested)
                 throw;
 
-            // Return the partial output + a clear "timed out" status rather than
-            // a bare kill, so the model can decide what to do next (PART 3).
+            // Timed out (not user-cancelled): return the partial output + a
+            // resumable note rather than a bare kill (Phase A behavior kept).
             string partial;
-            lock (output) partial = output.ToString().TrimEnd();
+            lock (gate) partial = output.ToString().TrimEnd();
             var note = $"[Command still running after {timeout.TotalSeconds:0}s and was stopped. " +
                        "The output above is partial. Increase timeout_seconds for a longer build, " +
                        "or split the work into smaller commands.]";
             return ToolResult.Ok(partial.Length == 0 ? note : $"{partial}\n{note}");
         }
 
+        // The model's final result is still the full captured output + exit code
+        // (streaming is additive UI); the ToolResult 50K cap applies downstream.
         string text;
-        lock (output) text = output.ToString().TrimEnd();
-        var summary = $"[exit code {process.ExitCode}]";
+        lock (gate) text = output.ToString().TrimEnd();
+        var summary = $"[exit code {exitCode}]";
         return ToolResult.Ok(text.Length == 0 ? summary : $"{text}\n{summary}");
     }
 

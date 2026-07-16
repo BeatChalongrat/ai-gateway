@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -43,6 +44,26 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasScreenshot))]
     private BitmapSource? _screenshotPreview;
+
+    // ── Live output (Phase B PART 1) ────────────────────────────────────────
+    // run_command streams stdout/stderr here as it runs, rendered as a mini
+    // terminal while the card is pending. Tail-bounded so a flood can't grow it.
+    private readonly StringBuilder _streamBuffer = new();
+    private const int StreamDisplayCap = 8000;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasStreamingOutput))]
+    private string? _streamingOutput;
+
+    public bool HasStreamingOutput => !string.IsNullOrEmpty(StreamingOutput);
+
+    public void AppendStreamingLine(string line)
+    {
+        _streamBuffer.Append(line).Append('\n');
+        if (_streamBuffer.Length > StreamDisplayCap)
+            _streamBuffer.Remove(0, _streamBuffer.Length - StreamDisplayCap);
+        StreamingOutput = _streamBuffer.ToString();
+    }
 
     public bool IsPending => State == "pending";
     public bool IsOk => State == "ok";
@@ -106,6 +127,9 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     public void Complete(AgentToolResultEvent result)
     {
         State = result.Success ? "ok" : "failed";
+        // The live mini-terminal gives way to the final captured output.
+        _streamBuffer.Clear();
+        StreamingOutput = null;
         DurationText = result.DurationMs > 0 ? $"{result.DurationMs} ms" : string.Empty;
         ResultPreview = result.ResultPreview;
         FullResult = Truncate(result.FullResult ?? result.ResultPreview, 4000);
