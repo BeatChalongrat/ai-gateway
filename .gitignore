@@ -30,6 +30,11 @@ storage/
 # etc.), not Go source. Exception must come AFTER the broader rule.
 !services/chat-edge-api/internal/storage/
 !services/chat-edge-api/internal/storage/**
+# Same fix for the desktop's C# Storage source — the ``storage/`` rule
+# matched it case-insensitively on Windows, leaving these core files
+# UNTRACKED (a fresh clone wouldn't build). Re-include the source dir.
+!SranDesktop/src/SranDesktop.Infrastructure/Storage/
+!SranDesktop/src/SranDesktop.Infrastructure/Storage/**
 uploads/
 *.sqlite3
 admin-ui/tsconfig.tsbuildinfo
