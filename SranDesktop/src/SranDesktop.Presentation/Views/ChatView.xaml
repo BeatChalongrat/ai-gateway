@@ -85,6 +85,37 @@
             </ListBox.ItemTemplate>
         </ListBox>
 
+        <!-- Jump to latest (Phase C PART 2): shown only when scrolled up with
+             content below; click smooth-scrolls to the newest message + re-pins. -->
+        <Button x:Name="JumpToLatestButton" Grid.Row="0"
+                Visibility="Collapsed"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="0,0,24,12" Width="36" Height="36"
+                Cursor="Hand" Click="JumpToLatest_Click"
+                ToolTip="{loc:T chat.jumpToLatest}"
+                AutomationProperties.Name="{loc:T chat.jumpToLatest}">
+            <Button.Template>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bg" CornerRadius="18"
+                            Background="{DynamicResource BgSecondaryBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="10" ShadowDepth="1" Opacity="0.25" />
+                        </Border.Effect>
+                        <controls:IconView Geometry="{StaticResource Geo_ChevronDown}"
+                                           Stroke="{DynamicResource TextSecondaryBrush}"
+                                           Width="18" Height="18"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Button.Template>
+        </Button>
+
         <!-- "Chat is getting long" nudge (Phase 5 Task 4) — dismissible,
              chat-edge conversations only, at most once per conversation. -->
         <Border Grid.Row="1"

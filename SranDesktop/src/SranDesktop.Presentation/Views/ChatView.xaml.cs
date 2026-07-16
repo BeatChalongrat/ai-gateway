@@ -42,9 +42,31 @@ public partial class ChatView : UserControl
         // A user scroll (no content growth) sets the intent: away from the
         // bottom pauses auto-scroll, returning to the bottom resumes it.
         if (e.ExtentHeightChange == 0)
-            _autoScroll = scroll.VerticalOffset >= scroll.ScrollableHeight - 4;
+            _autoScroll = scroll.VerticalOffset >= scroll.ScrollableHeight - Services.ScrollStateHelper.BottomThreshold;
         else if (_autoScroll)
             scroll.ScrollToVerticalOffset(scroll.ExtentHeight);
+
+        UpdateJumpToLatest(scroll);
+    }
+
+    /// <summary>Phase C PART 2: show the jump button only when scrolled up with
+    /// content below (even during a stream that keeps growing).</summary>
+    private void UpdateJumpToLatest(ScrollViewer scroll)
+    {
+        var hasContentBelow = scroll.ScrollableHeight > 0
+            && scroll.VerticalOffset < scroll.ScrollableHeight - Services.ScrollStateHelper.BottomThreshold;
+        JumpToLatestButton.Visibility =
+            Services.ScrollStateHelper.ShouldShowJumpToLatest(_autoScroll, hasContentBelow)
+                ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void JumpToLatest_Click(object sender, RoutedEventArgs e)
+    {
+        var scroll = MessageScroll;
+        if (scroll is null) return;
+        _autoScroll = true; // re-pin so the stream keeps following
+        Services.AnimatedScroller.ScrollToBottom(scroll); // snaps when reduced-motion
+        JumpToLatestButton.Visibility = Visibility.Collapsed;
     }
 
     private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
