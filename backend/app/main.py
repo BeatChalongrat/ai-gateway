@@ -99,6 +99,17 @@ async def lifespan(app: FastAPI):
     from app.core.schema_guard import run_schema_guard
     await asyncio.to_thread(run_schema_guard)
 
+    # Service-JWT wiring visibility (FIX 1b) — make a DORMANT decoupling loud
+    # in every env. validate_secrets() already REFUSES to start in prod when
+    # chat-edge is wired but SERVICE_JWT_SECRET is empty; this covers dev/test
+    # (where validate_secrets no-ops) so the silent fallback can't hide.
+    _jwt_issue = settings.service_jwt_wiring_issue()
+    if _jwt_issue:
+        print(f"[startup] WARNING: {_jwt_issue}", flush=True)
+    elif (settings.service_jwt_secret or "").strip():
+        print("[startup] service-JWT auth ACTIVE (chat-edge service tokens "
+              "verified against SERVICE_JWT_SECRET).", flush=True)
+
     # Seed admin user (runs blocking bcrypt in thread)
     await asyncio.to_thread(_seed_admin_user)
 

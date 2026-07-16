@@ -95,6 +95,11 @@ services:
       # proxy hostnames. Required: compose refuses to start otherwise.
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in .env for prod (e.g. https://gateway-api.sran.net,https://admin.sran.net)}
       PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:?PORTAL_PUBLIC_URL must be set in .env for prod}
+      # FIX 1b — the gateway verifies chat-edge's service JWT with this;
+      # hard-required in prod (same var + form as the chat-edge service so
+      # both hold the SAME value). Without it the service-JWT path is
+      # dormant and validate_secrets() refuses to start (chat-edge is wired).
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?SERVICE_JWT_SECRET must be set for prod (openssl rand -hex 32) and MUST match the chat-edge service}
     ports: !override
       - "127.0.0.1:8080:8080"
     restart: always
