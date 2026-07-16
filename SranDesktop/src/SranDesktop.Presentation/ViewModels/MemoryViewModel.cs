@@ -47,10 +47,16 @@ public partial class MemoryViewModel : ObservableObject
     /// <summary>Raised after any mutation so the header badge can refresh.</summary>
     public event EventHandler? MemoriesChanged;
 
-    public MemoryViewModel(IChatEdgeApiClient api, ILogger<MemoryViewModel> logger)
+    private readonly IDialogService _dialogs;
+
+    /// <summary>Themed confirm/error dialogs (Phase C.5), shared with item VMs.</summary>
+    internal IDialogService Dialogs => _dialogs;
+
+    public MemoryViewModel(IChatEdgeApiClient api, ILogger<MemoryViewModel> logger, IDialogService dialogs)
     {
         _api = api;
         _logger = logger;
+        _dialogs = dialogs;
     }
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
@@ -154,11 +160,9 @@ public partial class MemoryViewModel : ObservableObject
     [RelayCommand]
     private async Task ClearAllAsync()
     {
-        var confirmed = System.Windows.MessageBox.Show(
-            LocaleService.Instance.T("memory.danger.clearConfirm"),
+        var confirmed = await _dialogs.ConfirmAsync(
             LocaleService.Instance.T("memory.danger.clearButton"),
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            LocaleService.Instance.T("memory.danger.clearConfirm"));
         if (!confirmed)
             return;
 
@@ -334,11 +338,9 @@ public partial class MemoryItemViewModel : ObservableObject
     [RelayCommand]
     private async Task DeleteAsync()
     {
-        var confirmed = System.Windows.MessageBox.Show(
-            LocaleService.Instance.T("memory.deleteConfirm"),
+        var confirmed = await _parent.Dialogs.ConfirmAsync(
             LocaleService.Instance.T("memory.title"),
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            LocaleService.Instance.T("memory.deleteConfirm"));
         if (!confirmed)
             return;
 

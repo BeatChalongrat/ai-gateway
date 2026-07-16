@@ -2525,10 +2525,9 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Share failed");
-            System.Windows.MessageBox.Show(
-                $"{Localization.LocaleService.Instance.T("share.unavailable")}\n{Localization.LocaleService.Instance.T("share.exportInstead")}",
-                Localization.LocaleService.Instance.T("share.title"),
-                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            Application.Services.ToastService.Instance.Show(
+                Application.Interfaces.ToastKind.Info, "share.unavailable",
+                Localization.LocaleService.Instance.T("share.exportInstead"));
         }
     }
 

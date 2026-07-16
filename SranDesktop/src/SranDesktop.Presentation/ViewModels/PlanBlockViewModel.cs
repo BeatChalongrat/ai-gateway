@@ -294,9 +294,8 @@ public partial class PlanResultViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.IO.IOException)
         {
-            System.Windows.MessageBox.Show(ex.Message,
-                LocaleService.Instance.T("common.download"),
-                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            Application.Services.ToastService.Instance.Show(
+                Application.Interfaces.ToastKind.Error, "dialog.error", ex.Message);
         }
         finally
         {

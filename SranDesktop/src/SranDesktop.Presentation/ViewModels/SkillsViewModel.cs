@@ -19,10 +19,16 @@ public partial class SkillsViewModel : ObservableObject
 
     [ObservableProperty] private string? _errorMessage;
 
-    public SkillsViewModel(ISkillManager skills, ILogger<SkillsViewModel> logger)
+    private readonly IDialogService _dialogs;
+
+    /// <summary>Themed confirm/error dialogs (Phase C.5), shared with item VMs.</summary>
+    internal IDialogService Dialogs => _dialogs;
+
+    public SkillsViewModel(ISkillManager skills, ILogger<SkillsViewModel> logger, IDialogService dialogs)
     {
         _skills = skills;
         _logger = logger;
+        _dialogs = dialogs;
     }
 
     [RelayCommand]
@@ -91,11 +97,9 @@ public partial class SkillItemViewModel : ObservableObject
     private async Task DeleteAsync()
     {
         if (IsBuiltin) return;
-        var confirmed = System.Windows.MessageBox.Show(
-            LocaleService.Instance.T("skill.deleteConfirm", DisplayName),
+        var confirmed = await _parent.Dialogs.ConfirmAsync(
             LocaleService.Instance.T("skill.title"),
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            LocaleService.Instance.T("skill.deleteConfirm", DisplayName));
         if (!confirmed)
             return;
 
