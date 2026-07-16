@@ -20,11 +20,14 @@ namespace SranDesktop.Application.Services;
 /// </summary>
 public sealed class ChatOrchestrator : IChatOrchestrator
 {
-    /// <summary>Default safety caps for a top-level turn. A nested run
-    /// (run_subagent, Phase 12 F) constructs its own instance with tighter
-    /// caps via the optional constructor parameters.</summary>
-    public const int DefaultMaxIterations = 25;
-    public static readonly TimeSpan DefaultMaxDuration = TimeSpan.FromMinutes(10);
+    /// <summary>Default safety caps for a top-level turn. These are now a SOFT
+    /// budget (Phase A PART 1/6): reaching them pauses the turn with its tool
+    /// history intact and offers Continue, rather than abandoning the task — so
+    /// the ceiling can be much higher than the old 25 without risking a runaway.
+    /// A nested run (run_subagent, Phase 12 F) constructs its own instance with
+    /// tighter caps via the optional constructor parameters.</summary>
+    public const int DefaultMaxIterations = 100;
+    public static readonly TimeSpan DefaultMaxDuration = TimeSpan.FromMinutes(20);
 
     private readonly int _maxIterations;
     private readonly TimeSpan _maxDuration;
@@ -43,6 +46,8 @@ public sealed class ChatOrchestrator : IChatOrchestrator
     private readonly IPermissionService _permissions;
     private readonly IConversationStore _store;
     private readonly ILogger<ChatOrchestrator> _logger;
+    private readonly ShellSession? _shellSession;
+    private readonly IToolScopeResolver? _scopeResolver;
 
     public event Func<ToolConsentRequest, Task<ToolConsentResponse>>? ConsentRequested;
 
@@ -56,7 +61,9 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         IConversationStore store,
         ILogger<ChatOrchestrator> logger,
         int maxIterations = DefaultMaxIterations,
-        TimeSpan? maxDuration = null)
+        TimeSpan? maxDuration = null,
+        ShellSession? shellSession = null,
+        IToolScopeResolver? scopeResolver = null)
     {
         if (maxIterations < 1)
             throw new ArgumentOutOfRangeException(nameof(maxIterations), "At least one iteration is required.");
@@ -68,6 +75,8 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         _logger = logger;
         _maxIterations = maxIterations;
         _maxDuration = maxDuration ?? DefaultMaxDuration;
+        _shellSession = shellSession;
+        _scopeResolver = scopeResolver;
     }
 
     public async IAsyncEnumerable<AgentStreamEvent> RunAsync(
@@ -204,25 +213,40 @@ public sealed class ChatOrchestrator : IChatOrchestrator
                 ToolCalls = pendingToolCalls.ToList()
             });
 
+            var pausedAtDeadline = false;
             foreach (var toolCall in pendingToolCalls)
             {
                 ct.ThrowIfCancellationRequested();
 
                 // The while-condition only checks the deadline between
-                // iterations — don't start another tool past it.
-                if (DateTimeOffset.UtcNow >= deadline)
+                // iterations — don't start another tool past it. Rather than
+                // abandon the turn, answer the remaining tool calls with a
+                // "paused" placeholder so the chain stays valid (every tool_call
+                // needs a result) and the turn can be RESUMED (PART 1/6).
+                if (pausedAtDeadline || DateTimeOffset.UtcNow >= deadline)
                 {
-                    yield return new AgentErrorEvent(TimeLimitMessage);
-                    yield break;
+                    pausedAtDeadline = true;
+                    messages.Add(ToolResultMessage(toolCall.Id, toolCall.Function.Name,
+                        "Not executed: the turn was paused at its time limit. It can be resumed to continue."));
+                    continue;
                 }
 
                 await foreach (var evt in ExecuteToolCallAsync(toolCall, messages, conversationId, ct))
                     yield return evt;
             }
+
+            if (pausedAtDeadline)
+            {
+                yield return new AgentPausedEvent(TimeLimitMessage);
+                yield break;
+            }
         }
 
-        yield return new AgentErrorEvent(iteration >= _maxIterations
-            ? $"Stopped: reached the {_maxIterations}-step tool limit."
+        // The cap is a checkpoint, not a cliff: the accumulated tool history is
+        // intact in `messages` (the caller's list), so the UI can offer Continue
+        // and re-enter this loop to resume the task (PART 1/6).
+        yield return new AgentPausedEvent(iteration >= _maxIterations
+            ? $"Paused: reached the {_maxIterations}-step limit. The task can be continued."
             : TimeLimitMessage);
     }
 
@@ -257,7 +281,11 @@ public sealed class ChatOrchestrator : IChatOrchestrator
             yield break;
         }
 
-        var scope = ExtractScope(tool, argumentsJson);
+        // Folder-scoped consent (PART 4): the resolver maps writes to their
+        // project folder and shell to its cwd; falls back to the exact-path
+        // scope when no resolver is wired (tests).
+        var scope = _scopeResolver?.Resolve(tool, argumentsJson, conversationId)
+                    ?? ExtractScope(tool, argumentsJson);
         var decision = await _permissions.CheckAsync(tool, scope, ct);
 
         if (decision == PermissionDecision.NeedsConsent)
@@ -299,6 +327,12 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         ToolResult result;
         try
         {
+            // Carry the active conversation to the tool via the ambient shell
+            // session (flows through AsyncLocal) so per-conversation shell state
+            // — the retained working directory — resolves correctly (PART 3).
+            if (_shellSession is not null)
+                _shellSession.CurrentConversationId = conversationId;
+
             using var args = JsonDocument.Parse(
                 string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
             result = await tool.ExecuteAsync(args.RootElement, ct);

@@ -83,6 +83,12 @@ public sealed class UserSettings
     [JsonPropertyName("granted_folders")]
     public List<string> GrantedFolders { get; set; } = new();
 
+    /// <summary>run_command timeout in seconds (Phase A PART 3). Defaults high
+    /// enough for a real .NET/npm build or test run; the old 30s hard cap killed
+    /// them mid-run. Clamped to a sane range by the tool.</summary>
+    [JsonPropertyName("shell_timeout_seconds")]
+    public int ShellTimeoutSeconds { get; set; } = 300;
+
     public UserSettings Clone()
     {
         var copy = (UserSettings)MemberwiseClone();

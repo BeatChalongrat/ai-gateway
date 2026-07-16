@@ -40,6 +40,15 @@ public sealed record AgentErrorEvent(string Message, string? Code = null) : Agen
 /// <summary>Agent loop status update.</summary>
 public sealed record AgentStatusEvent(string Status, int Iteration, int MaxIterations) : AgentStreamEvent;
 
+/// <summary>
+/// The turn hit its iteration/time budget with work still in flight (Phase A
+/// PART 1/6). Unlike <see cref="AgentErrorEvent"/> this is a CHECKPOINT, not a
+/// failure: the accumulated tool history is intact in the caller's message list
+/// and the loop can be re-entered to continue the task. The UI surfaces a
+/// "Continue" affordance instead of a terminal error.
+/// </summary>
+public sealed record AgentPausedEvent(string Reason) : AgentStreamEvent;
+
 /// <summary>Older messages were trimmed/pruned to fit the model's context window.</summary>
 public sealed record AgentContextTrimmedEvent(int OmittedMessages) : AgentStreamEvent;
 
