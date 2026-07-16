@@ -367,6 +367,18 @@
                                 <ProgressBar Height="2" IsIndeterminate="True" Margin="0,6,0,0"
                                              Visibility="{Binding IsPending, Converter={StaticResource BoolToVisibility}}" />
 
+                                <!-- Phase B PART 1: live shell output (mini terminal) while the
+                                     command runs — accumulates stdout/stderr in real time. -->
+                                <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
+                                        Padding="8" Margin="0,6,0,0"
+                                        Visibility="{Binding HasStreamingOutput, Converter={StaticResource BoolToVisibility}}">
+                                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                        <TextBlock Text="{Binding StreamingOutput}" FontFamily="Consolas" FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </ScrollViewer>
+                                </Border>
+
                                 <!-- expanded: input + output + screenshot + error -->
                                 <StackPanel Margin="0,8,0,0"
                                             Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">

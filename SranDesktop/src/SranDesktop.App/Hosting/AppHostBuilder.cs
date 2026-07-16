@@ -138,6 +138,8 @@ public static class AppHostBuilder
                     registry.Register(new OpenUrlTool());
                     registry.Register(new ReadClipboardTool());
                     registry.Register(new WriteClipboardTool());
+                    // Phase B PART 1: streams stdout/stderr live via the default
+                    // SystemProcessRunner (tests inject a fake IProcessRunner).
                     registry.Register(new RunCommandTool(
                         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RunCommandTool>>(),
                         sp.GetRequiredService<ISettingsService>(),

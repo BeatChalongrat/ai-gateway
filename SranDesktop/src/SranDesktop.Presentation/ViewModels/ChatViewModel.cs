@@ -32,6 +32,10 @@ public partial class ChatViewModel : ObservableObject
     /// progress. Subscribed once (both this VM and the tool are singletons).</summary>
     private readonly ISupportsNestedProgress? _nestedProgressTool;
 
+    /// <summary>Phase B PART 1: the run_command tool, when it streams stdout/
+    /// stderr live. Subscribed once (VM + tool are singletons).</summary>
+    private readonly ISupportsOutputStreaming? _outputStreamingTool;
+
     /// <summary>The assistant message whose tool loop is currently streaming —
     /// the target for nested sub-agent progress events (they arrive off-band of
     /// the main event loop). Set for the duration of a gateway agent turn.</summary>
@@ -492,6 +496,39 @@ public partial class ChatViewModel : ObservableObject
             .OfType<ISupportsNestedProgress>().FirstOrDefault();
         if (_nestedProgressTool is not null)
             _nestedProgressTool.NestedProgress += OnNestedProgress;
+
+        // Phase B PART 1: live shell output → the pending run_command card.
+        _outputStreamingTool = toolHost?.GetRegisteredTools()
+            .OfType<ISupportsOutputStreaming>().FirstOrDefault();
+        if (_outputStreamingTool is not null)
+            _outputStreamingTool.OutputStreamed += OnToolOutputStreamed;
+    }
+
+    /// <summary>
+    /// Route a live output chunk to the currently in-flight run_command card.
+    /// Tools execute sequentially at the top level, so at most one run_command
+    /// card is pending when these fire. Marshalled to the UI thread (the chunk
+    /// arrives on a process-reader thread); non-blocking so a flooding build
+    /// can't stall the reader.
+    /// </summary>
+    private void OnToolOutputStreamed(ToolOutputChunk chunk)
+    {
+        var message = _activeAgentMessage;
+        if (message is null)
+            return;
+
+        void Route()
+        {
+            var card = message.ToolExecutions
+                .FirstOrDefault(t => t.ToolName == chunk.ToolName && t.IsPending);
+            card?.AppendStreamingLine(chunk.Text);
+        }
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+            Route();
+        else
+            dispatcher.InvokeAsync(Route);
     }
 
     /// <summary>
