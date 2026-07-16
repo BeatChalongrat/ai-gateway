@@ -5,7 +5,9 @@ from __future__ import annotations
 import structlog
 
 from app.domain.observability import (
+    INPUT_RAW_NOT_PERSISTED_MARKER,
     OUTPUT_FINAL_REDACTED_MARKER,
+    safe_input_snapshot,
     safe_output_final_snapshot,
     safe_output_raw_snapshot,
     safe_output_snapshot,
@@ -18,6 +20,27 @@ class _Enf:
     def __init__(self, blocked=False, findings=True):
         self.is_blocked = blocked
         self.match_actions = [object()] if findings else []
+
+
+# ===========================================================================
+# 17D — input_raw never persists verbatim plaintext at rest
+# ===========================================================================
+
+
+class TestInputRawSnapshot:
+    def test_clean_input_is_not_persisted_verbatim(self):
+        # Detector-missed PII in "clean" traffic must NOT land in input_raw;
+        # the verbatim is kept encrypted in input_raw_encrypted instead.
+        pii = "my card is 4111 1111 1111 1111 and ssn 123-45-6789"
+        out = safe_input_snapshot(pii, pii, _Enf(findings=False))
+        assert out == INPUT_RAW_NOT_PERSISTED_MARKER
+        assert pii not in (out or "")
+
+    def test_blocked_input_placeholder(self):
+        assert safe_input_snapshot("x", "x", _Enf(blocked=True)) == "[BLOCKED_BY_DLP]"
+
+    def test_masked_findings_placeholder(self):
+        assert safe_input_snapshot("x", "x", _Enf(findings=True)) == "[MASKED_BY_DLP]"
 
 
 # ===========================================================================

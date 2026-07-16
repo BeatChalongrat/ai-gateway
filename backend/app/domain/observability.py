@@ -256,6 +256,12 @@ def build_dlp_findings_json(
     return json.dumps(findings, ensure_ascii=False)
 
 
+# Phase 17D — stored in ``input_raw`` for clean (no-DLP-finding) traffic so the
+# plaintext column never holds verbatim content the detector might have missed.
+# The real verbatim lives encrypted in ``input_raw_encrypted``.
+INPUT_RAW_NOT_PERSISTED_MARKER = "[NOT_PERSISTED_SEE_ENCRYPTED]"
+
+
 def safe_input_snapshot(
     input_raw: str | None,
     input_masked: str | None,
@@ -270,12 +276,22 @@ def safe_input_snapshot(
     fixed placeholder. Use ``safe_input_masked_snapshot`` for the
     ``input_masked`` column, which keeps the actual masked text
     (tokens only, no PII).
+
+    Phase 17D — even "clean" input (nothing the detector flagged) can
+    hold PII the detector MISSED (a false negative). Persisting it
+    verbatim would leak that content to anyone who reads the
+    ``request_logs`` table, so the clean path now stores a marker, NOT
+    the raw text. The verbatim is preserved encrypted in
+    ``input_raw_encrypted`` (AES-256-GCM Safe Trace audit channel,
+    populated for every request) and the admin Safe Trace view decrypts
+    stage 1 from there — so a plain DB leak no longer exposes
+    detector-missed content.
     """
     if getattr(enforcement, "is_blocked", False):
         return blocked_placeholder
     if getattr(enforcement, "match_actions", None):
         return "[MASKED_BY_DLP]"
-    return input_raw
+    return INPUT_RAW_NOT_PERSISTED_MARKER
 
 
 def safe_input_masked_snapshot(
