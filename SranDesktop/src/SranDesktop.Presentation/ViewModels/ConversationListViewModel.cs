@@ -235,9 +235,22 @@ public partial class ConversationListViewModel : ObservableObject
             MessageSearchResults.ToList(),
             showSearchSection: IsSearchingMessages || HasMessageSearchResults);
 
-        SidebarRows.Clear();
-        foreach (var row in rows)
-            SidebarRows.Add(row);
+        // In-place reconcile (FIX 12 Part B). The old Clear()+Add-all forced
+        // WPF to drop and rebind every row container on every refresh — the
+        // rebind churn behind the wrong-type CanExecute requeries (and visible
+        // flicker). Most rebuilds produce an element-equal list (conversation/
+        // folder/hit rows are stable VM references; header and folder-member
+        // rows are value-equal records), so usually this touches nothing.
+        var shared = Math.Min(SidebarRows.Count, rows.Count);
+        for (var i = 0; i < shared; i++)
+        {
+            if (!Equals(SidebarRows[i], rows[i]))
+                SidebarRows[i] = rows[i];
+        }
+        for (var i = SidebarRows.Count - 1; i >= rows.Count; i--)
+            SidebarRows.RemoveAt(i);
+        for (var i = shared; i < rows.Count; i++)
+            SidebarRows.Add(rows[i]);
     }
 
     partial void OnIsSearchingMessagesChanged(bool value) => ScheduleRowsRebuild();
@@ -365,9 +378,10 @@ public partial class ConversationListViewModel : ObservableObject
     /// server_id/source semantics stay consistent — then opens it. Failure
     /// shows an error toast and the row stays for a retry.</summary>
     [RelayCommand]
-    private async Task OpenMessageHitAsync(MessageSearchHitViewModel? hit)
+    private async Task OpenMessageHitAsync(object? parameter)
     {
-        if (hit is null || hit.IsPulling)
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not MessageSearchHitViewModel hit || hit.IsPulling)
             return;
 
         if (!hit.RequiresPull)
@@ -471,9 +485,10 @@ public partial class ConversationListViewModel : ObservableObject
 
     /// <summary>Context-menu Rename folder: inline editor in the header row.</summary>
     [RelayCommand]
-    private void RenameFolder(FolderItemViewModel? folder)
+    private void RenameFolder(object? parameter)
     {
-        if (folder is null)
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not FolderItemViewModel folder)
             return;
         folder.EditingName = folder.Name;
         folder.IsRenaming = true;
@@ -503,9 +518,10 @@ public partial class ConversationListViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task DeleteFolderAsync(FolderItemViewModel? folder)
+    private async Task DeleteFolderAsync(object? parameter)
     {
-        if (folder is null)
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not FolderItemViewModel folder)
             return;
 
         var confirmed = await _dialogs.ConfirmAsync(
@@ -568,9 +584,10 @@ public partial class ConversationListViewModel : ObservableObject
 
     /// <summary>Context-menu "New folder…": create a folder, then file the chat into it.</summary>
     [RelayCommand]
-    private async Task MoveToNewFolderAsync(ConversationItemViewModel? conv)
+    private async Task MoveToNewFolderAsync(object? parameter)
     {
-        if (conv is null)
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not ConversationItemViewModel conv)
             return;
         var name = Views.Dialogs.InputDialog.Show(
             System.Windows.Application.Current?.MainWindow, "New folder", "Folder name:");
@@ -602,10 +619,18 @@ public partial class ConversationListViewModel : ObservableObject
     }
 
     /// <summary>Row click in any sidebar section.</summary>
+    // FIX 12: every command reachable from a SidebarRows template takes
+    // object? and pattern-matches. SidebarRows mixes 6 row types in ONE
+    // recycled ItemsControl; while RebuildSidebarRowsNow repopulates it, WPF
+    // transiently requeries a button's command with a wrong-type DataContext
+    // (a group header lands on a conversation-row button) — and CommunityToolkit's
+    // RelayCommand<T>.CanExecute THROWS on a non-null wrong-type parameter
+    // ("Something went wrong" crash). object? + match makes that a no-op by
+    // construction. Single-type lists elsewhere keep their typed commands.
     [RelayCommand]
-    private void SelectConversation(ConversationItemViewModel? item)
+    private void SelectConversation(object? parameter)
     {
-        if (item is not null)
+        if (parameter is ConversationItemViewModel item)
             SelectedConversation = item;
     }
 
@@ -815,9 +840,10 @@ public partial class ConversationListViewModel : ObservableObject
 
     /// <summary>Context-menu Rename: turn the row title into an inline editor (web parity).</summary>
     [RelayCommand]
-    private void Rename(ConversationItemViewModel? item)
+    private void Rename(object? parameter)
     {
-        if (item is null)
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not ConversationItemViewModel item)
             return;
         item.EditingName = item.DisplayTitle;
         item.IsRenaming = true;
@@ -837,9 +863,10 @@ public partial class ConversationListViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task DeleteAsync(ConversationItemViewModel? item)
+    private async Task DeleteAsync(object? parameter)
     {
-        if (item is null) return;
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not ConversationItemViewModel item) return;
 
         var confirmed = await _dialogs.ConfirmAsync(
             Localization.LocaleService.Instance.T("confirm.deleteChatTitle"),
@@ -886,9 +913,10 @@ public partial class ConversationListViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task TogglePinAsync(ConversationItemViewModel? item)
+    private async Task TogglePinAsync(object? parameter)
     {
-        if (item is null) return;
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not ConversationItemViewModel item) return;
 
         var newValue = !item.IsPinned;
         try
