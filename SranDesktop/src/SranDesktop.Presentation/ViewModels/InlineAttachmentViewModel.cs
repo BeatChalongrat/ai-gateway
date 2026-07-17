@@ -2,7 +2,6 @@ using System.IO;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using SranDesktop.Presentation.Localization;
 
 namespace SranDesktop.Presentation.ViewModels;
 
@@ -10,12 +9,26 @@ namespace SranDesktop.Presentation.ViewModels;
 /// A generated/attached media file rendered inside an assistant bubble
 /// (R7 Features A/B). Images decode to a frozen BitmapSource; videos are
 /// written to a temp file so MediaElement can stream from disk.
+///
+/// FIX 10b: documents (the save-chip case) are created METADATA-ONLY —
+/// their bytes are fetched lazily via a resolver when the user actually
+/// saves, so opening a conversation never downloads or retains megabytes
+/// of PDFs/docs that may never be touched.
 /// </summary>
 public partial class InlineAttachmentViewModel : ObservableObject
 {
     public string Filename { get; }
     public string ContentType { get; }
-    public byte[] RawBytes { get; }
+
+    /// <summary>In-hand bytes. Empty for a lazy (document) attachment until
+    /// <see cref="ResolveBytesAsync"/> fetches them.</summary>
+    public byte[] RawBytes => _rawBytes;
+
+    private byte[] _rawBytes;
+
+    /// <summary>Lazy byte source for metadata-only attachments (FIX 10b):
+    /// local-first → filecache → authed download. Null for eager media.</summary>
+    private readonly Func<Task<byte[]?>>? _bytesResolver;
 
     /// <summary>Decoded bitmap for image/*; null otherwise.</summary>
     public BitmapSource? ImageSource { get; }
@@ -38,12 +51,37 @@ public partial class InlineAttachmentViewModel : ObservableObject
     {
         Filename = filename;
         ContentType = contentType;
-        RawBytes = rawBytes;
+        _rawBytes = rawBytes;
 
         if (IsImage)
             ImageSource = TryDecode(rawBytes);
         else if (IsVideo)
             VideoFilePath = TryWriteTempFile(filename, rawBytes);
+    }
+
+    /// <summary>Metadata-only attachment (FIX 10b): no bytes are held until
+    /// the user saves; <paramref name="bytesResolver"/> then fetches them
+    /// (returning null on failure, e.g. offline). Intended for documents —
+    /// media should use the eager constructor so it can render inline.</summary>
+    public InlineAttachmentViewModel(string filename, string contentType, Func<Task<byte[]?>> bytesResolver)
+    {
+        Filename = filename;
+        ContentType = contentType;
+        _rawBytes = Array.Empty<byte>();
+        _bytesResolver = bytesResolver;
+    }
+
+    /// <summary>Returns the attachment's bytes, fetching through the lazy
+    /// resolver on first use (and keeping them for a repeat save). Null or
+    /// empty means the fetch failed — callers surface that gracefully.</summary>
+    internal async Task<byte[]?> ResolveBytesAsync()
+    {
+        if (_rawBytes.Length > 0 || _bytesResolver is null)
+            return _rawBytes;
+        var bytes = await _bytesResolver();
+        if (bytes is { Length: > 0 })
+            _rawBytes = bytes;
+        return bytes;
     }
 
     private static BitmapSource? TryDecode(byte[] bytes)
@@ -84,7 +122,7 @@ public partial class InlineAttachmentViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void SaveAs()
+    private async Task SaveAsAsync()
     {
         var ext = Path.GetExtension(Filename);
         var dialog = new Microsoft.Win32.SaveFileDialog
@@ -94,17 +132,37 @@ public partial class InlineAttachmentViewModel : ObservableObject
                 ? "All files (*.*)|*.*"
                 : $"{ext.TrimStart('.').ToUpperInvariant()} (*{ext})|*{ext}|All files (*.*)|*.*"
         };
-        if (dialog.ShowDialog() == true)
+        if (dialog.ShowDialog() != true)
+            return;
+
+        // Lazy documents fetch their bytes here, on the first save (FIX
+        // 10b) — a failed fetch (offline, file deleted server-side) is a
+        // toast, never a crash.
+        byte[]? bytes;
+        try
         {
-            try
-            {
-                File.WriteAllBytes(dialog.FileName, RawBytes);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                Application.Services.ToastService.Instance.Show(
-                    Application.Interfaces.ToastKind.Error, "dialog.error", ex.Message);
-            }
+            bytes = await ResolveBytesAsync();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            bytes = null; // resolver failures surface as the toast below
+            System.Diagnostics.Debug.WriteLine($"Attachment fetch failed: {ex.Message}");
+        }
+        if (bytes is null || bytes.Length == 0)
+        {
+            Application.Services.ToastService.Instance.Show(
+                Application.Interfaces.ToastKind.Error, "attachment.downloadFailed");
+            return;
+        }
+
+        try
+        {
+            await File.WriteAllBytesAsync(dialog.FileName, bytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Application.Services.ToastService.Instance.Show(
+                Application.Interfaces.ToastKind.Error, "dialog.error", ex.Message);
         }
     }
 }

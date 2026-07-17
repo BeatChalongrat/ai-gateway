@@ -797,11 +797,37 @@ public partial class ChatViewModel : ObservableObject
             {
                 try
                 {
-                    var bytes = await GetOrDownloadAttachmentBytesAsync(conversationId, file);
-                    if (bytes is null || bytes.Length == 0)
+                    // FIX 10b: server file ids are UUIDs — reject anything
+                    // else BEFORE it can reach a filesystem path (the id is
+                    // a server-controlled string; a traversal-shaped id must
+                    // never touch the filecache path arithmetic).
+                    if (!Guid.TryParse(file.Id, out _))
+                    {
+                        _logger.LogWarning(
+                            "Skipping attachment with non-UUID id {Id}", file.Id);
                         continue;
-                    var attachment = new InlineAttachmentViewModel(
-                        file.Filename, file.ContentType ?? "application/octet-stream", bytes);
+                    }
+
+                    var contentType = file.ContentType ?? "application/octet-stream";
+                    InlineAttachmentViewModel attachment;
+                    if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                        || contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Media renders inline — the bytes are needed now.
+                        var bytes = await GetOrDownloadAttachmentBytesAsync(conversationId, file);
+                        if (bytes is null || bytes.Length == 0)
+                            continue;
+                        attachment = new InlineAttachmentViewModel(file.Filename, contentType, bytes);
+                    }
+                    else
+                    {
+                        // Documents only show a save chip (FIX 10b): metadata
+                        // now, bytes fetched lazily on Save through the same
+                        // local-first → filecache → download resolution (the
+                        // first fetch still writes the offline cache).
+                        attachment = new InlineAttachmentViewModel(file.Filename, contentType,
+                            () => GetOrDownloadAttachmentBytesAsync(conversationId, file));
+                    }
 
                     void Add()
                     {
@@ -838,6 +864,16 @@ public partial class ChatViewModel : ObservableObject
     private async Task<byte[]?> GetOrDownloadAttachmentBytesAsync(
         string conversationId, FileAttachmentDto file)
     {
+        // Defense in depth (FIX 10b): file.Id is a server-controlled string
+        // that becomes part of the filecache path below. The hydration entry
+        // already rejects non-UUID ids; re-check here so no future caller can
+        // reach the path arithmetic with a traversal-shaped id.
+        if (!Guid.TryParse(file.Id, out _))
+        {
+            _logger.LogWarning("Refusing attachment bytes for non-UUID id {Id}", file.Id);
+            return null;
+        }
+
         // 1. A local copy we already know about (own upload / prior cache).
         Domain.Entities.FileAttachment? known = null;
         try
