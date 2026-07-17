@@ -173,24 +173,28 @@ public class ChatViewModelServerReadTests : IDisposable
         _vm.Messages.Should().HaveCount(4);
     }
 
+    private static readonly string ImgId = Guid.NewGuid().ToString();
+    private static readonly string DocId = Guid.NewGuid().ToString();
+
     [Fact]
     public async Task Server_Files_Hydrate_Into_Bubbles_And_Cache_Locally()
     {
         // FIX 10: a conversation with web-uploaded attachments renders them
-        // on desktop — image inline in the user bubble, PDF as a file chip —
-        // and caches the bytes locally so a re-open works offline with no
-        // second download.
+        // on desktop — image inline in the user bubble, PDF as a file chip.
+        // FIX 10b: only the IMAGE downloads on open (it renders inline); the
+        // PDF chip is metadata-only until the user saves, and the image's
+        // bytes are cached so a re-open works offline with no second download.
         var conversation = await SeedConversationAsync();
         var png = OnePixelPng();
         _api.Setup(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string url, CancellationToken _) =>
-                url.Contains("img-1") ? png : "%PDF-fake"u8.ToArray());
+                url.Contains(ImgId) ? png : "%PDF-fake"u8.ToArray());
         var files = new List<FileAttachmentDto>
         {
-            new("img-1", "conv-1", "photo.png", "image/png", png.Length,
-                "/files/img-1/download", "completed", T0),
-            new("doc-1", "conv-1", "report.pdf", "application/pdf", 9,
-                "/files/doc-1/download", "completed", T0),
+            new(ImgId, "conv-1", "photo.png", "image/png", png.Length,
+                $"/files/{ImgId}/download", "completed", T0),
+            new(DocId, "conv-1", "report.pdf", "application/pdf", 9,
+                $"/files/{DocId}/download", "completed", T0),
         };
         SetupServerMessages(Dto("s-u1", "user", "uploaded on web", T0, files: files));
 
@@ -200,14 +204,36 @@ public class ChatViewModelServerReadTests : IDisposable
         var user = _vm.Messages.Should().ContainSingle().Subject;
         user.InlineImages.Should().ContainSingle(a => a.Filename == "photo.png" && a.IsImage);
         user.InlineImages.Single().ImageSource.Should().NotBeNull("the PNG must decode");
-        user.InlineAttachments.Should().ContainSingle(a => a.Filename == "report.pdf" && a.IsDocument);
+        var chip = user.InlineAttachments.Should()
+            .ContainSingle(a => a.Filename == "report.pdf" && a.IsDocument).Subject;
 
+        // FIX 10b: exactly ONE download (the image) — the doc chip fetched nothing.
+        _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        chip.RawBytes.Should().BeEmpty("documents hydrate metadata-only");
         var rows = await _store.GetFilesAsync("conv-1");
+        rows.Should().ContainSingle("only the image was fetched and cached")
+            .Which.Should().Match<Domain.Entities.FileAttachment>(r =>
+                r.ServerUrl != null && r.LocalPath != null && File.Exists(r.LocalPath));
+
+        // Saving the document triggers the lazy fetch — download fires, the
+        // bytes come back, and the offline cache row is written.
+        var docBytes = await chip.ResolveBytesAsync();
+        docBytes.Should().NotBeNull();
+        docBytes!.Should().BeEquivalentTo("%PDF-fake"u8.ToArray());
+        _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        rows = await _store.GetFilesAsync("conv-1");
         rows.Should().HaveCount(2);
         rows.Should().OnlyContain(r =>
             r.ServerUrl != null && r.LocalPath != null && File.Exists(r.LocalPath));
 
-        // Re-open: bytes come from the local cache — zero downloads.
+        // A repeat save re-uses the in-hand bytes — no third download.
+        (await chip.ResolveBytesAsync()).Should().NotBeNull();
+        _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+
+        // Re-open: the image comes from the local cache — zero new downloads.
         _api.Invocations.Clear();
         await _vm.OpenConversationAsync(conversation);
         await _vm.AttachmentHydration;
@@ -218,8 +244,55 @@ public class ChatViewModelServerReadTests : IDisposable
         _vm.Messages.Single().InlineAttachments.Should().ContainSingle();
 
         // Tidy the shared file cache (fixed LocalAppData location).
-        foreach (var row in rows)
+        foreach (var row in await _store.GetFilesAsync("conv-1"))
             try { File.Delete(row.LocalPath!); } catch (IOException) { }
+    }
+
+    [Fact]
+    public async Task Lazy_Document_Save_Fails_Gracefully_When_Offline()
+    {
+        // FIX 10b: the chip renders from metadata even when the server is
+        // unreachable; resolving bytes for Save then reports failure (null)
+        // instead of throwing — SaveAs turns that into a toast.
+        var conversation = await SeedConversationAsync();
+        _api.Setup(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("offline"));
+        var docId = Guid.NewGuid().ToString();
+        SetupServerMessages(Dto("s-u1", "user", "doc while offline", T0, files: new List<FileAttachmentDto>
+        {
+            new(docId, "conv-1", "notes.pdf", "application/pdf", 9,
+                $"/files/{docId}/download", "completed", T0),
+        }));
+
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.AttachmentHydration;
+
+        var chip = _vm.Messages.Single().InlineAttachments.Should().ContainSingle().Subject;
+        (await chip.ResolveBytesAsync()).Should().BeNullOrEmpty("offline fetch reports failure, no throw");
+    }
+
+    [Fact]
+    public async Task Non_Uuid_File_Id_From_The_Server_Is_Rejected_Before_Any_Filesystem_Use()
+    {
+        // FIX 10b: file.Id is server-controlled and participates in the
+        // filecache path — a traversal-shaped id must be dropped before any
+        // download or disk write happens.
+        var conversation = await SeedConversationAsync();
+        SetupServerMessages(Dto("s-u1", "user", "hostile file id", T0, files: new List<FileAttachmentDto>
+        {
+            new(@"..\..\..\evil", "conv-1", "innocent.png", "image/png", 4,
+                @"/files/..\..\..\evil/download", "completed", T0),
+        }));
+
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.AttachmentHydration;
+
+        var user = _vm.Messages.Single();
+        user.InlineImages.Should().BeEmpty();
+        user.InlineAttachments.Should().BeEmpty();
+        _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        (await _store.GetFilesAsync("conv-1")).Should().BeEmpty("nothing may be cached for a rejected id");
     }
 
     [Fact]

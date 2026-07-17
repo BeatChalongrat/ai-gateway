@@ -198,6 +198,8 @@ public static class Dict
         ["chat.turnNotSynced"] = "Not synced to the server yet — will retry",
         // FIX 10 — synced non-image attachment chip.
         ["attachment.save"] = "Save file…",
+        // FIX 10b — lazy document fetch failed (offline / file gone).
+        ["attachment.downloadFailed"] = "Could not download the file — check your connection and try again",
         ["agent.contextTrimmed"] = "Older messages were trimmed to fit the model's context window.",
         ["agent.contextTooLong"] = "This conversation is too long for the model. Start a new chat for best results.",
         // Phase A PART 1/6 — resumable step/time budget
@@ -624,6 +626,8 @@ public static class Dict
         ["chat.turnNotSynced"] = "ยังไม่ได้ซิงก์ขึ้นเซิร์ฟเวอร์ — จะลองใหม่อีกครั้ง",
         // FIX 10 — synced non-image attachment chip.
         ["attachment.save"] = "บันทึกไฟล์…",
+        // FIX 10b — lazy document fetch failed (offline / file gone).
+        ["attachment.downloadFailed"] = "ดาวน์โหลดไฟล์ไม่สำเร็จ — กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่",
         ["agent.contextTrimmed"] = "ตัดข้อความเก่าบางส่วนออกเพื่อให้พอดีกับหน้าต่างบริบทของโมเดล",
         ["agent.contextTooLong"] = "บทสนทนานี้ยาวเกินขีดจำกัดของโมเดลแล้ว แนะนำให้เริ่มแชทใหม่",
         // Phase A PART 1/6 — resumable step/time budget
