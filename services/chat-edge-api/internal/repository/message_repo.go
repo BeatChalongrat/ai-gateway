@@ -168,7 +168,7 @@ func (r *MessageRepo) ListByConversation(
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
 		       secure_trace_id, created_at, parent_id, branch_index, is_active,
-		       reasoning_content, search_sources` + extraCols + `
+		       reasoning_content, search_sources, client_id` + extraCols + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
@@ -194,7 +194,7 @@ func (r *MessageRepo) ListByConversation(
 			&m.ContentMasked, &m.Status, &m.ModelID,
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
 			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
-			&m.ReasoningContent, &m.SearchSources,
+			&m.ReasoningContent, &m.SearchSources, &m.ClientID,
 		}
 		if r.displayLifecycle {
 			dest = append(dest, &m.ContentCanonical, &m.CanonicalStatus, &m.DisplayState)

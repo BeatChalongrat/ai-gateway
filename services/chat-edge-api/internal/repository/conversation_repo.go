@@ -111,10 +111,10 @@ func (r *ConversationRepo) GetByClientID(
 	return c, nil
 }
 
-// Restore reverses a soft-delete. Used by the desktop import path: the
-// desktop is authoritative for its own backup mirror, so re-importing a
-// conversation whose mirror was deleted on the web resurrects it (otherwise
-// the client could never sync that conversation again).
+// Restore reverses a soft-delete. No longer called by the desktop import
+// path (FIX 9: deletes are authoritative and imports against a deleted
+// conversation return 410 Gone instead of resurrecting); kept for potential
+// ops/admin recovery use.
 func (r *ConversationRepo) Restore(ctx context.Context, tenantID, convID uuid.UUID) error {
 	const q = `
 		UPDATE chat.conversations

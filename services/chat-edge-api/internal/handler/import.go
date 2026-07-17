@@ -103,11 +103,16 @@ func (h *ImportHandler) ImportConversation(w http.ResponseWriter, r *http.Reques
 		CreatedAt: createdAt,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrImportInvalid) {
+		switch {
+		case errors.Is(err, service.ErrImportInvalid):
 			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
-			return
+		case errors.Is(err, service.ErrImportConversationGone):
+			// Deleted on another client — the desktop must propagate the
+			// delete locally, never resurrect (FIX 9 Part C).
+			WriteError(w, http.StatusGone, CodeNotFound, "conversation deleted")
+		default:
+			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		}
-		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
 
