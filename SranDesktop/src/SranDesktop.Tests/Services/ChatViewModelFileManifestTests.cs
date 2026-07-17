@@ -61,8 +61,8 @@ public class ChatViewModelFileManifestTests : IDisposable
         var fileService = new Mock<IFileService>();
         fileService.Setup(f => f.UploadAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<double>?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, string path, IProgress<double>? _, CancellationToken _) =>
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string path, IProgress<double>? _, string? _, CancellationToken _) =>
                 new FileAttachmentDto($"srv-{Guid.NewGuid():N}", "c1", Path.GetFileName(path),
                     "text/plain", 0, null, "done", DateTimeOffset.UtcNow));
 

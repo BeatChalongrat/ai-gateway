@@ -28,7 +28,8 @@ public class FileServiceTests
         {
             var api = new Mock<IChatEdgeApiClient>();
             api.Setup(a => a.UploadFileAsync("c1", It.IsAny<Stream>(), It.IsAny<string>(),
-                    "application/pdf", 3, It.IsAny<IProgress<double>?>(), It.IsAny<CancellationToken>()))
+                    "application/pdf", 3, It.IsAny<IProgress<double>?>(), It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Application.Models.FileAttachmentDto(
                     "f1", "c1", Path.GetFileName(tempFile), "application/pdf", 3, null, "pending",
                     DateTimeOffset.UtcNow))

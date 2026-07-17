@@ -300,6 +300,37 @@ public class AgentConversationSyncServiceTests : IDisposable
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task Import_Includes_File_Ids_Persisted_On_The_Local_Message_Row()
+    {
+        // FIX 10: a user message that carried uploaded attachments syncs with
+        // their SERVER file ids so the server links them to the message and
+        // web-chat shows them under the bubble.
+        await SeedServerConversationAsync(messages: 0);
+        await _store.UpsertMessagesAsync(new[]
+        {
+            new Message
+            {
+                Id = "srv-conv-1-m0", ConversationId = "srv-conv-1", Role = MessageRole.User,
+                Content = "see the attached report", CreatedAt = DateTimeOffset.UtcNow,
+                SortOrder = 0, FileIdsJson = """["file-a","file-b"]"""
+            },
+        });
+        SetupHappyApi();
+
+        await _sync.SyncAllAsync();
+
+        _api.Verify(a => a.ImportMessagesAsync(
+            "srv-conv-1",
+            It.Is<IReadOnlyList<ImportMessageItem>>(items =>
+                items.Count == 1
+                && items[0].FileIds != null
+                && items[0].FileIds!.Count == 2
+                && items[0].FileIds![0] == "file-a"
+                && items[0].FileIds![1] == "file-b"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ── FIX 9 Part A: awaited per-turn landing ──────────────────────────────
 
     [Fact]

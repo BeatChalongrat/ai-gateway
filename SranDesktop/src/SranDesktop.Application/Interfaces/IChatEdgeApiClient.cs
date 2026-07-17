@@ -114,10 +114,13 @@ public interface IChatEdgeApiClient
     /// capped at 20 server-side). Hits carry no message id — open-conversation only.</summary>
     Task<MessageSearchResponse> SearchMessagesAsync(string query, int limit = 20, CancellationToken ct = default);
 
-    /// <summary>Multipart upload (form field "file"). Progress reports 0–100.</summary>
+    /// <summary>Multipart upload (form field "file"). Progress reports 0–100.
+    /// <paramref name="clientId"/> is the optional dedup key (FIX 10): when
+    /// set, re-uploading the same (conversation, clientId) returns the
+    /// existing server row instead of duplicating it.</summary>
     Task<FileAttachmentDto> UploadFileAsync(
         string conversationId, Stream content, string fileName, string contentType, long? length,
-        IProgress<double>? progress = null, CancellationToken ct = default);
+        IProgress<double>? progress = null, string? clientId = null, CancellationToken ct = default);
 
     // ── Plan execution (R7 Feature C) ───────────────────────────────────────
 

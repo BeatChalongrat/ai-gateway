@@ -631,7 +631,7 @@ public partial class ChatViewModel : ObservableObject
             // imported carry client_id (our local message id) — they render
             // under that LOCAL id so dedup, tool-chain attachment and branch
             // restore keep working.
-            var entries = new List<(string Id, MessageRole Role, string Content, DateTimeOffset CreatedAt, string? ModelId, bool FromServer)>();
+            var entries = new List<(string Id, MessageRole Role, string Content, DateTimeOffset CreatedAt, string? ModelId, bool FromServer, List<FileAttachmentDto>? Files)>();
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
             var serverRead = false;
             // Legacy local-first conversations read their Phase 3 mirror.
@@ -654,7 +654,7 @@ public partial class ChatViewModel : ObservableObject
                     var isImported = !string.IsNullOrEmpty(dto.ClientId);
                     var id = isImported ? dto.ClientId! : dto.Id;
                     if (seenIds.Add(id))
-                        entries.Add((id, role, dto.Content ?? string.Empty, dto.CreatedAt, dto.ModelId, !isImported));
+                        entries.Add((id, role, dto.Content ?? string.Empty, dto.CreatedAt, dto.ModelId, !isImported, dto.Files));
                 }
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -684,7 +684,7 @@ public partial class ChatViewModel : ObservableObject
                     || string.IsNullOrWhiteSpace(local.Content))
                     continue;
                 if (seenIds.Add(local.Id))
-                    entries.Add((local.Id, local.Role, local.Content!, local.CreatedAt, local.ModelId, false));
+                    entries.Add((local.Id, local.Role, local.Content!, local.CreatedAt, local.ModelId, false, null));
             }
 
             // Selection may have moved on while we awaited.
@@ -692,6 +692,7 @@ public partial class ChatViewModel : ObservableObject
                 return;
 
             Messages.Clear();
+            var hydration = new List<(MessageViewModel Vm, List<FileAttachmentDto> Files)>();
             foreach (var entry in entries.OrderBy(e => e.CreatedAt))
             {
                 var vm = new MessageViewModel(entry.Id, entry.Role, entry.Content, entry.CreatedAt)
@@ -713,11 +714,20 @@ public partial class ChatViewModel : ObservableObject
                     }
                     ExtractPlanBlocks(conversation.Id, vm);
                 }
+                if (entry.Files is { Count: > 0 })
+                    hydration.Add((vm, entry.Files));
                 Messages.Add(vm);
             }
             await RestoreBranchesAsync(conversation.Id); // R10 Fix 3
             UpdateLastAssistantFlag();
             MessageActivity?.Invoke(this, EventArgs.Empty);
+
+            // Render the messages' server attachments (FIX 10) — uploads made
+            // on web AND this device's own synced attachments. Fire-and-forget
+            // so a slow download never blocks the open; the task is kept for
+            // deterministic tests.
+            if (hydration.Count > 0)
+                AttachmentHydration = HydrateServerAttachmentsAsync(conversation.Id, hydration);
         }
         finally
         {
@@ -732,7 +742,7 @@ public partial class ChatViewModel : ObservableObject
     /// messages. Best-effort — a cache failure never fails the open.</summary>
     private async Task CacheServerRowsAsync(
         string conversationId, string serverConversationId,
-        IReadOnlyList<(string Id, MessageRole Role, string Content, DateTimeOffset CreatedAt, string? ModelId, bool FromServer)> entries,
+        IReadOnlyList<(string Id, MessageRole Role, string Content, DateTimeOffset CreatedAt, string? ModelId, bool FromServer, List<FileAttachmentDto>? Files)> entries,
         IReadOnlyList<Domain.Entities.Message> localRows)
     {
         try
@@ -764,6 +774,134 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogDebug(ex, "Could not cache server transcript for {Id}", conversationId);
         }
+    }
+
+    /// <summary>Attachment hydration in flight for the open conversation
+    /// (FIX 10). Internal so tests can await it deterministically.</summary>
+    internal Task AttachmentHydration { get; private set; } = Task.CompletedTask;
+
+    /// <summary>Renders each message's server-side attachments (FIX 10):
+    /// bytes come from the original local file when this device uploaded it,
+    /// from the offline cache, or via download (follows the 307-presigned
+    /// redirect) — downloads are cached to disk + the local files row so the
+    /// conversation still shows its attachments offline. Images join the
+    /// bubble inline; other types render as a save-able file chip. Every
+    /// failure is per-file and non-fatal.</summary>
+    private async Task HydrateServerAttachmentsAsync(
+        string conversationId,
+        IReadOnlyList<(MessageViewModel Vm, List<FileAttachmentDto> Files)> pairs)
+    {
+        foreach (var (vm, files) in pairs)
+        {
+            foreach (var file in files)
+            {
+                try
+                {
+                    var bytes = await GetOrDownloadAttachmentBytesAsync(conversationId, file);
+                    if (bytes is null || bytes.Length == 0)
+                        continue;
+                    var attachment = new InlineAttachmentViewModel(
+                        file.Filename, file.ContentType ?? "application/octet-stream", bytes);
+
+                    void Add()
+                    {
+                        if (Conversation?.Id != conversationId)
+                            return; // conversation switched while downloading
+                        // User bubbles keep their existing image strip; docs
+                        // and everything on assistant bubbles render via the
+                        // InlineAttachments template (image/video/file chip).
+                        if (vm.IsUser && attachment.IsImage)
+                            vm.InlineImages.Add(attachment);
+                        else
+                            vm.InlineAttachments.Add(attachment);
+                        MessageActivity?.Invoke(this, EventArgs.Empty);
+                    }
+
+                    var dispatcher = System.Windows.Application.Current?.Dispatcher;
+                    if (dispatcher is null || dispatcher.CheckAccess())
+                        Add();
+                    else
+                        await dispatcher.InvokeAsync(Add);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Attachment hydration failed for {File}", file.Id);
+                }
+            }
+        }
+    }
+
+    /// <summary>Resolves an attachment's bytes: the original local file when
+    /// this device uploaded it (correlated via the server-echoed client_id),
+    /// then the offline cache, then a fresh download (cached for next time).
+    /// Null when offline with no cached copy — the chip simply doesn't render.</summary>
+    private async Task<byte[]?> GetOrDownloadAttachmentBytesAsync(
+        string conversationId, FileAttachmentDto file)
+    {
+        // 1. A local copy we already know about (own upload / prior cache).
+        Domain.Entities.FileAttachment? known = null;
+        try
+        {
+            var locals = await _store.GetFilesAsync(conversationId);
+            known = locals.FirstOrDefault(r => r.Id == file.ClientId)
+                    ?? locals.FirstOrDefault(r => r.Id == file.Id);
+            if (known?.LocalPath is { } path && File.Exists(path))
+            {
+                if (string.IsNullOrEmpty(known.ServerUrl) && file.DownloadUrl is not null)
+                {
+                    known.ServerUrl = file.DownloadUrl;
+                    await _store.UpsertFileAsync(known);
+                }
+                return await File.ReadAllBytesAsync(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Local attachment lookup failed for {File}", file.Id);
+        }
+
+        // 2. Download from the server (follows the 307-presigned redirect).
+        if (string.IsNullOrEmpty(file.DownloadUrl))
+            return null;
+        byte[] bytes;
+        try
+        {
+            bytes = await _api.DownloadFileAsync(file.DownloadUrl!);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            _logger.LogDebug(ex, "Attachment download unavailable for {File}", file.Id);
+            return null; // offline — renders once the server is reachable again
+        }
+
+        // 3. Cache for offline viewing. Best-effort; the row keys on the
+        //    original manifest id when this device uploaded the file so the
+        //    manifest never grows a duplicate entry.
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SranDesktop", "filecache");
+            Directory.CreateDirectory(dir);
+            var cachePath = Path.Combine(dir, $"{file.Id}_{SafeFileName(file.Filename)}");
+            await File.WriteAllBytesAsync(cachePath, bytes);
+            await _store.UpsertFileAsync(new Domain.Entities.FileAttachment
+            {
+                Id = file.ClientId ?? file.Id,
+                ConversationId = conversationId,
+                Name = known?.Name ?? file.Filename,
+                MimeType = file.ContentType,
+                SizeBytes = file.FileSizeBytes,
+                LocalPath = cachePath,
+                ServerUrl = file.DownloadUrl,
+                CreatedAt = file.CreatedAt
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Attachment cache write failed for {File}", file.Id);
+        }
+        return bytes;
     }
 
     /// <summary>
@@ -835,7 +973,11 @@ public partial class ChatViewModel : ObservableObject
         try
         {
             var progress = new Progress<double>(p => pending.Progress = p);
-            var dto = await _fileService.UploadAsync(conversationId, pending.LocalPath, progress);
+            // The manifest's deterministic id doubles as the server dedup key
+            // (FIX 10): re-attaching the same file re-uses the server row.
+            var dto = await _fileService.UploadAsync(
+                conversationId, pending.LocalPath, progress,
+                clientId: ManifestFileId(conversationId, pending.LocalPath));
             pending.FileId = dto.Id;
             pending.State = "ready";
         }
@@ -889,6 +1031,23 @@ public partial class ChatViewModel : ObservableObject
         var attachedNames = readyFiles.Where(f => !f.IsImage).Select(f => f.Name).ToList();
         PendingFiles.Clear();
 
+        // Files attached from the home screen were held "ready" without an
+        // upload (no conversation existed yet) — upload them now so they sync
+        // to the server like any other attachment (FIX 10). Best-effort: a
+        // failed upload keeps the local-path flow (the agent can still
+        // read_file it), it just won't show on web.
+        foreach (var pending in readyFiles.Where(f => f.FileId is null))
+            await UploadOneAsync(conversation.Id, pending);
+
+        // The uploaded server file ids ride the turn (FIX 10): the chat-edge
+        // path sends them as file_ids; the agent path persists them on the
+        // user message so the push sync links them server-side. Either way
+        // the attachment shows under this message's bubble on web-chat.
+        var attachedFileIds = readyFiles
+            .Where(f => f.FileId is not null)
+            .Select(f => f.FileId!)
+            .ToList();
+
         // Record every attachment in the conversation's file manifest (Phase 14
         // A) BEFORE the turn runs, so this turn's system prompt already lists
         // them and they survive context trimming forever after. Best-effort:
@@ -901,7 +1060,8 @@ public partial class ChatViewModel : ObservableObject
         var userMessage = new MessageViewModel(
             $"local-{Guid.NewGuid():N}", MessageRole.User, bubbleText, DateTimeOffset.Now)
         {
-            AnimateEntrance = true // live append — history loads never animate
+            AnimateEntrance = true, // live append — history loads never animate
+            AttachedFileIds = attachedFileIds.Count > 0 ? attachedFileIds : null
         };
 
         // Echo attached images inline in the user's bubble (R9 D5).
@@ -941,7 +1101,8 @@ public partial class ChatViewModel : ObservableObject
         try
         {
             await RunTurnAsync(
-                conversation, attachedPaths, attachedImagePaths, assistantMessage, _streamCts.Token);
+                conversation, attachedPaths, attachedImagePaths, attachedFileIds,
+                assistantMessage, _streamCts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -1045,7 +1206,10 @@ public partial class ChatViewModel : ObservableObject
         Content = vm.Content,
         ModelId = vm.ModelId,
         CreatedAt = vm.CreatedAt,
-        SortOrder = sortOrder
+        SortOrder = sortOrder,
+        FileIdsJson = vm.AttachedFileIds is { Count: > 0 } ids
+            ? JsonSerializer.Serialize(ids)
+            : null
     };
 
     /// <summary>
@@ -1069,7 +1233,8 @@ public partial class ChatViewModel : ObservableObject
     /// </summary>
     private async Task RunTurnAsync(
         ConversationItemViewModel conversation, List<string> attachedPaths,
-        List<string> imagePaths, MessageViewModel assistantMessage, CancellationToken ct)
+        List<string> imagePaths, List<string> attachedFileIds,
+        MessageViewModel assistantMessage, CancellationToken ct)
     {
         // imagePaths is passed as a per-turn argument (Phase 10 D2) — it used
         // to ride a field the chat-edge branch never consumed or cleared, so
@@ -1077,7 +1242,7 @@ public partial class ChatViewModel : ObservableObject
 
         if (IsImageModeOn || IsVideoModeOn)
         {
-            await RunChatEdgeTurnAsync(conversation, assistantMessage, ct);
+            await RunChatEdgeTurnAsync(conversation, attachedFileIds, assistantMessage, ct);
             return;
         }
 
@@ -1409,7 +1574,8 @@ public partial class ChatViewModel : ObservableObject
     /// generate_image / generate_video tools run, media arriving as message_files.
     /// </summary>
     private async Task RunChatEdgeTurnAsync(
-        ConversationItemViewModel conversation, MessageViewModel assistantMessage, CancellationToken ct)
+        ConversationItemViewModel conversation, List<string> attachedFileIds,
+        MessageViewModel assistantMessage, CancellationToken ct)
     {
         var imageMode = IsImageModeOn;
         var videoMode = IsVideoModeOn;
@@ -1419,13 +1585,17 @@ public partial class ChatViewModel : ObservableObject
         RecordRecentModel(Conversation?.ModelId);
 
         // The user's bubble is already in Messages; chat-edge stores it and
-        // builds context from its own history, so only the text goes up.
+        // builds context from its own history, so only the text goes up —
+        // plus the uploaded attachment ids (FIX 10) so the server links the
+        // files to the message it creates.
         var userContent = Messages.LastOrDefault(m => m.IsUser)?.Content ?? string.Empty;
 
         try
         {
             await foreach (var evt in _chatService.SendMessageAsync(
-                               conversation.Id, userContent, null, imageMode, videoMode, ct))
+                               conversation.Id, userContent,
+                               attachedFileIds.Count > 0 ? attachedFileIds : null,
+                               imageMode, videoMode, ct))
             {
                 switch (evt)
                 {
@@ -1634,6 +1804,11 @@ public partial class ChatViewModel : ObservableObject
                         : GuessMimeType(file.LocalPath),
                     SizeBytes = size,
                     LocalPath = file.LocalPath,
+                    // Uploaded copies record their server download URL (FIX
+                    // 10) so the row is recognizably synced — the attachment
+                    // hydration then reads the original local file instead of
+                    // re-downloading it.
+                    ServerUrl = file.FileId is { } fid ? $"/files/{fid}/download" : null,
                     CreatedAt = DateTimeOffset.UtcNow
                 });
             }

@@ -34,7 +34,11 @@ public sealed record MessageDto(
     // FIX 9: the desktop's own message id for rows this client imported —
     // correlates a server row back to its local copy (dedup + tool-chain
     // re-attachment). Null for native chat-edge rows.
-    [property: JsonPropertyName("client_id")] string? ClientId = null);
+    [property: JsonPropertyName("client_id")] string? ClientId = null,
+    // FIX 10: the message's file attachments (uploads + generated media),
+    // embedded per message by the server's list endpoint. Null/empty when
+    // the message has none.
+    [property: JsonPropertyName("files")] List<FileAttachmentDto>? Files = null);
 
 /// <summary>GET /conversations/{id}/messages — latest N in ascending order; `before` pages older.</summary>
 public sealed record MessageListResponse(
@@ -52,7 +56,11 @@ public sealed record FileAttachmentDto(
     [property: JsonPropertyName("file_size_bytes")] long FileSizeBytes,
     [property: JsonPropertyName("download_url")] string? DownloadUrl,
     [property: JsonPropertyName("extraction_status")] string? ExtractionStatus,
-    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    // FIX 10: THIS device's deterministic local file id when the file was
+    // uploaded by this desktop (dedup key echo); null for web uploads and
+    // generated files. Correlates a server file to its local manifest row.
+    [property: JsonPropertyName("client_id")] string? ClientId = null);
 
 public sealed record ReasoningCapability(
     [property: JsonPropertyName("supported")] bool Supported,
@@ -164,7 +172,10 @@ public sealed record ImportMessageItem(
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("model_id")] string? ModelId,
     // RFC3339, required — historical data keeps its original timestamp.
-    [property: JsonPropertyName("created_at")] string CreatedAt);
+    [property: JsonPropertyName("created_at")] string CreatedAt,
+    // FIX 10: server file ids to link to this message (the agent path's
+    // equivalent of the send path's file_ids). Omitted when none.
+    [property: JsonPropertyName("file_ids")] List<string>? FileIds = null);
 
 public sealed record ImportMessagesRequest(
     [property: JsonPropertyName("messages")] List<ImportMessageItem> Messages);
