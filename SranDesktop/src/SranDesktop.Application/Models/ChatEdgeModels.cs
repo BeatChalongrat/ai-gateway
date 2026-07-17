@@ -30,7 +30,11 @@ public sealed record MessageDto(
     [property: JsonPropertyName("status")] string? Status,
     [property: JsonPropertyName("model_id")] string? ModelId,
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
-    [property: JsonPropertyName("token_usage")] TokenUsagePayload? TokenUsage);
+    [property: JsonPropertyName("token_usage")] TokenUsagePayload? TokenUsage,
+    // FIX 9: the desktop's own message id for rows this client imported —
+    // correlates a server row back to its local copy (dedup + tool-chain
+    // re-attachment). Null for native chat-edge rows.
+    [property: JsonPropertyName("client_id")] string? ClientId = null);
 
 /// <summary>GET /conversations/{id}/messages — latest N in ascending order; `before` pages older.</summary>
 public sealed record MessageListResponse(

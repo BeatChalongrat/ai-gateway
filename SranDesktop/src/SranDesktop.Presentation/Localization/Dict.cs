@@ -194,6 +194,8 @@ public static class Dict
         ["error.serverUnreachable"] = "Can't reach the chat server. Check your connection and the server URL in Settings, then try again.",
         ["error.connectionLost"] = "Connection lost while streaming. Please try again.",
         ["status.stopped"] = "Stopped",
+        // FIX 9 — a completed turn that could not land on the server yet.
+        ["chat.turnNotSynced"] = "Not synced to the server yet — will retry",
         ["agent.contextTrimmed"] = "Older messages were trimmed to fit the model's context window.",
         ["agent.contextTooLong"] = "This conversation is too long for the model. Start a new chat for best results.",
         // Phase A PART 1/6 — resumable step/time budget
@@ -616,6 +618,8 @@ public static class Dict
         ["error.serverUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์แชทไม่ได้ กรุณาตรวจสอบการเชื่อมต่อและ URL เซิร์ฟเวอร์ในการตั้งค่า แล้วลองใหม่",
         ["error.connectionLost"] = "การเชื่อมต่อหลุดระหว่างสตรีม กรุณาลองใหม่",
         ["status.stopped"] = "หยุดแล้ว",
+        // FIX 9 — a completed turn that could not land on the server yet.
+        ["chat.turnNotSynced"] = "ยังไม่ได้ซิงก์ขึ้นเซิร์ฟเวอร์ — จะลองใหม่อีกครั้ง",
         ["agent.contextTrimmed"] = "ตัดข้อความเก่าบางส่วนออกเพื่อให้พอดีกับหน้าต่างบริบทของโมเดล",
         ["agent.contextTooLong"] = "บทสนทนานี้ยาวเกินขีดจำกัดของโมเดลแล้ว แนะนำให้เริ่มแชทใหม่",
         // Phase A PART 1/6 — resumable step/time budget

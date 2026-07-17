@@ -622,15 +622,25 @@ public partial class ChatViewModel : ObservableObject
         IsLoadingHistory = true;
         try
         {
-            // Agent turns are persisted locally (the gateway path bypasses
-            // chat-edge storage); older chats may still have server-side
-            // messages. Merge both, dedup by id, order by timestamp.
+            // FIX 9 Part B: the SERVER transcript is authoritative when
+            // online — a turn made in web-chat shows up here and vice versa.
+            // Local rows still supply (i) the agent tool chain, which is
+            // local-only by design, (ii) turns not yet landed on the server,
+            // (iii) history older than the server page, and (iv) the offline
+            // fallback when the server read fails. Server rows this client
+            // imported carry client_id (our local message id) — they render
+            // under that LOCAL id so dedup, tool-chain attachment and branch
+            // restore keep working.
             var entries = new List<(string Id, MessageRole Role, string Content, DateTimeOffset CreatedAt, string? ModelId, bool FromServer)>();
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
+            var serverRead = false;
+            // Legacy local-first conversations read their Phase 3 mirror.
+            var serverConversationId = conversation.ServerId ?? conversation.Id;
 
             try
             {
-                var response = await _api.ListMessagesAsync(conversation.Id, 50);
+                var response = await _api.ListMessagesAsync(serverConversationId, 50);
+                serverRead = true;
                 foreach (var dto in response.Messages)
                 {
                     if (dto.Role != "user" && string.IsNullOrWhiteSpace(dto.Content))
@@ -641,8 +651,10 @@ public partial class ChatViewModel : ObservableObject
                         "system" => MessageRole.System,
                         _ => MessageRole.Assistant
                     };
-                    if (seenIds.Add(dto.Id))
-                        entries.Add((dto.Id, role, dto.Content ?? string.Empty, dto.CreatedAt, dto.ModelId, true));
+                    var isImported = !string.IsNullOrEmpty(dto.ClientId);
+                    var id = isImported ? dto.ClientId! : dto.Id;
+                    if (seenIds.Add(id))
+                        entries.Add((id, role, dto.Content ?? string.Empty, dto.CreatedAt, dto.ModelId, !isImported));
                 }
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -656,6 +668,13 @@ public partial class ChatViewModel : ObservableObject
             // per assistant turn and skip them from the visible thread; they are
             // re-attached to their bubble below so the next turn replays them.
             var localRows = await _store.GetMessagesAsync(conversation.Id);
+
+            // Cache server-origin rows locally (FIX 9 Part D) so an already-
+            // opened conversation still renders offline. Best-effort, and the
+            // cached rows carry the synced marker so they are never pushed
+            // back to the server as new messages.
+            if (serverRead)
+                await CacheServerRowsAsync(conversation.Id, serverConversationId, entries, localRows);
             var chainMap = Application.Services.AgentChainCodec.GroupChains(localRows);
             foreach (var local in localRows)
             {
@@ -703,6 +722,47 @@ public partial class ChatViewModel : ObservableObject
         finally
         {
             IsLoadingHistory = false;
+        }
+    }
+
+    /// <summary>Writes server-origin transcript rows (turns made on web, or
+    /// chat-edge turns never persisted locally before FIX 9) into the local
+    /// store as an offline read cache. The rows carry messages.server_id as
+    /// the synced marker so the push sync never mirrors them back as new
+    /// messages. Best-effort — a cache failure never fails the open.</summary>
+    private async Task CacheServerRowsAsync(
+        string conversationId, string serverConversationId,
+        IReadOnlyList<(string Id, MessageRole Role, string Content, DateTimeOffset CreatedAt, string? ModelId, bool FromServer)> entries,
+        IReadOnlyList<Domain.Entities.Message> localRows)
+    {
+        try
+        {
+            var known = localRows.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+            var missing = entries
+                .Where(e => e.FromServer && !known.Contains(e.Id)
+                            && e.Role is MessageRole.User or MessageRole.Assistant)
+                .OrderBy(e => e.CreatedAt)
+                .ToList();
+            if (missing.Count == 0)
+                return;
+
+            var sort = await _store.GetNextSortOrderAsync(conversationId);
+            var rows = missing.Select(e => new Domain.Entities.Message
+            {
+                Id = e.Id,
+                ConversationId = conversationId,
+                Role = e.Role,
+                Content = e.Content,
+                ModelId = e.ModelId,
+                CreatedAt = e.CreatedAt,
+                SortOrder = sort++,
+                ServerId = serverConversationId // synced marker — never re-pushed
+            }).ToList();
+            await _store.UpsertMessagesAsync(rows);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not cache server transcript for {Id}", conversationId);
         }
     }
 
@@ -919,15 +979,15 @@ public partial class ChatViewModel : ObservableObject
                 ReadAloud(assistantMessage);
 
             // The gateway path bypasses chat-edge storage — persist the turn
-            // locally so history survives conversation switches and restarts.
+            // locally (the agent's tool chain + offline cache), then land the
+            // visible text on the SERVER before the turn counts as done, so
+            // web-chat shows the same conversation immediately (FIX 9 Part A).
             // Chat-edge turns are stored server-side already; persisting them
             // locally would duplicate rows on reload.
             if (!_turnUsedChatEdge)
             {
                 await PersistTurnAsync(conversation.Id, userMessage, assistantMessage);
-                // Phase 3 D: mirror the agent turn to the server (debounced,
-                // fire-and-forget — never blocks or fails the UI path).
-                _agentSync.QueueConversationSync(conversation.Id);
+                await LandTurnOnServerAsync(conversation.Id, assistantMessage);
             }
         }
 
@@ -1318,10 +1378,26 @@ public partial class ChatViewModel : ObservableObject
             MessageActivity?.Invoke(this, EventArgs.Empty);
 
             // The user row was saved on the first pass; re-persist the chain +
-            // (now-complete) answer by their stable ids (upsert).
+            // (now-complete) answer by their stable ids (upsert), then land
+            // the visible text on the server (FIX 9 Part A).
             await PersistTurnAsync(resume.Conversation.Id, null, assistant);
-            _agentSync.QueueConversationSync(resume.Conversation.Id);
+            await LandTurnOnServerAsync(resume.Conversation.Id, assistant);
         }
+    }
+
+    /// <summary>Awaited server landing of a completed agent turn (FIX 9 Part
+    /// A). On failure the sync service has already queued the retry — the
+    /// bubble just gets a quiet "not synced yet" meta line so the divergence
+    /// is visible instead of silent.</summary>
+    private async Task LandTurnOnServerAsync(string conversationId, MessageViewModel assistant)
+    {
+        var landed = await _agentSync.SyncConversationNowAsync(conversationId);
+        if (landed || assistant.IsError)
+            return;
+        var note = Localization.LocaleService.Instance.T("chat.turnNotSynced");
+        assistant.MetaLine = string.IsNullOrEmpty(assistant.MetaLine)
+            ? note
+            : $"{assistant.MetaLine}  ·  {note}";
     }
 
     /// <summary>True when the current/last turn streamed via chat-edge (which

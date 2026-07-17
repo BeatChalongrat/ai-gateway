@@ -1,20 +1,33 @@
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
+using SranDesktop.Application.Services;
 using SranDesktop.Domain.Entities;
 using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Services;
 
 /// <summary>
-/// One-way push sync of local agent-mode conversations to chat-edge's import
-/// endpoints (Phase 3 D). Only <c>source='local'</c> conversations and their
-/// user/assistant text messages sync — tool executions, screenshots and
-/// tool-call metadata stay local-only (chat-edge cannot represent them; the
-/// transcript is the valuable part). Sync state lives in SQLite:
-/// conversations.server_id maps to the mirror; messages.server_id stores the
-/// SERVER CONVERSATION id as the synced marker (the server dedupes by our
-/// message id as its client_id, so no per-message server id exists).
+/// Push sync of agent-mode turns to chat-edge's import endpoints. Since FIX 9
+/// the server is the authoritative home of the VISIBLE transcript (user text +
+/// final assistant text) so web and desktop show the same conversation:
+/// a completed agent turn lands synchronously via
+/// <see cref="SyncConversationNowAsync"/>, with the debounced queue as the
+/// offline retry. Only user/assistant text syncs — the agent's working state
+/// (tool chains, screenshots, tool-call metadata) stays local-only (chat-edge
+/// cannot represent it; see AgentChainCodec.IsChainRow).
+///
+/// Conversations created through the server API (<c>source='server'</c>, the
+/// normal case) use their own id as the server conversation id; legacy
+/// <c>source='local'</c> conversations keep the Phase 3 mirror flow
+/// (ImportConversation idempotent by local id). Sync state lives in SQLite:
+/// conversations.server_id maps a local conversation to its mirror;
+/// messages.server_id stores the SERVER CONVERSATION id as the synced marker
+/// (the server dedupes by our message id as its client_id, so no per-message
+/// server id exists). A push that discovers the conversation was deleted on
+/// the server (404/410) deletes the local copy and raises
+/// <see cref="RemoteConversationDeleted"/> — deletes propagate, never
+/// resurrect (FIX 9 Part C).
 /// </summary>
 public sealed class AgentConversationSyncService : IAgentConversationSyncService, IDisposable
 {
@@ -53,6 +66,9 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
         _toasts = toasts;
     }
 
+    /// <inheritdoc />
+    public event EventHandler<string>? RemoteConversationDeleted;
+
     private void NotifySyncFailureOnce()
     {
         if (Interlocked.Exchange(ref _failureToastShown, 1) == 0)
@@ -71,8 +87,6 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
             var conversations = await _store.GetConversationsAsync(ct);
             foreach (var conversation in conversations)
             {
-                if (conversation.Source != ConversationSource.Local)
-                    continue;
                 ct.ThrowIfCancellationRequested();
                 try
                 {
@@ -139,7 +153,7 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
                 try
                 {
                     var conversation = await _store.GetConversationAsync(id);
-                    if (conversation is { Source: ConversationSource.Local })
+                    if (conversation is not null)
                         await PushConversationAsync(conversation, CancellationToken.None);
                 }
                 catch (HttpRequestException ex) when (ex.StatusCode is not null)
@@ -199,32 +213,96 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> SyncConversationNowAsync(string conversationId, CancellationToken ct = default)
+    {
+        if (!_settings.Current.SyncAgentConversations)
+            return true; // user opted out of sync — nothing is "pending"
+
+        await _syncLock.WaitAsync(ct);
+        try
+        {
+            var conversation = await _store.GetConversationAsync(conversationId, ct);
+            if (conversation is null)
+                return true; // deleted while the turn ran — nothing to land
+            await PushConversationAsync(conversation, ct);
+            return true;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is not null)
+        {
+            // The server ANSWERED with an error — retrying the same payload
+            // won't help (matches the sweep's poisoned-conversation handling).
+            _logger.LogWarning(ex, "Turn sync rejected for {Id} (HTTP {Status})",
+                conversationId, (int)ex.StatusCode);
+            NotifySyncFailureOnce();
+            return false;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            // Offline / server down — the debounced queue keeps retrying.
+            _logger.LogInformation(ex, "Turn could not land on the server for {Id}; queued for retry",
+                conversationId);
+            RequeuePending(new[] { conversationId });
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Turn sync failed for {Id}", conversationId);
+            NotifySyncFailureOnce();
+            return false;
+        }
+        finally
+        {
+            _syncLock.Release();
+        }
+    }
+
     private async Task PushConversationAsync(Conversation conversation, CancellationToken ct)
     {
-        // 1. Ensure the server mirror exists (idempotent by our local id).
-        var serverId = conversation.ServerId;
-        if (string.IsNullOrEmpty(serverId))
+        // 1. Resolve the server conversation. Conversations created through
+        //    the server API (the normal case) ARE server conversations — their
+        //    local id is the server id. Legacy local-first conversations keep
+        //    the Phase 3 mirror flow, idempotent by our local id.
+        string serverId;
+        if (conversation.Source == ConversationSource.Server)
         {
-            var result = await _api.ImportConversationAsync(
-                conversation.Id, conversation.Title, conversation.ModelId,
-                conversation.CreatedAt, ct);
-            serverId = result.Conversation.Id;
-            await _store.SetConversationServerIdAsync(conversation.Id, serverId, ct);
+            serverId = conversation.Id;
+        }
+        else
+        {
+            serverId = conversation.ServerId ?? string.Empty;
+            if (serverId.Length == 0)
+            {
+                ImportConversationResponse result;
+                try
+                {
+                    result = await _api.ImportConversationAsync(
+                        conversation.Id, conversation.Title, conversation.ModelId,
+                        conversation.CreatedAt, ct);
+                }
+                catch (HttpRequestException ex) when (
+                    ex.StatusCode == System.Net.HttpStatusCode.Gone)
+                {
+                    // Deleted on another client — propagate, never resurrect.
+                    await HandleRemoteDeleteAsync(conversation.Id, ct);
+                    return;
+                }
+                serverId = result.Conversation.Id;
+                await _store.SetConversationServerIdAsync(conversation.Id, serverId, ct);
+            }
         }
 
-        // 2. Push unsynced user/assistant text in chronological batches.
+        // 2. Push unsynced user/assistant text in chronological batches. The
+        //    agent's working state — tool results, assistant preambles that
+        //    carry tool_calls, screenshot placeholders — is deliberately
+        //    excluded: it stays local-only (the server schema can't hold it).
         var unsynced = (await _store.GetUnsyncedMessagesAsync(conversation.Id, ct))
-            .Where(m => m.Role is MessageRole.User or MessageRole.Assistant
+            .Where(m => !AgentChainCodec.IsChainRow(m)
+                        && m.Role is MessageRole.User or MessageRole.Assistant
                         && !string.IsNullOrWhiteSpace(m.Content))
             .ToList();
         if (unsynced.Count == 0)
             return;
-
-        // At most ONE mirror recovery per push: a 404 from messages/import
-        // means the mirror was deleted on the web — re-importing by our local
-        // id resurrects it server-side; a second 404 after that propagates
-        // (never loop).
-        var reimported = false;
 
         foreach (var chunk in unsynced.Chunk(BatchSize))
         {
@@ -240,19 +318,15 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
             {
                 response = await _api.ImportMessagesAsync(serverId, items, ct);
             }
-            catch (HttpRequestException ex) when (
-                ex.StatusCode == System.Net.HttpStatusCode.NotFound && !reimported)
+            catch (HttpRequestException ex) when (ex.StatusCode is
+                System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone)
             {
-                reimported = true;
-                _logger.LogWarning(ex, "Server mirror missing for {Id}; re-importing", conversation.Id);
-                var result = await _api.ImportConversationAsync(
-                    conversation.Id, conversation.Title, conversation.ModelId,
-                    conversation.CreatedAt, ct);
-                // The returned id is authoritative (normally the resurrected
-                // row keeps its id; a fresh row gets a new one).
-                serverId = result.Conversation.Id;
-                await _store.SetConversationServerIdAsync(conversation.Id, serverId, ct);
-                response = await _api.ImportMessagesAsync(serverId, items, ct);
+                // The conversation was deleted on the server (another client).
+                // A user-intended delete must stay deleted: drop the local
+                // copy instead of re-importing (FIX 9 Part C — the old
+                // recovery here resurrected web-deleted conversations).
+                await HandleRemoteDeleteAsync(conversation.Id, ct);
+                return;
             }
 
             await _store.MarkMessagesSyncedAsync(
@@ -261,10 +335,25 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
                 conversation.Id, response.Imported, response.Skipped);
         }
 
-        // Refresh last_synced_at now that the transcript is mirrored.
-        await _store.SetConversationServerIdAsync(conversation.Id, serverId, ct);
+        // Refresh the mirror mapping's last_synced_at (legacy local rows only —
+        // server-created conversations must keep server_id NULL so the sidebar
+        // pull doesn't mistake them for Phase 3 mirrors and skip their updates).
+        if (conversation.Source == ConversationSource.Local)
+            await _store.SetConversationServerIdAsync(conversation.Id, serverId, ct);
         _logger.LogInformation("Agent sync pushed {Count} message(s) for {Id}",
             unsynced.Count, conversation.Id);
+    }
+
+    /// <summary>The server says this conversation is gone — delete the local
+    /// copy and tell the UI. Deletes made on any client propagate everywhere;
+    /// the agent's local tool chain goes with it (it belongs to the deleted
+    /// conversation).</summary>
+    private async Task HandleRemoteDeleteAsync(string conversationId, CancellationToken ct)
+    {
+        _logger.LogInformation(
+            "Conversation {Id} was deleted on the server; removing the local copy", conversationId);
+        await _store.DeleteConversationAsync(conversationId, ct);
+        RemoteConversationDeleted?.Invoke(this, conversationId);
     }
 
     public void Dispose()

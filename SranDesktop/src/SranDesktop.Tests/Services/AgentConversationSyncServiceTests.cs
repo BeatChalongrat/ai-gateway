@@ -205,8 +205,10 @@ public class AgentConversationSyncServiceTests : IDisposable
         _api.Invocations.Should().BeEmpty();
     }
 
+    // ── FIX 9 Part A: server-created conversations push via their own id ────
+
     [Fact]
-    public async Task Server_Source_Conversations_Never_Sync()
+    public async Task Server_Source_With_Nothing_Unsynced_Makes_No_Calls()
     {
         await _store.UpsertConversationAsync(new Conversation
         {
@@ -220,67 +222,196 @@ public class AgentConversationSyncServiceTests : IDisposable
         _api.Invocations.Should().BeEmpty();
     }
 
-    // ── Phase 3 hotfix: web-deleted mirror must not wedge sync ──────────────
+    private async Task SeedServerConversationAsync(string id = "srv-conv-1", int messages = 2)
+    {
+        await _store.UpsertConversationAsync(new Conversation
+        {
+            Id = id, Title = "Agent chat", ModelId = "gpt-4o-mini",
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            UpdatedAt = DateTimeOffset.UtcNow, Source = ConversationSource.Server
+        });
+        var rows = new List<Message>();
+        for (var i = 0; i < messages; i++)
+        {
+            rows.Add(new Message
+            {
+                Id = $"{id}-m{i}",
+                ConversationId = id,
+                Role = i % 2 == 0 ? MessageRole.User : MessageRole.Assistant,
+                Content = $"message {i}",
+                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-9 + i),
+                SortOrder = i
+            });
+        }
+        await _store.UpsertMessagesAsync(rows);
+    }
+
+    [Fact]
+    public async Task Server_Source_Pushes_Unsynced_Rows_Via_Its_Own_Id_Without_Import_Ensure()
+    {
+        // FIX 9: conversations are created through the server API, so their
+        // local id IS the server conversation id — the agent turn must land
+        // there directly, with no ImportConversation mirror and no server_id
+        // mapping (that would make the sidebar pull mistake it for a mirror).
+        await SeedServerConversationAsync();
+        SetupHappyApi();
+
+        await _sync.SyncAllAsync();
+
+        _api.Verify(a => a.ImportConversationAsync(
+            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        _api.Verify(a => a.ImportMessagesAsync(
+            "srv-conv-1",
+            It.Is<IReadOnlyList<ImportMessageItem>>(items =>
+                items.Count == 2 && items[0].ClientId == "srv-conv-1-m0" && items[0].Role == "user"
+                && items[1].ClientId == "srv-conv-1-m1" && items[1].Role == "assistant"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        (await _store.GetUnsyncedMessagesAsync("srv-conv-1")).Should().BeEmpty();
+        (await _store.GetConversationAsync("srv-conv-1"))!.ServerId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Agent_Tool_Chain_Rows_Never_Sync()
+    {
+        // The agent's working state is local-only: an assistant preamble that
+        // carries tool_calls and a screenshot placeholder (role user, marked
+        // by name) must never reach the server transcript even though their
+        // roles pass the naive user/assistant filter.
+        await SeedServerConversationAsync(messages: 1);
+        await _store.UpsertMessagesAsync(new[]
+        {
+            new Message { Id = "chain-a", ConversationId = "srv-conv-1", Role = MessageRole.Assistant,
+                Content = "Let me look at that file.", ToolCallsJson = "[{\"id\":\"c1\"}]",
+                CreatedAt = DateTimeOffset.UtcNow, SortOrder = 5 },
+            new Message { Id = "chain-s", ConversationId = "srv-conv-1", Role = MessageRole.User,
+                Content = Application.Services.AgentChainCodec.ScreenshotPlaceholderText,
+                Name = Application.Services.AgentChainCodec.ScreenshotMarker,
+                CreatedAt = DateTimeOffset.UtcNow, SortOrder = 6 },
+        });
+        SetupHappyApi();
+
+        await _sync.SyncAllAsync();
+
+        _api.Verify(a => a.ImportMessagesAsync(
+            "srv-conv-1",
+            It.Is<IReadOnlyList<ImportMessageItem>>(items =>
+                items.Count == 1 && items[0].ClientId == "srv-conv-1-m0"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── FIX 9 Part A: awaited per-turn landing ──────────────────────────────
+
+    [Fact]
+    public async Task SyncNow_Lands_The_Turn_And_Returns_True()
+    {
+        await SeedServerConversationAsync();
+        SetupHappyApi();
+
+        var landed = await _sync.SyncConversationNowAsync("srv-conv-1");
+
+        landed.Should().BeTrue();
+        (await _store.GetUnsyncedMessagesAsync("srv-conv-1")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SyncNow_Offline_Returns_False_And_Requeues_For_Retry()
+    {
+        await SeedServerConversationAsync();
+        _api.Setup(a => a.ImportMessagesAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyList<ImportMessageItem>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("offline"));
+
+        var landed = await _sync.SyncConversationNowAsync("srv-conv-1");
+
+        landed.Should().BeFalse();
+        _sync.PendingQueueSnapshot.Should().Contain("srv-conv-1");
+        (await _store.GetUnsyncedMessagesAsync("srv-conv-1")).Should().HaveCount(2);
+
+        // Server comes back — the queued retry completes the landing.
+        SetupHappyApi();
+        await _sync.DrainQueueAsync();
+        (await _store.GetUnsyncedMessagesAsync("srv-conv-1")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SyncNow_With_Sync_Disabled_Reports_Nothing_Pending()
+    {
+        await SeedServerConversationAsync();
+        _settings.SetupGet(s => s.Current)
+            .Returns(new UserSettings { SyncAgentConversations = false });
+
+        (await _sync.SyncConversationNowAsync("srv-conv-1")).Should().BeTrue();
+        _api.Invocations.Should().BeEmpty();
+    }
+
+    // ── FIX 9 Part C: a delete on any client stays deleted ──────────────────
 
     private static HttpRequestException Http(HttpStatusCode status) =>
         new("server answered", null, status);
 
     [Fact]
-    public async Task Dead_Mirror_Is_ReImported_Once_And_Push_Retried()
+    public async Task Remote_Delete_Propagates_Locally_Instead_Of_Resurrecting()
     {
-        await SeedLocalConversationAsync();
-        await _store.SetConversationServerIdAsync("local-1", "srv-old");
-
+        // The conversation was deleted in web-chat. The push discovers the 404
+        // and must DELETE the local copy + raise the event — never re-import
+        // (the old recovery resurrected user-deleted conversations).
+        await SeedServerConversationAsync();
         _api.Setup(a => a.ImportMessagesAsync(
-                "srv-old", It.IsAny<IReadOnlyList<ImportMessageItem>>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<IReadOnlyList<ImportMessageItem>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(Http(HttpStatusCode.NotFound));
-        // Different id in the response proves the client adopts the
-        // authoritative server id rather than assuming it's unchanged.
-        _api.Setup(a => a.ImportConversationAsync(
-                "local-1", It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ImportConversationResponse(ServerDto("srv-new"), false));
-        _api.Setup(a => a.ImportMessagesAsync(
-                "srv-new", It.IsAny<IReadOnlyList<ImportMessageItem>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, IReadOnlyList<ImportMessageItem> items, CancellationToken _) =>
-                new ImportMessagesResponse(items.Count, 0));
+        string? deletedId = null;
+        _sync.RemoteConversationDeleted += (_, id) => deletedId = id;
 
         await _sync.SyncAllAsync();
 
         _api.Verify(a => a.ImportConversationAsync(
-            "local-1", It.IsAny<string?>(), It.IsAny<string?>(),
-            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once);
-        (await _store.GetConversationAsync("local-1"))!.ServerId.Should().Be("srv-new");
-        (await _store.GetUnsyncedMessagesAsync("local-1")).Should().BeEmpty();
-        (await _store.GetMessagesAsync("local-1")).Should().OnlyContain(m => m.ServerId == "srv-new");
+            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        (await _store.GetConversationAsync("srv-conv-1")).Should().BeNull();
+        deletedId.Should().Be("srv-conv-1");
     }
 
     [Fact]
-    public async Task Dead_Mirror_Retry_Does_Not_Loop()
+    public async Task Remote_Delete_Of_Legacy_Mirror_Also_Propagates()
     {
+        // Legacy local-first conversation whose Phase 3 mirror was deleted on
+        // the web: same outcome — local delete, no resurrection.
         await SeedLocalConversationAsync();
         await _store.SetConversationServerIdAsync("local-1", "srv-old");
-
-        // 404 on BOTH attempts — the recovery must run exactly once and the
-        // surfaced failure must not crash the sweep.
         _api.Setup(a => a.ImportMessagesAsync(
-                It.IsAny<string>(), It.IsAny<IReadOnlyList<ImportMessageItem>>(), It.IsAny<CancellationToken>()))
+                "srv-old", It.IsAny<IReadOnlyList<ImportMessageItem>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(Http(HttpStatusCode.NotFound));
-        _api.Setup(a => a.ImportConversationAsync(
-                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ImportConversationResponse(ServerDto("srv-new"), false));
+        string? deletedId = null;
+        _sync.RemoteConversationDeleted += (_, id) => deletedId = id;
 
-        var act = () => _sync.SyncAllAsync();
+        await _sync.SyncAllAsync();
 
-        await act.Should().NotThrowAsync();
         _api.Verify(a => a.ImportConversationAsync(
             It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
-            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once);
-        _api.Verify(a => a.ImportMessagesAsync(
-            It.IsAny<string>(), It.IsAny<IReadOnlyList<ImportMessageItem>>(),
-            It.IsAny<CancellationToken>()), Times.Exactly(2)); // original + one retry
-        (await _store.GetUnsyncedMessagesAsync("local-1")).Should().HaveCount(2); // nothing falsely marked
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        (await _store.GetConversationAsync("local-1")).Should().BeNull();
+        deletedId.Should().Be("local-1");
+    }
+
+    [Fact]
+    public async Task Gone_On_First_Import_Propagates_The_Delete_Too()
+    {
+        // First push of a legacy local conversation whose client_id maps to a
+        // conversation the user already deleted: the server answers 410 Gone
+        // (it no longer resurrects) and the local copy must go away.
+        await SeedLocalConversationAsync();
+        _api.Setup(a => a.ImportConversationAsync(
+                "local-1", It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(Http(HttpStatusCode.Gone));
+        string? deletedId = null;
+        _sync.RemoteConversationDeleted += (_, id) => deletedId = id;
+
+        await _sync.SyncAllAsync();
+
+        (await _store.GetConversationAsync("local-1")).Should().BeNull();
+        deletedId.Should().Be("local-1");
     }
 
     [Fact]

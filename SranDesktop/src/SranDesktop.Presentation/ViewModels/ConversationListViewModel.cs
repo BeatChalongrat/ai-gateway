@@ -103,6 +103,33 @@ public partial class ConversationListViewModel : ObservableObject
         Conversations.CollectionChanged += OnConversationsCollectionChanged;
         Folders.CollectionChanged += OnFoldersCollectionChanged;
         MessageSearchResults.CollectionChanged += (_, _) => ScheduleRowsRebuild();
+
+        // FIX 9 Part C: a push that finds the conversation deleted on the
+        // server (deleted in web-chat) removes the local copy — drop the
+        // sidebar row too. Both VMs are singletons; no unsubscribe needed.
+        _agentSync.RemoteConversationDeleted += OnRemoteConversationDeleted;
+    }
+
+    /// <summary>Server-side delete discovered mid-session — reflect it in the
+    /// sidebar (the local store row is already gone). Marshalled to the UI
+    /// thread: the event can fire on a sync continuation thread.</summary>
+    private void OnRemoteConversationDeleted(object? sender, string conversationId)
+    {
+        void Remove()
+        {
+            var item = Conversations.FirstOrDefault(c => c.Id == conversationId);
+            if (item is null)
+                return;
+            Conversations.Remove(item);
+            if (SelectedConversation == item)
+                SelectedConversation = null;
+        }
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+            Remove();
+        else
+            dispatcher.InvokeAsync(Remove);
     }
 
     // ── Flat sidebar rows (Phase 8 Task 2) ─────────────────────────────────
