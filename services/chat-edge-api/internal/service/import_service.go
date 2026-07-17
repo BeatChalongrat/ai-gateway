@@ -39,12 +39,16 @@ const (
 	importMaxBatch = 200
 	// importMaxContentBytes caps a single message's content (128 KB).
 	importMaxContentBytes = 128 * 1024
+	// importMaxFilesPerMessage mirrors the send path's files-per-message
+	// cap (FileService Knobs.MaxFilesPerMessage default).
+	importMaxFilesPerMessage = 5
 )
 
 type ImportService struct {
 	pool          *pgxpool.Pool
 	conversations *repository.ConversationRepo
 	messages      *repository.MessageRepo
+	files         *repository.FileRepo
 	ownership     *ConversationService
 }
 
@@ -52,12 +56,14 @@ func NewImportService(
 	pool *pgxpool.Pool,
 	conversations *repository.ConversationRepo,
 	messages *repository.MessageRepo,
+	files *repository.FileRepo,
 	ownership *ConversationService,
 ) *ImportService {
 	return &ImportService{
 		pool:          pool,
 		conversations: conversations,
 		messages:      messages,
+		files:         files,
 		ownership:     ownership,
 	}
 }
@@ -158,6 +164,12 @@ type ImportMessageInput struct {
 	Content   string
 	ModelID   string
 	CreatedAt time.Time
+	// FileIDs are SERVER file ids (previously uploaded to this
+	// conversation) to link to this message (FIX 10) — the desktop's
+	// equivalent of the send path's ``file_ids``, so a desktop
+	// attachment shows under its message bubble on web. Idempotent:
+	// already-linked files are left untouched.
+	FileIDs []uuid.UUID
 }
 
 // ImportMessages appends historical messages to an owned conversation in
@@ -195,6 +207,10 @@ func (s *ImportService) ImportMessages(
 		if items[i].CreatedAt.IsZero() {
 			return 0, 0, fmt.Errorf("%w: message %d: created_at is required", ErrImportInvalid, i)
 		}
+		if len(items[i].FileIDs) > importMaxFilesPerMessage {
+			return 0, 0, fmt.Errorf("%w: message %d: at most %d file_ids per message",
+				ErrImportInvalid, i, importMaxFilesPerMessage)
+		}
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -205,12 +221,13 @@ func (s *ImportService) ImportMessages(
 
 	msgs := s.messages.WithTx(tx)
 	convs := s.conversations.WithTx(tx)
+	filesTx := s.files.WithTx(tx)
 	for i := range items {
 		var modelID *string
 		if m := strings.TrimSpace(items[i].ModelID); m != "" {
 			modelID = &m
 		}
-		inserted, err := msgs.CreateImported(ctx, &model.Message{
+		msgID, inserted, err := msgs.CreateImported(ctx, &model.Message{
 			ConversationID: convID,
 			TenantID:       tenantID,
 			UserID:         userID,
@@ -225,6 +242,16 @@ func (s *ImportService) ImportMessages(
 			imported++
 		} else {
 			skipped++
+		}
+		// Link uploaded attachments to the message (FIX 10) — same repo
+		// path the send handler uses. Tenant+conversation scoped, and it
+		// only claims rows with message_id IS NULL, so ids the caller
+		// doesn't own (or already-linked files on a replay) are no-ops.
+		if len(items[i].FileIDs) > 0 {
+			if _, err := filesTx.AttachToMessage(
+				ctx, tenantID, convID, msgID, items[i].FileIDs); err != nil {
+				return 0, 0, err
+			}
 		}
 	}
 	// message_count is app-maintained; bump by rows ACTUALLY inserted —

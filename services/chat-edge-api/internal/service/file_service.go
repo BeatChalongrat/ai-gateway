@@ -219,6 +219,11 @@ type UploadInput struct {
 	ContentType    string
 	Size           int64
 	Body           multipart.File
+	// ClientID is the uploader's own dedup key (FIX 10 — the desktop's
+	// deterministic local file id). When set, re-uploading the same
+	// (conversation, client_id) returns the EXISTING row instead of
+	// creating a duplicate; empty keeps the legacy always-insert path.
+	ClientID string
 }
 
 // Upload validates the request, persists the blob, creates the row,
@@ -249,6 +254,20 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	}
 	if conv.UserID != in.UserID {
 		return nil, ErrFileConvNotFound
+	}
+
+	// Dedup by the uploader's client id (FIX 10): a re-sync of the same
+	// attachment returns the existing row — no duplicate blob, no
+	// duplicate quota charge. Checked AFTER the ownership gate so the
+	// existence of another user's client ids never leaks.
+	clientID := strings.TrimSpace(in.ClientID)
+	if clientID != "" {
+		if existing, err := s.files.GetByClientID(
+			ctx, in.TenantID, in.ConversationID, clientID); err == nil {
+			return existing, nil
+		} else if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
 	}
 
 	// Per-conversation cap. Sum existing rows + the incoming size.
@@ -288,6 +307,10 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	// not worth a HEAD per upload.
 	written := in.Size
 
+	var rowClientID *string
+	if clientID != "" {
+		rowClientID = &clientID
+	}
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
 		TenantID:         in.TenantID,
@@ -298,9 +321,18 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 		FileSizeBytes:    written,
 		StoragePath:      key,
 		ExtractionStatus: "processing",
+		ClientID:         rowClientID,
 	})
 	if err != nil {
 		_ = s.storage.Delete(ctx, key)
+		// Lost a same-client_id insert race — the winner's row is the
+		// canonical attachment; return it (idempotent contract).
+		if clientID != "" && repository.IsUniqueViolation(err) {
+			if existing, gerr := s.files.GetByClientID(
+				ctx, in.TenantID, in.ConversationID, clientID); gerr == nil {
+				return existing, nil
+			}
+		}
 		return nil, err
 	}
 

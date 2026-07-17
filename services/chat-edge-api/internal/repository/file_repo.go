@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
@@ -35,7 +36,8 @@ const fileColumns = `
 	original_filename, content_type, file_size_bytes,
 	storage_path, extracted_text, extraction_status,
 	created_at, updated_at,
-	inspection_json, is_generated, parent_file_id, version, change_log
+	inspection_json, is_generated, parent_file_id, version, change_log,
+	client_id
 `
 
 func scanFile(row pgx.Row, f *model.ConversationFile) error {
@@ -45,6 +47,7 @@ func scanFile(row pgx.Row, f *model.ConversationFile) error {
 		&f.StoragePath, &f.ExtractedText, &f.ExtractionStatus,
 		&f.CreatedAt, &f.UpdatedAt,
 		&f.InspectionJSON, &f.IsGenerated, &f.ParentFileID, &f.Version, &f.ChangeLog,
+		&f.ClientID,
 	)
 }
 
@@ -63,8 +66,8 @@ func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*mode
 		INSERT INTO chat.conversation_files
 			(conversation_id, message_id, tenant_id, user_id, filename, original_filename,
 			 content_type, file_size_bytes, storage_path, extraction_status,
-			 is_generated, parent_file_id, version, change_log, inspection_json)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			 is_generated, parent_file_id, version, change_log, inspection_json, client_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, created_at, updated_at
 	`
 	if f.ExtractionStatus == "" {
@@ -76,10 +79,36 @@ func (r *FileRepo) Create(ctx context.Context, f *model.ConversationFile) (*mode
 	err := r.db.QueryRow(ctx, q,
 		f.ConversationID, f.MessageID, f.TenantID, f.UserID, f.Filename, f.OriginalFilename,
 		f.ContentType, f.FileSizeBytes, f.StoragePath, f.ExtractionStatus,
-		f.IsGenerated, f.ParentFileID, f.Version, f.ChangeLog, f.InspectionJSON,
+		f.IsGenerated, f.ParentFileID, f.Version, f.ChangeLog, f.InspectionJSON, f.ClientID,
 	).Scan(&f.ID, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create file: %w", err)
+	}
+	return f, nil
+}
+
+// IsUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505) — the losing side of a concurrent
+// same-client_id upload race.
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// GetByClientID resolves a conversation file by the desktop's local file
+// id (migration 027). Tenant + conversation scoped. ErrNotFound when no
+// row carries the client id.
+func (r *FileRepo) GetByClientID(
+	ctx context.Context, tenantID, convID uuid.UUID, clientID string,
+) (*model.ConversationFile, error) {
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files
+	      WHERE conversation_id = $1 AND tenant_id = $2 AND client_id = $3`
+	f := &model.ConversationFile{}
+	if err := scanFile(r.db.QueryRow(ctx, q, convID, tenantID, clientID), f); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get file by client id: %w", err)
 	}
 	return f, nil
 }
@@ -335,6 +364,7 @@ func (r *FileRepo) ListGeneratedLeaves(
 		  cf.storage_path, cf.extracted_text, cf.extraction_status,
 		  cf.created_at, cf.updated_at,
 		  cf.inspection_json, cf.is_generated, cf.parent_file_id, cf.version, cf.change_log,
+		  cf.client_id,
 		  counts.version_count,
 		  parent.original_filename AS parent_filename
 		FROM leaves cf
@@ -360,7 +390,7 @@ func (r *FileRepo) ListGeneratedLeaves(
 			&leaf.File.ExtractedText, &leaf.File.ExtractionStatus,
 			&leaf.File.CreatedAt, &leaf.File.UpdatedAt,
 			&leaf.File.InspectionJSON, &leaf.File.IsGenerated, &leaf.File.ParentFileID,
-			&leaf.File.Version, &leaf.File.ChangeLog,
+			&leaf.File.Version, &leaf.File.ChangeLog, &leaf.File.ClientID,
 			&leaf.VersionCount, &parentName,
 		); err != nil {
 			return nil, fmt.Errorf("list generated leaves scan: %w", err)

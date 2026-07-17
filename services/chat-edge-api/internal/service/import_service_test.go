@@ -7,6 +7,7 @@ package service
 // non-leaking not-found error. DB-gated: skips when Postgres is unreachable.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -16,8 +17,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
+
+// memFile adapts a bytes.Reader to multipart.File for upload tests.
+type memFile struct{ *bytes.Reader }
+
+func (memFile) Close() error { return nil }
 
 func importPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -33,8 +41,11 @@ func importPool(t *testing.T) *pgxpool.Pool {
 		p.Close()
 		t.Skipf("skip: DB unreachable %v", err)
 	}
-	// Migration 026 is fully idempotent (IF NOT EXISTS everywhere).
+	// Migrations 026 + 027 are fully idempotent (IF NOT EXISTS everywhere).
 	if b, err := os.ReadFile("../../migrations/026_desktop_import.sql"); err == nil {
+		_, _ = p.Exec(context.Background(), string(b))
+	}
+	if b, err := os.ReadFile("../../migrations/027_conversation_files_client_id.sql"); err == nil {
 		_, _ = p.Exec(context.Background(), string(b))
 	}
 	var col *string
@@ -62,7 +73,8 @@ func TestImportServiceE2E(t *testing.T) {
 
 	cr := repository.NewConversationRepo(pool)
 	mr := repository.NewMessageRepo(pool)
-	svc := NewImportService(pool, cr, mr, NewConversationService(cr, importTestModels{}))
+	fr := repository.NewFileRepo(pool)
+	svc := NewImportService(pool, cr, mr, fr, NewConversationService(cr, importTestModels{}))
 
 	tenantID, userID, otherUser := uuid.New(), uuid.New(), uuid.New()
 	t.Cleanup(func() {
@@ -226,6 +238,97 @@ func TestImportServiceE2E(t *testing.T) {
 		_, _, err := svc.ImportMessages(ctx, tenantID, otherUser, conv.ID, batch)
 		if !errors.Is(err, ErrConversationNotFound) {
 			t.Fatalf("want ErrConversationNotFound, got %v", err)
+		}
+	})
+
+	t.Run("ImportWithFileIDsLinksAttachment", func(t *testing.T) {
+		// FIX 10: a desktop-uploaded file linked via file_ids on import
+		// gets message_id set — it then shows under its message bubble on
+		// web. A replay of the same batch must not error or re-link.
+		clientFileID := "file-" + uuid.NewString()
+		row, err := fr.Create(ctx, &model.ConversationFile{
+			ConversationID: conv.ID, TenantID: tenantID, UserID: userID,
+			Filename: "x_img.png", OriginalFilename: "img.png",
+			ContentType: "image/png", FileSizeBytes: 4,
+			StoragePath: "test/img.png", ExtractionStatus: "completed",
+			ClientID: &clientFileID,
+		})
+		if err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+		item := []ImportMessageInput{{
+			ClientID: "mf1", Role: "user", Content: "see attached",
+			CreatedAt: time.Date(2026, 1, 2, 5, 0, 0, 0, time.UTC),
+			FileIDs:   []uuid.UUID{row.ID},
+		}}
+		if _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, item); err != nil {
+			t.Fatalf("import with file_ids: %v", err)
+		}
+		var linkedTo *uuid.UUID
+		if err := pool.QueryRow(ctx,
+			"SELECT message_id FROM chat.conversation_files WHERE id = $1", row.ID,
+		).Scan(&linkedTo); err != nil {
+			t.Fatalf("file lookup: %v", err)
+		}
+		if linkedTo == nil {
+			t.Fatal("file not linked to the imported message")
+		}
+		var clientOfMsg string
+		if err := pool.QueryRow(ctx,
+			"SELECT client_id FROM chat.messages_masked WHERE id = $1", *linkedTo,
+		).Scan(&clientOfMsg); err != nil || clientOfMsg != "mf1" {
+			t.Fatalf("file linked to wrong message: client_id=%q err=%v", clientOfMsg, err)
+		}
+		// Replay: message dedups (skipped), link survives, no error.
+		imported, skipped, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, item)
+		if err != nil || imported != 0 || skipped != 1 {
+			t.Fatalf("replay: want 0/1 nil, got %d/%d %v", imported, skipped, err)
+		}
+		var still *uuid.UUID
+		_ = pool.QueryRow(ctx,
+			"SELECT message_id FROM chat.conversation_files WHERE id = $1", row.ID,
+		).Scan(&still)
+		if still == nil || *still != *linkedTo {
+			t.Fatal("replay disturbed the file link")
+		}
+	})
+
+	t.Run("UploadDedupByClientID", func(t *testing.T) {
+		// FIX 10 migration 027: re-uploading the same (conversation,
+		// client_id) returns the existing row — no duplicate.
+		backend, err := storage.NewLocalBackend(t.TempDir())
+		if err != nil {
+			t.Fatalf("local backend: %v", err)
+		}
+		fsvc := NewFileService(fr, cr, backend, Knobs{
+			ExtractPythonBinary: "definitely-missing-python-binary",
+		})
+		clientID := "file-" + uuid.NewString()
+		up := func() *model.ConversationFile {
+			t.Helper()
+			row, err := fsvc.Upload(ctx, UploadInput{
+				TenantID: tenantID, UserID: userID, ConversationID: conv.ID,
+				OriginalName: "notes.txt", ContentType: "text/plain",
+				Size: 5, Body: memFile{bytes.NewReader([]byte("hello"))},
+				ClientID: clientID,
+			})
+			if err != nil {
+				t.Fatalf("upload: %v", err)
+			}
+			return row
+		}
+		first := up()
+		second := up()
+		if first.ID != second.ID {
+			t.Fatalf("re-upload duplicated: %s vs %s", first.ID, second.ID)
+		}
+		var n int
+		_ = pool.QueryRow(ctx,
+			"SELECT COUNT(*) FROM chat.conversation_files WHERE conversation_id = $1 AND client_id = $2",
+			conv.ID, clientID,
+		).Scan(&n)
+		if n != 1 {
+			t.Fatalf("want exactly 1 row for the client_id, got %d", n)
 		}
 	})
 

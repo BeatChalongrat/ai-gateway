@@ -93,9 +93,14 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 // verbatim (never re-stamped to NOW()). status is always 'completed'; the
 // canonical fields keep their 'legacy' defaults so imported content is
 // excluded from canonical-history replay.
+//
+// Returns the row's SERVER message id in both outcomes (FIX 10): the
+// freshly-inserted id, or — on a conflict replay — the existing row's id
+// resolved by (conversation_id, client_id), so the caller can link file
+// attachments idempotently.
 func (r *MessageRepo) CreateImported(
 	ctx context.Context, m *model.Message, clientID string, createdAt time.Time,
-) (bool, error) {
+) (uuid.UUID, bool, error) {
 	const q = `
 		INSERT INTO chat.messages_masked
 			(conversation_id, tenant_id, user_id, role, content_masked,
@@ -103,15 +108,28 @@ func (r *MessageRepo) CreateImported(
 		VALUES ($1, $2, $3, $4, $5, 'completed', $6, $7, $8, true)
 		ON CONFLICT (conversation_id, client_id) WHERE client_id IS NOT NULL
 		DO NOTHING
+		RETURNING id
 	`
-	tag, err := r.db.Exec(ctx, q,
+	var id uuid.UUID
+	err := r.db.QueryRow(ctx, q,
 		m.ConversationID, m.TenantID, m.UserID, m.Role, m.ContentMasked,
 		m.ModelID, clientID, createdAt,
-	)
-	if err != nil {
-		return false, fmt.Errorf("create imported message: %w", err)
+	).Scan(&id)
+	if err == nil {
+		return id, true, nil
 	}
-	return tag.RowsAffected() == 1, nil
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, fmt.Errorf("create imported message: %w", err)
+	}
+	// Conflict — resolve the existing row (idempotent replay).
+	const sel = `
+		SELECT id FROM chat.messages_masked
+		WHERE conversation_id = $1 AND client_id = $2
+	`
+	if err := r.db.QueryRow(ctx, sel, m.ConversationID, clientID).Scan(&id); err != nil {
+		return uuid.Nil, false, fmt.Errorf("resolve imported message by client id: %w", err)
+	}
+	return id, false, nil
 }
 
 // ListByConversation returns the message history for one
