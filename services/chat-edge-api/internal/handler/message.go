@@ -79,6 +79,11 @@ type messageResponse struct {
 	// reasoning_delta stream is gone once the turn completes).
 	ReasoningContent *string         `json:"reasoning_content,omitempty"`
 	SearchSources    json.RawMessage `json:"search_sources,omitempty"`
+	// ClientID is the desktop's own message id for rows that arrived via
+	// the desktop import endpoints (FIX 9). The desktop uses it to
+	// correlate a server row back to its local copy; nil / omitted for
+	// native chat-edge rows so the web wire is unchanged.
+	ClientID *string `json:"client_id,omitempty"`
 	Files            []fileResponse  `json:"files,omitempty"`
 	BranchIndex      int             `json:"branch_index"`
 	BranchCount      int             `json:"branch_count"`
@@ -143,6 +148,7 @@ func messageToWire(m *model.Message) messageResponse {
 		CreatedAt:   m.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		BranchIndex: m.BranchIndex,
 		BranchCount: 1,
+		ClientID:    m.ClientID,
 	}
 	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
 		r.ReasoningContent = m.ReasoningContent

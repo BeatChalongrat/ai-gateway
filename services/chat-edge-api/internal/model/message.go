@@ -77,4 +77,11 @@ type Message struct {
 	// placeholder). Drives the read-path representation policy. Empty string
 	// from a pre-migration row is treated as ``legacy_display``.
 	DisplayState string
+
+	// Desktop import identity (migration 026 / FIX 9). The desktop's own
+	// message id for rows that arrived via the import endpoints; nil for
+	// native chat-edge rows. Surfaced on the list wire so the desktop can
+	// correlate a server row back to its local copy (dedup + tool-chain
+	// re-attachment) when reading the server-authoritative transcript.
+	ClientID *string
 }

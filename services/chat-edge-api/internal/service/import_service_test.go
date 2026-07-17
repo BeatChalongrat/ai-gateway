@@ -229,18 +229,37 @@ func TestImportServiceE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("DeletedMirrorIsResurrected", func(t *testing.T) {
+	t.Run("DeletedMirrorStaysDeleted", func(t *testing.T) {
+		// FIX 9 Part C: a delete on any client is intentional. Re-importing
+		// the same client_id must surface ErrImportConversationGone (410) —
+		// never resurrect the row — and the row must remain soft-deleted.
 		if err := cr.SoftDelete(ctx, tenantID, conv.ID); err != nil {
 			t.Fatalf("soft delete: %v", err)
 		}
-		back, created, err := svc.ImportConversation(ctx, ImportConversationInput{
+		_, _, err := svc.ImportConversation(ctx, ImportConversationInput{
 			TenantID: tenantID, UserID: userID, ClientID: clientConvID,
 		})
-		if err != nil {
-			t.Fatalf("re-import after delete: %v", err)
+		if !errors.Is(err, ErrImportConversationGone) {
+			t.Fatalf("want ErrImportConversationGone, got %v", err)
 		}
-		if created || back.ID != conv.ID || back.IsDeleted {
-			t.Fatalf("want resurrected existing mirror, got created=%v deleted=%v", created, back.IsDeleted)
+		var stillDeleted bool
+		if err := pool.QueryRow(ctx,
+			"SELECT is_deleted FROM chat.conversations WHERE id = $1", conv.ID,
+		).Scan(&stillDeleted); err != nil {
+			t.Fatalf("row lookup: %v", err)
+		}
+		if !stillDeleted {
+			t.Fatalf("import resurrected a deleted conversation")
+		}
+	})
+
+	t.Run("MessagesImportToDeletedIsNotFound", func(t *testing.T) {
+		// The message-import path sees a deleted conversation as not-found
+		// (ownership gate filters is_deleted) — the desktop treats that 404
+		// as "deleted remotely" and drops its local copy.
+		_, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
+		if !errors.Is(err, ErrConversationNotFound) {
+			t.Fatalf("want ErrConversationNotFound for deleted conversation, got %v", err)
 		}
 	})
 }

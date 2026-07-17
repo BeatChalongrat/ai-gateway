@@ -28,6 +28,12 @@ import (
 // ErrImportInvalid marks a validation failure the handler maps to 422.
 var ErrImportInvalid = errors.New("import: invalid input")
 
+// ErrImportConversationGone marks an import against a conversation the user
+// deleted (on any client). The handler maps it to 410 Gone so the desktop
+// propagates the delete locally instead of resurrecting the transcript
+// (FIX 9 Part C — a user-intended delete must stay deleted).
+var ErrImportConversationGone = errors.New("import: conversation deleted")
+
 const (
 	// importMaxBatch caps one message-import request.
 	importMaxBatch = 200
@@ -67,9 +73,10 @@ type ImportConversationInput struct {
 }
 
 // ImportConversation creates-or-gets a conversation by the desktop's local
-// id. Returns (conversation, created). A web-deleted mirror is resurrected
-// rather than returned dead — the desktop is authoritative for its own
-// backup, and a permanently-deleted mirror would wedge sync forever.
+// id. Returns (conversation, created). A deleted mirror is NOT resurrected
+// (FIX 9 Part C): the server transcript is authoritative and a delete on any
+// client is intentional — the call fails with ErrImportConversationGone
+// (410) and the desktop deletes its local copy in response.
 func (s *ImportService) ImportConversation(
 	ctx context.Context, in ImportConversationInput,
 ) (*model.Conversation, bool, error) {
@@ -123,8 +130,11 @@ func (s *ImportService) ImportConversation(
 	return existing, false, nil
 }
 
-// getExisting resolves (and if needed resurrects) the mirror for a client
-// id. Returns (nil, nil) when no row exists.
+// getExisting resolves the mirror for a client id. Returns (nil, nil) when
+// no row exists, and ErrImportConversationGone when the mirror was deleted —
+// deletes are user-intended and must never be undone by a sync push
+// (previously this resurrected the row, which let the desktop re-create a
+// conversation the user had deleted on the web).
 func (s *ImportService) getExisting(
 	ctx context.Context, tenantID, userID uuid.UUID, clientID string,
 ) (*model.Conversation, error) {
@@ -136,11 +146,7 @@ func (s *ImportService) getExisting(
 		return nil, err
 	}
 	if existing.IsDeleted {
-		if err := s.conversations.Restore(ctx, tenantID, existing.ID); err != nil {
-			return nil, err
-		}
-		existing.IsDeleted = false
-		existing.DeletedAt = nil
+		return nil, ErrImportConversationGone
 	}
 	return existing, nil
 }
