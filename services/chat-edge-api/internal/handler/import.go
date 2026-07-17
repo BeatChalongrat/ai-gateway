@@ -55,6 +55,9 @@ type importMessageItem struct {
 	// CreatedAt is required per message — historical data keeps its
 	// original timestamp, never NOW().
 	CreatedAt string `json:"created_at"`
+	// FileIDs are server file ids already uploaded to this conversation,
+	// to link to this message (FIX 10 — desktop attachment sync).
+	FileIDs []string `json:"file_ids,omitempty"`
 }
 
 type importMessagesRequest struct {
@@ -154,12 +157,23 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 				"messages["+strconv.Itoa(i)+"].created_at must be RFC3339")
 			return
 		}
+		var fileIDs []uuid.UUID
+		for _, s := range m.FileIDs {
+			id, err := uuid.Parse(s)
+			if err != nil {
+				WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
+					"messages["+strconv.Itoa(i)+"].file_ids must be UUIDs")
+				return
+			}
+			fileIDs = append(fileIDs, id)
+		}
 		items = append(items, service.ImportMessageInput{
 			ClientID:  m.ClientID,
 			Role:      m.Role,
 			Content:   m.Content,
 			ModelID:   m.ModelID,
 			CreatedAt: ts,
+			FileIDs:   fileIDs,
 		})
 	}
 

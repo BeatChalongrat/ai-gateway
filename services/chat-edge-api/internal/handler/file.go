@@ -61,6 +61,10 @@ type fileResponse struct {
 	ParentFileID string   `json:"parent_file_id,omitempty"`
 	Version      int      `json:"version,omitempty"`
 	ChangeLog    []string `json:"change_log,omitempty"`
+	// ClientID is the desktop's own file id for attachments that client
+	// uploaded (FIX 10 dedup key) — lets it correlate a server file back
+	// to its local copy. Omitted for web uploads and generated files.
+	ClientID string `json:"client_id,omitempty"`
 }
 
 // FileToWire formats a model.ConversationFile for the wire. Exported
@@ -83,6 +87,9 @@ func FileToWire(f *model.ConversationFile) fileResponse {
 	}
 	if f.ParentFileID != nil {
 		r.ParentFileID = f.ParentFileID.String()
+	}
+	if f.ClientID != nil {
+		r.ClientID = *f.ClientID
 	}
 	if f.ChangeLog != nil && *f.ChangeLog != "" {
 		// Persisted as newline-joined; split back into a list for
@@ -154,6 +161,9 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		ContentType:    ct,
 		Size:           header.Size,
 		Body:           file,
+		// Optional dedup key (FIX 10): the desktop sends its local file
+		// id as a plain multipart field so re-syncs upsert.
+		ClientID: r.FormValue("client_id"),
 	})
 	if err != nil {
 		h.writeUploadError(w, err)

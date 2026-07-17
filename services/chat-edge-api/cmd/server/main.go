@@ -477,8 +477,10 @@ func main() {
 		// GatewayClient (and its internal-trust headers) as the video tool.
 		MediaProxy: handler.NewMediaProxyHandler(gateway),
 		// Phase 3 — desktop agent-conversation backup mirror (migration 026).
+		// filesRepo: FIX 10 — imported user messages can link uploaded
+		// attachments via file_ids.
 		Import: handler.NewImportHandler(
-			service.NewImportService(pool, conversations, messages, conversationSvc),
+			service.NewImportService(pool, conversations, messages, filesRepo, conversationSvc),
 		),
 	}
 
