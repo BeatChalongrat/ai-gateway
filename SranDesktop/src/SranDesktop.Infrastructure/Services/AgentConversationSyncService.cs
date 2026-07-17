@@ -311,7 +311,10 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
                 m.Role == MessageRole.User ? "user" : "assistant",
                 m.Content!,
                 m.ModelId,
-                m.CreatedAt.UtcDateTime.ToString("o"))).ToList();
+                m.CreatedAt.UtcDateTime.ToString("o"),
+                // FIX 10: link previously-uploaded attachments to this
+                // message so they show under its bubble on web.
+                ParseFileIds(m.FileIdsJson))).ToList();
 
             ImportMessagesResponse response;
             try
@@ -342,6 +345,24 @@ public sealed class AgentConversationSyncService : IAgentConversationSyncService
             await _store.SetConversationServerIdAsync(conversation.Id, serverId, ct);
         _logger.LogInformation("Agent sync pushed {Count} message(s) for {Id}",
             unsynced.Count, conversation.Id);
+    }
+
+    /// <summary>Parses a message row's persisted file_ids JSON (FIX 10) into
+    /// the wire list. Malformed JSON degrades to "no attachments" — the
+    /// transcript text must still sync.</summary>
+    private static List<string>? ParseFileIds(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            var ids = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
+            return ids is { Count: > 0 } ? ids : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>The server says this conversation is gone — delete the local

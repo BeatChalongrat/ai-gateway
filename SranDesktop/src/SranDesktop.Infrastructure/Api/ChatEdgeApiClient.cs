@@ -274,11 +274,16 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
 
     public async Task<FileAttachmentDto> UploadFileAsync(
         string conversationId, Stream content, string fileName, string contentType, long? length,
-        IProgress<double>? progress = null, CancellationToken ct = default)
+        IProgress<double>? progress = null, string? clientId = null, CancellationToken ct = default)
     {
         using var deadline = Deadline(ct, TimeSpan.FromMinutes(10));
 
         using var form = new MultipartFormDataContent();
+        // Dedup key first (FIX 10) — a plain text field the server reads via
+        // FormValue; re-uploads of the same (conversation, client_id) return
+        // the existing row instead of a duplicate.
+        if (!string.IsNullOrEmpty(clientId))
+            form.Add(new StringContent(clientId), "client_id");
         var streamContent = new StreamContent(
             new ProgressReportingStream(content, length, progress), 81920);
         streamContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);

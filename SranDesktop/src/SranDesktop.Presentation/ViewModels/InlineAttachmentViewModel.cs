@@ -26,6 +26,10 @@ public partial class InlineAttachmentViewModel : ObservableObject
     public bool IsImage => ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
     public bool IsVideo => ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Everything that isn't inline-renderable media — synced PDFs,
+    /// docs, spreadsheets (FIX 10). Rendered as a save-able file chip.</summary>
+    public bool IsDocument => !IsImage && !IsVideo;
+
     /// <summary>Play/pause state — toggled by MessageBubble's overlay button.</summary>
     [ObservableProperty]
     private bool _isPlaying;

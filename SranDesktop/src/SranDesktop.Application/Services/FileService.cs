@@ -39,7 +39,7 @@ public sealed class FileService : IFileService
 
     public async Task<FileAttachmentDto> UploadAsync(
         string conversationId, string localPath,
-        IProgress<double>? progress = null, CancellationToken ct = default)
+        IProgress<double>? progress = null, string? clientId = null, CancellationToken ct = default)
     {
         var info = new FileInfo(localPath);
         if (!info.Exists)
@@ -56,7 +56,7 @@ public sealed class FileService : IFileService
             localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
 
         var result = await _api.UploadFileAsync(
-            conversationId, stream, info.Name, contentType, info.Length, progress, ct);
+            conversationId, stream, info.Name, contentType, info.Length, progress, clientId, ct);
 
         _logger.LogInformation("Uploaded {Name} ({Bytes} bytes) as {Id}", info.Name, info.Length, result.Id);
         return result;

@@ -28,4 +28,9 @@ public sealed class Message
     /// this row was pushed to — the server dedupes by our message id as its
     /// client_id, so no per-message server id exists. Null = not yet synced.</summary>
     public string? ServerId { get; set; }
+
+    /// <summary>JSON array of SERVER file ids attached to this (user) message
+    /// (FIX 10). The push sync sends them as file_ids on import so the
+    /// attachment shows under this message's bubble on web. Null = none.</summary>
+    public string? FileIdsJson { get; set; }
 }

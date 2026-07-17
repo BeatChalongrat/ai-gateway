@@ -131,6 +131,13 @@ public sealed class SqliteConversationStore : IConversationStore
         );
         CREATE INDEX IF NOT EXISTS idx_agent_notes_convo ON agent_notes(conversation_id, created_at);
         """,
+
+        // 4 — per-message attachment linkage (FIX 10). JSON array of SERVER
+        // file ids attached to a user message, so the push sync can send
+        // file_ids on import and the file shows under its bubble on web.
+        """
+        ALTER TABLE messages ADD COLUMN file_ids TEXT;
+        """,
     };
 
     /// <summary>Newest-N notes kept per conversation; older ones pruned on add.</summary>
@@ -281,7 +288,7 @@ public sealed class SqliteConversationStore : IConversationStore
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id
+            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids
             FROM messages WHERE conversation_id = $cid
             ORDER BY sort_order
             """;
@@ -301,7 +308,7 @@ public sealed class SqliteConversationStore : IConversationStore
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id
+            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids
             FROM messages WHERE conversation_id = $cid AND server_id IS NULL
             ORDER BY created_at, sort_order
             """;
@@ -367,13 +374,14 @@ public sealed class SqliteConversationStore : IConversationStore
     private static void BindMessageUpsert(SqliteCommand cmd, Message m)
     {
         cmd.CommandText = """
-            INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id)
-            VALUES ($id, $cid, $role, $content, $tool_calls, $tool_call_id, $name, $model_id, $token_usage, $created_at, $sort_order, $server_id)
+            INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids)
+            VALUES ($id, $cid, $role, $content, $tool_calls, $tool_call_id, $name, $model_id, $token_usage, $created_at, $sort_order, $server_id, $file_ids)
             ON CONFLICT(id) DO UPDATE SET
                 content = excluded.content,
                 tool_calls = excluded.tool_calls,
                 model_id = excluded.model_id,
-                token_usage = excluded.token_usage
+                token_usage = excluded.token_usage,
+                file_ids = COALESCE(excluded.file_ids, messages.file_ids)
             """;
         cmd.Parameters.AddWithValue("$id", m.Id);
         cmd.Parameters.AddWithValue("$cid", m.ConversationId);
@@ -388,6 +396,7 @@ public sealed class SqliteConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$created_at", ToIso(m.CreatedAt));
         cmd.Parameters.AddWithValue("$sort_order", m.SortOrder);
         cmd.Parameters.AddWithValue("$server_id", (object?)m.ServerId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$file_ids", (object?)m.FileIdsJson ?? DBNull.Value);
     }
 
     public async Task<int> GetNextSortOrderAsync(string conversationId, CancellationToken ct = default)
@@ -745,7 +754,8 @@ public sealed class SqliteConversationStore : IConversationStore
             : JsonSerializer.Deserialize<TokenUsage>(reader.GetString(8)),
         CreatedAt = FromIso(reader.GetString(9)),
         SortOrder = reader.GetInt32(10),
-        ServerId = reader.IsDBNull(11) ? null : reader.GetString(11)
+        ServerId = reader.IsDBNull(11) ? null : reader.GetString(11),
+        FileIdsJson = reader.IsDBNull(12) ? null : reader.GetString(12)
     };
 
     private static string RoleToString(MessageRole role) => role switch

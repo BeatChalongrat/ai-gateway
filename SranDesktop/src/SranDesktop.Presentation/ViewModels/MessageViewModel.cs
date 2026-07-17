@@ -44,6 +44,11 @@ public partial class MessageViewModel : ObservableObject
     /// <summary>Images the user attached, echoed inline in their bubble (R9 D5).</summary>
     public System.Collections.ObjectModel.ObservableCollection<InlineAttachmentViewModel> InlineImages { get; } = new();
 
+    /// <summary>SERVER file ids of the attachments uploaded with this (user)
+    /// message (FIX 10). Persisted with the message so the push sync can link
+    /// them server-side; null when the turn had no uploaded attachments.</summary>
+    public List<string>? AttachedFileIds { get; set; }
+
     /// <summary>Shows the shimmer image placeholder while the server generates.</summary>
     [ObservableProperty]
     private bool _isGeneratingImage;

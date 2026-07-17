@@ -72,8 +72,14 @@ public class ChatViewModelServerReadTests : IDisposable
     }
 
     private static MessageDto Dto(
-        string id, string role, string content, DateTimeOffset createdAt, string? clientId = null) =>
-        new(id, role, content, "completed", null, createdAt, null, clientId);
+        string id, string role, string content, DateTimeOffset createdAt, string? clientId = null,
+        List<FileAttachmentDto>? files = null) =>
+        new(id, role, content, "completed", null, createdAt, null, clientId, files);
+
+    /// <summary>Smallest valid PNG (1×1 transparent) — decodes to a real
+    /// BitmapSource so the hydrated attachment renders as an image.</summary>
+    private static byte[] OnePixelPng() => Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==");
 
     private void SetupServerMessages(params MessageDto[] messages) =>
         _api.Setup(a => a.ListMessagesAsync(
@@ -165,6 +171,55 @@ public class ChatViewModelServerReadTests : IDisposable
         _vm.Messages.Select(m => m.Content).Should().ContainInOrder(
             "agent turn", "agent answer", "web follow-up", "web answer");
         _vm.Messages.Should().HaveCount(4);
+    }
+
+    [Fact]
+    public async Task Server_Files_Hydrate_Into_Bubbles_And_Cache_Locally()
+    {
+        // FIX 10: a conversation with web-uploaded attachments renders them
+        // on desktop — image inline in the user bubble, PDF as a file chip —
+        // and caches the bytes locally so a re-open works offline with no
+        // second download.
+        var conversation = await SeedConversationAsync();
+        var png = OnePixelPng();
+        _api.Setup(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string url, CancellationToken _) =>
+                url.Contains("img-1") ? png : "%PDF-fake"u8.ToArray());
+        var files = new List<FileAttachmentDto>
+        {
+            new("img-1", "conv-1", "photo.png", "image/png", png.Length,
+                "/files/img-1/download", "completed", T0),
+            new("doc-1", "conv-1", "report.pdf", "application/pdf", 9,
+                "/files/doc-1/download", "completed", T0),
+        };
+        SetupServerMessages(Dto("s-u1", "user", "uploaded on web", T0, files: files));
+
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.AttachmentHydration;
+
+        var user = _vm.Messages.Should().ContainSingle().Subject;
+        user.InlineImages.Should().ContainSingle(a => a.Filename == "photo.png" && a.IsImage);
+        user.InlineImages.Single().ImageSource.Should().NotBeNull("the PNG must decode");
+        user.InlineAttachments.Should().ContainSingle(a => a.Filename == "report.pdf" && a.IsDocument);
+
+        var rows = await _store.GetFilesAsync("conv-1");
+        rows.Should().HaveCount(2);
+        rows.Should().OnlyContain(r =>
+            r.ServerUrl != null && r.LocalPath != null && File.Exists(r.LocalPath));
+
+        // Re-open: bytes come from the local cache — zero downloads.
+        _api.Invocations.Clear();
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.AttachmentHydration;
+
+        _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _vm.Messages.Single().InlineImages.Should().ContainSingle();
+        _vm.Messages.Single().InlineAttachments.Should().ContainSingle();
+
+        // Tidy the shared file cache (fixed LocalAppData location).
+        foreach (var row in rows)
+            try { File.Delete(row.LocalPath!); } catch (IOException) { }
     }
 
     [Fact]

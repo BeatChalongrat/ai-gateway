@@ -74,6 +74,36 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- Non-media attachments synced from the server (FIX 10):
+                 a user-uploaded PDF/doc renders as a save-able chip. -->
+            <ItemsControl ItemsSource="{Binding InlineAttachments}" HorizontalAlignment="Right"
+                          Margin="0,0,0,4">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:InlineAttachmentViewModel}">
+                        <Button Command="{Binding SaveAsCommand}"
+                                ToolTip="{loc:T attachment.save}"
+                                Cursor="Hand" Margin="4,0,0,4"
+                                HorizontalAlignment="Right"
+                                Background="{DynamicResource BgSecondaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1" Padding="10,8"
+                                controls:ButtonHelper.CornerRadius="10"
+                                Visibility="{Binding IsDocument, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="M6,2 H13 L18,7 V21 A1,1 0 0 1 17,22 H6 A1,1 0 0 1 5,21 V3 A1,1 0 0 1 6,2 Z M13,2 V7 H18"
+                                      Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5"
+                                      Fill="Transparent" Width="18" Height="18" Stretch="Uniform"
+                                      Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding Filename}" FontSize="13"
+                                           MaxWidth="260" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
             <Border Background="{DynamicResource UserBubbleBrush}"
                     CornerRadius="20"
                     Padding="16,10"
@@ -662,6 +692,29 @@
                                     </Path>
                                 </Button>
                             </Grid>
+
+                            <!-- Non-media attachment (FIX 10): synced PDF/doc/
+                                 spreadsheet renders as a save-able file chip. -->
+                            <Button Command="{Binding SaveAsCommand}"
+                                    ToolTip="{loc:T attachment.save}"
+                                    Cursor="Hand" Margin="0,4"
+                                    HorizontalAlignment="Left"
+                                    Background="{DynamicResource BgSecondaryBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1" Padding="10,8"
+                                    controls:ButtonHelper.CornerRadius="10"
+                                    Visibility="{Binding IsDocument, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="M6,2 H13 L18,7 V21 A1,1 0 0 1 17,22 H6 A1,1 0 0 1 5,21 V3 A1,1 0 0 1 6,2 Z M13,2 V7 H18"
+                                          Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5"
+                                          Fill="Transparent" Width="18" Height="18" Stretch="Uniform"
+                                          Margin="0,0,8,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Filename}" FontSize="13"
+                                               MaxWidth="260" TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
