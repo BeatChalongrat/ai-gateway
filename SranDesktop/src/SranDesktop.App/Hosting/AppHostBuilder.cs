@@ -132,6 +132,17 @@ public static class AppHostBuilder
                         AutomaticDecompression = System.Net.DecompressionMethods.All
                     });
 
+                // Browser bridge (Chrome extension): pipe server + pairing;
+                // Start() is called at app startup so the relay can connect
+                // whenever Chrome launches it.
+                services.AddSingleton<IBrowserBridgeService>(sp =>
+                    new SranDesktop.Infrastructure.Services.BrowserBridgeService(
+                        sp.GetRequiredService<ICredentialStore>(),
+                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+                            SranDesktop.Infrastructure.Services.BrowserBridgeService>>()));
+                services.AddSingleton<IBrowserExtensionInstaller,
+                    SranDesktop.Infrastructure.Services.BrowserExtensionInstaller>();
+
                 // Computer-use screenshot→screen coordinate mapping (accuracy
                 // overhaul): screenshot writes it, click/scroll/drag/zoom read it.
                 services.AddSingleton<SranDesktop.Infrastructure.Native.ScreenContext>();
@@ -206,6 +217,17 @@ public static class AppHostBuilder
                     registry.Register(new ReadScreenElementsTool(uiaSnapshots));
                     registry.Register(new UiaClickTool(uiaSnapshots));
                     registry.Register(new UiaSetValueTool(uiaSnapshots));
+                    // Browser tools (Chrome extension bridge): DOM-level
+                    // control; all fail softly while the extension is absent.
+                    var browserBridge = sp.GetRequiredService<IBrowserBridgeService>();
+                    registry.Register(new BrowserListTabsTool(browserBridge));
+                    registry.Register(new BrowserTabsTool(browserBridge));
+                    registry.Register(new BrowserNavigateTool(browserBridge));
+                    registry.Register(new BrowserReadPageTool(browserBridge));
+                    registry.Register(new BrowserFindTool(browserBridge));
+                    registry.Register(new BrowserClickTool(browserBridge));
+                    registry.Register(new BrowserTypeTool(browserBridge));
+                    registry.Register(new BrowserScreenshotTool(browserBridge));
                     // Phase 13 Part B: code interpreter. Thin client → chat-edge's
                     // /code/run (server-side hardened sandbox). DefaultPermission
                     // is Ask (deny-without-handler): it runs model code + can read
@@ -289,4 +311,42 @@ public static class AppHostBuilder
                     new SranDesktop.Infrastructure.Services.McpConnectorService(
                         sp.GetRequiredService<ICredentialStore>(),
                         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SranDesktop.Infrastructure.Services.McpConnectorService>>(),
-                        
+                        context.Configuration["Sran:McpCatalogUrl"],
+                        sp.GetRequiredService<ITokenSession>()));
+
+                // ViewModels
+                services.AddSingleton<LoginViewModel>();
+                services.AddSingleton<ConversationListViewModel>();
+                services.AddSingleton<ChatViewModel>();
+                services.AddSingleton<MainViewModel>();
+                services.AddTransient<SettingsViewModel>();
+                services.AddTransient<KnowledgeBaseViewModel>();
+                services.AddTransient<MemoryViewModel>();
+                services.AddTransient<ScheduledTasksViewModel>();
+                services.AddTransient<SkillsViewModel>();
+                services.AddTransient<ConnectorMarketplaceViewModel>();
+                services.AddTransient<WritingStyleViewModel>();
+
+                // Views
+                services.AddTransient<SettingsView>();
+                services.AddSingleton<Func<SettingsView>>(sp => () => sp.GetRequiredService<SettingsView>());
+                services.AddTransient<KnowledgeBaseView>();
+                services.AddSingleton<Func<KnowledgeBaseView>>(sp => () => sp.GetRequiredService<KnowledgeBaseView>());
+                services.AddTransient<MemoryView>();
+                services.AddSingleton<Func<MemoryView>>(sp => () => sp.GetRequiredService<MemoryView>());
+                services.AddTransient<ScheduledTasksView>();
+                services.AddSingleton<Func<ScheduledTasksView>>(sp => () => sp.GetRequiredService<ScheduledTasksView>());
+                services.AddTransient<SkillsView>();
+                services.AddSingleton<Func<SkillsView>>(sp => () => sp.GetRequiredService<SkillsView>());
+                services.AddTransient<ConnectorMarketplaceView>();
+                services.AddSingleton<Func<ConnectorMarketplaceView>>(sp => () => sp.GetRequiredService<ConnectorMarketplaceView>());
+                services.AddTransient<WritingStyleView>();
+                services.AddSingleton<Func<WritingStyleView>>(sp => () => sp.GetRequiredService<WritingStyleView>());
+                services.AddTransient<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>();
+                services.AddSingleton<Func<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>>(
+                    sp => () => sp.GetRequiredService<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>());
+                services.AddSingleton<MainWindow>();
+            })
+            .Build();
+    }
+}

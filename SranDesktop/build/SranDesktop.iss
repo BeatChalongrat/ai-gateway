@@ -1,6 +1,8 @@
 ; SRAN Desktop Installer — Inno Setup 6.x
 ; Prereq: publish first ->
 ;   dotnet publish src/SranDesktop.App/SranDesktop.App.csproj -c Release -p:PublishProfile=win-x64
+;   dotnet publish src/SranDesktop.BrowserHost/SranDesktop.BrowserHost.csproj -c Release ^
+;     -r win-x64 --self-contained -p:PublishSingleFile=true -o publish\win-x64
 ; Build:  ISCC.exe build\SranDesktop.iss
 
 #define MyAppName "SRAN Desktop"
@@ -47,6 +49,10 @@ Source: "..\publish\win-x64\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignorever
 ; Any loose companions the single-file host emits (native libs, config).
 Source: "..\publish\win-x64\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\publish\win-x64\*.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Browser bridge: native-messaging relay exe (spawned by Chrome) + the
+; unpacked extension folder Settings points users at.
+Source: "..\publish\win-x64\SranDesktop.BrowserHost.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\browser-extension\*"; DestDir: "{app}\browser-extension"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

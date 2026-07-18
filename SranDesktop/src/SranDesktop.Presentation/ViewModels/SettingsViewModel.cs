@@ -15,6 +15,8 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IChatEdgeApiClient _api;
     private readonly IStartupManager _startupManager;
     private readonly ConversationListViewModel _conversations;
+    private readonly IBrowserBridgeService _browserBridge;
+    private readonly IBrowserExtensionInstaller _browserInstaller;
     private readonly ILogger<SettingsViewModel> _logger;
 
     /// <summary>Delegates to the (singleton) conversation list so the button in Settings
@@ -70,6 +72,26 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _restartRequired;
 
+    // ── Browser bridge (Chrome extension) ──────────────────────────────────
+
+    [ObservableProperty]
+    private bool _isBrowserConnected;
+
+    [ObservableProperty]
+    private string _browserStatusText = "";
+
+    /// <summary>Pairing token the user pastes into the extension options page.</summary>
+    [ObservableProperty]
+    private string _browserPairingToken = "";
+
+    /// <summary>Dev/load-unpacked extension id added to allowed_origins.</summary>
+    [ObservableProperty]
+    private string _browserExtensionId = "";
+
+    /// <summary>Post-install instructions (extension folder path); null = hidden.</summary>
+    [ObservableProperty]
+    private string? _browserInstallMessage;
+
     public event EventHandler? Saved;
 
     public SettingsViewModel(
@@ -77,13 +99,21 @@ public partial class SettingsViewModel : ObservableObject
         IChatEdgeApiClient api,
         IStartupManager startupManager,
         ConversationListViewModel conversations,
+        IBrowserBridgeService browserBridge,
+        IBrowserExtensionInstaller browserInstaller,
         ILogger<SettingsViewModel> logger)
     {
         _settings = settings;
         _api = api;
         _startupManager = startupManager;
         _conversations = conversations;
+        _browserBridge = browserBridge;
+        _browserInstaller = browserInstaller;
         _logger = logger;
+        // Live status dot while the dialog is open (same singleton-event
+        // pattern as ConnectorItemViewModel; the VM is transient per dialog).
+        browserBridge.StatusChanged += (_, _) =>
+            System.Windows.Application.Current?.Dispatcher.Invoke(RefreshBrowserStatus);
     }
 
     public async Task LoadAsync()
@@ -101,6 +131,17 @@ public partial class SettingsViewModel : ObservableObject
         foreach (var folder in current.GrantedFolders)
             GrantedFolders.Add(folder);
         FolderRejectedMessage = null;
+        BrowserExtensionId = current.BrowserExtensionId;
+        BrowserInstallMessage = null;
+        try
+        {
+            BrowserPairingToken = _browserBridge.GetOrCreatePairingToken();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not load browser pairing token");
+        }
+        RefreshBrowserStatus();
         // The registry is the source of truth for auto-start.
         StartWithWindows = _startupManager.IsEnabled;
         RestartRequired = false;
@@ -134,6 +175,7 @@ public partial class SettingsViewModel : ObservableObject
         updated.SyncAgentConversations = SyncAgentConversations;
         updated.PreferLocalOfficeGeneration = PreferLocalOfficeGeneration;
         updated.GrantedFolders = GrantedFolders.ToList();
+        updated.BrowserExtensionId = BrowserExtensionId.Trim();
         if (!string.IsNullOrWhiteSpace(SelectedModelId))
             updated.DefaultModel = SelectedModelId;
 
@@ -185,5 +227,50 @@ public partial class SettingsViewModel : ObservableObject
     {
         if (folder is not null)
             GrantedFolders.Remove(folder);
+    }
+
+    // ── Browser bridge (Chrome extension) ──────────────────────────────────
+
+    private void RefreshBrowserStatus()
+    {
+        IsBrowserConnected = _browserBridge.IsConnected;
+        BrowserStatusText = IsBrowserConnected
+            ? Localization.LocaleService.Instance.T("settings.browser.connected")
+            : _browserBridge.LastSeenAt is { } seen
+                ? Localization.LocaleService.Instance.T(
+                    "settings.browser.lastSeen", seen.LocalDateTime.ToString("g"))
+                : Localization.LocaleService.Instance.T("settings.browser.never");
+    }
+
+    /// <summary>Registers the native-messaging host, then shows load-unpacked
+    /// instructions with the shipped extension folder.</summary>
+    [RelayCommand]
+    private void InstallBrowserExtension()
+    {
+        try
+        {
+            var folder = _browserInstaller.Install(
+                string.IsNullOrWhiteSpace(BrowserExtensionId) ? null : BrowserExtensionId);
+            BrowserInstallMessage = Localization.LocaleService.Instance.T(
+                "settings.browser.installDone", folder);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Browser extension install failed");
+            BrowserInstallMessage = ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private void CopyBrowserToken()
+    {
+        try
+        {
+            System.Windows.Clipboard.SetText(BrowserPairingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Clipboard copy failed");
+        }
     }
 }

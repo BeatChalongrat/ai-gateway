@@ -8,9 +8,14 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 
 public sealed class ComputerScrollTool : IMcpTool
 {
+    private readonly ScreenContext _screen;
+
+    public ComputerScrollTool(ScreenContext screen) => _screen = screen;
+
     public string Name => "computer_scroll";
     public string Description =>
-        "Scroll the mouse wheel at the given screen coordinates (moves the cursor there first).";
+        "Scroll the mouse wheel at the given coordinates FROM THE LAST SCREENSHOT " +
+        "(moves the cursor there first). Pass coordinates exactly as seen — never rescale.";
     public ToolCategory Category => ToolCategory.Screen;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowOnce;
 
@@ -18,8 +23,8 @@ public sealed class ComputerScrollTool : IMcpTool
         {
             "type": "object",
             "properties": {
-                "x": { "type": "integer", "description": "X coordinate in pixels" },
-                "y": { "type": "integer", "description": "Y coordinate in pixels" },
+                "x": { "type": "integer", "description": "X coordinate in pixels in the last screenshot" },
+                "y": { "type": "integer", "description": "Y coordinate in pixels in the last screenshot" },
                 "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Default down" },
                 "amount": { "type": "integer", "description": "Wheel notches, 1-10 (default 3)" }
             },
@@ -29,7 +34,7 @@ public sealed class ComputerScrollTool : IMcpTool
 
     public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
-        if (!ComputerClickTool.TryGetPoint(arguments, out var x, out var y, out var error))
+        if (!ComputerClickTool.TryGetScreenPoint(arguments, _screen, out var x, out var y, out var error))
             return ToolResult.Fail(error!);
 
         var direction = ToolHelpers.GetString(arguments, "direction") ?? "down";
@@ -39,6 +44,6 @@ public sealed class ComputerScrollTool : IMcpTool
 
         await Task.Run(() => Win32Input.Scroll(x, y, direction, amount), ct);
         await Task.Delay(100, ct);
-        return ToolResult.Ok($"Scrolled {direction} by {amount} at ({x}, {y}).");
+        return ToolResult.Ok($"Scrolled {direction} by {amount} at screen point ({x}, {y}).");
     }
 }

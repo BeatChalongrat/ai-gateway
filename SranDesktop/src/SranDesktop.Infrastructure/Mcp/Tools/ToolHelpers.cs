@@ -25,6 +25,24 @@ internal static class ToolHelpers
             ? el.GetBoolean()
             : fallback;
 
+    /// <summary>Brings a window to the foreground before keyboard injection and
+    /// VERIFIES it — typing into the wrong window is the worst computer-use
+    /// failure mode. Returns an error message, or null when focused.</summary>
+    public static async Task<string?> FocusWindowForInputAsync(string windowTitle, CancellationToken ct)
+    {
+        var hWnd = Native.Win32Input.FindWindowByTitle(windowTitle);
+        if (hWnd == IntPtr.Zero)
+            return $"No visible window with a title containing '{windowTitle}'.";
+
+        var focused = await Task.Run(() => Native.Win32Input.ForceForegroundWindow(hWnd), ct);
+        await Task.Delay(150, ct); // let the activation settle before keystrokes
+        if (!focused || Native.Win32Input.GetForegroundWindow() != hWnd)
+            return $"Could not bring '{windowTitle}' to the foreground — it may belong to an " +
+                   "elevated (administrator) process, which cannot receive our input. " +
+                   "Input was NOT sent.";
+        return null;
+    }
+
     public static string FormatSize(long bytes) => bytes switch
     {
         < 1024 => $"{bytes} B",

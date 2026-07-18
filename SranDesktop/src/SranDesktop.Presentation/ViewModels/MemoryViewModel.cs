@@ -10,15 +10,19 @@ using SranDesktop.Presentation.Localization;
 
 namespace SranDesktop.Presentation.ViewModels;
 
-/// <summary>In-app memory management (R7 Feature E).</summary>
+/// <summary>In-app memory management (R7 Feature E). Also surfaces the LOCAL
+/// global agent notes (Global Memory) with per-note delete — these live in the
+/// desktop SQLite store, not on the server.</summary>
 public partial class MemoryViewModel : ObservableObject
 {
     private readonly IChatEdgeApiClient _api;
+    private readonly IConversationStore _store;
     private readonly ILogger<MemoryViewModel> _logger;
     private readonly List<MemoryItemViewModel> _allMemories = new();
 
     public ObservableCollection<MemoryItemViewModel> Memories { get; } = new();
     public ObservableCollection<MemoryItemViewModel> PendingMemories { get; } = new();
+    public ObservableCollection<GlobalNoteItemViewModel> GlobalNotes { get; } = new();
 
     [ObservableProperty] private string _searchText = string.Empty;
     [ObservableProperty] private bool _isLoading;
@@ -35,8 +39,16 @@ public partial class MemoryViewModel : ObservableObject
 
     public bool HasPending => PendingCount > 0;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasGlobalNotes))]
+    [NotifyPropertyChangedFor(nameof(GlobalHeader))]
+    private int _globalCount;
+
+    public bool HasGlobalNotes => GlobalCount > 0;
+
     public string SavedHeader => $"{LocaleService.Instance.T("memory.saved")} ({TotalCount})";
     public string PendingHeader => $"{LocaleService.Instance.T("memory.suggested.title")} ({PendingCount})";
+    public string GlobalHeader => $"{LocaleService.Instance.T("memory.global")} ({GlobalCount})";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsListEmpty))]
@@ -52,9 +64,12 @@ public partial class MemoryViewModel : ObservableObject
     /// <summary>Themed confirm/error dialogs (Phase C.5), shared with item VMs.</summary>
     internal IDialogService Dialogs => _dialogs;
 
-    public MemoryViewModel(IChatEdgeApiClient api, ILogger<MemoryViewModel> logger, IDialogService dialogs)
+    public MemoryViewModel(
+        IChatEdgeApiClient api, IConversationStore store,
+        ILogger<MemoryViewModel> logger, IDialogService dialogs)
     {
         _api = api;
+        _store = store;
         _logger = logger;
         _dialogs = dialogs;
     }
@@ -66,6 +81,23 @@ public partial class MemoryViewModel : ObservableObject
     {
         IsLoading = true;
         ErrorMessage = null;
+
+        // Local global notes first — the SQLite store must not be hostage to
+        // server reachability (and vice versa).
+        try
+        {
+            var notes = await _store.GetGlobalNotesAsync();
+            GlobalNotes.Clear();
+            // Newest first, matching the ## Memory (global) prompt section.
+            for (var i = notes.Count - 1; i >= 0; i--)
+                GlobalNotes.Add(new GlobalNoteItemViewModel(this, _store, _logger, notes[i]));
+            GlobalCount = GlobalNotes.Count;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Global notes load failed");
+        }
+
         try
         {
             var active = await _api.ListMemoriesAsync(status: "active", limit: 200);
@@ -226,7 +258,58 @@ public partial class MemoryViewModel : ObservableObject
         NotifyChanged();
     }
 
+    internal void RemoveGlobalNote(GlobalNoteItemViewModel item)
+    {
+        if (GlobalNotes.Remove(item))
+            GlobalCount = GlobalNotes.Count;
+        NotifyChanged();
+    }
+
     internal void NotifyChanged() => MemoriesChanged?.Invoke(this, EventArgs.Empty);
+}
+
+/// <summary>One LOCAL global agent note (Global Memory) — delete removes the row.</summary>
+public partial class GlobalNoteItemViewModel : ObservableObject
+{
+    private readonly MemoryViewModel _parent;
+    private readonly IConversationStore _store;
+    private readonly ILogger _logger;
+
+    public string Id { get; }
+    public string Content { get; }
+    public string MetaLine { get; }
+
+    public GlobalNoteItemViewModel(
+        MemoryViewModel parent, IConversationStore store, ILogger logger,
+        SranDesktop.Domain.Entities.AgentNote note)
+    {
+        _parent = parent;
+        _store = store;
+        _logger = logger;
+        Id = note.Id;
+        Content = note.Content;
+        MetaLine = note.CreatedAt.LocalDateTime.ToString("d MMM yyyy");
+    }
+
+    [RelayCommand]
+    private async Task DeleteAsync()
+    {
+        var confirmed = await _parent.Dialogs.ConfirmAsync(
+            LocaleService.Instance.T("memory.global"),
+            LocaleService.Instance.T("memory.deleteConfirm"));
+        if (!confirmed)
+            return;
+
+        try
+        {
+            await _store.DeleteNoteAsync(Id);
+            _parent.RemoveGlobalNote(this);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Global note delete failed for {Id}", Id);
+        }
+    }
 }
 
 /// <summary>One memory row (saved or pending).</summary>

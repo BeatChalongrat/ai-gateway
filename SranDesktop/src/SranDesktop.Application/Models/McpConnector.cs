@@ -59,6 +59,23 @@ public sealed class McpConnector
     [JsonPropertyName("env")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, string>? Env { get; set; }
+
+    /// <summary>Custom-connector UI: HTTP header carrying the api_key token.
+    /// Null/absent = the default <c>Authorization: Bearer</c>; a custom name
+    /// (e.g. "X-Api-Key") sends the raw token under that header instead.
+    /// The token itself NEVER rides here — it stays in the DPAPI store.</summary>
+    [JsonPropertyName("auth_header")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AuthHeader { get; set; }
+}
+
+/// <summary>Outcome of a pre-install "Test connection" dial (custom-connector
+/// UI): initialize + tools/list against a connector definition that is NOT
+/// persisted yet. Never throws — errors come back as text for inline display.</summary>
+public sealed record ConnectorTestResult(bool Success, int ToolCount, string? Error)
+{
+    public static ConnectorTestResult Ok(int toolCount) => new(true, toolCount, null);
+    public static ConnectorTestResult Fail(string error) => new(false, 0, error);
 }
 
 /// <summary>Locally persisted install record for a connector.</summary>

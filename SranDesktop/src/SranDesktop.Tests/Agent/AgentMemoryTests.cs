@@ -90,6 +90,45 @@ public class AgentMemoryTests : IDisposable
         (await _store.GetNotesAsync("c1")).Should().BeEmpty();
     }
 
+    // ── global scope (Global Memory) ──────────────────────────────────────────
+
+    [Fact]
+    public async Task Global_Notes_RoundTrip_And_Survive_A_Store_Reopen()
+    {
+        await _store.AddNoteAsync(IConversationStore.GlobalNotesId, "user prefers short reports");
+
+        var reopened = new SqliteConversationStore(Path.Combine(_dbDir, "data.db"));
+        (await reopened.GetGlobalNotesAsync())
+            .Should().ContainSingle().Which.Content.Should().Be("user prefers short reports");
+        // Global notes never leak into a conversation's own list.
+        (await reopened.GetNotesAsync("c1")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Global_Notes_Are_Capped_To_Newest_50()
+    {
+        for (var i = 0; i < 60; i++)
+            await _store.AddNoteAsync(IConversationStore.GlobalNotesId, $"fact {i}");
+
+        var notes = await _store.GetGlobalNotesAsync();
+        notes.Should().HaveCount(50);
+        notes.Last().Content.Should().Be("fact 59");             // newest kept
+        notes.Should().NotContain(n => n.Content == "fact 9");   // oldest pruned
+    }
+
+    [Fact]
+    public async Task DeleteNoteAsync_Removes_A_Single_Note()
+    {
+        await _store.AddNoteAsync(IConversationStore.GlobalNotesId, "keep");
+        await _store.AddNoteAsync(IConversationStore.GlobalNotesId, "drop");
+        var target = (await _store.GetGlobalNotesAsync()).Single(n => n.Content == "drop");
+
+        await _store.DeleteNoteAsync(target.Id);
+
+        (await _store.GetGlobalNotesAsync())
+            .Should().ContainSingle().Which.Content.Should().Be("keep");
+    }
+
     // ── formatter ─────────────────────────────────────────────────────────────
 
     [Fact]
@@ -120,6 +159,47 @@ public class AgentMemoryTests : IDisposable
     public void Formatter_Returns_Null_For_No_Notes()
     {
         AgentNotesFormatter.BuildBlock(Array.Empty<AgentNote>()).Should().BeNull();
+        AgentNotesFormatter.BuildBlock(Array.Empty<AgentNote>(), Array.Empty<AgentNote>()).Should().BeNull();
+    }
+
+    [Fact]
+    public void Formatter_Renders_Global_Section_Before_Conversation_Section()
+    {
+        var convo = new[] { Note("task fact", 0) };
+        var global = new[] { Note("user fact old", 0), Note("user fact new", 1) };
+
+        var block = AgentNotesFormatter.BuildBlock(convo, global)!;
+
+        block.Should().Contain("## Memory (global)");
+        block.Should().Contain("## Notes (this conversation)");
+        block.IndexOf("## Memory (global)", StringComparison.Ordinal)
+            .Should().BeLessThan(block.IndexOf("## Notes (this conversation)", StringComparison.Ordinal));
+        // Global notes render newest first.
+        block.IndexOf("user fact new", StringComparison.Ordinal)
+            .Should().BeLessThan(block.IndexOf("user fact old", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Formatter_Renders_Global_Only_When_Conversation_Has_No_Notes()
+    {
+        var block = AgentNotesFormatter.BuildBlock(Array.Empty<AgentNote>(), new[] { Note("user fact", 0) });
+
+        block.Should().NotBeNull();
+        block.Should().Contain("## Memory (global)");
+        block.Should().NotContain("## Notes (this conversation)");
+    }
+
+    [Fact]
+    public void Formatter_Caps_Global_Section_Independently_Of_Conversation_Notes()
+    {
+        // A busy conversation must not evict global notes: each section has its own cap.
+        var convo = Enumerable.Range(0, 50).Select(i => Note($"task {i} " + new string('z', 200), i)).ToList();
+        var global = new[] { Note("user prefers short reports", 0) };
+
+        var block = AgentNotesFormatter.BuildBlock(convo, global)!;
+
+        block.Should().Contain("user prefers short reports");
+        block.Should().Contain("task 49"); // newest conversation note still present
     }
 
     // ── tool ──────────────────────────────────────────────────────────────────
@@ -142,6 +222,36 @@ public class AgentMemoryTests : IDisposable
     {
         var result = await new RememberTool(_store, new ShellSession())
             .ExecuteAsync(Args(new { note = "x" }), CancellationToken.None);
+        result.Success.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Remember_Tool_Global_Scope_Persists_Even_Without_A_Conversation()
+    {
+        var result = await new RememberTool(_store, new ShellSession())
+            .ExecuteAsync(Args(new { note = "user's team is Platform", scope = "global" }), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        (await _store.GetGlobalNotesAsync())
+            .Should().ContainSingle().Which.Content.Should().Be("user's team is Platform");
+    }
+
+    [Fact]
+    public async Task Remember_Tool_Default_Scope_Stays_Conversation()
+    {
+        var session = new ShellSession { CurrentConversationId = "c1" };
+        await new RememberTool(_store, session)
+            .ExecuteAsync(Args(new { note = "task-local" }), CancellationToken.None);
+
+        (await _store.GetGlobalNotesAsync()).Should().BeEmpty();
+        (await _store.GetNotesAsync("c1")).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Remember_Tool_Rejects_Unknown_Scope()
+    {
+        var result = await new RememberTool(_store, new ShellSession { CurrentConversationId = "c1" })
+            .ExecuteAsync(Args(new { note = "x", scope = "everywhere" }), CancellationToken.None);
         result.Success.Should().BeFalse();
     }
 

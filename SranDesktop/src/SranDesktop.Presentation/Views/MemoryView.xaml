@@ -117,6 +117,55 @@
                     </Grid>
                 </Border>
 
+                <!-- ══ Global memory (local agent notes, cross-conversation) ══ -->
+                <StackPanel Visibility="{Binding HasGlobalNotes, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="{Binding GlobalHeader}" FontSize="14" FontWeight="SemiBold"
+                               Margin="0,4,0,6"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <ItemsControl ItemsSource="{Binding GlobalNotes}" Margin="0,0,0,10">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:GlobalNoteItemViewModel}">
+                                <Border x:Name="NoteRoot"
+                                        Background="{DynamicResource BgSecondaryBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1" CornerRadius="10"
+                                        Padding="12,10" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <!-- delete reveals on card hover, matching the saved rows -->
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                                        VerticalAlignment="Top">
+                                                <StackPanel.Style>
+                                                    <Style TargetType="StackPanel">
+                                                        <Setter Property="Opacity" Value="0" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsMouseOver, ElementName=NoteRoot}" Value="True">
+                                                                <Setter Property="Opacity" Value="1" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </StackPanel.Style>
+                                                <Button Style="{DynamicResource IconButton}" Width="26" Height="26"
+                                                        ToolTip="{loc:T common.delete}" AutomationProperties.Name="{loc:T common.delete}"
+                                                        Command="{Binding DeleteCommand}">
+                                                    <controls:IconView Geometry="{StaticResource Geo_Trash}"
+                                                                       Stroke="{DynamicResource AccentRedBrush}"
+                                                                       Width="13" Height="13" />
+                                                </Button>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding Content}" FontSize="13"
+                                                       TextWrapping="Wrap" Margin="0,0,10,0"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding MetaLine}" FontSize="11" Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
                 <!-- ══ Saved memories header + add + search ══ -->
                 <DockPanel Margin="0,4,0,6">
                     <Button DockPanel.Dock="Right" Style="{DynamicResource AccentButton}" Padding="12,6"

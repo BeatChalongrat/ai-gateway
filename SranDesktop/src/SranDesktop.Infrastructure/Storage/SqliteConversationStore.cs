@@ -766,4 +766,44 @@ public sealed class SqliteConversationStore : IConversationStore
         Content = reader.IsDBNull(3) ? null : reader.GetString(3),
         ToolCallsJson = reader.IsDBNull(4) ? null : reader.GetString(4),
         ToolCallId = reader.IsDBNull(5) ? null : reader.GetString(5),
-        Name = reader.IsDBNull(6) ? null : 
+        Name = reader.IsDBNull(6) ? null : reader.GetString(6),
+        ModelId = reader.IsDBNull(7) ? null : reader.GetString(7),
+        TokenUsage = reader.IsDBNull(8)
+            ? null
+            : JsonSerializer.Deserialize<TokenUsage>(reader.GetString(8)),
+        CreatedAt = FromIso(reader.GetString(9)),
+        SortOrder = reader.GetInt32(10),
+        ServerId = reader.IsDBNull(11) ? null : reader.GetString(11),
+        FileIdsJson = reader.IsDBNull(12) ? null : reader.GetString(12)
+    };
+
+    private static string RoleToString(MessageRole role) => role switch
+    {
+        MessageRole.System => "system",
+        MessageRole.User => "user",
+        MessageRole.Assistant => "assistant",
+        MessageRole.Tool => "tool",
+        _ => throw new ArgumentOutOfRangeException(nameof(role))
+    };
+
+    private static MessageRole RoleFromString(string role) => role switch
+    {
+        "system" => MessageRole.System,
+        "user" => MessageRole.User,
+        "assistant" => MessageRole.Assistant,
+        "tool" => MessageRole.Tool,
+        _ => throw new InvalidDataException($"Unknown message role '{role}'")
+    };
+
+    private static string ToIso(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
+
+    private static DateTimeOffset FromIso(string value) =>
+        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    private static string DefaultDbPath()
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        return Path.Combine(appData, "SRAN Desktop", "data.db");
+    }
+}

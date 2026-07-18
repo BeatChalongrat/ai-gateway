@@ -34,11 +34,29 @@
     <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!-- Unpacked Chrome extension ships beside the app: Settings → Browser shows
+       this folder for chrome://extensions load-unpacked. -->
+  <ItemGroup>
+    <None Include="..\..\browser-extension\**"
+          Link="browser-extension\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <Target Name="PublishBrowserHost" AfterTargets="Publish">
+    <PropertyGroup>
+      <BrowserHostPublishDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\publish\win-x64\'))</BrowserHostPublishDir>
+    </PropertyGroup>
+    <MSBuild Projects="..\SranDesktop.BrowserHost\SranDesktop.BrowserHost.csproj"
+             Targets="Publish"
+             RemoveProperties="PublishProfile"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(BrowserHostPublishDir)" />
+  </Target>
 
   <!-- Icon as a WPF resource so pack:// URIs (window + tray) can load it -->
   <ItemGroup>

@@ -58,6 +58,11 @@ public partial class App : System.Windows.Application
         // Housekeeping: sweep leaked screenshot temp files (Phase 6 Task 4).
         CleanupOldScreenshots();
 
+        // Browser bridge (Chrome extension): the pipe server must be listening
+        // BEFORE Chrome spawns the relay, or the relay's connect times out.
+        _host.Services.GetRequiredService<
+            SranDesktop.Application.Interfaces.IBrowserBridgeService>().Start();
+
         // sran:// URI scheme (Phase 7 C1): the installer registers it; this
         // dev fallback covers running from the IDE / a loose build.
         RegisterSranSchemeBestEffort();
@@ -370,4 +375,17 @@ public partial class App : System.Windows.Application
         try
         {
             var reporter = _host?.Services.GetService<SranDesktop.Application.Interfaces.ICrashReportService>();
-            new SranDesktop.Pr
+            new SranDesktop.Presentation.Views.Dialogs.CrashDialog(exception, reporter)
+            {
+                Owner = MainWindow is { IsLoaded: true } ? MainWindow : null
+            }.ShowDialog();
+        }
+        catch (Exception dialogEx)
+        {
+            _logger?.LogError(dialogEx, "Crash dialog failed — falling back to MessageBox");
+            MessageBox.Show(
+                $"An unexpected error occurred:\n\n{exception.Message}\n\nThe error has been logged.",
+                "SRAN Desktop Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+}

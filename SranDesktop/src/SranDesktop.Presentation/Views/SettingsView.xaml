@@ -179,6 +179,71 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Browser bridge (Chrome extension) -->
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <TextBlock Text="{loc:T settings.browser}" Style="{StaticResource SectionHeader}" Margin="0" />
+                            <!-- status dot: green connected / grey not -->
+                            <Ellipse Width="9" Height="9" Margin="8,2,6,0" VerticalAlignment="Center">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{DynamicResource TextTertiaryBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsBrowserConnected}" Value="True">
+                                                <Setter Property="Fill" Value="{DynamicResource AccentGreenBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding BrowserStatusText}" FontSize="12"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </StackPanel>
+
+                        <TextBlock Text="{loc:T settings.browser.hint}"
+                                   FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+
+                        <TextBlock Text="{loc:T settings.browser.token}" Style="{StaticResource FieldLabel}" />
+                        <DockPanel Margin="0,0,0,10">
+                            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Padding="10,5"
+                                    Background="Transparent" BorderThickness="1"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    Content="{loc:T settings.browser.copyToken}"
+                                    Command="{Binding CopyBrowserTokenCommand}" />
+                            <TextBox Text="{Binding BrowserPairingToken, Mode=OneWay}" IsReadOnly="True"
+                                     FontFamily="Consolas" FontSize="12" />
+                        </DockPanel>
+
+                        <TextBlock Text="{loc:T settings.browser.extensionId}" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding BrowserExtensionId, UpdateSourceTrigger=PropertyChanged}"
+                                 FontFamily="Consolas" FontSize="12" Margin="0,0,0,10" />
+
+                        <Button Content="{loc:T settings.browser.install}" Padding="12,7"
+                                HorizontalAlignment="Left"
+                                Background="Transparent" BorderThickness="1"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                Command="{Binding InstallBrowserExtensionCommand}" />
+
+                        <TextBlock Text="{Binding BrowserInstallMessage}"
+                                   FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding BrowserInstallMessage}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
                 <!-- Advanced (collapsed by default) -->
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>

@@ -8,11 +8,12 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 
 /// <summary>
 /// Cross-session agent memory (Phase B PART 3). Persists a short, durable,
-/// model-authored note scoped to the CURRENT conversation — recalled in later
-/// turns and after the app restarts via the system-prompt <c>## Notes</c> block.
-/// No machine side effect (a local note), so AllowAlways. The active
-/// conversation is read from the ambient <see cref="ShellSession"/> the
-/// orchestrator sets before every tool call.
+/// model-authored note — recalled in later turns and after the app restarts
+/// via the system-prompt <c>## Notes</c> / <c>## Memory (global)</c> blocks.
+/// scope=conversation (default) attaches to the CURRENT conversation (read
+/// from the ambient <see cref="ShellSession"/> the orchestrator sets before
+/// every tool call); scope=global stores a user-level fact that carries into
+/// EVERY conversation. No machine side effect (a local note), so AllowAlways.
 /// </summary>
 public sealed class RememberTool : IMcpTool
 {
@@ -27,10 +28,12 @@ public sealed class RememberTool : IMcpTool
 
     public string Name => "remember";
     public string Description =>
-        "Save a short durable note about this task or project — e.g. the build command " +
-        "(\"builds with dotnet build src/X.sln\"), a discovered file path, or a user preference. " +
-        "Notes are recalled in later turns AND after the app restarts, scoped to THIS conversation. " +
-        "Use it to avoid re-discovering the same facts. Keep each note to one factual sentence.";
+        "Save a short durable note. scope=\"conversation\" (default) for task-specific facts — " +
+        "the build command of this repo (\"builds with dotnet build src/X.sln\"), a discovered " +
+        "file path. scope=\"global\" for durable user-level facts that should carry into every " +
+        "future conversation — the user's name or team, preferences like \"ชอบรายงานแบบสั้น\", " +
+        "recurring workflows. Notes are recalled in later turns AND after the app restarts. " +
+        "Keep each note to one factual sentence. Never store secrets or credentials.";
     public ToolCategory Category => ToolCategory.Network; // no machine side effect
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways;
 
@@ -38,7 +41,12 @@ public sealed class RememberTool : IMcpTool
         {
             "type": "object",
             "properties": {
-                "note": { "type": "string", "description": "A short, factual note to remember for this conversation." }
+                "note": { "type": "string", "description": "A short, factual note to remember." },
+                "scope": {
+                    "type": "string",
+                    "enum": ["conversation", "global"],
+                    "description": "conversation (default) = this task only; global = durable user-level fact recalled in ALL conversations."
+                }
             },
             "required": ["note"]
         }
@@ -49,6 +57,16 @@ public sealed class RememberTool : IMcpTool
         var note = ToolHelpers.GetString(arguments, "note");
         if (string.IsNullOrWhiteSpace(note))
             return ToolResult.Fail("'note' is required.");
+
+        var scope = ToolHelpers.GetString(arguments, "scope") ?? "conversation";
+        if (scope is not ("conversation" or "global"))
+            return ToolResult.Fail("'scope' must be \"conversation\" or \"global\".");
+
+        if (scope == "global")
+        {
+            await _store.AddNoteAsync(IConversationStore.GlobalNotesId, note.Trim(), ct);
+            return ToolResult.Ok("Saved a global memory — it will be recalled in every conversation.");
+        }
 
         var conversationId = _session?.CurrentConversationId;
         if (string.IsNullOrEmpty(conversationId))
