@@ -268,3 +268,17 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
 	fileID, err := uuid.Parse(chi.URLParam(r, "fileID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id")
+		return
+	}
+	if err := h.files.Delete(r.Context(), caller.TenantUUID, caller.UserID, fileID); err != nil {
+		if errors.Is(err, service.ErrFileNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

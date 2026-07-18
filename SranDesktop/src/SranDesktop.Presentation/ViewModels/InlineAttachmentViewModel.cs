@@ -88,4 +88,81 @@ public partial class InlineAttachmentViewModel : ObservableObject
     {
         try
         {
-            va
+            var image = new BitmapImage();
+            using var stream = new MemoryStream(bytes);
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.StreamSource = stream;
+            image.EndInit();
+            image.Freeze(); // usable from any thread
+            return image;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or IOException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryWriteTempFile(string filename, byte[] bytes)
+    {
+        try
+        {
+            var ext = Path.GetExtension(filename);
+            if (string.IsNullOrEmpty(ext)) ext = ".mp4";
+            var path = Path.Combine(Path.GetTempPath(), "SranDesktop",
+                $"video-{Guid.NewGuid():N}{ext}");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, bytes);
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SaveAsAsync()
+    {
+        var ext = Path.GetExtension(Filename);
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = Filename,
+            Filter = string.IsNullOrEmpty(ext)
+                ? "All files (*.*)|*.*"
+                : $"{ext.TrimStart('.').ToUpperInvariant()} (*{ext})|*{ext}|All files (*.*)|*.*"
+        };
+        if (dialog.ShowDialog() != true)
+            return;
+
+        // Lazy documents fetch their bytes here, on the first save (FIX
+        // 10b) — a failed fetch (offline, file deleted server-side) is a
+        // toast, never a crash.
+        byte[]? bytes;
+        try
+        {
+            bytes = await ResolveBytesAsync();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            bytes = null; // resolver failures surface as the toast below
+            System.Diagnostics.Debug.WriteLine($"Attachment fetch failed: {ex.Message}");
+        }
+        if (bytes is null || bytes.Length == 0)
+        {
+            Application.Services.ToastService.Instance.Show(
+                Application.Interfaces.ToastKind.Error, "attachment.downloadFailed");
+            return;
+        }
+
+        try
+        {
+            await File.WriteAllBytesAsync(dialog.FileName, bytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Application.Services.ToastService.Instance.Show(
+                Application.Interfaces.ToastKind.Error, "dialog.error", ex.Message);
+        }
+    }
+}

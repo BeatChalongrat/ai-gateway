@@ -210,4 +210,8 @@ public class ChatViewModelFileManifestTests : IDisposable
         {
             if (Directory.Exists(_dbDir)) Directory.Delete(_dbDir, recursive: true);
         }
-        catch (IOExcepti
+        catch (IOException)
+        {
+        }
+    }
+}

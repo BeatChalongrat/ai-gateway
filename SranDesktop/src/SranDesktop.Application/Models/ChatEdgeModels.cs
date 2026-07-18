@@ -207,4 +207,22 @@ public sealed record ContextInfoDto(
 /// message_id — a hit can only open its conversation, never jump to the row.</summary>
 public sealed record MessageSearchHitDto(
     [property: JsonPropertyName("type")] string? Type,
-    [property: J
+    [property: JsonPropertyName("conversation_id")] string ConversationId,
+    [property: JsonPropertyName("conversation_title")] string? ConversationTitle,
+    [property: JsonPropertyName("content")] string? Content,
+    [property: JsonPropertyName("role")] string? Role,
+    [property: JsonPropertyName("date")] string? Date,
+    [property: JsonPropertyName("relevance")] string? Relevance);
+
+public sealed record MessageSearchResponse(
+    [property: JsonPropertyName("query")] string? Query,
+    [property: JsonPropertyName("scope")] string? Scope,
+    [property: JsonPropertyName("results")] List<MessageSearchHitDto>? Results,
+    [property: JsonPropertyName("total")] int Total);
+
+/// <summary>POST /conversations/{id}/share (R9 K).</summary>
+public sealed record ShareResponse(
+    [property: JsonPropertyName("share_token")] string ShareToken,
+    [property: JsonPropertyName("share_url")] string ShareUrl,
+    [property: JsonPropertyName("expires_at")] DateTimeOffset? ExpiresAt,
+    [property: JsonPropertyName("created_at")] DateTimeOffset? CreatedAt);

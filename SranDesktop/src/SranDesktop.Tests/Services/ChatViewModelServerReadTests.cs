@@ -240,4 +240,92 @@ public class ChatViewModelServerReadTests : IDisposable
 
         _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
-        _vm.Messages.Single().InlineImage
+        _vm.Messages.Single().InlineImages.Should().ContainSingle();
+        _vm.Messages.Single().InlineAttachments.Should().ContainSingle();
+
+        // Tidy the shared file cache (fixed LocalAppData location).
+        foreach (var row in await _store.GetFilesAsync("conv-1"))
+            try { File.Delete(row.LocalPath!); } catch (IOException) { }
+    }
+
+    [Fact]
+    public async Task Lazy_Document_Save_Fails_Gracefully_When_Offline()
+    {
+        // FIX 10b: the chip renders from metadata even when the server is
+        // unreachable; resolving bytes for Save then reports failure (null)
+        // instead of throwing — SaveAs turns that into a toast.
+        var conversation = await SeedConversationAsync();
+        _api.Setup(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("offline"));
+        var docId = Guid.NewGuid().ToString();
+        SetupServerMessages(Dto("s-u1", "user", "doc while offline", T0, files: new List<FileAttachmentDto>
+        {
+            new(docId, "conv-1", "notes.pdf", "application/pdf", 9,
+                $"/files/{docId}/download", "completed", T0),
+        }));
+
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.AttachmentHydration;
+
+        var chip = _vm.Messages.Single().InlineAttachments.Should().ContainSingle().Subject;
+        (await chip.ResolveBytesAsync()).Should().BeNullOrEmpty("offline fetch reports failure, no throw");
+    }
+
+    [Fact]
+    public async Task Non_Uuid_File_Id_From_The_Server_Is_Rejected_Before_Any_Filesystem_Use()
+    {
+        // FIX 10b: file.Id is server-controlled and participates in the
+        // filecache path — a traversal-shaped id must be dropped before any
+        // download or disk write happens.
+        var conversation = await SeedConversationAsync();
+        SetupServerMessages(Dto("s-u1", "user", "hostile file id", T0, files: new List<FileAttachmentDto>
+        {
+            new(@"..\..\..\evil", "conv-1", "innocent.png", "image/png", 4,
+                @"/files/..\..\..\evil/download", "completed", T0),
+        }));
+
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.AttachmentHydration;
+
+        var user = _vm.Messages.Single();
+        user.InlineImages.Should().BeEmpty();
+        user.InlineAttachments.Should().BeEmpty();
+        _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        (await _store.GetFilesAsync("conv-1")).Should().BeEmpty("nothing may be cached for a rejected id");
+    }
+
+    [Fact]
+    public async Task Offline_Open_Falls_Back_To_The_Local_Cache()
+    {
+        var conversation = await SeedConversationAsync();
+        await _store.UpsertMessagesAsync(new[]
+        {
+            new Message { Id = "u1", ConversationId = "conv-1", Role = MessageRole.User,
+                Content = "cached question", CreatedAt = T0, SortOrder = 0, ServerId = "conv-1" },
+            new Message { Id = "a1", ConversationId = "conv-1", Role = MessageRole.Assistant,
+                Content = "cached answer", CreatedAt = T0.AddSeconds(2), SortOrder = 1, ServerId = "conv-1" },
+        });
+        _api.Setup(a => a.ListMessagesAsync(
+                It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("offline"));
+
+        await _vm.OpenConversationAsync(conversation);
+
+        _vm.Messages.Should().HaveCount(2);
+        _vm.Messages[0].Content.Should().Be("cached question");
+        _vm.Messages[1].Content.Should().Be("cached answer");
+    }
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        try
+        {
+            if (Directory.Exists(_dbDir)) Directory.Delete(_dbDir, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+}

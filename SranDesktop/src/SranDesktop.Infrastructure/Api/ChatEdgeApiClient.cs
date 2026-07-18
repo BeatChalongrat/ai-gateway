@@ -697,4 +697,17 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
         if (matches.Count == 0)
             return null;
 
-        
+        var raw = matches[^1].Groups[1].Value;
+        try
+        {
+            return JsonSerializer.Deserialize<string>($"\"{raw}\"");
+        }
+        catch (JsonException)
+        {
+            return raw;
+        }
+    }
+
+    private static string Truncate(string value, int max) =>
+        value.Length <= max ? value : value[..max] + "...";
+}
