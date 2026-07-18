@@ -146,6 +146,10 @@ public static class AppHostBuilder
                 // Computer-use screenshot→screen coordinate mapping (accuracy
                 // overhaul): screenshot writes it, click/scroll/drag/zoom read it.
                 services.AddSingleton<SranDesktop.Infrastructure.Native.ScreenContext>();
+                // Consent-flow foreground restore (self-interference fix): the
+                // consent dialog steals focus from the agent's target window.
+                services.AddSingleton<IForegroundTargetTracker,
+                    SranDesktop.Infrastructure.Native.ForegroundTargetTracker>();
                 // UIA element snapshot shared by read_screen_elements → uia_click/uia_set_value.
                 services.AddSingleton<SranDesktop.Infrastructure.Native.Uia.UiaSnapshotStore>();
 
@@ -202,8 +206,9 @@ public static class AppHostBuilder
                     // Computer use (Claude-style: screenshot → look → act → verify;
                     // accuracy overhaul: coordinates auto-map through ScreenContext)
                     var screenContext = sp.GetRequiredService<SranDesktop.Infrastructure.Native.ScreenContext>();
-                    registry.Register(new ComputerScreenshotTool(screenContext));
-                    registry.Register(new ComputerClickTool(screenContext));
+                    var foregroundTracker = sp.GetRequiredService<IForegroundTargetTracker>();
+                    registry.Register(new ComputerScreenshotTool(screenContext, foregroundTracker));
+                    registry.Register(new ComputerClickTool(screenContext, foregroundTracker));
                     registry.Register(new ComputerTypeTool());
                     registry.Register(new ComputerKeyTool());
                     registry.Register(new ComputerScrollTool(screenContext));

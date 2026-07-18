@@ -13,6 +13,11 @@ public sealed class UiaSnapshotStore
     public const string StaleError =
         "element list is stale — call read_screen_elements again";
 
+    /// <summary>Distinct from stale: the model GUESSED an id without ever
+    /// reading elements (seen live: uia_click(0) as the first tool call).</summary>
+    public const string NoSnapshotError =
+        "No element snapshot exists yet — call read_screen_elements first.";
+
     private readonly object _lock = new();
     private IReadOnlyList<object>? _elements;
 
@@ -24,13 +29,19 @@ public sealed class UiaSnapshotStore
         }
     }
 
-    /// <summary>Resolve an element id from the CURRENT snapshot. False (with
-    /// the stale message) when no snapshot exists or the id is out of range.</summary>
+    /// <summary>Resolve an element id from the CURRENT snapshot. False with
+    /// NoSnapshotError before any read, StaleError on an out-of-range id.</summary>
     public bool TryGet(int elementId, out object? element, out string? error)
     {
         lock (_lock)
         {
-            if (_elements is null || elementId < 0 || elementId >= _elements.Count)
+            if (_elements is null)
+            {
+                element = null;
+                error = NoSnapshotError;
+                return false;
+            }
+            if (elementId < 0 || elementId >= _elements.Count)
             {
                 element = null;
                 error = StaleError;

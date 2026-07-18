@@ -24,7 +24,8 @@ public sealed class UiaSetValueTool : IMcpTool
     public string Name => "uia_set_value";
     public string Description =>
         "Set the text value of an input element by its id from read_screen_elements. " +
-        "More reliable than clicking + typing.";
+        "More reliable than clicking + typing. Element ids are ONLY valid from the LATEST " +
+        "read_screen_elements result — never guess ids; call read_screen_elements first.";
     public ToolCategory Category => ToolCategory.Screen;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 

@@ -71,12 +71,15 @@ public class UiaToolTests
     // ── snapshot staleness ────────────────────────────────────────────────────
 
     [Fact]
-    public void Resolving_Before_Any_Snapshot_Reports_Stale()
+    public void Resolving_Before_Any_Snapshot_Says_Read_Elements_First()
     {
+        // A GUESSED id before any read (seen live) must not claim "stale" —
+        // there was never a list; the fix is to read elements, said explicitly.
         var store = new UiaSnapshotStore();
 
         store.TryGet(0, out _, out var error).Should().BeFalse();
-        error.Should().Be(UiaSnapshotStore.StaleError);
+        error.Should().Be(UiaSnapshotStore.NoSnapshotError);
+        error.Should().Contain("call read_screen_elements first");
     }
 
     [Fact]

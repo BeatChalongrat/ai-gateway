@@ -9,8 +9,13 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 public sealed class ComputerClickTool : IMcpTool
 {
     private readonly ScreenContext _screen;
+    private readonly IForegroundTargetTracker? _foreground;
 
-    public ComputerClickTool(ScreenContext screen) => _screen = screen;
+    public ComputerClickTool(ScreenContext screen, IForegroundTargetTracker? foreground = null)
+    {
+        _screen = screen;
+        _foreground = foreground;
+    }
 
     public string Name => "computer_click";
     public string Description =>
@@ -39,11 +44,14 @@ public sealed class ComputerClickTool : IMcpTool
 
         // Refuse clicking SRAN's own window: the agent fighting its host app
         // (accidentally pressing its own Stop/Send) is never what the user
-        // asked for and can wedge the very turn that is executing.
+        // asked for and can wedge the very turn that is executing. Restoring
+        // the recorded target makes the refusal ACTIONABLE — the very next
+        // screenshot shows the right app again instead of looping on SRAN.
         if (Win32Input.ProcessIdAtPoint(x, y) == (uint)Environment.ProcessId)
-            return ToolResult.Fail(
-                "That point is on the SRAN Desktop window itself — clicking the host app is not " +
-                "allowed. Minimize the SRAN window first or target another window.");
+        {
+            var restored = _foreground?.RestoreTarget() ?? false;
+            return ToolResult.Fail(OwnWindowRefusal(restored));
+        }
 
         var button = ToolHelpers.GetString(arguments, "button") ?? "left";
         var clicks = (ToolHelpers.GetString(arguments, "click_type") ?? "single") switch
@@ -58,6 +66,14 @@ public sealed class ComputerClickTool : IMcpTool
         return ToolResult.Ok($"Clicked {button} ({clicks}x) at screen point ({x}, {y}). " +
                              "Take a screenshot to verify the result.");
     }
+
+    /// <summary>Own-window refusal text — actionable when the target app could
+    /// be restored (the model's obvious next step is a fresh screenshot).</summary>
+    internal static string OwnWindowRefusal(bool restored) => restored
+        ? "That point is over SRAN's own window. The target app has been restored to the " +
+          "foreground — take a fresh screenshot and try again."
+        : "That point is over SRAN's own window — clicking the host app is not allowed. " +
+          "Take a fresh screenshot of the target app and use coordinates from it.";
 
     /// <summary>Reads x/y (last-screenshot space), transforms them to screen
     /// space via the session mapping, and validates against the VIRTUAL
