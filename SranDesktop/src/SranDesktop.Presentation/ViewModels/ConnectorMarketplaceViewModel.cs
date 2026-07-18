@@ -9,11 +9,13 @@ using SranDesktop.Presentation.Localization;
 
 namespace SranDesktop.Presentation.ViewModels;
 
-/// <summary>Connector marketplace (R9 Feature I; oauth2 broker flow in Phase 7).</summary>
+/// <summary>Connector marketplace (R9 Feature I; oauth2 broker flow in Phase 7;
+/// user-added custom MCP servers in the custom-connector UI).</summary>
 public partial class ConnectorMarketplaceViewModel : ObservableObject
 {
     private readonly IMcpConnectorService _connectors;
     private readonly ConnectorOAuthCoordinator _oauth;
+    private readonly IDialogService _dialogs;
     private readonly ILogger<ConnectorMarketplaceViewModel> _logger;
     private List<ConnectorItemViewModel> _all = new();
 
@@ -24,10 +26,12 @@ public partial class ConnectorMarketplaceViewModel : ObservableObject
     public ConnectorMarketplaceViewModel(
         IMcpConnectorService connectors,
         ConnectorOAuthCoordinator oauth,
+        IDialogService dialogs,
         ILogger<ConnectorMarketplaceViewModel> logger)
     {
         _connectors = connectors;
         _oauth = oauth;
+        _dialogs = dialogs;
         _logger = logger;
     }
 
@@ -36,11 +40,36 @@ public partial class ConnectorMarketplaceViewModel : ObservableObject
     [RelayCommand]
     public async Task LoadAsync()
     {
+        // The user's own custom connectors lead the list; catalog follows.
+        var installed = await _connectors.GetInstalledAsync();
         var available = await _connectors.ListAvailableAsync();
-        _all = available
-            .Select(c => new ConnectorItemViewModel(_connectors, _oauth, c))
+        _all = installed
+            .Where(r => r.Custom is not null)
+            .Select(r => new ConnectorItemViewModel(
+                _connectors, _oauth, r.Custom!, isCustom: true, onUninstalled: RemoveItem))
+            .Concat(available.Select(c => new ConnectorItemViewModel(_connectors, _oauth, c)))
             .ToList();
         ApplyFilter();
+    }
+
+    /// <summary>Open the "Add custom connector" dialog; a successful add
+    /// reloads so the new card appears with its live status/tools.</summary>
+    [RelayCommand]
+    private async Task AddCustomAsync()
+    {
+        var vm = new AddCustomConnectorViewModel(_connectors, _dialogs);
+        var dialog = new Views.Dialogs.AddCustomConnectorDialog(vm)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        if (dialog.ShowDialog() == true)
+            await LoadAsync();
+    }
+
+    private void RemoveItem(ConnectorItemViewModel item)
+    {
+        _all.Remove(item);
+        Connectors.Remove(item);
     }
 
     private void ApplyFilter()
@@ -58,17 +87,29 @@ public partial class ConnectorMarketplaceViewModel : ObservableObject
     }
 }
 
-/// <summary>One connector card.</summary>
+/// <summary>One connector card — catalog entry or a user-added custom server.</summary>
 public partial class ConnectorItemViewModel : ObservableObject
 {
     private readonly IMcpConnectorService _connectors;
     private readonly ConnectorOAuthCoordinator _oauth;
     private readonly McpConnector _connector;
+    private readonly Action<ConnectorItemViewModel>? _onUninstalled;
 
     public string Name => _connector.Name;
     public string Description => _connector.Description;
     public string Category => _connector.Category.ToUpperInvariant();
-    public string ToolsText => string.Join(" · ", _connector.Tools);
+
+    /// <summary>Custom-connector UI: user-added server (badge + uninstall
+    /// removes the card entirely — it exists in no catalog).</summary>
+    public bool IsCustom { get; }
+
+    /// <summary>Catalog cards list their declared tools; a custom definition
+    /// declares none, so its card shows the LIVE cached tools/list instead
+    /// (refreshed via StatusChanged as connects/health checks land).</summary>
+    public string ToolsText => IsCustom
+        ? string.Join(" · ", _connectors.GetCachedToolNames(_connector.Id))
+        : string.Join(" · ", _connector.Tools);
+
     public bool IsOAuth2 => _connector.AuthType == "oauth2";
 
     [ObservableProperty]
@@ -114,15 +155,22 @@ public partial class ConnectorItemViewModel : ObservableObject
         System.Windows.Application.Current?.TryFindResource(key) as System.Windows.Media.Brush ?? fallback;
 
     public ConnectorItemViewModel(
-        IMcpConnectorService connectors, ConnectorOAuthCoordinator oauth, McpConnector connector)
+        IMcpConnectorService connectors, ConnectorOAuthCoordinator oauth, McpConnector connector,
+        bool isCustom = false, Action<ConnectorItemViewModel>? onUninstalled = null)
     {
         _connectors = connectors;
         _oauth = oauth;
         _connector = connector;
+        IsCustom = isCustom;
+        _onUninstalled = onUninstalled;
         _isInstalled = connectors.IsInstalled(connector.Id);
         connectors.StatusChanged += (_, _) =>
-            System.Windows.Application.Current?.Dispatcher.Invoke(
-                () => OnPropertyChanged(nameof(StatusBrush)));
+            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+            {
+                OnPropertyChanged(nameof(StatusBrush));
+                if (IsCustom)
+                    OnPropertyChanged(nameof(ToolsText)); // live tools/list arrived
+            });
         oauth.StateChanged += (_, _) =>
             System.Windows.Application.Current?.Dispatcher.Invoke(RefreshFlowState);
     }
@@ -164,6 +212,8 @@ public partial class ConnectorItemViewModel : ObservableObject
         {
             await _connectors.UninstallAsync(_connector.Id);
             IsInstalled = false;
+            // A custom card exists in no catalog — uninstall removes it.
+            _onUninstalled?.Invoke(this);
             return;
         }
 

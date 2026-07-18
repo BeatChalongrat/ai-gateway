@@ -45,10 +45,22 @@
                        Foreground="{DynamicResource TextTertiaryBrush}" />
         </StackPanel>
 
-        <TextBox Grid.Row="1" Margin="24,4,24,10"
-                 Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                 controls:WatermarkService.Text="{loc:T connector.searchPlaceholder}"
-                 Padding="8,6" />
+        <DockPanel Grid.Row="1" Margin="24,4,24,10">
+            <!-- custom-connector UI entry point: any MCP server, HTTP or stdio -->
+            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Padding="12,6"
+                    VerticalAlignment="Center"
+                    Command="{Binding AddCustomCommand}">
+                <StackPanel Orientation="Horizontal">
+                    <controls:IconView Geometry="{StaticResource Geo_Plus}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="12" Height="12" Margin="0,0,6,0" />
+                    <TextBlock Text="{loc:T connector.addCustom}" FontSize="12" />
+                </StackPanel>
+            </Button>
+            <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                     controls:WatermarkService.Text="{loc:T connector.searchPlaceholder}"
+                     Padding="8,6" />
+        </DockPanel>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="24,0,24,16">
             <StackPanel>
@@ -108,8 +120,26 @@
                                                    Foreground="{DynamicResource TextPrimaryBrush}" />
                                         <Border Background="{DynamicResource BgSelectedBrush}" CornerRadius="4"
                                                 Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                            <!-- the Custom badge replaces the category chip on custom cards -->
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsCustom}" Value="True">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
                                             <TextBlock Text="{Binding Category}" FontSize="9.5"
                                                        Foreground="{DynamicResource TextTertiaryBrush}" />
+                                        </Border>
+                                        <!-- "Custom" badge: user-added server (custom-connector UI) -->
+                                        <Border CornerRadius="4" BorderThickness="1"
+                                                BorderBrush="{DynamicResource AccentBrush}"
+                                                Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                Visibility="{Binding IsCustom, Converter={StaticResource BoolToVisibility}}">
+                                            <TextBlock Text="{loc:T connector.custom}" FontSize="9.5"
+                                                       Foreground="{DynamicResource AccentBrush}" />
                                         </Border>
                                     </StackPanel>
                                     <TextBlock Text="{Binding Description}" FontSize="12" Margin="0,3,0,0"

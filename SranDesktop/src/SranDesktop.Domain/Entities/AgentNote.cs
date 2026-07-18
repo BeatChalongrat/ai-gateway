@@ -1,11 +1,12 @@
 namespace SranDesktop.Domain.Entities;
 
 /// <summary>
-/// A short, durable, model-authored note scoped to one conversation (Phase B
-/// PART 3). Survives restarts so the agent recalls key facts ("this project
-/// builds with dotnet build src/X.sln", discovered paths, user preferences)
-/// without re-discovering them. Plain text, conversation-scoped — never global,
-/// so it can't leak between conversations.
+/// A short, durable, model-authored note (Phase B PART 3). Survives restarts
+/// so the agent recalls key facts ("this project builds with dotnet build
+/// src/X.sln", discovered paths, user preferences) without re-discovering
+/// them. Usually scoped to one conversation; durable user-level facts may be
+/// stored GLOBALLY under the reserved IConversationStore.GlobalNotesId so they
+/// carry across conversations (Global Memory).
 /// </summary>
 public sealed class AgentNote
 {

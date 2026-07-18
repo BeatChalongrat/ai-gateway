@@ -22,18 +22,24 @@ public sealed class HttpMcpTransport : IMcpTransport
     private readonly bool _ownsHttp;
     private readonly string _baseUrl;
     private readonly Func<string?>? _tokenProvider;
+    private readonly string? _authHeader;
     private string? _sessionId;
     private long _nextId;
 
     /// <summary>Phase 7 C4: the Bearer is resolved PER REQUEST so an oauth2
     /// connector always sends the CURRENT portal access token — a mid-session
-    /// JWT refresh is picked up without re-dialing the client.</summary>
-    public HttpMcpTransport(string baseUrl, Func<string?>? tokenProvider, HttpClient? http = null)
+    /// JWT refresh is picked up without re-dialing the client.
+    /// <paramref name="authHeader"/> (custom-connector UI): null/"Authorization"
+    /// keeps the Bearer scheme; any other name sends the RAW token under that
+    /// header (API-key servers like X-Api-Key expect no Bearer prefix).</summary>
+    public HttpMcpTransport(string baseUrl, Func<string?>? tokenProvider, HttpClient? http = null,
+        string? authHeader = null)
     {
         _baseUrl = baseUrl.TrimEnd('/');
         _ownsHttp = http is null;
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         _tokenProvider = tokenProvider;
+        _authHeader = authHeader;
     }
 
     public string? SessionId => _sessionId;
@@ -102,8 +108,13 @@ public sealed class HttpMcpTransport : IMcpTransport
     private void ApplyAuth(HttpRequestMessage request)
     {
         var token = _tokenProvider?.Invoke();
-        if (!string.IsNullOrEmpty(token))
+        if (string.IsNullOrEmpty(token))
+            return;
+        if (string.IsNullOrEmpty(_authHeader)
+            || _authHeader.Equals("Authorization", StringComparison.OrdinalIgnoreCase))
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        else
+            request.Headers.TryAddWithoutValidation(_authHeader, token);
     }
 
     /// <summary>Streamable-HTTP servers may answer a POST with one SSE event —

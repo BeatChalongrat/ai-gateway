@@ -375,6 +375,16 @@ public static class Dict
         ["connector.err.envInvalid"] = "Environment variables must be KEY=value, one per line",
         ["connector.err.headerRequired"] = "Enter the header name (e.g. Authorization)",
         ["connector.err.keyRequired"] = "Enter the API key value",
+        ["settings.browser"] = "Browser",
+        ["settings.browser.hint"] = "Let the assistant read and interact with Chrome tabs through the SRAN browser extension. Install it, then paste the pairing token into the extension's options page.",
+        ["settings.browser.connected"] = "Extension connected",
+        ["settings.browser.lastSeen"] = "Not connected — last seen {0}",
+        ["settings.browser.never"] = "Not connected",
+        ["settings.browser.token"] = "Pairing token",
+        ["settings.browser.copyToken"] = "Copy",
+        ["settings.browser.extensionId"] = "Extension ID (developer, optional)",
+        ["settings.browser.install"] = "Install Chrome extension",
+        ["settings.browser.installDone"] = "Native host registered. In Chrome open chrome://extensions, enable Developer mode, click \"Load unpacked\" and choose:\n{0}\nThen open the extension's Options and paste the pairing token.",
         ["connector.stdioWarningTitle"] = "Run a local program?",
         ["connector.stdioWarning"] = "This connector runs a program on your computer with your permissions:\n\n{0}\n\nOnly continue if you trust this command — it can access your files and network.",
 
@@ -847,6 +857,16 @@ public static class Dict
         ["connector.err.envInvalid"] = "ตัวแปรสภาพแวดล้อมต้องอยู่ในรูป KEY=value บรรทัดละหนึ่งรายการ",
         ["connector.err.headerRequired"] = "กรุณาใส่ชื่อ header (เช่น Authorization)",
         ["connector.err.keyRequired"] = "กรุณาใส่ค่าคีย์ API",
+        ["settings.browser"] = "เบราว์เซอร์",
+        ["settings.browser.hint"] = "ให้ผู้ช่วยอ่านและควบคุมแท็บ Chrome ผ่านส่วนขยาย SRAN — ติดตั้งส่วนขยายแล้ววางโทเคนจับคู่ในหน้า Options ของส่วนขยาย",
+        ["settings.browser.connected"] = "เชื่อมต่อส่วนขยายแล้ว",
+        ["settings.browser.lastSeen"] = "ยังไม่เชื่อมต่อ — เห็นล่าสุด {0}",
+        ["settings.browser.never"] = "ยังไม่เชื่อมต่อ",
+        ["settings.browser.token"] = "โทเคนจับคู่",
+        ["settings.browser.copyToken"] = "คัดลอก",
+        ["settings.browser.extensionId"] = "Extension ID (สำหรับนักพัฒนา ไม่บังคับ)",
+        ["settings.browser.install"] = "ติดตั้งส่วนขยาย Chrome",
+        ["settings.browser.installDone"] = "ลงทะเบียน native host แล้ว ใน Chrome เปิด chrome://extensions เปิด Developer mode กด \"Load unpacked\" แล้วเลือกโฟลเดอร์:\n{0}\nจากนั้นเปิด Options ของส่วนขยายและวางโทเคนจับคู่",
         ["connector.stdioWarningTitle"] = "เรียกใช้โปรแกรมในเครื่อง?",
         ["connector.stdioWarning"] = "connector นี้จะรันโปรแกรมบนเครื่องของคุณด้วยสิทธิ์ผู้ใช้ของคุณ:\n\n{0}\n\nดำเนินการต่อเฉพาะเมื่อคุณเชื่อถือคำสั่งนี้ — โปรแกรมสามารถเข้าถึงไฟล์และเครือข่ายของคุณได้",
 
@@ -857,4 +877,97 @@ public static class Dict
         ["voice.title"] = "ตั้งค่าเสียง",
         ["voice.voice"] = "เสียง",
         ["voice.speed"] = "ความเร็ว",
-        ["voice.autoRead"] = "อ่านคำตอบออกเสียงอัตโนมั
+        ["voice.autoRead"] = "อ่านคำตอบออกเสียงอัตโนมัติ",
+        ["voice.listening"] = "กำลังฟัง...",
+        ["voice.backend"] = "ระบบเสียง",
+        ["voice.language"] = "ภาษาที่ใช้พูด",
+        ["voice.azureKey"] = "Azure Speech key",
+        ["voice.azureRegion"] = "Region",
+        ["voice.test"] = "ทดสอบ",
+        ["voice.testOk"] = "คีย์ใช้งานได้ ✓",
+        ["voice.testFail"] = "คีย์หรือ region ไม่ถูกต้อง",
+        ["voice.azureHint"] = "ใส่ Azure AI Speech key เพื่อเปิดการพูดภาษาไทยและเสียงอ่านภาษาไทยแบบ neural",
+
+        // R9 — Share
+        ["header.share"] = "แชร์",
+        ["share.title"] = "แชร์บทสนทนา",
+        ["share.copyLink"] = "คัดลอกลิงก์",
+        ["share.copied"] = "คัดลอกแล้ว!",
+        ["share.unavailable"] = "เซิร์ฟเวอร์นี้ยังไม่รองรับการแชร์",
+        ["share.exportInstead"] = "ใช้ส่งออกเป็น Markdown/JSON จากเมนู ... แทนได้",
+
+        // R9 — Branching
+        ["message.branch"] = "สาขา",
+        ["message.edit"] = "แก้ไข",
+
+        // R11 — Auto-update
+        ["update.available"] = "มีเวอร์ชันใหม่:",
+        ["update.install"] = "ติดตั้งเลย",
+        ["update.later"] = "ภายหลัง",
+        ["update.downloading"] = "กำลังดาวน์โหลดอัปเดต...",
+        ["update.mandatory"] = "อัปเดตนี้จำเป็นต้องติดตั้ง",
+        ["update.failed"] = "อัปเดตไม่สำเร็จ",
+
+        // R11 — Setup / first run
+        ["setup.serverTitle"] = "เชื่อมต่อเซิร์ฟเวอร์",
+        ["setup.serverDesc"] = "เลือกวิธีเชื่อมต่อกับ SRAN AI",
+        ["setup.cloud"] = "SRAN Cloud (บริการสำเร็จรูป)",
+        ["setup.selfHosted"] = "เซิร์ฟเวอร์ขององค์กร",
+        ["setup.serverUrl"] = "URL เซิร์ฟเวอร์",
+        ["setup.serverUrlHint"] = "ใส่ URL ที่ผู้ดูแลระบบให้มา เช่น https://sran.yourcompany.com",
+        ["setup.testConnection"] = "ทดสอบการเชื่อมต่อ",
+        ["setup.testing"] = "กำลังทดสอบ...",
+        ["setup.connected"] = "เชื่อมต่อสำเร็จ ✓",
+
+        // R11 — Crash reporting
+        ["crash.title"] = "เกิดข้อผิดพลาด",
+        ["crash.description"] = "SRAN Desktop พบข้อผิดพลาดที่ไม่คาดคิด คุณสามารถใช้งานต่อ รีสตาร์ทแอป หรือส่งรายงานเพื่อช่วยเราแก้ไข",
+        ["crash.details"] = "รายละเอียดข้อผิดพลาด",
+        ["crash.sendReport"] = "ส่งรายงานข้อผิดพลาด",
+        ["crash.sent"] = "ส่งรายงานแล้ว ขอบคุณครับ!",
+        ["crash.restart"] = "รีสตาร์ท",
+        ["crash.optIn"] = "ส่งรายงานข้อผิดพลาดเพื่อช่วยพัฒนา SRAN Desktop",
+
+        // Phase 3 — agent-chat backup
+        ["settings.syncAgentChats"] = "สำรองแชทโหมดเอเจนต์ไปยังบัญชีของคุณ",
+        ["settings.syncAgentChatsHint"] = "สำรองเฉพาะข้อความสนทนาเท่านั้น — ประวัติการใช้เครื่องมือและภาพหน้าจอยังอยู่ในเครื่องนี้",
+
+        // Phase 12 E — on-device Office file generation
+        ["settings.localOfficeGen"] = "สร้างไฟล์ Excel/Word บนเครื่องนี้เมื่อทำได้",
+        ["settings.localOfficeGenHint"] = "การ์ดแผนงานที่รองรับจะสร้างไฟล์ในเครื่อง เนื้อหาเอกสารจึงไม่ออกจากเครื่องนี้ ส่วน PowerPoint, PDF, แผนภูมิ และการแก้ไขไฟล์ที่อัปโหลดยังใช้เซิร์ฟเวอร์ และไฟล์ที่สร้างในเครื่องจะไม่มีประวัติเวอร์ชันฝั่งเซิร์ฟเวอร์",
+
+        // Phase 6 — folder access
+        ["settings.folderAccess"] = "การเข้าถึงโฟลเดอร์",
+        ["settings.folderAccessHint"] = "เอเจนต์สามารถอ่านและเขียนไฟล์ในโฟลเดอร์ที่คุณอนุญาตที่นี่ได้ (เพิ่มเติมจากโฟลเดอร์โปรไฟล์ผู้ใช้และโฟลเดอร์ชั่วคราว) โดยยังคงขออนุญาตก่อนเขียนหรือรันคำสั่งทุกครั้ง",
+        ["settings.addFolder"] = "เพิ่มโฟลเดอร์…",
+        ["settings.removeFolder"] = "ลบโฟลเดอร์",
+        ["settings.folderRejected"] = "ไม่สามารถอนุญาตโฟลเดอร์นี้ได้ กรุณาเลือกโฟลเดอร์ที่เจาะจง — ไม่ใช่ทั้งไดรฟ์ ไม่ใช่โฟลเดอร์ Windows หรือ Program Files และต้องไม่ใช่โฟลเดอร์ที่เพิ่มไว้แล้ว",
+
+        // R11 — Version
+        ["settings.version"] = "เวอร์ชัน",
+
+        // R12 — Login screen (simplified R12-fix: centered logo + form only)
+        ["login.email"] = "อีเมล",
+        ["login.emailPlaceholder"] = "you@company.com",
+        ["login.password"] = "รหัสผ่าน",
+        ["login.signIn"] = "เข้าสู่ระบบ",
+        ["login.signingIn"] = "กำลังเข้าสู่ระบบ...",
+        ["login.forgotPassword"] = "ลืมรหัสผ่าน?",
+        ["login.showPassword"] = "แสดง/ซ่อนรหัสผ่าน",
+        ["login.toggleTheme"] = "สลับธีม",
+        ["login.errorInvalid"] = "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+        ["login.errorUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่า gateway ทำงานอยู่และ URL เซิร์ฟเวอร์ถูกต้อง",
+        ["login.errorTimeout"] = "เซิร์ฟเวอร์ตอบสนองช้าเกินไป กรุณาลองใหม่อีกครั้ง",
+
+        // R9 — Writing style
+        ["style.learn"] = "เรียนรู้สไตล์เขียน",
+        ["style.profile"] = "สไตล์การเขียน",
+        ["style.title"] = "สไตล์การเขียน",
+        ["style.subtitle"] = "วางตัวอย่างงานเขียนของคุณ AI จะเรียนรู้โทนและนำไปใช้",
+        ["style.samplesHint"] = "วางตัวอย่างงานเขียน 3-5 ชิ้นที่นี่",
+        ["style.analyze"] = "วิเคราะห์",
+        ["style.analyzing"] = "กำลังวิเคราะห์...",
+        ["style.active"] = "โปรไฟล์สไตล์ทำงานอยู่",
+        ["style.clear"] = "ล้างโปรไฟล์",
+    };
+}

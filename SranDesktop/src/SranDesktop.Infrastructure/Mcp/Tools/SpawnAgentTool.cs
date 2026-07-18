@@ -483,4 +483,6 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         public IMcpTool? Resolve(string name) => IsAllowed(name) ? _inner.Resolve(name) : null;
 
         public IReadOnlyList<GatewayToolDefinition> GetToolDefinitions() =>
-            _
+            _inner.GetToolDefinitions().Where(d => IsAllowed(d.Function.Name)).ToList();
+    }
+}

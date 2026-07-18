@@ -54,6 +54,16 @@ public interface IConversationStore
     // scoped to a conversation. AddNoteAsync keeps only the newest N per
     // conversation (older ones are pruned); GetNotesAsync returns them oldest
     // first for the ## Notes system-prompt block.
+
+    /// <summary>Reserved conversation id under which GLOBAL (cross-conversation)
+    /// notes are stored — real ids are GUIDs/server ids so it can never collide.
+    /// Chosen over a schema migration: existing rows stay valid as-is.</summary>
+    const string GlobalNotesId = "__global__";
+
     Task AddNoteAsync(string conversationId, string content, CancellationToken ct = default);
     Task<IReadOnlyList<Domain.Entities.AgentNote>> GetNotesAsync(string conversationId, CancellationToken ct = default);
+    /// <summary>Global (user-level) notes, oldest first; capped at the newest 50 on add.</summary>
+    Task<IReadOnlyList<Domain.Entities.AgentNote>> GetGlobalNotesAsync(CancellationToken ct = default);
+    /// <summary>Removes a single note by id (MemoryView per-note delete).</summary>
+    Task DeleteNoteAsync(string noteId, CancellationToken ct = default);
 }

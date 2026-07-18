@@ -439,4 +439,55 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         try
         {
             using var doc = JsonDocument.Parse(argumentsJson);
-            if (doc.RootElement.ValueKind == JsonV
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (doc.RootElement.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String)
+                    return p.GetString() ?? "*";
+                if (doc.RootElement.TryGetProperty("directory", out var d) && d.ValueKind == JsonValueKind.String)
+                    return d.GetString() ?? "*";
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        return "*";
+    }
+
+    private static string SummarizeArgs(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+    }
+
+    private async Task LogExecutionAsync(
+        string conversationId, GatewayToolCall toolCall, string permission,
+        string? result, string? error, long? durationMs, CancellationToken ct)
+    {
+        try
+        {
+            await _store.InsertToolExecutionAsync(new ToolExecution
+            {
+                Id = $"{toolCall.Id}-{Guid.NewGuid():N}",
+                ConversationId = conversationId,
+                ToolName = toolCall.Function.Name,
+                ArgumentsJson = toolCall.Function.Arguments,
+                Result = result is { Length: > 2000 } ? result[..2000] : result,
+                Permission = permission,
+                DurationMs = durationMs,
+                Error = error,
+                ExecutedAt = DateTimeOffset.UtcNow
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log tool execution");
+        }
+    }
+}

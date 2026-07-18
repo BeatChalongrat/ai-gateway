@@ -69,6 +69,10 @@ internal static class Win32Input
 
     private const int SM_CXSCREEN = 0;
     private const int SM_CYSCREEN = 1;
+    private const int SM_XVIRTUALSCREEN = 76;
+    private const int SM_YVIRTUALSCREEN = 77;
+    private const int SM_CXVIRTUALSCREEN = 78;
+    private const int SM_CYVIRTUALSCREEN = 79;
 
     // ── Window management ───────────────────────────────────────────────────
 
@@ -107,6 +111,12 @@ internal static class Win32Input
     internal static (int Width, int Height) PrimaryScreenSize()
         => (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
 
+    /// <summary>The virtual desktop spanning ALL monitors. X/Y can be negative
+    /// (a monitor left of / above the primary).</summary>
+    internal static (int X, int Y, int Width, int Height) VirtualScreenBounds()
+        => (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+
     /// <summary>First visible top-level window whose title contains <paramref name="titlePart"/>.</summary>
     internal static IntPtr FindWindowByTitle(string titlePart)
     {
@@ -133,6 +143,107 @@ internal static class Win32Input
         if (IsIconic(hWnd))
             ShowWindow(hWnd, 9); // SW_RESTORE
         SetForegroundWindow(hWnd);
+    }
+
+    // ── Foreground / hit-testing (computer-use accuracy overhaul) ───────────
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X, Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    /// <summary>Process id owning the window under a screen point (0 = none).
+    /// Used by computer_click to refuse clicking SRAN's own UI.</summary>
+    internal static uint ProcessIdAtPoint(int x, int y)
+    {
+        var hWnd = WindowFromPoint(new POINT { X = x, Y = y });
+        if (hWnd == IntPtr.Zero)
+            return 0;
+        GetWindowThreadProcessId(hWnd, out var pid);
+        return pid;
+    }
+
+    /// <summary>
+    /// SetForegroundWindow honestly fails when another process owns the
+    /// foreground (the OS foreground lock). Attaching our input queue to the
+    /// current foreground thread's queue is the documented workaround — while
+    /// attached we count as "the foreground application" and the switch is
+    /// allowed. Returns whether the window really is foreground afterwards.
+    /// </summary>
+    internal static bool ForceForegroundWindow(IntPtr hWnd)
+    {
+        if (IsIconic(hWnd))
+            ShowWindow(hWnd, 9); // SW_RESTORE
+
+        var foreground = GetForegroundWindow();
+        if (foreground == hWnd)
+            return true;
+
+        var targetThread = GetWindowThreadProcessId(hWnd, out _);
+        var foregroundThread = foreground != IntPtr.Zero
+            ? GetWindowThreadProcessId(foreground, out _) : 0;
+        var ourThread = GetCurrentThreadId();
+
+        var attachedForeground = foregroundThread != 0 && foregroundThread != ourThread
+            && AttachThreadInput(ourThread, foregroundThread, true);
+        var attachedTarget = targetThread != 0 && targetThread != ourThread
+            && AttachThreadInput(ourThread, targetThread, true);
+        try
+        {
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+        }
+        finally
+        {
+            if (attachedForeground)
+                AttachThreadInput(ourThread, foregroundThread, false);
+            if (attachedTarget)
+                AttachThreadInput(ourThread, targetThread, false);
+        }
+        return GetForegroundWindow() == hWnd;
+    }
+
+    internal static string GetWindowTitleText(IntPtr hWnd)
+    {
+        var sb = new StringBuilder(512);
+        GetWindowText(hWnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    /// <summary>All visible, titled top-level windows — get_computer_state's raw list.</summary>
+    internal static List<(IntPtr Handle, string Title, bool Minimized)> ListTopLevelWindows()
+    {
+        var windows = new List<(IntPtr, string, bool)>();
+        EnumWindows((hWnd, _) =>
+        {
+            if (IsWindowVisible(hWnd))
+            {
+                var title = GetWindowTitleText(hWnd);
+                if (title.Length > 0)
+                    windows.Add((hWnd, title, IsIconic(hWnd)));
+            }
+            return true;
+        }, IntPtr.Zero);
+        return windows;
     }
 
     // ── Mouse ───────────────────────────────────────────────────────────────

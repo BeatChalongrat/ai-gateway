@@ -36,6 +36,12 @@ public sealed class UserSettings
     [JsonPropertyName("writing_style_profile")]
     public string WritingStyleProfile { get; set; } = "";
 
+    /// <summary>Dev/load-unpacked Chrome extension id added to the browser
+    /// bridge's native-messaging allowed_origins (browser tools). Empty =
+    /// store id only.</summary>
+    [JsonPropertyName("browser_extension_id")]
+    public string BrowserExtensionId { get; set; } = "";
+
     /// <summary>Voice settings (R9 J): TTS voice name, rate (-10..10), auto-read.</summary>
     [JsonPropertyName("voice_name")]
     public string VoiceName { get; set; } = "";
@@ -92,4 +98,20 @@ public sealed class UserSettings
     /// <summary>The agent's working folder, chosen from the composer (Cowork-style).
     /// Acts as an extra granted root and is surfaced to the model as the default
     /// place to do file work. Empty = none selected.</summary>
-    [JsonPr
+    [JsonPropertyName("working_folder")]
+    public string WorkingFolder { get; set; } = "";
+
+    /// <summary>Global approval mode for agent tool calls (Cowork-style):
+    /// "manual" (pause for every action), "auto" (run freely, pause only for
+    /// unsafe actions), or "skip" (never pause). Default "auto".</summary>
+    [JsonPropertyName("approval_mode")]
+    public string ApprovalMode { get; set; } = "auto";
+
+    public UserSettings Clone()
+    {
+        var copy = (UserSettings)MemberwiseClone();
+        copy.RecentModels = new List<string>(RecentModels);
+        copy.GrantedFolders = new List<string>(GrantedFolders);
+        return copy;
+    }
+}

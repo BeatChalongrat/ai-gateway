@@ -11,6 +11,7 @@ public sealed class ComputerKeyTool : IMcpTool
     public string Name => "computer_key";
     public string Description =>
         "Press a keyboard key or shortcut, e.g. 'Enter', 'Ctrl+C', 'Alt+Tab', 'Ctrl+Shift+S'. " +
+        "Pass window_title to focus a specific window first (verified). " +
         "Use for shortcuts and special keys; use computer_type for literal text.";
     public ToolCategory Category => ToolCategory.Screen;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
@@ -19,7 +20,8 @@ public sealed class ComputerKeyTool : IMcpTool
         {
             "type": "object",
             "properties": {
-                "keys": { "type": "string", "description": "Key or combo, e.g. 'Enter', 'Ctrl+C', 'Alt+F4'" }
+                "keys": { "type": "string", "description": "Key or combo, e.g. 'Enter', 'Ctrl+C', 'Alt+F4'" },
+                "window_title": { "type": "string", "description": "Optional: focus the window whose title contains this text before pressing" }
             },
             "required": ["keys"]
         }
@@ -40,6 +42,10 @@ public sealed class ComputerKeyTool : IMcpTool
         {
             return ToolResult.Fail(ex.Message);
         }
+
+        if (ToolHelpers.GetString(arguments, "window_title") is { Length: > 0 } windowTitle
+            && await ToolHelpers.FocusWindowForInputAsync(windowTitle, ct) is { } focusError)
+            return ToolResult.Fail(focusError);
 
         await Task.Run(() => Win32Input.PressKey(keys), ct);
         await Task.Delay(80, ct);

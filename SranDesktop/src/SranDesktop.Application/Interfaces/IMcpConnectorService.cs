@@ -33,8 +33,20 @@ public interface IMcpConnectorService
     /// command/args/env). The full definition is persisted in connectors.json.
     /// Its tools flow through the SAME remote-tool consent path as catalog
     /// connectors (RemoteMcpTool → PermissionLevel.Ask): nothing a local
-    /// process exposes can auto-run.</summary>
-    Task InstallCustomAsync(McpConnector connector, CancellationToken ct = default);
+    /// process exposes can auto-run. Custom-connector UI: throws
+    /// ArgumentException on an invalid definition or duplicate id;
+    /// <paramref name="apiToken"/> goes to the DPAPI store, never to
+    /// connectors.json.</summary>
+    Task InstallCustomAsync(McpConnector connector, string? apiToken = null, CancellationToken ct = default);
+
+    /// <summary>Custom-connector UI: dial a NOT-yet-installed definition
+    /// (initialize + tools/list) and report the tool count or error inline.
+    /// Persists nothing; a stdio test spawns — and then kills — the process.</summary>
+    Task<ConnectorTestResult> TestConnectionAsync(McpConnector connector, string? apiToken = null, CancellationToken ct = default);
+
+    /// <summary>Cached tool names of ONE connected connector (empty when not
+    /// connected) — the installed-list card shows live tool names/count.</summary>
+    IReadOnlyList<string> GetCachedToolNames(string connectorId);
 
     Task UninstallAsync(string connectorId, CancellationToken ct = default);
 

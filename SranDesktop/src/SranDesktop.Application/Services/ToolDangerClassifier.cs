@@ -21,7 +21,11 @@ public static class ToolDangerClassifier
     private static readonly HashSet<string> Safe = new(StringComparer.OrdinalIgnoreCase)
     {
         "read_file", "list_directory", "search_files", "read_clipboard",
-        "web_search", "run_subagent", "update_plan", "use_skill", "remember",
+        "web_search", "web_fetch", "run_subagent", "update_plan", "use_skill", "remember",
+        // Computer-use READ tools: they only observe the screen/window tree.
+        "computer_zoom", "get_computer_state", "read_screen_elements",
+        // Browser READ tools (Chrome extension bridge): observation only.
+        "browser_read_page", "browser_find", "browser_list_tabs", "browser_screenshot",
     };
 
     public static ToolDanger Classify(string toolName, ToolCategory category)

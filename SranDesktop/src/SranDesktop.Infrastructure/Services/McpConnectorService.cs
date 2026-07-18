@@ -126,25 +126,104 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
     /// <summary>Phase 12 D: locally-defined connector (typically stdio). The
     /// whole definition rides in connectors.json (record.Custom); catalog
     /// lookups are bypassed for it. Its tools land in the same remote-tool
-    /// cache, so they resolve as RemoteMcpTool → consent-gated Ask.</summary>
-    public async Task InstallCustomAsync(McpConnector connector, CancellationToken ct = default)
+    /// cache, so they resolve as RemoteMcpTool → consent-gated Ask. The
+    /// custom-connector UI adds validation (fail loud on a bad definition —
+    /// a silent bad install would just sit Disconnected forever) and an
+    /// api_key path whose token goes to DPAPI, never connectors.json.</summary>
+    public async Task InstallCustomAsync(McpConnector connector, string? apiToken = null, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(connector.Id))
-            throw new ArgumentException("Custom connector requires an id", nameof(connector));
+        ValidateCustomDefinition(connector);
 
         var state = LoadState();
-        var record = state.FirstOrDefault(c => c.Id == connector.Id);
-        if (record is null)
+        if (state.Any(c => c.Id == connector.Id))
+            throw new ArgumentException(
+                $"A connector with id '{connector.Id}' is already installed", nameof(connector));
+
+        var record = new InstalledConnector { Id = connector.Id, Custom = connector };
+        if (!string.IsNullOrEmpty(apiToken))
         {
-            record = new InstalledConnector { Id = connector.Id };
-            state.Add(record);
+            record.HasCredentials = true;
+            record.AuthMode = InstalledConnector.AuthModeApiKey;
+            _credentials.Save($"connector:{connector.Id}", apiToken);
         }
-        record.Custom = connector;
+        state.Add(record);
         SaveState(state);
         _logger.LogInformation("Custom connector {Id} installed (transport={Transport})",
             connector.Id, connector.Transport);
 
         await ConnectOneAsync(connector.Id, ct);
+    }
+
+    /// <summary>Rejects definitions that could only ever sit Disconnected:
+    /// missing id/name, stdio without a command, HTTP without a valid URL.
+    /// https is REQUIRED for non-loopback hosts — an API key must never
+    /// travel over cleartext to a remote server. Internal for tests.</summary>
+    internal static void ValidateCustomDefinition(McpConnector connector)
+    {
+        if (string.IsNullOrWhiteSpace(connector.Id))
+            throw new ArgumentException("Custom connector requires an id", nameof(connector));
+        if (string.IsNullOrWhiteSpace(connector.Name))
+            throw new ArgumentException("Custom connector requires a name", nameof(connector));
+
+        if (connector.Transport == McpConnector.TransportStdio)
+        {
+            if (string.IsNullOrWhiteSpace(connector.Command))
+                throw new ArgumentException("stdio connector requires a command", nameof(connector));
+            return;
+        }
+
+        if (!Uri.TryCreate(connector.ServerUrl, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https"))
+            throw new ArgumentException(
+                "HTTP connector requires an absolute http(s) server URL", nameof(connector));
+        if (uri.Scheme == "http" && !uri.IsLoopback)
+            throw new ArgumentException(
+                "https is required for non-localhost servers", nameof(connector));
+    }
+
+    /// <summary>Custom-connector UI "Test connection": dial the definition
+    /// without persisting anything. The throwaway client is disposed either
+    /// way — for stdio that kills the just-spawned server process.</summary>
+    public async Task<ConnectorTestResult> TestConnectionAsync(
+        McpConnector connector, string? apiToken = null, CancellationToken ct = default)
+    {
+        try
+        {
+            ValidateCustomDefinition(connector);
+        }
+        catch (ArgumentException ex)
+        {
+            return ConnectorTestResult.Fail(ex.Message);
+        }
+
+        // The pasted token is used directly — it isn't in DPAPI yet, and the
+        // regular provider must not run: an auth-none custom definition would
+        // resolve the portal JWT (see ResolveTokenProvider's custom guard).
+        IMcpTransport transport = connector.Transport == McpConnector.TransportStdio
+            ? new StdioMcpTransport(connector.Command ?? "", connector.Args, connector.Env, _logger)
+            : new HttpMcpTransport(connector.ServerUrl,
+                string.IsNullOrEmpty(apiToken) ? null : () => apiToken,
+                authHeader: connector.AuthHeader);
+
+        var client = new McpRemoteClient(transport);
+        try
+        {
+            using var dialCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            dialCts.CancelAfter(_dialTimeout);
+            await client.InitializeAsync(dialCts.Token);
+            var tools = await client.ListToolsAsync(dialCts.Token);
+            return ConnectorTestResult.Ok(tools.Count);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
+                                       or OperationCanceledException or McpProtocolException
+                                       or JsonException or IOException)
+        {
+            return ConnectorTestResult.Fail(ex.Message);
+        }
+        finally
+        {
+            await client.DisposeAsync();
+        }
     }
 
     public async Task UninstallAsync(string connectorId, CancellationToken ct = default)
@@ -279,7 +358,8 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
             transport.Exited += (_, _) => _ = HandleStdioExitAsync(connectorId);
             return transport;
         }
-        return new HttpMcpTransport(connector.ServerUrl, ResolveTokenProvider(connector));
+        return new HttpMcpTransport(connector.ServerUrl, ResolveTokenProvider(connector),
+            authHeader: connector.AuthHeader);
     }
 
     private async Task HandleStdioExitAsync(string connectorId)
@@ -311,10 +391,18 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
     /// "none" gets this treatment on purpose: an api_key connector with a
     /// missing DPAPI entry must keep sending NOTHING rather than leak the
     /// portal JWT to a third-party server URL.</summary>
-    internal Func<string?> ResolveTokenProvider(McpConnector connector) =>
-        connector.AuthType == "none"
-            ? () => _tokenSession?.AccessToken
-            : ResolveTokenProvider(connector.Id);
+    internal Func<string?> ResolveTokenProvider(McpConnector connector)
+    {
+        if (connector.AuthType == "none")
+        {
+            // Custom-connector guard: only CATALOG auth-none connectors (the
+            // built-in gateway servers) get the portal JWT. A USER-ADDED
+            // auth-none server is an arbitrary URL — it must receive nothing.
+            var isCustom = LoadState().FirstOrDefault(c => c.Id == connector.Id)?.Custom is not null;
+            return isCustom ? () => null : () => _tokenSession?.AccessToken;
+        }
+        return ResolveTokenProvider(connector.Id);
+    }
 
     /// <summary>Phase 7 C4: pick the Bearer source by install mode. oauth2
     /// (broker) connectors send the CURRENT portal access token, resolved
@@ -386,6 +474,16 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
                 }
             }
             return defs;
+        }
+    }
+
+    public IReadOnlyList<string> GetCachedToolNames(string connectorId)
+    {
+        lock (_remoteLock)
+        {
+            return _remoteTools.TryGetValue(connectorId, out var tools)
+                ? tools.Select(t => t.Name).ToList()
+                : Array.Empty<string>();
         }
     }
 

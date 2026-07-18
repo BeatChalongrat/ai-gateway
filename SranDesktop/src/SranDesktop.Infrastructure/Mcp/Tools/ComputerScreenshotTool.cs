@@ -10,17 +10,32 @@ using SranDesktop.Infrastructure.Native;
 namespace SranDesktop.Infrastructure.Mcp.Tools;
 
 /// <summary>
-/// The agent's eyes: captures the screen (or one window), scales it down to
-/// bound token cost, and returns the image for vision analysis.
+/// The agent's eyes: captures the FULL virtual desktop (all monitors) or one
+/// window, scales it down to bound token cost, and records the image→screen
+/// mapping in <see cref="ScreenContext"/> so click/scroll/drag translate
+/// coordinates automatically — the model must never rescale (the old
+/// "multiply by X" instruction was routinely ignored → misclicks).
 /// </summary>
 public sealed class ComputerScreenshotTool : IMcpTool
 {
-    private const int MaxWidth = 1920;
+    /// <summary>Downscale cap on the LONGER side. Width-only 1920 made a
+    /// 5760-wide triple-monitor desktop a 3x shrink — text unreadable. 2560 on
+    /// the longer side keeps multi-monitor text legible while bounding token
+    /// cost; a single 1920/2560 monitor still ships unscaled, and precise
+    /// reading is computer_zoom's job.</summary>
+    internal const int MaxLongSide = 2560;
+
+    private readonly ScreenContext _screen;
+
+    public ComputerScreenshotTool(ScreenContext screen) => _screen = screen;
 
     public string Name => "computer_screenshot";
     public string Description =>
         "Take a screenshot of the screen. Returns the image for visual analysis. " +
-        "Always use this before clicking to see what's on screen and find exact coordinates.";
+        "TIP: for Windows applications, read_screen_elements + uia_click is usually more " +
+        "accurate than looking at pixels — use screenshots when UIA gives poor results " +
+        "(games, custom-drawn apps, Chrome without accessibility) or to visually verify " +
+        "an action's outcome.";
     public ToolCategory Category => ToolCategory.Screen;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
 
@@ -30,7 +45,7 @@ public sealed class ComputerScreenshotTool : IMcpTool
             "properties": {
                 "window_title": {
                     "type": "string",
-                    "description": "Optional: capture only the window whose title contains this text (else the full primary screen)"
+                    "description": "Optional: capture only the window whose title contains this text (else the full desktop across all monitors)"
                 }
             }
         }
@@ -41,14 +56,30 @@ public sealed class ComputerScreenshotTool : IMcpTool
         try
         {
             var windowTitle = ToolHelpers.GetString(arguments, "window_title");
-            using var bitmap = windowTitle is { Length: > 0 }
-                ? CaptureWindow(windowTitle, out var error)
-                : CaptureScreen();
-            if (bitmap is null)
-                return Task.FromResult(ToolResult.Fail(
-                    $"Could not capture window containing '{windowTitle}'. Is it open and visible?"));
+            int originX = 0, originY = 0;
+            Bitmap? bitmap;
+            if (windowTitle is { Length: > 0 })
+            {
+                bitmap = CaptureWindow(windowTitle, out originX, out originY);
+                if (bitmap is null)
+                    return Task.FromResult(ToolResult.Fail(
+                        $"Could not capture window containing '{windowTitle}'. Is it open and visible?"));
+            }
+            else
+            {
+                bitmap = CaptureVirtualDesktop(out originX, out originY);
+            }
 
-            using var scaled = ScaleDown(bitmap, MaxWidth);
+            using var source = bitmap;
+            using var scaled = ScaleDown(source, MaxLongSide);
+
+            // Every capture rewrites the session mapping — clicks always refer
+            // to the LAST screenshot the model saw.
+            _screen.Set(new ScreenMapping(
+                Scale: source.Width / (double)scaled.Width,
+                OriginX: originX, OriginY: originY,
+                CapturedWidth: source.Width, CapturedHeight: source.Height,
+                ImageWidth: scaled.Width, ImageHeight: scaled.Height));
 
             // Encode straight to a data URI in memory — no temp file (Phase 6
             // Task 4): the old write-then-read roundtrip leaked a PNG per shot.
@@ -56,12 +87,9 @@ public sealed class ComputerScreenshotTool : IMcpTool
             scaled.Save(memory, ImageFormat.Png);
             var dataUri = "data:image/png;base64," + Convert.ToBase64String(memory.GetBuffer(), 0, (int)memory.Length);
 
-            var note = scaled.Width != bitmap.Width
-                ? $" (scaled from {bitmap.Width}x{bitmap.Height} — multiply coordinates you see by {bitmap.Width / (double)scaled.Width:0.###} to click)"
-                : "";
             return Task.FromResult(ToolResult.OkWithImage(
-                $"Screenshot captured: {scaled.Width}x{scaled.Height}{note}. " +
-                "The image follows in the next message.",
+                $"Screenshot captured: {scaled.Width}x{scaled.Height}. Coordinates you see in " +
+                "this image can be used directly with computer_click — do NOT rescale them.",
                 dataUri));
         }
         catch (Exception ex)
@@ -70,34 +98,38 @@ public sealed class ComputerScreenshotTool : IMcpTool
         }
     }
 
-    private static Bitmap CaptureScreen()
+    /// <summary>Full virtual desktop — all monitors, including ones left of /
+    /// above the primary (negative origin).</summary>
+    private static Bitmap CaptureVirtualDesktop(out int originX, out int originY)
     {
-        var (width, height) = Win32Input.PrimaryScreenSize();
+        var (x, y, width, height) = Win32Input.VirtualScreenBounds();
+        originX = x;
+        originY = y;
         var bitmap = new Bitmap(width, height);
         using var graphics = Graphics.FromImage(bitmap);
-        graphics.CopyFromScreen(0, 0, 0, 0, bitmap.Size);
+        graphics.CopyFromScreen(x, y, 0, 0, bitmap.Size);
         return bitmap;
     }
 
-    private static Bitmap? CaptureWindow(string titlePart, out string? error)
+    /// <summary>PrintWindow capture. The window's screen top-left goes into the
+    /// mapping origin so window-relative pixels translate to correct absolute
+    /// click coordinates (the old code returned the bitmap with no offset —
+    /// clicks on window screenshots landed shifted).</summary>
+    private static Bitmap? CaptureWindow(string titlePart, out int originX, out int originY)
     {
-        error = null;
+        originX = originY = 0;
         var hWnd = Win32Input.FindWindowByTitle(titlePart);
         if (hWnd == IntPtr.Zero)
-        {
-            error = "window not found";
             return null;
-        }
 
         Win32Input.GetWindowRect(hWnd, out var rect);
         var width = rect.Right - rect.Left;
         var height = rect.Bottom - rect.Top;
         if (width <= 0 || height <= 0)
-        {
-            error = "window has no visible area";
             return null;
-        }
 
+        originX = rect.Left;
+        originY = rect.Top;
         var bitmap = new Bitmap(width, height);
         using var graphics = Graphics.FromImage(bitmap);
         var hdc = graphics.GetHdc();
@@ -112,13 +144,16 @@ public sealed class ComputerScreenshotTool : IMcpTool
         return bitmap;
     }
 
-    private static Bitmap ScaleDown(Bitmap source, int maxWidth)
+    private static Bitmap ScaleDown(Bitmap source, int maxLongSide)
     {
-        if (source.Width <= maxWidth)
+        var longSide = Math.Max(source.Width, source.Height);
+        if (longSide <= maxLongSide)
             return (Bitmap)source.Clone();
 
-        var scale = maxWidth / (double)source.Width;
-        var scaled = new Bitmap(maxWidth, Math.Max(1, (int)(source.Height * scale)));
+        var scale = maxLongSide / (double)longSide;
+        var scaled = new Bitmap(
+            Math.Max(1, (int)(source.Width * scale)),
+            Math.Max(1, (int)(source.Height * scale)));
         using var graphics = Graphics.FromImage(scaled);
         graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
         graphics.DrawImage(source, 0, 0, scaled.Width, scaled.Height);
