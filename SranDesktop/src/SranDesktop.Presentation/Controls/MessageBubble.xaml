@@ -416,7 +416,10 @@
                                                Foreground="{DynamicResource TextTertiaryBrush}" />
                                     <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
                                             Padding="8" Margin="0,4,0,8">
-                                        <TextBlock Text="{Binding InputJson}" FontFamily="Consolas" FontSize="11"
+                                        <!-- Human-readable "label: value" lines; raw JSON stays available
+                                             on the ToolTip for technical users. -->
+                                        <TextBlock Text="{Binding InputDisplay}" ToolTip="{Binding InputJson}"
+                                                   FontFamily="Consolas" FontSize="11"
                                                    TextWrapping="Wrap"
                                                    Foreground="{DynamicResource TextSecondaryBrush}" />
                                     </Border>

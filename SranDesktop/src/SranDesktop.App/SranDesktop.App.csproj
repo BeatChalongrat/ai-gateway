@@ -53,7 +53,7 @@
       <BrowserHostPublishDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\publish\win-x64\'))</BrowserHostPublishDir>
     </PropertyGroup>
     <MSBuild Projects="..\SranDesktop.BrowserHost\SranDesktop.BrowserHost.csproj"
-             Targets="Publish"
+             Targets="Restore;Publish"
              RemoveProperties="PublishProfile"
              Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(BrowserHostPublishDir)" />
   </Target>

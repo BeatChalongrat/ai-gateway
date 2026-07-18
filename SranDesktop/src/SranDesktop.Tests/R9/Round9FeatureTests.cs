@@ -260,7 +260,8 @@ public class ToolIconTests
 {
     [Theory]
     [InlineData("computer_screenshot", "Geo_Monitor")]
-    [InlineData("web_search", "Geo_Browser")]
+    [InlineData("web_search", "Geo_Globe2")] // humanize pass: globe (Geo_Browser now = browser_* tools)
+    [InlineData("browser_navigate", "Geo_Browser")]
     [InlineData("run_command", "Geo_Terminal")]
     [InlineData("something_unknown", "Geo_Tool")]
     public void Tool_Icon_Mapping(string tool, string expected)
