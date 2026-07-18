@@ -170,31 +170,4 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 		items = append(items, service.ImportMessageInput{
 			ClientID:  m.ClientID,
 			Role:      m.Role,
-			Content:   m.Content,
-			ModelID:   m.ModelID,
-			CreatedAt: ts,
-			FileIDs:   fileIDs,
-		})
-	}
-
-	imported, skipped, err := h.imports.ImportMessages(
-		r.Context(), caller.TenantUUID, caller.UserID, convID, items,
-	)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrConversationNotFound):
-			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
-		case errors.Is(err, service.ErrImportInvalid):
-			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
-		default:
-			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(importMessagesResponse{
-		Imported: imported,
-		Skipped:  skipped,
-	})
-}
+			Content:   m.Content

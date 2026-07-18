@@ -63,9 +63,4 @@ type ConversationFile struct {
 	Version        int
 	ChangeLog      *string
 
-	// ClientID is the desktop's deterministic local file id (migration
-	// 027 / FIX 10). Nil for web uploads and generated files. Unique per
-	// conversation when set, so a desktop re-sync upserts instead of
-	// duplicating the attachment row.
-	ClientID *string
-}
+	

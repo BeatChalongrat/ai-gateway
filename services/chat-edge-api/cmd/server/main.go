@@ -530,8 +530,4 @@ func main() {
 	bgCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("http server shutdown error", "err", err)
-	}
-	slog.Info("chat-edge-api stopped")
-}
+	if err := srv.Shutdown(shutdownCtx); er
