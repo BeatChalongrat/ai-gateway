@@ -191,6 +191,58 @@
                                 </ControlTemplate>
                             </ToggleButton.Template>
                         </ToggleButton>
+                        <!-- working folder pill (Cowork-style) -->
+                        <Button Style="{DynamicResource PillButton}"
+                                Padding="8,4" Margin="4,0,0,0"
+                                VerticalAlignment="Center"
+                                Command="{Binding SelectWorkingFolderCommand}"
+                                AutomationProperties.Name="Select working folder"
+                                ToolTip="{Binding WorkingFolderTooltip}">
+                            <StackPanel Orientation="Horizontal">
+                                <controls:IconView Geometry="{StaticResource Geo_FolderPlus}"
+                                                   Stroke="{DynamicResource TextSecondaryBrush}"
+                                                   Width="14" Height="14" Margin="0,0,5,0"
+                                                   VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding WorkingFolderLabel}" FontSize="13"
+                                           MaxWidth="140" TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Button>
+                        <!-- clear working folder (only when one is set) -->
+                        <Button Command="{Binding ClearWorkingFolderCommand}"
+                                Style="{DynamicResource IconButton}"
+                                Width="18" Height="18"
+                                controls:ButtonHelper.CornerRadius="9"
+                                Margin="2,0,0,0" VerticalAlignment="Center"
+                                AutomationProperties.Name="Clear working folder"
+                                ToolTip="{loc:T input.clearWorkingFolder}"
+                                Visibility="{Binding HasWorkingFolder, Converter={StaticResource BoolToVisibility}}">
+                            <controls:IconView Geometry="{StaticResource Geo_Close}"
+                                               Stroke="{DynamicResource TextSecondaryBrush}"
+                                               Width="10" Height="10" />
+                        </Button>
+                        <!-- permission mode pill: opens the 3-mode dropdown -->
+                        <Button x:Name="PermissionButton"
+                                Style="{DynamicResource PillButton}"
+                                Padding="8,4" Margin="4,0,0,0"
+                                VerticalAlignment="Center"
+                                Command="{Binding OpenPermissionPopupCommand}"
+                                AutomationProperties.Name="Permission mode"
+                                ToolTip="{loc:T perm.tooltip}">
+                            <StackPanel Orientation="Horizontal">
+                                <controls:IconView Geometry="{StaticResource Geo_Shield}"
+                                                   Stroke="{DynamicResource TextSecondaryBrush}"
+                                                   Width="14" Height="14" Margin="0,0,5,0"
+                                                   VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ApprovalModeLabel}" FontSize="13"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <controls:IconView Geometry="{StaticResource Geo_ChevronDown}"
+                                                   Stroke="{DynamicResource TextSecondaryBrush}"
+                                                   Width="11" Height="11" Margin="4,1,0,0" />
+                            </StackPanel>
+                        </Button>
                         <!-- listening hint -->
                         <TextBlock Text="{loc:T voice.listening}" FontSize="11.5"
                                    Margin="6,0,0,0" VerticalAlignment="Center"
@@ -684,60 +736,4 @@
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel Grid.Column="0">
-                                                        <TextBlock Text="{Binding Name}" FontSize="13"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
-                                                        <TextBlock FontSize="11"
-                                                                   Foreground="{DynamicResource TextTertiaryBrush}">
-                                                            <Run Text="{Binding DocumentCount, Mode=OneWay}" /><Run Text=" documents" />
-                                                        </TextBlock>
-                                                    </StackPanel>
-                                                    <controls:IconView Grid.Column="1"
-                                                                       Geometry="{StaticResource Geo_Check}"
-                                                                       Stroke="{DynamicResource AccentBrush}"
-                                                                       Width="14" Height="14" Margin="8,0,0,0"
-                                                                       VerticalAlignment="Center">
-                                                        <controls:IconView.Visibility>
-                                                            <MultiBinding Converter="{StaticResource EqualityToVisibility}">
-                                                                <Binding Path="Id" />
-                                                                <Binding Path="DataContext.KnowledgeBaseId"
-                                                                         RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
-                                                            </MultiBinding>
-                                                        </controls:IconView.Visibility>
-                                                    </controls:IconView>
-                                                </Grid>
-                                            </Button>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </ScrollViewer>
-
-                            <TextBlock Text="{loc:T kbPopup.empty}" FontSize="12" Margin="8,6"
-                                       Foreground="{DynamicResource TextTertiaryBrush}">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding AvailableKnowledgeBases.Count}" Value="0">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </StackPanel>
-                    </Border>
-                </Popup>
-            </Grid>
-        </Border>
-
-        <!-- Disclaimer (web parity) -->
-        <TextBlock Text="{loc:T input.footer}"
-                   FontSize="11" Margin="0,8,0,0"
-                   HorizontalAlignment="Center"
-                   Foreground="{DynamicResource TextTertiaryBrush}" />
-    </StackPanel>
-</UserControl>
+                                                        <ColumnDefinition Wi

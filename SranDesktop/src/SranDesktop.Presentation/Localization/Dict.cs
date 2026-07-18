@@ -59,6 +59,18 @@ public static class Dict
         ["input.selectKnowledgeBase"] = "Select knowledge base",
         ["input.knowledgePlaceholder"] = "Knowledge",
         ["input.dropFiles"] = "Drop files to attach",
+        ["input.workingFolder"] = "Working folder",
+        ["input.selectWorkingFolder"] = "Select the folder the agent works in",
+        ["input.clearWorkingFolder"] = "Clear working folder",
+
+        // Permission mode (Cowork-style approval dropdown)
+        ["perm.tooltip"] = "Permission mode",
+        ["perm.manual.name"] = "Manually approve",
+        ["perm.manual.desc"] = "Pauses so you can approve each action.",
+        ["perm.auto.name"] = "Automatically approve",
+        ["perm.auto.desc"] = "Runs on its own and pauses to ask if anything looks unsafe.",
+        ["perm.skip.name"] = "Skip all approvals",
+        ["perm.skip.desc"] = "Never pauses, even for unsafe actions.",
 
         // Conversation / folder context menus
         ["conv.rename"] = "Rename",
@@ -189,6 +201,8 @@ public static class Dict
         ["memory.danger.purgePhrase"] = "DELETE",
         ["memory.deleteConfirm"] = "Delete this memory?",
         ["memory.loadFailed"] = "Could not load memories - server unreachable.",
+        ["memory.global"] = "Global memory",
+        ["memory.conversation"] = "This conversation",
 
         // Errors / status
         ["error.serverUnreachable"] = "Can't reach the chat server. Check your connection and the server URL in Settings, then try again.",
@@ -333,6 +347,36 @@ public static class Dict
         ["connector.disconnect"] = "Disconnect",
         ["connector.searchPlaceholder"] = "Search connectors...",
         ["connector.comingSoon"] = "Remote execution requires a reachable MCP server",
+        ["connector.addCustom"] = "Add custom connector",
+        ["connector.custom"] = "Custom",
+        ["connector.add"] = "Add",
+        ["connector.testConnection"] = "Test connection",
+        ["connector.testing"] = "Testing…",
+        ["connector.testOk"] = "Connected — {0} tool(s) found",
+        ["connector.form.name"] = "Name",
+        ["connector.form.transport"] = "Transport",
+        ["connector.form.http"] = "HTTP",
+        ["connector.form.stdio"] = "Local command (stdio)",
+        ["connector.form.serverUrl"] = "Server URL",
+        ["connector.form.command"] = "Command (e.g. npx)",
+        ["connector.form.args"] = "Arguments",
+        ["connector.form.env"] = "Environment variables (KEY=value, one per line, optional)",
+        ["connector.form.auth"] = "Authentication",
+        ["connector.form.authNone"] = "None",
+        ["connector.form.authApiKey"] = "API key",
+        ["connector.form.headerName"] = "Header name",
+        ["connector.form.apiKey"] = "Key value",
+        ["connector.err.nameRequired"] = "Enter a name for this connector",
+        ["connector.err.nameTaken"] = "A connector with this name is already installed",
+        ["connector.err.urlRequired"] = "Enter the MCP server URL",
+        ["connector.err.urlInvalid"] = "The server URL must be an absolute http(s) URL",
+        ["connector.err.urlHttps"] = "https is required (http is allowed for localhost only)",
+        ["connector.err.commandRequired"] = "Enter the command to run",
+        ["connector.err.envInvalid"] = "Environment variables must be KEY=value, one per line",
+        ["connector.err.headerRequired"] = "Enter the header name (e.g. Authorization)",
+        ["connector.err.keyRequired"] = "Enter the API key value",
+        ["connector.stdioWarningTitle"] = "Run a local program?",
+        ["connector.stdioWarning"] = "This connector runs a program on your computer with your permissions:\n\n{0}\n\nOnly continue if you trust this command — it can access your files and network.",
 
         // R9 — Voice
         ["input.voice"] = "Voice input",
@@ -487,6 +531,18 @@ public static class Dict
         ["input.selectKnowledgeBase"] = "เลือกฐานความรู้",
         ["input.knowledgePlaceholder"] = "ฐานความรู้",
         ["input.dropFiles"] = "วางไฟล์เพื่อแนบ",
+        ["input.workingFolder"] = "โฟลเดอร์ทำงาน",
+        ["input.selectWorkingFolder"] = "เลือกโฟลเดอร์ที่ให้ AI ทำงาน",
+        ["input.clearWorkingFolder"] = "ล้างโฟลเดอร์ทำงาน",
+
+        // Permission mode (Cowork-style approval dropdown)
+        ["perm.tooltip"] = "โหมดการอนุญาต",
+        ["perm.manual.name"] = "อนุมัติเองทุกครั้ง",
+        ["perm.manual.desc"] = "หยุดถามก่อนทำทุกการกระทำ",
+        ["perm.auto.name"] = "อนุมัติอัตโนมัติ",
+        ["perm.auto.desc"] = "ทำงานเอง จะหยุดถามเฉพาะการกระทำที่ดูไม่ปลอดภัย",
+        ["perm.skip.name"] = "ข้ามการอนุมัติทั้งหมด",
+        ["perm.skip.desc"] = "ไม่หยุดถามเลย แม้การกระทำที่ไม่ปลอดภัย",
 
         // Conversation / folder context menus
         ["conv.rename"] = "เปลี่ยนชื่อ",
@@ -617,6 +673,8 @@ public static class Dict
         ["memory.danger.purgePhrase"] = "DELETE",
         ["memory.deleteConfirm"] = "ลบความจำนี้?",
         ["memory.loadFailed"] = "โหลดความจำไม่ได้ - เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ",
+        ["memory.global"] = "ความจำส่วนกลาง",
+        ["memory.conversation"] = "บทสนทนานี้",
 
         // Errors / status
         ["error.serverUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์แชทไม่ได้ กรุณาตรวจสอบการเชื่อมต่อและ URL เซิร์ฟเวอร์ในการตั้งค่า แล้วลองใหม่",
@@ -761,6 +819,36 @@ public static class Dict
         ["connector.disconnect"] = "ยกเลิกการเชื่อมต่อ",
         ["connector.searchPlaceholder"] = "ค้นหาส่วนเสริม...",
         ["connector.comingSoon"] = "การรันระยะไกลต้องมี MCP server ที่เข้าถึงได้",
+        ["connector.addCustom"] = "เพิ่ม connector เอง",
+        ["connector.custom"] = "กำหนดเอง",
+        ["connector.add"] = "เพิ่ม",
+        ["connector.testConnection"] = "ทดสอบการเชื่อมต่อ",
+        ["connector.testing"] = "กำลังทดสอบ…",
+        ["connector.testOk"] = "เชื่อมต่อสำเร็จ — พบ {0} เครื่องมือ",
+        ["connector.form.name"] = "ชื่อ",
+        ["connector.form.transport"] = "การเชื่อมต่อ",
+        ["connector.form.http"] = "HTTP",
+        ["connector.form.stdio"] = "คำสั่งในเครื่อง (stdio)",
+        ["connector.form.serverUrl"] = "URL ของเซิร์ฟเวอร์",
+        ["connector.form.command"] = "คำสั่ง (เช่น npx)",
+        ["connector.form.args"] = "อาร์กิวเมนต์",
+        ["connector.form.env"] = "ตัวแปรสภาพแวดล้อม (KEY=value บรรทัดละหนึ่งรายการ ไม่บังคับ)",
+        ["connector.form.auth"] = "การยืนยันตัวตน",
+        ["connector.form.authNone"] = "ไม่มี",
+        ["connector.form.authApiKey"] = "คีย์ API",
+        ["connector.form.headerName"] = "ชื่อ header",
+        ["connector.form.apiKey"] = "ค่าคีย์",
+        ["connector.err.nameRequired"] = "กรุณาตั้งชื่อ connector",
+        ["connector.err.nameTaken"] = "มี connector ชื่อนี้ติดตั้งอยู่แล้ว",
+        ["connector.err.urlRequired"] = "กรุณาใส่ URL ของ MCP server",
+        ["connector.err.urlInvalid"] = "URL ต้องเป็น http(s) แบบเต็ม",
+        ["connector.err.urlHttps"] = "ต้องใช้ https (อนุญาต http เฉพาะ localhost เท่านั้น)",
+        ["connector.err.commandRequired"] = "กรุณาใส่คำสั่งที่จะรัน",
+        ["connector.err.envInvalid"] = "ตัวแปรสภาพแวดล้อมต้องอยู่ในรูป KEY=value บรรทัดละหนึ่งรายการ",
+        ["connector.err.headerRequired"] = "กรุณาใส่ชื่อ header (เช่น Authorization)",
+        ["connector.err.keyRequired"] = "กรุณาใส่ค่าคีย์ API",
+        ["connector.stdioWarningTitle"] = "เรียกใช้โปรแกรมในเครื่อง?",
+        ["connector.stdioWarning"] = "connector นี้จะรันโปรแกรมบนเครื่องของคุณด้วยสิทธิ์ผู้ใช้ของคุณ:\n\n{0}\n\nดำเนินการต่อเฉพาะเมื่อคุณเชื่อถือคำสั่งนี้ — โปรแกรมสามารถเข้าถึงไฟล์และเครือข่ายของคุณได้",
 
         // R9 — Voice
         ["input.voice"] = "พูดข้อความ",
@@ -769,97 +857,4 @@ public static class Dict
         ["voice.title"] = "ตั้งค่าเสียง",
         ["voice.voice"] = "เสียง",
         ["voice.speed"] = "ความเร็ว",
-        ["voice.autoRead"] = "อ่านคำตอบออกเสียงอัตโนมัติ",
-        ["voice.listening"] = "กำลังฟัง...",
-        ["voice.backend"] = "ระบบเสียง",
-        ["voice.language"] = "ภาษาที่ใช้พูด",
-        ["voice.azureKey"] = "Azure Speech key",
-        ["voice.azureRegion"] = "Region",
-        ["voice.test"] = "ทดสอบ",
-        ["voice.testOk"] = "คีย์ใช้งานได้ ✓",
-        ["voice.testFail"] = "คีย์หรือ region ไม่ถูกต้อง",
-        ["voice.azureHint"] = "ใส่ Azure AI Speech key เพื่อเปิดการพูดภาษาไทยและเสียงอ่านภาษาไทยแบบ neural",
-
-        // R9 — Share
-        ["header.share"] = "แชร์",
-        ["share.title"] = "แชร์บทสนทนา",
-        ["share.copyLink"] = "คัดลอกลิงก์",
-        ["share.copied"] = "คัดลอกแล้ว!",
-        ["share.unavailable"] = "เซิร์ฟเวอร์นี้ยังไม่รองรับการแชร์",
-        ["share.exportInstead"] = "ใช้ส่งออกเป็น Markdown/JSON จากเมนู ... แทนได้",
-
-        // R9 — Branching
-        ["message.branch"] = "สาขา",
-        ["message.edit"] = "แก้ไข",
-
-        // R11 — Auto-update
-        ["update.available"] = "มีเวอร์ชันใหม่:",
-        ["update.install"] = "ติดตั้งเลย",
-        ["update.later"] = "ภายหลัง",
-        ["update.downloading"] = "กำลังดาวน์โหลดอัปเดต...",
-        ["update.mandatory"] = "อัปเดตนี้จำเป็นต้องติดตั้ง",
-        ["update.failed"] = "อัปเดตไม่สำเร็จ",
-
-        // R11 — Setup / first run
-        ["setup.serverTitle"] = "เชื่อมต่อเซิร์ฟเวอร์",
-        ["setup.serverDesc"] = "เลือกวิธีเชื่อมต่อกับ SRAN AI",
-        ["setup.cloud"] = "SRAN Cloud (บริการสำเร็จรูป)",
-        ["setup.selfHosted"] = "เซิร์ฟเวอร์ขององค์กร",
-        ["setup.serverUrl"] = "URL เซิร์ฟเวอร์",
-        ["setup.serverUrlHint"] = "ใส่ URL ที่ผู้ดูแลระบบให้มา เช่น https://sran.yourcompany.com",
-        ["setup.testConnection"] = "ทดสอบการเชื่อมต่อ",
-        ["setup.testing"] = "กำลังทดสอบ...",
-        ["setup.connected"] = "เชื่อมต่อสำเร็จ ✓",
-
-        // R11 — Crash reporting
-        ["crash.title"] = "เกิดข้อผิดพลาด",
-        ["crash.description"] = "SRAN Desktop พบข้อผิดพลาดที่ไม่คาดคิด คุณสามารถใช้งานต่อ รีสตาร์ทแอป หรือส่งรายงานเพื่อช่วยเราแก้ไข",
-        ["crash.details"] = "รายละเอียดข้อผิดพลาด",
-        ["crash.sendReport"] = "ส่งรายงานข้อผิดพลาด",
-        ["crash.sent"] = "ส่งรายงานแล้ว ขอบคุณครับ!",
-        ["crash.restart"] = "รีสตาร์ท",
-        ["crash.optIn"] = "ส่งรายงานข้อผิดพลาดเพื่อช่วยพัฒนา SRAN Desktop",
-
-        // Phase 3 — agent-chat backup
-        ["settings.syncAgentChats"] = "สำรองแชทโหมดเอเจนต์ไปยังบัญชีของคุณ",
-        ["settings.syncAgentChatsHint"] = "สำรองเฉพาะข้อความสนทนาเท่านั้น — ประวัติการใช้เครื่องมือและภาพหน้าจอยังอยู่ในเครื่องนี้",
-
-        // Phase 12 E — on-device Office file generation
-        ["settings.localOfficeGen"] = "สร้างไฟล์ Excel/Word บนเครื่องนี้เมื่อทำได้",
-        ["settings.localOfficeGenHint"] = "การ์ดแผนงานที่รองรับจะสร้างไฟล์ในเครื่อง เนื้อหาเอกสารจึงไม่ออกจากเครื่องนี้ ส่วน PowerPoint, PDF, แผนภูมิ และการแก้ไขไฟล์ที่อัปโหลดยังใช้เซิร์ฟเวอร์ และไฟล์ที่สร้างในเครื่องจะไม่มีประวัติเวอร์ชันฝั่งเซิร์ฟเวอร์",
-
-        // Phase 6 — folder access
-        ["settings.folderAccess"] = "การเข้าถึงโฟลเดอร์",
-        ["settings.folderAccessHint"] = "เอเจนต์สามารถอ่านและเขียนไฟล์ในโฟลเดอร์ที่คุณอนุญาตที่นี่ได้ (เพิ่มเติมจากโฟลเดอร์โปรไฟล์ผู้ใช้และโฟลเดอร์ชั่วคราว) โดยยังคงขออนุญาตก่อนเขียนหรือรันคำสั่งทุกครั้ง",
-        ["settings.addFolder"] = "เพิ่มโฟลเดอร์…",
-        ["settings.removeFolder"] = "ลบโฟลเดอร์",
-        ["settings.folderRejected"] = "ไม่สามารถอนุญาตโฟลเดอร์นี้ได้ กรุณาเลือกโฟลเดอร์ที่เจาะจง — ไม่ใช่ทั้งไดรฟ์ ไม่ใช่โฟลเดอร์ Windows หรือ Program Files และต้องไม่ใช่โฟลเดอร์ที่เพิ่มไว้แล้ว",
-
-        // R11 — Version
-        ["settings.version"] = "เวอร์ชัน",
-
-        // R12 — Login screen (simplified R12-fix: centered logo + form only)
-        ["login.email"] = "อีเมล",
-        ["login.emailPlaceholder"] = "you@company.com",
-        ["login.password"] = "รหัสผ่าน",
-        ["login.signIn"] = "เข้าสู่ระบบ",
-        ["login.signingIn"] = "กำลังเข้าสู่ระบบ...",
-        ["login.forgotPassword"] = "ลืมรหัสผ่าน?",
-        ["login.showPassword"] = "แสดง/ซ่อนรหัสผ่าน",
-        ["login.toggleTheme"] = "สลับธีม",
-        ["login.errorInvalid"] = "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
-        ["login.errorUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่า gateway ทำงานอยู่และ URL เซิร์ฟเวอร์ถูกต้อง",
-        ["login.errorTimeout"] = "เซิร์ฟเวอร์ตอบสนองช้าเกินไป กรุณาลองใหม่อีกครั้ง",
-
-        // R9 — Writing style
-        ["style.learn"] = "เรียนรู้สไตล์เขียน",
-        ["style.profile"] = "สไตล์การเขียน",
-        ["style.title"] = "สไตล์การเขียน",
-        ["style.subtitle"] = "วางตัวอย่างงานเขียนของคุณ AI จะเรียนรู้โทนและนำไปใช้",
-        ["style.samplesHint"] = "วางตัวอย่างงานเขียน 3-5 ชิ้นที่นี่",
-        ["style.analyze"] = "วิเคราะห์",
-        ["style.analyzing"] = "กำลังวิเคราะห์...",
-        ["style.active"] = "โปรไฟล์สไตล์ทำงานอยู่",
-        ["style.clear"] = "ล้างโปรไฟล์",
-    };
-}
+        ["voice.autoRead"] = "อ่านคำตอบออกเสียงอัตโนมั

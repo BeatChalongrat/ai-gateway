@@ -49,10 +49,11 @@ public partial class App : System.Windows.Application
 
         // Apply the user's folder grants to the agent's PathGuard now, and on
         // every settings change (Phase 6 Task 1). A grant only widens WHERE
-        // file tools may operate — consent still gates each write.
-        SranDesktop.Infrastructure.Mcp.Tools.PathGuard.ConfigureGrantedRoots(_settings.Current.GrantedFolders);
+        // file tools may operate — consent still gates each write. The
+        // composer's working folder counts as an extra granted root.
+        SranDesktop.Infrastructure.Mcp.Tools.PathGuard.ConfigureGrantedRoots(AgentRoots(_settings));
         _settings.SettingsChanged += (_, _) =>
-            SranDesktop.Infrastructure.Mcp.Tools.PathGuard.ConfigureGrantedRoots(_settings.Current.GrantedFolders);
+            SranDesktop.Infrastructure.Mcp.Tools.PathGuard.ConfigureGrantedRoots(AgentRoots(_settings));
 
         // Housekeeping: sweep leaked screenshot temp files (Phase 6 Task 4).
         CleanupOldScreenshots();
@@ -110,6 +111,17 @@ public partial class App : System.Windows.Application
             _mainWindow.Show();
         else
             _logger.LogInformation("Started minimized to tray");
+    }
+
+    /// <summary>Granted folders + the composer's working folder (when set) —
+    /// the full list of extra roots the agent's file tools may reach.</summary>
+    private static IReadOnlyList<string> AgentRoots(ISettingsService settings)
+    {
+        var current = settings.Current;
+        if (string.IsNullOrWhiteSpace(current.WorkingFolder))
+            return current.GrantedFolders;
+        var roots = new List<string>(current.GrantedFolders) { current.WorkingFolder };
+        return roots;
     }
 
     /// <summary>Route a ``sran://`` URI to the OAuth coordinator (Phase 7).
@@ -358,17 +370,4 @@ public partial class App : System.Windows.Application
         try
         {
             var reporter = _host?.Services.GetService<SranDesktop.Application.Interfaces.ICrashReportService>();
-            new SranDesktop.Presentation.Views.Dialogs.CrashDialog(exception, reporter)
-            {
-                Owner = MainWindow is { IsLoaded: true } ? MainWindow : null
-            }.ShowDialog();
-        }
-        catch (Exception dialogEx)
-        {
-            _logger?.LogError(dialogEx, "Crash dialog failed — falling back to MessageBox");
-            MessageBox.Show(
-                $"An unexpected error occurred:\n\n{exception.Message}\n\nThe error has been logged.",
-                "SRAN Desktop Error", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-}
+            new SranDesktop.Pr
