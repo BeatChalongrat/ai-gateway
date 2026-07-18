@@ -120,6 +120,24 @@ public static class AppHostBuilder
                         client.Timeout = Timeout.InfiniteTimeSpan; // streaming
                     });
 
+                // web_fetch named client: 30s timeout; auto-redirect OFF so the
+                // tool can SSRF-re-check every hop before following it.
+                services.AddHttpClient(WebFetchTool.HttpClientName, client =>
+                    {
+                        client.Timeout = TimeSpan.FromSeconds(30);
+                    })
+                    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+                    {
+                        AllowAutoRedirect = false,
+                        AutomaticDecompression = System.Net.DecompressionMethods.All
+                    });
+
+                // Computer-use screenshot→screen coordinate mapping (accuracy
+                // overhaul): screenshot writes it, click/scroll/drag/zoom read it.
+                services.AddSingleton<SranDesktop.Infrastructure.Native.ScreenContext>();
+                // UIA element snapshot shared by read_screen_elements → uia_click/uia_set_value.
+                services.AddSingleton<SranDesktop.Infrastructure.Native.Uia.UiaSnapshotStore>();
+
                 // Per-conversation shell state (PART 3): retained working dir.
                 services.AddSingleton<ShellSession>();
                 // Folder-scoped consent (PART 4): writes → project folder, shell → cwd.
@@ -161,17 +179,33 @@ public static class AppHostBuilder
                     registry.Register(new WebSearchTool(
                         sp.GetRequiredService<IGatewayApiClient>(),
                         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebSearchTool>>()));
+                    // web_fetch reads page content after web_search (read-only,
+                    // SSRF-guarded). ALWAYS listed — unlike web_search it is
+                    // not gated by the composer web-search toggle.
+                    registry.Register(new WebFetchTool(
+                        sp.GetRequiredService<IHttpClientFactory>(),
+                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebFetchTool>>()));
                     // Model-driven skill loading (Phase 6 Task 2) — reads
                     // bundled SKILL.md on demand; no side effects (AllowAlways).
                     registry.Register(new UseSkillTool(sp.GetRequiredService<ISkillManager>()));
-                    // Computer use (Claude-style: screenshot → look → act → verify)
-                    registry.Register(new ComputerScreenshotTool());
-                    registry.Register(new ComputerClickTool());
+                    // Computer use (Claude-style: screenshot → look → act → verify;
+                    // accuracy overhaul: coordinates auto-map through ScreenContext)
+                    var screenContext = sp.GetRequiredService<SranDesktop.Infrastructure.Native.ScreenContext>();
+                    registry.Register(new ComputerScreenshotTool(screenContext));
+                    registry.Register(new ComputerClickTool(screenContext));
                     registry.Register(new ComputerTypeTool());
                     registry.Register(new ComputerKeyTool());
-                    registry.Register(new ComputerScrollTool());
-                    registry.Register(new ComputerDragTool());
+                    registry.Register(new ComputerScrollTool(screenContext));
+                    registry.Register(new ComputerDragTool(screenContext));
+                    registry.Register(new ComputerZoomTool(screenContext));
                     registry.Register(new OpenApplicationTool());
+                    // Windows UI Automation layer: element-level control, far
+                    // more accurate than pixel clicking where apps expose UIA.
+                    var uiaSnapshots = sp.GetRequiredService<SranDesktop.Infrastructure.Native.Uia.UiaSnapshotStore>();
+                    registry.Register(new GetComputerStateTool());
+                    registry.Register(new ReadScreenElementsTool(uiaSnapshots));
+                    registry.Register(new UiaClickTool(uiaSnapshots));
+                    registry.Register(new UiaSetValueTool(uiaSnapshots));
                     // Phase 13 Part B: code interpreter. Thin client → chat-edge's
                     // /code/run (server-side hardened sandbox). DefaultPermission
                     // is Ask (deny-without-handler): it runs model code + can read
@@ -212,7 +246,8 @@ public static class AppHostBuilder
                     sp.GetRequiredService<IConversationStore>(),
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatOrchestrator>>(),
                     shellSession: sp.GetRequiredService<ShellSession>(),
-                    scopeResolver: sp.GetRequiredService<IToolScopeResolver>()));
+                    scopeResolver: sp.GetRequiredService<IToolScopeResolver>(),
+                    settings: sp.GetRequiredService<ISettingsService>()));
 
                 // Application services
                 services.AddSingleton<IAuthService, AuthService>();
@@ -254,42 +289,4 @@ public static class AppHostBuilder
                     new SranDesktop.Infrastructure.Services.McpConnectorService(
                         sp.GetRequiredService<ICredentialStore>(),
                         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SranDesktop.Infrastructure.Services.McpConnectorService>>(),
-                        context.Configuration["Sran:McpCatalogUrl"],
-                        sp.GetRequiredService<ITokenSession>()));
-
-                // ViewModels
-                services.AddSingleton<LoginViewModel>();
-                services.AddSingleton<ConversationListViewModel>();
-                services.AddSingleton<ChatViewModel>();
-                services.AddSingleton<MainViewModel>();
-                services.AddTransient<SettingsViewModel>();
-                services.AddTransient<KnowledgeBaseViewModel>();
-                services.AddTransient<MemoryViewModel>();
-                services.AddTransient<ScheduledTasksViewModel>();
-                services.AddTransient<SkillsViewModel>();
-                services.AddTransient<ConnectorMarketplaceViewModel>();
-                services.AddTransient<WritingStyleViewModel>();
-
-                // Views
-                services.AddTransient<SettingsView>();
-                services.AddSingleton<Func<SettingsView>>(sp => () => sp.GetRequiredService<SettingsView>());
-                services.AddTransient<KnowledgeBaseView>();
-                services.AddSingleton<Func<KnowledgeBaseView>>(sp => () => sp.GetRequiredService<KnowledgeBaseView>());
-                services.AddTransient<MemoryView>();
-                services.AddSingleton<Func<MemoryView>>(sp => () => sp.GetRequiredService<MemoryView>());
-                services.AddTransient<ScheduledTasksView>();
-                services.AddSingleton<Func<ScheduledTasksView>>(sp => () => sp.GetRequiredService<ScheduledTasksView>());
-                services.AddTransient<SkillsView>();
-                services.AddSingleton<Func<SkillsView>>(sp => () => sp.GetRequiredService<SkillsView>());
-                services.AddTransient<ConnectorMarketplaceView>();
-                services.AddSingleton<Func<ConnectorMarketplaceView>>(sp => () => sp.GetRequiredService<ConnectorMarketplaceView>());
-                services.AddTransient<WritingStyleView>();
-                services.AddSingleton<Func<WritingStyleView>>(sp => () => sp.GetRequiredService<WritingStyleView>());
-                services.AddTransient<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>();
-                services.AddSingleton<Func<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>>(
-                    sp => () => sp.GetRequiredService<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>());
-                services.AddSingleton<MainWindow>();
-            })
-            .Build();
-    }
-}
+                        

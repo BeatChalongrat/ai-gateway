@@ -197,8 +197,4 @@ public interface IChatEdgeApiClient
 
     // ── Sharing (R9 Feature K) ──────────────────────────────────────────────
 
-    /// <summary>Create (or return the existing) public share link for a conversation.</summary>
-    Task<ShareResponse> ShareConversationAsync(string id, CancellationToken ct = default);
-
-    Task RevokeShareAsync(string id, CancellationToken ct = default);
-}
+    /// <summary>Create (or retu

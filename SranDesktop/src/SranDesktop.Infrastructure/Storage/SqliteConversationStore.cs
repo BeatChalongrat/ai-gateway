@@ -142,6 +142,9 @@ public sealed class SqliteConversationStore : IConversationStore
 
     /// <summary>Newest-N notes kept per conversation; older ones pruned on add.</summary>
     private const int MaxNotesPerConversation = 20;
+    /// <summary>Global notes (IConversationStore.GlobalNotesId) get a higher cap:
+    /// durable user facts accumulate across every conversation.</summary>
+    private const int MaxGlobalNotes = 50;
     private const int MaxNoteChars = 2000;
 
     private readonly string _connectionString;
@@ -684,7 +687,8 @@ public sealed class SqliteConversationStore : IConversationStore
                 )
                 """;
             prune.Parameters.AddWithValue("$cid", conversationId);
-            prune.Parameters.AddWithValue("$keep", MaxNotesPerConversation);
+            prune.Parameters.AddWithValue("$keep",
+                conversationId == IConversationStore.GlobalNotesId ? MaxGlobalNotes : MaxNotesPerConversation);
             await prune.ExecuteNonQueryAsync(ct);
         }
 
@@ -718,6 +722,21 @@ public sealed class SqliteConversationStore : IConversationStore
         return result;
     }
 
+    /// <summary>Global notes live under the reserved GlobalNotesId row space —
+    /// no schema change; existing conversation-scoped rows are untouched.</summary>
+    public Task<IReadOnlyList<AgentNote>> GetGlobalNotesAsync(CancellationToken ct = default) =>
+        GetNotesAsync(IConversationStore.GlobalNotesId, ct);
+
+    public async Task DeleteNoteAsync(string noteId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM agent_notes WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", noteId);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
         var conn = new SqliteConnection(_connectionString);
@@ -747,44 +766,4 @@ public sealed class SqliteConversationStore : IConversationStore
         Content = reader.IsDBNull(3) ? null : reader.GetString(3),
         ToolCallsJson = reader.IsDBNull(4) ? null : reader.GetString(4),
         ToolCallId = reader.IsDBNull(5) ? null : reader.GetString(5),
-        Name = reader.IsDBNull(6) ? null : reader.GetString(6),
-        ModelId = reader.IsDBNull(7) ? null : reader.GetString(7),
-        TokenUsage = reader.IsDBNull(8)
-            ? null
-            : JsonSerializer.Deserialize<TokenUsage>(reader.GetString(8)),
-        CreatedAt = FromIso(reader.GetString(9)),
-        SortOrder = reader.GetInt32(10),
-        ServerId = reader.IsDBNull(11) ? null : reader.GetString(11),
-        FileIdsJson = reader.IsDBNull(12) ? null : reader.GetString(12)
-    };
-
-    private static string RoleToString(MessageRole role) => role switch
-    {
-        MessageRole.System => "system",
-        MessageRole.User => "user",
-        MessageRole.Assistant => "assistant",
-        MessageRole.Tool => "tool",
-        _ => throw new ArgumentOutOfRangeException(nameof(role))
-    };
-
-    private static MessageRole RoleFromString(string role) => role switch
-    {
-        "system" => MessageRole.System,
-        "user" => MessageRole.User,
-        "assistant" => MessageRole.Assistant,
-        "tool" => MessageRole.Tool,
-        _ => throw new InvalidDataException($"Unknown message role '{role}'")
-    };
-
-    private static string ToIso(DateTimeOffset value) =>
-        value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
-
-    private static DateTimeOffset FromIso(string value) =>
-        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-
-    private static string DefaultDbPath()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return Path.Combine(appData, "SRAN Desktop", "data.db");
-    }
-}
+        Name = reader.IsDBNull(6) ? null : 

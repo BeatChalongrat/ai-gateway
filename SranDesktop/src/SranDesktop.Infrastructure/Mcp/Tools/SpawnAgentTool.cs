@@ -257,7 +257,8 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         var nested = new ChatOrchestrator(
             _gateway, host, _permissions, _store,
             _loggerFactory.CreateLogger<ChatOrchestrator>(),
-            NestedMaxIterations, NestedMaxDuration, _shellSession, _scopeResolver);
+            NestedMaxIterations, NestedMaxDuration, _shellSession, _scopeResolver,
+            settings: _settings); // nested runs honor the same global approval mode
 
         if (forwardConsent)
         {
@@ -482,6 +483,4 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         public IMcpTool? Resolve(string name) => IsAllowed(name) ? _inner.Resolve(name) : null;
 
         public IReadOnlyList<GatewayToolDefinition> GetToolDefinitions() =>
-            _inner.GetToolDefinitions().Where(d => IsAllowed(d.Function.Name)).ToList();
-    }
-}
+            _

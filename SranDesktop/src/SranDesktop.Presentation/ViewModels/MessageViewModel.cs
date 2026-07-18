@@ -245,19 +245,4 @@ public partial class MessageViewModel : ObservableObject
             MetaLine = string.Join("  ·  ", parts);
     }
 
-    public void SetError(string message)
-    {
-        IsStreaming = false;
-        IsError = true;
-        StatusText = null;
-        if (Content.Length == 0)
-        {
-            _contentBuffer.Append(message);
-            Content = message;
-        }
-        else
-        {
-            MetaLine = message;
-        }
-    }
-}
+    public void SetError(string

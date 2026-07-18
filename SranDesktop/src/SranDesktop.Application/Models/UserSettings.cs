@@ -89,11 +89,7 @@ public sealed class UserSettings
     [JsonPropertyName("shell_timeout_seconds")]
     public int ShellTimeoutSeconds { get; set; } = 300;
 
-    public UserSettings Clone()
-    {
-        var copy = (UserSettings)MemberwiseClone();
-        copy.RecentModels = new List<string>(RecentModels);
-        copy.GrantedFolders = new List<string>(GrantedFolders);
-        return copy;
-    }
-}
+    /// <summary>The agent's working folder, chosen from the composer (Cowork-style).
+    /// Acts as an extra granted root and is surfaced to the model as the default
+    /// place to do file work. Empty = none selected.</summary>
+    [JsonPr

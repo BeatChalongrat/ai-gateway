@@ -164,6 +164,105 @@ public partial class ChatViewModel : ObservableObject
 
     partial void OnIsWebSearchOnChanged(bool value) => WebSearchState.Enabled = value;
 
+    // ── Working folder + approval mode (Cowork-style composer controls) ──────
+
+    /// <summary>True when the user picked a working folder from the composer.</summary>
+    public bool HasWorkingFolder => !string.IsNullOrWhiteSpace(_settings.Current.WorkingFolder);
+
+    /// <summary>Pill label: the folder's name, or the localized placeholder.</summary>
+    public string WorkingFolderLabel
+    {
+        get
+        {
+            var folder = _settings.Current.WorkingFolder;
+            if (string.IsNullOrWhiteSpace(folder))
+                return Localization.LocaleService.Instance.T("input.workingFolder");
+            var name = System.IO.Path.GetFileName(folder.TrimEnd('\\', '/'));
+            return string.IsNullOrEmpty(name) ? folder : name;
+        }
+    }
+
+    /// <summary>Tooltip: the full path when set, otherwise the call to action.</summary>
+    public string WorkingFolderTooltip => HasWorkingFolder
+        ? _settings.Current.WorkingFolder
+        : Localization.LocaleService.Instance.T("input.selectWorkingFolder");
+
+    /// <summary>Pick the agent's working folder (validated like Settings' folder
+    /// grants and persisted; App.xaml.cs feeds it into PathGuard on save).</summary>
+    [RelayCommand]
+    private void SelectWorkingFolder()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = Localization.LocaleService.Instance.T("input.selectWorkingFolder")
+        };
+        if (dialog.ShowDialog() != true)
+            return;
+
+        var rejection = SranDesktop.Application.Services.FolderGrantValidator
+            .Validate(dialog.FolderName, out var canonical);
+        if (rejection != SranDesktop.Application.Services.FolderGrantRejection.Ok || canonical is null)
+        {
+            ErrorMessage = Localization.LocaleService.Instance.T("settings.folderRejected");
+            return;
+        }
+        SaveWorkingFolder(canonical);
+    }
+
+    [RelayCommand]
+    private void ClearWorkingFolder() => SaveWorkingFolder("");
+
+    private void SaveWorkingFolder(string folder)
+    {
+        var updated = _settings.Current.Clone();
+        updated.WorkingFolder = folder;
+        _settings.Save(updated);
+        OnPropertyChanged(nameof(HasWorkingFolder));
+        OnPropertyChanged(nameof(WorkingFolderLabel));
+        OnPropertyChanged(nameof(WorkingFolderTooltip));
+    }
+
+    /// <summary>Permission-mode popup open state (Knowledge-popup pattern).</summary>
+    [ObservableProperty]
+    private bool _isPermissionPopupOpen;
+
+    [RelayCommand]
+    private void OpenPermissionPopup() => IsPermissionPopupOpen = true;
+
+    private Domain.Enums.ApprovalMode CurrentApprovalMode =>
+        Domain.Enums.ApprovalModeParser.Parse(_settings.Current.ApprovalMode);
+
+    public bool IsApprovalManual => CurrentApprovalMode == Domain.Enums.ApprovalMode.Manual;
+    public bool IsApprovalAuto => CurrentApprovalMode == Domain.Enums.ApprovalMode.Auto;
+    public bool IsApprovalSkip => CurrentApprovalMode == Domain.Enums.ApprovalMode.Skip;
+
+    /// <summary>Pill label for the currently selected approval mode.</summary>
+    public string ApprovalModeLabel => Localization.LocaleService.Instance.T(
+        CurrentApprovalMode switch
+        {
+            Domain.Enums.ApprovalMode.Manual => "perm.manual.name",
+            Domain.Enums.ApprovalMode.Skip => "perm.skip.name",
+            _ => "perm.auto.name"
+        });
+
+    /// <summary>Persist the chosen approval mode ("manual" | "auto" | "skip").
+    /// ChatOrchestrator reads it live from settings on every tool call.</summary>
+    [RelayCommand]
+    private void SelectApprovalMode(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return;
+        var updated = _settings.Current.Clone();
+        updated.ApprovalMode = Domain.Enums.ApprovalModeParser.ToSettingsValue(
+            Domain.Enums.ApprovalModeParser.Parse(mode));
+        _settings.Save(updated);
+        OnPropertyChanged(nameof(IsApprovalManual));
+        OnPropertyChanged(nameof(IsApprovalAuto));
+        OnPropertyChanged(nameof(IsApprovalSkip));
+        OnPropertyChanged(nameof(ApprovalModeLabel));
+        IsPermissionPopupOpen = false;
+    }
+
     // ── Voice (R9 Feature J, abstracted over ISpeechService in R10 Fix 2) ──
 
     /// <summary>Mic toggle: dictation appends recognized text to the composer.</summary>
@@ -1861,7 +1960,7 @@ public partial class ChatViewModel : ObservableObject
     private static string ManifestFileId(string conversationId, string localPath)
     {
         var hash = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(conversationId + " " + localPath));
+            System.Text.Encoding.UTF8.GetBytes(conversationId + "\0" + localPath));
         return "file-" + Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
     }
 
@@ -1905,17 +2004,21 @@ public partial class ChatViewModel : ObservableObject
         }
     }
 
-    /// <summary>Appends the `## Notes` block (Phase B PART 3) from the durable,
-    /// conversation-scoped agent notes. Size-bounded by the formatter; a store
-    /// hiccup just omits the block, never throws.</summary>
+    /// <summary>Appends the `## Memory (global)` + `## Notes` blocks (Phase B
+    /// PART 3) from the durable agent notes. Global notes render even for a
+    /// brand-new conversation — that's the whole point of Global Memory.
+    /// Size-bounded by the formatter; a store hiccup just omits the block,
+    /// never throws.</summary>
     private async Task AppendNotesAsync(System.Text.StringBuilder sb)
     {
-        if (Conversation?.Id is not { } conversationId)
-            return;
+        var conversationId = Conversation?.Id;
         try
         {
-            var notes = await _store.GetNotesAsync(conversationId);
-            var block = Application.Services.AgentNotesFormatter.BuildBlock(notes);
+            var notes = conversationId is not null
+                ? await _store.GetNotesAsync(conversationId)
+                : Array.Empty<Domain.Entities.AgentNote>();
+            var globalNotes = await _store.GetGlobalNotesAsync();
+            var block = Application.Services.AgentNotesFormatter.BuildBlock(notes, globalNotes);
             if (block is not null)
                 sb.Append(block);
         }
@@ -2340,6 +2443,14 @@ public partial class ChatViewModel : ObservableObject
             - If a tool fails, explain what happened and try an alternative approach
             """;
 
+        // Working folder (Cowork-style): tell the model where to do file work.
+        var workingFolder = _settings.Current.WorkingFolder;
+        if (!string.IsNullOrWhiteSpace(workingFolder))
+            systemPrompt += $"\n\n[WORKING FOLDER] The user selected \"{workingFolder}\" as the working " +
+                "folder. Do file work there by default: create new files inside it, resolve relative " +
+                "paths against it, and run shell commands with it as the current directory, unless the " +
+                "user explicitly points elsewhere.";
+
         // Image/Video mode toggles — append hints to bias the model (same approach as chat-edge-api)
         if (IsImageModeOn)
             systemPrompt += "\n\n[IMAGE MODE] The user wants an IMAGE. Treat their message as an image " +
@@ -2483,536 +2594,4 @@ public partial class ChatViewModel : ObservableObject
             var newTail = Messages.Skip(index).ToList();
             set.Tails.Add(newTail);
             set.Current = set.Tails.Count - 1;
-            RefreshBranchMarkers(key, set);
-            await PersistBranchSetAsync(Conversation!.Id, key, set);
-        }
-    }
-
-    [RelayCommand]
-    private void PreviousBranch(MessageViewModel? message) => SwitchBranch(message, -1);
-
-    [RelayCommand]
-    private void NextBranch(MessageViewModel? message) => SwitchBranch(message, +1);
-
-    private void SwitchBranch(MessageViewModel? message, int delta)
-    {
-        if (message?.BranchKey is not { } key || IsStreaming
-            || !_branchSets.TryGetValue(key, out var set))
-            return;
-
-        var target = set.Current + delta;
-        if (target < 0 || target >= set.Tails.Count)
-            return;
-
-        var index = Messages.IndexOf(message);
-        if (index < 0)
-            return;
-
-        // Save the on-screen tail back into its slot, swap in the target tail.
-        set.Tails[set.Current] = Messages.Skip(index).ToList();
-        foreach (var m in Messages.Skip(index).ToList())
-            Messages.Remove(m);
-        foreach (var m in set.Tails[target])
-            Messages.Add(m);
-        set.Current = target;
-
-        RefreshBranchMarkers(key, set);
-        UpdateLastAssistantFlag();
-        MessageActivity?.Invoke(this, EventArgs.Empty);
-
-        if (Conversation is { } conversation)
-            _ = PersistBranchSetAsync(conversation.Id, key, set);
-    }
-
-    /// <summary>Persist a fork's tails + active index (R10 Fix 3).</summary>
-    private async Task PersistBranchSetAsync(string conversationId, string key, BranchSet set)
-    {
-        try
-        {
-            var tails = set.Tails
-                .Select(tail => tail.Select(m => m.Id).ToList())
-                .ToList();
-            await _store.SaveBranchSetAsync(
-                new BranchSetRecord(conversationId, key, set.Current, tails));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not persist branch set {Key}", key);
-        }
-    }
-
-    /// <summary>
-    /// Rebuild branch sets after a history load (R10 Fix 3): messages arrive
-    /// flat; every NON-active tail is pulled out of the visible list into its
-    /// branch slot, leaving the last-viewed branch on screen. Conversations
-    /// without branch rows keep the flat behavior.
-    /// </summary>
-    private async Task RestoreBranchesAsync(string conversationId)
-    {
-        IReadOnlyList<BranchSetRecord> records;
-        try
-        {
-            records = await _store.GetBranchSetsAsync(conversationId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Branch restore skipped for {Id}", conversationId);
-            return;
-        }
-        if (records.Count == 0)
-            return;
-
-        var byId = Messages.ToDictionary(m => m.Id, StringComparer.Ordinal);
-        foreach (var record in records)
-        {
-            var set = new BranchSet { Current = Math.Clamp(record.ActiveIndex, 0, record.Tails.Count - 1) };
-            for (var i = 0; i < record.Tails.Count; i++)
-            {
-                var tail = record.Tails[i]
-                    .Where(byId.ContainsKey)
-                    .Select(id => byId[id])
-                    .ToList();
-                set.Tails.Add(tail);
-
-                if (i == set.Current)
-                    continue;
-                // Hide non-active tails from the visible thread.
-                foreach (var vm in tail)
-                    Messages.Remove(vm);
-            }
-            _branchSets[record.BranchKey] = set;
-            RefreshBranchMarkers(record.BranchKey, set);
-        }
-        UpdateLastAssistantFlag();
-    }
-
-    private void RefreshBranchMarkers(string key, BranchSet set)
-    {
-        for (var i = 0; i < set.Tails.Count; i++)
-        {
-            var head = set.Tails[i].FirstOrDefault(m => m.IsUser);
-            if (head is null) continue;
-            head.BranchKey = key;
-            head.BranchIndex = i;
-            head.BranchCount = set.Tails.Count;
-        }
-    }
-
-    /// <summary>Toggle thumbs-up on an assistant message. Local state is
-    /// authoritative; server upsert is best-effort (Phase 5 Task 3).</summary>
-    [RelayCommand]
-    private void ThumbUp(MessageViewModel? message)
-    {
-        if (message is null) return;
-        message.Feedback = message.Feedback == "up" ? "none" : "up";
-        _logger.LogInformation("Feedback {Value} on message {Id}", message.Feedback, message.Id);
-        PostFeedbackIfServerMessage(message);
-    }
-
-    /// <summary>Toggle thumbs-down on an assistant message. Local state is
-    /// authoritative; server upsert is best-effort (Phase 5 Task 3).</summary>
-    [RelayCommand]
-    private void ThumbDown(MessageViewModel? message)
-    {
-        if (message is null) return;
-        message.Feedback = message.Feedback == "down" ? "none" : "down";
-        _logger.LogInformation("Feedback {Value} on message {Id}", message.Feedback, message.Id);
-        PostFeedbackIfServerMessage(message);
-    }
-
-    /// <summary>
-    /// Mirrors thumbs to the server for chat-edge messages (Phase 5 Task 3).
-    /// AGENT-path messages stay local-only: the Phase 3 mirror keys messages by
-    /// client_id and returns no per-message server ids, so there is nothing to
-    /// POST against. Un-toggling also stays local — the server exposes only a
-    /// create/upsert route, no delete; switching up↔down re-POSTs (upsert).
-    /// Fire-and-forget: feedback is a preference signal, never critical data.
-    /// </summary>
-    private void PostFeedbackIfServerMessage(MessageViewModel message)
-    {
-        if (!message.IsServerMessage || !message.IsAssistant || message.Feedback == "none")
-            return;
-
-        var messageId = message.Id;
-        var rating = message.Feedback == "up" ? "thumbs_up" : "thumbs_down";
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _api.SendFeedbackAsync(messageId, rating);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Feedback POST failed for {Id} (local state kept)", messageId);
-            }
-        });
-    }
-
-    // ── Model / KB / Memory / Export commands (web parity round 2) ─────────
-
-    /// <summary>Lazy-load the model catalogue, then open the selector popup.</summary>
-    [RelayCommand]
-    private async Task OpenModelPopupAsync()
-    {
-        if (AvailableModels.Count == 0)
-            await LoadModelsAsync();
-        ModelSearchText = string.Empty;
-        RebuildModelGroups();
-        IsModelPopupOpen = true;
-    }
-
-    /// <summary>Model chosen before a conversation exists — applied when one is created/opened.</summary>
-    private string? _pendingModelId;
-
-    [RelayCommand]
-    private async Task SelectModelAsync(ModelInfo? model)
-    {
-        IsModelPopupOpen = false;
-        if (model is null)
-            return;
-
-        RecordRecentModel(model.Id);
-
-        // No active conversation yet (home screen) — store for later
-        if (Conversation is null)
-        {
-            _pendingModelId = model.Id;
-            NotifyModelChanged();
-            return;
-        }
-
-        try
-        {
-            await _api.SetConversationModelAsync(Conversation.Id, model.Id);
-            Conversation.ModelId = model.Id;
-            _pendingModelId = null;
-            NotifyModelChanged();
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Failed to set model {Model}", model.Id);
-            ErrorMessage = "Could not change the model - server unreachable.";
-        }
-    }
-
-    /// <summary>Auto row: the gateway's smart router picks the model per turn.</summary>
-    [RelayCommand]
-    private async Task SelectAutoAsync()
-    {
-        IsModelPopupOpen = false;
-        if (IsAutoSelected)
-            return;
-
-        // No active conversation yet (home screen) — store for later
-        if (Conversation is null)
-        {
-            _pendingModelId = "auto";
-            NotifyModelChanged();
-            return;
-        }
-
-        try
-        {
-            await _api.SetConversationModelAsync(Conversation.Id, "auto");
-            Conversation.ModelId = "auto";
-            _pendingModelId = null;
-            NotifyModelChanged();
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Failed to set Auto model");
-            ErrorMessage = "Could not change the model - server unreachable.";
-        }
-    }
-
-    private async Task LoadModelsAsync()
-    {
-        try
-        {
-            var response = await _api.ListModelsAsync();
-            AvailableModels.Clear();
-            foreach (var m in response.Models.Where(m => m.Allowed && (m.ModelKind is null or "chat")))
-                AvailableModels.Add(m);
-            NotifyModelChanged();
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Could not load models");
-        }
-    }
-
-    /// <summary>Lazy-load knowledge bases, then open the KB selector popup.</summary>
-    [RelayCommand]
-    private async Task OpenKnowledgePopupAsync()
-    {
-        if (AvailableKnowledgeBases.Count == 0)
-            await LoadKnowledgeBasesAsync();
-        IsKnowledgePopupOpen = true;
-    }
-
-    [RelayCommand]
-    private async Task SelectKnowledgeBaseAsync(KnowledgeBaseDto? kb)
-    {
-        IsKnowledgePopupOpen = false;
-        if (Conversation is null)
-            return;
-        try
-        {
-            await _api.SetConversationKnowledgeBaseAsync(Conversation.Id, kb?.Id);
-            KnowledgeBaseId = kb?.Id;
-            KnowledgeBaseName = kb?.Name;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Failed to set knowledge base");
-            ErrorMessage = "Could not change the knowledge base - server unreachable.";
-        }
-    }
-
-    private async Task LoadKnowledgeBasesAsync()
-    {
-        try
-        {
-            var response = await _api.ListKnowledgeBasesAsync();
-            AvailableKnowledgeBases.Clear();
-            foreach (var kb in response.KnowledgeBases)
-                AvailableKnowledgeBases.Add(kb);
-
-            // Resolve the bound KB's display name now that the list is available.
-            if (!string.IsNullOrEmpty(KnowledgeBaseId) && string.IsNullOrEmpty(KnowledgeBaseName))
-                KnowledgeBaseName = AvailableKnowledgeBases
-                    .FirstOrDefault(k => k.Id == KnowledgeBaseId)?.Name;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Could not load knowledge bases");
-        }
-    }
-
-    [RelayCommand]
-    private async Task ToggleMemoryAsync()
-    {
-        if (Conversation is null)
-            return;
-        var target = !MemoryEnabled;
-        MemoryEnabled = target; // optimistic
-        try
-        {
-            await _api.SetConversationMemoryAsync(Conversation.Id, target);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            MemoryEnabled = !target; // revert on failure
-            _logger.LogWarning(ex, "Failed to toggle memory");
-            ErrorMessage = "Could not update memory - server unreachable.";
-        }
-    }
-
-    /// <summary>Share the conversation: create the public link and show it (R9 K).</summary>
-    [RelayCommand]
-    private async Task ShareAsync()
-    {
-        if (Conversation is null)
-            return;
-        try
-        {
-            var share = await _api.ShareConversationAsync(Conversation.Id);
-            var dialog = new Views.Dialogs.ShareDialog(share.ShareUrl,
-                revoke: () => _api.RevokeShareAsync(Conversation.Id))
-            {
-                Owner = System.Windows.Application.Current.MainWindow
-            };
-            dialog.ShowDialog();
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Share failed");
-            Application.Services.ToastService.Instance.Show(
-                Application.Interfaces.ToastKind.Info, "share.unavailable",
-                Localization.LocaleService.Instance.T("share.exportInstead"));
-        }
-    }
-
-    [RelayCommand]
-    private Task ExportMarkdown() => ExportAsync("markdown", "Markdown (*.md)|*.md", ".md");
-
-    [RelayCommand]
-    private Task ExportJson() => ExportAsync("json", "JSON (*.json)|*.json", ".json");
-
-    private async Task ExportAsync(string format, string filter, string ext)
-    {
-        if (Conversation is null)
-            return;
-        try
-        {
-            var text = await _api.ExportConversationAsync(Conversation.Id, format);
-            var dialog = new Microsoft.Win32.SaveFileDialog
-            {
-                Filter = filter,
-                FileName = SafeFileName(Conversation.DisplayTitle) + ext
-            };
-            if (dialog.ShowDialog() == true)
-            {
-                await File.WriteAllTextAsync(dialog.FileName, text);
-                Application.Services.ToastService.Instance.Show(
-                    Application.Interfaces.ToastKind.Success, "toast.exportSaved",
-                    Path.GetFileName(dialog.FileName));
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Export ({Format}) failed", format);
-            ErrorMessage = "Could not export - server unreachable.";
-        }
-    }
-
-    [RelayCommand]
-    private async Task CopyMarkdownAsync()
-    {
-        if (Conversation is null)
-            return;
-        try
-        {
-            var text = await _api.ExportConversationAsync(Conversation.Id, "markdown");
-            System.Windows.Clipboard.SetText(text);
-            Application.Services.ToastService.Instance.Show(
-                Application.Interfaces.ToastKind.Success, "toast.copied");
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Copy-as-markdown failed");
-            ErrorMessage = "Could not copy - server unreachable.";
-        }
-    }
-
-    private static string SafeFileName(string name)
-    {
-        foreach (var c in Path.GetInvalidFileNameChars())
-            name = name.Replace(c, '_');
-        return name.Length > 60 ? name[..60] : name;
-    }
-
-    /// <summary>Best-effort refresh of model / KB / memory state when a chat opens.</summary>
-    private async Task LoadConversationStateAsync(string conversationId)
-    {
-        try
-        {
-            var dto = await _api.GetConversationAsync(conversationId);
-            if (Conversation?.Id != conversationId)
-                return; // selection moved on while awaiting
-
-            KnowledgeBaseId = dto.KnowledgeBaseId;
-            MemoryEnabled = dto.MemoryEnabled ?? true;
-            if (!string.IsNullOrEmpty(dto.ModelId))
-            {
-                Conversation.ModelId = dto.ModelId;
-                NotifyModelChanged();
-            }
-            if (!string.IsNullOrEmpty(KnowledgeBaseId))
-                KnowledgeBaseName = AvailableKnowledgeBases
-                    .FirstOrDefault(k => k.Id == KnowledgeBaseId)?.Name;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogDebug(ex, "Could not load conversation state for {Id}", conversationId);
-        }
-    }
-
-    private bool CanCancel() => IsStreaming;
-
-    [RelayCommand(CanExecute = nameof(CanCancel))]
-    private void CancelStreaming()
-    {
-        // Snapshot BEFORE the local cancel: the finally block clears these.
-        var serverCancelNeeded = IsStreaming && _turnUsedChatEdge;
-        var conversationId = Conversation?.Id;
-
-        // Local cancel first — the UI stops immediately. For the AGENT path
-        // this is also the complete story: dropping the CTS tears down the
-        // SSE connection to the gateway, which aborts generation upstream.
-        _streamCts?.Cancel();
-
-        // Chat-edge turns generate SERVER-side against a server conversation —
-        // tell the server to stop too (Phase 5 Task 1). Fire-and-forget: a
-        // failed cancel must never block the UI (the local stop already took
-        // effect); the request is idempotent server-side.
-        if (serverCancelNeeded && conversationId is not null)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var cancelled = await _api.CancelStreamAsync(conversationId);
-                    _logger.LogDebug("Server-side cancel for {Id}: cancelled={Cancelled}",
-                        conversationId, cancelled);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Server-side cancel failed for {Id}", conversationId);
-                }
-            });
-        }
-    }
-
-    /// <summary>
-    /// Client-side auto-title: the gateway path bypasses chat-edge storage, so
-    /// its server-side title generator has nothing to read. Ask the model for a
-    /// short title directly and persist it via the conversation-rename API.
-    /// </summary>
-    private async Task TryGenerateTitleAsync(ConversationItemViewModel conversation)
-    {
-        try
-        {
-            var firstUser = Messages.FirstOrDefault(m => m.IsUser)?.Content ?? "";
-            var firstReply = Messages.FirstOrDefault(m => m.IsAssistant && m.Content.Length > 0)?.Content ?? "";
-            if (firstUser.Length == 0)
-                return;
-
-            var request = new GatewayCompletionRequest
-            {
-                Model = ResolveModel(conversation),
-                Messages = new List<GatewayMessage>
-                {
-                    new()
-                    {
-                        Role = "system",
-                        Content = "Generate a very short title (3-6 words, no quotes, no trailing period, " +
-                                  "same language as the conversation) for this chat. Reply with the title only."
-                    },
-                    new()
-                    {
-                        Role = "user",
-                        Content = $"User: {Truncate(firstUser, 500)}\n\nAssistant: {Truncate(firstReply, 500)}"
-                    }
-                }
-            };
-
-            var parser = new GatewayChunkParser();
-            var title = new System.Text.StringBuilder();
-            await foreach (var frame in _gateway.StreamCompletionAsync(request))
-            {
-                foreach (var evt in parser.Parse(frame.Data))
-                {
-                    if (evt is AgentContentDeltaEvent delta)
-                        title.Append(delta.Text);
-                    else if (evt is AgentErrorEvent)
-                        return;
-                }
-            }
-
-            var cleaned = title.ToString().Trim().Trim('"', '“', '”').Trim();
-            if (cleaned.Length is 0 or > 80)
-                return;
-
-            await _api.RenameConversationAsync(conversation.Id, cleaned);
-            conversation.Title = cleaned;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Title generation skipped");
-        }
-    }
-
-    private static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..max] + "...";
-}
+ 

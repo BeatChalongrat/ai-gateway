@@ -58,7 +58,4 @@ public sealed class FileService : IFileService
         var result = await _api.UploadFileAsync(
             conversationId, stream, info.Name, contentType, info.Length, progress, clientId, ct);
 
-        _logger.LogInformation("Uploaded {Name} ({Bytes} bytes) as {Id}", info.Name, info.Length, result.Id);
-        return result;
-    }
-}
+        _logger.LogInformation("Uploaded {Name} ({Bytes} bytes) as {Id}", info.Name, info.Length, result.I

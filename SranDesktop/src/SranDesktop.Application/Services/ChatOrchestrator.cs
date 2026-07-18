@@ -48,6 +48,7 @@ public sealed class ChatOrchestrator : IChatOrchestrator
     private readonly ILogger<ChatOrchestrator> _logger;
     private readonly ShellSession? _shellSession;
     private readonly IToolScopeResolver? _scopeResolver;
+    private readonly ISettingsService? _settings;
 
     public event Func<ToolConsentRequest, Task<ToolConsentResponse>>? ConsentRequested;
 
@@ -63,7 +64,8 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         int maxIterations = DefaultMaxIterations,
         TimeSpan? maxDuration = null,
         ShellSession? shellSession = null,
-        IToolScopeResolver? scopeResolver = null)
+        IToolScopeResolver? scopeResolver = null,
+        ISettingsService? settings = null)
     {
         if (maxIterations < 1)
             throw new ArgumentOutOfRangeException(nameof(maxIterations), "At least one iteration is required.");
@@ -77,6 +79,37 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         _maxDuration = maxDuration ?? DefaultMaxDuration;
         _shellSession = shellSession;
         _scopeResolver = scopeResolver;
+        _settings = settings;
+    }
+
+    /// <summary>
+    /// Overlay the user's global approval mode (Cowork-style) on top of the
+    /// per-tool decision. Deny always wins; beyond that: Manual forces the
+    /// consent dialog for every action, Skip auto-approves everything, and
+    /// Auto (default) auto-approves anything ToolDangerClassifier considers
+    /// safe while still pausing for dangerous (side-effecting) tools.
+    /// No settings wired (tests / nested defaults) → behavior unchanged.
+    /// </summary>
+    private PermissionDecision ApplyApprovalMode(PermissionDecision decision, IMcpTool tool)
+    {
+        if (_settings is null || decision == PermissionDecision.Denied)
+            return decision;
+
+        var dangerous = ToolDangerClassifier.Classify(tool.Name, tool.Category).IsDangerous;
+        return ApprovalModeParser.Parse(_settings.Current.ApprovalMode) switch
+        {
+            // Manual: pause for every side-effecting action. Read-only/meta
+            // tools that were already auto-approvable stay auto — this also
+            // keeps run_subagent fan-out (which has no consent handler and a
+            // safe-tools-only surface) from denying everything.
+            ApprovalMode.Manual => dangerous || decision == PermissionDecision.NeedsConsent
+                ? PermissionDecision.NeedsConsent
+                : decision,
+            ApprovalMode.Skip => PermissionDecision.Auto,
+            _ => decision == PermissionDecision.NeedsConsent && !dangerous
+                ? PermissionDecision.Auto
+                : decision
+        };
     }
 
     public async IAsyncEnumerable<AgentStreamEvent> RunAsync(
@@ -286,7 +319,7 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         // scope when no resolver is wired (tests).
         var scope = _scopeResolver?.Resolve(tool, argumentsJson, conversationId)
                     ?? ExtractScope(tool, argumentsJson);
-        var decision = await _permissions.CheckAsync(tool, scope, ct);
+        var decision = ApplyApprovalMode(await _permissions.CheckAsync(tool, scope, ct), tool);
 
         if (decision == PermissionDecision.NeedsConsent)
         {
@@ -406,55 +439,4 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         try
         {
             using var doc = JsonDocument.Parse(argumentsJson);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                if (doc.RootElement.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String)
-                    return p.GetString() ?? "*";
-                if (doc.RootElement.TryGetProperty("directory", out var d) && d.ValueKind == JsonValueKind.String)
-                    return d.GetString() ?? "*";
-            }
-        }
-        catch (JsonException)
-        {
-        }
-        return "*";
-    }
-
-    private static string SummarizeArgs(string json)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            return JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
-        }
-        catch (JsonException)
-        {
-            return json;
-        }
-    }
-
-    private async Task LogExecutionAsync(
-        string conversationId, GatewayToolCall toolCall, string permission,
-        string? result, string? error, long? durationMs, CancellationToken ct)
-    {
-        try
-        {
-            await _store.InsertToolExecutionAsync(new ToolExecution
-            {
-                Id = $"{toolCall.Id}-{Guid.NewGuid():N}",
-                ConversationId = conversationId,
-                ToolName = toolCall.Function.Name,
-                ArgumentsJson = toolCall.Function.Arguments,
-                Result = result is { Length: > 2000 } ? result[..2000] : result,
-                Permission = permission,
-                DurationMs = durationMs,
-                Error = error,
-                ExecutedAt = DateTimeOffset.UtcNow
-            }, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to log tool execution");
-        }
-    }
-}
+            if (doc.RootElement.ValueKind == JsonV

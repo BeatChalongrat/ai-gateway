@@ -1,0 +1,138 @@
+<Window x:Class="SranDesktop.Presentation.Views.Dialogs.AddCustomConnectorDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
+        xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
+        xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:AddCustomConnectorViewModel}"
+        Title="{loc:T connector.addCustom}"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BgPrimaryBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <Window.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
+    <StackPanel Margin="20,16">
+        <!-- Name -->
+        <TextBlock Text="{loc:T connector.form.name}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <TextBox x:Name="NameBox" Margin="0,0,0,12"
+                 Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+
+        <!-- Transport -->
+        <TextBlock Text="{loc:T connector.form.transport}" FontSize="12" Margin="0,0,0,4"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <RadioButton GroupName="Transport" Content="{loc:T connector.form.http}"
+                         IsChecked="{Binding IsHttp}" Margin="0,0,18,0"
+                         Foreground="{DynamicResource TextPrimaryBrush}" />
+            <RadioButton GroupName="Transport" Content="{loc:T connector.form.stdio}"
+                         IsChecked="{Binding IsStdio}"
+                         Foreground="{DynamicResource TextPrimaryBrush}" />
+        </StackPanel>
+
+        <!-- HTTP fields -->
+        <StackPanel Visibility="{Binding IsHttp, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="{loc:T connector.form.serverUrl}" FontSize="12" Margin="0,0,0,4"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBox Margin="0,0,0,12"
+                     Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}" />
+
+            <!-- Auth (HTTP only) -->
+            <TextBlock Text="{loc:T connector.form.auth}" FontSize="12" Margin="0,0,0,4"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <RadioButton GroupName="Auth" Content="{loc:T connector.form.authNone}"
+                             IsChecked="{Binding UseNoAuth}" Margin="0,0,18,0"
+                             Foreground="{DynamicResource TextPrimaryBrush}" />
+                <RadioButton GroupName="Auth" Content="{loc:T connector.form.authApiKey}"
+                             IsChecked="{Binding UseApiKey}"
+                             Foreground="{DynamicResource TextPrimaryBrush}" />
+            </StackPanel>
+
+            <StackPanel Visibility="{Binding UseApiKey, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="{loc:T connector.form.headerName}" FontSize="12" Margin="0,0,0,4"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBox Margin="0,0,0,10"
+                         Text="{Binding HeaderName, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Text="{loc:T connector.form.apiKey}" FontSize="12" Margin="0,0,0,4"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                <PasswordBox x:Name="ApiKeyBox" Margin="0,0,0,12"
+                             PasswordChanged="ApiKeyBox_PasswordChanged" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- stdio fields -->
+        <StackPanel Visibility="{Binding IsStdio, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="{loc:T connector.form.command}" FontSize="12" Margin="0,0,0,4"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBox Margin="0,0,0,12" FontFamily="Consolas"
+                     Text="{Binding Command, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Text="{loc:T connector.form.args}" FontSize="12" Margin="0,0,0,4"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBox Margin="0,0,0,12" FontFamily="Consolas"
+                     Text="{Binding ArgumentsLine, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Text="{loc:T connector.form.env}" FontSize="12" Margin="0,0,0,4"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBox Margin="0,0,0,12" FontFamily="Consolas"
+                     AcceptsReturn="True" TextWrapping="NoWrap"
+                     MinHeight="52" MaxHeight="110"
+                     VerticalScrollBarVisibility="Auto"
+                     Text="{Binding EnvLines, UpdateSourceTrigger=PropertyChanged}" />
+        </StackPanel>
+
+        <!-- inline validation hint / test result -->
+        <TextBlock Text="{Binding ValidationText}" FontSize="11.5" Margin="0,0,0,6"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextTertiaryBrush}">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding ValidationText}" Value="">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <TextBlock Text="{Binding TestStatusText}" FontSize="12" Margin="0,0,0,10"
+                   TextWrapping="Wrap">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding TestStatusText}" Value="">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding TestFailed}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource AccentRedBrush}" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <!-- Buttons -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="{loc:T common.cancel}" IsCancel="True"
+                    Padding="16,6" Margin="0,0,8,0" />
+            <Button Content="{loc:T connector.testConnection}"
+                    Padding="16,6" Margin="0,0,8,0"
+                    IsEnabled="{Binding CanAdd}"
+                    Command="{Binding TestConnectionCommand}" />
+            <Button Content="{loc:T connector.add}"
+                    Style="{DynamicResource AccentButton}"
+                    Padding="16,6" IsDefault="True"
+                    IsEnabled="{Binding CanAdd}"
+                    Command="{Binding AddCommand}" />
+        </StackPanel>
+    </StackPanel>
+</Window>
