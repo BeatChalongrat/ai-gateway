@@ -1,0 +1,183 @@
+// SRAN Desktop Browser Bridge — MV3 service worker.
+// Owns the native-messaging port to SranDesktop.BrowserHost.exe (which relays
+// to the desktop app's named pipe). Wire: app→here {id, method, params};
+// here→app {token, id, result|error} (+ one {token, hello:true} after connect).
+// The pairing token is entered once on the options page.
+
+const HOST = 'com.sran.browser';
+const LOAD_TIMEOUT_MS = 20000;
+const SETTLE_MS = 800; // network-quiet fallback after readyState complete (no webRequest permission)
+
+let port = null;
+let backoffMs = 1000;
+
+async function getToken() {
+  const stored = await chrome.storage.local.get('token');
+  return stored.token || '';
+}
+
+async function setStatus(connected) {
+  await chrome.storage.local.set({ status: { connected, at: Date.now() } });
+}
+
+function connect() {
+  try {
+    port = chrome.runtime.connectNative(HOST);
+  } catch (e) {
+    scheduleReconnect();
+    return;
+  }
+  port.onMessage.addListener(onRequest);
+  port.onDisconnect.addListener(() => {
+    port = null;
+    setStatus(false);
+    scheduleReconnect();
+  });
+  getToken().then((token) => {
+    if (port) port.postMessage({ token, hello: true });
+    setStatus(true);
+    backoffMs = 1000;
+  });
+}
+
+function scheduleReconnect() {
+  setTimeout(connect, backoffMs);
+  backoffMs = Math.min(backoffMs * 2, 30000);
+}
+
+async function onRequest(msg) {
+  if (!msg || typeof msg.id === 'undefined') return;
+  const token = await getToken();
+  try {
+    const result = await route(msg.method, msg.params || {});
+    port?.postMessage({ token, id: msg.id, result });
+  } catch (e) {
+    port?.postMessage({ token, id: msg.id, error: String((e && e.message) || e) });
+  }
+}
+
+async function route(method, p) {
+  switch (method) {
+    case 'tabs.list': {
+      const tabs = await chrome.tabs.query({});
+      return { tabs: tabs.map((t) => ({ id: t.id, title: t.title || '', url: t.url || '', active: t.active })) };
+    }
+    case 'tabs.activate': {
+      const tab = await chrome.tabs.update(p.tab_id, { active: true });
+      await chrome.windows.update(tab.windowId, { focused: true });
+      return { ok: true };
+    }
+    case 'tabs.new': {
+      const tab = await chrome.tabs.create({ url: p.url });
+      const done = await waitForLoad(tab.id);
+      return { tab_id: tab.id, url: done.url, title: done.title };
+    }
+    case 'tabs.close': {
+      await chrome.tabs.remove(p.tab_id);
+      return { ok: true };
+    }
+    case 'page.navigate': {
+      const tabId = await resolveTab(p.tab_id);
+      await chrome.tabs.update(tabId, { url: p.url });
+      const done = await waitForLoad(tabId);
+      return { url: done.url, title: done.title };
+    }
+    case 'page.read':
+      return contentCall(p.tab_id, { cmd: 'read', filter: p.filter || 'interactive' });
+    case 'page.find':
+      return contentCall(p.tab_id, { cmd: 'find', query: p.query });
+    case 'page.click': {
+      const tabId = await resolveTab(p.tab_id);
+      const res = await contentCall(tabId, { cmd: 'click', ref: p.ref }, tabId);
+      // The click may start a navigation — give it a beat, then wait it out.
+      await sleep(600);
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === 'loading') {
+        const done = await waitForLoad(tabId);
+        return { ...res, navigated: true, url: done.url, title: done.title };
+      }
+      return { ...res, navigated: false };
+    }
+    case 'page.type':
+      return contentCall(p.tab_id, { cmd: 'type', ref: p.ref, text: p.text, clear: p.clear, submit: p.submit });
+    case 'page.screenshot': {
+      const tabId = await resolveTab(p.tab_id);
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab.active) {
+        await chrome.tabs.update(tabId, { active: true });
+        await chrome.windows.update(tab.windowId, { focused: true });
+        await sleep(300);
+      }
+      // JPEG: keeps the frame under the 1 MB native-messaging limit
+      // (BrowserWire.MaxMessageBytes on the C# side).
+      const image = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 55 });
+      return { image, title: tab.title || '' };
+    }
+    default:
+      throw new Error(`Unknown method '${method}'`);
+  }
+}
+
+async function resolveTab(tabId) {
+  if (typeof tabId === 'number') return tabId;
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!active) throw new Error('No active tab.');
+  return active.id;
+}
+
+async function contentCall(tabId, message) {
+  const id = await resolveTab(tabId);
+  await ensureContentScript(id);
+  const response = await chrome.tabs.sendMessage(id, message);
+  if (response && response.error) throw new Error(response.error);
+  return response || {};
+}
+
+async function ensureContentScript(tabId) {
+  try {
+    // content.js is idempotent (window.__sranBridge guard) — inject freely.
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  } catch (e) {
+    throw new Error('Cannot access this page (chrome:// pages, the Web Store and some ' +
+      'protected pages are off-limits to extensions): ' + ((e && e.message) || e));
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// document.readyState complete (via tabs.onUpdated) + a settle window.
+async function waitForLoad(tabId) {
+  const deadline = Date.now() + LOAD_TIMEOUT_MS;
+  await new Promise((resolve) => {
+    const listener = (updatedId, info) => {
+      if (updatedId === tabId && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    // Already complete (or never fires): poll as a safety net.
+    const poll = setInterval(async () => {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.status === 'complete' || Date.now() > deadline) {
+          clearInterval(poll);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      } catch {
+        clearInterval(poll);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }, 250);
+  });
+  await sleep(SETTLE_MS);
+  const tab = await chrome.tabs.get(tabId);
+  return { url: tab.url || '', title: tab.title || '' };
+}
+
+chrome.runtime.onStartup.addListener(connect);
+connect();
