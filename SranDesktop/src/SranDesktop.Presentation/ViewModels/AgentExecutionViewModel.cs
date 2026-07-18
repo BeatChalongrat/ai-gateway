@@ -24,6 +24,12 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     /// <summary>Pretty-printed arguments for the expanded Input section.</summary>
     public string InputJson { get; }
 
+    /// <summary>Human-readable input for the expanded section: "label: value"
+    /// lines with localized labels instead of raw JSON (non-technical users
+    /// shouldn't need to read JSON to see what the agent did). Falls back to
+    /// pretty JSON when the arguments aren't a simple object.</summary>
+    public string InputDisplay { get; }
+
     /// <summary>Icon geometry resolved from the tool name (theme resources).</summary>
     public Geometry? IconGeometry { get; }
 
@@ -119,8 +125,9 @@ public partial class ToolExecutionItemViewModel : ObservableObject
         ToolCallId = toolCallId;
         ToolName = toolName;
         FriendlyName = Friendly(toolName);
-        ArgsSummary = Compact(argumentsJson);
+        ArgsSummary = Humanize(toolName, argumentsJson);
         InputJson = Pretty(argumentsJson);
+        InputDisplay = BuildInputDisplay(argumentsJson);
         IconGeometry = System.Windows.Application.Current?.TryFindResource(ToolIcon(toolName)) as Geometry;
     }
 
@@ -131,8 +138,12 @@ public partial class ToolExecutionItemViewModel : ObservableObject
         _streamBuffer.Clear();
         StreamingOutput = null;
         DurationText = result.DurationMs > 0 ? $"{result.DurationMs} ms" : string.Empty;
-        ResultPreview = result.ResultPreview;
-        FullResult = Truncate(result.FullResult ?? result.ResultPreview, 4000);
+        // list_directory results use terse "D name" / "F name (size)" markers for
+        // the model; swap them for folder/file emoji so non-technical users can
+        // read the listing at a glance (display only — the model text is untouched).
+        ResultPreview = MaybePrettifyListing(ToolName, result.Success, result.ResultPreview);
+        FullResult = MaybePrettifyListing(ToolName, result.Success,
+            Truncate(result.FullResult ?? result.ResultPreview, 4000));
         if (result.ImageDataUri is { Length: > 0 } dataUri)
             ScreenshotPreview = TryDecodeDataUri(dataUri);
     }
@@ -141,25 +152,44 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     public static string ToolIcon(string toolName) => toolName switch
     {
         "computer_screenshot" => "Geo_Monitor",
-        "computer_click" or "computer_drag" => "Geo_Cursor",
-        "computer_type" or "computer_key" => "Geo_Keyboard",
+        "computer_click" or "computer_drag" or "uia_click" => "Geo_Cursor",
+        "computer_type" or "computer_key" or "uia_set_value" => "Geo_Keyboard",
         "computer_scroll" => "Geo_ArrowsVertical",
+        "computer_zoom" => "Geo_Search",
+        "get_computer_state" or "read_screen_elements" => "Geo_Monitor",
         "read_file" => "Geo_FileText",
         "write_file" or "edit_file" => "Geo_FileCode",
         "create_directory" or "move_file" => "Geo_FileCode",
         "search_files" or "list_directory" => "Geo_Search",
         "run_command" => "Geo_Terminal",
-        "web_search" => "Geo_Browser",
+        "run_python" => "Geo_Code",
+        "web_search" or "web_fetch" => "Geo_Globe2",
         "open_url" => "Geo_Browser",
+        "browser_navigate" or "browser_read_page" or "browser_find" or "browser_click"
+            or "browser_type" or "browser_tabs" or "browser_list_tabs"
+            or "browser_screenshot" => "Geo_Browser",
         "open_application" => "Geo_Monitor",
         "read_clipboard" or "write_clipboard" => "Geo_Copy",
         "remember" => "Geo_FileText",
+        "use_skill" => "Geo_Puzzle",
+        "run_subagent" => "Geo_Agent",
+        "update_plan" => "Geo_Check",
         "generate_image" => "Geo_ImageBadge",
         "generate_video" => "Geo_VideoBadge",
         _ => "Geo_Tool"
     };
 
-    private static string Friendly(string toolName) => toolName switch
+    /// <summary>Localized display name: "tool.name.{tool}" from the dictionary
+    /// (TH users see Thai), falling back to the English switch below for any
+    /// tool the dictionary doesn't know (e.g. remote MCP tools).</summary>
+    private static string Friendly(string toolName)
+    {
+        var key = "tool.name." + toolName;
+        var localized = Localization.LocaleService.Instance.T(key);
+        return localized != key ? localized : FallbackFriendly(toolName);
+    }
+
+    private static string FallbackFriendly(string toolName) => toolName switch
     {
         "computer_screenshot" => "Screenshot",
         "computer_click" => "Click",
@@ -183,6 +213,136 @@ public partial class ToolExecutionItemViewModel : ObservableObject
         "web_search" => "Web search",
         _ => toolName.Replace('_', ' ')
     };
+
+    /// <summary>
+    /// One-line human summary of a tool call's arguments for the card header:
+    /// the salient value only ("_zeno_backups", "(960, 668)", a search query),
+    /// never raw JSON. Unknown tools fall back to compact JSON. Internal for tests.
+    /// </summary>
+    internal static string Humanize(string toolName, string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return Compact(json);
+            var r = doc.RootElement;
+
+            string? S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString() : null;
+            string? I(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number
+                ? v.GetRawText() : null;
+
+            var summary = toolName switch
+            {
+                "list_directory" or "create_directory" => Leaf(S("path")),
+                "read_file" or "write_file" or "edit_file" => Leaf(S("path")),
+                "move_file" => JoinNonEmpty(" → ", Leaf(S("source")), Leaf(S("destination"))),
+                "search_files" => S("pattern") ?? S("content_pattern"),
+                "run_command" => Trunc(S("command"), 70),
+                "run_python" => Trunc(S("code"), 70),
+                "web_search" or "browser_find" => S("query"),
+                "web_fetch" or "open_url" or "browser_navigate" => Trunc(S("url"), 70),
+                "open_application" or "use_skill" => S("name"),
+                "remember" => Trunc(S("note"), 70),
+                "run_subagent" => Trunc(S("task"), 70),
+                "computer_click" or "computer_scroll" =>
+                    I("x") is { } x && I("y") is { } y ? $"({x}, {y})" : null,
+                "computer_type" => Trunc(S("text"), 40),
+                "computer_key" => S("keys"),
+                "computer_screenshot" or "read_screen_elements" => S("window_title") ?? "",
+                "get_computer_state" or "computer_zoom" or "browser_read_page"
+                    or "browser_screenshot" or "browser_list_tabs"
+                    or "read_clipboard" or "update_plan" => "",
+                "uia_click" => I("element_id") is { } id ? "#" + id : null,
+                "uia_set_value" => JoinNonEmpty(" ",
+                    I("element_id") is { } id2 ? "#" + id2 : null, Trunc(S("text"), 40)),
+                "browser_click" => I("ref") is { } rf ? "#" + rf : null,
+                "browser_type" => JoinNonEmpty(" ",
+                    I("ref") is { } rf2 ? "#" + rf2 : null, Trunc(S("text"), 40)),
+                "browser_tabs" => S("action"),
+                _ => null
+            };
+            return summary ?? Compact(json);
+        }
+        catch (JsonException)
+        {
+            return Compact(json);
+        }
+    }
+
+    /// <summary>Last path segment ("_zeno_backups" from the full path) — the part
+    /// a person recognizes; the full path stays in the expanded input.</summary>
+    private static string? Leaf(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+        var name = Path.GetFileName(path.TrimEnd('\\', '/'));
+        return string.IsNullOrEmpty(name) ? path : name;
+    }
+
+    private static string? Trunc(string? s, int max) =>
+        s is null ? null : s.Length <= max ? s : s[..max] + "…";
+
+    private static string? JoinNonEmpty(string separator, params string?[] parts)
+    {
+        var kept = parts.Where(p => !string.IsNullOrEmpty(p)).ToArray();
+        return kept.Length == 0 ? null : string.Join(separator, kept);
+    }
+
+    /// <summary>Expanded-input lines: "label: value" per argument with localized
+    /// labels (tool.arg.*), long values capped. Pretty JSON only as a fallback
+    /// for non-object arguments. Internal for tests.</summary>
+    internal static string BuildInputDisplay(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return Pretty(json);
+            var sb = new StringBuilder();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                var value = prop.Value.ValueKind == JsonValueKind.String
+                    ? prop.Value.GetString() ?? ""
+                    : prop.Value.GetRawText();
+                sb.Append(ArgLabel(prop.Name)).Append(": ")
+                  .AppendLine(Trunc(value, 500));
+            }
+            return sb.Length == 0 ? "—" : sb.ToString().TrimEnd();
+        }
+        catch (JsonException)
+        {
+            return Pretty(json);
+        }
+    }
+
+    private static string ArgLabel(string param)
+    {
+        var key = "tool.arg." + param;
+        var localized = Localization.LocaleService.Instance.T(key);
+        return localized != key ? localized : param;
+    }
+
+    /// <summary>Swap list_directory's terse "D " / "F " line markers for
+    /// folder/file emoji (display only). Any other tool passes through.</summary>
+    internal static string? MaybePrettifyListing(string toolName, bool success, string? text)
+    {
+        if (toolName != "list_directory" || !success || string.IsNullOrEmpty(text))
+            return text;
+        var sb = new StringBuilder(text.Length + 16);
+        foreach (var line in text.Split('\n'))
+        {
+            var l = line.TrimEnd('\r');
+            if (l.StartsWith("D ", StringComparison.Ordinal))
+                sb.Append("📁 ").AppendLine(l[2..]);
+            else if (l.StartsWith("F ", StringComparison.Ordinal))
+                sb.Append("📄 ").AppendLine(l[2..]);
+            else
+                sb.AppendLine(l);
+        }
+        return sb.ToString().TrimEnd();
+    }
 
     private static string Compact(string json)
     {
