@@ -43,4 +43,7 @@ public class FileServiceTests
         }
         finally
         {
-            
+            File.Delete(tempFile);
+        }
+    }
+}

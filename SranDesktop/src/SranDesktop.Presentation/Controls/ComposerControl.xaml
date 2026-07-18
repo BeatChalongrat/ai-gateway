@@ -736,4 +736,165 @@
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Wi
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0">
+                                                        <TextBlock Text="{Binding Name}" FontSize="13"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                        <TextBlock FontSize="11"
+                                                                   Foreground="{DynamicResource TextTertiaryBrush}">
+                                                            <Run Text="{Binding DocumentCount, Mode=OneWay}" /><Run Text=" documents" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                    <controls:IconView Grid.Column="1"
+                                                                       Geometry="{StaticResource Geo_Check}"
+                                                                       Stroke="{DynamicResource AccentBrush}"
+                                                                       Width="14" Height="14" Margin="8,0,0,0"
+                                                                       VerticalAlignment="Center">
+                                                        <controls:IconView.Visibility>
+                                                            <MultiBinding Converter="{StaticResource EqualityToVisibility}">
+                                                                <Binding Path="Id" />
+                                                                <Binding Path="DataContext.KnowledgeBaseId"
+                                                                         RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                                                            </MultiBinding>
+                                                        </controls:IconView.Visibility>
+                                                    </controls:IconView>
+                                                </Grid>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+
+                            <TextBlock Text="{loc:T kbPopup.empty}" FontSize="12" Margin="8,6"
+                                       Foreground="{DynamicResource TextTertiaryBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AvailableKnowledgeBases.Count}" Value="0">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+                <!-- Permission mode popup (Cowork-style 3-mode dropdown) -->
+                <Popup x:Name="PermissionPopup"
+                       PlacementTarget="{Binding ElementName=PermissionButton}"
+                       Placement="Top"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade">
+                    <Popup.Style>
+                        <Style TargetType="Popup">
+                            <Setter Property="IsOpen" Value="{Binding IsPermissionPopupOpen, Mode=TwoWay}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsVisible, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
+                                    <Setter Property="IsOpen" Value="False" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Popup.Style>
+                    <Border Margin="8"
+                            Background="{DynamicResource BgPrimaryBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="12"
+                            Padding="8" MinWidth="320" MaxWidth="400">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="14" ShadowDepth="2"
+                                              Opacity="0.35" Color="Black" />
+                        </Border.Effect>
+                        <StackPanel>
+                            <!-- Manually approve -->
+                            <Button Style="{DynamicResource FlatRowButton}" Padding="8,7"
+                                    Command="{Binding SelectApprovalModeCommand}"
+                                    CommandParameter="manual"
+                                    AutomationProperties.Name="{loc:T perm.manual.name}">
+                                <DockPanel LastChildFill="True">
+                                    <controls:IconView DockPanel.Dock="Left"
+                                                       Geometry="{StaticResource Geo_Hand}"
+                                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                                       Width="16" Height="16" Margin="0,0,10,0"
+                                                       VerticalAlignment="Center" />
+                                    <controls:IconView DockPanel.Dock="Right"
+                                                       Geometry="{StaticResource Geo_Check}"
+                                                       Stroke="{DynamicResource AccentBrush}"
+                                                       Width="14" Height="14" Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{Binding IsApprovalManual, Converter={StaticResource BoolToVisibility}}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:T perm.manual.name}" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{loc:T perm.manual.desc}" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,1,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                            <!-- Automatically approve -->
+                            <Button Style="{DynamicResource FlatRowButton}" Padding="8,7"
+                                    Command="{Binding SelectApprovalModeCommand}"
+                                    CommandParameter="auto"
+                                    AutomationProperties.Name="{loc:T perm.auto.name}">
+                                <DockPanel LastChildFill="True">
+                                    <controls:IconView DockPanel.Dock="Left"
+                                                       Geometry="{StaticResource Geo_FastForward}"
+                                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                                       Width="16" Height="16" Margin="0,0,10,0"
+                                                       VerticalAlignment="Center" />
+                                    <controls:IconView DockPanel.Dock="Right"
+                                                       Geometry="{StaticResource Geo_Check}"
+                                                       Stroke="{DynamicResource AccentBrush}"
+                                                       Width="14" Height="14" Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{Binding IsApprovalAuto, Converter={StaticResource BoolToVisibility}}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:T perm.auto.name}" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{loc:T perm.auto.desc}" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,1,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                            <!-- Skip all approvals -->
+                            <Button Style="{DynamicResource FlatRowButton}" Padding="8,7"
+                                    Command="{Binding SelectApprovalModeCommand}"
+                                    CommandParameter="skip"
+                                    AutomationProperties.Name="{loc:T perm.skip.name}">
+                                <DockPanel LastChildFill="True">
+                                    <controls:IconView DockPanel.Dock="Left"
+                                                       Geometry="{StaticResource Geo_Warning}"
+                                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                                       Width="16" Height="16" Margin="0,0,10,0"
+                                                       VerticalAlignment="Center" />
+                                    <controls:IconView DockPanel.Dock="Right"
+                                                       Geometry="{StaticResource Geo_Check}"
+                                                       Stroke="{DynamicResource AccentBrush}"
+                                                       Width="14" Height="14" Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{Binding IsApprovalSkip, Converter={StaticResource BoolToVisibility}}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:T perm.skip.name}" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{loc:T perm.skip.desc}" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,1,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+            </Grid>
+        </Border>
+
+        <!-- Disclaimer (web parity) -->
+        <TextBlock Text="{loc:T input.footer}"
+                   FontSize="11" Margin="0,8,0,0"
+                   HorizontalAlignment="Center"
+                   Foreground="{DynamicResource TextTertiaryBrush}" />
+    </StackPanel>
+</UserControl>
