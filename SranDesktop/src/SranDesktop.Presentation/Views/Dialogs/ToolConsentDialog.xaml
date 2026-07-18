@@ -94,7 +94,10 @@
                     <!-- Phase C PART 3: say WHY (capability-specific), then review. -->
                     <TextBlock Foreground="{DynamicResource AccentRedBrush}" FontSize="12.5"
                                FontWeight="SemiBold" TextWrapping="Wrap">
-                        <Run Text="{loc:T consent.dangerPrefix}" /><Run Text=" " /><Run Text="{Binding DangerReason}" /><Run Text="." />
+                        <!-- Mode=OneWay is REQUIRED: Run.Text binds TwoWay by default and
+                             DangerReason is get-only → InvalidOperationException on the UI
+                             thread (crashed live during a uia_click consent, 2026-07-18). -->
+                        <Run Text="{loc:T consent.dangerPrefix}" /><Run Text=" " /><Run Text="{Binding DangerReason, Mode=OneWay}" /><Run Text="." />
                     </TextBlock>
                     <TextBlock Text="{loc:T consent.dangerReview}"
                                Foreground="{DynamicResource AccentRedBrush}" FontSize="12"

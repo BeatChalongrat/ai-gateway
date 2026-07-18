@@ -26,8 +26,13 @@ public sealed class ComputerScreenshotTool : IMcpTool
     internal const int MaxLongSide = 2560;
 
     private readonly ScreenContext _screen;
+    private readonly IForegroundTargetTracker? _foreground;
 
-    public ComputerScreenshotTool(ScreenContext screen) => _screen = screen;
+    public ComputerScreenshotTool(ScreenContext screen, IForegroundTargetTracker? foreground = null)
+    {
+        _screen = screen;
+        _foreground = foreground;
+    }
 
     public string Name => "computer_screenshot";
     public string Description =>
@@ -67,6 +72,12 @@ public sealed class ComputerScreenshotTool : IMcpTool
             }
             else
             {
+                // Self-interference fix: if SRAN itself holds the foreground
+                // (a consent dialog just closed), a full-screen shot would show
+                // SRAN instead of the app the agent is working on — put the
+                // recorded target back first.
+                if (_foreground?.RestoreIfOwnForeground() == true)
+                    Thread.Sleep(200); // let the target repaint before the grab
                 bitmap = CaptureVirtualDesktop(out originX, out originY);
             }
 

@@ -130,8 +130,8 @@
                                TextTrimming="CharacterEllipsis"
                                Foreground="{DynamicResource OnAccentBrush}">
                         <Run Text="{loc:T update.available}" />
-                        <Run Text="{Binding UpdateVersion}" FontWeight="SemiBold" />
-                        <Run Text=" " /><Run Text="{Binding UpdateNotes}" />
+                        <Run Text="{Binding UpdateVersion, Mode=OneWay}" FontWeight="SemiBold" />
+                        <Run Text=" " /><Run Text="{Binding UpdateNotes, Mode=OneWay}" />
                     </TextBlock>
                 </DockPanel>
                 <!-- download progress (A1e) -->

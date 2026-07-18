@@ -26,6 +26,8 @@ public partial class ChatViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly IAgentConversationSyncService _agentSync;
     private readonly ILogger<ChatViewModel> _logger;
+    /// <summary>Consent-flow foreground restore (computer-use self-interference fix).</summary>
+    private readonly IForegroundTargetTracker? _foregroundTracker;
     private readonly IReadOnlyList<ILocalPlanExecutor> _localPlanExecutors;
 
     /// <summary>Phase 16 A: the run_subagent tool, when it exposes live nested
@@ -570,7 +572,8 @@ public partial class ChatViewModel : ObservableObject
         IAgentConversationSyncService agentSync,
         ILogger<ChatViewModel> logger,
         IEnumerable<ILocalPlanExecutor>? localPlanExecutors = null,
-        IMcpToolHost? toolHost = null)
+        IMcpToolHost? toolHost = null,
+        IForegroundTargetTracker? foregroundTracker = null)
     {
         _api = api;
         _gateway = gateway;
@@ -583,6 +586,7 @@ public partial class ChatViewModel : ObservableObject
         _settings = settings;
         _agentSync = agentSync;
         _logger = logger;
+        _foregroundTracker = foregroundTracker;
         // Phase 12 E: on-device excel/doc/pptx plan executors; anything they
         // can't reproduce falls back to chat-edge.
         _localPlanExecutors = localPlanExecutors?.ToList() ?? new List<ILocalPlanExecutor>();
@@ -2341,10 +2345,24 @@ public partial class ChatViewModel : ObservableObject
 
     private async Task<ToolConsentResponse> OnConsentRequested(ToolConsentRequest request)
     {
+        // Self-interference fix: the consent dialog steals the foreground from
+        // the window the agent is working on. Remember it now…
+        _foregroundTracker?.RecordBeforeConsent();
+
         var dispatcher = System.Windows.Application.Current.Dispatcher;
-        if (dispatcher.CheckAccess())
-            return ShowConsentDialog(request);
-        return await dispatcher.InvokeAsync(() => ShowConsentDialog(request));
+        var response = dispatcher.CheckAccess()
+            ? ShowConsentDialog(request)
+            : await dispatcher.InvokeAsync(() => ShowConsentDialog(request));
+
+        // …and give it back BEFORE the orchestrator runs an approved Screen
+        // tool, so the next screenshot/click sees the target app, not SRAN.
+        if (!response.Denied
+            && request.Category == Domain.Enums.ToolCategory.Screen
+            && _foregroundTracker?.RestoreTarget() == true)
+        {
+            await Task.Delay(200); // let the activation/repaint settle
+        }
+        return response;
     }
 
     private static ToolConsentResponse ShowConsentDialog(ToolConsentRequest request)

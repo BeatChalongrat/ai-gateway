@@ -24,7 +24,9 @@ public sealed class UiaClickTool : IMcpTool
     public string Name => "uia_click";
     public string Description =>
         "Click a UI element by its id from read_screen_elements. More accurate than pixel " +
-        "clicking: uses the element's own automation action when available.";
+        "clicking: uses the element's own automation action when available. Element ids are " +
+        "ONLY valid from the LATEST read_screen_elements result — never guess or reuse ids; " +
+        "call read_screen_elements first.";
     public ToolCategory Category => ToolCategory.Screen;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 
