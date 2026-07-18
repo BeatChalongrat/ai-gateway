@@ -93,3 +93,9 @@ Thumbs.db
 # above (dir first, then contents — same pattern as internal/storage).
 !SranDesktop/build/
 !SranDesktop/build/**
+
+# Local data and dev-server artifacts (dev-server*.log already matches *.log)
+data/
+test-results/
+.next-dev/
+.next-fresh/
