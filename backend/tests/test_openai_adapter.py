@@ -205,6 +205,52 @@ class TestOpenAIRequestMapping:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_internal_user_message_name_not_forwarded(self):
+        route = respx.post(f"{OPENAI_BASE_URL}/chat/completions").mock(
+            return_value=httpx.Response(200, json=_openai_response())
+        )
+        adapter = OpenAIAdapter()
+        await adapter.chat(
+            _make_payload(),
+            [Message(role="user", content="Hello", name="__screenshot__")],
+        )
+        import json
+
+        parsed = json.loads(route.calls[0].request.content)
+        assert parsed["messages"] == [{"role": "user", "content": "Hello"}]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_tool_message_fields_preserved(self):
+        route = respx.post(f"{OPENAI_BASE_URL}/chat/completions").mock(
+            return_value=httpx.Response(200, json=_openai_response())
+        )
+        adapter = OpenAIAdapter()
+        await adapter.chat(
+            _make_payload(),
+            [
+                Message(
+                    role="tool",
+                    content="42",
+                    tool_call_id="call_123",
+                    name="calculator",
+                )
+            ],
+        )
+        import json
+
+        parsed = json.loads(route.calls[0].request.content)
+        assert parsed["messages"] == [
+            {
+                "role": "tool",
+                "content": "42",
+                "tool_call_id": "call_123",
+                "name": "calculator",
+            }
+        ]
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_optional_params_forwarded(self):
         route = respx.post(f"{OPENAI_BASE_URL}/chat/completions").mock(
             return_value=httpx.Response(200, json=_openai_response())
