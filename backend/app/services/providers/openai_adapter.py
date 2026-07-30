@@ -60,20 +60,22 @@ class OpenAIAdapter(BaseProviderAdapter):
     def _serialize_message(msg) -> dict:
         """Build the OpenAI wire-format dict for a single Message.
 
-        Includes content / tool_calls / tool_call_id / name only when
-        set — OpenAI rejects e.g. ``"name": null`` on a tool result,
-        and an assistant message with tool_calls is allowed to omit
-        content entirely.
+        Includes content when set. Function-calling fields are role-scoped:
+        assistant turns may carry ``tool_calls`` while tool result turns may
+        carry ``tool_call_id`` / ``name``. Other internal message metadata
+        (for example desktop screenshot markers on user turns) must not leak
+        into the OpenAI wire payload.
         """
         out: dict = {"role": msg.role}
         if msg.content is not None:
             out["content"] = msg.content
-        if msg.tool_calls is not None:
+        if msg.role == "assistant" and msg.tool_calls is not None:
             out["tool_calls"] = msg.tool_calls
-        if msg.tool_call_id is not None:
-            out["tool_call_id"] = msg.tool_call_id
-        if msg.name is not None:
-            out["name"] = msg.name
+        if msg.role == "tool":
+            if msg.tool_call_id is not None:
+                out["tool_call_id"] = msg.tool_call_id
+            if msg.name is not None:
+                out["name"] = msg.name
         return out
 
     def _build_body(
