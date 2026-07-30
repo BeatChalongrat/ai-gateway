@@ -35,6 +35,12 @@ storage/
 # UNTRACKED (a fresh clone wouldn't build). Re-include the source dir.
 !SranDesktop/src/SranDesktop.Infrastructure/Storage/
 !SranDesktop/src/SranDesktop.Infrastructure/Storage/**
+# ...and the matching TEST directory, for the same reason. This one bit later:
+# four test sources sat there untracked and did not even appear in git status,
+# so `git add -A` skipped them without a word. A rule meant for data directories
+# must never be left to match source by accident.
+!SranDesktop/src/SranDesktop.Tests/Storage/
+!SranDesktop/src/SranDesktop.Tests/Storage/**
 uploads/
 *.sqlite3
 admin-ui/tsconfig.tsbuildinfo
