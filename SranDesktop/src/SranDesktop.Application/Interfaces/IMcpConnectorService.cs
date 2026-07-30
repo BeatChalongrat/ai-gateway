@@ -26,23 +26,35 @@ public interface IMcpConnectorService
     /// ``authMode`` = <see cref="InstalledConnector.AuthModeOAuth2"/> records a
     /// broker-mode install that carries NO local secret (Phase 7 C3) — its
     /// tool calls authenticate with the live portal JWT instead.</summary>
-    Task InstallAsync(string connectorId, string? apiToken = null, string? authMode = null, CancellationToken ct = default);
+    /// <paramref name="evidence"/> records that a person chose this connector.
+    /// Installing without it still writes the install record, but the connector
+    /// lands unapproved and cannot be dialled — an install is a decision, and a
+    /// decision nobody can be shown to have made is not one.
+    Task InstallAsync(
+        string connectorId, string? apiToken = null, string? authMode = null,
+        UserApprovalEvidence? evidence = null, CancellationToken ct = default);
 
-    /// <summary>Phase 12 D: install a locally-defined connector that exists in
-    /// no catalog — typically a stdio MCP server (transport "stdio" +
-    /// command/args/env). The full definition is persisted in connectors.json.
-    /// Its tools flow through the SAME remote-tool consent path as catalog
-    /// connectors (RemoteMcpTool → PermissionLevel.Ask): nothing a local
-    /// process exposes can auto-run. Custom-connector UI: throws
-    /// ArgumentException on an invalid definition or duplicate id;
+    /// <summary>Install a user-defined connector that exists in no catalog. The
+    /// full definition is persisted in connectors.json and its tools flow through
+    /// the SAME durable-gateway path as catalog connectors, so nothing it exposes
+    /// can run without an AgentStep and a trust check. Throws ArgumentException on
+    /// an invalid definition, a duplicate id, or a stdio definition — a local
+    /// server has to be installed as a manifest-bearing package into the managed
+    /// connector folder, where the approval screen can show what it wants.
     /// <paramref name="apiToken"/> goes to the DPAPI store, never to
     /// connectors.json.</summary>
-    Task InstallCustomAsync(McpConnector connector, string? apiToken = null, CancellationToken ct = default);
+    Task InstallCustomAsync(
+        McpConnector connector, string? apiToken = null,
+        UserApprovalEvidence? evidence = null, CancellationToken ct = default);
 
-    /// <summary>Custom-connector UI: dial a NOT-yet-installed definition
-    /// (initialize + tools/list) and report the tool count or error inline.
-    /// Persists nothing; a stdio test spawns — and then kills — the process.</summary>
-    Task<ConnectorTestResult> TestConnectionAsync(McpConnector connector, string? apiToken = null, CancellationToken ct = default);
+    /// <summary>Dial a NOT-yet-installed definition (initialize + tools/list) and
+    /// report the tool count or error inline. Persists nothing. It runs through
+    /// the durable gateway under a temporary grant, so it leaves an AgentStep;
+    /// without <paramref name="evidence"/> that a person asked for it, or for a
+    /// stdio definition, it is refused rather than dialled.</summary>
+    Task<ConnectorTestResult> TestConnectionAsync(
+        McpConnector connector, string? apiToken = null,
+        UserApprovalEvidence? evidence = null, CancellationToken ct = default);
 
     /// <summary>Cached tool names of ONE connected connector (empty when not
     /// connected) — the installed-list card shows live tool names/count.</summary>

@@ -68,6 +68,21 @@
         <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,0,0,12"
                    Foreground="{DynamicResource TextSecondaryBrush}" />
 
+        <Border Background="{DynamicResource BgSecondaryBrush}"
+                CornerRadius="6" Padding="12,8" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="{Binding Action}" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <TextBlock Text="{Binding Destination, StringFormat=Destination: {0}}"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding Sensitivity, StringFormat=Sensitivity: {0}}"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock Text="Data will leave this device"
+                           Visibility="{Binding ExternalTransmission, Converter={StaticResource BoolToVisibility}}"
+                           Foreground="{DynamicResource AccentRedBrush}" FontWeight="SemiBold" />
+            </StackPanel>
+        </Border>
+
         <!-- Arguments -->
         <Border Background="{DynamicResource BgSecondaryBrush}"
                 CornerRadius="6" Padding="12,8" MaxHeight="200" Margin="0,0,0,12">
@@ -117,10 +132,12 @@
                     Click="AllowOnce_Click" />
             <Button Content="Always Allow" Style="{DynamicResource AccentButton}"
                     MinWidth="110" Padding="10,6"
+                    Visibility="{Binding ShowAlwaysAllow, Converter={StaticResource BoolToVisibility}}"
                     Click="AllowAlways_Click" />
         </StackPanel>
         <TextBlock Text="Always Allow remembers this tool for the same target permanently."
                    Margin="0,8,0,0" FontSize="11"
+                   Visibility="{Binding ShowAlwaysAllow, Converter={StaticResource BoolToVisibility}}"
                    Foreground="{DynamicResource TextSecondaryBrush}" />
     </StackPanel>
 </Window>

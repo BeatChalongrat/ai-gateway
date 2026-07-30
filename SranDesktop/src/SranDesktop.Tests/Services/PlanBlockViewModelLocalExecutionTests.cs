@@ -29,7 +29,7 @@ public class PlanBlockViewModelLocalExecutionTests
     """;
 
     private readonly Mock<IChatEdgeApiClient> _api = new();
-    private readonly Mock<ILocalPlanExecutor> _local = new();
+    private readonly Mock<IIsolatedPlanExecutor> _local = new();
     private readonly Mock<ISettingsService> _settings = new();
 
     private static JsonElement Plan(string json)
@@ -46,7 +46,7 @@ public class PlanBlockViewModelLocalExecutionTests
 
     private PlanBlockViewModel BuildVm(
         bool settingOn, string planType = "excel",
-        ILocalPlanExecutor? localExecutor = null, string? planJson = null)
+        IIsolatedPlanExecutor? localExecutor = null, string? planJson = null)
     {
         _settings.SetupGet(s => s.Current).Returns(new UserSettings
         {
@@ -68,12 +68,14 @@ public class PlanBlockViewModelLocalExecutionTests
     public async Task Setting_On_And_Supported_Runs_Locally_Not_Server()
     {
         var localPath = Path.Combine(Path.GetTempPath(), "sran-vm-local", "report.xlsx");
-        _local.Setup(e => e.CanExecute(It.IsAny<JsonElement>())).Returns(true);
+        _local.SetupGet(e => e.IsAvailable).Returns(true);
         _local.Setup(e => e.ExecuteAsync(
-                It.IsAny<JsonElement>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new LocalPlanExecutionResult(
-                localPath, 123, new List<string> { "Created sheet 'Data'" },
-                new Dictionary<string, int> { ["sheets"] = 1 }));
+                It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IsolatedPlanExecution(
+                true, localPath, 123, new List<string> { "Created sheet 'Data'" },
+                new DocumentValidationReport { Reopened = true, StructureValid = true },
+                null, null));
 
         var vm = BuildVm(settingOn: true, localExecutor: _local.Object);
         await vm.ExecuteCommand.ExecuteAsync(null);
@@ -84,7 +86,8 @@ public class PlanBlockViewModelLocalExecutionTests
         vm.Result.Changes.Should().ContainSingle().Which.Should().Be("Created sheet 'Data'");
         // The staged output path honors the plan's output_filename.
         _local.Verify(e => e.ExecuteAsync(
-            It.IsAny<JsonElement>(), It.Is<string>(p => p.EndsWith("report.xlsx")),
+            It.IsAny<string>(), It.IsAny<JsonElement>(),
+            It.Is<string>(name => name.EndsWith("report.xlsx")),
             It.IsAny<CancellationToken>()), Times.Once);
         _api.Verify(a => a.ExecuteExcelPlanAsync(
                 It.IsAny<string>(), It.IsAny<ExecuteExcelPlanRequest>(), It.IsAny<CancellationToken>()),
@@ -94,16 +97,25 @@ public class PlanBlockViewModelLocalExecutionTests
     [Fact]
     public async Task Unsupported_Plan_Falls_Back_To_Server()
     {
-        _local.Setup(e => e.CanExecute(It.IsAny<JsonElement>())).Returns(false);
+        _local.SetupGet(e => e.IsAvailable).Returns(true);
+        // The worker declines a plan it cannot reproduce; the VM must fall back.
+        _local.Setup(e => e.ExecuteAsync(
+                It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(IsolatedPlanExecution.Failed(
+                "PlanNotSupportedLocally", "unsupported action"));
 
         var vm = BuildVm(settingOn: true, localExecutor: _local.Object);
         await vm.ExecuteCommand.ExecuteAsync(null);
 
         vm.Result.Should().NotBeNull();
         vm.Result!.LocalFilePath.Should().BeNull();
+        // The support decision now belongs to the worker, so the call IS made
+        // and the decline is what triggers the server fallback.
         _local.Verify(e => e.ExecuteAsync(
-                It.IsAny<JsonElement>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+                It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
         _api.Verify(a => a.ExecuteExcelPlanAsync(
                 "conv-1", It.IsAny<ExecuteExcelPlanRequest>(), It.IsAny<CancellationToken>()),
             Times.Once);
@@ -112,7 +124,7 @@ public class PlanBlockViewModelLocalExecutionTests
     [Fact]
     public async Task Setting_Off_Uses_Server_Even_When_Locally_Supported()
     {
-        _local.Setup(e => e.CanExecute(It.IsAny<JsonElement>())).Returns(true);
+        _local.SetupGet(e => e.IsAvailable).Returns(true);
 
         var vm = BuildVm(settingOn: false, localExecutor: _local.Object);
         await vm.ExecuteCommand.ExecuteAsync(null);
@@ -120,7 +132,8 @@ public class PlanBlockViewModelLocalExecutionTests
         vm.Result.Should().NotBeNull();
         vm.Result!.LocalFilePath.Should().BeNull();
         _local.Verify(e => e.ExecuteAsync(
-                It.IsAny<JsonElement>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Never);
         _api.Verify(a => a.ExecuteExcelPlanAsync(
                 "conv-1", It.IsAny<ExecuteExcelPlanRequest>(), It.IsAny<CancellationToken>()),
@@ -130,9 +143,10 @@ public class PlanBlockViewModelLocalExecutionTests
     [Fact]
     public async Task Local_Failure_Falls_Back_To_Server_Transparently()
     {
-        _local.Setup(e => e.CanExecute(It.IsAny<JsonElement>())).Returns(true);
+        _local.SetupGet(e => e.IsAvailable).Returns(true);
         _local.Setup(e => e.ExecuteAsync(
-                It.IsAny<JsonElement>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("disk full"));
 
         var vm = BuildVm(settingOn: true, localExecutor: _local.Object);
@@ -164,10 +178,20 @@ public class PlanBlockViewModelLocalExecutionTests
             Times.Once);
     }
 
+    /// <summary>The plan fence, end to end, through the REAL isolated worker —
+    /// the generation that used to run in this process now runs sandboxed and the
+    /// workbook is reopened before the VM reports a result.</summary>
     [Fact]
-    public async Task EndToEnd_Real_Excel_Executor_Produces_Openable_File()
+    [Trait("Category", "WindowsSecurityIntegration")]
+    public async Task EndToEnd_Isolated_Worker_Produces_Openable_File()
     {
-        var vm = BuildVm(settingOn: true, localExecutor: new LocalExcelPlanExecutor());
+        var isolated = new SranDesktop.Infrastructure.Workers.IsolatedPlanExecutor(
+            new SranDesktop.Infrastructure.Workers.IsolatedWorkerHost(
+                new SranDesktop.Infrastructure.Workers.WorkerImageResolver(
+                    Path.Combine(AppContext.BaseDirectory, "workers"))),
+            new SranDesktop.Infrastructure.Workers.WorkerImageResolver(
+                Path.Combine(AppContext.BaseDirectory, "workers")));
+        var vm = BuildVm(settingOn: true, localExecutor: isolated);
         await vm.ExecuteCommand.ExecuteAsync(null);
 
         vm.ErrorMessage.Should().BeNull();

@@ -50,7 +50,7 @@ public class ConnectorMarketplaceOAuthTests
         // Nothing installed yet, and definitely no pasted token stored.
         _connectors.Verify(c => c.InstallAsync(
                 It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()),
+                It.IsAny<UserApprovalEvidence?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         item.FlowState.Should().Be(ConnectorFlowState.Connecting);
         item.IsInstalled.Should().BeFalse();

@@ -560,7 +560,6 @@ public class AgentConversationSyncServiceTests : IDisposable
     public void Dispose()
     {
         _sync.Dispose();
-        SqliteConnection.ClearAllPools();
         try
         {
             if (Directory.Exists(_dbDir)) Directory.Delete(_dbDir, recursive: true);

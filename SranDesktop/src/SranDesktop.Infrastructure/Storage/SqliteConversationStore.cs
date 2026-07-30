@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Services;
 using SranDesktop.Domain.Entities;
 using SranDesktop.Domain.Enums;
 using SranDesktop.Domain.ValueObjects;
@@ -138,6 +139,379 @@ public sealed class SqliteConversationStore : IConversationStore
         """
         ALTER TABLE messages ADD COLUMN file_ids TEXT;
         """,
+
+        // 5 - durable goal/plan/state runtime. Structured details are JSON,
+        // while identity, status, version and correlation fields remain
+        // queryable and constrained. Existing conversation rows are untouched.
+        """
+        CREATE TABLE IF NOT EXISTS goals (
+            goal_id          TEXT PRIMARY KEY,
+            conversation_id  TEXT NOT NULL,
+            original_request TEXT NOT NULL,
+            normalized_goal  TEXT NOT NULL,
+            desired_outcome  TEXT NOT NULL,
+            risk_level       TEXT NOT NULL,
+            version          INTEGER NOT NULL,
+            goal_json        TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS definition_of_done_items (
+            item_id          TEXT PRIMARY KEY,
+            goal_id          TEXT NOT NULL,
+            description      TEXT NOT NULL,
+            verification_type TEXT NOT NULL,
+            required_evidence TEXT NOT NULL,
+            required         INTEGER NOT NULL,
+            status           TEXT NOT NULL,
+            verification_result TEXT,
+            evidence_ids_json TEXT NOT NULL,
+            FOREIGN KEY (goal_id) REFERENCES goals(goal_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_tasks (
+            task_id          TEXT PRIMARY KEY,
+            conversation_id  TEXT NOT NULL,
+            goal_id          TEXT NOT NULL,
+            owner_scope      TEXT NOT NULL,
+            mode             TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            current_plan_version INTEGER NOT NULL,
+            current_milestone_id TEXT,
+            current_step_id  TEXT,
+            task_json        TEXT NOT NULL,
+            version          INTEGER NOT NULL,
+            checkpoint_version INTEGER NOT NULL,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            completed_at     TEXT,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (goal_id) REFERENCES goals(goal_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_plans (
+            plan_id          TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            version          INTEGER NOT NULL,
+            goal_version     INTEGER NOT NULL,
+            status           TEXT NOT NULL,
+            planning_reason  TEXT NOT NULL,
+            supersedes_plan_id TEXT,
+            created_by       TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            plan_json        TEXT NOT NULL,
+            UNIQUE(task_id, version),
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_milestones (
+            milestone_id     TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            plan_id          TEXT NOT NULL,
+            sequence         INTEGER NOT NULL,
+            title            TEXT NOT NULL,
+            objective        TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            milestone_json   TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE,
+            FOREIGN KEY (plan_id) REFERENCES task_plans(plan_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_steps (
+            step_id          TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            milestone_id     TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            side_effect_class TEXT NOT NULL,
+            attempt_count    INTEGER NOT NULL,
+            failure_code     TEXT,
+            step_json        TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE,
+            FOREIGN KEY (milestone_id) REFERENCES task_milestones(milestone_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_checkpoints (
+            checkpoint_id    TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            version          INTEGER NOT NULL,
+            plan_version     INTEGER NOT NULL,
+            task_status      TEXT NOT NULL,
+            current_milestone_id TEXT,
+            current_step_id  TEXT,
+            pending_action_id TEXT,
+            resume_safety_status TEXT NOT NULL,
+            checksum         TEXT NOT NULL,
+            checkpoint_json  TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            UNIQUE(task_id, version),
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_actions (
+            action_id        TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            plan_id          TEXT NOT NULL,
+            milestone_id     TEXT NOT NULL,
+            step_id          TEXT NOT NULL,
+            tool_call_id     TEXT NOT NULL,
+            tool_name        TEXT NOT NULL,
+            arguments_fingerprint TEXT NOT NULL,
+            idempotency_key  TEXT NOT NULL,
+            side_effect_class TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            attempt          INTEGER NOT NULL,
+            failure_code     TEXT,
+            failure_reason   TEXT,
+            action_json      TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            UNIQUE(task_id, idempotency_key),
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_evidence (
+            evidence_id      TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            step_id          TEXT,
+            action_id        TEXT,
+            evidence_type    TEXT NOT NULL,
+            source           TEXT NOT NULL,
+            summary          TEXT NOT NULL,
+            structured_data  TEXT NOT NULL,
+            artifact_reference TEXT,
+            confidence       REAL NOT NULL,
+            sensitivity      TEXT NOT NULL,
+            retention_policy TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS world_state_snapshots (
+            world_state_id   TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            version          INTEGER NOT NULL,
+            source           TEXT NOT NULL,
+            confidence       REAL NOT NULL,
+            observed_at      TEXT NOT NULL,
+            expires_at       TEXT,
+            snapshot_json    TEXT NOT NULL,
+            UNIQUE(task_id, version),
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_approvals (
+            approval_id      TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            step_id          TEXT NOT NULL,
+            action_fingerprint TEXT NOT NULL,
+            scope            TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            expires_at       TEXT NOT NULL,
+            approval_json    TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_artifacts (
+            artifact_id      TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            step_id          TEXT,
+            path_or_uri      TEXT NOT NULL,
+            content_hash     TEXT,
+            sensitivity      TEXT NOT NULL,
+            retention_policy TEXT NOT NULL,
+            artifact_json    TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_events (
+            event_id         TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            event_type       TEXT NOT NULL,
+            plan_id          TEXT,
+            milestone_id     TEXT,
+            step_id          TEXT,
+            action_id        TEXT,
+            tool_call_id     TEXT,
+            checkpoint_id    TEXT,
+            world_state_version INTEGER,
+            event_json       TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_goals_conversation ON goals(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_conversation_status ON agent_tasks(conversation_id, status);
+        CREATE INDEX IF NOT EXISTS idx_plans_task_version ON task_plans(task_id, version);
+        CREATE INDEX IF NOT EXISTS idx_steps_task_status ON task_steps(task_id, status);
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_task_version ON task_checkpoints(task_id, version DESC);
+        CREATE INDEX IF NOT EXISTS idx_actions_task_status ON task_actions(task_id, status);
+        CREATE INDEX IF NOT EXISTS idx_evidence_task_step ON task_evidence(task_id, step_id);
+        CREATE INDEX IF NOT EXISTS idx_world_state_task_version ON world_state_snapshots(task_id, version DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_task_created ON task_events(task_id, created_at);
+        """,
+
+        // 6 - Prompt 4 real-world skill runtime health, durable metrics and
+        // verified compensation ledger. Existing task JSON remains compatible.
+        """
+        CREATE TABLE IF NOT EXISTS capability_health (
+            capability_id   TEXT PRIMARY KEY,
+            provider        TEXT NOT NULL,
+            availability    TEXT NOT NULL,
+            health          TEXT NOT NULL,
+            capability_json TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS task_metrics (
+            metric_id       TEXT PRIMARY KEY,
+            task_id         TEXT NOT NULL,
+            skill_id        TEXT,
+            name            TEXT NOT NULL,
+            value           REAL NOT NULL,
+            dimensions_json TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS compensation_ledger (
+            compensation_id TEXT PRIMARY KEY,
+            task_id         TEXT NOT NULL,
+            step_id         TEXT NOT NULL,
+            action_id       TEXT NOT NULL,
+            target          TEXT NOT NULL,
+            reversible      INTEGER NOT NULL,
+            status          TEXT NOT NULL,
+            compensation_json TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_metrics_task_name
+            ON task_metrics(task_id, name, created_at);
+        CREATE INDEX IF NOT EXISTS idx_compensation_task_status
+            ON compensation_ledger(task_id, status);
+        """,
+
+        // 7 - semantic outcome graph and complete action correlation. New
+        // columns are nullable so existing persisted tasks remain readable and
+        // are upgraded by the durable runtime before consequential dispatch.
+        """
+        CREATE TABLE IF NOT EXISTS task_outcomes (
+            outcome_id       TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            plan_id          TEXT NOT NULL,
+            parent_outcome_id TEXT,
+            kind             TEXT NOT NULL,
+            required         INTEGER NOT NULL,
+            prohibited       INTEGER NOT NULL,
+            status           TEXT NOT NULL,
+            source_goal_version INTEGER NOT NULL,
+            outcome_json     TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE,
+            FOREIGN KEY (plan_id) REFERENCES task_plans(plan_id) ON DELETE CASCADE
+        );
+
+        ALTER TABLE task_actions ADD COLUMN outcome_id TEXT;
+        ALTER TABLE task_actions ADD COLUMN parent_action_id TEXT;
+        ALTER TABLE task_actions ADD COLUMN retry_id TEXT;
+        ALTER TABLE task_actions ADD COLUMN observation_version INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE task_actions ADD COLUMN recovery_strategy TEXT;
+        ALTER TABLE task_actions ADD COLUMN capability_change_reason TEXT;
+        ALTER TABLE task_evidence ADD COLUMN outcome_id TEXT;
+        ALTER TABLE task_events ADD COLUMN parent_action_id TEXT;
+        ALTER TABLE task_events ADD COLUMN retry_id TEXT;
+        ALTER TABLE task_events ADD COLUMN model_request_id TEXT;
+        ALTER TABLE task_events ADD COLUMN capture_id TEXT;
+        ALTER TABLE task_events ADD COLUMN outcome_id TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_outcomes_task_status
+            ON task_outcomes(task_id, status);
+        CREATE INDEX IF NOT EXISTS idx_evidence_task_outcome
+            ON task_evidence(task_id, outcome_id);
+        """,
+
+        // 8 - Phase 1 security cleanup. Legacy tool payloads were stored before
+        // redaction was guaranteed at the persistence boundary. Their content
+        // cannot be classified reliably in SQL, so remove it instead of trying
+        // to display-time redact unknown plaintext.
+        """
+        UPDATE tool_executions
+        SET arguments = '{"legacy_payload_removed":true}',
+            result = NULL,
+            error = CASE WHEN error IS NULL THEN NULL ELSE '[legacy error removed]' END;
+
+        UPDATE messages
+        SET content = '[legacy tool output removed by security migration]'
+        WHERE role = 'tool';
+
+        UPDATE messages
+        SET tool_calls = NULL
+        WHERE tool_calls IS NOT NULL;
+
+        UPDATE branch_sets
+        SET tails_json = '[]';
+        """,
+
+        // 9 - unified durable runtime metadata. Existing JSON rows remain
+        // readable; additive scalar columns make trigger/parent/recovery state
+        // queryable without weakening the Phase 1 redaction boundary.
+        """
+        ALTER TABLE agent_tasks ADD COLUMN parent_run_id TEXT;
+        ALTER TABLE agent_tasks ADD COLUMN trigger_type TEXT NOT NULL DEFAULT 'Chat';
+        ALTER TABLE agent_tasks ADD COLUMN security_context_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE agent_tasks ADD COLUMN permission_context_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE agent_tasks ADD COLUMN workspace_context_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE agent_tasks ADD COLUMN model_context_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE agent_tasks ADD COLUMN cancellation_requested_at TEXT;
+        ALTER TABLE agent_tasks ADD COLUMN failure_summary TEXT;
+        ALTER TABLE agent_tasks ADD COLUMN final_result_reference TEXT;
+
+        ALTER TABLE task_steps ADD COLUMN parent_step_id TEXT;
+        ALTER TABLE task_steps ADD COLUMN step_type TEXT NOT NULL DEFAULT 'tool';
+        ALTER TABLE task_steps ADD COLUMN tool_name TEXT;
+        ALTER TABLE task_steps ADD COLUMN arguments_reference TEXT;
+        ALTER TABLE task_steps ADD COLUMN idempotency_key TEXT;
+        ALTER TABLE task_steps ADD COLUMN started_at TEXT;
+        ALTER TABLE task_steps ADD COLUMN completed_at TEXT;
+        ALTER TABLE task_steps ADD COLUMN observation_ids_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE task_steps ADD COLUMN verification_disposition TEXT;
+        ALTER TABLE task_steps ADD COLUMN tool_outcome TEXT;
+        ALTER TABLE task_steps ADD COLUMN failure_classification TEXT;
+
+        ALTER TABLE task_evidence ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'ToolObservation';
+        ALTER TABLE task_evidence ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE task_evidence ADD COLUMN allowed_uses_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE task_evidence ADD COLUMN prohibited_uses_json TEXT NOT NULL DEFAULT '[]';
+
+        ALTER TABLE task_events ADD COLUMN sequence_no INTEGER NOT NULL DEFAULT 0;
+        UPDATE task_events SET sequence_no = rowid WHERE sequence_no = 0;
+
+        CREATE TABLE IF NOT EXISTS task_verifications (
+            verification_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            step_id TEXT NOT NULL,
+            action_id TEXT,
+            disposition TEXT NOT NULL,
+            expected_state TEXT NOT NULL,
+            actual_state_summary TEXT NOT NULL,
+            evidence_ids_json TEXT NOT NULL,
+            suggested_recovery_action TEXT,
+            verification_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tasks_parent ON agent_tasks(parent_run_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_tasks_trigger_status ON agent_tasks(trigger_type, status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_task_events_sequence
+            ON task_events(task_id, sequence_no);
+        CREATE INDEX IF NOT EXISTS idx_verifications_task_step
+            ON task_verifications(task_id, step_id, created_at);
+        """,
     };
 
     /// <summary>Newest-N notes kept per conversation; older ones pruned on add.</summary>
@@ -161,7 +535,11 @@ public sealed class SqliteConversationStore : IConversationStore
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,
-            ForeignKeys = true
+            ForeignKeys = true,
+            // Off for the same reason as SqliteAgentTaskStore: a pooled
+            // connection keeps the file handle after the caller has finished
+            // with it, so the database is still locked when nothing is using it.
+            Pooling = false
         }.ToString();
     }
 
@@ -239,7 +617,8 @@ public sealed class SqliteConversationStore : IConversationStore
                 last_synced_at = COALESCE(excluded.last_synced_at, conversations.last_synced_at)
             """;
         cmd.Parameters.AddWithValue("$id", c.Id);
-        cmd.Parameters.AddWithValue("$title", (object?)c.Title ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$title",
+            c.Title is null ? DBNull.Value : SensitiveDataRedactor.Redact(c.Title));
         cmd.Parameters.AddWithValue("$model_id", (object?)c.ModelId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$created_at", ToIso(c.CreatedAt));
         cmd.Parameters.AddWithValue("$updated_at", ToIso(c.UpdatedAt));
@@ -389,8 +768,19 @@ public sealed class SqliteConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$id", m.Id);
         cmd.Parameters.AddWithValue("$cid", m.ConversationId);
         cmd.Parameters.AddWithValue("$role", RoleToString(m.Role));
-        cmd.Parameters.AddWithValue("$content", (object?)m.Content ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$tool_calls", (object?)m.ToolCallsJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$content",
+            m.Content is null
+                ? DBNull.Value
+                : m.Role == MessageRole.Tool && m.Name != "update_plan"
+                    ? SensitiveDataRedactor.SummarizeTextForPersistence(
+                        "tool output",
+                        m.Content)
+                    : SensitiveDataRedactor.Redact(m.Content));
+        cmd.Parameters.AddWithValue("$tool_calls",
+            m.ToolCallsJson is null
+                ? DBNull.Value
+                : AgentChainCodec.SanitizeToolCallsJsonForPersistence(
+                    m.ToolCallsJson));
         cmd.Parameters.AddWithValue("$tool_call_id", (object?)m.ToolCallId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$name", (object?)m.Name ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$model_id", (object?)m.ModelId ?? DBNull.Value);
@@ -484,11 +874,27 @@ public sealed class SqliteConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$cid", e.ConversationId);
         cmd.Parameters.AddWithValue("$mid", (object?)e.MessageId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$tool", e.ToolName);
-        cmd.Parameters.AddWithValue("$args", e.ArgumentsJson);
-        cmd.Parameters.AddWithValue("$result", (object?)e.Result ?? DBNull.Value);
+        cmd.Parameters.AddWithValue(
+            "$args",
+            e.ToolName == "update_plan"
+                ? SensitiveDataRedactor.RedactJson(e.ArgumentsJson)
+                : SensitiveDataRedactor.SummarizeJsonForPersistence(e.ArgumentsJson));
+        cmd.Parameters.AddWithValue("$result",
+            e.Result is null
+                ? DBNull.Value
+                : e.ToolName == "update_plan"
+                    ? SensitiveDataRedactor.Redact(e.Result)
+                    : SensitiveDataRedactor.SummarizeTextForPersistence(
+                        "tool result",
+                        e.Result));
         cmd.Parameters.AddWithValue("$perm", e.Permission);
         cmd.Parameters.AddWithValue("$dur", (object?)e.DurationMs ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$err", (object?)e.Error ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$err",
+            e.Error is null
+                ? DBNull.Value
+                : SensitiveDataRedactor.SummarizeTextForPersistence(
+                    "tool error",
+                    e.Error));
         cmd.Parameters.AddWithValue("$at", ToIso(e.ExecutedAt));
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -580,7 +986,7 @@ public sealed class SqliteConversationStore : IConversationStore
                     updated_at = excluded.updated_at
                 """;
             cmd.Parameters.AddWithValue("$cid", conversationId);
-            cmd.Parameters.AddWithValue("$text", text);
+            cmd.Parameters.AddWithValue("$text", SensitiveDataRedactor.Redact(text));
             cmd.Parameters.AddWithValue("$at", ToIso(DateTimeOffset.UtcNow));
         }
         await cmd.ExecuteNonQueryAsync(ct);
@@ -614,7 +1020,8 @@ public sealed class SqliteConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$key", record.BranchKey);
         cmd.Parameters.AddWithValue("$convo", record.ConversationId);
         cmd.Parameters.AddWithValue("$active", record.ActiveIndex);
-        cmd.Parameters.AddWithValue("$tails", JsonSerializer.Serialize(record.Tails));
+        cmd.Parameters.AddWithValue("$tails",
+            SensitiveDataRedactor.RedactJson(JsonSerializer.Serialize(record.Tails)));
         cmd.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -670,7 +1077,7 @@ public sealed class SqliteConversationStore : IConversationStore
                 """;
             insert.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
             insert.Parameters.AddWithValue("$cid", conversationId);
-            insert.Parameters.AddWithValue("$content", trimmed);
+            insert.Parameters.AddWithValue("$content", SensitiveDataRedactor.Redact(trimmed));
             insert.Parameters.AddWithValue("$at", ToIso(DateTimeOffset.UtcNow));
             await insert.ExecuteNonQueryAsync(ct);
         }

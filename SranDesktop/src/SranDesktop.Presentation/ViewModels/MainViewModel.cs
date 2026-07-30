@@ -178,6 +178,10 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Shown in the settings popup footer.</summary>
     public string AppVersion => $"v{_updates.CurrentVersion}";
 
+    /// <summary>Build stamp (UTC build time + git hash) under the version footer, so it's
+    /// visible-by-eye which binary is running after a publish (T5 PART B).</summary>
+    public string BuildInfo => SranDesktop.Application.Services.BuildStamp.Current;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUpdate))]
     private string? _updateVersion;

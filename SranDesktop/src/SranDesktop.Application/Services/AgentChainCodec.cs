@@ -47,9 +47,76 @@ public static class AgentChainCodec
         {
             result.Add(ScreenshotMessage.IsScreenshotMessage(msg)
                 ? new GatewayMessage { Role = "user", Content = ScreenshotPlaceholderText }
-                : msg);
+                : SanitizeMessage(msg));
         }
         return result;
+    }
+
+    private static GatewayMessage SanitizeMessage(GatewayMessage message) =>
+        new()
+        {
+            Role = message.Role,
+            Content = message.Content is string text
+                ? MayPersistToolPayload(message.Name)
+                    ? SensitiveDataRedactor.Redact(text)
+                    : message.Role == "tool"
+                        ? SensitiveDataRedactor.SummarizeTextForPersistence(
+                            "tool output",
+                            text)
+                        : SensitiveDataRedactor.Redact(text)
+                : message.Content,
+            ToolCallId = message.ToolCallId,
+            Name = message.Name,
+            ToolCalls = message.ToolCalls?.Select(call => new GatewayToolCall
+            {
+                Id = call.Id,
+                Type = call.Type,
+                Function = new GatewayToolCallFunction
+                {
+                    Name = call.Function.Name,
+                    Arguments = SanitizeArgumentsForPersistence(
+                        call.Function.Name,
+                        call.Function.Arguments)
+                }
+            }).ToList()
+        };
+
+    private static bool MayPersistToolPayload(string? toolName) =>
+        string.Equals(toolName, "update_plan", StringComparison.Ordinal);
+
+    private static string SanitizeArgumentsForPersistence(
+        string? toolName,
+        string? arguments) =>
+        MayPersistToolPayload(toolName)
+            ? SensitiveDataRedactor.RedactJson(arguments)
+            : SensitiveDataRedactor.SummarizeJsonForPersistence(arguments);
+
+    public static string SanitizeToolCallsJsonForPersistence(string? toolCallsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolCallsJson))
+            return SensitiveDataRedactor.SummarizeJsonForPersistence(toolCallsJson);
+        try
+        {
+            var calls = JsonSerializer.Deserialize<List<GatewayToolCall>>(toolCallsJson);
+            if (calls is null)
+                return SensitiveDataRedactor.SummarizeJsonForPersistence(toolCallsJson);
+            return JsonSerializer.Serialize(calls.Select(call => new GatewayToolCall
+            {
+                Id = call.Id,
+                Type = call.Type,
+                Function = new GatewayToolCallFunction
+                {
+                    Name = call.Function.Name,
+                    Arguments = SanitizeArgumentsForPersistence(
+                        call.Function.Name,
+                        call.Function.Arguments)
+                }
+            }).ToList(), ToolCallJson);
+        }
+        catch (JsonException)
+        {
+            return SensitiveDataRedactor.SummarizeJsonForPersistence(toolCallsJson);
+        }
     }
 
     /// <summary>
@@ -73,19 +140,24 @@ public static class AgentChainCodec
                 rows.Add(new Message
                 {
                     Id = id, ConversationId = conversationId, Role = MessageRole.Tool,
-                    Content = msg.Content as string,
+                    Content = MayPersistToolPayload(msg.Name)
+                        ? SensitiveDataRedactor.Redact(msg.Content as string)
+                        : SensitiveDataRedactor.SummarizeTextForPersistence(
+                            "tool output",
+                            msg.Content as string),
                     ToolCallId = msg.ToolCallId, Name = msg.Name,
                     CreatedAt = createdAt, SortOrder = baseSort + i
                 });
             }
             else if (msg.Role == "assistant")
             {
+                var sanitized = SanitizeMessage(msg);
                 rows.Add(new Message
                 {
                     Id = id, ConversationId = conversationId, Role = MessageRole.Assistant,
-                    Content = msg.Content as string,
-                    ToolCallsJson = msg.ToolCalls is { Count: > 0 }
-                        ? JsonSerializer.Serialize(msg.ToolCalls, ToolCallJson)
+                    Content = SensitiveDataRedactor.Redact(sanitized.Content as string),
+                    ToolCallsJson = sanitized.ToolCalls is { Count: > 0 }
+                        ? JsonSerializer.Serialize(sanitized.ToolCalls, ToolCallJson)
                         : null,
                     CreatedAt = createdAt, SortOrder = baseSort + i
                 });

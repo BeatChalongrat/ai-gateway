@@ -7,6 +7,7 @@ using SranDesktop.Application.Events;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
 using SranDesktop.Application.Services;
+using SranDesktop.Domain.Entities;
 using SranDesktop.Domain.Enums;
 using Xunit;
 
@@ -57,6 +58,126 @@ public class ChatOrchestratorTests
         }
     }
 
+    private sealed class UnverifiedPerceptualTool : IMcpTool, IPerceptualActionTool
+    {
+        public string Name => "perceptual_tool";
+        public string Description => "A state-changing tool with an unchanged post-state.";
+        public JsonElement ParametersSchema =>
+            JsonSerializer.SerializeToElement(new { type = "object" });
+        public ToolCategory Category => ToolCategory.Screen;
+        public PermissionLevel DefaultPermission => PermissionLevel.Ask;
+
+        public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct) =>
+            Task.FromResult(ToolResult.Verified("native dispatch completed", ["native=true"]));
+
+        public InteractionActionDescriptor DescribeAction(JsonElement arguments) =>
+            new(
+                InteractionActionKind.Click,
+                "fixture:button",
+                "label changes",
+                SideEffectClass.ReversibleLowRisk,
+                Reversible: true,
+                Idempotent: false,
+                RequiresConfirmation: true,
+                Timeout: TimeSpan.FromSeconds(1),
+                MaximumAttempts: 1);
+
+        public Task<InteractionObservationSnapshot> ObserveBeforeActionAsync(
+            JsonElement arguments,
+            CancellationToken ct) =>
+            Task.FromResult(Snapshot("before", 1));
+
+        public Task<InteractionObservationSnapshot> ObserveAfterActionAsync(
+            JsonElement arguments,
+            ToolResult result,
+            InteractionObservationSnapshot before,
+            CancellationToken ct) =>
+            Task.FromResult(Snapshot("after", 2));
+
+        public ToolContractVerification VerifyAction(
+            JsonElement arguments,
+            ToolResult result,
+            InteractionObservationSnapshot before,
+            InteractionObservationSnapshot after) =>
+            new(
+                VerificationDisposition.Inconclusive,
+                ["independent_state_changed=false"],
+                "The independent post-state did not change.");
+
+        private static InteractionObservationSnapshot Snapshot(
+            string observationId,
+            long version) =>
+            new(
+                observationId,
+                "run-1",
+                "step-1",
+                InteractionObservationSource.Desktop,
+                version,
+                DateTimeOffset.UtcNow,
+                1,
+                InteractionCoordinateSpace.PhysicalScreenPixels,
+                [],
+                null,
+                [],
+                null,
+                null,
+                null,
+                null,
+                "unchanged-state",
+                ObservationTrust.ToolObservation,
+                SensitiveDataClassification.Confidential,
+                "metadata_only",
+                true,
+                []);
+    }
+
+    private sealed class SensitiveTool(string content) : IMcpTool, ISensitiveDataTool
+    {
+        public string Name => "sensitive_tool";
+        public string Description => "Reads local sensitive data";
+        public JsonElement ParametersSchema => JsonDocument.Parse("{}").RootElement.Clone();
+        public ToolCategory Category => ToolCategory.Clipboard;
+        public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways;
+        public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+            "Clipboard.ReadLocal",
+            "Clipboard.SendToModel",
+            "clipboard",
+            "unknown",
+            "configured model provider",
+            ExternalTransmission: true,
+            AlwaysRequireConfirmation: true);
+        public int Executions;
+
+        public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+        {
+            Executions++;
+            return Task.FromResult(ToolResult.Ok(content));
+        }
+    }
+
+    private sealed class ScreenCaptureTool : IMcpTool, ISensitiveDataTool
+    {
+        public string Name => "screen_capture_test";
+        public string Description => "Captures a local screen image";
+        public JsonElement ParametersSchema => JsonDocument.Parse("{}").RootElement.Clone();
+        public ToolCategory Category => ToolCategory.Screen;
+        public PermissionLevel DefaultPermission => PermissionLevel.Ask;
+        public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+            "Screen.CaptureLocal",
+            "Screen.SendToModel",
+            "screen_capture",
+            "unknown",
+            "configured model provider",
+            ExternalTransmission: true,
+            AlwaysRequireConfirmation: true,
+            AllowPersistence: false);
+
+        public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct) =>
+            Task.FromResult(ToolResult.OkWithImage(
+                "capture metadata",
+                "data:image/png;base64,AAAA"));
+    }
+
     private const string StopFrame =
         """{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""";
 
@@ -99,6 +220,42 @@ public class ChatOrchestratorTests
         return (orchestrator, gateway, tool, permissions);
     }
 
+    private static (ChatOrchestrator Orchestrator, ScriptedGateway Gateway,
+        SensitiveTool Tool, Mock<IPermissionService> Permissions)
+        CreateSensitive(string result)
+    {
+        var gateway = new ScriptedGateway();
+        var tool = new SensitiveTool(result);
+        var host = new Mock<IMcpToolHost>();
+        host.Setup(h => h.Resolve(tool.Name)).Returns(tool);
+        host.Setup(h => h.GetToolDefinitions()).Returns(
+        [
+            new GatewayToolDefinition
+            {
+                Function = new GatewayFunctionDef
+                {
+                    Name = tool.Name,
+                    Description = tool.Description,
+                    Parameters = tool.ParametersSchema
+                }
+            }
+        ]);
+        var permissions = new Mock<IPermissionService>();
+        permissions.Setup(p => p.CheckAsync(
+                It.IsAny<IMcpTool>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PermissionDecision.Auto);
+        var store = new Mock<IConversationStore>();
+        var orchestrator = new ChatOrchestrator(
+            gateway,
+            host.Object,
+            permissions.Object,
+            store.Object,
+            NullLogger<ChatOrchestrator>.Instance);
+        return (orchestrator, gateway, tool, permissions);
+    }
+
     private static async Task<List<AgentStreamEvent>> RunAsync(
         ChatOrchestrator orchestrator, List<GatewayMessage> messages)
     {
@@ -123,6 +280,62 @@ public class ChatOrchestratorTests
         tool.Executions.Should().Be(0);
         gateway.Requests.Should().HaveCount(1);
         gateway.Requests[0].Tools.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Perceptual_Action_Without_Postcondition_Is_Not_Presented_As_Success()
+    {
+        var gateway = new ScriptedGateway();
+        var tool = new UnverifiedPerceptualTool();
+        var host = new Mock<IMcpToolHost>();
+        host.Setup(h => h.Resolve(tool.Name)).Returns(tool);
+        host.Setup(h => h.GetToolDefinitions()).Returns(
+        [
+            new GatewayToolDefinition
+            {
+                Function = new GatewayFunctionDef
+                {
+                    Name = tool.Name,
+                    Description = tool.Description,
+                    Parameters = tool.ParametersSchema
+                }
+            }
+        ]);
+        var permissions = new Mock<IPermissionService>();
+        permissions.Setup(p => p.CheckAsync(
+                tool,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PermissionDecision.Auto);
+        var orchestrator = new ChatOrchestrator(
+            gateway,
+            host.Object,
+            permissions.Object,
+            new Mock<IConversationStore>().Object,
+            NullLogger<ChatOrchestrator>.Instance,
+            maxIterations: 5);
+        gateway.Enqueue(
+            ToolCallFrame("call_perception", tool.Name),
+            FinishToolCallsFrame,
+            "[DONE]");
+        gateway.Enqueue(ContentFrame("Done"), StopFrame, "[DONE]");
+        gateway.Enqueue(StopFrame, "[DONE]");
+        gateway.Enqueue(StopFrame, "[DONE]");
+        gateway.Enqueue(StopFrame, "[DONE]");
+
+        var events = await RunAsync(
+            orchestrator,
+            [new GatewayMessage { Role = "user", Content = "click the fixture button" }]);
+
+        var toolEvent = events.OfType<AgentToolResultEvent>().Single();
+        toolEvent.Success.Should().BeFalse();
+        toolEvent.FullResult.Should().Contain("The independent post-state did not change");
+        toolEvent.FullResult.Should().Contain(ChatOrchestrator.ToolEffectMarker);
+        ChatOrchestrator.HasPendingUnverifiedAction(
+                [new GatewayMessage { Role = "tool", Content = toolEvent.FullResult }])
+            .Should().BeTrue();
+        events.OfType<AgentContentDeltaEvent>()
+            .Should().NotContain(evt => evt.Text.Contains("Done", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -184,6 +397,132 @@ public class ChatOrchestratorTests
         tool.Executions.Should().Be(1);
         permissions.Verify(p => p.PersistDecisionAsync(
             "fake_tool", It.IsAny<string>(), "allow_always", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Sensitive_Data_Tool_Overrides_Auto_And_Cannot_Persist_Always()
+    {
+        var (orchestrator, gateway, tool, permissions) = CreateSensitive("ordinary clipboard text");
+        var requests = new List<ToolConsentRequest>();
+        orchestrator.ConsentRequested += seen =>
+        {
+            requests.Add(seen);
+            return Task.FromResult(ToolConsentResponse.Always);
+        };
+        gateway.Enqueue(
+            ToolCallFrame("call_sensitive", tool.Name),
+            FinishToolCallsFrame,
+            "[DONE]");
+        gateway.Enqueue(StopFrame, "[DONE]");
+
+        await RunAsync(
+            orchestrator,
+            [new GatewayMessage { Role = "user", Content = "read clipboard" }]);
+
+        tool.Executions.Should().Be(1);
+        requests.Should().HaveCount(2);
+        requests[0].Action.Should().Be("Clipboard.ReadLocal");
+        requests[0].ExternalTransmission.Should().BeFalse();
+        requests[0].Destination.Should().Be("local device");
+        requests[1].Action.Should().Be("Clipboard.SendToModel");
+        requests[1].AlwaysRequireConfirmation.Should().BeTrue();
+        requests[1].ExternalTransmission.Should().BeTrue();
+        requests[1].Destination.Should().Be("configured model provider");
+        permissions.Verify(p => p.PersistDecisionAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Secret_Local_Data_Is_Discarded_When_Transmission_Consent_Is_Denied()
+    {
+        const string secret = "ghp_1234567890abcdefghijklmnop";
+        var (orchestrator, gateway, tool, _) = CreateSensitive(secret);
+        var requests = new List<ToolConsentRequest>();
+        orchestrator.ConsentRequested += request =>
+        {
+            requests.Add(request);
+            return Task.FromResult(
+                requests.Count == 1 ? ToolConsentResponse.Once : ToolConsentResponse.Deny);
+        };
+        gateway.Enqueue(
+            ToolCallFrame("call_secret", tool.Name),
+            FinishToolCallsFrame,
+            "[DONE]");
+        gateway.Enqueue(StopFrame, "[DONE]");
+        var messages = new List<GatewayMessage>
+        {
+            new() { Role = "user", Content = "read clipboard" }
+        };
+
+        await RunAsync(orchestrator, messages);
+
+        requests.Should().HaveCount(2);
+        requests[1].Sensitivity.Should().Be("secret");
+        requests[1].ArgumentsJson.Should().Be("{}");
+        var resultMessage = messages.Single(message => message.Role == "tool");
+        resultMessage.Content!.ToString().Should().Contain("transmission was denied");
+        resultMessage.Content!.ToString().Should().NotContain(secret);
+    }
+
+    [Fact]
+    public async Task Screen_Image_Is_Discarded_When_Separate_Transmission_Is_Denied()
+    {
+        var gateway = new ScriptedGateway();
+        var tool = new ScreenCaptureTool();
+        var host = new Mock<IMcpToolHost>();
+        host.Setup(item => item.Resolve(tool.Name)).Returns(tool);
+        host.Setup(item => item.GetToolDefinitions()).Returns(
+        [
+            new GatewayToolDefinition
+            {
+                Function = new GatewayFunctionDef
+                {
+                    Name = tool.Name,
+                    Description = tool.Description,
+                    Parameters = tool.ParametersSchema
+                }
+            }
+        ]);
+        var permissions = new Mock<IPermissionService>();
+        permissions.Setup(item => item.CheckAsync(
+                It.IsAny<IMcpTool>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PermissionDecision.Auto);
+        var orchestrator = new ChatOrchestrator(
+            gateway,
+            host.Object,
+            permissions.Object,
+            Mock.Of<IConversationStore>(),
+            NullLogger<ChatOrchestrator>.Instance);
+        var requests = new List<ToolConsentRequest>();
+        orchestrator.ConsentRequested += request =>
+        {
+            requests.Add(request);
+            return Task.FromResult(
+                requests.Count == 1 ? ToolConsentResponse.Once : ToolConsentResponse.Deny);
+        };
+        gateway.Enqueue(
+            ToolCallFrame("call_screen", tool.Name),
+            FinishToolCallsFrame,
+            "[DONE]");
+        gateway.Enqueue(StopFrame, "[DONE]");
+
+        var events = await RunAsync(
+            orchestrator,
+            [new GatewayMessage { Role = "user", Content = "capture screen" }]);
+
+        requests.Should().HaveCount(2);
+        requests[0].Action.Should().Be("Screen.CaptureLocal");
+        requests[0].ExternalTransmission.Should().BeFalse();
+        requests[1].Action.Should().Be("Screen.SendToModel");
+        requests[1].ExternalTransmission.Should().BeTrue();
+        var result = events.OfType<AgentToolResultEvent>().Single();
+        result.Success.Should().BeFalse();
+        result.ImageDataUri.Should().BeNull();
     }
 
     [Fact]
@@ -481,4 +820,70 @@ public class ChatOrchestratorTests
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
+
+    [Fact]
+    public async Task Final_Response_Does_Not_Claim_Success_While_Action_Is_Unverified()
+    {
+        var (orchestrator, gateway, _, _) = Create();
+        gateway.Enqueue(ContentFrame("Microphone muted successfully."), StopFrame, "[DONE]");
+        var action = ComputerAction(taskCompleted: false);
+        var messages = new List<GatewayMessage>
+        {
+            new() { Role = "user", Content = "mute me" },
+            new()
+            {
+                Role = "tool",
+                ToolCallId = "click-1",
+                Content = ChatOrchestrator.ComputerActionMarker + JsonSerializer.Serialize(action)
+            }
+        };
+
+        var events = await RunAsync(orchestrator, messages);
+        var visible = string.Concat(
+            events.OfType<AgentContentDeltaEvent>().Select(e => e.Text));
+
+        visible.Should().Be(ChatOrchestrator.UnverifiedActionMessage);
+        visible.Should().NotContain("muted successfully");
+    }
+
+    [Fact]
+    public void Completed_Action_Clears_Unverified_Final_Response_Guard()
+    {
+        var messages = new[]
+        {
+            new GatewayMessage
+            {
+                Role = "tool",
+                Content = ChatOrchestrator.ComputerActionMarker +
+                          JsonSerializer.Serialize(ComputerAction(taskCompleted: true))
+            }
+        };
+
+        ChatOrchestrator.HasPendingUnverifiedAction(messages).Should().BeFalse();
+    }
+
+    private static ComputerActionResult ComputerAction(bool taskCompleted) =>
+        new(
+            ActionRequested: true,
+            TargetResolved: true,
+            TargetValidated: true,
+            ExecutionAttempted: true,
+            OsInputAccepted: true,
+            EffectVerified: taskCompleted,
+            TaskCompleted: taskCompleted,
+            FailureCode: taskCompleted ? null : "EffectNotVerified",
+            FailureReason: null,
+            Retryable: !taskCompleted,
+            Evidence: Array.Empty<string>(),
+            CaptureBeforeId: "before",
+            CaptureAfterId: taskCompleted ? "after" : null,
+            WindowHandle: 10,
+            ProcessId: 42,
+            ExecutedX: 10,
+            ExecutedY: 20,
+            TargetX: 0,
+            TargetY: 0,
+            TargetWidth: 20,
+            TargetHeight: 40,
+            DurationMs: 10);
 }

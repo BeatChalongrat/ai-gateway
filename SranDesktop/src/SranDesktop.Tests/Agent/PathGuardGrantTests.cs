@@ -73,14 +73,14 @@ public sealed class PathGuardGrantTests : IDisposable
     }
 
     [Fact]
-    public void Built_In_Roots_Work_With_No_Grants()
+    public void Host_Profile_And_Temp_Are_Denied_With_No_Explicit_Mounts()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), "sran-builtin.txt");
-        Resolve(tempFile).Should().NotBeNull();
+        Resolve(tempFile).Should().BeNull();
 
         var profileFile = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "doc.txt");
-        Resolve(profileFile).Should().NotBeNull();
+        Resolve(profileFile).Should().BeNull();
     }
 
     [Fact]

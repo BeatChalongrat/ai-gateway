@@ -22,7 +22,7 @@ public partial class PlanBlockViewModel : ObservableObject
     private readonly IChatEdgeApiClient _api;
     private readonly string _conversationId;
     private readonly JsonElement _plan;
-    private readonly ILocalPlanExecutor? _localExecutor;
+    private readonly IIsolatedPlanExecutor? _localExecutor;
     private readonly ISettingsService? _settings;
     private readonly ILogger? _logger;
 
@@ -59,7 +59,7 @@ public partial class PlanBlockViewModel : ObservableObject
 
     public PlanBlockViewModel(
         IChatEdgeApiClient api, string conversationId, string planType, JsonElement plan,
-        ILocalPlanExecutor? localExecutor = null, ISettingsService? settings = null,
+        IIsolatedPlanExecutor? localExecutor = null, ISettingsService? settings = null,
         ILogger? logger = null)
     {
         _api = api;
@@ -118,17 +118,25 @@ public partial class PlanBlockViewModel : ObservableObject
     private async Task<bool> TryExecuteLocallyAsync()
     {
         if (_settings?.Current.PreferLocalOfficeGeneration != true
-            || _localExecutor is null || !_localExecutor.CanExecute(_plan))
+            || _localExecutor is null
+            || !_localExecutor.IsAvailable)
             return false;
 
         try
         {
-            // Staged under temp until the user clicks Download — the same UX
-            // as the server path, where bytes only land via the save dialog.
-            var outputPath = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), "SranDesktop", "plans",
-                Guid.NewGuid().ToString("N"), BuildLocalOutputFilename());
-            var local = await _localExecutor.ExecuteAsync(_plan, outputPath);
+            // Executed in the isolated document worker, never in this process.
+            // The worker reopens the produced file, so the validation reported
+            // here is a real check rather than an assumption.
+            var executed = await _localExecutor.ExecuteAsync(
+                PlanType, _plan, BuildLocalOutputFilename());
+            if (!executed.Succeeded || executed.OutputPath is null)
+            {
+                _logger?.LogInformation(
+                    "Isolated {PlanType} plan execution declined ({Code}) — using chat-edge",
+                    PlanType,
+                    executed.FailureCode);
+                return false;
+            }
 
             // Version 0 on purpose: local files sit outside the server's
             // DB-backed version lineage (a stated tradeoff of the setting).
@@ -136,17 +144,18 @@ public partial class PlanBlockViewModel : ObservableObject
                 _api,
                 new PlanExecutionResult(
                     new PlanFileDto(
-                        "local", System.IO.Path.GetFileName(local.OutputPath), null,
-                        local.FileSizeBytes, null, 0),
-                    new PlanValidationDto(true, null, null, null, local.Stats),
-                    local.Changes),
-                local.OutputPath);
+                        "local", System.IO.Path.GetFileName(executed.OutputPath), null,
+                        executed.FileSizeBytes, null, 0),
+                    new PlanValidationDto(
+                        executed.Validation?.Passed == true, null, null, null, null),
+                    executed.Changes.ToList()),
+                executed.OutputPath);
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogWarning(ex,
-                "Local {PlanType} plan execution failed — falling back to chat-edge",
+                "Isolated {PlanType} plan execution failed — falling back to chat-edge",
                 PlanType);
             return false;
         }

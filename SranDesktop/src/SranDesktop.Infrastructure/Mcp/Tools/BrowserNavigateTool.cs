@@ -1,23 +1,26 @@
 using System.Text.Json;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
+using SranDesktop.Domain.Entities;
 using SranDesktop.Domain.Enums;
+using SranDesktop.Infrastructure.Native;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
 
-/// <summary>browser_navigate (browser tools) — navigates and WAITS: the
-/// extension resolves only after document.readyState === 'complete' plus a
-/// short settle window, so the next read_page sees the real page.</summary>
-public sealed class BrowserNavigateTool : IMcpTool
+public sealed class BrowserNavigateTool : IMcpTool, IPerceptualActionTool
 {
     private readonly IBrowserBridgeService _bridge;
+    private readonly BrowserInteractionObserver _observer;
 
-    public BrowserNavigateTool(IBrowserBridgeService bridge) => _bridge = bridge;
+    public BrowserNavigateTool(IBrowserBridgeService bridge)
+    {
+        _bridge = bridge;
+        _observer = new BrowserInteractionObserver(bridge);
+    }
 
     public string Name => "browser_navigate";
     public string Description =>
-        "Navigate a Chrome tab to a URL and wait for the page to finish loading. " +
-        "Returns the final URL and title.";
+        "Navigate a Chrome tab to a URL, wait for load completion, and verify the final URL.";
     public ToolCategory Category => ToolCategory.Browser;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 
@@ -39,10 +42,58 @@ public sealed class BrowserNavigateTool : IMcpTool
             || uri.Scheme is not ("http" or "https"))
             return Task.FromResult(ToolResult.Fail("url must be an absolute http(s) URL."));
 
-        return BrowserToolHelpers.RequestAsync(_bridge, "page.navigate",
+        return BrowserToolHelpers.RequestAsync(
+            _bridge,
+            "page.navigate",
             new { url, tab_id = BrowserToolHelpers.GetTabId(arguments) },
-            r => ToolResult.Ok($"Loaded: {BrowserToolHelpers.GetString(r, "title")} — " +
-                               $"{BrowserToolHelpers.GetString(r, "url")}. " +
-                               "Use browser_read_page to see its content."), ct);
+            result =>
+            {
+                var finalUrl = BrowserToolHelpers.GetString(result, "url");
+                var navigationVerified =
+                    result.TryGetProperty("navigation_verified", out var verified)
+                    && verified.ValueKind == JsonValueKind.True;
+                if (!navigationVerified
+                    || !Uri.TryCreate(finalUrl, UriKind.Absolute, out _))
+                    return ToolResult.ExecutedUnverified(
+                        "The browser accepted navigation, but no valid final URL was returned.",
+                        "NavigationNotVerified",
+                        "The bridge did not report a valid final URL.");
+                return ToolResult.Verified(
+                    $"Loaded and verified: {BrowserToolHelpers.GetString(result, "title")} - {finalUrl}.",
+                    [$"browser_final_url={finalUrl}", "document_ready_state=complete"]);
+            },
+            ct,
+            mutating: true);
     }
+
+    public InteractionActionDescriptor DescribeAction(JsonElement arguments) =>
+        new(
+            InteractionActionKind.Navigate,
+            ToolHelpers.GetString(arguments, "url") ?? "",
+            ToolHelpers.GetString(arguments, "url") ?? "",
+            SideEffectClass.ReversibleLowRisk,
+            Reversible: true,
+            Idempotent: true,
+            RequiresConfirmation: true,
+            Timeout: TimeSpan.FromSeconds(20),
+            MaximumAttempts: 2);
+
+    public Task<InteractionObservationSnapshot> ObserveBeforeActionAsync(
+        JsonElement arguments,
+        CancellationToken ct) =>
+        _observer.ObserveBeforeAsync(arguments, DescribeAction(arguments), ct);
+
+    public Task<InteractionObservationSnapshot> ObserveAfterActionAsync(
+        JsonElement arguments,
+        ToolResult result,
+        InteractionObservationSnapshot before,
+        CancellationToken ct) =>
+        _observer.ObserveAfterAsync(arguments, DescribeAction(arguments), before, ct);
+
+    public ToolContractVerification VerifyAction(
+        JsonElement arguments,
+        ToolResult result,
+        InteractionObservationSnapshot before,
+        InteractionObservationSnapshot after) =>
+        _observer.Verify(result, before, after);
 }

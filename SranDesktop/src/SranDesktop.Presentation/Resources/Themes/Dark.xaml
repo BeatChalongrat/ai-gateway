@@ -16,6 +16,7 @@
     <Color x:Key="AccentBlueColor">#60A5FA</Color>
     <Color x:Key="AccentGreenColor">#10A37F</Color>
     <Color x:Key="AccentRedColor">#EF4444</Color>
+    <Color x:Key="AccentAmberColor">#E8A23D</Color>
     <Color x:Key="AccentWarningColor">#F59E0B</Color>
     <Color x:Key="BorderColor">#3A3A3A</Color>
     <Color x:Key="UserBubbleColor">#2F2F2F</Color>
@@ -36,6 +37,7 @@
     <SolidColorBrush x:Key="AccentBlueBrush" Color="{StaticResource AccentBlueColor}" />
     <SolidColorBrush x:Key="AccentGreenBrush" Color="{StaticResource AccentGreenColor}" />
     <SolidColorBrush x:Key="AccentRedBrush" Color="{StaticResource AccentRedColor}" />
+    <SolidColorBrush x:Key="AccentAmberBrush" Color="{StaticResource AccentAmberColor}" />
     <SolidColorBrush x:Key="AccentWarningBrush" Color="{StaticResource AccentWarningColor}" />
     <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}" />
     <SolidColorBrush x:Key="UserBubbleBrush" Color="{StaticResource UserBubbleColor}" />

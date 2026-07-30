@@ -1,0 +1,136 @@
+<Window x:Class="SranDesktop.ReliabilityFixture.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SRAN Reliability Fixture"
+        Width="720"
+        Height="620"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <TextBlock x:Name="State"
+               Grid.Row="0"
+               FontSize="18"
+               Text="Ready" />
+
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
+      <Button x:Name="ActivateButton"
+              AutomationProperties.AutomationId="activate-button"
+              AutomationProperties.Name="Activate fixture button"
+              Width="150"
+              Height="36"
+              Click="ActivateButton_OnClick"
+              Content="Activate fixture button" />
+      <TextBox x:Name="Input"
+               AutomationProperties.AutomationId="fixture-input"
+               AutomationProperties.Name="Fixture input"
+               Width="220"
+               Height="36"
+               Margin="12,0,0,0" />
+      <CheckBox x:Name="Toggle"
+                AutomationProperties.Name="Fixture checkbox"
+                Margin="12,8,0,0"
+                Checked="Toggle_OnChanged"
+                Unchecked="Toggle_OnChanged"
+                Content="Toggle" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+      <Button AutomationProperties.Name="Open fixture modal"
+              Click="OpenModal_OnClick"
+              Content="Open modal" />
+      <Button AutomationProperties.Name="Move fixture target"
+              Margin="8,0,0,0"
+              Click="MoveTarget_OnClick"
+              Content="Move target" />
+      <Button AutomationProperties.Name="Replace fixture target"
+              Margin="8,0,0,0"
+              Click="ReplaceTarget_OnClick"
+              Content="Replace target" />
+      <Button AutomationProperties.Name="Relocate magenta fixture surface"
+              Margin="8,0,0,0"
+              Click="MoveVisualTarget_OnClick"
+              Content="Relocate surface" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="3"
+                  Margin="0,12,0,0"
+                  VerticalScrollBarVisibility="Auto">
+      <Grid Height="760">
+        <Button x:Name="MovingTarget"
+                AutomationProperties.Name="Moving fixture action"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Width="150"
+                Height="36"
+                Margin="20,80,0,0"
+                Click="MovingTarget_OnClick"
+                Content="Moving fixture action" />
+        <Border x:Name="ReplacementHost"
+                Margin="0,160,0,0"
+                VerticalAlignment="Top"
+                Height="52" />
+        <Border x:Name="OcrTarget"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Width="220"
+                Height="68"
+                Margin="260,260,0,0"
+                Background="#FFF4C542"
+                BorderBrush="#FF171717"
+                BorderThickness="3"
+                Cursor="Hand"
+                MouseLeftButtonUp="OcrTarget_OnClick">
+          <TextBlock Text="OCR ACTION"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     FontFamily="Segoe UI"
+                     FontSize="28"
+                     FontWeight="Bold"
+                     IsHitTestVisible="False" />
+        </Border>
+        <Border x:Name="VisualTarget"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Width="180"
+                Height="68"
+                Margin="20,360,0,0"
+                Background="#FFCF2DF0"
+                BorderBrush="#FF171717"
+                BorderThickness="3"
+                Cursor="Hand"
+                MouseLeftButtonUp="VisualTarget_OnClick">
+          <Grid IsHitTestVisible="False">
+            <Ellipse Width="30"
+                     Height="30"
+                     Fill="#FFFFFFFF"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+            <Rectangle Width="12"
+                       Height="48"
+                       Fill="#FF171717"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       RenderTransformOrigin="0.5,0.5">
+              <Rectangle.RenderTransform>
+                <RotateTransform Angle="45" />
+              </Rectangle.RenderTransform>
+            </Rectangle>
+          </Grid>
+        </Border>
+        <Button AutomationProperties.Name="After scroll action"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Width="150"
+                Height="36"
+                Click="AfterScroll_OnClick"
+                Content="After scroll action" />
+      </Grid>
+    </ScrollViewer>
+  </Grid>
+</Window>

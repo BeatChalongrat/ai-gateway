@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
+using SranDesktop.Application.Services;
 using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
@@ -23,7 +24,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// files, so it is NOT auto-allowed — it asks, and the user may grant
 /// allow-once / allow-always per session through the standard consent flow.
 /// </summary>
-public sealed class RunPythonTool : IMcpTool
+public sealed class RunPythonTool : IMcpTool, ISensitiveDataTool
 {
     private readonly IChatEdgeApiClient _client;
 
@@ -43,6 +44,15 @@ public sealed class RunPythonTool : IMcpTool
 
     // Ask — see the class remarks for the justification vs run_command.
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
+    public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+        "RemoteSandbox.Execute",
+        "CodeAndFiles.SendToSandbox",
+        "model_authored_code",
+        "unknown",
+        "configured code sandbox service",
+        ExternalTransmission: true,
+        AlwaysRequireConfirmation: true,
+        AllowPersistence: false);
 
     public JsonElement ParametersSchema { get; } = ToolHelpers.Schema("""
         {
@@ -137,7 +147,8 @@ public sealed class RunPythonTool : IMcpTool
                 sb.AppendLine("Generated file(s): " + string.Join(", ", otherFiles.Select(f => f.Filename)));
         }
 
-        var text = sb.ToString().TrimEnd();
+        var text = UntrustedObservationBoundary.ProtectIfUntrusted(
+            "run_python", sb.ToString().TrimEnd());
 
         // ToolResult carries at most one inline image (for the model's vision).
         // Surface the first chart; any extras are named in the text above.

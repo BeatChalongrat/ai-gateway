@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
+using SranDesktop.Application.Services;
 using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
@@ -62,12 +63,16 @@ public sealed class WebSearchTool : IMcpTool
                 domain = r.Domain,
                 published_date = r.PublishedDate
             });
-            return ToolResult.Ok(JsonSerializer.Serialize(new
+            // Search hits (titles/snippets/urls) are untrusted external content —
+            // wrap so a poisoned result can't be read as instructions. The query
+            // and provider are our own metadata but travel inside the same payload.
+            var payload = JsonSerializer.Serialize(new
             {
                 query = response.Query,
                 provider = response.Provider,
                 results
-            }));
+            });
+            return ToolResult.Ok(UntrustedObservationBoundary.ProtectIfUntrusted(Name, payload));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {

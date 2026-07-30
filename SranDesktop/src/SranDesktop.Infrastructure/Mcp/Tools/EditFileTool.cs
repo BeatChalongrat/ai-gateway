@@ -16,6 +16,10 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 public sealed class EditFileTool : IMcpTool
 {
     private const long MaxFileBytes = 10 * 1024 * 1024;
+    private readonly IWorkspaceFileBroker _files;
+
+    public EditFileTool(IWorkspaceFileBroker? files = null) =>
+        _files = files ?? WorkspaceFileBroker.Shared;
 
     public string Name => "edit_file";
     public string Description =>
@@ -40,9 +44,9 @@ public sealed class EditFileTool : IMcpTool
 
     public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
-        var path = PathGuard.Resolve(ToolHelpers.GetString(arguments, "path"), out var error);
-        if (path is null)
-            return ToolResult.Fail(error!);
+        var path = ToolHelpers.GetString(arguments, "path");
+        if (string.IsNullOrWhiteSpace(path))
+            return ToolResult.Fail("'path' is required.");
 
         var oldString = ToolHelpers.GetString(arguments, "old_string");
         var newString = ToolHelpers.GetString(arguments, "new_string");
@@ -53,16 +57,25 @@ public sealed class EditFileTool : IMcpTool
         if (oldString == newString)
             return ToolResult.Fail("'old_string' and 'new_string' are identical — nothing to change.");
 
-        if (!File.Exists(path))
+        WorkspaceFileSnapshot snapshot;
+        try
+        {
+            snapshot = await _files.ReadFileAsync(path, MaxFileBytes, ct);
+        }
+        catch (FileNotFoundException)
+        {
             return ToolResult.Fail($"File not found: {path}. To create a new file, use write_file.");
+        }
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or ArgumentException
+                                   or NotSupportedException)
+        {
+            return ToolResult.Fail(ex.Message);
+        }
 
-        var info = new FileInfo(path);
-        if (info.Length > MaxFileBytes)
-            return ToolResult.Fail($"File too large to edit: {ToolHelpers.FormatSize(info.Length)} (max 10 MB).");
-
-        var content = await File.ReadAllTextAsync(path, ct);
+        var content = Encoding.UTF8.GetString(snapshot.Bytes);
         var replaceAll = ToolHelpers.GetBool(arguments, "replace_all");
-
         var occurrences = CountOccurrences(content, oldString);
         if (occurrences == 0)
             return ToolResult.Fail(
@@ -79,12 +92,22 @@ public sealed class EditFileTool : IMcpTool
             : string.Concat(content.AsSpan(0, firstIndex), newString,
                 content.AsSpan(firstIndex + oldString.Length));
 
-        await File.WriteAllTextAsync(path, updated, Encoding.UTF8, ct);
+        try
+        {
+            await _files.WriteTextAsync(path, updated, ct);
+        }
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or ArgumentException
+                                   or NotSupportedException)
+        {
+            return ToolResult.Fail(ex.Message);
+        }
 
         var line = LineNumberAt(content, firstIndex);
         return ToolResult.Ok(replaceAll
-            ? $"Replaced {occurrences} occurrence(s) in {path}."
-            : $"Edited {path} at line {line} (1 replacement).");
+            ? $"Replaced {occurrences} occurrence(s) in {snapshot.FullPath}."
+            : $"Edited {snapshot.FullPath} at line {line} (1 replacement).");
     }
 
     private static int CountOccurrences(string haystack, string needle)

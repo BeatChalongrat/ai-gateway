@@ -1,12 +1,14 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using SranDesktop.Application.Services;
 using SranDesktop.Infrastructure.Mcp;
 using SranDesktop.Infrastructure.Mcp.Tools;
 using Xunit;
 
 namespace SranDesktop.Tests.Agent;
 
+[Collection("PathGuardGrants")]
 public class McpToolTests : IDisposable
 {
     private readonly string _workDir;
@@ -16,6 +18,9 @@ public class McpToolTests : IDisposable
         // Inside the temp folder → within PathGuard's allowed roots.
         _workDir = Path.Combine(Path.GetTempPath(), $"sran-tools-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
+        PathGuard.ConfigureMounts(
+            [new WorkspaceMount(_workDir, WorkspaceMountAccess.ReadWrite)],
+            _workDir);
     }
 
     private static JsonElement Args(string json)
@@ -38,7 +43,10 @@ public class McpToolTests : IDisposable
             Args($"{{\"path\":{J(file)}}}"), CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        result.Content.Should().Be("hello สวัสดี");
+        UntrustedObservationBoundary.TryReadEnvelope(result.Content, out var envelope)
+            .Should().BeTrue();
+        envelope!.SourceType.Should().Be("workspace_file");
+        envelope.Content.Should().Be("hello สวัสดี");
     }
 
     [Fact]
@@ -49,7 +57,7 @@ public class McpToolTests : IDisposable
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("outside the allowed directories");
+        result.Error.Should().Contain("outside authorized workspace mounts");
     }
 
     [Fact]
@@ -135,10 +143,19 @@ public class McpToolTests : IDisposable
 
     // ---------- open_url ----------
 
+    /// <summary>A launcher that fails the test if it is ever reached — a refused
+    /// scheme must not get as far as the shell. The dispatch and honesty
+    /// properties live in OpenUrlToolSecurityTests.</summary>
+    private sealed class NeverLaunches : SranDesktop.Application.Interfaces.IBrowserLauncher
+    {
+        public bool Open(string url) =>
+            throw new InvalidOperationException($"Must not launch: {url}");
+    }
+
     [Fact]
     public async Task OpenUrl_Rejects_Non_Http_Schemes()
     {
-        var result = await new OpenUrlTool().ExecuteAsync(
+        var result = await new OpenUrlTool(new NeverLaunches()).ExecuteAsync(
             Args("""{"url":"file:///C:/Windows/System32/calc.exe"}"""), CancellationToken.None);
 
         result.Success.Should().BeFalse();
@@ -150,7 +167,11 @@ public class McpToolTests : IDisposable
     public async Task RunCommand_Executes_And_Captures_Output()
     {
         var result = await new RunCommandTool(NullLogger<RunCommandTool>.Instance).ExecuteAsync(
-            Args("""{"command":"echo agent-test-123"}"""), CancellationToken.None);
+            Args(JsonSerializer.Serialize(new
+            {
+                command = "echo agent-test-123",
+                working_directory = _workDir
+            })), CancellationToken.None);
 
         result.Success.Should().BeTrue();
         result.Content.Should().Contain("agent-test-123");
@@ -200,8 +221,24 @@ public class McpToolTests : IDisposable
         host.Resolve("nope").Should().BeNull();
     }
 
+    // Phase 0 (UIA-first): the model sees tools in REGISTRATION order, which is what
+    // makes AppHostBuilder's structured-first ordering (uia_* before computer_*) reach
+    // the model. Lock the order-preservation invariant that gives that reordering meaning.
+    [Fact]
+    public void ToolHost_Preserves_Registration_Order()
+    {
+        var registry = new McpToolRegistry();
+        registry.Register(new WriteFileTool());  // registered first
+        registry.Register(new ReadFileTool());   // registered second
+        var host = new McpToolHost(registry);
+
+        host.GetToolDefinitions().Select(d => d.Function.Name)
+            .Should().ContainInOrder("write_file", "read_file");
+    }
+
     public void Dispose()
     {
+        PathGuard.ConfigureMounts([]);
         if (Directory.Exists(_workDir))
             Directory.Delete(_workDir, recursive: true);
     }

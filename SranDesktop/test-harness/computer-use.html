@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SRAN Computer Use Safe Harness</title>
+  <style>
+    body { font: 16px Segoe UI, sans-serif; margin: 24px; }
+    button, input, select { margin: 6px; min-height: 32px; }
+    .medium { width: 120px; } .large { width: 240px; height: 64px; }
+    .small { width: 28px; height: 28px; padding: 0; }
+    #scroll { height: 180px; overflow: auto; border: 1px solid #555; }
+    #scroll div { height: 500px; padding-top: 450px; }
+    #edge { position: fixed; right: 0; top: 180px; }
+    dialog { min-width: 260px; }
+  </style>
+</head>
+<body>
+  <h1>SRAN Computer Use Safe Harness</h1>
+  <output id="state" data-state="idle">idle</output>
+  <div>
+    <button class="large" data-action="large">Large target</button>
+    <button class="medium" data-action="medium">Medium target</button>
+    <button class="small" data-action="icon" aria-label="Icon target">+</button>
+    <button disabled>Disabled</button>
+    <button id="edge" data-action="edge">Edge</button>
+  </div>
+  <label><input id="toggle" type="checkbox"> Toggle</label>
+  <label><input id="check" type="checkbox"> Checkbox</label>
+  <select id="select"><option>One</option><option>Two</option></select>
+  <input id="text" aria-label="Test text">
+  <button data-action="modal" onclick="modal.showModal()">Modal</button>
+  <div id="scroll"><div><button data-action="after-scroll">After scroll</button></div></div>
+  <dialog id="modal"><p>Safe modal</p><button onclick="modal.close()">Close</button></dialog>
+  <script>
+    const params = new URLSearchParams(location.search);
+    let randomState = Number(params.get('seed') || 1729) >>> 0;
+    const random = () => {
+      randomState = (1664525 * randomState + 1013904223) >>> 0;
+      return randomState / 4294967296;
+    };
+
+    function generateBenchmarkLayout() {
+      const groups = [
+        ['large-text', 220, 64], ['medium-text', 120, 40], ['small-text', 48, 28],
+        ['icon-only', 30, 30], ['checkbox-toggle', 32, 32], ['input', 150, 34],
+        ['dropdown-menu', 130, 34], ['adjacent', 42, 30], ['edge', 70, 32],
+        ['after-scroll', 90, 34], ['moved-window', 100, 36], ['resized-window', 100, 36],
+        ['occluded', 90, 36], ['similar-decoy', 90, 36]
+      ];
+      const attemptsPerGroup = Math.max(100, Number(params.get('attempts') || 100));
+      window.__sranBenchmarkPlan = groups.flatMap(([group]) =>
+        Array.from({ length: attemptsPerGroup }, (_, attempt) => ({
+          group,
+          attempt,
+          seed: (Number(params.get('seed') || 1729) + attempt * 7919) >>> 0,
+          query: `?benchmark=1&group=${encodeURIComponent(group)}&seed=${
+            (Number(params.get('seed') || 1729) + attempt * 7919) >>> 0}`
+        })));
+      const selectedGroup = params.get('group');
+      const renderedGroups = selectedGroup
+        ? groups.filter(([group]) => group === selectedGroup)
+        : groups;
+      const area = document.createElement('section');
+      area.id = 'benchmark-area';
+      area.style.cssText = 'position:relative;height:900px;border:1px solid #777;margin-top:20px;overflow:auto';
+      renderedGroups.forEach(([group, width, height], index) => {
+        const target = document.createElement(group === 'input' ? 'input' : 'button');
+        target.id = `ground-truth-${group}`;
+        target.dataset.groundTruth = 'true';
+        target.dataset.group = group;
+        target.setAttribute('aria-label', `Target ${group}`);
+        if (target.tagName === 'BUTTON') target.textContent = group.includes('icon') ? '+' : `Target ${index}`;
+        target.style.cssText = `position:absolute;width:${width}px;height:${height}px;` +
+          `left:${Math.floor(random() * Math.max(1, 700 - width))}px;` +
+          `top:${Math.floor(random() * 820)}px`;
+        area.appendChild(target);
+        if (group === 'adjacent' || group === 'similar-decoy' || group === 'icon-only') {
+          const decoy = target.cloneNode(true);
+          decoy.id = `decoy-${group}`;
+          decoy.dataset.groundTruth = 'false';
+          decoy.setAttribute('aria-label', `Decoy ${group}`);
+          decoy.style.left = `${parseInt(target.style.left, 10) + width + 4}px`;
+          area.appendChild(decoy);
+        }
+        if (group === 'occluded') {
+          const overlay = document.createElement('div');
+          overlay.id = 'test-overlay';
+          overlay.style.cssText = target.style.cssText + ';background:#9998;z-index:2';
+          area.appendChild(overlay);
+        }
+      });
+      document.body.appendChild(area);
+      window.__sranBenchmarkGroundTruth = () => [...area.querySelectorAll('[data-ground-truth]')]
+        .map(el => {
+          const r = el.getBoundingClientRect();
+          return { id: el.id, group: el.dataset.group, ground_truth: el.dataset.groundTruth === 'true',
+            bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
+            state: el.dataset.state || 'idle', seed: randomState };
+        });
+    }
+    if (params.get('benchmark') === '1') generateBenchmarkLayout();
+
+    document.addEventListener('click', event => {
+      const action = event.target.dataset.action;
+      if (action) {
+        state.value = action;
+        state.dataset.state = action;
+      }
+      if (event.target.dataset.groundTruth) {
+        event.target.dataset.state = 'activated';
+        state.value = event.target.id;
+        state.dataset.activatedElementId = event.target.id;
+      }
+    });
+  </script>
+</body>
+</html>

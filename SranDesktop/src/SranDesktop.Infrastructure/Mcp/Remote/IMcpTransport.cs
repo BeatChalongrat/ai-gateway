@@ -36,4 +36,10 @@ public interface IMcpTransport : IAsyncDisposable
     /// process crash/exit). NOT raised on graceful disposal. Never raised by
     /// the HTTP transport — its failures surface per call.</summary>
     event EventHandler? Exited;
+
+    /// <summary>Whether a cached session is still worth handing out. A stdio
+    /// server whose process has exited is not, and reusing it would turn a dead
+    /// connector into a hang. HTTP has no persistent process to lose, so it is
+    /// always reusable and its failures surface per call.</summary>
+    bool IsConnected => true;
 }

@@ -12,6 +12,11 @@ public sealed class ToolConsentViewModel
     public string Description { get; }
     public string ArgumentsFormatted { get; }
     public ToolCategory Category { get; }
+    public string Action { get; }
+    public string Destination { get; }
+    public string Sensitivity { get; }
+    public bool ExternalTransmission { get; }
+    public bool ShowAlwaysAllow { get; }
 
     /// <summary>True when the action can affect the machine or the outside world —
     /// drives the prominent danger banner (Phase C PART 3, capability-derived).</summary>
@@ -24,8 +29,14 @@ public sealed class ToolConsentViewModel
     {
         ToolName = request.ToolName;
         Description = request.Description;
-        ArgumentsFormatted = PrettyPrint(request.ArgumentsJson);
+        ArgumentsFormatted = PrettyPrint(
+            SensitiveDataRedactor.Redact(request.ArgumentsJson));
         Category = request.Category;
+        Action = request.Action ?? request.ToolName;
+        Destination = request.Destination ?? "local device";
+        Sensitivity = request.Sensitivity ?? "unknown";
+        ExternalTransmission = request.ExternalTransmission;
+        ShowAlwaysAllow = !request.AlwaysRequireConfirmation;
 
         var danger = ToolDangerClassifier.Classify(request.ToolName, request.Category);
         IsDangerous = danger.IsDangerous;

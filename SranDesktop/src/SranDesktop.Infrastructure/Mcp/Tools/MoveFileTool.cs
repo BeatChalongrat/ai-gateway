@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
 using SranDesktop.Domain.Enums;
@@ -14,6 +15,11 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// </summary>
 public sealed class MoveFileTool : IMcpTool
 {
+    private readonly IWorkspaceFileBroker _files;
+
+    public MoveFileTool(IWorkspaceFileBroker? files = null) =>
+        _files = files ?? WorkspaceFileBroker.Shared;
+
     public string Name => "move_file";
     public string Description =>
         "Move or rename a file or directory. Both the source and destination must be inside allowed folders.";
@@ -32,47 +38,27 @@ public sealed class MoveFileTool : IMcpTool
         }
         """);
 
-    public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
-        var source = PathGuard.Resolve(ToolHelpers.GetString(arguments, "source"), out var srcError);
-        if (source is null)
-            return Task.FromResult(ToolResult.Fail(srcError!));
-
-        var destination = PathGuard.Resolve(ToolHelpers.GetString(arguments, "destination"), out var dstError);
-        if (destination is null)
-            return Task.FromResult(ToolResult.Fail(dstError!));
-
+        var source = ToolHelpers.GetString(arguments, "source");
+        var destination = ToolHelpers.GetString(arguments, "destination");
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(destination))
+            return ToolResult.Fail("'source' and 'destination' are required.");
         var overwrite = ToolHelpers.GetBool(arguments, "overwrite");
-        var isDirectory = Directory.Exists(source);
-
-        if (!isDirectory && !File.Exists(source))
-            return Task.FromResult(ToolResult.Fail($"Source not found: {source}"));
-
-        var parent = Path.GetDirectoryName(destination);
-        if (parent is not null)
-            Directory.CreateDirectory(parent);
-
         try
         {
-            if (isDirectory)
-            {
-                if (Directory.Exists(destination))
-                    return Task.FromResult(ToolResult.Fail($"Destination directory already exists: {destination}"));
-                Directory.Move(source, destination);
-            }
-            else
-            {
-                if (File.Exists(destination) && !overwrite)
-                    return Task.FromResult(ToolResult.Fail(
-                        $"Destination already exists: {destination}. Set overwrite to replace it."));
-                File.Move(source, destination, overwrite);
-            }
+            await _files.MoveAsync(source, destination, overwrite, ct);
+            return ToolResult.Verified(
+                $"Moved and verified {source} to {destination}.",
+                ["source_absent=true", "destination_present=true"],
+                [$"moved_from={source}", $"moved_to={destination}"]);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or ArgumentException
+                                   or NotSupportedException)
         {
-            return Task.FromResult(ToolResult.Fail($"Move failed: {ex.Message}"));
+            return ToolResult.Fail($"Move failed: {ex.Message}");
         }
-
-        return Task.FromResult(ToolResult.Ok($"Moved {source} to {destination}"));
     }
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Models;
 using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp;
@@ -11,34 +12,44 @@ namespace SranDesktop.Infrastructure.Mcp;
 public sealed class PermissionService : IPermissionService
 {
     private readonly IConversationStore _store;
+    private readonly ISecurityEventLogger? _securityEvents;
     private readonly ConcurrentDictionary<string, PermissionLevel> _sessionCache = new();
 
-    public PermissionService(IConversationStore store) => _store = store;
+    public PermissionService(
+        IConversationStore store,
+        ISecurityEventLogger? securityEvents = null)
+    {
+        _store = store;
+        _securityEvents = securityEvents;
+    }
 
     public async Task<PermissionDecision> CheckAsync(
         IMcpTool tool, string scope, CancellationToken ct = default)
     {
         // 1. Persistent overrides
         var persisted = await _store.GetToolPermissionAsync(tool.Name, scope, ct);
-        if (persisted == "allow_always") return PermissionDecision.Auto;
-        if (persisted == "deny_always") return PermissionDecision.Denied;
+        if (persisted == "allow_always")
+            return Record(tool, scope, PermissionDecision.Auto, "stored_allow");
+        if (persisted == "deny_always")
+            return Record(tool, scope, PermissionDecision.Denied, "stored_deny");
 
         // 2. Session decisions
         if (_sessionCache.TryGetValue(CacheKey(tool.Name, scope), out var cached))
         {
             if (cached is PermissionLevel.AllowOnce or PermissionLevel.AllowAlways)
-                return PermissionDecision.Auto;
+                return Record(tool, scope, PermissionDecision.Auto, "task_allow");
             if (cached == PermissionLevel.Deny)
-                return PermissionDecision.Denied;
+                return Record(tool, scope, PermissionDecision.Denied, "task_deny");
         }
 
         // 3. Tool default
-        return tool.DefaultPermission switch
+        var decision = tool.DefaultPermission switch
         {
             PermissionLevel.AllowAlways => PermissionDecision.Auto,
             PermissionLevel.Deny => PermissionDecision.Denied,
             _ => PermissionDecision.NeedsConsent
         };
+        return Record(tool, scope, decision, "tool_default");
     }
 
     public void RecordSessionDecision(string toolName, string scope, PermissionLevel level) =>
@@ -49,4 +60,18 @@ public sealed class PermissionService : IPermissionService
         _store.SetToolPermissionAsync(toolName, scope, permission, ct);
 
     private static string CacheKey(string toolName, string scope) => $"{toolName}::{scope}";
+
+    private PermissionDecision Record(
+        IMcpTool tool,
+        string scope,
+        PermissionDecision decision,
+        string source)
+    {
+        _securityEvents?.Write(new SecurityAuditEvent(
+            "permission.evaluated",
+            $"{source}:{decision}",
+            tool.Name,
+            TargetCategory: scope == "*" ? "global" : "scoped"));
+        return decision;
+    }
 }

@@ -11,6 +11,7 @@ namespace SranDesktop.Tests.Agent;
 
 /// <summary>Phase A PART 3: configurable timeout, partial output on timeout,
 /// per-conversation working-directory retention.</summary>
+[Collection("PathGuardGrants")]
 public class ShellToolTests : IDisposable
 {
     private readonly string _workDir;
@@ -19,13 +20,20 @@ public class ShellToolTests : IDisposable
     {
         _workDir = Path.Combine(Path.GetTempPath(), $"sran-shell-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
+        PathGuard.ConfigureMounts(
+            [new WorkspaceMount(_workDir, WorkspaceMountAccess.ReadWrite)],
+            _workDir);
     }
 
     private sealed class FakeSettings : ISettingsService
     {
         public UserSettings Current { get; }
         public bool IsFirstRun => false;
-        public FakeSettings(int timeout) => Current = new UserSettings { ShellTimeoutSeconds = timeout };
+        public FakeSettings(int timeout, string workingFolder) => Current = new UserSettings
+        {
+            ShellTimeoutSeconds = timeout,
+            WorkingFolder = workingFolder
+        };
         public event EventHandler? SettingsChanged;
         public void Save(UserSettings settings) => SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -35,7 +43,7 @@ public class ShellToolTests : IDisposable
     [Fact]
     public async Task Command_Completes_Under_Configured_Timeout()
     {
-        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300));
+        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300, _workDir));
 
         var result = await tool.ExecuteAsync(Args(new { command = "echo build-ok" }), CancellationToken.None);
 
@@ -49,35 +57,62 @@ public class ShellToolTests : IDisposable
     {
         // A 1s override on a 5s sleep: the old behavior was a bare "timed out and
         // was killed" failure; now it returns partial output + a resumable note.
-        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300));
+        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300, _workDir));
 
         var result = await tool.ExecuteAsync(
-            Args(new { command = "powershell Start-Sleep -Seconds 5", timeout_seconds = 1 }),
+            Args(new
+            {
+                command = "echo partial-output & for /L %i in (1,1,2147483647) do @rem",
+                timeout_seconds = 1
+            }),
             CancellationToken.None);
 
-        result.Success.Should().BeTrue();
-        result.Content.Should().Contain("still running");
-        result.Content.Should().Contain("timeout_seconds");
+        result.Success.Should().BeFalse();
+        result.Effect!.FailureCode.Should().Be("Timeout");
+        result.Effect.Retryable.Should().BeTrue();
+        result.Error.Should().Contain("still running");
+        result.Error.Should().Contain("timeout_seconds");
+        result.Content.Should().Contain("partial-output");
     }
 
     [Fact]
     public async Task Stderr_And_NonZero_Exit_Feed_Back()
     {
-        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300));
+        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300, _workDir));
 
         var result = await tool.ExecuteAsync(
             Args(new { command = "echo oops 1>&2 & exit /b 3" }), CancellationToken.None);
 
-        result.Success.Should().BeTrue();
+        result.Success.Should().BeFalse();
+        result.Effect!.FailureCode.Should().Be("NonZeroExitCode");
+        result.Effect.ExitCode.Should().Be(3);
         result.Content.Should().Contain("oops");
         result.Content.Should().Contain("[exit code 3]");
+    }
+
+    [Fact]
+    public async Task Explicit_Expected_NonZero_Exit_Code_Is_Verified()
+    {
+        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300, _workDir));
+
+        var result = await tool.ExecuteAsync(
+            Args(new
+            {
+                command = "exit /b 3",
+                expected_exit_codes = new[] { 3 }
+            }),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Effect!.Verified.Should().BeTrue();
+        result.Effect.ExitCode.Should().Be(3);
     }
 
     [Fact]
     public async Task WorkingDirectory_Persists_Across_Calls_In_A_Conversation()
     {
         var session = new ShellSession { CurrentConversationId = "conv-1" };
-        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300), session);
+        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300, _workDir), session);
         var subA = Path.Combine(_workDir, "projA");
         var subB = Path.Combine(_workDir, "projB");
         Directory.CreateDirectory(subA);
@@ -86,16 +121,16 @@ public class ShellToolTests : IDisposable
         // Set the cwd explicitly once...
         var first = await tool.ExecuteAsync(
             Args(new { command = "cd", working_directory = subA }), CancellationToken.None);
-        first.Content.Should().Contain(subA);
+        first.Content.Should().Contain("projA");
 
         // ...the next command without a working_directory reuses it.
         var second = await tool.ExecuteAsync(Args(new { command = "cd" }), CancellationToken.None);
-        second.Content.Should().Contain(subA);
+        second.Content.Should().Contain("projA");
 
         // A new explicit dir updates the retained value.
         var third = await tool.ExecuteAsync(
             Args(new { command = "cd", working_directory = subB }), CancellationToken.None);
-        third.Content.Should().Contain(subB);
+        third.Content.Should().Contain("projB");
         session.GetWorkingDirectory("conv-1").Should().Be(subB);
     }
 
@@ -105,7 +140,7 @@ public class ShellToolTests : IDisposable
         var subA = Path.Combine(_workDir, "cA");
         Directory.CreateDirectory(subA);
         var session = new ShellSession();
-        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300), session);
+        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300, _workDir), session);
 
         session.CurrentConversationId = "conv-A";
         await tool.ExecuteAsync(Args(new { command = "cd", working_directory = subA }), CancellationToken.None);
@@ -120,7 +155,7 @@ public class ShellToolTests : IDisposable
     [Fact]
     public async Task Retained_Working_Directory_Still_Rejects_Out_Of_Root_Cwd()
     {
-        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300),
+        var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300, _workDir),
             new ShellSession { CurrentConversationId = "c" });
 
         var result = await tool.ExecuteAsync(
@@ -131,6 +166,7 @@ public class ShellToolTests : IDisposable
 
     public void Dispose()
     {
+        PathGuard.ConfigureMounts([]);
         if (Directory.Exists(_workDir))
             Directory.Delete(_workDir, recursive: true);
     }

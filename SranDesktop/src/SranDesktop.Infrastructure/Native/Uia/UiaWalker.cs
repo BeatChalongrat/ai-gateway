@@ -96,9 +96,15 @@ internal static class UiaWalker
     {
         try
         {
-            return element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)
-                ? ((ValuePattern)pattern).Current.Value
-                : null;
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var value))
+                return ((ValuePattern)value).Current.Value;
+            // Fall back to TextPattern so a document editor's content (e.g. Windows 11
+            // Notepad's RichEdit, which exposes no ValuePattern) still shows up in the
+            // listing — this is what lets a post-type read_screen_elements observation
+            // confirm typed text (T3 PART 2). Bounded length keeps the walk cheap.
+            if (element.TryGetCurrentPattern(TextPattern.Pattern, out var text))
+                return ((TextPattern)text).DocumentRange.GetText(256);
+            return null;
         }
         catch (ElementNotAvailableException)
         {

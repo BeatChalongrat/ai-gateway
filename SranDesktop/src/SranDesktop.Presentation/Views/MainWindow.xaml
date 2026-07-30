@@ -556,12 +556,17 @@
                             </Button>
 
                             <!-- App version footer (R11 A1f) -->
-                            <TextBlock FontSize="10.5" Margin="12,6,12,2"
+                            <TextBlock FontSize="10.5" Margin="12,6,12,0"
                                        HorizontalAlignment="Center"
                                        Foreground="{DynamicResource TextTertiaryBrush}">
                                 <Run Text="{loc:T settings.version}" />
                                 <Run Text="{Binding AppVersion, Mode=OneWay}" />
                             </TextBlock>
+                            <!-- Build stamp (T5 PART B): which binary is actually running -->
+                            <TextBlock FontSize="9.5" Margin="12,0,12,2"
+                                       HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                       Text="{Binding BuildInfo, Mode=OneWay}" />
                         </StackPanel>
                     </Border>
                 </Popup>
@@ -990,6 +995,20 @@
         <!-- Toast overlay (Phase 8 Task 1): above all content, below dialog
              windows. Null background = clicks pass through except on cards. -->
         <controls:ToastHost Grid.Row="2" Panel.ZIndex="100" />
+
+        <!-- Build stamp, always visible (P3-7).
+             The same value already existed in the account popup, but a stamp you
+             have to open a menu to read does not answer the question it exists to
+             answer. Publishing does not restart the process and a stale shortcut
+             looks identical to a fresh build, so hours were spent testing a binary
+             that predated the changes under test. Corner, dim, click-through. -->
+        <TextBlock Grid.Row="2" Panel.ZIndex="99"
+                   Text="{Binding BuildInfo, Mode=OneWay}"
+                   ToolTip="{Binding BuildInfo, Mode=OneWay}"
+                   HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                   Margin="0,0,10,6" FontSize="9.5" Opacity="0.55"
+                   IsHitTestVisible="False"
+                   Foreground="{DynamicResource TextTertiaryBrush}" />
     </Grid>
     </Grid>
 </Window>

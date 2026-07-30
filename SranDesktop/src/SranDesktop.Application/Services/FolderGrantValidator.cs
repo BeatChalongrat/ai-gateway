@@ -25,6 +25,38 @@ public static class FolderGrantValidator
     public static string LocalAppStateDir { get; } = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SRAN Desktop");
 
+    /// <summary>
+    /// The folder onboarding proposes as the agent's working folder, or null when
+    /// nothing suitable exists.
+    ///
+    /// <para>Needed because the agent's file tools reach exactly the folders the
+    /// user has granted and nothing else — there are no implicit built-in roots,
+    /// which is correct, but it also means a fresh install can read and write
+    /// nothing at all. Rather than restore an implicit grant over the whole home
+    /// directory, onboarding names one ordinary folder and asks the user to
+    /// confirm it. Documents first because that is where a person's own files
+    /// live; the profile is a last resort for a machine with no Documents
+    /// folder.</para>
+    ///
+    /// <para>Candidates are run through <see cref="Validate"/>, so this can never
+    /// propose a folder the grant rules would refuse.</para>
+    /// </summary>
+    public static string? SuggestDefaultWorkingFolder()
+    {
+        foreach (var special in new[]
+                 {
+                     Environment.SpecialFolder.MyDocuments,
+                     Environment.SpecialFolder.UserProfile,
+                 })
+        {
+            var path = Environment.GetFolderPath(special);
+            if (!string.IsNullOrEmpty(path)
+                && Validate(path, out var canonical) == FolderGrantRejection.Ok)
+                return canonical;
+        }
+        return null;
+    }
+
     /// <summary>Validates + canonicalizes a candidate folder. Refuses drive
     /// roots, the Windows/Program Files/System trees, and the app state dir;
     /// requires an existing, fully-qualified directory.</summary>

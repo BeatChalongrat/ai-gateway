@@ -17,9 +17,16 @@ public partial class ConnectorMarketplaceViewModel : ObservableObject
     private readonly ConnectorOAuthCoordinator _oauth;
     private readonly IDialogService _dialogs;
     private readonly ILogger<ConnectorMarketplaceViewModel> _logger;
+    private readonly IConnectorManifestResolver? _resolver;
+    private readonly IConnectorTrustAdministration? _trust;
     private List<ConnectorItemViewModel> _all = new();
 
     public ObservableCollection<ConnectorItemViewModel> Connectors { get; } = new();
+
+    /// <summary>Connectors installed as packages in the managed folder. They are
+    /// listed whether or not they are approved — a connector nobody has decided
+    /// about yet has to be visible, or the decision can never be made.</summary>
+    public ObservableCollection<LocalConnectorItemViewModel> LocalConnectors { get; } = new();
 
     [ObservableProperty] private string _searchText = string.Empty;
 
@@ -27,12 +34,16 @@ public partial class ConnectorMarketplaceViewModel : ObservableObject
         IMcpConnectorService connectors,
         ConnectorOAuthCoordinator oauth,
         IDialogService dialogs,
-        ILogger<ConnectorMarketplaceViewModel> logger)
+        ILogger<ConnectorMarketplaceViewModel> logger,
+        IConnectorManifestResolver? resolver = null,
+        IConnectorTrustAdministration? trust = null)
     {
         _connectors = connectors;
         _oauth = oauth;
         _dialogs = dialogs;
         _logger = logger;
+        _resolver = resolver;
+        _trust = trust;
     }
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
@@ -50,7 +61,28 @@ public partial class ConnectorMarketplaceViewModel : ObservableObject
             .Concat(available.Select(c => new ConnectorItemViewModel(_connectors, _oauth, c)))
             .ToList();
         ApplyFilter();
+        LoadLocalConnectors();
     }
+
+    /// <summary>
+    /// Lists packaged connectors with their current verdict. The verdict is
+    /// re-derived from disk each time rather than remembered: a connector whose
+    /// binary changed since the last look should say so here, which is the whole
+    /// point of showing it.
+    /// </summary>
+    public void LoadLocalConnectors()
+    {
+        LocalConnectors.Clear();
+        if (_resolver is null || _trust is null)
+            return;
+        foreach (var declaration in _resolver.Discover()
+                     .Where(item => item.Transport == ConnectorTransportKind.Stdio))
+            LocalConnectors.Add(new LocalConnectorItemViewModel(
+                declaration, _resolver, _trust, LoadLocalConnectors, _logger));
+        OnPropertyChanged(nameof(HasLocalConnectors));
+    }
+
+    public bool HasLocalConnectors => LocalConnectors.Count > 0;
 
     /// <summary>Open the "Add custom connector" dialog; a successful add
     /// reloads so the new card appears with its live status/tools.</summary>
@@ -229,7 +261,14 @@ public partial class ConnectorItemViewModel : ObservableObject
                 return;
         }
 
-        await _connectors.InstallAsync(_connector.Id, token);
+        // Choosing the connector here IS the approval: the user picked this
+        // server and, for an api_key connector, handed it a credential. Recording
+        // that decision is what lets the endpoint be re-checked at every launch
+        // instead of trusted because it once had the same name.
+        await _connectors.InstallAsync(
+            _connector.Id, token,
+            evidence: Application.Interfaces.UserApprovalEvidence.FromUserGesture(
+                "user:desktop", "connector marketplace install"));
         IsInstalled = true;
     }
 }

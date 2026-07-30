@@ -20,15 +20,21 @@ public partial class ChatViewModel : ObservableObject
     private readonly IConversationStore _store;
     private readonly IFileService _fileService;
     private readonly IChatOrchestrator _orchestrator;
-    private readonly IChatService _chatService;
+    private readonly IDurableMediaTurnService _mediaTurnService;
     private readonly ISkillManager _skills;
     private readonly ISpeechService _speech;
     private readonly ISettingsService _settings;
+
+    /// <summary>Optional so the many test constructions of this ViewModel keep
+    /// compiling. Only the host-lane opt-in needs it, and that path treats a
+    /// missing dialog as "not confirmed" rather than confirming silently.</summary>
+    private readonly IDialogService? _dialogs;
     private readonly IAgentConversationSyncService _agentSync;
+    private readonly IAgentTaskStore? _agentTaskStore;
     private readonly ILogger<ChatViewModel> _logger;
     /// <summary>Consent-flow foreground restore (computer-use self-interference fix).</summary>
     private readonly IForegroundTargetTracker? _foregroundTracker;
-    private readonly IReadOnlyList<ILocalPlanExecutor> _localPlanExecutors;
+    private readonly IIsolatedPlanExecutor? _isolatedPlanExecutor;
 
     /// <summary>Phase 16 A: the run_subagent tool, when it exposes live nested
     /// progress. Subscribed once (both this VM and the tool are singletons).</summary>
@@ -263,6 +269,91 @@ public partial class ChatViewModel : ObservableObject
         OnPropertyChanged(nameof(IsApprovalSkip));
         OnPropertyChanged(nameof(ApprovalModeLabel));
         IsPermissionPopupOpen = false;
+        // The host-lane warning text depends on the approval mode ("nothing will
+        // ask you first" is only true under skip), so it has to be re-read here.
+        OnPropertyChanged(nameof(ShellLaneLabel));
+    }
+
+    // ── Shell execution lane (P3-1) ──
+    //
+    // The lane already existed end to end — opt-in setting, no fallback,
+    // blocklist, consent dialog, and a security-audit record written before
+    // dispatch. What was missing was any way for a user to choose it: the only
+    // channel was hand-editing settings.json while the app was closed, and
+    // run_command's own error text told the model to point users at a setting
+    // that had no UI. This adds the control; it does not widen the boundary.
+
+    /// <summary>Lane popup open state (mirrors the permission popup).</summary>
+    [ObservableProperty]
+    private bool _isShellLanePopupOpen;
+
+    [RelayCommand]
+    private void OpenShellLanePopup() => IsShellLanePopupOpen = true;
+
+    private Domain.Enums.ShellLane CurrentShellLane =>
+        Domain.Enums.ShellLaneParser.Parse(_settings.Current.ShellExecutionMode);
+
+    public bool IsShellSandbox => CurrentShellLane == Domain.Enums.ShellLane.Sandbox;
+    public bool IsShellHost => CurrentShellLane == Domain.Enums.ShellLane.Host;
+
+    /// <summary>Pill label for the active lane.</summary>
+    public string ShellLaneLabel => Localization.LocaleService.Instance.T(
+        CurrentShellLane == Domain.Enums.ShellLane.Host
+            ? "shell.host.name"
+            : "shell.sandbox.name");
+
+    /// <summary>
+    /// Persists the chosen lane ("sandbox" | "host"). Switching TO host asks
+    /// first, because it is the one choice here that widens what a command can
+    /// reach; switching back to sandbox is a narrowing and needs no prompt.
+    ///
+    /// <para>The warning states the actual exposure rather than a generic
+    /// caution, and says a different thing under <c>approval_mode = "skip"</c>,
+    /// where no per-command prompt will follow this one.</para>
+    /// </summary>
+    [RelayCommand]
+    private async Task SelectShellLaneAsync(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return;
+        var requested = Domain.Enums.ShellLaneParser.Parse(mode);
+        if (requested == CurrentShellLane)
+        {
+            IsShellLanePopupOpen = false;
+            return;
+        }
+
+        if (requested == Domain.Enums.ShellLane.Host)
+        {
+            // No dialog service (unit-test construction) means no way to obtain
+            // consent, so the widening does not happen. Fail toward the sandbox.
+            if (_dialogs is null)
+            {
+                IsShellLanePopupOpen = false;
+                return;
+            }
+
+            var locale = Localization.LocaleService.Instance;
+            var confirmed = await _dialogs.ConfirmAsync(
+                locale.T("shell.host.confirmTitle"),
+                locale.T(CurrentApprovalMode == Domain.Enums.ApprovalMode.Skip
+                    ? "shell.host.confirmBody"
+                    : "shell.host.confirmBodyPrompted"),
+                destructive: true);
+            if (!confirmed)
+            {
+                IsShellLanePopupOpen = false;
+                return;
+            }
+        }
+
+        var updated = _settings.Current.Clone();
+        updated.ShellExecutionMode = Domain.Enums.ShellLaneParser.ToSettingsValue(requested);
+        _settings.Save(updated);
+        OnPropertyChanged(nameof(IsShellSandbox));
+        OnPropertyChanged(nameof(IsShellHost));
+        OnPropertyChanged(nameof(ShellLaneLabel));
+        IsShellLanePopupOpen = false;
     }
 
     // ── Voice (R9 Feature J, abstracted over ISpeechService in R10 Fix 2) ──
@@ -565,31 +656,35 @@ public partial class ChatViewModel : ObservableObject
         IConversationStore store,
         IFileService fileService,
         IChatOrchestrator orchestrator,
-        IChatService chatService,
+        IDurableMediaTurnService mediaTurnService,
         ISkillManager skills,
         ISpeechService speech,
         ISettingsService settings,
         IAgentConversationSyncService agentSync,
         ILogger<ChatViewModel> logger,
-        IEnumerable<ILocalPlanExecutor>? localPlanExecutors = null,
+        IIsolatedPlanExecutor? isolatedPlanExecutor = null,
         IMcpToolHost? toolHost = null,
-        IForegroundTargetTracker? foregroundTracker = null)
+        IForegroundTargetTracker? foregroundTracker = null,
+        IAgentTaskStore? agentTaskStore = null,
+        IDialogService? dialogs = null)
     {
+        _dialogs = dialogs;
         _api = api;
         _gateway = gateway;
         _store = store;
         _fileService = fileService;
         _orchestrator = orchestrator;
-        _chatService = chatService;
+        _mediaTurnService = mediaTurnService;
         _skills = skills;
         _speech = speech;
         _settings = settings;
         _agentSync = agentSync;
+        _agentTaskStore = agentTaskStore;
         _logger = logger;
         _foregroundTracker = foregroundTracker;
         // Phase 12 E: on-device excel/doc/pptx plan executors; anything they
         // can't reproduce falls back to chat-edge.
-        _localPlanExecutors = localPlanExecutors?.ToList() ?? new List<ILocalPlanExecutor>();
+        _isolatedPlanExecutor = isolatedPlanExecutor;
 
         // Phase 16 A: surface nested sub-agent tool activity live under the
         // parent run_subagent card. Opt-in through the IMcpTool boundary — only
@@ -807,19 +902,20 @@ public partial class ChatViewModel : ObservableObject
                 if (vm.IsAssistant)
                 {
                     if (chainMap.TryGetValue(vm.Id, out var chain))
-                    {
                         vm.AgentToolChain = chain;
-                        // Rebuild the plan checklist (PART 5) from the last
-                        // update_plan call in the persisted chain (PART 1).
-                        var planArgs = LastPlanArgs(chain);
-                        if (planArgs is not null)
-                            vm.UpdatePlan(Application.Services.PlanParser.Parse(planArgs));
-                    }
                     ExtractPlanBlocks(conversation.Id, vm);
                 }
                 if (entry.Files is { Count: > 0 })
                     hydration.Add((vm, entry.Files));
                 Messages.Add(vm);
+            }
+            if (_agentTaskStore is not null)
+            {
+                var snapshot = await _agentTaskStore.GetLatestByConversationAsync(
+                    conversation.Id);
+                if (snapshot is not null)
+                    Messages.LastOrDefault(message => message.IsAssistant)
+                        ?.UpdatePlan(AuthoritativePlanView.From(snapshot));
             }
             await RestoreBranchesAsync(conversation.Id); // R10 Fix 3
             UpdateLastAssistantFlag();
@@ -1510,16 +1606,42 @@ public partial class ChatViewModel : ObservableObject
                             // The plan renders as its own live checklist (PART 5),
                             // not as a generic tool card.
                             if (call.Function.Name == "update_plan")
-                            {
-                                assistantMessage.UpdatePlan(
-                                    Application.Services.PlanParser.Parse(call.Function.Arguments));
                                 continue;
-                            }
                             assistantMessage.ToolExecutions.Add(new ToolExecutionItemViewModel(
                                 call.Id, call.Function.Name, call.Function.Arguments));
                         }
                         assistantMessage.StatusText =
                             FriendlyToolStatus(toolCalls.ToolCalls[^1].Function.Name);
+                        RaiseThrottledActivity();
+                        break;
+
+                    case AgentAuthoritativePlanEvent authoritative:
+                        assistantMessage.UpdatePlan(authoritative.Plan);
+                        RaiseThrottledActivity();
+                        break;
+
+                    case AgentDurableEventsEvent durable when durable.Events.Count > 0:
+                        assistantMessage.StatusText = durable.Events[^1].EventType switch
+                        {
+                            "PermissionRequested" => "Waiting for permission...",
+                            "ActionDispatching" => "Executing verified step...",
+                            "VerificationCompleted" => "Verification completed",
+                            "RetryScheduled" => "Retry scheduled after verification",
+                            "ReconciliationRequired" => "Reconciliation required",
+                            "RunInterrupted" => "Run interrupted",
+                            "RunResumed" => "Run resumed",
+                            "RunCompleted" => null,
+                            _ => assistantMessage.StatusText
+                        };
+                        RaiseThrottledActivity();
+                        break;
+
+                    case AgentToolRetryEvent retry:
+                        // 2b: collapse repeated auto-retries into the existing card —
+                        // mark it "retrying n/m" (amber) instead of stacking red X's.
+                        assistantMessage.ToolExecutions
+                            .FirstOrDefault(t => t.ToolCallId == retry.ToolCallId)
+                            ?.BeginRetry(retry.Attempt, retry.MaxAttempts, retry.Reason);
                         RaiseThrottledActivity();
                         break;
 
@@ -1573,6 +1695,17 @@ public partial class ChatViewModel : ObservableObject
                             assistantMessage.StatusText = notice;
                         else
                             assistantMessage.MetaLine = notice;
+                        break;
+
+                    case AgentVerificationModeEvent:
+                        // Transparency-only: the durable runtime declined this turn,
+                        // so surface a quiet meta note that results aren't verified.
+                        // Non-blocking; doesn't disturb streaming content.
+                        var convNotice = Localization.LocaleService.Instance.T("agent.conversationMode");
+                        if (assistantMessage.Content.Length == 0)
+                            assistantMessage.StatusText = convNotice;
+                        else
+                            assistantMessage.MetaLine = convNotice;
                         break;
 
                     case AgentPausedEvent paused:
@@ -1731,7 +1864,7 @@ public partial class ChatViewModel : ObservableObject
 
         try
         {
-            await foreach (var evt in _chatService.SendMessageAsync(
+            await foreach (var evt in _mediaTurnService.RunAsync(
                                conversation.Id, userContent,
                                attachedFileIds.Count > 0 ? attachedFileIds : null,
                                imageMode, videoMode, ct))
@@ -2170,7 +2303,7 @@ public partial class ChatViewModel : ObservableObject
                 using var doc = JsonDocument.Parse(match.Groups[2].Value);
                 message.PlanBlocks.Add(new PlanBlockViewModel(
                     _api, conversationId, planType, doc.RootElement.Clone(),
-                    _localPlanExecutors.FirstOrDefault(e => e.PlanType == planType),
+                    _isolatedPlanExecutor,
                     _settings, _logger));
             }
             catch (JsonException ex)
@@ -2324,24 +2457,42 @@ public partial class ChatViewModel : ObservableObject
         _ => $"Running {toolName}..."
     };
 
-    /// <summary>The arguments of the LAST update_plan call in a persisted tool
-    /// chain, so the plan checklist re-renders after a reload (PART 5/1).</summary>
-    private static string? LastPlanArgs(IReadOnlyList<GatewayMessage> chain)
+    private string ResolveModel(ConversationItemViewModel conversation)
     {
-        string? args = null;
-        foreach (var msg in chain)
-        {
-            if (msg.Role != "assistant" || msg.ToolCalls is not { Count: > 0 } calls)
-                continue;
-            foreach (var call in calls)
-                if (call.Function.Name == "update_plan")
-                    args = call.Function.Arguments;
-        }
-        return args;
+        // An explicit model choice always wins.
+        if (!string.IsNullOrEmpty(conversation.ModelId)
+            && conversation.ModelId != "auto")
+            return conversation.ModelId!;
+        // Auto (T3 PART 3, booster): desktop/computer-use turns need the strongest
+        // multimodal model to drive the screen; everything else stays on the cheaper
+        // mini. This never replaces the Part 1/2 fixes — the same model must still
+        // succeed on its own; this only upgrades when the work is clearly on-screen.
+        var lastUser = Messages.LastOrDefault(m => m.Role == MessageRole.User)?.Content ?? "";
+        return PreferredAutoModel(lastUser);
     }
 
-    private string ResolveModel(ConversationItemViewModel conversation) =>
-        string.IsNullOrEmpty(conversation.ModelId) ? "gpt-4o-mini" : conversation.ModelId!;
+    /// <summary>Auto-mode model pick: the strongest vision model for on-screen /
+    /// computer-use work, otherwise the cheaper mini. Pure + testable.</summary>
+    internal static string PreferredAutoModel(string userText) =>
+        LooksLikeComputerUseTask(userText) ? "gpt-4o" : "gpt-4o-mini";
+
+    private static readonly string[] ComputerUseHints =
+    {
+        // English
+        "notepad", "screenshot", "screen", "click", "type into", "open the app",
+        "open app", "desktop", "window", "calculator", "excel", "word",
+        // Thai
+        "โน้ตแพด", "โปรแกรม", "หน้าจอ", "คลิก", "พิมพ์", "เปิดแอป", "เปิดโปรแกรม",
+        "เดสก์ท็อป", "หน้าต่าง", "เครื่องคิดเลข", "ภาพหน้าจอ", "จับภาพ"
+    };
+
+    private static bool LooksLikeComputerUseTask(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        var lower = text.ToLowerInvariant();
+        return ComputerUseHints.Any(lower.Contains);
+    }
 
     private async Task<ToolConsentResponse> OnConsentRequested(ToolConsentRequest request)
     {
@@ -2374,6 +2525,37 @@ public partial class ChatViewModel : ObservableObject
         dialog.ShowDialog();
         return dialog.Response;
     }
+
+    // Injected into the desktop agent's system prompt (see BuildGatewayMessages).
+    // Steers the model to write known-content files directly with write_file instead
+    // of burning steps driving a GUI Save As dialog — the A3 correctness fix. Kept as
+    // a single named constant so it is verifiable in isolation.
+    internal const string FileSavingGuidance = """
+        ## Saving files — prefer write_file over Save As (IMPORTANT)
+        - When you must save a file whose CONTENT you already know (text the user gave you, a result
+          you computed, anything you can reproduce), call write_file with the full destination path and
+          the content directly. Do NOT drive an application's Save As dialog (Ctrl+S, Alt+F, clicking
+          through Save) for this — that path is slow and weak models get stuck on it for many steps.
+        - Use an app's Save As dialog ONLY when the content was produced inside the app and you cannot
+          reproduce it yourself.
+        - Name the destination explicitly: an absolute path, a working-folder path, or a known folder
+          such as "Desktop\report.txt". Never save to a bare filename and assume where it lands.
+        """;
+
+    // Injected into the desktop agent's system prompt (see BuildGatewayMessages).
+    // Steers text entry to the verifiable uia_set_value path instead of computer_type /
+    // clipboard, which weak models loop on and which cannot be read back — the T2 fix.
+    internal const string TypingGuidance = """
+        ## Typing into a desktop app — prefer uia_set_value (IMPORTANT)
+        - To put text into a native app's editable control (Notepad, text boxes, editors):
+          FIRST call read_screen_elements to get the control's element id, THEN call uia_set_value
+          with that element_id + snapshot_id. This binds to the real control and verifies by read-back.
+        - Do NOT use computer_type or clipboard paste (Ctrl+A/Ctrl+V) as the primary way to fill a control —
+          they are unverifiable and weak models loop on them. Use computer_type ONLY when read_screen_elements
+          finds no editable element (e.g. a canvas/game).
+        - If a typing attempt fails, do NOT repeat the same tool — switch approach: re-observe with
+          read_screen_elements and use uia_set_value on the correct element.
+        """;
 
     private List<GatewayMessage> BuildGatewayMessages(MessageViewModel currentPlaceholder)
     {
@@ -2422,17 +2604,25 @@ public partial class ChatViewModel : ObservableObject
             - Use create_directory to make folders and move_file to move or rename. For a build/fix loop:
               edit the file, run_command to build/test, read the errors, edit again, and repeat.
 
+            {FileSavingGuidance}
+
+            {TypingGuidance}
+
             ## Computer Use
             When the user asks you to interact with an application:
-            1. Take a screenshot (computer_screenshot) to see the current screen state
-            2. Analyze the screenshot to understand what's visible
-            3. Perform actions (computer_click, computer_type, computer_key, computer_scroll) based on what you see
-            4. Take another screenshot to verify the result
-            5. Repeat until the task is complete
+            1. Resolve the intended application and HWND before acting
+            2. Prefer a dedicated adapter, browser DOM ref, or read_screen_elements + UIA pattern
+            3. Use a verified application shortcut only when focus and post-state can be verified
+            4. Use a target-window screenshot and vision bounding box only when semantic targeting fails
+            5. Use raw pixel coordinates only as the final low-risk fallback
+            6. Observe the expected state after every action; an accepted input is not task completion
+            7. Re-resolve from a fresh observation on failure, and stop safely at the retry limit
 
             IMPORTANT: Always take a screenshot BEFORE clicking. Never guess coordinates — always look first.
-            Coordinates are in pixels from the top-left corner of the screen. If the screenshot was scaled,
-            multiply the coordinates you read from it by the stated factor before clicking.
+            Coordinates are pixels in the exact image returned by computer_screenshot. Pass those image
+            coordinates and its capture_id unchanged. Never apply DPI, display scaling, resize scaling,
+            window offsets, or any other coordinate conversion yourself; the executor performs the single
+            authoritative conversion to physical screen coordinates.
 
             CRITICAL — protect the user's open work: apps like Notepad restore previous documents, so a
             fresh-looking window may hold the user's existing unsaved content. NEVER type into a document
@@ -2451,8 +2641,9 @@ public partial class ChatViewModel : ObservableObject
             ## Environment
             - The user's home directory is {home}. File tools can access paths under your user
               profile, the temp folder, and any folders the user has granted in Settings; relative
-              paths resolve against the home directory. If a path you need is outside these, tell the
-              user they can grant that folder in Settings → Folder access.
+              paths resolve against the working folder when one is set, otherwise the home directory.
+              You can also name a standard folder directly, e.g. "Desktop\notes.txt". If a path you
+              need is outside these, tell the user they can grant that folder in Settings → Folder access.
             - The OS is Windows; shell commands run in PowerShell-compatible cmd.
 
             ## Response Style

@@ -233,7 +233,7 @@
             <Expander Margin="0,0,0,6" IsExpanded="True"
                       Visibility="{Binding HasPlan, Converter={StaticResource BoolToVisibility}}">
                 <Expander.Header>
-                    <TextBlock Text="{loc:T agent.plan}" FontSize="12.5" FontWeight="SemiBold"
+                    <TextBlock Text="{Binding PlanHeader}" FontSize="12.5" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextSecondaryBrush}" />
                 </Expander.Header>
                 <Border Background="{DynamicResource BgSecondaryBrush}"
@@ -256,6 +256,10 @@
                                                     <DataTrigger Binding="{Binding IsDone}" Value="True">
                                                         <Setter Property="Text" Value="✓" />
                                                         <Setter Property="Foreground" Value="{DynamicResource AccentGreenBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                                        <Setter Property="Text" Value="x" />
+                                                        <Setter Property="Foreground" Value="{DynamicResource AccentRedBrush}" />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -284,8 +288,11 @@
                 </Border>
             </Expander>
 
-            <!-- Inline tool activity: one collapsible row per tool call (Claude-style) -->
-            <ItemsControl ItemsSource="{Binding ToolExecutions}" Margin="0,0,0,4">
+            <!-- Inline tool activity: one collapsible row per tool call (Claude-style).
+                 x:Name is a test seam: the STA binding gate (MessageBubbleBindingTests)
+                 locates this ItemsControl to extract its real ItemTemplate. -->
+            <ItemsControl x:Name="ToolExecutionsList"
+                          ItemsSource="{Binding ToolExecutions}" Margin="0,0,0,4">
                 <ItemsControl.Style>
                     <Style TargetType="ItemsControl">
                         <Setter Property="Visibility" Value="Visible" />
@@ -372,10 +379,29 @@
                                                            Stroke="{DynamicResource AccentGreenBrush}"
                                                            Width="14" Height="14"
                                                            Visibility="{Binding IsOk, Converter={StaticResource BoolToVisibility}}" />
+                                        <Ellipse Width="8" Height="8"
+                                                 Fill="{DynamicResource AccentAmberBrush}"
+                                                 Visibility="{Binding IsVerificationPending, Converter={StaticResource BoolToVisibility}}" />
                                         <controls:IconView Geometry="{StaticResource Geo_Close}"
                                                            Stroke="{DynamicResource AccentRedBrush}"
                                                            Width="13" Height="13"
                                                            Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibility}}" />
+                                        <!-- 2b: amber pulse while auto-retrying (no red X between attempts) -->
+                                        <Ellipse Width="8" Height="8"
+                                                 Fill="{DynamicResource AccentAmberBrush}"
+                                                 Visibility="{Binding IsRetrying, Converter={StaticResource BoolToVisibility}}">
+                                            <Ellipse.Triggers>
+                                                <EventTrigger RoutedEvent="Loaded">
+                                                    <BeginStoryboard>
+                                                        <Storyboard RepeatBehavior="Forever">
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                             From="0.3" To="1" Duration="0:0:0.6"
+                                                                             AutoReverse="True" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </EventTrigger>
+                                            </Ellipse.Triggers>
+                                        </Ellipse>
                                     </Grid>
                                     <StackPanel Orientation="Horizontal">
                                         <controls:IconView Geometry="{Binding IconGeometry}"
@@ -390,12 +416,29 @@
                                                    TextTrimming="CharacterEllipsis"
                                                    VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextTertiaryBrush}" />
+                                        <!-- R5: amber "verifying" hint while the effect is not yet independently confirmed -->
+                                        <TextBlock Text="{loc:T tool.verifying}" FontSize="11"
+                                                   Margin="8,0,0,0" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource AccentAmberBrush}"
+                                                   Visibility="{Binding IsVerificationPending, Converter={StaticResource BoolToVisibility}}" />
+                                        <!-- 2b: amber "Retrying n/m — reason" while auto-retrying -->
+                                        <TextBlock Text="{Binding RetryHint}" FontSize="11"
+                                                   Margin="8,0,0,0" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource AccentAmberBrush}"
+                                                   Visibility="{Binding IsRetrying, Converter={StaticResource BoolToVisibility}}" />
                                     </StackPanel>
                                 </DockPanel>
 
                                 <!-- running indicator -->
                                 <ProgressBar Height="2" IsIndeterminate="True" Margin="0,6,0,0"
                                              Visibility="{Binding IsPending, Converter={StaticResource BoolToVisibility}}" />
+
+                                <!-- R5: human-readable failure reason, always visible on a failed
+                                     card (the raw code stays in the expandable Output below). -->
+                                <TextBlock Text="{Binding HumanError}" TextWrapping="Wrap"
+                                           FontSize="12.5" Margin="0,6,0,0"
+                                           Foreground="{DynamicResource AccentRedBrush}"
+                                           Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibility}}" />
 
                                 <!-- Phase B PART 1: live shell output (mini terminal) while the
                                      command runs — accumulates stdout/stderr in real time. -->
@@ -493,6 +536,9 @@
                                                                                    Stroke="{DynamicResource AccentGreenBrush}"
                                                                                    Width="13" Height="13"
                                                                                    Visibility="{Binding IsOk, Converter={StaticResource BoolToVisibility}}" />
+                                                                <Ellipse Width="7" Height="7"
+                                                                         Fill="{DynamicResource AccentAmberBrush}"
+                                                                         Visibility="{Binding IsVerificationPending, Converter={StaticResource BoolToVisibility}}" />
                                                                 <controls:IconView Geometry="{StaticResource Geo_Close}"
                                                                                    Stroke="{DynamicResource AccentRedBrush}"
                                                                                    Width="12" Height="12"

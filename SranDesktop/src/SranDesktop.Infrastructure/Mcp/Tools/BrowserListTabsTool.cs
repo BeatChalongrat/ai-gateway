@@ -41,6 +41,8 @@ public sealed class BrowserListTabsTool : IMcpTool
                     sb.Append(" (active)");
                 sb.AppendLine();
             }
-            return ToolResult.Ok(sb.Length > 0 ? sb.ToString().TrimEnd() : "No open tabs.");
+            return ToolResult.Verified(
+                sb.Length > 0 ? sb.ToString().TrimEnd() : "No open tabs.",
+                [$"browser_tabs_observed={tabs.GetArrayLength()}"]);
         }, ct);
 }

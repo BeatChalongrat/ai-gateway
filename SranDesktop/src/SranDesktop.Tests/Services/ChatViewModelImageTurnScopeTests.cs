@@ -51,8 +51,8 @@ public class ChatViewModelImageTurnScopeTests : IDisposable
             .Returns(DoneOnly());
 
         // Chat-edge path (image-mode turns): one delta, then the stream ends.
-        var chatService = new Mock<IChatService>();
-        chatService.Setup(c => c.SendMessageAsync(
+        var mediaTurnService = new Mock<IDurableMediaTurnService>();
+        mediaTurnService.Setup(c => c.RunAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<string>?>(),
                 It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .Returns(DeltaOnly());
@@ -71,7 +71,7 @@ public class ChatViewModelImageTurnScopeTests : IDisposable
             _store,
             Mock.Of<IFileService>(),
             orchestrator.Object,
-            chatService.Object,
+            mediaTurnService.Object,
             skills.Object,
             Mock.Of<ISpeechService>(),
             settings.Object,
@@ -155,7 +155,6 @@ public class ChatViewModelImageTurnScopeTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         try
         {
             if (Directory.Exists(_dbDir)) Directory.Delete(_dbDir, recursive: true);

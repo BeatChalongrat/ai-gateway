@@ -26,7 +26,9 @@ public sealed class FolderScopeResolverTests : IDisposable
     {
         _tempSub = Path.Combine(Path.GetTempPath(), $"sran-scope-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempSub);
-        PathGuard.ConfigureGrantedRoots(Array.Empty<string>());
+        PathGuard.ConfigureMounts(
+            [new WorkspaceMount(_tempSub, WorkspaceMountAccess.ReadWrite)],
+            _tempSub);
     }
 
     private static string Args(object o) => JsonSerializer.Serialize(o);

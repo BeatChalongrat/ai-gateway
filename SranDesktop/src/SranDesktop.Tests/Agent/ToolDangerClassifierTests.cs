@@ -27,6 +27,7 @@ public class ToolDangerClassifierTests
     [InlineData("create_directory", ToolCategory.FileSystem)]
     [InlineData("move_file", ToolCategory.FileSystem)]
     [InlineData("write_clipboard", ToolCategory.Clipboard)]
+    [InlineData("read_clipboard", ToolCategory.Clipboard)]
     [InlineData("open_url", ToolCategory.Browser)]
     // a remote MCP tool (arbitrary Network name)
     [InlineData("acme_jira_create_issue", ToolCategory.Network)]
@@ -41,7 +42,6 @@ public class ToolDangerClassifierTests
     [InlineData("read_file", ToolCategory.FileSystem)]
     [InlineData("list_directory", ToolCategory.FileSystem)]
     [InlineData("search_files", ToolCategory.FileSystem)]
-    [InlineData("read_clipboard", ToolCategory.Clipboard)]
     [InlineData("web_search", ToolCategory.Network)]
     [InlineData("update_plan", ToolCategory.Network)]
     [InlineData("remember", ToolCategory.Network)]

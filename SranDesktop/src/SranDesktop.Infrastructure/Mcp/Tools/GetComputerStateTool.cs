@@ -15,7 +15,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// blocking the foreground window (the classic reason clicks "do nothing").
 /// Read-only observation → AllowAlways + Safe-listed.
 /// </summary>
-public sealed class GetComputerStateTool : IMcpTool
+public sealed class GetComputerStateTool : IMcpTool, ISensitiveDataTool
 {
     private const int MaxWindows = 40;
 
@@ -24,7 +24,16 @@ public sealed class GetComputerStateTool : IMcpTool
         "See what applications and windows are open and which is focused. " +
         "Use before deciding how to act.";
     public ToolCategory Category => ToolCategory.Screen;
-    public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
+    public PermissionLevel DefaultPermission => PermissionLevel.Ask;
+    public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+        "Screen.StateReadLocal",
+        "ScreenState.SendToModel",
+        "screen_metadata",
+        "unknown",
+        "configured model provider",
+        ExternalTransmission: true,
+        AlwaysRequireConfirmation: true,
+        AllowPersistence: false);
 
     public JsonElement ParametersSchema { get; } = ToolHelpers.Schema("""
         { "type": "object", "properties": {} }
@@ -35,7 +44,8 @@ public sealed class GetComputerStateTool : IMcpTool
         try
         {
             var json = await Task.Run(BuildState, ct).WaitAsync(UiaToolSupport.UiaTimeout, ct);
-            return ToolResult.Ok(json);
+            return ToolResult.Verified(json,
+                ["process_window_state_observed=true"]);
         }
         catch (TimeoutException)
         {

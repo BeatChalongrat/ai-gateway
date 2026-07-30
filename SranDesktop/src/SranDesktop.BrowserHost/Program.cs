@@ -1,6 +1,9 @@
 using System.IO.Pipes;
 using SranDesktop.Infrastructure.Native.Browser;
 
+if (!BrowserNativeHostPolicy.IsAllowedInvocation(args))
+    return 2;
+
 // SranDesktop.BrowserHost — the native-messaging relay. Chrome only speaks
 // native messaging to a process IT spawns, so this exe exists solely to
 // forward frames 1:1 between Chrome (stdio) and the running SRAN Desktop app

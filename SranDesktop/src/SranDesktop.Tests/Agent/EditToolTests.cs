@@ -6,6 +6,7 @@ using Xunit;
 namespace SranDesktop.Tests.Agent;
 
 /// <summary>Phase A PART 2: edit_file / create_directory / move_file.</summary>
+[Collection("PathGuardGrants")]
 public class EditToolTests : IDisposable
 {
     private readonly string _workDir;
@@ -14,6 +15,9 @@ public class EditToolTests : IDisposable
     {
         _workDir = Path.Combine(Path.GetTempPath(), $"sran-edit-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
+        PathGuard.ConfigureMounts(
+            [new WorkspaceMount(_workDir, WorkspaceMountAccess.ReadWrite)],
+            _workDir);
     }
 
     private static JsonElement Args(object o) =>
@@ -100,7 +104,7 @@ public class EditToolTests : IDisposable
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("outside the allowed directories");
+        result.Error.Should().Contain("outside authorized workspace mounts");
     }
 
     [Fact]
@@ -172,6 +176,7 @@ public class EditToolTests : IDisposable
 
     public void Dispose()
     {
+        PathGuard.ConfigureMounts([]);
         if (Directory.Exists(_workDir))
             Directory.Delete(_workDir, recursive: true);
     }

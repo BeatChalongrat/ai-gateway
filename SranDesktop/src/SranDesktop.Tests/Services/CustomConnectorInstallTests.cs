@@ -144,7 +144,7 @@ public sealed class CustomConnectorInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Test_Connection_Succeeds_Against_A_Real_Stdio_Server_Without_Persisting()
+    public async Task Test_Connection_FailsClosed_For_Stdio_Without_Persisting()
     {
         await using var svc = CreateService();
         var (command, args) = Mcp.StdioEchoServer.CommandLine();
@@ -158,10 +158,69 @@ public sealed class CustomConnectorInstallTests : IDisposable
             Args = args
         }).WaitAsync(TimeSpan.FromSeconds(30));
 
-        result.Success.Should().BeTrue(result.Error);
-        result.ToolCount.Should().BeGreaterThan(0);
+        result.Success.Should().BeFalse();
+        // "Just to test it" runs the same code as running it, so an unapproved
+        // local executable is refused before anything is spawned.
+        result.Error.Should().Contain("approved");
+        result.ToolCount.Should().Be(0);
         File.Exists(_stateFile).Should().BeFalse("test connection must not persist state");
         svc.IsInstalled("custom-echo-test").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Test_Connection_Refuses_To_Dial_Without_Evidence_Of_A_Person()
+    {
+        await using var svc = CreateService();
+
+        // No UserApprovalEvidence: this could be the agent asking.
+        var result = await svc.TestConnectionAsync(HttpConnector());
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("started by a person");
+        File.Exists(_stateFile).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Stdio_Definition_With_Environment_Is_Rejected_Without_Persistence()
+    {
+        await using var svc = CreateService();
+        var connector = new McpConnector
+        {
+            Id = "stdio-with-env",
+            Name = "Local",
+            Transport = McpConnector.TransportStdio,
+            Command = "server.exe",
+            Env = new Dictionary<string, string>
+            {
+                ["API_TOKEN"] = "ghp_1234567890abcdefghijklmnop"
+            }
+        };
+
+        var action = () => svc.InstallCustomAsync(connector);
+
+        await action.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*environment values are not accepted*");
+        File.Exists(_stateFile).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Stdio_Definition_With_Secret_Argument_Is_Rejected_Without_Persistence()
+    {
+        await using var svc = CreateService();
+        var connector = new McpConnector
+        {
+            Id = "stdio-with-arg-secret",
+            Name = "Local",
+            Transport = McpConnector.TransportStdio,
+            Command = "server.exe",
+            Args = ["--token", "ghp_1234567890abcdefghijklmnop"]
+        };
+
+        var action = () => svc.InstallCustomAsync(connector);
+
+        await action.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*arguments contain sensitive data*");
+        File.Exists(_stateFile).Should().BeFalse();
     }
 
     [Fact]

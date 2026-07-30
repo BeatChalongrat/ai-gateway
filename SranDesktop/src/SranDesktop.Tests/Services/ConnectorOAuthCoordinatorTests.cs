@@ -80,7 +80,7 @@ public class ConnectorOAuthCoordinatorTests
         // The key Phase 7 assertion: apiToken is NULL, authMode is oauth2.
         _connectors.Verify(c => c.InstallAsync(
             "slack", null, InstalledConnector.AuthModeOAuth2,
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<UserApprovalEvidence?>(), It.IsAny<CancellationToken>()), Times.Once);
         _connectors.Verify(c => c.PingAsync("slack", It.IsAny<CancellationToken>()), Times.Once);
         coord.GetState("slack").Should().Be(ConnectorFlowState.Connected);
     }
@@ -97,7 +97,7 @@ public class ConnectorOAuthCoordinatorTests
 
         _connectors.Verify(c => c.InstallAsync(
                 It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()),
+                It.IsAny<UserApprovalEvidence?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         coord.GetState("slack").Should().Be(ConnectorFlowState.Error);
         coord.GetErrorReason("slack").Should().Be("not_confirmed");

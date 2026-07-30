@@ -61,7 +61,8 @@ public sealed class ComputerZoomTool : IMcpTool
 
         try
         {
-            var (screenX, screenY, w, h) = region.Value;
+            var (screenX, screenY, w, h) =
+                (region.X, region.Y, region.Width, region.Height);
             using var bitmap = new Bitmap(w, h);
             using (var graphics = Graphics.FromImage(bitmap))
                 graphics.CopyFromScreen(screenX, screenY, 0, 0, bitmap.Size);
@@ -75,7 +76,8 @@ public sealed class ComputerZoomTool : IMcpTool
                 $"Zoomed region {w}x{h} at full resolution (from screen point ({screenX}, {screenY})). " +
                 "NOTE: coordinates inside this zoom are NOT clickable directly — use coordinates " +
                 "from the last full screenshot for clicks.",
-                dataUri));
+                dataUri,
+                [$"zoom_region_observed={w}x{h}", $"zoom_origin={screenX},{screenY}"]));
         }
         catch (Exception ex)
         {

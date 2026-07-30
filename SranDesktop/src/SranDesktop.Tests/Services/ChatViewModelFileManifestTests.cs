@@ -72,7 +72,7 @@ public class ChatViewModelFileManifestTests : IDisposable
             _store,
             fileService.Object,
             orchestrator.Object,
-            Mock.Of<IChatService>(),
+            Mock.Of<IDurableMediaTurnService>(),
             skills.Object,
             Mock.Of<ISpeechService>(),
             settings.Object,
@@ -205,7 +205,6 @@ public class ChatViewModelFileManifestTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         try
         {
             if (Directory.Exists(_dbDir)) Directory.Delete(_dbDir, recursive: true);

@@ -43,7 +43,7 @@ public class PlanBlockViewModelPptxTests
 
         return new PlanBlockViewModel(
             _api.Object, "conv-1", "pptx", Plan(planJson),
-            new LocalPptxPlanExecutor(), _settings.Object,
+            new InProcessPlanExecutorAdapter(new LocalPptxPlanExecutor()), _settings.Object,
             NullLogger<PlanBlockViewModel>.Instance);
     }
 
@@ -121,5 +121,42 @@ public class PlanBlockViewModelPptxTests
                 It.Is<ExecuteDocumentPlanRequest>(r => r.Format == "pptx"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    /// <summary>Drives the real executor through the isolated-executor contract so
+    /// these VM tests still cover the "declined plan falls back to the server"
+    /// gate. Actual process isolation is covered by
+    /// DocumentWorkerIntegrationTests, which runs the worker for real.</summary>
+    private sealed class InProcessPlanExecutorAdapter(
+        SranDesktop.Application.Interfaces.ILocalPlanExecutor inner)
+        : SranDesktop.Application.Interfaces.IIsolatedPlanExecutor
+    {
+        public bool IsAvailable => true;
+
+        public async Task<SranDesktop.Application.Interfaces.IsolatedPlanExecution> ExecuteAsync(
+            string planType,
+            JsonElement plan,
+            string outputFileName,
+            CancellationToken ct = default)
+        {
+            if (!inner.CanExecute(plan))
+                return SranDesktop.Application.Interfaces.IsolatedPlanExecution.Failed(
+                    "PlanNotSupportedLocally", "the executor declined the plan");
+            var path = Path.Combine(
+                Path.GetTempPath(), "sran-pptx-vm", Guid.NewGuid().ToString("N"), outputFileName);
+            var executed = await inner.ExecuteAsync(plan, path, ct);
+            return new SranDesktop.Application.Interfaces.IsolatedPlanExecution(
+                true,
+                executed.OutputPath,
+                executed.FileSizeBytes,
+                executed.Changes,
+                new SranDesktop.Application.Models.DocumentValidationReport
+                {
+                    Reopened = true,
+                    StructureValid = true
+                },
+                null,
+                null);
+        }
     }
 }

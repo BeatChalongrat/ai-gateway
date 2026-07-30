@@ -40,6 +40,12 @@ public sealed class McpConnector
     [JsonPropertyName("tools")]
     public List<string> Tools { get; set; } = new();
 
+    /// <summary>OAuth scopes this connector's operations need. The broker refuses
+    /// a lease that does not cover them, so a connector whose grant was narrowed
+    /// fails with "reconnect and approve X" rather than with the provider's 403.</summary>
+    [JsonPropertyName("scopes")]
+    public List<string> Scopes { get; set; } = new();
+
     /// <summary>"http" | "stdio" (Phase 12 D). Absent in legacy JSON →
     /// defaults to http, so existing connectors keep behaving identically.</summary>
     [JsonPropertyName("transport")]
@@ -113,4 +119,21 @@ public sealed class InstalledConnector
     [JsonPropertyName("custom")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public McpConnector? Custom { get; set; }
+
+    /// <summary>
+    /// Which connected account this connector acts as, and in which tenant.
+    ///
+    /// A REFERENCE, never a credential: this is what a scheduled task stores so
+    /// that "post the nightly report" still means the same mailbox in six
+    /// months, without the task record ever holding a token. Null on a legacy
+    /// record, which resolves to the single connected account if there is
+    /// exactly one and is ambiguous — and therefore refused — if there are more.
+    /// </summary>
+    [JsonPropertyName("account_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AccountId { get; set; }
+
+    [JsonPropertyName("tenant_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TenantId { get; set; }
 }

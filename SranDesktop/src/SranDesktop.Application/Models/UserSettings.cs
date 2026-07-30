@@ -107,6 +107,33 @@ public sealed class UserSettings
     [JsonPropertyName("approval_mode")]
     public string ApprovalMode { get; set; } = "auto";
 
+    /// <summary>
+    /// Which lane <c>run_command</c> executes in.
+    ///
+    /// <para>"sandbox" (default) runs every command inside the capability-free
+    /// AppContainer: no network, an allowlisted environment whose PATH is only
+    /// System32, and a staged private copy of the workspace. Host tooling
+    /// (docker, git, node, python) is unreachable there by construction — the
+    /// CLI is a client of a host service and the sandbox exists to sever
+    /// exactly that.</para>
+    ///
+    /// <para>"host" runs the command on the real machine with the real
+    /// environment, so host tooling works. This is a deliberate, user-chosen
+    /// widening of the security boundary, never a fallback: a sandbox failure
+    /// must not reach this lane (see
+    /// <c>RuntimeBypassInvariantTests.Host_Lane_Is_Never_Reached_By_Fallback</c>).
+    /// The working directory is still confined to an authorized root, and the
+    /// command still passes the blocklist and the normal consent gate.</para>
+    ///
+    /// <para><b>Risk, stated plainly:</b> with <see cref="ApprovalMode"/> set to
+    /// "skip", host-lane commands run with no prompt. The exposure is not a
+    /// careless click — it is prompt injection: content the model just read
+    /// from a web page or a file can dictate the command. Every host-lane
+    /// dispatch is written to the security audit log for this reason.</para>
+    /// </summary>
+    [JsonPropertyName("shell_execution_mode")]
+    public string ShellExecutionMode { get; set; } = "sandbox";
+
     public UserSettings Clone()
     {
         var copy = (UserSettings)MemberwiseClone();

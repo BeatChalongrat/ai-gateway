@@ -17,9 +17,9 @@ public sealed class UpdatePlanTool : IMcpTool
 {
     public string Name => "update_plan";
     public string Description =>
-        "Maintain a short task list for a multi-step task. Call this to lay out the steps and again to " +
-        "mark progress: each step has a 'status' of pending, in_progress, or done. Keep exactly one step " +
-        "in_progress at a time. Skip this for a simple one-shot answer.";
+        "Propose a short task plan for a multi-step task. The durable runtime validates dependencies, " +
+        "persists a versioned plan, and decides verified completion from evidence. Status values control " +
+        "the checklist view only; marking done never verifies a step.";
     public ToolCategory Category => ToolCategory.Network; // no local side effect
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways;
 

@@ -43,6 +43,10 @@ public partial class App : System.Windows.Application
         _host = AppHostBuilder.Build(e.Args);
         await _host.StartAsync();
         _logger = _host.Services.GetRequiredService<ILogger<App>>();
+        // Startup build stamp (T5 PART B): cross-check against the publish time to catch a
+        // stale process that a publish didn't restart.
+        _logger.LogInformation("SRAN started — {BuildInfo}",
+            SranDesktop.Application.Services.BuildStamp.Current);
 
         _settings = _host.Services.GetRequiredService<ISettingsService>();
         SranDesktop.Presentation.Services.ThemeManager.Apply(_settings.Current.Theme);
@@ -50,10 +54,23 @@ public partial class App : System.Windows.Application
         // Apply the user's folder grants to the agent's PathGuard now, and on
         // every settings change (Phase 6 Task 1). A grant only widens WHERE
         // file tools may operate — consent still gates each write. The
-        // composer's working folder counts as an extra granted root.
-        SranDesktop.Infrastructure.Mcp.Tools.PathGuard.ConfigureGrantedRoots(AgentRoots(_settings));
-        _settings.SettingsChanged += (_, _) =>
-            SranDesktop.Infrastructure.Mcp.Tools.PathGuard.ConfigureGrantedRoots(AgentRoots(_settings));
+        // composer's working folder counts as an extra granted root, and is the
+        // one that gets rename/delete (P3-2) — hence passing it in the same call
+        // rather than as a separate step whose ordering mattered.
+        ApplyAgentRoots();
+        _settings.SettingsChanged += (_, _) => ApplyAgentRoots();
+
+        // Recovery is part of startup, not a UI affordance. Incomplete runs are
+        // classified and reconciled before any entry point can dispatch another
+        // tool. A storage/recovery failure is intentionally allowed to abort
+        // startup so unknown side effects cannot be bypassed by a fresh run.
+        var recovery = await _host.Services
+            .GetRequiredService<IDurableTaskRuntime>()
+            .RecoverInterruptedRunsAsync();
+        _logger.LogInformation(
+            "Durable runtime startup recovery examined {RunCount} run(s); {NeedsUserCount} require user reconciliation",
+            recovery.Count,
+            recovery.Count(item => item.RequiresUser));
 
         // Housekeeping: sweep leaked screenshot temp files (Phase 6 Task 4).
         CleanupOldScreenshots();
@@ -116,6 +133,18 @@ public partial class App : System.Windows.Application
             _mainWindow.Show();
         else
             _logger.LogInformation("Started minimized to tray");
+    }
+
+    /// <summary>Pushes the current grants and working folder into PathGuard as one
+    /// operation. Single entry point so startup and the settings-changed handler
+    /// cannot drift, and so the working folder is always known while the mount
+    /// access levels are being decided.</summary>
+    private void ApplyAgentRoots()
+    {
+        var current = _settings!.Current;
+        SranDesktop.Infrastructure.Mcp.Tools.PathGuard.ConfigureGrantedRoots(
+            AgentRoots(_settings),
+            current.WorkingFolder ?? string.Empty);
     }
 
     /// <summary>Granted folders + the composer's working folder (when set) —

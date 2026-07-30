@@ -85,4 +85,23 @@ public class ComputerToolTests
     {
         ComputerTypeTool.LooksLikeCredential(text, out _).Should().BeFalse(text);
     }
+
+    // ── Phase 2 (evidence polish): no-foreground rung classification ─────────
+    // Structured rungs (UIA ValuePattern / window message) need no foreground; keystroke
+    // rungs (clipboard paste / SendInput) do. Case-insensitive so both typing tools'
+    // method spellings map the same. Evidence-only — never changes success/fail.
+
+    [Theory]
+    [InlineData("value_pattern", true)]   // computer_type spelling
+    [InlineData("ValuePattern", true)]    // uia_set_value spelling
+    [InlineData("window_message", true)]
+    [InlineData("clipboard_paste", false)]
+    [InlineData("sendinput", false)]
+    [InlineData("sendinput_keyboard", false)]
+    [InlineData("none", false)]
+    [InlineData(null, false)]
+    public void IsNoForegroundRung_Classifies_Delivery_Method(string? method, bool expected)
+    {
+        ComputerTypeTool.IsNoForegroundRung(method).Should().Be(expected);
+    }
 }

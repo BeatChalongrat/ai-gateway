@@ -1,0 +1,179 @@
+<Window x:Class="SranDesktop.Presentation.Views.Dialogs.ConnectorApprovalDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
+        xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:ConnectorApprovalViewModel}"
+        Title="Approve connector"
+        SizeToContent="Height"
+        Width="520"
+        MaxHeight="760"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BgPrimaryBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <Window.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
+    <Grid Margin="24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="{Binding Headline}" FontWeight="SemiBold" FontSize="16"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextPrimaryBrush}" />
+            <TextBlock Text="A connector runs code that can act on your behalf. Approve it only if you know where it came from."
+                       Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+
+            <!-- Why we are asking again. Absent on a first approval. -->
+            <Border Margin="0,12,0,0" CornerRadius="6" Padding="12,10"
+                    Background="{DynamicResource BgSecondaryBrush}"
+                    Visibility="{Binding IsReapproval, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="Why you are seeing this again" FontWeight="SemiBold"
+                               FontSize="12"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="{Binding ReapprovalReason}" Margin="0,4,0,0"
+                               TextWrapping="Wrap" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBlock Text="{Binding PreviousDenialCode}" Margin="0,4,0,0"
+                               FontFamily="Consolas" FontSize="11"
+                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" Margin="0,16,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Identity -->
+                <Border CornerRadius="6" Padding="12,10"
+                        Background="{DynamicResource BgSecondaryBrush}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Publisher" Width="120" FontSize="12"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding Publisher}" FontSize="12"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <TextBlock Text="Version" Width="120" FontSize="12"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding Version}" FontSize="12"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <TextBlock Text="Came from" Width="120" FontSize="12"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding InstallSource}" FontSize="12"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,8,0,0">
+                            <TextBlock Text="Program" FontSize="12"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding ExecutablePath}" Margin="0,2,0,0"
+                                       TextWrapping="Wrap" FontFamily="Consolas" FontSize="11"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="Fingerprint" Width="120" FontSize="12"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding ExecutableFingerprint}"
+                                       FontFamily="Consolas" FontSize="12"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <TextBlock Text="Manifest" Width="120" FontSize="12"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding ManifestFingerprint}"
+                                       FontFamily="Consolas" FontSize="12"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- What it will be able to do -->
+                <TextBlock Text="What it will be able to do" Margin="0,16,0,6"
+                           FontWeight="SemiBold" FontSize="13"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <ItemsControl ItemsSource="{Binding Permissions}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,0,6" CornerRadius="6" Padding="12,8"
+                                    Background="{DynamicResource BgSecondaryBrush}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <!-- A permission the previous approval did not cover -->
+                                        <Border Margin="8,0,0,0" CornerRadius="4" Padding="6,1"
+                                                Background="{DynamicResource AccentRedBrush}"
+                                                Visibility="{Binding IsNew, Converter={StaticResource BoolToVisibility}}">
+                                            <TextBlock Text="NEW" FontSize="10" FontWeight="SemiBold"
+                                                       Foreground="White" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Detail}" Margin="0,3,0,0"
+                                               TextWrapping="Wrap" FontSize="12"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="{Binding RiskSummary}" Margin="0,6,0,0"
+                           TextWrapping="Wrap" FontSize="12"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding UpdatePolicy}" Margin="0,10,0,0"
+                           TextWrapping="Wrap" FontSize="12"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
+
+                <Expander Header="Inspect details" Margin="0,12,0,0" FontSize="12"
+                          Foreground="{DynamicResource TextSecondaryBrush}">
+                    <TextBox Text="{Binding InspectionText, Mode=OneWay}" IsReadOnly="True"
+                             AcceptsReturn="True" TextWrapping="NoWrap"
+                             HorizontalScrollBarVisibility="Auto"
+                             VerticalScrollBarVisibility="Auto" MaxHeight="220"
+                             Margin="0,8,0,0" FontFamily="Consolas" FontSize="11"
+                             Background="{DynamicResource BgSecondaryBrush}"
+                             Foreground="{DynamicResource TextPrimaryBrush}"
+                             BorderThickness="0" />
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Margin="0,18,0,0">
+            <Button x:Name="RevokeButton" Content="Revoke trust" Padding="14,7" Margin="0,0,8,0"
+                    Click="Revoke_Click"
+                    Visibility="{Binding IsReapproval, Converter={StaticResource BoolToVisibility}}" />
+            <Button x:Name="DisableButton" Content="Disable" Padding="14,7" Margin="0,0,8,0"
+                    Click="Disable_Click"
+                    Visibility="{Binding IsReapproval, Converter={StaticResource BoolToVisibility}}" />
+            <!-- Deny is the default: closing the window any other way means the same.
+                 Deliberately NOT IsCancel: a Cancel button drives DialogResult to
+                 false, ShowDialog then returns false, and the caller treats it as
+                 "the window was dismissed" and records nothing — so an explicit
+                 denial silently vanished. Escape is handled in code-behind
+                 instead, which keeps both routes recording the same decision. -->
+            <Button x:Name="DenyButton" Content="Don't allow" Padding="14,7" Margin="0,0,8,0"
+                    Click="Deny_Click" />
+            <Button x:Name="ApproveVersionButton" Content="Allow this version" Padding="14,7"
+                    Margin="0,0,8,0" Click="ApproveVersion_Click" />
+            <Button x:Name="ApproveButton" Content="Allow" Padding="16,7"
+                    Click="Approve_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

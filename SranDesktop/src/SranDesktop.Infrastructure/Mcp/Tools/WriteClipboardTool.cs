@@ -6,12 +6,20 @@ using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
 
-public sealed class WriteClipboardTool : IMcpTool
+public sealed class WriteClipboardTool : IMcpTool, ISensitiveDataTool
 {
     public string Name => "write_clipboard";
     public string Description => "Replace the system clipboard content with the given text.";
     public ToolCategory Category => ToolCategory.Clipboard;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
+    public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+        LocalAction: "Clipboard.Write",
+        ExternalAction: null,
+        SourceType: "model_output",
+        Sensitivity: "unknown",
+        Destination: "local system clipboard",
+        ExternalTransmission: false,
+        AlwaysRequireConfirmation: true);
 
     public JsonElement ParametersSchema { get; } = ToolHelpers.Schema("""
         {
@@ -33,7 +41,20 @@ public sealed class WriteClipboardTool : IMcpTool
         if (dispatcher is null)
             return ToolResult.Fail("Clipboard unavailable: no UI dispatcher.");
 
-        await dispatcher.InvokeAsync(() => Clipboard.SetText(text));
-        return ToolResult.Ok($"Clipboard set ({text.Length} chars).");
+        var verified = await dispatcher.InvokeAsync(() =>
+        {
+            Clipboard.SetText(text);
+            return Clipboard.ContainsText()
+                   && string.Equals(Clipboard.GetText(), text, StringComparison.Ordinal);
+        });
+        if (!verified)
+            return ToolResult.ExecutedUnverified(
+                $"Clipboard write dispatched ({text.Length} chars).",
+                "ClipboardReadBackMismatch",
+                "Clipboard content did not match the requested text after write-back.");
+        return ToolResult.Verified(
+            $"Clipboard set and verified ({text.Length} chars).",
+            ["clipboard_read_back=true"],
+            ["clipboard_replaced=true"]);
     }
 }

@@ -5,6 +5,7 @@ using SranDesktop.Application.Events;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
 using SranDesktop.Application.Services;
+using SranDesktop.Domain.Entities;
 using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
@@ -72,6 +73,8 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
     private readonly ILoggerFactory _loggerFactory;
     private readonly ShellSession? _shellSession;
     private readonly IToolScopeResolver? _scopeResolver;
+    private readonly IDurableTaskRuntime? _durableRuntime;
+    private readonly ISecurityEventLogger? _securityEvents;
 
     /// <param name="toolHost">Lazy: the registry that hosts this tool is what the
     /// tool host wraps — resolving eagerly would cycle during DI construction.</param>
@@ -87,7 +90,9 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         ISettingsService settings,
         ILoggerFactory loggerFactory,
         ShellSession? shellSession = null,
-        IToolScopeResolver? scopeResolver = null)
+        IToolScopeResolver? scopeResolver = null,
+        IDurableTaskRuntime? durableRuntime = null,
+        ISecurityEventLogger? securityEvents = null)
     {
         _gateway = gateway;
         _permissions = permissions;
@@ -98,6 +103,8 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         _loggerFactory = loggerFactory;
         _shellSession = shellSession;
         _scopeResolver = scopeResolver;
+        _durableRuntime = durableRuntime;
+        _securityEvents = securityEvents;
     }
 
     public string Name => ToolName;
@@ -251,6 +258,42 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
     private async Task<NestedRunResult> RunOneAsync(
         string task, IMcpToolHost host, bool forwardConsent, CancellationToken ct)
     {
+        var model = _settings.Current.DefaultModel;
+        if (string.IsNullOrWhiteSpace(model))
+            model = "gpt-4o-mini";
+
+        var conversationId = $"subagent-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        await _store.UpsertConversationAsync(new Conversation
+        {
+            Id = conversationId,
+            Title = "Subagent task",
+            ModelId = model,
+            Source = ConversationSource.Local,
+            CreatedAt = now,
+            UpdatedAt = now
+        }, ct);
+
+        string? childRunId = null;
+        if (_durableRuntime is not null)
+        {
+            var request = new DurableRunRequest(
+                conversationId,
+                AgentTriggerType.Subagent,
+                task,
+                $"conversation:{conversationId}",
+                ModelContextJson: JsonSerializer.Serialize(new { model }),
+                ParentRunId: AgentRunExecutionContext.CurrentRunId);
+
+            if (request.ParentRunId is { Length: > 0 } parentRunId)
+                childRunId = (await _durableRuntime.CreateChildRunAsync(
+                    parentRunId,
+                    request,
+                    ct)).TaskId;
+            else
+                childRunId = (await _durableRuntime.CreateRunAsync(request, ct)).TaskId;
+        }
+
         // A fresh orchestrator instance per spawn: RunAsync keeps all run state
         // in locals, so nothing mutable is shared with the parent run — only
         // the stateless dependencies (gateway/permissions/store) are reused.
@@ -258,7 +301,9 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
             _gateway, host, _permissions, _store,
             _loggerFactory.CreateLogger<ChatOrchestrator>(),
             NestedMaxIterations, NestedMaxDuration, _shellSession, _scopeResolver,
-            settings: _settings); // nested runs honor the same global approval mode
+            settings: _settings,
+            durableRuntime: _durableRuntime,
+            securityEvents: _securityEvents); // nested runs honor the same global approval mode
 
         if (forwardConsent)
         {
@@ -273,10 +318,6 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
             };
         }
 
-        var model = _settings.Current.DefaultModel;
-        if (string.IsNullOrWhiteSpace(model))
-            model = "gpt-4o-mini";
-
         var messages = new List<GatewayMessage>
         {
             new() { Role = "system", Content = BuildSubAgentSystemPrompt() },
@@ -288,7 +329,6 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linked.CancelAfter(NestedMaxDuration + TimeSpan.FromSeconds(30));
 
-        var conversationId = $"subagent-{Guid.NewGuid():N}";
         var finalText = new StringBuilder();
         var trace = new List<string>();
         string? stopReason = null;
@@ -328,11 +368,34 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            if (_durableRuntime is not null && childRunId is not null)
+                await _durableRuntime.CancelAsync(
+                    childRunId,
+                    "Parent run cancellation propagated to the durable child run.",
+                    CancellationToken.None);
             throw; // the parent turn was cancelled — propagate like any other tool
         }
         catch (OperationCanceledException)
         {
+            if (_durableRuntime is not null && childRunId is not null)
+                await _durableRuntime.CancelAsync(
+                    childRunId,
+                    "The durable child run exceeded its execution budget.",
+                    CancellationToken.None);
             stopReason = $"Stopped: the sub-agent exceeded its {NestedMaxDuration.TotalMinutes:0} minute budget.";
+        }
+
+        if (_durableRuntime is not null && childRunId is not null)
+        {
+            var events = await _durableRuntime.GetEventsAsync(
+                childRunId,
+                ct: CancellationToken.None);
+            if (!events.Any(item => item.EventType == "RunCompleted"))
+            {
+                completed = false;
+                stopReason ??=
+                    "The durable child run did not produce a verified completion event.";
+            }
         }
 
         var traceSummary = trace.Count == 0

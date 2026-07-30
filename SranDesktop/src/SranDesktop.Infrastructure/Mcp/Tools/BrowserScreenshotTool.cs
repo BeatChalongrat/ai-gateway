@@ -8,7 +8,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// <summary>browser_screenshot (browser tools) — captureVisibleTab through the
 /// extension (JPEG, to stay under the 1 MB native-messaging frame cap).
 /// Complements browser_read_page for visual verification.</summary>
-public sealed class BrowserScreenshotTool : IMcpTool
+public sealed class BrowserScreenshotTool : IMcpTool, ISensitiveDataTool
 {
     private readonly IBrowserBridgeService _bridge;
 
@@ -19,7 +19,16 @@ public sealed class BrowserScreenshotTool : IMcpTool
         "Take a screenshot of a Chrome tab's visible area. Prefer browser_read_page for " +
         "interaction; use this to visually verify a page's state.";
     public ToolCategory Category => ToolCategory.Browser;
-    public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
+    public PermissionLevel DefaultPermission => PermissionLevel.Ask;
+    public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+        "BrowserTab.CaptureLocal",
+        "BrowserTab.SendToModel",
+        "browser_screenshot",
+        "unknown",
+        "configured model provider",
+        ExternalTransmission: true,
+        AlwaysRequireConfirmation: true,
+        AllowPersistence: false);
 
     public JsonElement ParametersSchema { get; } = ToolHelpers.Schema("""
         {
@@ -40,6 +49,7 @@ public sealed class BrowserScreenshotTool : IMcpTool
                     return ToolResult.Fail("The extension returned no image.");
                 return ToolResult.OkWithImage(
                     $"Screenshot of tab: {BrowserToolHelpers.GetString(r, "title")}. " +
-                    "The image follows in the next message.", image);
+                    "The image follows in the next message.", image,
+                    [$"browser_tab_captured={BrowserToolHelpers.GetString(r, "title")}"]);
             }, ct);
 }

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
+using SranDesktop.Application.Services;
 using SranDesktop.Infrastructure.Native.Browser;
 using SranDesktop.Infrastructure.Services;
 using Xunit;
@@ -56,6 +57,77 @@ public class BrowserWireTests
     }
 }
 
+public sealed class BrowserNativeHostPolicyTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(
+        Path.GetTempPath(),
+        $"sran-native-policy-{Guid.NewGuid():N}");
+    private readonly string _executable;
+    private readonly string _manifest;
+
+    public BrowserNativeHostPolicyTests()
+    {
+        Directory.CreateDirectory(_directory);
+        _executable = Path.Combine(_directory, "SranDesktop.BrowserHost.exe");
+        _manifest = Path.Combine(_directory, "com.sran.browser.json");
+        File.WriteAllBytes(_executable, [0x4d, 0x5a, 0x01, 0x02]);
+        WriteManifest(BrowserNativeHostPolicy.Sha256(_executable));
+    }
+
+    [Fact]
+    public void Invocation_Requires_An_Origin_From_The_Validated_Manifest()
+    {
+        const string allowedId = "abcdefghijklmnopabcdefghijklmnop";
+        BrowserNativeHostPolicy.IsAllowedInvocation(
+                [$"chrome-extension://{allowedId}/"],
+                _manifest)
+            .Should().BeTrue();
+        BrowserNativeHostPolicy.IsAllowedInvocation(
+                ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"],
+                _manifest)
+            .Should().BeFalse();
+        BrowserNativeHostPolicy.IsAllowedInvocation([], _manifest)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void Executable_Hash_And_Extension_Id_Are_Fail_Closed()
+    {
+        BrowserNativeHostPolicy.IsValidExtensionId(
+                "abcdefghijklmnopabcdefghijklmnop")
+            .Should().BeTrue();
+        BrowserNativeHostPolicy.IsValidExtensionId(
+                "sran0000000000000000000000000000")
+            .Should().BeFalse();
+
+        File.AppendAllText(_executable, "tampered");
+        BrowserNativeHostPolicy.TryReadManifest(_manifest, out _)
+            .Should().BeFalse();
+    }
+
+    private void WriteManifest(string hash) =>
+        File.WriteAllText(
+            _manifest,
+            JsonSerializer.Serialize(new
+            {
+                name = BrowserNativeHostPolicy.HostName,
+                description = "test",
+                path = _executable,
+                type = "stdio",
+                allowed_origins = new[]
+                {
+                    "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+                },
+                sran_executable_sha256 = hash
+            }));
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory))
+            Directory.Delete(_directory, recursive: true);
+    }
+}
+
 /// <summary>BrowserBridgeService over a REAL named pipe: correlation, timeout,
 /// pairing rejection, and the not-connected error.</summary>
 public sealed class BrowserBridgeServiceTests : IAsyncDisposable
@@ -64,6 +136,7 @@ public sealed class BrowserBridgeServiceTests : IAsyncDisposable
 
     private readonly string _pipeName = $"sran-test-{Guid.NewGuid():N}";
     private readonly BrowserBridgeService _service;
+    private string _sessionId = "";
 
     public BrowserBridgeServiceTests()
     {
@@ -79,7 +152,23 @@ public sealed class BrowserBridgeServiceTests : IAsyncDisposable
     {
         var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         await client.ConnectAsync(5000);
-        await Send(client, new { token, hello = true });
+        await Send(client, new
+        {
+            token,
+            hello = true,
+            protocol_version = 2,
+            extension_session_id = "extension_test_session",
+            browser_instance_id = "chrome_test_instance",
+            browser_profile_id = "profile_test_profile"
+        });
+        if (token == Token)
+        {
+            using var acknowledgement = await Receive(client);
+            acknowledgement.RootElement.GetProperty("control").GetString()
+                .Should().Be("hello_ack");
+            _sessionId = acknowledgement.RootElement
+                .GetProperty("bridge_session_id").GetString()!;
+        }
         return client;
     }
 
@@ -119,11 +208,18 @@ public sealed class BrowserBridgeServiceTests : IAsyncDisposable
         var id = request.RootElement.GetProperty("id").GetInt64();
         request.RootElement.GetProperty("method").GetString().Should().Be("tabs.list");
 
-        await Send(client, new { token = Token, id, result = new { ok = true } });
+        await Send(client, new
+        {
+            token = Token,
+            id,
+            bridge_session_id = _sessionId,
+            result = new { ok = true }
+        });
 
         var result = await pending;
         result.GetProperty("ok").ValueKind.Should().Be(JsonValueKind.True);
         _service.LastSeenAt.Should().NotBeNull();
+        _service.CurrentSession!.BridgeSessionId.Should().Be(_sessionId);
     }
 
     [Fact]
@@ -132,10 +228,21 @@ public sealed class BrowserBridgeServiceTests : IAsyncDisposable
         await using var client = await ConnectClientAsync();
         await WaitFor(() => _service.IsConnected);
 
+        using var scope = AgentRunExecutionContext.Push("run_test", "step_test");
         var pending = _service.RequestAsync("page.click", new { @ref = 3 });
         using var request = await Receive(client);
         var id = request.RootElement.GetProperty("id").GetInt64();
-        await Send(client, new { token = Token, id, error = "refs are stale — call browser_read_page again" });
+        request.RootElement.GetProperty("context").GetProperty("run_id")
+            .GetString().Should().Be("run_test");
+        await Send(client, new
+        {
+            token = Token,
+            id,
+            bridge_session_id = _sessionId,
+            run_id = "run_test",
+            step_id = "step_test",
+            error = "refs are stale - call browser_read_page again"
+        });
 
         var act = () => pending;
         (await act.Should().ThrowAsync<BrowserBridgeException>())
@@ -170,11 +277,61 @@ public sealed class BrowserBridgeServiceTests : IAsyncDisposable
     {
         var first = await ConnectClientAsync();
         await WaitFor(() => _service.IsConnected);
+        var firstSession = _service.CurrentSession!.BridgeSessionId;
         await first.DisposeAsync();
         await WaitFor(() => !_service.IsConnected);
 
         await using var second = await ConnectClientAsync();
         await WaitFor(() => _service.IsConnected);
+        _service.CurrentSession!.BridgeSessionId.Should().NotBe(firstSession);
+    }
+
+    [Fact]
+    public async Task Mutable_Request_Without_Durable_Context_Is_Rejected()
+    {
+        await using var client = await ConnectClientAsync();
+        await WaitFor(() => _service.IsConnected);
+
+        var action = () => _service.RequestAsync("page.click", new { @ref = 1 });
+
+        (await action.Should().ThrowAsync<BrowserBridgeException>())
+            .WithMessage("*RuntimeContextRequired*");
+    }
+
+    [Fact]
+    public async Task Response_From_Stale_Session_Is_Rejected()
+    {
+        await using var client = await ConnectClientAsync();
+        await WaitFor(() => _service.IsConnected);
+
+        var pending = _service.RequestAsync("tabs.list");
+        using var request = await Receive(client);
+        var id = request.RootElement.GetProperty("id").GetInt64();
+        await Send(client, new
+        {
+            token = Token,
+            id,
+            bridge_session_id = "bridge_stale_session",
+            result = new { ok = true }
+        });
+
+        var action = () => pending;
+        (await action.Should().ThrowAsync<BrowserBridgeException>())
+            .WithMessage("*StaleBrowserSession*");
+    }
+
+    [Fact]
+    public async Task Unknown_Method_Is_Rejected_Before_Dispatch()
+    {
+        await using var client = await ConnectClientAsync();
+        await WaitFor(() => _service.IsConnected);
+
+        var action = () => _service.RequestAsync(
+            "host.execute",
+            new { command = "whoami" });
+
+        (await action.Should().ThrowAsync<BrowserBridgeException>())
+            .WithMessage("*Unsupported browser bridge method*");
     }
 
     public async ValueTask DisposeAsync() => await _service.DisposeAsync();

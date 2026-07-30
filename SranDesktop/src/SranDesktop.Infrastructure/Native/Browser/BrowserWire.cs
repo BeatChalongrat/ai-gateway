@@ -23,6 +23,17 @@ public static class BrowserWire
     /// only to keep the name short and character-safe.</summary>
     public static string PipeName()
     {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("SRAN_BROWSER_TEST_MODE"),
+                "1",
+                StringComparison.Ordinal)
+            && Environment.GetEnvironmentVariable("SRAN_BROWSER_PIPE_NAME")
+                is { Length: >= 16 and <= 120 } testPipe
+            && testPipe.All(character =>
+                char.IsAsciiLetterOrDigit(character)
+                || character is '-' or '_'))
+            return testPipe;
+
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? "anonymous";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(sid));
         return "sran-browser-" + Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();

@@ -34,6 +34,49 @@ public partial class FirstRunViewModel : ObservableObject
 
     [ObservableProperty] private bool _startWithWindows;
 
+    // ── Working folder (P3-4) ───────────────────────────────────────────────
+    //
+    // File tools reach only granted folders; there are no implicit built-in
+    // roots. Without this step a fresh install can read and write nothing, and
+    // the sandbox shell lane has no tree to stage, so every one of those tools
+    // fails and nothing tells the user that picking a folder is the fix. The
+    // answer is onboarding, not an implicit grant over the whole home directory.
+
+    /// <summary>Pre-filled with Documents; the user can browse elsewhere or clear
+    /// it. Empty means "decide later", which is allowed — it just leaves file
+    /// tools unavailable until a folder is chosen in the composer.</summary>
+    [ObservableProperty] private string _workingFolder = string.Empty;
+
+    /// <summary>Shown as a warning when the user clears the proposal, so the
+    /// consequence is stated before Continue rather than discovered later.</summary>
+    public bool HasNoWorkingFolder => string.IsNullOrWhiteSpace(WorkingFolder);
+
+    partial void OnWorkingFolderChanged(string value) =>
+        OnPropertyChanged(nameof(HasNoWorkingFolder));
+
+    [RelayCommand]
+    private void BrowseWorkingFolder()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = LocaleService.Instance.T("input.selectWorkingFolder"),
+            InitialDirectory = WorkingFolder
+        };
+        if (dialog.ShowDialog() != true)
+            return;
+        if (SranDesktop.Application.Services.FolderGrantValidator.Validate(
+                dialog.FolderName, out var canonical)
+            != SranDesktop.Application.Services.FolderGrantRejection.Ok)
+        {
+            ConnectionStatus = LocaleService.Instance.T("settings.folderRejected");
+            return;
+        }
+        WorkingFolder = canonical!;
+    }
+
+    [RelayCommand]
+    private void ClearProposedWorkingFolder() => WorkingFolder = string.Empty;
+
     // ── Connection test (A2c) ───────────────────────────────────────────────
 
     [ObservableProperty] private bool _isTestingConnection;
@@ -58,6 +101,11 @@ public partial class FirstRunViewModel : ObservableObject
         _originalGatewayUrl = settings.Current.GatewayBaseUrl;
         _serverBaseUrl = settings.Current.GatewayBaseUrl;
         _startWithWindows = startupManager.IsEnabled;
+        // An existing setting wins (re-onboarding); otherwise propose Documents.
+        _workingFolder = string.IsNullOrWhiteSpace(settings.Current.WorkingFolder)
+            ? SranDesktop.Application.Services.FolderGrantValidator
+                  .SuggestDefaultWorkingFolder() ?? string.Empty
+            : settings.Current.WorkingFolder;
     }
 
     /// <summary>Local dev (split ports, no nginx) skips the gate so `make up`
@@ -143,6 +191,18 @@ public partial class FirstRunViewModel : ObservableObject
                 updated.GatewayBaseUrl = baseUrl;
             }
         }
+
+        // Re-validated at commit time: the proposal was checked when it was made,
+        // but the folder could have been renamed or removed since. A stale value
+        // would configure zero mounts and silently reproduce the fresh-install
+        // failure this step exists to prevent.
+        updated.WorkingFolder =
+            !string.IsNullOrWhiteSpace(WorkingFolder)
+            && SranDesktop.Application.Services.FolderGrantValidator.Validate(
+                   WorkingFolder, out var canonicalWorkingFolder)
+               == SranDesktop.Application.Services.FolderGrantRejection.Ok
+                ? canonicalWorkingFolder!
+                : string.Empty;
 
         updated.StartWithWindows = StartWithWindows;
         try

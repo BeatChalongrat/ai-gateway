@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
+using SranDesktop.Application.Services;
 using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
@@ -102,12 +103,21 @@ public sealed class WebFetchTool : IMcpTool
             if (body is null)
                 return ToolResult.Fail("The page exceeds the 5 MB download limit.");
 
+            // The page body is untrusted external content: wrap it with the
+            // observation boundary so it can't be read as instructions (prompt
+            // injection). Truncate first so the marker survives the max_length cap.
             if (!isHtml)
-                return ToolResult.Ok(ApplyMaxLength(body, maxLength));
+                return ToolResult.Verified(
+                    UntrustedObservationBoundary.ProtectIfUntrusted(
+                        Name, ApplyMaxLength(body, maxLength)),
+                    [$"http_status={(int)response.StatusCode}", $"fetched_url={uri}"]);
 
             var (title, text) = ExtractReadableText(body);
             var result = "# " + (string.IsNullOrWhiteSpace(title) ? uri!.Host : title) + "\n\n" + text;
-            return ToolResult.Ok(ApplyMaxLength(result, maxLength));
+            return ToolResult.Verified(
+                UntrustedObservationBoundary.ProtectIfUntrusted(
+                    Name, ApplyMaxLength(result, maxLength)),
+                [$"http_status={(int)response.StatusCode}", $"fetched_url={uri}"]);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
         {

@@ -6,6 +6,10 @@ TestResults/
 publish/
 installer/
 
+# Build outputs (belt-and-suspenders alongside bin/ + publish/)
+*.exe
+*.pdb
+
 # Local databases (app state lives in %APPDATA%, but never risk a stray copy)
 *.db
 *.sqlite*

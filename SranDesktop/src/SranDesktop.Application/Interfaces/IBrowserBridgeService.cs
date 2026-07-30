@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SranDesktop.Application.Models;
 
 namespace SranDesktop.Application.Interfaces;
 
@@ -15,6 +16,10 @@ public interface IBrowserBridgeService
 
     /// <summary>Last time any valid message arrived (Settings "last seen").</summary>
     DateTimeOffset? LastSeenAt { get; }
+
+    /// <summary>The currently authenticated bridge session. A reconnect always
+    /// creates a new identity, invalidating references from the prior session.</summary>
+    BrowserBridgeSession? CurrentSession => null;
 
     /// <summary>Raised on connect/disconnect — the Settings status dot.</summary>
     event EventHandler? StatusChanged;

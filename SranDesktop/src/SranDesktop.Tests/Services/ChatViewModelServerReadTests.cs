@@ -48,7 +48,7 @@ public class ChatViewModelServerReadTests : IDisposable
             _store,
             Mock.Of<IFileService>(),
             Mock.Of<IChatOrchestrator>(),
-            Mock.Of<IChatService>(),
+            Mock.Of<IDurableMediaTurnService>(),
             Mock.Of<ISkillManager>(),
             Mock.Of<ISpeechService>(),
             settings.Object,
@@ -319,7 +319,6 @@ public class ChatViewModelServerReadTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         try
         {
             if (Directory.Exists(_dbDir)) Directory.Delete(_dbDir, recursive: true);

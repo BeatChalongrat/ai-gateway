@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -31,6 +31,70 @@
     <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
     <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
     <ProjectReference Include="..\SranDesktop.Presentation\SranDesktop.Presentation.csproj" />
+    <ProjectReference Include="..\SranDesktop.App\SranDesktop.App.csproj" />
+    <ProjectReference Include="..\SranDesktop.ReliabilityFixture\SranDesktop.ReliabilityFixture.csproj" />
   </ItemGroup>
+
+
+  <!-- The isolated worker ships as a self-contained image under workers/<capability>/.
+       Built first, then copied so WorkerImageResolver can find it; a missing image
+       makes the capability fail closed rather than fall back in-process. -->
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.DocumentWorker\SranDesktop.DocumentWorker.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false"
+                      SetTargetFramework="TargetFramework=net8.0" />
+  </ItemGroup>
+
+  <Target Name="StageDocumentWorkerImage" AfterTargets="Build">
+    <ItemGroup>
+      <DocumentWorkerFiles Include="$(MSBuildThisFileDirectory)..\SranDesktop.DocumentWorker\bin\$(Configuration)\net8.0\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DocumentWorkerFiles)"
+          DestinationFolder="$(OutDir)workers\document\%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(DocumentWorkerFiles)' != ''" />
+  </Target>
+
+
+  <Target Name="StageInteractiveFixtureWorkerImage" AfterTargets="Build">
+    <ItemGroup>
+      <FixtureWorkerFiles Include="$(MSBuildThisFileDirectory)..\SranDesktop.InteractiveFixtureWorker\bin\$(Configuration)\net8.0\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FixtureWorkerFiles)"
+          DestinationFolder="$(OutDir)workers\interactive-fixture\%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(FixtureWorkerFiles)' != ''" />
+  </Target>
+
+
+  <!-- The remote MCP fixture runs OUT OF PROCESS: an in-process listener shares
+       the test's memory and lifetime, so a client bug that only appears across a
+       real socket can hide behind it. -->
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.RemoteMcpFixtureServer\SranDesktop.RemoteMcpFixtureServer.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
+  </ItemGroup>
+
+  <Target Name="StageRemoteMcpFixtureServerImage" AfterTargets="Build">
+    <ItemGroup>
+      <RemoteFixtureFiles Include="$(MSBuildThisFileDirectory)..\SranDesktop.RemoteMcpFixtureServer\bin\$(Configuration)\net8.0\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RemoteFixtureFiles)"
+          DestinationFolder="$(OutDir)workers\remote-mcp-fixture\%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(RemoteFixtureFiles)' != ''" />
+  </Target>
+
+  <Target Name="StageMcpFixtureServerImage" AfterTargets="Build">
+    <ItemGroup>
+      <McpFixtureFiles Include="$(MSBuildThisFileDirectory)..\SranDesktop.McpFixtureServer\bin\$(Configuration)\net8.0\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(McpFixtureFiles)"
+          DestinationFolder="$(OutDir)workers\mcp-fixture\%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(McpFixtureFiles)' != ''" />
+  </Target>
 
 </Project>

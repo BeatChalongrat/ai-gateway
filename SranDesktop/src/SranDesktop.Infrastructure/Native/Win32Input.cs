@@ -3,6 +3,17 @@ using System.Text;
 
 namespace SranDesktop.Infrastructure.Native;
 
+internal sealed record InputExecutionResult(
+    bool CursorPositioned,
+    int RequestedInputEvents,
+    int AcceptedInputEvents,
+    int LastWin32Error)
+{
+    public bool OsInputAccepted =>
+        CursorPositioned && RequestedInputEvents > 0
+        && AcceptedInputEvents == RequestedInputEvents;
+}
+
 /// <summary>
 /// P/Invoke wrappers for synthetic mouse/keyboard input (SendInput) and
 /// window lookup/focus — the foundation of the computer-use tools.
@@ -58,10 +69,26 @@ internal static class Win32Input
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const uint KEYEVENTF_UNICODE = 0x0004;
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+    [DllImport("user32.dll", EntryPoint = "SendInput", SetLastError = true)]
+    private static extern uint SendInputRaw(uint nInputs, INPUT[] pInputs, int cbSize);
 
-    [DllImport("user32.dll")]
+    /// <summary>
+    /// The single narrow point through which every synthetic keystroke and mouse
+    /// event in this process passes. Marking the agent-input window here rather
+    /// than at each caller is deliberate: a decision that must be a person's —
+    /// approving a connector, above all — has to be able to tell that the click
+    /// arriving right now was manufactured by a tool, and a marker set at five
+    /// call sites is a marker missing from the sixth.
+    /// </summary>
+    private static uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize)
+    {
+        Application.Services.AgentInputScope.Touch("synthetic input (SendInput)");
+        return SendInputRaw(nInputs, pInputs, cbSize);
+    }
+
+    // SetLastError so ClickCore's Marshal.GetLastWin32Error() after a failed SetCursorPos
+    // is accurate (UIPI blocks report ERROR_ACCESS_DENIED = 5) — part of the OsInputRejected probe.
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetCursorPos(int x, int y);
 
     [DllImport("user32.dll")]
@@ -76,7 +103,7 @@ internal static class Win32Input
 
     // ── Window management ───────────────────────────────────────────────────
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     internal static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
@@ -89,6 +116,9 @@ internal static class Win32Input
     internal static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    internal static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -98,15 +128,40 @@ internal static class Win32Input
     internal static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     internal static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    private delegate bool MonitorEnumProc(
+        IntPtr hMonitor, IntPtr hdcMonitor, ref RECT monitorRect, IntPtr data);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct RECT
     {
         public int Left, Top, Right, Bottom;
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MONITORINFOEX
+    {
+        public int Size;
+        public RECT Monitor;
+        public RECT WorkArea;
+        public uint Flags;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumDisplayMonitors(
+        IntPtr hdc, IntPtr clipRect, MonitorEnumProc callback, IntPtr data);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX info);
 
     internal static (int Width, int Height) PrimaryScreenSize()
         => (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
@@ -116,6 +171,68 @@ internal static class Win32Input
     internal static (int X, int Y, int Width, int Height) VirtualScreenBounds()
         => (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
             GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+
+    internal static double DpiScaleForWindow(IntPtr hWnd)
+    {
+        var dpi = hWnd == IntPtr.Zero ? 0 : GetDpiForWindow(hWnd);
+        return dpi == 0 ? 1d : dpi / 96d;
+    }
+
+    internal static long DisplayTopologyVersion()
+    {
+        unchecked
+        {
+            const long offset = 1469598103934665603;
+            const long prime = 1099511628211;
+            var hash = offset;
+            foreach (var monitor in ListMonitors().OrderBy(m => m.Id, StringComparer.Ordinal))
+            {
+                foreach (var value in new[]
+                         {
+                             monitor.Bounds.X, monitor.Bounds.Y,
+                             monitor.Bounds.Width, monitor.Bounds.Height
+                         })
+                    hash = (hash ^ value) * prime;
+                foreach (var ch in monitor.Id)
+                    hash = (hash ^ ch) * prime;
+            }
+            return hash;
+        }
+    }
+
+    internal sealed record MonitorDescriptor(string Id, PhysicalRect Bounds);
+
+    internal static IReadOnlyList<MonitorDescriptor> ListMonitors()
+    {
+        var monitors = new List<MonitorDescriptor>();
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero,
+            (IntPtr hMonitor, IntPtr _, ref RECT rect, IntPtr _) =>
+            {
+                var info = new MONITORINFOEX
+                {
+                    Size = Marshal.SizeOf<MONITORINFOEX>(),
+                    DeviceName = string.Empty
+                };
+                var id = GetMonitorInfo(hMonitor, ref info)
+                    ? info.DeviceName
+                    : $"monitor-{hMonitor.ToInt64()}";
+                monitors.Add(new MonitorDescriptor(
+                    id,
+                    new PhysicalRect(
+                        rect.Left, rect.Top,
+                        rect.Right - rect.Left,
+                        rect.Bottom - rect.Top)));
+                return true;
+            }, IntPtr.Zero);
+        return monitors;
+    }
+
+    internal static long WindowGeometryVersion(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero || !GetWindowRect(hWnd, out var rect))
+            return 0;
+        return HashCode.Combine(hWnd.ToInt64(), rect.Left, rect.Top, rect.Right, rect.Bottom);
+    }
 
     /// <summary>First visible top-level window whose title contains <paramref name="titlePart"/>.</summary>
     internal static IntPtr FindWindowByTitle(string titlePart)
@@ -160,6 +277,11 @@ internal static class Win32Input
     private static extern IntPtr WindowFromPoint(POINT point);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+    private const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [DllImport("user32.dll")]
@@ -180,6 +302,12 @@ internal static class Win32Input
             return 0;
         GetWindowThreadProcessId(hWnd, out var pid);
         return pid;
+    }
+
+    internal static IntPtr RootWindowAtPoint(int x, int y)
+    {
+        var hWnd = WindowFromPoint(new POINT { X = x, Y = y });
+        return hWnd == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hWnd, GA_ROOT);
     }
 
     /// <summary>
@@ -250,10 +378,32 @@ internal static class Win32Input
 
     public static void MoveMouse(int x, int y) => SetCursorPos(x, y);
 
-    public static void Click(int x, int y, string button = "left", int clicks = 1)
+    public static InputExecutionResult Click(
+        int x, int y, string button = "left", int clicks = 1) =>
+        ClickCore(
+            SetCursorPos,
+            (flags, data) => SendMouse(flags, data),
+            x, y, button, clicks,
+            milliseconds => Thread.Sleep(milliseconds));
+
+    internal static InputExecutionResult ClickCore(
+        Func<int, int, bool> setCursorPosition,
+        Func<uint, uint, uint> sendMouse,
+        int x,
+        int y,
+        string button,
+        int clicks,
+        Action<int>? delay = null)
     {
-        SetCursorPos(x, y);
-        Thread.Sleep(60);
+        if (clicks < 1)
+            throw new ArgumentOutOfRangeException(nameof(clicks));
+
+        var cursorPositioned = setCursorPosition(x, y);
+        if (!cursorPositioned)
+            return new InputExecutionResult(
+                false, clicks * 2, 0, Marshal.GetLastWin32Error());
+
+        delay?.Invoke(60);
 
         var (down, up) = button switch
         {
@@ -262,13 +412,18 @@ internal static class Win32Input
             _ => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP)
         };
 
+        var accepted = 0;
         for (var i = 0; i < clicks; i++)
         {
-            SendMouse(down);
-            SendMouse(up);
+            accepted += checked((int)sendMouse(down, 0));
+            accepted += checked((int)sendMouse(up, 0));
             if (i < clicks - 1)
-                Thread.Sleep(80); // double/triple-click cadence
+                delay?.Invoke(80);
         }
+
+        return new InputExecutionResult(
+            true, clicks * 2, accepted,
+            accepted == clicks * 2 ? 0 : Marshal.GetLastWin32Error());
     }
 
     public static void Scroll(int x, int y, string direction, int amount)
@@ -300,39 +455,46 @@ internal static class Win32Input
         SendMouse(MOUSEEVENTF_LEFTUP);
     }
 
-    private static void SendMouse(uint flags, uint mouseData = 0)
+    private static uint SendMouse(uint flags, uint mouseData = 0)
     {
         var input = new INPUT
         {
             type = INPUT_MOUSE,
             u = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags, mouseData = mouseData } }
         };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        return SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
     // ── Keyboard ────────────────────────────────────────────────────────────
 
     /// <summary>Types literal text via KEYEVENTF_UNICODE (layout-independent).</summary>
-    public static void TypeText(string text)
+    public static InputExecutionResult TypeText(string text)
     {
+        var requested = 0;
+        var accepted = 0;
         foreach (var ch in text)
         {
             if (ch == '\r')
                 continue;
             if (ch == '\n')
             {
-                PressVirtualKey(0x0D); // Enter
+                requested += 2;
+                accepted += PressVirtualKey(0x0D);
                 Thread.Sleep(5);
                 continue;
             }
 
-            SendUnicode(ch, keyUp: false);
-            SendUnicode(ch, keyUp: true);
+            requested += 2;
+            accepted += checked((int)SendUnicode(ch, keyUp: false));
+            accepted += checked((int)SendUnicode(ch, keyUp: true));
             Thread.Sleep(5);
         }
+        return new InputExecutionResult(
+            true, requested, accepted,
+            requested == accepted ? 0 : Marshal.GetLastWin32Error());
     }
 
-    private static void SendUnicode(char ch, bool keyUp)
+    private static uint SendUnicode(char ch, bool keyUp)
     {
         var input = new INPUT
         {
@@ -347,32 +509,44 @@ internal static class Win32Input
                 }
             }
         };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        return SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
     /// <summary>
     /// Presses a combo like "Ctrl+C", "Enter", "Alt+Tab", "Ctrl+Shift+S":
     /// modifiers down → key down/up → modifiers up.
     /// </summary>
-    public static void PressKey(string keyCombo)
+    public static InputExecutionResult PressKey(string keyCombo)
     {
         var parts = ParseKeyCombo(keyCombo);
+        var requested = 0;
+        var accepted = 0;
         foreach (var vk in parts.Modifiers)
-            SendVirtualKey(vk, keyUp: false);
+        {
+            requested++;
+            accepted += checked((int)SendVirtualKey(vk, keyUp: false));
+        }
         Thread.Sleep(20);
-        PressVirtualKey(parts.Key);
+        requested += 2;
+        accepted += PressVirtualKey(parts.Key);
         Thread.Sleep(20);
         for (var i = parts.Modifiers.Count - 1; i >= 0; i--)
-            SendVirtualKey(parts.Modifiers[i], keyUp: true);
+        {
+            requested++;
+            accepted += checked((int)SendVirtualKey(parts.Modifiers[i], keyUp: true));
+        }
+        return new InputExecutionResult(
+            true, requested, accepted,
+            requested == accepted ? 0 : Marshal.GetLastWin32Error());
     }
 
-    private static void PressVirtualKey(ushort vk)
+    private static int PressVirtualKey(ushort vk)
     {
-        SendVirtualKey(vk, keyUp: false);
-        SendVirtualKey(vk, keyUp: true);
+        return checked((int)SendVirtualKey(vk, keyUp: false))
+               + checked((int)SendVirtualKey(vk, keyUp: true));
     }
 
-    private static void SendVirtualKey(ushort vk, bool keyUp)
+    private static uint SendVirtualKey(ushort vk, bool keyUp)
     {
         var input = new INPUT
         {
@@ -382,7 +556,7 @@ internal static class Win32Input
                 ki = new KEYBDINPUT { wVk = vk, dwFlags = keyUp ? KEYEVENTF_KEYUP : 0 }
             }
         };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        return SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
     /// <summary>Parses "Ctrl+Shift+S" → modifiers [Ctrl, Shift] + key S. Throws on unknown keys.</summary>

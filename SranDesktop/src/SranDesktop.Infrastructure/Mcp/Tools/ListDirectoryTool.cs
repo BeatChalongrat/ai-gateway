@@ -6,14 +6,27 @@ using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
 
-public sealed class ListDirectoryTool : IMcpTool
+public sealed class ListDirectoryTool : IMcpTool, ISensitiveDataTool
 {
     private const int MaxEntries = 1000;
+    private readonly IWorkspaceFileBroker _files;
+
+    public ListDirectoryTool(IWorkspaceFileBroker? files = null) =>
+        _files = files ?? WorkspaceFileBroker.Shared;
 
     public string Name => "list_directory";
     public string Description => "List files and directories at the given path.";
     public ToolCategory Category => ToolCategory.FileSystem;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
+    public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+        "Workspace.ListLocal",
+        "WorkspaceListing.SendToModel",
+        "workspace_metadata",
+        "internal",
+        "configured model provider",
+        ExternalTransmission: true,
+        AlwaysRequireConfirmation: true,
+        AllowPersistence: false);
 
     public JsonElement ParametersSchema { get; } = ToolHelpers.Schema("""
         {
@@ -26,48 +39,40 @@ public sealed class ListDirectoryTool : IMcpTool
         }
         """);
 
-    public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
-        var path = PathGuard.Resolve(ToolHelpers.GetString(arguments, "path"), out var error);
-        if (path is null)
-            return Task.FromResult(ToolResult.Fail(error!));
-
-        if (!Directory.Exists(path))
-            return Task.FromResult(ToolResult.Fail($"Directory not found: {path}"));
-
+        var path = ToolHelpers.GetString(arguments, "path");
+        if (string.IsNullOrWhiteSpace(path))
+            return ToolResult.Fail("'path' is required.");
         var recursive = ToolHelpers.GetBool(arguments, "recursive");
-        var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-
-        var sb = new StringBuilder();
-        var count = 0;
         try
         {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(path, "*", option))
+            var entries = await _files.ListAsync(path, recursive, MaxEntries, ct);
+            var sb = new StringBuilder();
+            foreach (var entry in entries)
             {
-                ct.ThrowIfCancellationRequested();
-                // A recursive listing of an allowed parent (e.g. %APPDATA%)
-                // must not surface the app's own state subtree (Phase 10 D1).
-                if (PathGuard.IsProtectedStatePath(entry))
-                    continue;
-                if (++count > MaxEntries)
-                {
-                    sb.AppendLine($"[...truncated at {MaxEntries} entries]");
-                    break;
-                }
-
-                var relative = Path.GetRelativePath(path, entry);
-                if (Directory.Exists(entry))
-                    sb.AppendLine($"D  {relative}{Path.DirectorySeparatorChar}");
+                if (entry.IsDirectory)
+                    sb.AppendLine($"D  {entry.RelativePath}{Path.DirectorySeparatorChar}");
                 else
-                    sb.AppendLine($"F  {relative}  ({ToolHelpers.FormatSize(new FileInfo(entry).Length)})");
+                    sb.AppendLine($"F  {entry.RelativePath}  ({ToolHelpers.FormatSize(entry.Length)})");
             }
+            if (entries.Count == MaxEntries)
+                sb.AppendLine($"[...truncated at {MaxEntries} entries]");
+            // Reports the observation itself, not just "the call returned". The
+            // runtime used to infer "effect observed" from a read-only tool that
+            // merely succeeded, which credited any successful read with having
+            // seen whatever the goal wanted; that inference is gone, so a tool
+            // that really did observe something has to say so.
+            return ToolResult.Verified(
+                entries.Count == 0 ? "[empty directory]" : sb.ToString().TrimEnd(),
+                [$"directory_entries_observed={entries.Count}", $"listed_path={path}"]);
         }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or ArgumentException
+                                   or NotSupportedException)
         {
-            sb.AppendLine($"[some entries skipped: {ex.Message}]");
+            return ToolResult.Fail(ex.Message);
         }
-
-        return Task.FromResult(ToolResult.Ok(
-            count == 0 ? "[empty directory]" : sb.ToString().TrimEnd()));
     }
 }

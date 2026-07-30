@@ -72,6 +72,33 @@ public static class Dict
         ["perm.skip.name"] = "Skip all approvals",
         ["perm.skip.desc"] = "Never pauses, even for unsafe actions.",
 
+        // Shell execution lane (which environment run_command executes in)
+        ["shell.tooltip"] = "Where commands run",
+        ["shell.sandbox.name"] = "Sandboxed",
+        ["shell.sandbox.desc"] =
+            "Commands run isolated: no network, and only a copy of your working folder. "
+            + "Tools installed on your PC (docker, git, node, python) are not reachable.",
+        ["shell.host.name"] = "On this PC",
+        ["shell.host.desc"] =
+            "Commands run on the real machine with your full user rights, so your installed "
+            + "tools work. With approvals skipped, nothing asks first — and a web page or file "
+            + "the assistant just read can decide the command.",
+        ["shell.host.confirmTitle"] = "Run commands on this PC?",
+        ["shell.host.confirmBody"] =
+            "Commands will run on the real machine with your full user rights — they can read, "
+            + "change and delete your files and reach the network.\n\n"
+            + "You are currently set to skip all approvals, so commands will run without asking "
+            + "you first. The risk is not a careless click: content the assistant reads from a "
+            + "web page or a file can dictate the command.\n\n"
+            + "Every command that runs this way is written to the security log.",
+        ["shell.host.confirmBodyPrompted"] =
+            "Commands will run on the real machine with your full user rights — they can read, "
+            + "change and delete your files and reach the network.\n\n"
+            + "You will still be shown each command before it runs. Every command that runs this "
+            + "way is written to the security log.",
+        ["shell.host.confirmYes"] = "Run on this PC",
+        ["shell.host.confirmNo"] = "Keep sandboxed",
+
         // Conversation / folder context menus
         ["conv.rename"] = "Rename",
         ["conv.delete"] = "Delete",
@@ -219,6 +246,7 @@ public static class Dict
         // Phase A PART 1/6 — resumable step/time budget
         ["agent.paused"] = "Paused at the step limit — the tool history is saved. Continue to keep working.",
         ["agent.continue"] = "Continue",
+        ["agent.conversationMode"] = "Conversation mode — this turn's result is not independently verified.",
         ["agent.plan"] = "Plan",
         ["tool.remembering"] = "Saving a note...",
         // Phase C.5 — themed confirm/error dialogs
@@ -285,6 +313,29 @@ public static class Dict
         // R9 — Tool cards
         ["tool.input"] = "Input",
         ["tool.output"] = "Output",
+
+        // R5 — human-readable status / failure reasons (shown on the tool card so a
+        // non-technical user sees WHY a step failed; the raw code stays in Output).
+        ["tool.verifying"] = "Verifying result…",
+        // 2b — auto-retry (retrying state) line + short reasons
+        ["tool.retrying"] = "Retrying {0}/{1}",
+        ["tool.retry.reason.focusLost"] = "lost focus",
+        ["tool.retry.reason.targetNotFound"] = "target not found",
+        ["tool.retry.reason.stale"] = "screen changed",
+        ["tool.retry.reason.notReady"] = "app not ready",
+        ["tool.retry.reason.generic"] = "transient issue",
+        ["tool.error.focusLost"] = "Couldn't type: another window took focus.",
+        ["tool.error.targetNotFound"] = "Couldn't find the field — the screen may have changed.",
+        ["tool.error.wrongWindow"] = "Acted on the wrong window — target changed after it was seen.",
+        ["tool.error.unboundInput"] = "Not enough information about the target to act safely.",
+        ["tool.error.stale"] = "The screen view was too old — needs a fresh look.",
+        ["tool.error.notReady"] = "The app wasn't ready to receive input yet.",
+        ["tool.error.validate"] = "The target couldn't be confirmed on screen.",
+        ["tool.error.disabled"] = "That control is disabled and can't be clicked.",
+        ["tool.error.noClickable"] = "That control has no clickable area.",
+        ["tool.error.osRejected"] = "Windows didn't accept the click.",
+        ["tool.error.timeout"] = "The app's controls didn't respond in time.",
+        ["tool.error.generic"] = "This step didn't succeed.",
 
         // Friendly tool display names (non-technical card headers)
         ["tool.name.computer_screenshot"] = "Screenshot",
@@ -503,6 +554,16 @@ public static class Dict
         ["setup.testConnection"] = "Test connection",
         ["setup.testing"] = "Testing...",
         ["setup.connected"] = "Connected ✓",
+        ["setup.workingFolderTitle"] = "Working folder",
+        ["setup.workingFolderDesc"] =
+            "The folder the assistant may read and write in. It can only reach folders you "
+            + "choose — nothing else on your PC. You can change this any time from the composer.",
+        ["setup.browse"] = "Browse…",
+        ["setup.decideLater"] = "Decide later",
+        ["setup.workingFolderEmpty"] =
+            "Without a working folder the assistant cannot read, write or search files, and "
+            + "sandboxed commands have nothing to run in. Pick a folder here or from the "
+            + "composer later.",
 
         // R11 — Crash reporting
         ["crash.title"] = "Something went wrong",
@@ -620,6 +681,32 @@ public static class Dict
         ["perm.auto.desc"] = "ทำงานเอง จะหยุดถามเฉพาะการกระทำที่ดูไม่ปลอดภัย",
         ["perm.skip.name"] = "ข้ามการอนุมัติทั้งหมด",
         ["perm.skip.desc"] = "ไม่หยุดถามเลย แม้การกระทำที่ไม่ปลอดภัย",
+
+        // Shell execution lane (which environment run_command executes in)
+        ["shell.tooltip"] = "คำสั่งจะรันที่ไหน",
+        ["shell.sandbox.name"] = "รันแบบแยกกล่อง",
+        ["shell.sandbox.desc"] =
+            "คำสั่งรันในกล่องแยก ไม่มีเน็ต และเห็นแค่สำเนาของโฟลเดอร์ทำงาน "
+            + "เครื่องมือที่ติดตั้งบนเครื่อง (docker, git, node, python) เข้าไม่ถึง",
+        ["shell.host.name"] = "รันบนเครื่องนี้",
+        ["shell.host.desc"] =
+            "คำสั่งรันบนเครื่องจริงด้วยสิทธิ์ผู้ใช้เต็ม เครื่องมือที่ติดตั้งไว้จึงใช้ได้ "
+            + "ถ้าตั้งข้ามการอนุมัติไว้ จะไม่มีการถามเลย และเนื้อหาจากเว็บหรือไฟล์ที่ AI "
+            + "เพิ่งอ่านสามารถกำหนดคำสั่งได้",
+        ["shell.host.confirmTitle"] = "ให้คำสั่งรันบนเครื่องนี้ไหม",
+        ["shell.host.confirmBody"] =
+            "คำสั่งจะรันบนเครื่องจริงด้วยสิทธิ์ผู้ใช้เต็ม — อ่าน แก้ไข และลบไฟล์ของคุณได้ "
+            + "และเข้าถึงเครือข่ายได้\n\n"
+            + "ตอนนี้คุณตั้งค่าข้ามการอนุมัติทั้งหมดไว้ คำสั่งจึงรันโดยไม่ถามคุณก่อน "
+            + "ความเสี่ยงไม่ใช่การเผลอกดผิด แต่คือเนื้อหาจากเว็บหรือไฟล์ที่ AI อ่าน "
+            + "สามารถกำหนดคำสั่งได้เอง\n\n"
+            + "ทุกคำสั่งที่รันแบบนี้จะถูกบันทึกลง security log",
+        ["shell.host.confirmBodyPrompted"] =
+            "คำสั่งจะรันบนเครื่องจริงด้วยสิทธิ์ผู้ใช้เต็ม — อ่าน แก้ไข และลบไฟล์ของคุณได้ "
+            + "และเข้าถึงเครือข่ายได้\n\n"
+            + "คุณจะยังเห็นคำสั่งก่อนรันทุกครั้ง และทุกคำสั่งที่รันแบบนี้จะถูกบันทึกลง security log",
+        ["shell.host.confirmYes"] = "รันบนเครื่องนี้",
+        ["shell.host.confirmNo"] = "คงไว้แบบแยกกล่อง",
 
         // Conversation / folder context menus
         ["conv.rename"] = "เปลี่ยนชื่อ",
@@ -768,6 +855,7 @@ public static class Dict
         // Phase A PART 1/6 — resumable step/time budget
         ["agent.paused"] = "หยุดชั่วคราวที่ขีดจำกัดจำนวนขั้นตอน — บันทึกประวัติการใช้เครื่องมือไว้แล้ว กด \"ทำต่อ\" เพื่อดำเนินการต่อ",
         ["agent.continue"] = "ทำต่อ",
+        ["agent.conversationMode"] = "โหมดสนทนา — ผลลัพธ์ของรอบนี้ไม่ได้ผ่านการยืนยันแบบอิสระ",
         ["agent.plan"] = "แผนงาน",
         ["tool.remembering"] = "กำลังบันทึกโน้ต...",
         // Phase C.5 — themed confirm/error dialogs
@@ -834,6 +922,29 @@ public static class Dict
         // R9 — Tool cards
         ["tool.input"] = "สิ่งที่ทำ",
         ["tool.output"] = "ผลลัพธ์",
+
+        // R5 — ข้อความสถานะ/สาเหตุที่อ่านรู้เรื่อง (แสดงบนการ์ดให้ผู้ใช้ทั่วไปเข้าใจว่าทำไมล้ม;
+        // โค้ดดิบยังอยู่ในส่วนผลลัพธ์)
+        ["tool.verifying"] = "กำลังยืนยันผล…",
+        // 2b — บรรทัด auto-retry (สถานะ retrying) + เหตุผลสั้น
+        ["tool.retrying"] = "กำลังลองใหม่ {0}/{1}",
+        ["tool.retry.reason.focusLost"] = "โฟกัสหลุด",
+        ["tool.retry.reason.targetNotFound"] = "หาเป้าไม่เจอ",
+        ["tool.retry.reason.stale"] = "หน้าจอเปลี่ยน",
+        ["tool.retry.reason.notReady"] = "แอปยังไม่พร้อม",
+        ["tool.retry.reason.generic"] = "ติดขัดชั่วคราว",
+        ["tool.error.focusLost"] = "พิมพ์ไม่สำเร็จ: มีหน้าต่างอื่นแย่งโฟกัส",
+        ["tool.error.targetNotFound"] = "หาช่องกรอกไม่พบ — หน้าจออาจเปลี่ยนไป",
+        ["tool.error.wrongWindow"] = "ทำผิดหน้าต่าง — เป้าหมายเปลี่ยนหลังจากที่เห็น",
+        ["tool.error.unboundInput"] = "ข้อมูลเป้าหมายไม่พอที่จะทำอย่างปลอดภัย",
+        ["tool.error.stale"] = "ภาพหน้าจอเก่าเกินไป — ต้องดูใหม่",
+        ["tool.error.notReady"] = "แอปยังเปิดไม่พร้อมรับการพิมพ์",
+        ["tool.error.validate"] = "ยืนยันเป้าหมายบนหน้าจอไม่ได้",
+        ["tool.error.disabled"] = "ปุ่ม/ช่องนี้ถูกปิดใช้งาน คลิกไม่ได้",
+        ["tool.error.noClickable"] = "ปุ่ม/ช่องนี้ไม่มีพื้นที่ให้คลิก",
+        ["tool.error.osRejected"] = "Windows ไม่รับการคลิก",
+        ["tool.error.timeout"] = "ตัวควบคุมของแอปไม่ตอบสนองในเวลาที่กำหนด",
+        ["tool.error.generic"] = "ทำขั้นตอนนี้ไม่สำเร็จ",
 
         // ชื่อเครื่องมือแบบอ่านง่าย (หัวการ์ดสำหรับผู้ใช้ทั่วไป)
         ["tool.name.computer_screenshot"] = "ถ่ายภาพหน้าจอ",
@@ -1052,6 +1163,15 @@ public static class Dict
         ["setup.testConnection"] = "ทดสอบการเชื่อมต่อ",
         ["setup.testing"] = "กำลังทดสอบ...",
         ["setup.connected"] = "เชื่อมต่อสำเร็จ ✓",
+        ["setup.workingFolderTitle"] = "โฟลเดอร์ทำงาน",
+        ["setup.workingFolderDesc"] =
+            "โฟลเดอร์ที่ให้ AI อ่านและเขียนได้ AI จะเข้าถึงได้แค่โฟลเดอร์ที่คุณเลือกเท่านั้น "
+            + "ไม่แตะส่วนอื่นของเครื่อง เปลี่ยนได้ทีหลังจากช่องพิมพ์ข้อความ",
+        ["setup.browse"] = "เลือกโฟลเดอร์…",
+        ["setup.decideLater"] = "ไว้ค่อยตั้ง",
+        ["setup.workingFolderEmpty"] =
+            "ถ้าไม่มีโฟลเดอร์ทำงาน AI จะอ่าน เขียน หรือค้นหาไฟล์ไม่ได้ "
+            + "และคำสั่งแบบแยกกล่องจะไม่มีที่รัน เลือกตรงนี้ หรือเลือกทีหลังจากช่องพิมพ์ข้อความ",
 
         // R11 — Crash reporting
         ["crash.title"] = "เกิดข้อผิดพลาด",

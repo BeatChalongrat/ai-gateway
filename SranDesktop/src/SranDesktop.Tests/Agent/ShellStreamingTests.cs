@@ -10,20 +10,37 @@ namespace SranDesktop.Tests.Agent;
 
 /// <summary>Phase B PART 1: run_command streams output live via IProcessRunner,
 /// and the bounded buffer keeps head+tail.</summary>
-public class ShellStreamingTests
+[Collection("PathGuardGrants")]
+public class ShellStreamingTests : IDisposable
 {
+    private readonly string _workDir;
+
+    public ShellStreamingTests()
+    {
+        _workDir = Path.Combine(Path.GetTempPath(), $"sran-stream-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_workDir);
+        PathGuard.ConfigureMounts(
+            [new WorkspaceMount(_workDir, WorkspaceMountAccess.ReadWrite)],
+            _workDir);
+    }
+
     private sealed class FakeSettings : ISettingsService
     {
-        public UserSettings Current { get; } = new() { ShellTimeoutSeconds = 300 };
+        public UserSettings Current { get; }
         public bool IsFirstRun => false;
+        public FakeSettings(string workingFolder) => Current = new UserSettings
+        {
+            ShellTimeoutSeconds = 300,
+            WorkingFolder = workingFolder
+        };
         public event EventHandler? SettingsChanged;
         public void Save(UserSettings s) => SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private static JsonElement Args(object o) => JsonSerializer.SerializeToElement(o);
 
-    private static RunCommandTool Tool(IProcessRunner runner) =>
-        new(NullLogger<RunCommandTool>.Instance, new FakeSettings(), null, runner);
+    private RunCommandTool Tool(IProcessRunner runner) =>
+        new(NullLogger<RunCommandTool>.Instance, new FakeSettings(_workDir), null, runner);
 
     // A runner that emits one line, then blocks until the test releases it —
     // lets the test prove the first chunk streamed WHILE the command was running.
@@ -104,9 +121,11 @@ public class ShellStreamingTests
         var result = await Tool(new TimeoutRunner())
             .ExecuteAsync(Args(new { command = "long build" }), CancellationToken.None);
 
-        result.Success.Should().BeTrue();
+        result.Success.Should().BeFalse();
+        result.Effect!.FailureCode.Should().Be("Timeout");
+        result.Effect.Retryable.Should().BeTrue();
         result.Content.Should().Contain("partial output before kill");
-        result.Content.Should().Contain("still running");
+        result.Error.Should().Contain("still running");
     }
 
     [Fact]
@@ -145,5 +164,12 @@ public class ShellStreamingTests
         buf.Append("hello");
         buf.Append("world");
         buf.ToString().Should().Be("hello\nworld");
+    }
+
+    public void Dispose()
+    {
+        PathGuard.ConfigureMounts([]);
+        if (Directory.Exists(_workDir))
+            Directory.Delete(_workDir, recursive: true);
     }
 }

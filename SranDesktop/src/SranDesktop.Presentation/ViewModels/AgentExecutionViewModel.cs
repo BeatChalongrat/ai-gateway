@@ -36,8 +36,16 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPending))]
     [NotifyPropertyChangedFor(nameof(IsOk))]
+    [NotifyPropertyChangedFor(nameof(IsVerificationPending))]
     [NotifyPropertyChangedFor(nameof(IsFailed))]
-    private string _state = "pending"; // pending | ok | failed
+    [NotifyPropertyChangedFor(nameof(IsRetrying))]
+    private string _state = "pending"; // pending | retrying | verification_pending | verified | failed
+
+    /// <summary>R4/2b: amber "Retrying n/m — reason" line shown WHILE the runtime
+    /// auto-retries a transient failure, so repeated attempts collapse into one card
+    /// instead of a stack of red X's. Set by <see cref="BeginRetry"/>; cleared when the
+    /// action next completes.</summary>
+    [ObservableProperty] private string? _retryHint;
 
     [ObservableProperty] private string _durationText = string.Empty;
     [ObservableProperty] private string? _resultPreview;
@@ -46,6 +54,11 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     [ObservableProperty] private string? _fullResult;
 
     [ObservableProperty] private bool _isExpanded;
+
+    /// <summary>R5: one localized, human-readable sentence shown on a failed card so a
+    /// non-technical user sees WHY the step failed; the raw code/output stays available
+    /// in the expanded Output section. Set in <see cref="Complete"/> only when failed.</summary>
+    [ObservableProperty] private string? _humanError;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasScreenshot))]
@@ -72,9 +85,36 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     }
 
     public bool IsPending => State == "pending";
-    public bool IsOk => State == "ok";
+    public bool IsOk => State == "verified";
+    public bool IsVerificationPending => State == "verification_pending";
     public bool IsFailed => State == "failed";
+    public bool IsRetrying => State == "retrying";
     public bool HasScreenshot => ScreenshotPreview is not null;
+
+    /// <summary>2b: mark this card as auto-retrying (from an <c>AgentToolRetryEvent</c>).
+    /// Shows an amber "Retrying n/m — reason" line instead of a red X between attempts;
+    /// the next <see cref="Complete"/> replaces it with the real terminal state.</summary>
+    public void BeginRetry(int attempt, int maxAttempts, string reason)
+    {
+        RetryHint = string.Format(
+            Localization.LocaleService.Instance.T("tool.retrying"), attempt, maxAttempts)
+            + " — " + RetryReason(reason);
+        State = "retrying";
+    }
+
+    /// <summary>Short localized phrase for the retryable FailureCode driving the retry.</summary>
+    internal static string RetryReason(string? code)
+    {
+        var key = code switch
+        {
+            "FocusLost" => "tool.retry.reason.focusLost",
+            "TargetNotFound" => "tool.retry.reason.targetNotFound",
+            "StaleObservation" or "StaleWindow" => "tool.retry.reason.stale",
+            "ApplicationNotReady" => "tool.retry.reason.notReady",
+            _ => "tool.retry.reason.generic",
+        };
+        return Localization.LocaleService.Instance.T(key);
+    }
 
     /// <summary>
     /// Nested tool cards (Phase 16 A): populated for a run_subagent card from
@@ -115,7 +155,7 @@ public partial class ToolExecutionItemViewModel : ObservableObject
                     Children.Add(child);
                     OnPropertyChanged(nameof(HasChildren));
                 }
-                child.Complete(result);
+                child.Complete(result, requireVerification: false);
                 break;
         }
     }
@@ -131,9 +171,27 @@ public partial class ToolExecutionItemViewModel : ObservableObject
         IconGeometry = System.Windows.Application.Current?.TryFindResource(ToolIcon(toolName)) as Geometry;
     }
 
-    public void Complete(AgentToolResultEvent result)
+    /// <param name="requireVerification">
+    /// Top-level authoritative cards (the default) obey the Phase 8 rule: green
+    /// is reserved for an INDEPENDENTLY verified effect (a durable UnifiedResult
+    /// with Verified=true); native acceptance alone stays amber. Nested
+    /// sub-agent children pass <c>false</c> — they are an informational live
+    /// surface with no durable verification pipeline of their own (the
+    /// authoritative verification lives on the parent run_subagent card), so
+    /// their native success is a terminal "done" state.
+    /// </param>
+    public void Complete(AgentToolResultEvent result, bool requireVerification = true)
     {
-        State = result.Success ? "ok" : "failed";
+        State = requireVerification
+            ? (result.UnifiedResult?.Verified == true
+                ? "verified"
+                : result.Success ? "verification_pending" : "failed")
+            : (result.Success ? "verified" : "failed");
+        // The terminal state replaces any in-flight retry hint.
+        RetryHint = null;
+        // R5: attach a human-readable reason only for genuinely failed (red) cards.
+        if (State == "failed")
+            HumanError = HumanizeFailure(ExtractFailureCode(result));
         // The live mini-terminal gives way to the final captured output.
         _streamBuffer.Clear();
         StreamingOutput = null;
@@ -146,6 +204,56 @@ public partial class ToolExecutionItemViewModel : ObservableObject
             Truncate(result.FullResult ?? result.ResultPreview, 4000));
         if (result.ImageDataUri is { Length: > 0 } dataUri)
             ScreenshotPreview = TryDecodeDataUri(dataUri);
+    }
+
+    /// <summary>R5: extract the leading FailureCode from a failed tool result — the
+    /// ComputerAction.FailureCode when present, else the token before the first ':' in
+    /// the error text (tools prefix hard failures as "Error: &lt;Code&gt;: reason").</summary>
+    internal static string? ExtractFailureCode(AgentToolResultEvent result)
+    {
+        if (result.ComputerAction?.FailureCode is { Length: > 0 } code)
+            return code;
+        var text = result.FullResult ?? result.ResultPreview ?? string.Empty;
+        const string prefix = "Error: ";
+        if (text.StartsWith(prefix, StringComparison.Ordinal))
+            text = text[prefix.Length..];
+        var colon = text.IndexOf(':');
+        return colon > 0 ? text[..colon].Trim() : null;
+    }
+
+    /// <summary>R5: localized one-line reason for a failed step.</summary>
+    internal static string HumanizeFailure(string? code) =>
+        Localization.LocaleService.Instance.T(FailureKey(code));
+
+    /// <summary>Pure FailureCode → localization-key map (unit-testable). Only the red
+    /// (Success=false) failure codes are mapped — FocusLost / TargetNotFound /
+    /// readiness-not-ready / Stale* / WrongWindow / UnboundInput / capture-validation;
+    /// anything else falls back to a generic sentence.</summary>
+    internal static string FailureKey(string? code)
+    {
+        if (string.IsNullOrEmpty(code))
+            return "tool.error.generic";
+        bool Has(string s) => code.Contains(s, StringComparison.OrdinalIgnoreCase);
+        if (Has("FocusLost")) return "tool.error.focusLost";
+        if (Has("TargetNotFound")) return "tool.error.targetNotFound";
+        if (Has("WrongWindow")) return "tool.error.wrongWindow";
+        if (Has("UnboundInput")) return "tool.error.unboundInput";
+        if (Has("Stale")) return "tool.error.stale";        // StaleObservation / StaleWindow / CaptureStale
+        if (Has("NotReady")) return "tool.error.notReady";  // ApplicationNotReady
+        // Click-path (uia_click / computer_click) red codes — these arrive as sentences,
+        // so match on their distinctive phrase.
+        if (Has("disabled")) return "tool.error.disabled";
+        if (Has("clickable area")) return "tool.error.noClickable";
+        // Match the OS-rejection code EXACTLY. A substring "rejected" also matches
+        // policy/consent codes (CapabilityPolicyRejected, CapabilitySelectionRequired,
+        // permission "rejected"), which must NOT show "Windows didn't accept the input" —
+        // e.g. a non-click action that a policy blocked would wrongly read as a failed click.
+        if (string.Equals(code, "OsInputRejected", StringComparison.OrdinalIgnoreCase))
+            return "tool.error.osRejected";
+        if (Has("Timeout") || Has("did not respond")) return "tool.error.timeout";
+        if (Has("Mismatch") || Has("HostWindow") || Has("OffScreen") || Has("Occlud")
+            || Has("Covered")) return "tool.error.validate"; // capture / point validation
+        return "tool.error.generic";
     }
 
     /// <summary>Icon key per tool (R9 E3).</summary>

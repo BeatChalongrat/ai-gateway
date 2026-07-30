@@ -1,5 +1,6 @@
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
+using SranDesktop.Application.Models;
 using SranDesktop.Domain.Enums;
 using SranDesktop.Domain.ValueObjects;
 
@@ -23,11 +24,13 @@ public partial class MessageViewModel : ObservableObject
     /// <summary>Web-search citations shown as clickable source cards (R9 C5).</summary>
     public System.Collections.ObjectModel.ObservableCollection<SourceViewModel> Sources { get; } = new();
 
-    /// <summary>Model-maintained plan/todo checklist (Phase A PART 5), rendered
-    /// live above the reply and checked off as the agent progresses.</summary>
+    /// <summary>Runtime-authoritative outcome checklist rendered live above the reply.</summary>
     public System.Collections.ObjectModel.ObservableCollection<PlanStepViewModel> PlanSteps { get; } = new();
 
     public bool HasPlan => PlanSteps.Count > 0;
+
+    [ObservableProperty]
+    private string? _planHeader;
 
     /// <summary>Replace the plan with the model's latest task list.</summary>
     public void UpdatePlan(IReadOnlyList<Application.Services.PlanStep> steps)
@@ -36,6 +39,41 @@ public partial class MessageViewModel : ObservableObject
         foreach (var step in steps)
             PlanSteps.Add(new PlanStepViewModel(step.Step, step.Status));
         OnPropertyChanged(nameof(HasPlan));
+    }
+
+    public void UpdatePlan(AuthoritativePlanView plan)
+    {
+        PlanHeader = $"{plan.Goal} | plan v{plan.PlanVersion} | {HeaderStatus(plan)}";
+        PlanSteps.Clear();
+        foreach (var outcome in plan.Outcomes.Where(item => item.Required))
+            PlanSteps.Add(new PlanStepViewModel(outcome.Description, outcome.Status));
+        OnPropertyChanged(nameof(HasPlan));
+    }
+
+    /// <summary>
+    /// What the header says happened. The runtime status is authoritative and is
+    /// always shown, but two of its values read as jargon at exactly the moment
+    /// the user most needs to understand them, and one of them ("Completed") has
+    /// to be impossible to confuse with success when a required outcome failed.
+    ///
+    /// The failed suffix is deliberately additive rather than a replacement: the
+    /// raw status stays visible so the header never disagrees with the runtime.
+    /// </summary>
+    private static string HeaderStatus(AuthoritativePlanView plan)
+    {
+        var failed = plan.Outcomes.Count(outcome =>
+            outcome.Required
+            && outcome.Status is nameof(Domain.Entities.OutcomeStatus.Failed)
+                or nameof(Domain.Entities.OutcomeStatus.Blocked));
+        var label = plan.TaskStatus switch
+        {
+            nameof(Domain.Entities.AgentTaskStatus.NeedsUser) => "Needs you",
+            nameof(Domain.Entities.AgentTaskStatus.VerificationPending) => "Verifying",
+            _ => plan.TaskStatus
+        };
+        return failed == 0
+            ? label
+            : $"{label} — {failed} not done";
     }
 
     /// <summary>Live artifacts rendered in WebView2 (R9 A).</summary>

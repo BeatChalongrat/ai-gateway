@@ -2,20 +2,23 @@ using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Events;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
+using SranDesktop.Domain.Entities;
+using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Services;
 
 /// <summary>
-/// Background scheduler (R9 Feature G): a 60s timer checks enabled tasks
-/// against their cron schedule; due tasks send their prompt through chat-edge
-/// (server persists the turn) and store a result preview. Runs even while the
-/// window is minimized to tray — no dispatcher involvement.
+/// Durable scheduler entry point. A firing creates or resumes an AgentTask with
+/// TriggerType=Scheduler and then uses the same orchestrator, permission,
+/// verification, and security path as interactive chat.
 /// </summary>
 public sealed class TaskSchedulerService : ITaskSchedulerService, IDisposable
 {
     private readonly IScheduledTaskStore _store;
-    private readonly IChatEdgeApiClient _api;
-    private readonly IChatService _chat;
+    private readonly IConversationStore _conversations;
+    private readonly IChatOrchestrator _orchestrator;
+    private readonly IDurableTaskRuntime _runtime;
+    private readonly ISettingsService _settings;
     private readonly ILogger<TaskSchedulerService> _logger;
 
     private Timer? _timer;
@@ -25,20 +28,27 @@ public sealed class TaskSchedulerService : ITaskSchedulerService, IDisposable
 
     public TaskSchedulerService(
         IScheduledTaskStore store,
-        IChatEdgeApiClient api,
-        IChatService chat,
+        IConversationStore conversations,
+        IChatOrchestrator orchestrator,
+        IDurableTaskRuntime runtime,
+        ISettingsService settings,
         ILogger<TaskSchedulerService> logger)
     {
         _store = store;
-        _api = api;
-        _chat = chat;
+        _conversations = conversations;
+        _orchestrator = orchestrator;
+        _runtime = runtime;
+        _settings = settings;
         _logger = logger;
     }
 
     public void Start()
     {
-        _timer ??= new Timer(_ => _ = TickAsync(), null,
-            TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(60));
+        _timer ??= new Timer(
+            _ => _ = TickAsync(),
+            null,
+            TimeSpan.FromSeconds(15),
+            TimeSpan.FromSeconds(60));
     }
 
     public void Stop()
@@ -52,25 +62,20 @@ public sealed class TaskSchedulerService : ITaskSchedulerService, IDisposable
 
     private async Task TickAsync()
     {
-        // Never overlap ticks (a slow AI run can outlast the 60s period).
         if (Interlocked.Exchange(ref _ticking, 1) == 1)
             return;
         try
         {
             var tasks = await _store.GetAllAsync();
             var now = DateTimeOffset.Now;
-
-            foreach (var task in tasks.Where(t => t.IsEnabled))
+            foreach (var task in tasks.Where(task => task.IsEnabled))
             {
-                // Late-initialize the next-run marker for tasks created before
-                // scheduling metadata existed.
                 if (task.NextRunAt is null)
                 {
                     task.NextRunAt = NextOccurrence(task.CronExpression);
                     await _store.UpsertAsync(task);
                     continue;
                 }
-
                 if (task.NextRunAt <= now)
                     await RunNowAsync(task);
             }
@@ -87,44 +92,81 @@ public sealed class TaskSchedulerService : ITaskSchedulerService, IDisposable
 
     public async Task RunNowAsync(ScheduledTask task, CancellationToken ct = default)
     {
-        _logger.LogInformation("Running scheduled task {Name} ({Id})", task.Name, task.Id);
+        _logger.LogInformation("Running scheduled task {NameFingerprint} ({Id})",
+            Application.Services.SensitiveDataRedactor.Fingerprint(task.Name),
+            task.Id);
         try
         {
-            // Reuse the bound conversation, or create one titled after the task.
-            var conversationId = task.ConversationId;
-            if (conversationId is null)
+            var conversationId = task.ConversationId ?? $"schedule-{task.Id}";
+            if (await _conversations.GetConversationAsync(conversationId, ct) is null)
             {
-                var conversation = await _api.CreateConversationAsync("auto", ct);
-                conversationId = conversation.Id;
-                task.ConversationId = conversationId;
-                try
+                await _conversations.UpsertConversationAsync(new Conversation
                 {
-                    await _api.RenameConversationAsync(conversationId, $"⏰ {task.Name}", ct);
-                }
-                catch (HttpRequestException) { /* cosmetic only */ }
+                    Id = conversationId,
+                    Title = task.Name,
+                    ModelId = _settings.Current.DefaultModel,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                    Source = ConversationSource.Local
+                }, ct);
             }
+            task.ConversationId = conversationId;
 
+            var run = await _runtime.CreateRunAsync(new DurableRunRequest(
+                conversationId,
+                AgentTriggerType.Scheduler,
+                task.Prompt,
+                $"conversation:{conversationId}",
+                SecurityContextJson: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    schedule_id = task.Id,
+                    unattended = true,
+                    consent_fallback = "deny"
+                }),
+                PermissionContextJson:
+                    """{"unattended":true,"allow_stored_scope_only":true}""",
+                ModelContextJson: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    model = _settings.Current.DefaultModel
+                })), ct);
+            task.LastRunId = run.TaskId;
+
+            var messages = new List<GatewayMessage>
+            {
+                new() { Role = "user", Content = task.Prompt }
+            };
             var response = new System.Text.StringBuilder();
-            await foreach (var evt in _chat.SendMessageAsync(conversationId, task.Prompt, ct: ct))
+            var model = string.IsNullOrWhiteSpace(_settings.Current.DefaultModel)
+                ? "gpt-4o-mini"
+                : _settings.Current.DefaultModel;
+            await foreach (var evt in _orchestrator.RunAsync(
+                               model,
+                               messages,
+                               conversationId,
+                               ct: ct))
             {
                 switch (evt)
                 {
-                    case ContentDeltaEvent delta:
+                    case AgentContentDeltaEvent delta:
                         response.Append(delta.Text);
                         break;
-                    case StreamErrorEvent error:
+                    case AgentErrorEvent error:
                         response.Clear();
                         response.Append("Error: ").Append(error.Message);
                         break;
                 }
             }
-
             task.LastResult = Truncate(response.ToString(), 500);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        catch (Exception ex) when (ex is HttpRequestException
+                                   or TaskCanceledException
+                                   or IOException
+                                   or InvalidOperationException
+                                   or UnauthorizedAccessException)
         {
             _logger.LogWarning(ex, "Scheduled task {Id} failed", task.Id);
-            task.LastResult = $"Error: {ex.Message}";
+            task.LastResult =
+                $"Error: {Application.Services.SensitiveDataRedactor.Redact(ex.Message)}";
         }
         finally
         {

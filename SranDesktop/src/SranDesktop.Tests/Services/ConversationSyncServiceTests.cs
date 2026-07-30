@@ -135,7 +135,6 @@ public class ConversationSyncServiceTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         if (Directory.Exists(_dbDir))
             Directory.Delete(_dbDir, recursive: true);
     }

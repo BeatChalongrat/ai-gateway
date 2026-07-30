@@ -30,6 +30,12 @@ public partial class ToolConsentDialog : Window
 
     private void AllowAlways_Click(object sender, RoutedEventArgs e)
     {
+        if (DataContext is ToolConsentViewModel { ShowAlwaysAllow: false })
+        {
+            Response = ToolConsentResponse.Deny;
+            DialogResult = true;
+            return;
+        }
         Response = ToolConsentResponse.Always;
         DialogResult = true;
     }

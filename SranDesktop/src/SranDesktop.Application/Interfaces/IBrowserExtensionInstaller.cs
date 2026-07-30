@@ -13,4 +13,8 @@ public interface IBrowserExtensionInstaller
     /// allowed_origins next to the store id — for load-unpacked development.
     /// Returns the on-disk extension folder to load unpacked.</summary>
     string Install(string? devExtensionId);
+
+    /// <summary>Removes the per-user registration and manifest. This does not
+    /// delete the extension or browser profile.</summary>
+    void Uninstall();
 }

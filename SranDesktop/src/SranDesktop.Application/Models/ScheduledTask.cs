@@ -18,6 +18,7 @@ public sealed class ScheduledTask
     public bool IsEnabled { get; set; } = true;
     public DateTimeOffset? NextRunAt { get; set; }
     public DateTimeOffset? LastRunAt { get; set; }
+    public string? LastRunId { get; set; }
 
     /// <summary>Truncated preview of the last response (or error message).</summary>
     public string? LastResult { get; set; }

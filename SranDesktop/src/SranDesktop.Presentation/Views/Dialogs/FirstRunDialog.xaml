@@ -95,6 +95,33 @@
             </DockPanel>
         </StackPanel>
 
+        <!-- Working folder (P3-4): file tools reach only granted folders, so a
+             fresh install with none can read and write nothing. Name one and let
+             the user confirm it, rather than granting the whole home directory. -->
+        <TextBlock Text="{loc:T setup.workingFolderTitle}" FontWeight="SemiBold" Margin="0,0,0,2"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{loc:T setup.workingFolderDesc}" FontSize="12" Margin="0,0,0,8"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <Grid Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox Grid.Column="0" Text="{Binding WorkingFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalContentAlignment="Center" Padding="8,6"
+                     AutomationProperties.Name="Working folder" />
+            <Button Grid.Column="1" Content="{loc:T setup.browse}" Margin="6,0,0,0"
+                    Padding="12,6" Command="{Binding BrowseWorkingFolderCommand}" />
+            <Button Grid.Column="2" Content="{loc:T setup.decideLater}" Margin="6,0,0,0"
+                    Padding="12,6" Command="{Binding ClearProposedWorkingFolderCommand}" />
+        </Grid>
+        <TextBlock Text="{loc:T setup.workingFolderEmpty}" FontSize="11.5" Margin="0,0,0,16"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource AccentRedBrush}"
+                   Visibility="{Binding HasNoWorkingFolder, Converter={StaticResource BoolToVisibility}}" />
+
         <Border Background="{DynamicResource BgSecondaryBrush}" CornerRadius="8" Padding="16,12"
                 Margin="0,0,0,16">
             <StackPanel>

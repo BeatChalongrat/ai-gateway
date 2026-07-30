@@ -64,11 +64,8 @@ internal static class ToolHelpers
 /// </summary>
 public static class PathGuard
 {
-    private static readonly string[] BuiltInRoots =
-    {
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        Path.GetTempPath()
-    };
+    private static readonly string UserProfile =
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     // Phase 10 D1: the app's own state subtrees are HARD-DENIED. They live
     // UNDER the user-profile built-in root, and read_file is consent-free —
@@ -114,13 +111,123 @@ public static class PathGuard
     // so concurrent Resolve calls always see a consistent snapshot.
     private static volatile string[] _grantedRoots = Array.Empty<string>();
 
-    /// <summary>Validates + canonicalizes user-granted folders (via the shared
+    // The composer's working folder (when set). Bare relative paths resolve against
+    // this instead of the user profile, so "save a.txt" lands in the folder the user
+    // pointed the agent at — not silently in the home directory (the real-run bug).
+    // Null means relative paths fail closed.
+    private static volatile string? _workingDirectory;
+
+    // The words users and models say for their standard shell folders, mapped to the
+    // real special-folder location (which may be redirected, e.g. OneNote/OneDrive,
+    // away from %USERPROFILE%\Desktop). Applied only to a LEADING path segment.
+    private static readonly Dictionary<string, Environment.SpecialFolder> KnownUserFolders =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["desktop"] = Environment.SpecialFolder.Desktop,
+            ["documents"] = Environment.SpecialFolder.MyDocuments,
+            ["my documents"] = Environment.SpecialFolder.MyDocuments,
+            ["pictures"] = Environment.SpecialFolder.MyPictures,
+        };
+
+    /// <summary>Sets the working folder that bare relative paths resolve against.
+    /// Called from app startup and on every settings change, mirroring
+    /// <see cref="ConfigureGrantedRoots"/>. An empty/invalid value clears it (relative
+    /// paths then fail closed).</summary>
+    public static void ConfigureWorkingDirectory(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            _workingDirectory = null;
+            WorkspaceFileBroker.Shared.SetWorkingDirectory(null);
+            return;
+        }
+        try
+        {
+            _workingDirectory = Path.IsPathFullyQualified(folder)
+                ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder))
+                : null;
+            WorkspaceFileBroker.Shared.SetWorkingDirectory(_workingDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            _workingDirectory = null;
+            WorkspaceFileBroker.Shared.SetWorkingDirectory(null);
+        }
+    }
+
+    /// <summary>Expands a leading "Desktop"/"Documents"/"Pictures" segment, or the
+    /// literal token "working folder"/"working directory", to a real folder path.
+    /// Fully-qualified paths and unrecognized inputs pass through unchanged. Pure —
+    /// makes no access decision; <see cref="Resolve"/> still gates the result.</summary>
+    public static string ExpandUserFolders(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || Path.IsPathFullyQualified(path))
+            return path;
+        var trimmed = path.Trim();
+
+        // The user's/model's phrase for "put it in the working folder".
+        if (trimmed.Equals("working folder", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("working directory", StringComparison.OrdinalIgnoreCase)
+            || trimmed == ".")
+            return _workingDirectory ?? UserProfile;
+
+        var separator = trimmed.IndexOfAny(new[] { '/', '\\' });
+        var head = separator < 0 ? trimmed : trimmed[..separator];
+        var rest = separator < 0 ? string.Empty : trimmed[(separator + 1)..].TrimStart('/', '\\');
+        if (!KnownUserFolders.TryGetValue(head, out var special))
+            return path;
+        var baseDir = Environment.GetFolderPath(special);
+        if (string.IsNullOrEmpty(baseDir))
+            return path;
+        return rest.Length == 0 ? baseDir : Path.Combine(baseDir, rest);
+    }
+
+    /// <summary>
+    /// Validates + canonicalizes user-granted folders (via the shared
     /// Application-layer <see cref="Application.Services.FolderGrantValidator"/>)
     /// and swaps them in. Invalid/forbidden entries are skipped — defence in
     /// depth for a hand-edited settings file (the UI blocks them at add time).
-    /// Returns the canonicalized roots actually applied.</summary>
-    public static IReadOnlyList<string> ConfigureGrantedRoots(IReadOnlyList<string> folders)
+    /// Returns the canonicalized roots actually applied.
+    ///
+    /// <para><b>Access levels differ by role (P3-2).</b> The working folder is
+    /// the one directory the user pointed the agent at for this session, through
+    /// the composer, on purpose. It gets <see cref="WorkspaceMountAccess.ReadWrite"/>.
+    /// Other granted folders stay <see cref="WorkspaceMountAccess.ReadWriteNoDelete"/>:
+    /// they are standing grants that may have been added long ago for one task,
+    /// and a rename there is worth refusing.</para>
+    ///
+    /// <para>Why the working folder had to change: <c>NoDelete</c> also blocks
+    /// rename, because a rename consumes the source name. That made
+    /// <c>move_file</c> impossible in every folder the agent could see — the tool
+    /// was registered but could never succeed. Worse, the sandbox lane's
+    /// write-back step deletes files the command removed, so any sandboxed
+    /// command that touched a temporary file ended in
+    /// <c>SandboxWorkspaceSyncFailed</c> after running correctly. Granting
+    /// "no delete" over a folder the agent can already overwrite byte-for-byte
+    /// prevented neither data loss nor escape; it only broke two features.</para>
+    ///
+    /// <para><paramref name="workingFolder"/> is passed explicitly rather than
+    /// read from previously-stored state so the result does not depend on
+    /// whether <see cref="ConfigureWorkingDirectory"/> happened to run first.
+    /// Omitting it keeps whatever working folder is already configured.</para>
+    /// </summary>
+    public static IReadOnlyList<string> ConfigureGrantedRoots(
+        IReadOnlyList<string> folders,
+        string? workingFolder = null)
     {
+        if (workingFolder is not null)
+            ConfigureWorkingDirectory(workingFolder);
+
+        // Canonicalized through the same validator as the grants so the identity
+        // comparison below cannot be defeated by casing, a trailing separator,
+        // or a short (8.3) path spelling of the same directory.
+        string? canonicalWorking = null;
+        if (!string.IsNullOrWhiteSpace(workingFolder)
+            && Application.Services.FolderGrantValidator.Validate(
+                   workingFolder, out var validatedWorking)
+               == Application.Services.FolderGrantRejection.Ok)
+            canonicalWorking = validatedWorking;
+
         var applied = new List<string>();
         foreach (var folder in folders)
         {
@@ -129,7 +236,33 @@ public static class PathGuard
                 applied.Add(canonical!);
         }
         _grantedRoots = applied.ToArray();
+        WorkspaceFileBroker.Shared.Configure(
+            applied.Select(root => new WorkspaceMount(root, AccessFor(root, canonicalWorking))),
+            _workingDirectory);
         return applied;
+    }
+
+    /// <summary>The working folder is writable including rename/delete; every
+    /// other granted root is not. Kept separate so the rule reads as one line at
+    /// the call site.</summary>
+    private static WorkspaceMountAccess AccessFor(string root, string? canonicalWorkingFolder) =>
+        canonicalWorkingFolder is not null
+        && Path.TrimEndingDirectorySeparator(root).Equals(
+               Path.TrimEndingDirectorySeparator(canonicalWorkingFolder),
+               StringComparison.OrdinalIgnoreCase)
+            ? WorkspaceMountAccess.ReadWrite
+            : WorkspaceMountAccess.ReadWriteNoDelete;
+
+    /// <summary>Configures explicit mount capabilities without adding implicit
+    /// host roots. Invalid mounts are omitted and an empty set fails closed.</summary>
+    public static IReadOnlyList<WorkspaceMount> ConfigureMounts(
+        IReadOnlyList<WorkspaceMount> mounts,
+        string? workingDirectory = null)
+    {
+        _workingDirectory = workingDirectory;
+        var configured = WorkspaceFileBroker.Shared.Configure(mounts, workingDirectory);
+        _grantedRoots = configured.Select(static mount => mount.RootPath).ToArray();
+        return configured;
     }
 
     /// <summary>Canonicalizes and validates. Returns the full path, or null with an error message.</summary>
@@ -142,13 +275,21 @@ public static class PathGuard
             return null;
         }
 
+        // Map "Desktop"/"Documents"/"working folder" tokens to real folders first, so
+        // the model can name a destination the way a user says it.
+        path = ExpandUserFolders(path);
+
         string fullPath;
         try
         {
-            // Bare relative paths resolve against the user profile, not the app's cwd.
+            // Bare relative paths resolve against the working folder when one is set
+            // (else the user profile) — not the app's cwd.
             fullPath = Path.IsPathFullyQualified(path)
                 ? Path.GetFullPath(path)
-                : Path.GetFullPath(Path.Combine(BuiltInRoots[0], path));
+                : _workingDirectory is null
+                    ? throw new ArgumentException(
+                        "Relative paths require a working folder. " + NoWorkspaceRemedy)
+                    : Path.GetFullPath(Path.Combine(_workingDirectory, path));
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -165,20 +306,108 @@ public static class PathGuard
             return null;
         }
 
-        foreach (var root in BuiltInRoots)
+        try
         {
-            if (IsWithin(fullPath, root))
-                return fullPath;
+            return WorkspaceFileBroker.Shared.ResolveForScope(
+                fullPath,
+                WorkspaceFileOperation.Read);
         }
-        foreach (var root in _grantedRoots)
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or ArgumentException
+                                   or NotSupportedException)
         {
-            if (IsWithin(fullPath, root))
-                return fullPath;
+            // "Outside the allowed directories" is misleading when there are no
+            // allowed directories at all — it reads as "wrong folder" when the
+            // real state is "none configured yet", which sends the caller
+            // retrying other paths instead of asking the user to pick a folder.
+            error = _grantedRoots.Length == 0
+                ? $"No working folder is configured, so '{fullPath}' cannot be reached. "
+                  + NoWorkspaceRemedy
+                : $"Access denied: '{fullPath}' is outside the allowed directories. {ex.Message}";
+            return null;
+        }
+    }
+
+    /// <summary>The one sentence that turns "this failed" into "here is what to
+    /// do about it". Shared by every no-workspace error so the agent relays the
+    /// same instruction however it hit the wall.</summary>
+    internal const string NoWorkspaceRemedy =
+        "Ask the user to pick a working folder using the folder button next to the "
+        + "message box (it is labelled with the folder name once chosen). File tools "
+        + "reach only folders the user has granted, so none are available until then. "
+        + "Do not retry other paths — no path will work.";
+
+    /// <summary>
+    /// Canonicalizes a directory that a HOST-LANE shell command will merely start
+    /// in. Enforces the app's own state as off-limits and requires the directory
+    /// to exist, but does NOT require it to be inside an authorized mount.
+    ///
+    /// <para><b>Only for the host lane, and only for the starting directory.</b>
+    /// Every file tool, and the sandbox lane, must keep using
+    /// <see cref="Resolve"/>, where the mount IS the boundary.</para>
+    ///
+    /// <para>What replaces the mount check here: in the host lane the command runs
+    /// with the signed-in user's full rights, so the process can reach the whole
+    /// machine no matter which directory it starts in. Refusing to start it in an
+    /// unlisted folder therefore constrains nothing — it only rejected commands
+    /// that touch no files at all (<c>docker ps</c>, <c>git --version</c>,
+    /// <c>ipconfig</c>). The gates that do constrain this lane sit upstream and
+    /// still apply: the user must have opted into host mode, the blocklist runs,
+    /// the consent dialog shows the exact command line, and every dispatch is
+    /// written to the security audit log.</para>
+    ///
+    /// <para>This method exists to close a seam (P3-3): the host lane already
+    /// defaulted to <c>%USERPROFILE%</c> when no directory was given, while naming
+    /// that very same directory explicitly was rejected. One directory, two
+    /// answers depending on whether the caller mentioned it — a defect, not a
+    /// policy. Both paths now run through here.</para>
+    /// </summary>
+    public static string? ResolveStartingDirectory(string? path, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            error = "Path is required.";
+            return null;
         }
 
-        error = $"Access denied: '{fullPath}' is outside the allowed directories " +
-                "(your user profile, the temp folder, and folders you've granted in Settings).";
-        return null;
+        path = ExpandUserFolders(path);
+
+        string fullPath;
+        try
+        {
+            // Relative starting directories resolve against the working folder if
+            // there is one, else the profile. Unlike Resolve, this cannot fail
+            // closed on a missing working folder: the profile is always a valid
+            // place for a host command to start.
+            fullPath = Path.IsPathFullyQualified(path)
+                ? Path.GetFullPath(path)
+                : Path.GetFullPath(Path.Combine(_workingDirectory ?? UserProfile, path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            error = $"Invalid path: {ex.Message}";
+            return null;
+        }
+
+        // Unchanged from Resolve, and deliberately: the app's own state stays
+        // unreachable in every lane. A shell that starts inside credentials.dat's
+        // directory is not a starting directory, it is an exfiltration setup.
+        if (IsProtectedStatePath(fullPath))
+        {
+            error = $"Access denied: '{fullPath}' is inside SRAN Desktop's own application data, " +
+                    "which tools may never access.";
+            return null;
+        }
+
+        if (!Directory.Exists(fullPath))
+        {
+            error = $"Working directory not found: {fullPath}";
+            return null;
+        }
+
+        return fullPath;
     }
 
     /// <summary>
@@ -190,21 +419,22 @@ public static class PathGuard
     /// </summary>
     public static string? ContainingRoot(string fullPath)
     {
-        string? best = null;
-        foreach (var root in _grantedRoots.Concat(BuiltInRoots))
-        {
-            var normalized = Path.TrimEndingDirectorySeparator(root);
-            if (IsWithin(fullPath, normalized) && (best is null || normalized.Length > best.Length))
-                best = normalized;
-        }
-        return best;
+        return WorkspaceFileBroker.Shared.ContainingRoot(fullPath);
     }
 
     /// <summary>True when <paramref name="fullPath"/> is the root itself or a descendant.</summary>
     private static bool IsWithin(string fullPath, string root)
     {
-        var normalizedRoot = Path.TrimEndingDirectorySeparator(root);
-        return fullPath.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase)
-            || fullPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        var relative = Path.GetRelativePath(
+            Path.TrimEndingDirectorySeparator(root),
+            Path.GetFullPath(fullPath));
+        if (relative == ".")
+            return true;
+        if (Path.IsPathRooted(relative))
+            return false;
+        var first = relative.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return !string.Equals(first, "..", StringComparison.Ordinal);
     }
 }

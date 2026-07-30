@@ -48,8 +48,13 @@ public class AgentChainCodecTests : IDisposable
         sanitized.Should().HaveCount(3);
         ScreenshotMessage.IsScreenshotMessage(sanitized[2]).Should().BeFalse();
         (sanitized[2].Content as string).Should().Be(AgentChainCodec.ScreenshotPlaceholderText);
-        // Non-screenshot messages pass through untouched.
         sanitized[0].ToolCalls.Should().ContainSingle(tc => tc.Id == "call_1");
+        sanitized[0].ToolCalls![0].Function.Arguments
+            .Should().Contain("persisted_payload_removed")
+            .And.NotContain("x.txt");
+        (sanitized[1].Content as string).Should()
+            .Contain("tool output removed before persistence")
+            .And.NotContain("file contents here");
     }
 
     [Fact]
@@ -179,7 +184,6 @@ public class AgentChainCodecTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         if (Directory.Exists(_dbDir))
             Directory.Delete(_dbDir, recursive: true);
     }

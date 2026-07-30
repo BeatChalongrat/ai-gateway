@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
@@ -11,6 +11,10 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SranDesktop.Tests" />
+  </ItemGroup>
 
   <PropertyGroup>
     <Version>1.0.0</Version>
@@ -21,6 +25,29 @@
     <Description>AI Desktop Assistant with MCP Agent capabilities</Description>
     <Copyright>© 2026 SRAN</Copyright>
   </PropertyGroup>
+
+  <!-- Build stamp (T5 PART B): embed the UTC build time + git short hash into
+       AssemblyInformationalVersion so the running process can prove WHICH binary it is
+       (publish doesn't restart the process — this is how we catch a stale instance).
+       Format: "1.0.0+build.<yyyy-MM-dd HH:mm>.<hash>", parsed by BuildStamp at runtime.
+       The SDK's own append of the full commit hash is disabled so our stamp is the only
+       source-revision info, and the target runs before the AssemblyInfo is generated. -->
+  <PropertyGroup>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+  <Target Name="SetBuildStamp"
+          BeforeTargets="GetAssemblyVersion;CoreGenerateAssemblyInfo;GenerateAssemblyInfo">
+    <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short HEAD"
+          ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShortHash" />
+    </Exec>
+    <PropertyGroup>
+      <_BuildTimestamp>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm"))</_BuildTimestamp>
+      <_GitShortHash Condition="'$(_GitShortHash)' == ''">nogit</_GitShortHash>
+      <InformationalVersion>$(Version)+build.$(_BuildTimestamp).$(_GitShortHash.Trim())</InformationalVersion>
+      <Deterministic>false</Deterministic>
+    </PropertyGroup>
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.*" />
@@ -62,5 +89,26 @@
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
   </ItemGroup>
+
+
+  <!-- The isolated worker ships as a self-contained image under workers/<capability>/.
+       Built first, then copied so WorkerImageResolver can find it; a missing image
+       makes the capability fail closed rather than fall back in-process. -->
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.DocumentWorker\SranDesktop.DocumentWorker.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false"
+                      SetTargetFramework="TargetFramework=net8.0" />
+  </ItemGroup>
+
+  <Target Name="StageDocumentWorkerImage" AfterTargets="Build">
+    <ItemGroup>
+      <DocumentWorkerFiles Include="$(MSBuildThisFileDirectory)..\SranDesktop.DocumentWorker\bin\$(Configuration)\net8.0\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DocumentWorkerFiles)"
+          DestinationFolder="$(OutDir)workers\document\%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(DocumentWorkerFiles)' != ''" />
+  </Target>
 
 </Project>

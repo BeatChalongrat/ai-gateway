@@ -7,16 +7,29 @@ using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Infrastructure.Mcp.Tools;
 
-public sealed class SearchFilesTool : IMcpTool
+public sealed class SearchFilesTool : IMcpTool, ISensitiveDataTool
 {
     private const int MaxMatches = 100;
     private const long MaxGrepFileBytes = 2 * 1024 * 1024;
+    private readonly IWorkspaceFileBroker _files;
+
+    public SearchFilesTool(IWorkspaceFileBroker? files = null) =>
+        _files = files ?? WorkspaceFileBroker.Shared;
 
     public string Name => "search_files";
     public string Description =>
         "Search for files matching a glob pattern under a directory; optionally grep their contents with a regex.";
     public ToolCategory Category => ToolCategory.FileSystem;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
+    public ToolDataFlowPolicy DataFlowPolicy { get; } = new(
+        "Workspace.SearchLocal",
+        "WorkspaceSearch.SendToModel",
+        "workspace_search_result",
+        "unknown",
+        "configured model provider",
+        ExternalTransmission: true,
+        AlwaysRequireConfirmation: true,
+        AllowPersistence: false);
 
     public JsonElement ParametersSchema { get; } = ToolHelpers.Schema("""
         {
@@ -32,11 +45,9 @@ public sealed class SearchFilesTool : IMcpTool
 
     public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
-        var directory = PathGuard.Resolve(ToolHelpers.GetString(arguments, "directory"), out var error);
-        if (directory is null)
-            return ToolResult.Fail(error!);
-        if (!Directory.Exists(directory))
-            return ToolResult.Fail($"Directory not found: {directory}");
+        var directory = ToolHelpers.GetString(arguments, "directory");
+        if (string.IsNullOrWhiteSpace(directory))
+            return ToolResult.Fail("'directory' is required.");
 
         var pattern = ToolHelpers.GetString(arguments, "pattern");
         if (string.IsNullOrWhiteSpace(pattern))
@@ -55,56 +66,39 @@ public sealed class SearchFilesTool : IMcpTool
             }
         }
 
-        var sb = new StringBuilder();
-        var matches = 0;
-
-        foreach (var file in Directory.EnumerateFiles(directory, pattern, new EnumerationOptions
-                 {
-                     RecurseSubdirectories = true,
-                     IgnoreInaccessible = true
-                 }))
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            // A recursive search under an allowed parent (e.g. %APPDATA%)
-            // must not read or list the app's own state files (Phase 10 D1).
-            if (PathGuard.IsProtectedStatePath(file))
-                continue;
-            if (matches >= MaxMatches)
+            var found = await _files.SearchAsync(
+                directory,
+                pattern,
+                contentRegex,
+                MaxMatches,
+                MaxGrepFileBytes,
+                ct);
+            var sb = new StringBuilder();
+            foreach (var match in found)
             {
+                if (match.LineNumber is null)
+                    sb.AppendLine(match.FullPath);
+                else
+                    sb.AppendLine(
+                        $"{match.FullPath}:{match.LineNumber}: " +
+                        $"{(match.Line!.Length > 200 ? match.Line[..200] + "..." : match.Line.Trim())}");
+            }
+            if (found.Count == MaxMatches)
                 sb.AppendLine($"[...truncated at {MaxMatches} matches]");
-                break;
-            }
-
-            if (contentRegex is null)
-            {
-                sb.AppendLine(file);
-                matches++;
-                continue;
-            }
-
-            if (new FileInfo(file).Length > MaxGrepFileBytes)
-                continue;
-
-            var lineNumber = 0;
-            foreach (var line in await File.ReadAllLinesAsync(file, ct))
-            {
-                lineNumber++;
-                bool isMatch;
-                try
-                {
-                    isMatch = contentRegex.IsMatch(line);
-                }
-                catch (RegexMatchTimeoutException)
-                {
-                    continue;
-                }
-
-                if (!isMatch) continue;
-                sb.AppendLine($"{file}:{lineNumber}: {(line.Length > 200 ? line[..200] + "..." : line.Trim())}");
-                if (++matches >= MaxMatches) break;
-            }
+            return ToolResult.Verified(
+                Application.Services.UntrustedObservationBoundary.ProtectIfUntrusted(
+                    Name,
+                    found.Count == 0 ? "No matches found." : sb.ToString().TrimEnd()),
+                [$"search_matches_observed={found.Count}"]);
         }
-
-        return ToolResult.Ok(matches == 0 ? "No matches found." : sb.ToString().TrimEnd());
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or ArgumentException
+                                   or NotSupportedException)
+        {
+            return ToolResult.Fail(ex.Message);
+        }
     }
 }

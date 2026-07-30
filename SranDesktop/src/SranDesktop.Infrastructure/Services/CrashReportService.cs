@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Services;
 
 namespace SranDesktop.Infrastructure.Services;
 
@@ -16,15 +17,17 @@ public sealed class CrashReportService : ICrashReportService
     private readonly ISettingsService _settings;
     private readonly ILogger<CrashReportService> _logger;
     private readonly string? _endpoint;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private readonly HttpClient _http;
     private readonly string _appVersion;
 
     public CrashReportService(ISettingsService settings, string? endpoint,
-        ILogger<CrashReportService> logger)
+        ILogger<CrashReportService> logger, HttpClient? httpClient = null)
     {
         _settings = settings;
         _endpoint = endpoint;
         _logger = logger;
+        _http = httpClient ?? new HttpClient();
+        _http.Timeout = TimeSpan.FromSeconds(10);
         _appVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.0.0";
     }
 
@@ -44,9 +47,9 @@ public sealed class CrashReportService : ICrashReportService
             os = Environment.OSVersion.ToString(),
             dotnet = Environment.Version.ToString(),
             exception = exception.GetType().FullName,
-            message = exception.Message,
-            stackTrace = Truncate(exception.StackTrace, 8000),
-            innerException = exception.InnerException?.Message,
+            message = SensitiveDataRedactor.Redact(exception.Message),
+            stackTrace = SensitiveDataRedactor.Redact(Truncate(exception.StackTrace, 8000)),
+            innerException = SensitiveDataRedactor.Redact(exception.InnerException?.Message),
             timestamp = DateTimeOffset.UtcNow
         };
 
@@ -60,7 +63,9 @@ public sealed class CrashReportService : ICrashReportService
         catch (Exception ex)
         {
             // Never crash the crash reporter.
-            _logger.LogDebug(ex, "Crash report delivery failed");
+            _logger.LogDebug(
+                "Crash report delivery failed ({ExceptionType})",
+                ex.GetType().FullName);
             return false;
         }
     }

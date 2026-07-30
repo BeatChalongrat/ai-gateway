@@ -288,7 +288,10 @@ public partial class AddCustomConnectorViewModel : ObservableObject
         try
         {
             var result = await _connectors.TestConnectionAsync(
-                BuildConnector(), UseApiKey && !IsStdio ? ApiKey : null);
+                BuildConnector(),
+                UseApiKey && !IsStdio ? ApiKey : null,
+                Application.Interfaces.UserApprovalEvidence.FromUserGesture(
+                    "user:desktop", "Test connection button"));
             TestFailed = !result.Success;
             TestStatusText = result.Success
                 ? LocaleService.Instance.T("connector.testOk", result.ToolCount)
@@ -312,9 +315,13 @@ public partial class AddCustomConnectorViewModel : ObservableObject
         try
         {
             await _connectors.InstallCustomAsync(
-                BuildConnector(), UseApiKey && !IsStdio ? ApiKey : null);
+                BuildConnector(),
+                UseApiKey && !IsStdio ? ApiKey : null,
+                Application.Interfaces.UserApprovalEvidence.FromUserGesture(
+                    "user:desktop", "Add connector button"));
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException)
+        catch (Exception ex) when (ex is ArgumentException or IOException
+                                       or UnauthorizedAccessException)
         {
             TestFailed = true;
             TestStatusText = ex.Message;

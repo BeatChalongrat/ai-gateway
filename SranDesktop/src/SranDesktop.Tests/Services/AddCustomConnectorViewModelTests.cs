@@ -196,7 +196,8 @@ public sealed class AddCustomConnectorViewModelTests
         await vm.AddCommand.ExecuteAsync(null);
 
         _connectors.Verify(c => c.InstallCustomAsync(
-            It.IsAny<McpConnector>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<McpConnector>(), It.IsAny<string?>(), It.IsAny<UserApprovalEvidence?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -215,7 +216,8 @@ public sealed class AddCustomConnectorViewModelTests
         await vm.AddCommand.ExecuteAsync(null);
 
         _connectors.Verify(c => c.InstallCustomAsync(
-            It.Is<McpConnector>(m => m.Id == "custom-local"), null, It.IsAny<CancellationToken>()), Times.Once);
+            It.Is<McpConnector>(m => m.Id == "custom-local"), null,
+            It.IsAny<UserApprovalEvidence?>(), It.IsAny<CancellationToken>()), Times.Once);
         closed.Should().BeTrue();
     }
 
@@ -233,14 +235,16 @@ public sealed class AddCustomConnectorViewModelTests
         _dialogs.Verify(d => d.ConfirmAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
         _connectors.Verify(c => c.InstallCustomAsync(
-            It.IsAny<McpConnector>(), "sk-123", It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<McpConnector>(), "sk-123", It.IsAny<UserApprovalEvidence?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task Test_Connection_Shows_The_Tool_Count_Or_The_Error()
     {
         _connectors.Setup(c => c.TestConnectionAsync(
-                It.IsAny<McpConnector>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<McpConnector>(), It.IsAny<string?>(), It.IsAny<UserApprovalEvidence?>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(ConnectorTestResult.Ok(7));
         var vm = CreateVm();
         vm.Name = "My Server";
@@ -252,7 +256,8 @@ public sealed class AddCustomConnectorViewModelTests
         vm.TestStatusText.Should().Contain("7");
 
         _connectors.Setup(c => c.TestConnectionAsync(
-                It.IsAny<McpConnector>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<McpConnector>(), It.IsAny<string?>(), It.IsAny<UserApprovalEvidence?>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(ConnectorTestResult.Fail("connection refused"));
 
         await vm.TestConnectionCommand.ExecuteAsync(null);

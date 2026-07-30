@@ -24,9 +24,14 @@ public sealed class PathGuardStateDenyTests : IDisposable
 
     public PathGuardStateDenyTests()
     {
-        PathGuard.ConfigureGrantedRoots(Array.Empty<string>());
         Directory.CreateDirectory(RoamingState);
         Directory.CreateDirectory(LocalState);
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        PathGuard.ConfigureMounts(
+        [
+            new WorkspaceMount(profile, WorkspaceMountAccess.ReadWrite),
+            new WorkspaceMount(Path.GetTempPath(), WorkspaceMountAccess.ReadWrite)
+        ], profile);
     }
 
     private static string? Resolve(string path, out string? error) =>
@@ -108,7 +113,9 @@ public sealed class PathGuardStateDenyTests : IDisposable
         Directory.CreateDirectory(grantDir);
         try
         {
-            PathGuard.ConfigureGrantedRoots(new[] { grantDir });
+            PathGuard.ConfigureMounts(
+                [new WorkspaceMount(grantDir, WorkspaceMountAccess.ReadWrite)],
+                grantDir);
             Resolve(Path.Combine(grantDir, "inside.txt"), out _).Should().NotBeNull();
             Resolve(Path.Combine(RoamingState, "data.db"), out _).Should().BeNull();
         }

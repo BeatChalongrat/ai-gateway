@@ -30,6 +30,11 @@ storage/
 # etc.), not Go source. Exception must come AFTER the broader rule.
 !services/chat-edge-api/internal/storage/
 !services/chat-edge-api/internal/storage/**
+# Same mistake, C# side: SranDesktop's storage TEST suite is source, not a data
+# directory. The broad ``storage/`` rule hid it so completely that the files did
+# not even appear in ``git status``, and ``git add -A`` skipped them silently.
+!SranDesktop/src/SranDesktop.Tests/Storage/
+!SranDesktop/src/SranDesktop.Tests/Storage/**
 # Same fix for the desktop's C# Storage source — the ``storage/`` rule
 # matched it case-insensitively on Windows, leaving these core files
 # UNTRACKED (a fresh clone wouldn't build). Re-include the source dir.

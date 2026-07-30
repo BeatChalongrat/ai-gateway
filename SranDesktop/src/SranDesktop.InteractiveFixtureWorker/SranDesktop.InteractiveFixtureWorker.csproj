@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.InteractiveFixtureWorker</RootNamespace>
+    <AssemblyName>SranDesktop.InteractiveFixtureWorker</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- Speaks the framing verbatim by source-linking the codec: a fixture that
+       reimplemented the wire format could pass while the real one is broken. -->
+  <ItemGroup>
+    <Compile Include="..\SranDesktop.Infrastructure\Workers\InteractiveFrameCodec.cs"
+             Link="InteractiveFrameCodec.cs" />
+    <Compile Include="..\SranDesktop.Application\Models\InteractiveWorkerContracts.cs"
+             Link="InteractiveWorkerContracts.cs" />
+  </ItemGroup>
+
+</Project>

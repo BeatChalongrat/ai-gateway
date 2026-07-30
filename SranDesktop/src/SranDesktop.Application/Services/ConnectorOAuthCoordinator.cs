@@ -135,10 +135,16 @@ public sealed class ConnectorOAuthCoordinator
                 return;
             }
 
-            // Install WITHOUT a local secret — the key Phase 7 change.
+            // Install WITHOUT a local secret — the key Phase 7 change. The
+            // approval recorded here is the OAuth consent the user just gave in
+            // their browser, which the backend has confirmed above: the deep link
+            // alone would only be an assertion, and an assertion any local process
+            // can make is not a decision.
             await _connectors.InstallAsync(
                 callback.ConnectorId, apiToken: null,
-                authMode: Models.InstalledConnector.AuthModeOAuth2);
+                authMode: Models.InstalledConnector.AuthModeOAuth2,
+                evidence: Interfaces.UserApprovalEvidence.FromUserGesture(
+                    "user:oauth-consent", "broker OAuth consent confirmed by the backend"));
             await _connectors.PingAsync(callback.ConnectorId);
             SetState(callback.ConnectorId, ConnectorFlowState.Connected, null);
             _toasts?.Show(ToastKind.Success, "toast.connectorConnected", callback.ConnectorId);

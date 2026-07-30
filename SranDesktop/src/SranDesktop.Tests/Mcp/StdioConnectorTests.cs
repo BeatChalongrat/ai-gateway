@@ -4,18 +4,22 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
-using SranDesktop.Domain.Enums;
 using SranDesktop.Infrastructure.Mcp;
-using SranDesktop.Infrastructure.Mcp.Remote;
 using SranDesktop.Infrastructure.Services;
 using Xunit;
 
 namespace SranDesktop.Tests.Mcp;
 
-/// <summary>Phase 12 D: transport selection + legacy connectors.json
-/// compatibility. Existing HTTP connectors must be untouched by the stdio
-/// feature: no transport field → http, and re-saving the state file must not
-/// grow new keys.</summary>
+/// <summary>
+/// Legacy connectors.json compatibility, and what a user-added connector is
+/// allowed to be.
+///
+/// Phase 4.1C narrowed this deliberately. A pasted command line used to be a way
+/// to get a local executable launched; it carried no manifest, so there was
+/// nothing to show at approval time and nothing to hash. Local servers now come
+/// as manifest-bearing packages in the managed folder, and everything reached
+/// over the wire keeps working exactly as it did.
+/// </summary>
 public sealed class McpTransportSelectionTests : IDisposable
 {
     private readonly string _stateFile = Path.Combine(
@@ -26,24 +30,27 @@ public sealed class McpTransportSelectionTests : IDisposable
         stateFilePath: _stateFile);
 
     [Fact]
-    public async Task Stdio_Connector_Selects_Stdio_Transport()
+    public async Task A_Pasted_Command_Line_Is_Not_A_Way_To_Run_A_Local_Server()
     {
-        await using var svc = CreateService();
+        await using var service = CreateService();
 
-        var transport = svc.CreateTransport(new McpConnector
+        var add = () => service.InstallCustomAsync(new McpConnector
         {
             Id = "local",
+            Name = "Local",
             Transport = McpConnector.TransportStdio,
             Command = "server.exe",
-            Args = new List<string> { "--flag" }
+            Args = ["--flag"]
         });
 
-        transport.Should().BeOfType<StdioMcpTransport>();
-        await transport.DisposeAsync();
+        await add.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*managed connector folder*",
+                "a local executable has to arrive as a package whose manifest says what "
+                + "it wants, or the approval screen has nothing to show");
     }
 
     [Fact]
-    public async Task Legacy_Connector_Json_Without_Transport_Field_Selects_Http()
+    public void Legacy_Connector_Json_Without_Transport_Field_Is_Still_Http()
     {
         // A REAL pre-Phase-12 catalog entry — no "transport" key existed.
         const string legacyCatalogEntry = """
@@ -59,10 +66,28 @@ public sealed class McpTransportSelectionTests : IDisposable
             "legacy connectors must keep their exact pre-Phase-12 behavior");
         connector.ServerUrl.Should().Be("https://mcp.sran.ai/notion");
 
-        await using var svc = CreateService();
-        var transport = svc.CreateTransport(connector);
-        transport.Should().BeOfType<HttpMcpTransport>();
-        await transport.DisposeAsync();
+        var declaration = McpConnectorService.ToDeclaration(connector, "catalog");
+
+        declaration.Transport.Should().Be(ConnectorTransportKind.Http);
+        declaration.ServerUrl.Should().Be("https://mcp.sran.ai/notion");
+        declaration.Permissions.RequiresNetwork.Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_Remote_Connector_Repointed_At_Another_Server_Is_A_Different_Declaration()
+    {
+        var original = McpConnectorService.ToDeclaration(new McpConnector
+        {
+            Id = "notion", Name = "Notion", ServerUrl = "https://mcp.sran.ai/notion"
+        });
+        var moved = McpConnectorService.ToDeclaration(new McpConnector
+        {
+            Id = "notion", Name = "Notion", ServerUrl = "https://evil.example/notion"
+        });
+
+        moved.EndpointFingerprint().Should().NotBe(original.EndpointFingerprint());
+        moved.ComputeFingerprint("").Should().NotBe(original.ComputeFingerprint(""),
+            "an approval names a server, not a label");
     }
 
     [Fact]
@@ -114,13 +139,14 @@ public sealed class McpTransportSelectionTests : IDisposable
     }
 }
 
-/// <summary>Phase 12 D: end-to-end stdio connectors through
-/// McpConnectorService with a real child process — connect, cache, execute,
-/// persist, crash-surface, and consent-gate.</summary>
-public sealed class StdioConnectorServiceTests : IDisposable
+/// <summary>
+/// A connector record left over from before local servers were packaged. The
+/// point of every test here is that nothing about it becomes runnable by
+/// accident — not by restarting, not by refreshing, not by resolving its tool
+/// name — and that the secrets an old record may be carrying are scrubbed.
+/// </summary>
+public sealed class LegacyStdioConnectorRecordTests : IDisposable
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-
     private readonly string _stateFile = Path.Combine(
         Path.GetTempPath(), $"sran-stdio-{Guid.NewGuid():N}.json");
 
@@ -128,139 +154,92 @@ public sealed class StdioConnectorServiceTests : IDisposable
         Mock.Of<ICredentialStore>(), NullLogger<McpConnectorService>.Instance,
         stateFilePath: _stateFile);
 
-    private static McpConnector EchoConnector(string id = "local-echo")
-    {
-        var (command, args) = StdioEchoServer.CommandLine();
-        return new McpConnector
+    private void SeedLegacyStdioRecord(params string[] args) =>
+        File.WriteAllText(_stateFile, JsonSerializer.Serialize(new List<InstalledConnector>
         {
-            Id = id,
-            Name = "Local Echo",
-            Transport = McpConnector.TransportStdio,
-            Command = command,
-            Args = args
-        };
+            new()
+            {
+                Id = "legacy-local",
+                Custom = new McpConnector
+                {
+                    Id = "legacy-local",
+                    Name = "Legacy Local",
+                    Transport = McpConnector.TransportStdio,
+                    Command = "server.exe",
+                    Args = args.Length > 0 ? [.. args] : null
+                }
+            }
+        }));
+
+    [Fact]
+    public async Task A_Legacy_Stdio_Record_Is_Never_Offered_As_A_Declaration()
+    {
+        SeedLegacyStdioRecord();
+        await using var service = CreateService();
+
+        service.InstalledDeclarations().Should().BeEmpty(
+            "a stdio record with no package and no manifest cannot be resolved into "
+            + "something a person could meaningfully approve");
     }
 
     [Fact]
-    public async Task InstallCustom_Stdio_Connects_Caches_Tools_And_Persists()
+    public async Task A_Legacy_Stdio_Record_Exposes_No_Tools_After_A_Restart()
     {
-        await using var svc = CreateService();
+        SeedLegacyStdioRecord();
 
-        await svc.InstallCustomAsync(EchoConnector());
-
-        svc.GetStatus("local-echo").Should().Be(ConnectorStatus.Connected);
-        svc.GetCachedRemoteToolDefinitions()
-            .Should().Contain(d => d.Function.Name == "stdio_echo");
-
-        // Full definition persisted in connectors.json.
-        var state = JsonSerializer.Deserialize<List<InstalledConnector>>(
-            File.ReadAllText(_stateFile))!;
-        var record = state.Single(c => c.Id == "local-echo");
-        record.Custom.Should().NotBeNull();
-        record.Custom!.Transport.Should().Be(McpConnector.TransportStdio);
-        record.Custom.Command.Should().Be("powershell.exe");
-        record.Custom.Args.Should().NotBeNullOrEmpty();
-
-        // Tool executes end-to-end through the service.
-        using var args = JsonDocument.Parse("""{"text":"via service"}""");
-        var result = await svc.ExecuteRemoteToolAsync("stdio_echo", args.RootElement)
-            .WaitAsync(TestTimeout);
-        result.Success.Should().BeTrue();
-        result.Content.Should().Be("via service");
-    }
-
-    [Fact]
-    public async Task Persisted_Stdio_Connector_Redials_On_A_Fresh_Service()
-    {
-        await using (var first = CreateService())
-        {
-            await first.InstallCustomAsync(EchoConnector());
-        }
-
-        // New service instance = app restart: state comes purely from
+        // A new service instance is the app restarting: state comes purely from
         // connectors.json.
-        await using var second = CreateService();
-        await second.RefreshRemoteToolsAsync().WaitAsync(TestTimeout);
+        await using var service = CreateService();
+        await service.RefreshRemoteToolsAsync();
+        await service.RefreshRemoteToolsAsync();
 
-        second.GetStatus("local-echo").Should().Be(ConnectorStatus.Connected);
-        second.GetCachedRemoteToolDefinitions()
-            .Should().Contain(d => d.Function.Name == "stdio_echo");
+        service.GetStatus("legacy-local").Should().Be(ConnectorStatus.NotConfigured);
+        service.GetCachedRemoteToolDefinitions().Should().BeEmpty();
     }
 
     [Fact]
-    public async Task Stdio_Crash_During_Call_Surfaces_Disconnected_Via_StatusChanged()
+    public async Task A_Legacy_Stdio_Tool_Name_Resolves_To_Nothing()
     {
-        await using var svc = CreateService();
-        await svc.InstallCustomAsync(EchoConnector());
+        SeedLegacyStdioRecord();
+        await using var service = CreateService();
+        await service.RefreshRemoteToolsAsync();
 
-        var sawDisconnected = new TaskCompletionSource(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        svc.StatusChanged += (_, _) =>
+        // The same resolution path the orchestrator uses for every remote tool.
+        var host = new McpToolHost(new McpToolRegistry(), service);
+
+        host.Resolve("stdio_echo").Should().BeNull(
+            "permission consent cannot substitute for a trust decision about a binary");
+    }
+
+    [Fact]
+    public async Task Legacy_Stdio_Environment_Secrets_Are_Removed_Before_State_Is_Returned()
+    {
+        const string secret = "ghp_1234567890abcdefghijklmnop";
+        var legacy = new List<InstalledConnector>
         {
-            if (svc.GetStatus("local-echo") == ConnectorStatus.Disconnected)
-                sawDisconnected.TrySetResult();
+            new()
+            {
+                Id = "legacy-local",
+                Custom = new McpConnector
+                {
+                    Id = "legacy-local",
+                    Name = "Legacy Local",
+                    Transport = McpConnector.TransportStdio,
+                    Command = "server.exe",
+                    Args = ["--token", secret],
+                    Env = new Dictionary<string, string> { ["API_TOKEN"] = secret }
+                }
+            }
         };
+        await File.WriteAllTextAsync(_stateFile, JsonSerializer.Serialize(legacy));
+        await using var service = CreateService();
 
-        // stdio_crash exits WITHOUT replying.
-        using var args = JsonDocument.Parse("{}");
-        var result = await svc.ExecuteRemoteToolAsync("stdio_crash", args.RootElement)
-            .WaitAsync(TestTimeout);
+        var loaded = await service.GetInstalledAsync();
 
-        result.Success.Should().BeFalse();
-        await sawDisconnected.Task.WaitAsync(TestTimeout);
-        svc.GetStatus("local-echo").Should().Be(ConnectorStatus.Disconnected);
-    }
-
-    [Fact]
-    public async Task Idle_Stdio_Exit_Surfaces_Disconnected_Via_The_Exited_Event()
-    {
-        await using var svc = CreateService();
-        await svc.InstallCustomAsync(EchoConnector());
-
-        var sawDisconnected = new TaskCompletionSource(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        svc.StatusChanged += (_, _) =>
-        {
-            if (svc.GetStatus("local-echo") == ConnectorStatus.Disconnected)
-                sawDisconnected.TrySetResult();
-        };
-
-        // stdio_bye REPLIES (call succeeds → Connected), then the server
-        // exits on its own 300ms later — so the Disconnected transition can
-        // only come from the transport's Exited event, not a failed call.
-        using var args = JsonDocument.Parse("{}");
-        var result = await svc.ExecuteRemoteToolAsync("stdio_bye", args.RootElement)
-            .WaitAsync(TestTimeout);
-        result.Success.Should().BeTrue();
-
-        await sawDisconnected.Task.WaitAsync(TestTimeout);
-        svc.GetStatus("local-echo").Should().Be(ConnectorStatus.Disconnected);
-    }
-
-    [Fact]
-    public async Task Stdio_Tools_Are_Consent_Gated_As_Ask()
-    {
-        await using var svc = CreateService();
-        await svc.InstallCustomAsync(EchoConnector());
-
-        // Same resolution path the orchestrator uses for every remote tool.
-        var host = new McpToolHost(new McpToolRegistry(), svc);
-        var tool = host.Resolve("stdio_echo");
-
-        tool.Should().BeOfType<RemoteMcpTool>();
-        tool!.DefaultPermission.Should().Be(PermissionLevel.Ask,
-            "a stdio server is arbitrary local code — its tools must never auto-run");
-
-        // And the permission service turns that into a consent prompt when
-        // the user has no explicit override.
-        var store = new Mock<IConversationStore>();
-        store.Setup(s => s.GetToolPermissionAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-        var permissions = new PermissionService(store.Object);
-
-        var decision = await permissions.CheckAsync(tool, "scope");
-        decision.Should().Be(PermissionDecision.NeedsConsent);
+        loaded.Single().Custom!.Env.Should().BeNull();
+        loaded.Single().Custom!.Args.Should().NotContain(secret);
+        (await File.ReadAllTextAsync(_stateFile)).Should().NotContain(secret);
+        (await File.ReadAllTextAsync(_stateFile)).Should().NotContain("API_TOKEN");
     }
 
     public void Dispose()

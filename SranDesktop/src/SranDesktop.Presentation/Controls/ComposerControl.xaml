@@ -243,6 +243,49 @@
                                                    Width="11" Height="11" Margin="4,1,0,0" />
                             </StackPanel>
                         </Button>
+                        <!-- shell lane pill: where run_command executes -->
+                        <Button x:Name="ShellLaneButton"
+                                Style="{DynamicResource PillButton}"
+                                Padding="8,4" Margin="4,0,0,0"
+                                VerticalAlignment="Center"
+                                Command="{Binding OpenShellLanePopupCommand}"
+                                AutomationProperties.Name="Where commands run"
+                                ToolTip="{loc:T shell.tooltip}">
+                            <StackPanel Orientation="Horizontal">
+                                <controls:IconView Geometry="{StaticResource Geo_Terminal}"
+                                                   Width="14" Height="14" Margin="0,0,5,0"
+                                                   VerticalAlignment="Center">
+                                    <controls:IconView.Style>
+                                        <Style TargetType="controls:IconView">
+                                            <Setter Property="Stroke" Value="{DynamicResource TextSecondaryBrush}" />
+                                            <Style.Triggers>
+                                                <!-- Host lane is the widened boundary: mark it so the
+                                                     state is visible without opening the dropdown. -->
+                                                <DataTrigger Binding="{Binding IsShellHost}" Value="True">
+                                                    <Setter Property="Stroke" Value="{DynamicResource AccentRedBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </controls:IconView.Style>
+                                </controls:IconView>
+                                <TextBlock Text="{Binding ShellLaneLabel}" FontSize="13"
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsShellHost}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource AccentRedBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <controls:IconView Geometry="{StaticResource Geo_ChevronDown}"
+                                                   Stroke="{DynamicResource TextSecondaryBrush}"
+                                                   Width="11" Height="11" Margin="4,1,0,0" />
+                            </StackPanel>
+                        </Button>
                         <!-- listening hint -->
                         <TextBlock Text="{loc:T voice.listening}" FontSize="11.5"
                                    Margin="6,0,0,0" VerticalAlignment="Center"
@@ -881,6 +924,86 @@
                                         <TextBlock Text="{loc:T perm.skip.name}" FontSize="13" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource TextPrimaryBrush}" />
                                         <TextBlock Text="{loc:T perm.skip.desc}" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,1,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+                <!-- Shell lane popup: where run_command executes (P3-1) -->
+                <Popup x:Name="ShellLanePopup"
+                       PlacementTarget="{Binding ElementName=ShellLaneButton}"
+                       Placement="Top"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade">
+                    <Popup.Style>
+                        <Style TargetType="Popup">
+                            <Setter Property="IsOpen" Value="{Binding IsShellLanePopupOpen, Mode=TwoWay}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsVisible, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
+                                    <Setter Property="IsOpen" Value="False" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Popup.Style>
+                    <Border Margin="8"
+                            Background="{DynamicResource BgPrimaryBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="12"
+                            Padding="8" MinWidth="340" MaxWidth="420">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="14" ShadowDepth="2"
+                                              Opacity="0.35" Color="Black" />
+                        </Border.Effect>
+                        <StackPanel>
+                            <!-- Sandboxed (default) -->
+                            <Button Style="{DynamicResource FlatRowButton}" Padding="8,7"
+                                    Command="{Binding SelectShellLaneCommand}"
+                                    CommandParameter="sandbox"
+                                    AutomationProperties.Name="{loc:T shell.sandbox.name}">
+                                <DockPanel LastChildFill="True">
+                                    <controls:IconView DockPanel.Dock="Left"
+                                                       Geometry="{StaticResource Geo_Lock}"
+                                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                                       Width="16" Height="16" Margin="0,0,10,0"
+                                                       VerticalAlignment="Center" />
+                                    <controls:IconView DockPanel.Dock="Right"
+                                                       Geometry="{StaticResource Geo_Check}"
+                                                       Stroke="{DynamicResource AccentBrush}"
+                                                       Width="14" Height="14" Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{Binding IsShellSandbox, Converter={StaticResource BoolToVisibility}}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:T shell.sandbox.name}" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{loc:T shell.sandbox.desc}" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,1,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                            <!-- On this PC (opt-in; confirms before switching) -->
+                            <Button Style="{DynamicResource FlatRowButton}" Padding="8,7"
+                                    Command="{Binding SelectShellLaneCommand}"
+                                    CommandParameter="host"
+                                    AutomationProperties.Name="{loc:T shell.host.name}">
+                                <DockPanel LastChildFill="True">
+                                    <controls:IconView DockPanel.Dock="Left"
+                                                       Geometry="{StaticResource Geo_Terminal}"
+                                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                                       Width="16" Height="16" Margin="0,0,10,0"
+                                                       VerticalAlignment="Center" />
+                                    <controls:IconView DockPanel.Dock="Right"
+                                                       Geometry="{StaticResource Geo_Check}"
+                                                       Stroke="{DynamicResource AccentBrush}"
+                                                       Width="14" Height="14" Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{Binding IsShellHost, Converter={StaticResource BoolToVisibility}}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:T shell.host.name}" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{loc:T shell.host.desc}" FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,1,0,0" />
                                     </StackPanel>
                                 </DockPanel>
