@@ -94,6 +94,31 @@ const markdownComponents = {
     return <a {...props} target="_blank" rel="noopener noreferrer" />;
   },
   pre: (props: { children?: React.ReactNode }) => <CodeBlock {...props} />,
+  // Wrap every GFM table in its own scroll container. The table itself
+  // then stays `display: table` so the browser's real column algorithm
+  // runs (the old `display: block; overflow-x: auto` on the <table>
+  // scrolled, but at the cost of turning the table into a block box —
+  // column widths stopped tracking content and the frame could not be
+  // rounded). The wrapper owns the border, radius, clipping and the
+  // horizontal scroll instead, so a 12-column table scrolls inside the
+  // message instead of widening the whole chat column on mobile.
+  //
+  // This is a plain React element — no HTML string, no dangerouslySet-
+  // InnerHTML — so the no-raw-HTML invariant is untouched.
+  //
+  // tabIndex + role make the scroll area reachable and announceable for
+  // keyboard/screen-reader users, which WCAG 2.1.1 requires of any
+  // region that only scrolling can reveal.
+  table: (props: React.TableHTMLAttributes<HTMLTableElement>) => (
+    <div
+      className="md-table-wrap scrollbar-thin"
+      role="region"
+      aria-label="Table"
+      tabIndex={0}
+    >
+      <table {...props} />
+    </div>
+  ),
 };
 
 function CitationPill({ filename }: { filename: string }) {

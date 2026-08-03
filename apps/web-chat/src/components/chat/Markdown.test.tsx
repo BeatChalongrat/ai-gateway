@@ -37,6 +37,40 @@ describe("existing markdown behaviour (regression pins)", () => {
     expect(table!.querySelectorAll("td")[0]?.textContent).toBe("apples");
   });
 
+  it("wraps tables in a keyboard-reachable horizontal scroll container", () => {
+    // The frame + overflow live on a wrapper so the <table> can stay
+    // display:table (real column sizing) and still scroll on narrow
+    // screens. Pinned because reverting to `display:block` on the table
+    // itself silently breaks column widths and rounded corners.
+    const md = [
+      "| a | b | c |",
+      "| - | - | - |",
+      "| 1 | 2 | 3 |",
+    ].join("\n");
+    const { container } = render(<Markdown>{md}</Markdown>);
+    const wrap = container.querySelector(".md-table-wrap");
+    expect(wrap).not.toBeNull();
+    // Table is a direct child of the wrapper, not a sibling.
+    expect(wrap!.querySelector(":scope > table")).not.toBeNull();
+    // Reachable by keyboard so the hidden columns are not mouse-only.
+    expect(wrap!.getAttribute("tabindex")).toBe("0");
+    expect(wrap!.getAttribute("role")).toBe("region");
+  });
+
+  it("keeps table markup semantic (thead/tbody/th/td survive the wrapper)", () => {
+    const md = [
+      "| name | qty |",
+      "| ---- | --- |",
+      "| apples | 3 |",
+      "| pears | 5 |",
+    ].join("\n");
+    const { container } = render(<Markdown>{md}</Markdown>);
+    const table = container.querySelector(".md-table-wrap table");
+    expect(table).not.toBeNull();
+    expect(table!.querySelectorAll("thead th").length).toBe(2);
+    expect(table!.querySelectorAll("tbody tr").length).toBe(2);
+  });
+
   it("renders a fenced code block through CodeBlock with highlight classes", () => {
     const md = "```js\nconst x = 1;\n```";
     const { container } = render(<Markdown>{md}</Markdown>);
