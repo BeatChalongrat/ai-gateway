@@ -11,7 +11,9 @@ public sealed class ReadFileTool : IMcpTool
 
     public string Name => "read_file";
     public string Description =>
-        "Read the contents of a file at the given path. Returns text for text files, base64 for small binary files.";
+        "Read the contents of a file at the given path. Returns text for text files, base64 for small binary files. " +
+        "For DOCUMENTS — PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) — use read_document instead: " +
+        "this tool returns base64 for them, which you cannot read.";
     public ToolCategory Category => ToolCategory.FileSystem;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
 

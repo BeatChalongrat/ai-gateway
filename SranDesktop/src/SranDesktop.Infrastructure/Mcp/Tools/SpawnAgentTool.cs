@@ -108,7 +108,7 @@ public sealed class SpawnAgentTool : IMcpTool, ISupportsNestedProgress
         "several files) whose intermediate output should not flood this conversation. Pass 'task' for a " +
         "single delegate (full tool access, consent-gated). Pass 'tasks' (2+) to run INDEPENDENT " +
         "subtasks in PARALLEL — these fan-out sub-agents are restricted to read-only/research tools " +
-        "(read_file, list_directory, search_files, web_search, update_plan) so no permission prompt is " +
+        "(read_file, read_document, list_directory, search_files, web_search, update_plan) so no permission prompt is " +
         "needed; use it for parallel research/analysis, not for edits or commands. Sub-agents cannot " +
         "see this conversation, cannot ask the user questions, and cannot spawn further sub-agents.";
 

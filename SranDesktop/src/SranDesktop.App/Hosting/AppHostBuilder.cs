@@ -164,6 +164,11 @@ public static class AppHostBuilder
                 {
                     var registry = new McpToolRegistry();
                     registry.Register(new ReadFileTool());
+                    // Local document text extraction (PDF/Word/Excel/PowerPoint).
+                    // Registered right after read_file so the model meets the
+                    // document-capable reader before it settles for the base64
+                    // one. Same PathGuard + SensitiveReadGuard gates.
+                    registry.Register(new ReadDocumentTool());
                     registry.Register(new WriteFileTool());
                     // Phase A PART 2: targeted edit + filesystem primitives a real
                     // agent needs (all PathGuard-confined + consent-gated).

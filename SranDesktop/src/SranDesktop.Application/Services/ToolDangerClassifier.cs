@@ -20,7 +20,7 @@ public static class ToolDangerClassifier
     /// else is judged by category (fail-safe).</summary>
     private static readonly HashSet<string> Safe = new(StringComparer.OrdinalIgnoreCase)
     {
-        "read_file", "list_directory", "search_files", "read_clipboard",
+        "read_file", "read_document", "list_directory", "search_files", "read_clipboard",
         "web_search", "web_fetch", "run_subagent", "update_plan", "use_skill", "remember",
         // Computer-use READ tools: they only observe the screen/window tree.
         "computer_zoom", "get_computer_state", "read_screen_elements",
