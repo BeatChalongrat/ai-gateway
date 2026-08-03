@@ -36,6 +36,21 @@ MinVersion=10.0
 CloseApplications=yes
 RestartApplications=yes
 
+; ── Code signing (FIX-E) ────────────────────────────────────────────────────
+; Opt-in: a plain `ISCC.exe build\SranDesktop.iss` still produces an UNSIGNED
+; installer (no cert needed — dev/repackage keeps working). To sign, pass the
+; SIGN define AND supply a sign tool named "sran" on the command line; the
+; certificate path/password come from environment variables, NEVER this repo.
+; Full instructions: build\SIGNING.md.
+;
+;   ISCC.exe /DSIGN ^
+;     "/Ssran=signtool.exe sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f %SRAN_CERT_PFX% /p %SRAN_CERT_PASSWORD% $f" ^
+;     build\SranDesktop.iss
+#ifdef SIGN
+SignTool=sran
+SignedUninstaller=yes
+#endif
+
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 

@@ -44,6 +44,7 @@ public sealed class MoveFileTool : IMcpTool
 
         var overwrite = ToolHelpers.GetBool(arguments, "overwrite");
         var isDirectory = Directory.Exists(source);
+        string? backup = null;
 
         if (!isDirectory && !File.Exists(source))
             return Task.FromResult(ToolResult.Fail($"Source not found: {source}"));
@@ -65,6 +66,8 @@ public sealed class MoveFileTool : IMcpTool
                 if (File.Exists(destination) && !overwrite)
                     return Task.FromResult(ToolResult.Fail(
                         $"Destination already exists: {destination}. Set overwrite to replace it."));
+                if (overwrite)
+                    backup = ToolHelpers.BackupBeforeOverwrite(destination); // FIX-G
                 File.Move(source, destination, overwrite);
             }
         }
@@ -73,6 +76,7 @@ public sealed class MoveFileTool : IMcpTool
             return Task.FromResult(ToolResult.Fail($"Move failed: {ex.Message}"));
         }
 
-        return Task.FromResult(ToolResult.Ok($"Moved {source} to {destination}"));
+        return Task.FromResult(ToolResult.Ok($"Moved {source} to {destination}"
+            + (backup is null ? "" : $". Previous version saved to {backup}")));
     }
 }

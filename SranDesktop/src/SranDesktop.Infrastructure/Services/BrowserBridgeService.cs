@@ -174,6 +174,10 @@ public sealed class BrowserBridgeService : IBrowserBridgeService, IAsyncDisposab
             if (!string.Equals(token, expectedToken, StringComparison.Ordinal))
             {
                 _logger.LogWarning("Browser pipe client rejected: pairing token mismatch");
+                // FIX-B: tell the extension WHY before dropping, so its options
+                // page can say "paste a fresh token" instead of a silent grey
+                // dot. Reveals nothing: the client already knows its own token.
+                await TrySendControlAsync(server, new { hello_reject = "token_mismatch" });
                 return; // drop the connection — never talk to an unpaired client
             }
 
@@ -186,6 +190,9 @@ public sealed class BrowserBridgeService : IBrowserBridgeService, IAsyncDisposab
                     _paired = true;
                     StatusChanged?.Invoke(this, EventArgs.Empty);
                 }
+                // FIX-B: explicit ack — the extension shows "connected" only
+                // after this arrives (its old status was optimistic-on-send).
+                await TrySendControlAsync(server, new { hello_ack = true });
                 continue;
             }
 
@@ -200,6 +207,31 @@ public sealed class BrowserBridgeService : IBrowserBridgeService, IAsyncDisposab
                 else
                     tcs.TrySetException(new BrowserBridgeException("Malformed extension response."));
             }
+        }
+    }
+
+    /// <summary>Best-effort control frame (hello ack/reject). Id-less, so an
+    /// extension that predates it ignores it (onRequest drops frames without
+    /// an id). A broken pipe here just ends the session as before.</summary>
+    private async Task TrySendControlAsync(NamedPipeServerStream server, object message)
+    {
+        try
+        {
+            var payload = JsonSerializer.SerializeToUtf8Bytes(message);
+            await _writeLock.WaitAsync(_lifetime.Token);
+            try
+            {
+                await BrowserWire.WriteFrameAsync(server, payload, _lifetime.Token);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException
+                                       or InvalidDataException or OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Browser control frame not delivered");
         }
     }
 

@@ -44,9 +44,20 @@ public partial class FirstRunViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanContinue))]
     private bool _isConnectionValid;
 
+    /// <summary>Dev-only escape from the connection gate. In a Release build a
+    /// self-hosted URL must ALWAYS pass Test Connection before Continue — a
+    /// wrong URL that slips through becomes a permanent onboarding dead-end
+    /// (settings.json exists → first-run never shows again).</summary>
+#if DEBUG
+    internal static bool AllowLocalDevBypass { get; set; } = true;
+#else
+    internal static bool AllowLocalDevBypass { get; set; }
+#endif
+
     /// <summary>Cloud preset is trusted; self-hosted requires a passing test.</summary>
     public bool CanContinue => IsCloudSelected
-        || (IsSelfHostedSelected && (IsConnectionValid || IsLocalDevUrl(ServerBaseUrl)));
+        || (IsSelfHostedSelected && (IsConnectionValid
+            || (AllowLocalDevBypass && IsLocalDevUrl(ServerBaseUrl))));
 
     partial void OnServerBaseUrlChanged(string value) => IsConnectionValid = false;
 

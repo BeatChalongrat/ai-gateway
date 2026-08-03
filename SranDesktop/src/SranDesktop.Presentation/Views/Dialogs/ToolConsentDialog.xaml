@@ -9,7 +9,7 @@
         xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:ToolConsentViewModel}"
-        Title="Permission required"
+        Title="{loc:T consent.title}"
         SizeToContent="Height"
         Width="460"
         ResizeMode="NoResize"
@@ -55,10 +55,11 @@
                 </controls:IconView>
             </Border>
             <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="AI wants to use a tool"
+                <TextBlock Text="{loc:T consent.heading}"
                            FontWeight="SemiBold" FontSize="15"
                            Foreground="{DynamicResource TextPrimaryBrush}" />
-                <TextBlock Text="{Binding ToolName}"
+                <!-- FIX-C: localized human name (tool.name.*), not the raw id -->
+                <TextBlock Text="{Binding DisplayName}"
                            Foreground="{DynamicResource TextPrimaryBrush}"
                            FontWeight="SemiBold" />
             </StackPanel>
@@ -108,19 +109,19 @@
 
         <!-- Buttons -->
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="Deny" Style="{DynamicResource DangerButton}"
+            <Button Content="{loc:T consent.deny}" Style="{DynamicResource DangerButton}"
                     MinWidth="80" Margin="0,0,8,0" Padding="10,6"
                     IsCancel="True"
                     Click="Deny_Click" />
-            <Button Content="Allow Once" MinWidth="100" Margin="0,0,8,0" Padding="10,6"
+            <Button Content="{loc:T consent.allowOnce}" MinWidth="100" Margin="0,0,8,0" Padding="10,6"
                     IsDefault="True"
                     Click="AllowOnce_Click" />
-            <Button Content="Always Allow" Style="{DynamicResource AccentButton}"
+            <Button Content="{loc:T consent.allowAlways}" Style="{DynamicResource AccentButton}"
                     MinWidth="110" Padding="10,6"
                     Click="AllowAlways_Click" />
         </StackPanel>
-        <TextBlock Text="Always Allow remembers this tool for the same target permanently."
-                   Margin="0,8,0,0" FontSize="11"
+        <TextBlock Text="{loc:T consent.alwaysAllowNote}"
+                   Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                    Foreground="{DynamicResource TextSecondaryBrush}" />
     </StackPanel>
 </Window>

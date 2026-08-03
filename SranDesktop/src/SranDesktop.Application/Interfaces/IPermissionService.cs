@@ -24,4 +24,12 @@ public interface IPermissionService
 
     /// <summary>Persist allow_always / deny_always to the tool_permissions table.</summary>
     Task PersistDecisionAsync(string toolName, string scope, string permission, CancellationToken ct = default);
+
+    /// <summary>True when the user has EXPLICITLY decided this tool+scope
+    /// (persisted allow/deny or a session decision) — as opposed to a decision
+    /// that merely fell through to the tool's default. FIX-F uses this so the
+    /// out-of-scope read gate never overrides a real "Always Allow". Default
+    /// implementation (false) keeps existing test fakes compiling.</summary>
+    Task<bool> HasStoredDecisionAsync(string toolName, string scope, CancellationToken ct = default)
+        => Task.FromResult(false);
 }

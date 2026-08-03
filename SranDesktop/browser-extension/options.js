@@ -9,9 +9,15 @@ async function refresh() {
   if (typeof token === 'string') tokenInput.value = token;
   const connected = !!(status && status.connected);
   dot.className = 'dot ' + (connected ? 'on' : 'off');
-  statusText.textContent = connected
-    ? 'Connected to SRAN Desktop'
-    : 'Not connected — is SRAN Desktop running?';
+  if (connected) {
+    statusText.textContent = 'เชื่อมต่อกับ SRAN Desktop แล้ว (Connected)';
+  } else if (status && status.reason === 'token_mismatch') {
+    statusText.textContent =
+      'โทเคนไม่ตรง — คัดลอกโทเคนใหม่จาก SRAN Desktop → Settings → เบราว์เซอร์ แล้ววางที่นี่ '
+      + '(Pairing token mismatch — paste a fresh token from SRAN Desktop → Settings → Browser)';
+  } else {
+    statusText.textContent = 'ยังไม่เชื่อมต่อ — SRAN Desktop เปิดอยู่หรือไม่? (Not connected — is SRAN Desktop running?)';
+  }
 }
 
 document.getElementById('save').addEventListener('click', async () => {

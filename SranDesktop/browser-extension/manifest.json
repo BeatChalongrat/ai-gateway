@@ -3,7 +3,7 @@
   "name": "SRAN Desktop Browser Bridge",
   "version": "1.0.0",
   "description": "Lets the SRAN Desktop assistant read and interact with your Chrome tabs. Pair it with the desktop app in Settings → Browser.",
-  "permissions": ["nativeMessaging", "tabs", "scripting", "activeTab", "webNavigation", "storage"],
+  "permissions": ["nativeMessaging", "tabs", "scripting", "activeTab", "webNavigation", "storage", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "options_page": "options.html"

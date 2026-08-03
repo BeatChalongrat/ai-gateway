@@ -43,6 +43,21 @@ internal static class ToolHelpers
         return null;
     }
 
+    /// <summary>FIX-G: before a tool overwrites an EXISTING file, snapshot the
+    /// previous content next to it as "&lt;file&gt;.sran.bak" (latest one only —
+    /// enough to undo the last overwrite; not a version history). Returns the
+    /// backup path, or null when nothing existed (new file = nothing to lose).
+    /// The backup lands in the same directory, so it can never escape the
+    /// PathGuard root that already admitted the write itself.</summary>
+    public static string? BackupBeforeOverwrite(string fullPath)
+    {
+        if (!File.Exists(fullPath))
+            return null;
+        var backup = fullPath + ".sran.bak";
+        File.Copy(fullPath, backup, overwrite: true);
+        return backup;
+    }
+
     public static string FormatSize(long bytes) => bytes switch
     {
         < 1024 => $"{bytes} B",
@@ -179,6 +194,21 @@ public static class PathGuard
         error = $"Access denied: '{fullPath}' is outside the allowed directories " +
                 "(your user profile, the temp folder, and folders you've granted in Settings).";
         return null;
+    }
+
+    /// <summary>True when the path lies inside a folder the user EXPLICITLY
+    /// chose (granted folders + the composer's working folder). The built-in
+    /// user-profile/temp roots do NOT count — FIX-F uses this to decide
+    /// whether a silent read (read_file / list_directory / search_files) has
+    /// left the user's chosen scope and must ask first.</summary>
+    public static bool IsWithinUserScope(string fullPath)
+    {
+        foreach (var root in _grantedRoots)
+        {
+            if (IsWithin(fullPath, Path.TrimEndingDirectorySeparator(root)))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
