@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "../../lib/i18n";
+
 interface Props {
   page: number;
   pageSize: number;
@@ -8,6 +10,7 @@ interface Props {
 }
 
 export default function Pagination({ page, pageSize, total, onPageChange }: Props) {
+  const t = useT();
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
@@ -15,7 +18,7 @@ export default function Pagination({ page, pageSize, total, onPageChange }: Prop
   return (
     <div className="sran-pagination">
       <span className="sran-pagination-info">
-        Showing {start}–{end} of {total}
+        {t("table.showing", { from: start, to: end, total })}
       </span>
       <div className="sran-pagination-controls">
         <button
@@ -23,7 +26,7 @@ export default function Pagination({ page, pageSize, total, onPageChange }: Prop
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
         >
-          ← Prev
+          ← {t("table.previous")}
         </button>
         <span className="sran-pagination-page">
           {page} / {totalPages}
@@ -33,7 +36,7 @@ export default function Pagination({ page, pageSize, total, onPageChange }: Prop
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
         >
-          Next →
+          {t("table.next")} →
         </button>
       </div>
     </div>

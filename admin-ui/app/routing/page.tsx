@@ -10,6 +10,7 @@ import ConfirmModal from "../../components/ui/ConfirmModal";
 import { useApi } from "../../lib/useApi";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
+import { useT, type DictKey } from "../../lib/i18n";
 
 // ---------------------------------------------------------------------------
 // Types — derived from backend schemas/admin.py
@@ -72,6 +73,14 @@ const EMPTY_FORM: KeywordRuleForm = {
 // then repeats. Kept short and explicit; the visual job here is "tell
 // these apart at a glance", not encode a meaning.
 const MODEL_DOT_COLORS = ["#534AB7", "#1D9E75"];
+
+// Scope VALUES stay on the wire as global/tenant/project; only the label
+// shown in the picker and in validation copy is localized.
+const SCOPE_LABEL: Record<KeywordScope, DictKey> = {
+  global: "infra.routing.scopeGlobal",
+  tenant: "infra.routing.scopeTenant",
+  project: "infra.routing.scopeProject",
+};
 
 function scopeBadgeVariant(scope: KeywordScope): "neutral" | "info" | "warning" {
   if (scope === "tenant") return "info";
@@ -500,6 +509,7 @@ function RoutingStatsSection({
   rulesLoading: boolean;
   refetchRules: () => void;
 }) {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<RoutingStats>("/admin/routing/stats");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -534,7 +544,7 @@ function RoutingStatsSection({
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ fontSize: 13, fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
-            Routing stats
+            {t("infra.routing.statsTitle")}
           </h2>
           <button
             onClick={handleRefresh}
@@ -555,11 +565,11 @@ function RoutingStatsSection({
             }}
           >
             <IconRotateCw spinning={refreshing} />
-            Refresh
+            {t("action.refresh")}
           </button>
         </div>
         <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
-          Traffic overview for the last 24 hours
+          {t("infra.routing.statsSubtitle")}
         </p>
       </div>
 
@@ -568,29 +578,29 @@ function RoutingStatsSection({
       <div className="routing-metrics-grid" style={{ marginBottom: 20 }}>
         <StatTile
           icon={<IconChartBar />}
-          label="Requests"
+          label={t("infra.routing.requests")}
           value={loading ? "—" : totalRequests.toLocaleString()}
           accentColor="#3B82F6"
           chipClass="chip-blue"
-          badgeText="24h"
+          badgeText={t("infra.routing.badge24h")}
           loading={loading}
         />
         <StatTile
           icon={<IconCpu />}
-          label="Active models"
+          label={t("infra.routing.activeModels")}
           value={loading ? "—" : activeModels.toString()}
           accentColor="#10B981"
           chipClass="chip-green"
-          badgeText="Active"
+          badgeText={t("field.active")}
           loading={loading}
         />
         <StatTile
           icon={<Icon name="key" size={16} />}
-          label="Keyword rules"
+          label={t("infra.routing.keywordRules")}
           value={rulesLoading ? "—" : (rules?.items.length ?? 0).toLocaleString()}
           accentColor="#1E3A5F"
           chipClass="chip-navy"
-          badgeText="Total"
+          badgeText={t("infra.routing.badgeTotal")}
           loading={rulesLoading}
         />
       </div>
@@ -610,36 +620,36 @@ function RoutingStatsSection({
             borderBottom: "1px solid var(--color-border-subtle, rgba(0,0,0,0.06))",
           }}
         >
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Request volume</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{t("infra.routing.requestVolume")}</span>
         </div>
 
         <div style={{ padding: "18px 20px" }}>
           {loading ? (
             <div className="routing-charts-grid">
               <div>
-                <SectionLabel>By model</SectionLabel>
+                <SectionLabel>{t("infra.routing.byModel")}</SectionLabel>
                 <div className="sran-skeleton" style={{ width: "100%", height: "8rem", borderRadius: 12 }} />
               </div>
               <div>
-                <SectionLabel>By router</SectionLabel>
+                <SectionLabel>{t("infra.routing.byRouter")}</SectionLabel>
                 <div className="sran-skeleton" style={{ width: "100%", height: "8rem", borderRadius: 12 }} />
               </div>
             </div>
           ) : error ? (
             <div style={{ padding: "1.5rem", textAlign: "center" }}>
               <p style={{ color: "var(--color-status-error)", marginBottom: "0.75rem" }}>{error}</p>
-              <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={handleRefresh}>Retry</button>
+              <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={handleRefresh}>{t("action.retry")}</button>
             </div>
           ) : !hasData ? (
             <EmptyState
               icon={<IconChartArea />}
-              title="No requests in the last 24 hours"
-              description="Routing statistics will appear here once traffic starts flowing through the gateway."
+              title={t("infra.routing.noTraffic")}
+              description={t("infra.routing.noTrafficDesc")}
             />
           ) : (
             <div className="routing-charts-grid">
               <div>
-                <SectionLabel>By model</SectionLabel>
+                <SectionLabel>{t("infra.routing.byModel")}</SectionLabel>
                 <div
                   style={{
                     padding: "0.25rem 0",
@@ -649,7 +659,7 @@ function RoutingStatsSection({
                 >
                   {(data?.models ?? []).length === 0 ? (
                     <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
-                      No model data
+                      {t("infra.routing.noModelData")}
                     </div>
                   ) : (
                     (data?.models ?? []).map((m, i, arr) => (
@@ -666,7 +676,7 @@ function RoutingStatsSection({
                 </div>
               </div>
               <div>
-                <SectionLabel>By router</SectionLabel>
+                <SectionLabel>{t("infra.routing.byRouter")}</SectionLabel>
                 <div
                   style={{
                     padding: "0.25rem 0",
@@ -676,7 +686,7 @@ function RoutingStatsSection({
                 >
                   {(data?.routers ?? []).length === 0 ? (
                     <div style={{ padding: "1rem 1.125rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>
-                      No router data
+                      {t("infra.routing.noRouterData")}
                     </div>
                   ) : (
                     (data?.routers ?? []).map((r, i, arr) => (
@@ -715,6 +725,7 @@ function KeywordRulesSection({
   refetch: () => void;
 }) {
   const { toast } = useToast();
+  const t = useT();
 
   const [editing, setEditing] = useState<KeywordRule | null>(null);
   const [creating, setCreating] = useState(false);
@@ -744,12 +755,12 @@ function KeywordRulesSection({
 
   function validate(): boolean {
     const e: Record<string, string> = {};
-    if (!form.name.trim()) e.name = "Name is required";
+    if (!form.name.trim()) e.name = t("infra.routing.errName");
     const keywordList = form.keywords.split("\n").map((k) => k.trim()).filter((k) => k.length > 0);
-    if (keywordList.length === 0) e.keywords = "At least one keyword is required";
-    if (!form.model_override.trim()) e.model_override = "Model override is required";
+    if (keywordList.length === 0) e.keywords = t("infra.routing.errKeywords");
+    if (!form.model_override.trim()) e.model_override = t("infra.routing.errModel");
     if (form.scope !== "global" && !form.scope_id.trim()) {
-      e.scope_id = `${form.scope} scope requires a scope_id`;
+      e.scope_id = t("infra.routing.errScopeId", { scope: t(SCOPE_LABEL[form.scope]) });
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -762,20 +773,20 @@ function KeywordRulesSection({
       const body = formToBody(form);
       if (editing) {
         await api.put(`/admin/keyword-rules/${editing.id}`, body);
-        toast("Keyword rule updated");
+        toast(t("infra.routing.toastUpdated"));
       } else {
         await api.post("/admin/keyword-rules", body);
-        toast("Keyword rule created");
+        toast(t("infra.routing.toastCreated"));
       }
       closeForm();
       refetch();
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || `Save failed (${err.status})`
+          ? err.body?.error?.message || t("infra.routing.saveFailedStatus", { status: err.status })
           : err instanceof Error
             ? err.message
-            : "Save failed";
+            : t("infra.routing.saveFailed");
       toast(msg, "error");
     } finally {
       setSaving(false);
@@ -787,7 +798,7 @@ function KeywordRulesSection({
     setDeleting(true);
     try {
       await api.delete(`/admin/keyword-rules/${deleteTarget.id}`);
-      toast("Keyword rule deleted");
+      toast(t("infra.routing.toastDeleted"));
       setDeleteTarget(null);
       if (editing && editing.id === deleteTarget.id) {
         closeForm();
@@ -796,10 +807,10 @@ function KeywordRulesSection({
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || `Delete failed (${err.status})`
+          ? err.body?.error?.message || t("infra.routing.deleteFailedStatus", { status: err.status })
           : err instanceof Error
             ? err.message
-            : "Delete failed";
+            : t("infra.routing.deleteFailed");
       toast(msg, "error");
     } finally {
       setDeleting(false);
@@ -809,7 +820,7 @@ function KeywordRulesSection({
   const columns: Column<KeywordRule>[] = [
     {
       key: "name",
-      header: "Keyword / Pattern",
+      header: t("infra.routing.colKeyword"),
       render: (r) => (
         <div>
           <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>{r.name}</span>
@@ -821,7 +832,7 @@ function KeywordRulesSection({
     },
     {
       key: "model_override",
-      header: "Target Model",
+      header: t("infra.routing.colTargetModel"),
       render: (r) => (
         <code style={{ fontSize: "var(--font-size-xs)", padding: "0.125rem 0.375rem", borderRadius: "var(--radius-sm)", background: "var(--color-bg-surface-2)" }}>
           {r.model_override}
@@ -830,7 +841,7 @@ function KeywordRulesSection({
     },
     {
       key: "priority",
-      header: "Priority",
+      header: t("infra.routing.colPriority"),
       render: (r) => (
         <span style={{
           display: "inline-block", fontSize: "var(--font-size-xs)", fontWeight: 600,
@@ -844,7 +855,7 @@ function KeywordRulesSection({
     },
     {
       key: "enabled",
-      header: "Status",
+      header: t("field.status"),
       render: (r) => (
         <span style={{
           display: "inline-flex", alignItems: "center", gap: "0.375rem",
@@ -854,7 +865,7 @@ function KeywordRulesSection({
             width: 6, height: 6, borderRadius: "50%",
             background: r.enabled ? "var(--color-status-success)" : "var(--color-text-muted)",
           }} />
-          {r.enabled ? "Active" : "Inactive"}
+          {r.enabled ? t("field.active") : t("field.inactive")}
         </span>
       ),
     },
@@ -866,7 +877,7 @@ function KeywordRulesSection({
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
           <button
             className="sran-btn-icon"
-            title="Edit rule"
+            title={t("infra.routing.editRule")}
             onClick={() => openEdit(r)}
             style={{ color: "var(--color-text-muted)", cursor: "pointer", background: "none", border: "none", padding: "0.25rem" }}
           >
@@ -874,7 +885,7 @@ function KeywordRulesSection({
           </button>
           <button
             className="sran-btn-icon"
-            title="Delete rule"
+            title={t("infra.routing.deleteRule")}
             onClick={() => setDeleteTarget(r)}
             style={{ color: "var(--color-status-error)", cursor: "pointer", background: "none", border: "none", padding: "0.25rem", opacity: 0.7 }}
           >
@@ -893,7 +904,7 @@ function KeywordRulesSection({
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ fontSize: 13, fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
-            Keyword rules
+            {t("infra.routing.keywordRules")}
           </h2>
           <button
             className="sran-btn sran-btn-primary"
@@ -901,11 +912,11 @@ function KeywordRulesSection({
             style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}
           >
             <IconPlus />
-            New Rule
+            {t("infra.routing.newRule")}
           </button>
         </div>
         <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", margin: "0.25rem 0 0" }}>
-          Route requests to specific models based on keyword matching
+          {t("infra.routing.rulesSubtitle")}
         </p>
       </div>
 
@@ -917,7 +928,9 @@ function KeywordRulesSection({
           <table className="sran-table">
             <thead>
               <tr>
-                {["Keyword / Pattern", "Target Model", "Priority", "Status", ""].map((h) => (
+                {/* Skeleton header cells — no text is rendered, so these are
+                    plain column indices rather than (untranslated) labels. */}
+                {[0, 1, 2, 3, 4].map((h) => (
                   <th key={h}><div className="sran-skeleton" style={{ width: "60%" }} /></th>
                 ))}
               </tr>
@@ -936,7 +949,7 @@ function KeywordRulesSection({
       ) : error ? (
         <div className="sran-card" style={{ padding: "2rem", textAlign: "center" }}>
           <p style={{ color: "var(--color-status-error)", marginBottom: "0.75rem" }}>{error}</p>
-          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={refetch}>Retry</button>
+          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={refetch}>{t("action.retry")}</button>
         </div>
       ) : !hasRules ? (
         <div
@@ -949,8 +962,8 @@ function KeywordRulesSection({
         >
           <EmptyState
             icon={<Icon name="key" size={22} />}
-            title="No keyword rules configured yet"
-            description="Keyword rules route requests to specific models when the prompt contains matching keywords or patterns."
+            title={t("infra.routing.noRules")}
+            description={t("infra.routing.noRulesDesc")}
           />
         </div>
       ) : (
@@ -960,13 +973,13 @@ function KeywordRulesSection({
             data={data?.items ?? null}
             loading={loading}
             error={error}
-            emptyMessage="No keyword rules yet"
+            emptyMessage={t("infra.routing.emptyTable")}
             emptyIcon={<Icon name="git-merge" size={22} />}
-            emptyAction={<button className="sran-btn sran-btn-primary" onClick={openCreate}>Create your first rule</button>}
+            emptyAction={<button className="sran-btn sran-btn-primary" onClick={openCreate}>{t("infra.routing.createFirst")}</button>}
             rowKey={(r) => r.id}
             onRowClick={openEdit}
             searchable
-            searchPlaceholder="Search by name, keyword, model..."
+            searchPlaceholder={t("infra.routing.searchRules")}
             onRetry={refetch}
           />
         </div>
@@ -975,7 +988,7 @@ function KeywordRulesSection({
       <Modal
         open={isFormOpen}
         onClose={closeForm}
-        title={editing ? "Edit keyword rule" : "New keyword rule"}
+        title={editing ? t("infra.routing.modalEdit") : t("infra.routing.modalNew")}
         footer={
           <>
             {editing && (
@@ -985,12 +998,12 @@ function KeywordRulesSection({
                 disabled={saving}
                 style={{ marginRight: "auto" }}
               >
-                Delete
+                {t("action.delete")}
               </button>
             )}
-            <button className="sran-btn sran-btn-secondary" onClick={closeForm} disabled={saving}>Cancel</button>
+            <button className="sran-btn sran-btn-secondary" onClick={closeForm} disabled={saving}>{t("action.cancel")}</button>
             <button className="sran-btn sran-btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save"}
+              {saving ? t("action.saving") : t("action.save")}
             </button>
           </>
         }
@@ -998,23 +1011,23 @@ function KeywordRulesSection({
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           {editing && (
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Rule ID</div>
+              <div className="sran-detail-label">{t("infra.routing.ruleId")}</div>
               <div className="sran-detail-value"><code style={{ fontSize: "var(--font-size-xs)" }}>{editing.id}</code></div>
             </div>
           )}
           <div>
-            <label className="sran-label">Name *</label>
+            <label className="sran-label">{t("infra.routing.fieldName")}</label>
             <input
               className={`sran-input ${errors.name ? "sran-input-error" : ""}`}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="Route Thai legal queries"
+              placeholder={t("infra.routing.namePlaceholder")}
               maxLength={128}
             />
             {errors.name && <div className="sran-field-error">{errors.name}</div>}
           </div>
           <div>
-            <label className="sran-label">Keywords (one per line) *</label>
+            <label className="sran-label">{t("infra.routing.fieldKeywords")}</label>
             <textarea
               className={`sran-input ${errors.keywords ? "sran-input-error" : ""}`}
               value={form.keywords}
@@ -1026,7 +1039,7 @@ function KeywordRulesSection({
             {errors.keywords && <div className="sran-field-error">{errors.keywords}</div>}
           </div>
           <div>
-            <label className="sran-label">Model override *</label>
+            <label className="sran-label">{t("infra.routing.fieldModelOverride")}</label>
             <input
               className={`sran-input ${errors.model_override ? "sran-input-error" : ""}`}
               value={form.model_override}
@@ -1037,7 +1050,7 @@ function KeywordRulesSection({
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
             <div>
-              <label className="sran-label">Priority</label>
+              <label className="sran-label">{t("infra.routing.fieldPriority")}</label>
               <input
                 className="sran-input"
                 type="number"
@@ -1046,21 +1059,21 @@ function KeywordRulesSection({
               />
             </div>
             <div>
-              <label className="sran-label">Scope</label>
+              <label className="sran-label">{t("infra.routing.fieldScope")}</label>
               <select
                 className="sran-input"
                 value={form.scope}
                 onChange={(e) => setForm({ ...form, scope: e.target.value as KeywordScope })}
               >
-                <option value="global">global</option>
-                <option value="tenant">tenant</option>
-                <option value="project">project</option>
+                <option value="global">{t("infra.routing.scopeGlobal")}</option>
+                <option value="tenant">{t("infra.routing.scopeTenant")}</option>
+                <option value="project">{t("infra.routing.scopeProject")}</option>
               </select>
             </div>
           </div>
           {form.scope !== "global" && (
             <div>
-              <label className="sran-label">{form.scope === "tenant" ? "Tenant ID *" : "Project ID *"}</label>
+              <label className="sran-label">{form.scope === "tenant" ? t("infra.routing.fieldTenantId") : t("infra.routing.fieldProjectId")}</label>
               <input
                 className={`sran-input ${errors.scope_id ? "sran-input-error" : ""}`}
                 value={form.scope_id}
@@ -1077,7 +1090,7 @@ function KeywordRulesSection({
                 checked={form.enabled}
                 onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
               />
-              <span className="sran-label" style={{ margin: 0 }}>Enabled</span>
+              <span className="sran-label" style={{ margin: 0 }}>{t("field.enabled")}</span>
             </label>
           </div>
         </div>
@@ -1087,9 +1100,9 @@ function KeywordRulesSection({
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
-        title="Delete keyword rule"
-        message={`Delete rule '${deleteTarget?.name}'? This cannot be undone.`}
-        confirmLabel="Delete rule"
+        title={t("infra.routing.confirmDeleteTitle")}
+        message={t("infra.routing.confirmDeleteMsg", { name: deleteTarget?.name ?? "" })}
+        confirmLabel={t("infra.routing.deleteRule")}
         loading={deleting}
       />
     </section>
@@ -1101,12 +1114,13 @@ function KeywordRulesSection({
 // ---------------------------------------------------------------------------
 
 export default function RoutingPage() {
+  const t = useT();
   // Keyword rules are fetched once here so the "Keyword rules" stat tile
   // and the rules table below always show the same list.
   const rulesApi = useApi<KeywordRuleListResponse>("/admin/keyword-rules");
   return (
     <>
-      <PageHeader title="Routing" subtitle="Routing decisions and keyword overrides" />
+      <PageHeader title={t("infra.routing.title")} subtitle={t("infra.routing.subtitle")} />
       <RoutingStatsSection
         rules={rulesApi.data}
         rulesLoading={rulesApi.loading}

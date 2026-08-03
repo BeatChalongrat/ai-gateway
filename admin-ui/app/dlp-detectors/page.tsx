@@ -13,6 +13,7 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { Icon } from "../../components/ui/Icon";
 import CustomDetectorForm, { DetectorInitial } from "../../components/dlp/CustomDetectorForm";
 import AuditLogTimeline, { AuditEntry } from "../../components/dlp/AuditLogTimeline";
+import { useT, type DictKey } from "../../lib/i18n";
 
 const BASE = "/admin/dlp/custom-detectors";
 
@@ -39,8 +40,18 @@ const STATUS_BADGE: Record<string, string> = {
   draft: "sran-badge-neutral",
   disabled: "sran-badge-error",
 };
+// Lifecycle status is a human-facing word, not a wire identifier the
+// operator types, so the label is localized while the value stays raw.
+const STATUS_LABEL: Record<string, DictKey> = {
+  all: "field.all",
+  active: "infra.customDetectors.status.active",
+  testing: "infra.customDetectors.status.testing",
+  draft: "infra.customDetectors.status.draft",
+  disabled: "infra.customDetectors.status.disabled",
+};
 
 export default function DlpDetectorsPage() {
+  const t = useT();
   const [rows, setRows] = useState<Detector[]>([]);
   const [tab, setTab] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -59,12 +70,12 @@ export default function DlpDetectorsPage() {
       const q = tab === "all" ? "" : `?status=${tab}`;
       const data: any = await api.get(`${BASE}${q}`);
       setRows(data);
-    } catch (e) {
-      setError(e instanceof ApiError ? "Failed to load detectors" : "Failed to load");
+    } catch {
+      setError(t("infra.customDetectors.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, [tab, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -87,7 +98,11 @@ export default function DlpDetectorsPage() {
       await load();
       if (selected?.id === d.id) openDetail(d);
     } catch (e) {
-      setError(e instanceof ApiError ? (e.body?.error?.message ?? "action failed") : "action failed");
+      setError(
+        e instanceof ApiError
+          ? (e.body?.error?.message ?? t("infra.customDetectors.actionFailed"))
+          : t("infra.customDetectors.actionFailed"),
+      );
     }
   }
 
@@ -102,7 +117,11 @@ export default function DlpDetectorsPage() {
       await load();
       if (selected?.id === d.id) openDetail(d);
     } catch (e) {
-      setError(e instanceof ApiError ? (e.body?.error?.message ?? "action failed") : "action failed");
+      setError(
+        e instanceof ApiError
+          ? (e.body?.error?.message ?? t("infra.customDetectors.actionFailed"))
+          : t("infra.customDetectors.actionFailed"),
+      );
     }
   }
 
@@ -122,18 +141,18 @@ export default function DlpDetectorsPage() {
       setSelected(null);
       await load();
     } catch {
-      setError("delete failed");
+      setError(t("infra.customDetectors.deleteFailed"));
     }
   }
 
   return (
     <div style={{ padding: "28px 32px", maxWidth: 1200, margin: "0 auto" }}>
       <PageHeader
-        title="Custom DLP Detectors"
-        subtitle="Define detectors that run alongside the built-ins. Changes hot-reload instantly."
+        title={t("infra.customDetectors.title")}
+        subtitle={t("infra.customDetectors.subtitle")}
         action={
           <button style={primaryBtn} onClick={() => { setCreating(true); setSelected(null); }}>
-            + New detector
+            {t("infra.customDetectors.new")}
           </button>
         }
       />
@@ -141,17 +160,17 @@ export default function DlpDetectorsPage() {
       {/* status tabs — pill filters matching the /audit-log period buttons:
           active = semi-transparent accent (not solid fill). */}
       <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-        {STATUS_TABS.map((t) => {
-          const active = tab === t;
+        {STATUS_TABS.map((s) => {
+          const active = tab === s;
           return (
-            <button key={t} onClick={() => setTab(t)} style={{
+            <button key={s} onClick={() => setTab(s)} style={{
               padding: "5px 14px", fontSize: 12, fontWeight: 500, borderRadius: 100, cursor: "pointer",
               textTransform: "capitalize", fontFamily: "inherit",
               border: `1px solid ${active ? "rgb(30, 58, 95)" : "var(--border-default)"}`,
               background: active ? "rgba(30, 58, 95, 0.12)" : "var(--color-surface-primary)",
               color: active ? "var(--text-primary)" : "var(--text-secondary)",
               transition: "background 120ms, border-color 120ms",
-            }}>{t}</button>
+            }}>{t(STATUS_LABEL[s])}</button>
           );
         })}
       </div>
@@ -165,11 +184,15 @@ export default function DlpDetectorsPage() {
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<Icon name="scan" size={22} />}
-              message={tab === "all" ? "No custom detectors yet" : `No ${tab} detectors`}
+              message={
+                tab === "all"
+                  ? t("infra.customDetectors.empty")
+                  : t("infra.customDetectors.emptyFiltered", { status: t(STATUS_LABEL[tab]) })
+              }
               action={
                 tab === "all" ? (
                   <button style={primaryBtn} onClick={() => { setCreating(true); setSelected(null); }}>
-                    Create a detector
+                    {t("infra.customDetectors.create")}
                   </button>
                 ) : undefined
               }
@@ -178,8 +201,8 @@ export default function DlpDetectorsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: "left", color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>
-                  <th style={th}>Name</th><th style={th}>Category</th><th style={th}>Type</th>
-                  <th style={th}>Status</th><th style={th}>Matches</th><th style={th}>Actions</th>
+                  <th style={th}>{t("field.name")}</th><th style={th}>{t("infra.policies.colCategory")}</th><th style={th}>{t("field.type")}</th>
+                  <th style={th}>{t("field.status")}</th><th style={th}>{t("infra.customDetectors.colMatches")}</th><th style={th}>{t("field.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -191,23 +214,23 @@ export default function DlpDetectorsPage() {
                     <td style={td}>{d.detection_type}</td>
                     <td style={td}>
                       <span className={`sran-badge ${STATUS_BADGE[d.status] ?? "sran-badge-neutral"}`}>
-                        {d.status}
+                        {STATUS_LABEL[d.status] ? t(STATUS_LABEL[d.status]) : d.status}
                       </span>
                     </td>
                     <td style={td}>{d.last_match_count}</td>
                     <td style={{ ...td }} onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 6 }}>
                         {d.status !== "active" && (
-                          <button style={miniBtn} title={d.test_passed ? "" : "needs passing tests"}
-                            onClick={() => transition(d, "activate")}>Activate</button>
+                          <button style={miniBtn} title={d.test_passed ? "" : t("infra.customDetectors.needsTests")}
+                            onClick={() => transition(d, "activate")}>{t("infra.customDetectors.activate")}</button>
                         )}
                         {d.status !== "testing" && (
-                          <button style={miniBtn} onClick={() => transition(d, "testing")}>Test</button>
+                          <button style={miniBtn} onClick={() => transition(d, "testing")}>{t("action.test")}</button>
                         )}
                         {d.status !== "disabled" && (
-                          <button style={miniBtn} onClick={() => transition(d, "disable")}>Disable</button>
+                          <button style={miniBtn} onClick={() => transition(d, "disable")}>{t("action.disable")}</button>
                         )}
-                        <button style={dangerBtn} onClick={() => remove(d)}>Delete</button>
+                        <button style={dangerBtn} onClick={() => remove(d)}>{t("action.delete")}</button>
                       </div>
                     </td>
                   </tr>
@@ -227,7 +250,7 @@ export default function DlpDetectorsPage() {
         title={
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Icon name="scan" size={18} />
-            {creating ? "New detector" : selected?.name}
+            {creating ? t("infra.customDetectors.newTitle") : selected?.name}
           </span>
         }
       >
@@ -242,7 +265,7 @@ export default function DlpDetectorsPage() {
             />
             <div style={{ marginTop: 22 }}>
               <h3 style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 10 }}>
-                History
+                {t("infra.customDetectors.history")}
               </h3>
               <AuditLogTimeline entries={audit} />
             </div>
@@ -253,29 +276,31 @@ export default function DlpDetectorsPage() {
       <Modal
         open={!!disableTarget}
         onClose={() => setDisableTarget(null)}
-        title="Disable detector"
+        title={t("infra.customDetectors.disableTitle")}
         footer={
           <>
-            <button style={miniBtn} onClick={() => setDisableTarget(null)}>Cancel</button>
+            <button style={miniBtn} onClick={() => setDisableTarget(null)}>{t("action.cancel")}</button>
             <button
               style={{ ...primaryBtn, opacity: disableReason.trim() ? 1 : 0.5 }}
               disabled={!disableReason.trim()}
               onClick={() => void doDisable()}
             >
-              Disable
+              {t("action.disable")}
             </button>
           </>
         }
       >
         <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
-          Reason for disabling{disableTarget ? ` "${disableTarget.name}"` : ""}:
+          {disableTarget
+            ? t("infra.customDetectors.disableReason", { name: disableTarget.name })
+            : t("infra.customDetectors.disableReasonPlain")}
         </label>
         <input
           className="sran-input"
           autoFocus
           value={disableReason}
           onChange={(e) => setDisableReason(e.target.value)}
-          placeholder="Reason for disabling"
+          placeholder={t("infra.customDetectors.disableReasonPlaceholder")}
           style={{ width: "100%" }}
         />
       </Modal>
@@ -283,32 +308,32 @@ export default function DlpDetectorsPage() {
       <Modal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="Delete detector"
+        title={t("infra.customDetectors.deleteTitle")}
         footer={
           <>
-            <button style={miniBtn} onClick={() => setDeleteTarget(null)}>Cancel</button>
+            <button style={miniBtn} onClick={() => setDeleteTarget(null)}>{t("action.cancel")}</button>
             <button
               className="sran-btn sran-btn-danger"
               disabled={!deleteReason.trim()}
               onClick={() => void doDelete()}
             >
-              Delete
+              {t("action.delete")}
             </button>
           </>
         }
       >
         <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 0, marginBottom: 12 }}>
-          Delete &quot;{deleteTarget?.name}&quot;? This is permanent.
+          {t("infra.customDetectors.deleteConfirm", { name: deleteTarget?.name ?? "" })}
         </p>
         <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
-          Reason:
+          {t("infra.customDetectors.reasonLabel")}
         </label>
         <input
           className="sran-input"
           autoFocus
           value={deleteReason}
           onChange={(e) => setDeleteReason(e.target.value)}
-          placeholder="Reason for deleting"
+          placeholder={t("infra.customDetectors.deleteReasonPlaceholder")}
           style={{ width: "100%" }}
         />
       </Modal>

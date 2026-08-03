@@ -12,6 +12,7 @@ import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { useT, type DictKey } from "../../lib/i18n";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -115,6 +116,7 @@ const iconX = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke
 const iconGlobe = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>;
 
 export default function TenantsPage() {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<{ items: any[] }>("/admin/tenants");
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
@@ -122,7 +124,9 @@ export default function TenantsPage() {
   const [restoreTarget, setRestoreTarget] = useState<any | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [form, setForm] = useState({ name: "", slug: "", region: "global" });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Field errors are held as dictionary KEYS, not rendered text, so an
+  // error already on screen re-labels itself when the language is switched.
+  const [errors, setErrors] = useState<Record<string, DictKey>>({});
   const [saving, setSaving] = useState(false);
   // Edit-flow state. Separate from the create form so an open Edit
   // modal doesn't get clobbered by a "Create" click and vice versa.
@@ -130,7 +134,7 @@ export default function TenantsPage() {
   // identifier and changing it would break every cached resource.
   const [editTarget, setEditTarget] = useState<any | null>(null);
   const [editForm, setEditForm] = useState({ name: "", region: "global", status: "active", credit_markup: "1.0" });
-  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [editErrors, setEditErrors] = useState<Record<string, DictKey>>({});
   const [updating, setUpdating] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -139,27 +143,27 @@ export default function TenantsPage() {
   const items = data?.items ?? [];
 
   const stats = useMemo(() => {
-    const active = items.filter((t) => t.status === "active").length;
-    const deleted = items.filter((t) => t.status === "deleted").length;
-    const regions = new Set(items.map((t) => t.region)).size;
+    const active = items.filter((row) => row.status === "active").length;
+    const deleted = items.filter((row) => row.status === "deleted").length;
+    const regions = new Set(items.map((row) => row.region)).size;
     return { total: items.length, active, deleted, regions };
   }, [items]);
 
   const filtered = useMemo(() => {
     let r = items;
-    if (statusFilter) r = r.filter((t) => t.status === statusFilter);
+    if (statusFilter) r = r.filter((row) => row.status === statusFilter);
     if (search) {
       const q = search.toLowerCase();
-      r = r.filter((t) => t.name?.toLowerCase().includes(q) || t.slug?.toLowerCase().includes(q) || t.region?.toLowerCase().includes(q));
+      r = r.filter((row) => row.name?.toLowerCase().includes(q) || row.slug?.toLowerCase().includes(q) || row.region?.toLowerCase().includes(q));
     }
     return r;
   }, [items, statusFilter, search]);
 
   function validate() {
-    const e: Record<string, string> = {};
-    if (!form.name.trim()) e.name = "Name is required";
-    if (!form.slug.trim()) e.slug = "Slug is required";
-    else if (!/^[a-z0-9-]+$/.test(form.slug)) e.slug = "Only lowercase letters, numbers, and hyphens";
+    const e: Record<string, DictKey> = {};
+    if (!form.name.trim()) e.name = "tenancy.err.nameRequired";
+    if (!form.slug.trim()) e.slug = "tenancy.err.slugRequired";
+    else if (!/^[a-z0-9-]+$/.test(form.slug)) e.slug = "tenancy.err.slugFormat";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -170,8 +174,8 @@ export default function TenantsPage() {
     try {
       await api.post("/admin/tenants", form);
       setShowCreate(false); setForm({ name: "", slug: "", region: "global" }); setErrors({});
-      toast("Tenant created successfully"); refetch();
-    } catch (e: any) { toast(e.body?.error?.message || "Failed to create tenant", "error"); }
+      toast(t("tenancy.tenants.created")); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || t("tenancy.tenants.createFailed"), "error"); }
     finally { setSaving(false); }
   }
 
@@ -180,8 +184,8 @@ export default function TenantsPage() {
     setDeleting(true);
     try {
       await api.delete(`/admin/tenants/${deleteTarget.tenant_id}`);
-      toast(`Tenant "${deleteTarget.name}" deleted`); setDeleteTarget(null); refetch();
-    } catch (e: any) { toast(e.body?.error?.message || "Failed to delete tenant", "error"); }
+      toast(t("tenancy.tenants.deletedToast", { name: deleteTarget.name })); setDeleteTarget(null); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || t("tenancy.tenants.deleteFailed"), "error"); }
     finally { setDeleting(false); }
   }
 
@@ -190,28 +194,28 @@ export default function TenantsPage() {
     setRestoring(true);
     try {
       await api.put(`/admin/tenants/${restoreTarget.tenant_id}`, { status: "active" });
-      toast(`Tenant "${restoreTarget.name}" restored`); setRestoreTarget(null); refetch();
-    } catch (e: any) { toast(e.body?.error?.message || "Failed to restore tenant", "error"); }
+      toast(t("tenancy.tenants.restoredToast", { name: restoreTarget.name })); setRestoreTarget(null); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || t("tenancy.tenants.restoreFailed"), "error"); }
     finally { setRestoring(false); }
   }
 
-  function openEdit(t: any) {
+  function openEdit(tenant: any) {
     setEditForm({
-      name: t.name || "",
-      region: t.region || "global",
-      status: t.status || "active",
-      credit_markup: String(t.credit_markup ?? 1.0),
+      name: tenant.name || "",
+      region: tenant.region || "global",
+      status: tenant.status || "active",
+      credit_markup: String(tenant.credit_markup ?? 1.0),
     });
     setEditErrors({});
-    setEditTarget(t);
+    setEditTarget(tenant);
   }
 
   function validateEdit() {
-    const e: Record<string, string> = {};
-    if (!editForm.name.trim()) e.name = "Name is required";
+    const e: Record<string, DictKey> = {};
+    if (!editForm.name.trim()) e.name = "tenancy.err.nameRequired";
     const markup = parseFloat(editForm.credit_markup);
     if (Number.isNaN(markup) || markup < 1.0 || markup > 5.0) {
-      e.credit_markup = "Must be between 1.0 and 5.0";
+      e.credit_markup = "tenancy.err.markupRange";
     }
     setEditErrors(e);
     return Object.keys(e).length === 0;
@@ -230,16 +234,16 @@ export default function TenantsPage() {
       const newMarkup = parseFloat(editForm.credit_markup);
       if (newMarkup !== Number(editTarget.credit_markup ?? 1.0)) body.credit_markup = newMarkup;
       if (Object.keys(body).length === 0) {
-        toast("No changes to save");
+        toast(t("tenancy.tenants.noChanges"));
         setEditTarget(null);
         return;
       }
       await api.put(`/admin/tenants/${editTarget.tenant_id}`, body);
-      toast(`Tenant "${editForm.name}" updated`);
+      toast(t("tenancy.tenants.updatedToast", { name: editForm.name }));
       setEditTarget(null);
       refetch();
     } catch (e: any) {
-      toast(e.body?.error?.message || "Failed to update tenant", "error");
+      toast(e.body?.error?.message || t("tenancy.tenants.updateFailed"), "error");
     } finally {
       setUpdating(false);
     }
@@ -255,13 +259,13 @@ export default function TenantsPage() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>Tenants</h1>
-          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>Organization-level tenant management</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>{t("tenancy.tenants.title")}</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>{t("tenancy.tenants.subtitle")}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button className="sran-btn sran-btn-primary" onClick={() => setShowCreate(true)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Create Tenant
+            {t("tenancy.tenants.create")}
           </button>
           <ThemeToggle />
         </div>
@@ -270,10 +274,10 @@ export default function TenantsPage() {
       {/* Stats */}
       {!loading && !error && items.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: 14, marginBottom: 20 }}>
-          <StatCard value={stats.total} label="Total Tenants" icon={iconHouse} accent="#3b6cf6" delay={0} iconClass="tn-icon-pulse" />
-          <StatCard value={stats.active} label="Active" icon={iconCheck} accent="#10b981" delay={50} iconClass="tn-icon-glow" />
-          <StatCard value={stats.deleted} label="Deleted" icon={iconX} accent="#ef4444" delay={100} iconClass="tn-icon-swing" />
-          <StatCard value={stats.regions} label="Regions" icon={iconGlobe} accent="#8b5cf6" delay={150} iconClass="tn-icon-pulse" />
+          <StatCard value={stats.total} label={t("tenancy.tenants.statTotal")} icon={iconHouse} accent="#3b6cf6" delay={0} iconClass="tn-icon-pulse" />
+          <StatCard value={stats.active} label={t("field.active")} icon={iconCheck} accent="#10b981" delay={50} iconClass="tn-icon-glow" />
+          <StatCard value={stats.deleted} label={t("tenancy.status.deleted")} icon={iconX} accent="#ef4444" delay={100} iconClass="tn-icon-swing" />
+          <StatCard value={stats.regions} label={t("tenancy.tenants.statRegions")} icon={iconGlobe} accent="#8b5cf6" delay={150} iconClass="tn-icon-pulse" />
         </div>
       )}
 
@@ -284,14 +288,14 @@ export default function TenantsPage() {
         ) : error ? (
           <div style={{ padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>
         ) : items.length === 0 ? (
-          <div style={{ padding: 20 }}><EmptyState message="No tenants yet" icon={<Icon name="building" size={22} />} action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>Create your first tenant</button>} /></div>
+          <div style={{ padding: 20 }}><EmptyState message={t("tenancy.tenants.empty")} icon={<Icon name="building" size={22} />} action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>{t("tenancy.tenants.emptyAction")}</button>} /></div>
         ) : (
           <>
             {/* Toolbar */}
             <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--border-default)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <div style={{ position: "relative", flex: "0 1 280px", minWidth: 160 }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tenants..."
+                <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("tenancy.tenants.searchPlaceholder")}
                   style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: "inherit", border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
                   onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
@@ -303,9 +307,9 @@ export default function TenantsPage() {
 
               <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 {[
-                  { key: null, label: "All", count: items.length, dot: null },
-                  { key: "active", label: "Active", count: activeCount, dot: "#10b981" },
-                  { key: "deleted", label: "Deleted", count: deletedCount, dot: "#ef4444" },
+                  { key: null, label: t("field.all"), count: items.length, dot: null },
+                  { key: "active", label: t("field.active"), count: activeCount, dot: "#10b981" },
+                  { key: "deleted", label: t("tenancy.status.deleted"), count: deletedCount, dot: "#ef4444" },
                 ].map((f) => {
                   const active = statusFilter === f.key;
                   return (
@@ -325,41 +329,43 @@ export default function TenantsPage() {
               </div>
 
               <span style={{ flex: 1 }} />
-              <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>{filtered.length} tenant{filtered.length !== 1 ? "s" : ""}</span>
+              <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>
+                {t(filtered.length === 1 ? "tenancy.tenants.countOne" : "tenancy.tenants.count", { n: filtered.length })}
+              </span>
             </div>
 
             {/* Table */}
             <div style={{ overflowX: "auto" }}>
               <table className="tn-table" style={{ minWidth: 700 }}>
                 <thead><tr>
-                  <th style={{ paddingLeft: 20 }}>Tenant</th>
-                  <th>Region</th>
-                  <th style={{ textAlign: "center", width: 110 }}>Status</th>
-                  <th style={{ width: 120 }}>Created</th>
+                  <th style={{ paddingLeft: 20 }}>{t("field.tenant")}</th>
+                  <th>{t("tenancy.field.region")}</th>
+                  <th style={{ textAlign: "center", width: 110 }}>{t("field.status")}</th>
+                  <th style={{ width: 120 }}>{t("field.created")}</th>
                   <th style={{ width: 140 }}></th>
                 </tr></thead>
                 <tbody>
-                  {filtered.map((t, i) => {
-                    const ac = avatarColor(t.name || "");
-                    const st = STATUS[t.status] || STATUS.active;
-                    const rs = regionStyle(t.region || "global");
-                    const isDeleted = t.status === "deleted";
+                  {filtered.map((row, i) => {
+                    const ac = avatarColor(row.name || "");
+                    const st = STATUS[row.status] || STATUS.active;
+                    const rs = regionStyle(row.region || "global");
+                    const isDeleted = row.status === "deleted";
                     return (
-                      <tr key={t.tenant_id} className="tn-row" style={{ animationDelay: `${0.3 + i * 0.03}s`, cursor: "pointer" }} onClick={() => openEdit(t)}>
+                      <tr key={row.tenant_id} className="tn-row" style={{ animationDelay: `${0.3 + i * 0.03}s`, cursor: "pointer" }} onClick={() => openEdit(row)}>
                         {/* Tenant: avatar + name + slug */}
                         <td style={{ paddingLeft: 20 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                             <div style={{ width: 34, height: 34, borderRadius: 6, background: ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "white", flexShrink: 0 }}>
-                              {(t.name || "?").charAt(0).toUpperCase()}
+                              {(row.name || "?").charAt(0).toUpperCase()}
                             </div>
                             <div>
-                              <div style={{ fontSize: 14, fontWeight: 600, color: T.tp, lineHeight: 1.3 }}>{t.name}</div>
-                              <div style={{ fontFamily: T.mono, fontSize: "11.5px", color: T.tt, lineHeight: 1.2, marginTop: 1 }}>{t.slug}</div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: T.tp, lineHeight: 1.3 }}>{row.name}</div>
+                              <div style={{ fontFamily: T.mono, fontSize: "11.5px", color: T.tt, lineHeight: 1.2, marginTop: 1 }}>{row.slug}</div>
                             </div>
                           </div>
                         </td>
                         {/* Region */}
-                        <td><Pill text={t.region || "global"} color={rs.color} bg={rs.bg} /></td>
+                        <td><Pill text={row.region || "global"} color={rs.color} bg={rs.bg} /></td>
                         {/* Status */}
                         <td style={{ textAlign: "center" }}>
                           <span style={{
@@ -372,20 +378,20 @@ export default function TenantsPage() {
                               width: 6, height: 6, borderRadius: "50%", background: st.dot, flexShrink: 0,
                               animation: st.glow ? "dotGlow 2s ease-in-out infinite" : "none",
                             }} />
-                            {t.status}
+                            {row.status}
                           </span>
                         </td>
                         {/* Created */}
                         <td>
                           <span style={{ fontFamily: T.mono, fontSize: "12.5px", color: T.ts }}>
-                            {t.created_at ? new Date(t.created_at).toLocaleDateString() : "—"}
+                            {row.created_at ? new Date(row.created_at).toLocaleDateString() : "—"}
                           </span>
                         </td>
                         {/* Actions */}
                         <td>
                           <div className="tn-acts" style={{ display: "flex", gap: 6, justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
                             {isDeleted ? (
-                              <button onClick={() => setRestoreTarget(t)} style={{
+                              <button onClick={() => setRestoreTarget(row)} style={{
                                 display: "inline-flex", alignItems: "center", gap: 4,
                                 padding: "6px 12px", fontSize: 12, fontWeight: 500, fontFamily: "inherit",
                                 borderRadius: 6, border: "1px solid rgba(16,185,129,0.3)", background: "transparent",
@@ -395,9 +401,9 @@ export default function TenantsPage() {
                                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                               >
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-                                Restore
+                                {t("tenancy.action.restore")}
                               </button>
-                            ) : t.slug !== "demo" ? (
+                            ) : row.slug !== "demo" ? (
                               <>
                                 <button style={{
                                   display: "inline-flex", alignItems: "center", gap: 4,
@@ -407,10 +413,10 @@ export default function TenantsPage() {
                                 }}
                                   onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(59,108,246,0.06)"; e.currentTarget.style.color = T.accent; e.currentTarget.style.borderColor = "rgba(59,108,246,0.3)"; }}
                                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.ts; e.currentTarget.style.borderColor = T.bl; }}
-                                  onClick={() => openEdit(t)}
+                                  onClick={() => openEdit(row)}
                                 >
                                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                  Edit
+                                  {t("action.edit")}
                                 </button>
                                 <button style={{
                                   display: "inline-flex", alignItems: "center", gap: 4,
@@ -420,8 +426,8 @@ export default function TenantsPage() {
                                 }}
                                   onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.06)"; }}
                                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                                  onClick={() => setDeleteTarget(t)}
-                                >Delete</button>
+                                  onClick={() => setDeleteTarget(row)}
+                                >{t("action.delete")}</button>
                               </>
                             ) : null}
                           </div>
@@ -437,10 +443,10 @@ export default function TenantsPage() {
       </div>
 
       {/* Delete confirm */}
-      <ConfirmModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title="Delete Tenant" message={`Delete tenant "${deleteTarget?.name}"? This will deactivate all associated projects and API keys.`} confirmLabel="Delete Tenant" loading={deleting} />
+      <ConfirmModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title={t("tenancy.tenants.deleteTitle")} message={t("tenancy.tenants.deleteMessage", { name: deleteTarget?.name ?? "" })} confirmLabel={t("tenancy.tenants.deleteTitle")} loading={deleting} />
 
       {/* Restore confirm */}
-      <ConfirmModal open={!!restoreTarget} onClose={() => setRestoreTarget(null)} onConfirm={handleRestore} title="Restore Tenant" message={`Restore tenant "${restoreTarget?.name}"? This will reactivate the tenant and its resources.`} confirmLabel="Restore" loading={restoring} />
+      <ConfirmModal open={!!restoreTarget} onClose={() => setRestoreTarget(null)} onConfirm={handleRestore} title={t("tenancy.tenants.restoreTitle")} message={t("tenancy.tenants.restoreMessage", { name: restoreTarget?.name ?? "" })} confirmLabel={t("tenancy.action.restore")} loading={restoring} />
 
       {/* Edit modal — name + region + status editable. slug and
           tenant_id are immutable (URL-stable identifiers) so they
@@ -448,35 +454,35 @@ export default function TenantsPage() {
       <Modal
         open={!!editTarget && !deleteTarget}
         onClose={() => { setEditTarget(null); setEditErrors({}); }}
-        title="Edit Tenant"
+        title={t("tenancy.tenants.editTitle")}
         footer={
           <>
-            <button className="sran-btn sran-btn-secondary" onClick={() => { setEditTarget(null); setEditErrors({}); }} disabled={updating}>Cancel</button>
-            <button className="sran-btn sran-btn-primary" onClick={handleUpdate} disabled={updating}>{updating ? "Saving..." : "Save"}</button>
+            <button className="sran-btn sran-btn-secondary" onClick={() => { setEditTarget(null); setEditErrors({}); }} disabled={updating}>{t("action.cancel")}</button>
+            <button className="sran-btn sran-btn-primary" onClick={handleUpdate} disabled={updating}>{updating ? t("action.saving") : t("action.save")}</button>
           </>
         }
       >
         {editTarget && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-              <div className="sran-detail-field"><div className="sran-detail-label">Slug (immutable)</div><div className="sran-detail-value"><code>{editTarget.slug}</code></div></div>
-              <div className="sran-detail-field"><div className="sran-detail-label">Tenant ID</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{editTarget.tenant_id}</code></div></div>
+              <div className="sran-detail-field"><div className="sran-detail-label">{t("tenancy.tenants.slugImmutable")}</div><div className="sran-detail-value"><code>{editTarget.slug}</code></div></div>
+              <div className="sran-detail-field"><div className="sran-detail-label">{t("tenancy.field.tenantId")}</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{editTarget.tenant_id}</code></div></div>
             </div>
             <div>
-              <label className="sran-label">Name *</label>
+              <label className="sran-label">{t("field.name")} *</label>
               <input
                 className={`sran-input ${editErrors.name ? "sran-input-error" : ""}`}
                 value={editForm.name}
                 onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                placeholder="Acme Corp"
+                placeholder={t("tenancy.tenants.namePlaceholder")}
                 maxLength={64}
               />
-              {editErrors.name && <div className="sran-field-error">{editErrors.name}</div>}
+              {editErrors.name && <div className="sran-field-error">{t(editErrors.name)}</div>}
               <div className="sran-char-count">{editForm.name.length}/64</div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
               <div>
-                <label className="sran-label">Region</label>
+                <label className="sran-label">{t("tenancy.field.region")}</label>
                 <select className="sran-input" value={editForm.region} onChange={(e) => setEditForm({ ...editForm, region: e.target.value })}>
                   <option value="global">Global</option>
                   <option value="us">US</option>
@@ -484,7 +490,7 @@ export default function TenantsPage() {
                 </select>
               </div>
               <div>
-                <label className="sran-label">Status</label>
+                <label className="sran-label">{t("field.status")}</label>
                 <select className="sran-input" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
                   <option value="active">active</option>
                   <option value="suspended">suspended</option>
@@ -493,7 +499,7 @@ export default function TenantsPage() {
               </div>
             </div>
             <div>
-              <label className="sran-label">Credit markup multiplier</label>
+              <label className="sran-label">{t("tenancy.tenants.creditMarkup")}</label>
               <input
                 type="number"
                 className={`sran-input ${editErrors.credit_markup ? "sran-input-error" : ""}`}
@@ -503,36 +509,36 @@ export default function TenantsPage() {
                 min={1.0}
                 max={5.0}
               />
-              {editErrors.credit_markup && <div className="sran-field-error">{editErrors.credit_markup}</div>}
-              <div className="sran-char-count">1.0 = at cost, 1.5 = 50% margin, 2.0 = 100% margin</div>
+              {editErrors.credit_markup && <div className="sran-field-error">{t(editErrors.credit_markup)}</div>}
+              <div className="sran-char-count">{t("tenancy.tenants.creditMarkupHint")}</div>
             </div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Created</div><div className="sran-detail-value">{editTarget.created_at ? new Date(editTarget.created_at).toLocaleString() : "—"}</div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">{t("field.created")}</div><div className="sran-detail-value">{editTarget.created_at ? new Date(editTarget.created_at).toLocaleString() : "—"}</div></div>
           </div>
         )}
       </Modal>
 
       {/* Create modal */}
-      <Modal open={showCreate} onClose={() => { setShowCreate(false); setErrors({}); }} title="Create Tenant" footer={
+      <Modal open={showCreate} onClose={() => { setShowCreate(false); setErrors({}); }} title={t("tenancy.tenants.create")} footer={
         <>
-          <button className="sran-btn sran-btn-secondary" onClick={() => { setShowCreate(false); setErrors({}); }}>Cancel</button>
-          <button className="sran-btn sran-btn-primary" onClick={handleCreate} disabled={saving}>{saving ? "Creating..." : "Create"}</button>
+          <button className="sran-btn sran-btn-secondary" onClick={() => { setShowCreate(false); setErrors({}); }}>{t("action.cancel")}</button>
+          <button className="sran-btn sran-btn-primary" onClick={handleCreate} disabled={saving}>{saving ? t("action.creating") : t("action.create")}</button>
         </>
       }>
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
-            <label className="sran-label">Name *</label>
-            <input className={`sran-input ${errors.name ? "sran-input-error" : ""}`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Acme Corp" maxLength={64} />
-            {errors.name && <div className="sran-field-error">{errors.name}</div>}
+            <label className="sran-label">{t("field.name")} *</label>
+            <input className={`sran-input ${errors.name ? "sran-input-error" : ""}`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t("tenancy.tenants.namePlaceholder")} maxLength={64} />
+            {errors.name && <div className="sran-field-error">{t(errors.name)}</div>}
             <div className="sran-char-count">{form.name.length}/64</div>
           </div>
           <div>
-            <label className="sran-label">Slug *</label>
+            <label className="sran-label">{t("tenancy.field.slug")} *</label>
             <input className={`sran-input ${errors.slug ? "sran-input-error" : ""}`} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="acme-corp" maxLength={64} />
-            {errors.slug && <div className="sran-field-error">{errors.slug}</div>}
+            {errors.slug && <div className="sran-field-error">{t(errors.slug)}</div>}
             <div className="sran-char-count">{form.slug.length}/64</div>
           </div>
           <div>
-            <label className="sran-label">Region</label>
+            <label className="sran-label">{t("tenancy.field.region")}</label>
             <select className="sran-input" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })}>
               <option value="global">Global</option><option value="us">US</option><option value="eu">EU</option>
             </select>

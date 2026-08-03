@@ -1,4 +1,12 @@
-export default function LoadingState({ message = "Loading..." }: { message?: string }) {
+"use client";
+
+// Client component purely so the default message can be translated — there
+// is no server-only code here.
+
+import { useT } from "../../lib/i18n";
+
+export default function LoadingState({ message }: { message?: string }) {
+  const t = useT();
   return (
     <div className="sran-empty">
       <div
@@ -12,7 +20,7 @@ export default function LoadingState({ message = "Loading..." }: { message?: str
           margin: "0 auto 0.75rem",
         }}
       />
-      <p>{message}</p>
+      <p>{message ?? t("state.loading")}</p>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );

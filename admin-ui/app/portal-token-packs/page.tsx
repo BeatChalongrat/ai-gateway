@@ -8,6 +8,7 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useToast } from "../../components/ui/Toast";
 import { api, ApiError } from "../../lib/api";
 import { useApi } from "../../lib/useApi";
+import { useT } from "../../lib/i18n";
 import { ThemeToggle } from "../../components/ThemeToggle";
 
 interface TokenPack {
@@ -150,6 +151,7 @@ function PackStat({
 }
 
 export default function TokenPacksPage() {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<TokenPack[]>("/admin/token-packs");
   const { toast } = useToast();
   const packs = data ?? [];
@@ -218,11 +220,11 @@ export default function TokenPacksPage() {
 
   async function handleSave() {
     setFormErr(null);
-    if (!form.name.trim()) return setFormErr("Name is required.");
+    if (!form.name.trim()) return setFormErr(t("padmin.packs.nameRequired"));
     const tokens = parseInt(form.tokens, 10);
-    if (!Number.isFinite(tokens) || tokens <= 0) return setFormErr("Tokens must be a positive number.");
+    if (!Number.isFinite(tokens) || tokens <= 0) return setFormErr(t("padmin.packs.tokensPositive"));
     const price = parseFloat(form.price_usd);
-    if (!Number.isFinite(price) || price <= 0) return setFormErr("Price must be a positive number.");
+    if (!Number.isFinite(price) || price <= 0) return setFormErr(t("padmin.packs.pricePositive"));
     const sortOrder = parseInt(form.sort_order || "0", 10);
 
     const payload: Record<string, unknown> = {
@@ -238,15 +240,15 @@ export default function TokenPacksPage() {
     try {
       if (editPack) {
         await api.patch(`/admin/token-packs/${editPack.id}`, payload);
-        toast("Pack updated");
+        toast(t("padmin.packs.updated"));
       } else {
         await api.post("/admin/token-packs", payload);
-        toast("Pack created");
+        toast(t("padmin.packs.created"));
       }
       closeForm();
       refetch();
     } catch (e) {
-      setFormErr(errorMessage(e, "Save failed"));
+      setFormErr(errorMessage(e, t("padmin.saveFailed")));
     } finally {
       setSaving(false);
     }
@@ -255,10 +257,10 @@ export default function TokenPacksPage() {
   async function toggleActive(p: TokenPack) {
     try {
       await api.patch(`/admin/token-packs/${p.id}`, { is_active: !p.is_active });
-      toast(p.is_active ? "Pack deactivated" : "Pack activated");
+      toast(p.is_active ? t("padmin.packs.deactivated") : t("padmin.packs.activated"));
       refetch();
     } catch (e) {
-      toast(errorMessage(e, "Failed to update"), "error");
+      toast(errorMessage(e, t("padmin.packs.updateFailed")), "error");
     }
   }
 
@@ -267,11 +269,11 @@ export default function TokenPacksPage() {
     setDeleting(true);
     try {
       await api.delete(`/admin/token-packs/${deleteTarget.id}`);
-      toast("Pack deactivated");
+      toast(t("padmin.packs.deactivated"));
       setDeleteTarget(null);
       refetch();
     } catch (e) {
-      toast(errorMessage(e, "Failed to delete"), "error");
+      toast(errorMessage(e, t("padmin.packs.deleteFailed")), "error");
     } finally {
       setDeleting(false);
     }
@@ -281,9 +283,9 @@ export default function TokenPacksPage() {
     <div className="p-4 sm:p-6 lg:p-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
       <div className="sran-page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <h1 className="sran-page-title">Token Packs</h1>
+          <h1 className="sran-page-title">{t("padmin.packs.title")}</h1>
           <p className="sran-page-subtitle">
-            Configure available token packages for portal users.
+            {t("padmin.packs.subtitle")}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -291,7 +293,7 @@ export default function TokenPacksPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}>
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-            New Pack
+            {t("padmin.packs.newPack")}
           </button>
           <ThemeToggle />
         </div>
@@ -303,27 +305,27 @@ export default function TokenPacksPage() {
           iconBg="var(--icon-bg-blue)"
           iconColor="#3B82F6"
           icon={<LucideIcon size={16}>{ICON_PACKAGE}</LucideIcon>}
-          label="Total Packs"
+          label={t("padmin.packs.statTotal")}
           value={String(stats.total)}
-          sub="All configured"
+          sub={t("padmin.packs.statTotalSub")}
         />
         <PackStat
           accent="#10B981"
           iconBg="var(--icon-bg-green)"
           iconColor="#10B981"
           icon={<LucideIcon size={16}>{ICON_CHECK_CIRCLE}</LucideIcon>}
-          label="Active"
+          label={t("field.active")}
           value={String(stats.active)}
-          sub="Visible in portal"
+          sub={t("padmin.packs.statActiveSub")}
         />
         <PackStat
           accent="#F59E0B"
           iconBg="var(--icon-bg-amber)"
           iconColor="#F59E0B"
           icon={<LucideIcon size={16}>{ICON_TAG}</LucideIcon>}
-          label="Price Range"
+          label={t("padmin.packs.statPriceRange")}
           value={stats.priceRange}
-          sub="USD per pack"
+          sub={t("padmin.packs.statPriceSub")}
         />
       </div>
 
@@ -340,8 +342,8 @@ export default function TokenPacksPage() {
           <span style={{ color: "var(--border-color)", display: "inline-flex" }}>
             <LucideIcon size={48}>{ICON_PACKAGE}</LucideIcon>
           </span>
-          <p style={{ fontSize: 16, color: "var(--text-muted)", margin: "12px 0" }}>No token packs yet.</p>
-          <button className="sran-btn sran-btn-primary" onClick={openCreate}>Create your first pack</button>
+          <p style={{ fontSize: 16, color: "var(--text-muted)", margin: "12px 0" }}>{t("padmin.packs.empty")}</p>
+          <button className="sran-btn sran-btn-primary" onClick={openCreate}>{t("padmin.packs.createFirst")}</button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -375,7 +377,7 @@ export default function TokenPacksPage() {
                       letterSpacing: "0.03em",
                     }}
                   >
-                    MOST POPULAR
+                    {t("padmin.packs.mostPopular")}
                   </span>
                 ) : null}
 
@@ -386,13 +388,13 @@ export default function TokenPacksPage() {
 
                 <div style={{ fontSize: 28, fontWeight: 700, color: "var(--text-primary)", marginTop: 12, fontVariantNumeric: "tabular-nums" }}>
                   {formatUsd(p.price_usd)}
-                  <span style={{ fontSize: 14, fontWeight: 400, color: "var(--text-muted)" }}> / pack</span>
+                  <span style={{ fontSize: 14, fontWeight: 400, color: "var(--text-muted)" }}> {t("padmin.packs.perPack")}</span>
                 </div>
                 <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
                   <span style={{ color: "#F59E0B", display: "inline-flex" }}>
                     <LucideIcon size={14}>{ICON_ZAP}</LucideIcon>
                   </span>
-                  {p.tokens.toLocaleString()} tokens
+                  {t("padmin.packs.tokensCount", { count: p.tokens.toLocaleString() })}
                 </div>
 
                 <div
@@ -406,13 +408,13 @@ export default function TokenPacksPage() {
                   }}
                 >
                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    ${ratePerM.toFixed(2)} / 1M tokens
+                    {t("padmin.packs.ratePerMillion", { rate: ratePerM.toFixed(2) })}
                   </span>
                   <span
                     className={p.is_active ? "pack-badge-active" : "pack-badge-draft"}
                     style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}
                   >
-                    {p.is_active ? "Active" : "Draft"}
+                    {p.is_active ? t("field.active") : t("padmin.packs.draft")}
                   </span>
                 </div>
 
@@ -430,7 +432,7 @@ export default function TokenPacksPage() {
                       fontFamily: "inherit",
                     }}
                   >
-                    Edit
+                    {t("action.edit")}
                   </button>
                   <button
                     onClick={() => toggleActive(p)}
@@ -445,7 +447,7 @@ export default function TokenPacksPage() {
                       fontFamily: "inherit",
                     }}
                   >
-                    {p.is_active ? "Disable" : "Enable"}
+                    {p.is_active ? t("action.disable") : t("action.enable")}
                   </button>
                   {!p.is_active ? (
                     <button
@@ -461,7 +463,7 @@ export default function TokenPacksPage() {
                         fontFamily: "inherit",
                       }}
                     >
-                      Delete
+                      {t("action.delete")}
                     </button>
                   ) : null}
                 </div>
@@ -510,11 +512,11 @@ export default function TokenPacksPage() {
               }}
             >
               <span style={{ fontSize: 18, fontWeight: 600, color: "var(--text-primary)" }}>
-                {editPack ? "Edit Token Pack" : "New Token Pack"}
+                {editPack ? t("padmin.packs.editTitle") : t("padmin.packs.newTitle")}
               </span>
               <button
                 onClick={closeForm}
-                aria-label="Close"
+                aria-label={t("action.close")}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "inline-flex" }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-primary)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
@@ -537,10 +539,10 @@ export default function TokenPacksPage() {
               ) : null}
 
               <div style={{ marginBottom: 18 }}>
-                <label style={modalLabel}>Name <span style={{ color: "#EF4444" }}>*</span></label>
+                <label style={modalLabel}>{t("field.name")} <span style={{ color: "#EF4444" }}>*</span></label>
                 <input
                   className="pack-input"
-                  placeholder="e.g. Enterprise"
+                  placeholder={t("padmin.packs.namePlaceholder")}
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   autoFocus
@@ -549,7 +551,7 @@ export default function TokenPacksPage() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 18 }}>
                 <div>
-                  <label style={modalLabel}>Tokens <span style={{ color: "#EF4444" }}>*</span></label>
+                  <label style={modalLabel}>{t("padmin.packs.tokensLabel")} <span style={{ color: "#EF4444" }}>*</span></label>
                   <input
                     type="number"
                     min={1}
@@ -560,12 +562,12 @@ export default function TokenPacksPage() {
                   />
                   {form.tokens ? (
                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                      = {formatTokensShort(parseInt(form.tokens, 10) || 0)} tokens
+                      {t("padmin.packs.equalsTokens", { value: formatTokensShort(parseInt(form.tokens, 10) || 0) })}
                     </div>
                   ) : null}
                 </div>
                 <div>
-                  <label style={modalLabel}>Price (USD) <span style={{ color: "#EF4444" }}>*</span></label>
+                  <label style={modalLabel}>{t("padmin.packs.priceLabel")} <span style={{ color: "#EF4444" }}>*</span></label>
                   <input
                     type="number"
                     step="0.01"
@@ -579,10 +581,10 @@ export default function TokenPacksPage() {
               </div>
 
               <div style={{ marginBottom: 18 }}>
-                <label style={modalLabel}>Description</label>
+                <label style={modalLabel}>{t("field.description")}</label>
                 <input
                   className="pack-input"
-                  placeholder="Short tagline shown in the portal"
+                  placeholder={t("padmin.packs.descPlaceholder")}
                   value={form.description}
                   onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                   maxLength={200}
@@ -591,7 +593,7 @@ export default function TokenPacksPage() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div>
-                  <label style={modalLabel}>Sort Order</label>
+                  <label style={modalLabel}>{t("padmin.packs.sortOrder")}</label>
                   <input
                     type="number"
                     min={0}
@@ -601,21 +603,21 @@ export default function TokenPacksPage() {
                   />
                 </div>
                 <div>
-                  <label style={modalLabel}>Status</label>
+                  <label style={modalLabel}>{t("field.status")}</label>
                   <select
                     className="pack-input"
                     value={form.is_active === false ? "draft" : "active"}
                     onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.value === "active" }))}
                     disabled={!editPack}
-                    title={editPack ? undefined : "New packs are created active"}
+                    title={editPack ? undefined : t("padmin.packs.newPackActiveHint")}
                   >
-                    <option value="active">Active</option>
-                    <option value="draft">Draft</option>
+                    <option value="active">{t("field.active")}</option>
+                    <option value="draft">{t("padmin.packs.draft")}</option>
                   </select>
                 </div>
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-                Tip: sort_order = 2 is shown as &quot;Most Popular&quot; in the portal.
+                {t("padmin.packs.sortTip")}
               </div>
             </div>
 
@@ -643,10 +645,10 @@ export default function TokenPacksPage() {
                   fontFamily: "inherit",
                 }}
               >
-                Cancel
+                {t("action.cancel")}
               </button>
               <button className="pack-btn-navy" onClick={handleSave} disabled={saving}>
-                {saving ? "Saving…" : editPack ? "Save Changes" : "Create Pack"}
+                {saving ? t("action.saving") : editPack ? t("padmin.saveChanges") : t("padmin.packs.createPack")}
               </button>
             </div>
           </div>
@@ -657,9 +659,9 @@ export default function TokenPacksPage() {
         open={!!deleteTarget}
         onClose={() => !deleting && setDeleteTarget(null)}
         onConfirm={confirmDelete}
-        title="Delete token pack?"
-        message={`Delete "${deleteTarget?.name}"? The pack is soft-deleted and hidden from the portal. You can re-activate it later.`}
-        confirmLabel="Delete"
+        title={t("padmin.packs.deleteTitle")}
+        message={t("padmin.packs.deleteBody", { name: deleteTarget?.name ?? "" })}
+        confirmLabel={t("action.delete")}
         loading={deleting}
       />
     </div>

@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { api, ApiError } from "../../lib/api";
+import { useT, type DictKey } from "../../lib/i18n";
 
 const BASE = "/admin/dlp/custom-detectors";
 
@@ -22,11 +23,26 @@ type DetType = (typeof TYPES)[number];
 interface TestCase { input: string; expected_match: boolean; }
 
 // Human-readable display labels (option `value`s stay the raw API values).
+//
+// NOT localized on purpose: these are the DLP taxonomy — the category and
+// detection-type identifiers an operator also sees in policy config, audit
+// exports and support tickets. Translating them would make the console and
+// the backend disagree about what a detector is.
 const CATEGORY_LABELS: Record<string, string> = {
   pii: "PII", identity: "Identity", financial: "Financial", credential: "Credential",
   secret: "Secret", network: "Network", content_policy: "Content policy",
 };
 const TYPE_LABELS: Record<DetType, string> = { regex: "Regex", keyword_list: "Keywords", semantic: "Semantic" };
+
+// Severity and match-action ARE plain UI vocabulary, so they translate.
+const SEVERITY_LABELS: Record<string, DictKey> = {
+  low: "ui.severity.low", medium: "ui.severity.medium",
+  high: "ui.severity.high", critical: "ui.severity.critical",
+};
+const ACTION_LABELS: Record<string, DictKey> = {
+  mask: "ui.dlpAction.mask", block: "ui.dlpAction.block",
+  pass: "ui.dlpAction.pass", restore: "ui.dlpAction.restore",
+};
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export interface DetectorInitial {
@@ -96,6 +112,7 @@ export default function CustomDetectorForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const editing = Boolean(initial?.id);
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -141,20 +158,23 @@ export default function CustomDetectorForm({
         test_cases: testCases.filter((t) => t.input.trim()),
       };
       if (editing) {
+        // `reason` is an audit-log value, not UI copy — stays English so the
+        // audit trail reads consistently regardless of the admin's locale.
         await api.put(`${BASE}/${initial!.id}`, { ...body, reason: "edited via admin UI" });
       } else {
         await api.post(BASE, body);
       }
       onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? (e.body?.error?.message ?? "save failed") : "save failed");
+      const fallback = t("ui.detector.saveFailed");
+      setError(e instanceof ApiError ? (e.body?.error?.message ?? fallback) : fallback);
     } finally {
       setBusy(false);
     }
   }
 
   async function runTests() {
-    if (!editing) { setError("Save the detector first to run tests against the server."); return; }
+    if (!editing) { setError(t("ui.detector.saveBeforeTest")); return; }
     setBusy(true); setError(null);
     try {
       const inputs = testCases.map((t) => t.input).filter(Boolean);
@@ -163,55 +183,62 @@ export default function CustomDetectorForm({
       for (const r of res.results) map[r.input] = r.matched;
       setTestResults(map);
     } catch {
-      setError("test run failed");
+      setError(t("ui.detector.testFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   function setTC(i: number, patch: Partial<TestCase>) {
-    setTestCases((tc) => tc.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+    setTestCases((list) => list.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   }
 
   function removeTC(i: number) {
-    setTestCases((tc) => tc.filter((_, j) => j !== i));
+    setTestCases((list) => list.filter((_, j) => j !== i));
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Identity */}
       <div style={sectionCard}>
-        <div style={sectionTitle}>Identity</div>
+        <div style={sectionTitle}>{t("ui.detector.section.identity")}</div>
         <div>
-          <label style={lbl}>Name</label>
+          <label style={lbl}>{t("field.name")}</label>
+          {/* placeholder is a sample detector id — an API value, not copy */}
           <input style={ring("name", inp)} {...fx("name")} value={name} onChange={(e) => setName(e.target.value)} disabled={editing} placeholder="thai_plate_2026" />
         </div>
         <div>
-          <label style={lbl}>Description</label>
+          <label style={lbl}>{t("field.description")}</label>
           <textarea style={ring("description", { ...inp, minHeight: 48 })} {...fx("description")} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
       </div>
 
       {/* Classification */}
       <div style={sectionCard}>
-        <div style={sectionTitle}>Classification</div>
+        <div style={sectionTitle}>{t("ui.detector.section.classification")}</div>
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <label style={lbl}>Category</label>
+            <label style={lbl}>{t("ui.detector.category")}</label>
             <select style={ring("category", sel)} {...fx("category")} value={category} onChange={(e) => setCategory(e.target.value)}>
               {CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c] ?? cap(c)}</option>)}
             </select>
           </div>
           <div style={{ flex: 1 }}>
-            <label style={lbl}>Severity</label>
+            <label style={lbl}>{t("ui.detector.severity")}</label>
             <select style={ring("severity", sel)} {...fx("severity")} value={severity} onChange={(e) => setSeverity(e.target.value)}>
-              {SEVERITIES.map((s) => <option key={s} value={s}>{cap(s)}</option>)}
+              {SEVERITIES.map((s) => {
+                const k = SEVERITY_LABELS[s];
+                return <option key={s} value={s}>{k ? t(k) : cap(s)}</option>;
+              })}
             </select>
           </div>
           <div style={{ flex: 1 }}>
-            <label style={lbl}>Default action</label>
+            <label style={lbl}>{t("ui.detector.defaultAction")}</label>
             <select style={ring("action", sel)} {...fx("action")} value={action} onChange={(e) => setAction(e.target.value)}>
-              {ACTIONS.map((a) => <option key={a} value={a}>{cap(a)}</option>)}
+              {ACTIONS.map((a) => {
+                const k = ACTION_LABELS[a];
+                return <option key={a} value={a}>{k ? t(k) : cap(a)}</option>;
+              })}
             </select>
           </div>
         </div>
@@ -219,21 +246,21 @@ export default function CustomDetectorForm({
 
       {/* Detection */}
       <div style={sectionCard}>
-        <div style={sectionTitle}>Detection</div>
+        <div style={sectionTitle}>{t("ui.detector.section.detection")}</div>
         <div>
-          <label style={lbl}>Detection type</label>
-          <div style={segGroup} role="group" aria-label="Detection type">
-            {TYPES.map((t, i) => (
+          <label style={lbl}>{t("ui.detector.detectionType")}</label>
+          <div style={segGroup} role="group" aria-label={t("ui.detector.detectionType")}>
+            {TYPES.map((type, i) => (
               <button
-                key={t}
+                key={type}
                 type="button"
-                aria-pressed={detType === t}
+                aria-pressed={detType === type}
                 disabled={editing}
-                title={editing ? "Detection type can't change after creation" : undefined}
-                style={segBtn(detType === t, i === 0, editing)}
-                onClick={() => { if (!editing) setDetType(t); }}
+                title={editing ? t("ui.detector.typeLocked") : undefined}
+                style={segBtn(detType === type, i === 0, editing)}
+                onClick={() => { if (!editing) setDetType(type); }}
               >
-                {TYPE_LABELS[t]}
+                {TYPE_LABELS[type]}
               </button>
             ))}
           </div>
@@ -241,24 +268,25 @@ export default function CustomDetectorForm({
 
         {detType === "regex" && (
           <div>
-            <label style={lbl}>Regex pattern</label>
+            <label style={lbl}>{t("ui.detector.regexPattern")}</label>
             <input style={ring("regex", mono)} {...fx("regex")} value={regex} onChange={(e) => setRegex(e.target.value)} placeholder="^[ก-ฮ]{2}[0-9]{4}$" />
           </div>
         )}
         {detType === "keyword_list" && (
           <div>
-            <label style={lbl}>Keywords (comma-separated)</label>
+            <label style={lbl}>{t("ui.detector.keywords")}</label>
             <input style={ring("keywords", inp)} {...fx("keywords")} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="confidential, internal-only" />
           </div>
         )}
         {detType === "semantic" && (
           <div>
-            <label style={lbl}>Entity type</label>
+            <label style={lbl}>{t("ui.detector.entityType")}</label>
+            {/* Entity names are Presidio identifiers — never translated. */}
             <select style={ring("entity", sel)} {...fx("entity")} value={entity} onChange={(e) => setEntity(e.target.value)}>
               {SEMANTIC_ENTITIES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-              Semantic detectors are stored but not yet executed at runtime in this release.
+              {t("ui.detector.semanticNote")}
             </div>
           </div>
         )}
@@ -267,36 +295,38 @@ export default function CustomDetectorForm({
       {/* Test cases */}
       <div style={sectionCard}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={sectionTitle}>Test cases</div>
+          <div style={sectionTitle}>{t("ui.detector.section.testCases")}</div>
           <div style={{ display: "flex", gap: 8 }}>
-            {editing && <button style={btn("ghost")} onClick={runTests} disabled={busy}>Run tests</button>}
-            <button style={btn("ghost")} onClick={() => setTestCases((t) => [...t, { input: "", expected_match: true }])}>+ Add case</button>
+            {editing && <button style={btn("ghost")} onClick={runTests} disabled={busy}>{t("ui.detector.runTests")}</button>}
+            <button style={btn("ghost")} onClick={() => setTestCases((tc) => [...tc, { input: "", expected_match: true }])}>+ {t("ui.detector.addCase")}</button>
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {testCases.length === 0 && (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "4px 2px" }}>No test cases — add one to validate the pattern.</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "4px 2px" }}>{t("ui.detector.noTestCases")}</div>
           )}
           {testCases.map((tc, i) => (
             <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", background: "var(--bg-surface)", border: "1px solid var(--border-default)", borderRadius: 6 }}>
               <input
                 style={{ ...mono, flex: 1, background: "transparent", borderWidth: 0, padding: "2px 4px" }}
-                value={tc.input} placeholder="sample input"
+                value={tc.input} placeholder={t("ui.detector.sampleInput")}
                 onChange={(e) => setTC(i, { input: e.target.value })}
               />
               <label style={{ fontSize: 12, display: "flex", gap: 4, alignItems: "center", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                 <input type="checkbox" checked={tc.expected_match} onChange={(e) => setTC(i, { expected_match: e.target.checked })} />
-                Should match
+                {t("ui.detector.shouldMatch")}
               </label>
               {testResults && tc.input in testResults && (
                 <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", color: testResults[tc.input] === tc.expected_match ? "var(--color-status-success)" : "var(--color-status-error)" }}>
-                  {testResults[tc.input] === tc.expected_match ? "✓ pass" : "✗ fail"}
+                  {testResults[tc.input] === tc.expected_match
+                    ? `✓ ${t("ui.detector.pass")}`
+                    : `✗ ${t("ui.detector.fail")}`}
                 </span>
               )}
               <button
                 type="button"
-                title="Remove test case"
-                aria-label="Remove test case"
+                title={t("ui.detector.removeCase")}
+                aria-label={t("ui.detector.removeCase")}
                 onClick={() => removeTC(i)}
                 style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "2px 6px", borderRadius: 4 }}
               >
@@ -310,9 +340,9 @@ export default function CustomDetectorForm({
       {error && <div style={{ color: "var(--color-status-error)", fontSize: 13 }}>{error}</div>}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", borderTop: "1px solid var(--border-subtle)", paddingTop: 16, marginTop: 2 }}>
-        <button style={btn("ghost")} onClick={onCancel} disabled={busy}>Cancel</button>
+        <button style={btn("ghost")} onClick={onCancel} disabled={busy}>{t("action.cancel")}</button>
         <button style={btn("primary")} onClick={save} disabled={busy || !name}>
-          {editing ? "Save changes" : "Create"}
+          {editing ? t("ui.detector.saveChanges") : t("action.create")}
         </button>
       </div>
     </div>

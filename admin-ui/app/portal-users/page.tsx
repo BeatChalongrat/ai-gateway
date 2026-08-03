@@ -11,8 +11,11 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useToast } from "../../components/ui/Toast";
 import { api, ApiError } from "../../lib/api";
 import { useApi } from "../../lib/useApi";
+import { useT, type DictKey } from "../../lib/i18n";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
+
+type Translate = ReturnType<typeof useT>;
 
 interface PortalUser {
   id: string;
@@ -81,27 +84,61 @@ function formatDate(iso?: string | null): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+// Slugs coming back from the API are identifiers, not copy. The ones we
+// know about get a translated label; anything else falls back to the
+// prettified raw slug so a new backend value still renders legibly.
+const STATUS_KEYS: Record<string, DictKey> = {
+  active: "field.active",
+  suspended: "padmin.users.suspended",
+  deleted: "padmin.users.deleted",
+};
+
+const TX_TYPE_KEYS: Record<string, DictKey> = {
+  topup: "padmin.users.txTopup",
+  top_up: "padmin.users.txTopup",
+  usage: "padmin.users.txUsage",
+  refund: "padmin.users.txRefund",
+  adjustment: "padmin.users.txAdjustment",
+  admin_adjustment: "padmin.users.txAdjustment",
+  trial_grant: "padmin.users.txTrialGrant",
+};
+
+function prettifySlug(slug: string): string {
+  return slug.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function planLabel(plan: string, t: Translate): string {
+  if (plan === "free_trial") return t("padmin.users.freeTrial");
+  return prettifySlug(plan);
+}
+
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { cls: string; label: string }> = {
-    active: { cls: "sran-badge-success", label: "Active" },
-    suspended: { cls: "sran-badge-warning", label: "Suspended" },
-    deleted: { cls: "sran-badge-error", label: "Deleted" },
+  const t = useT();
+  const cls: Record<string, string> = {
+    active: "sran-badge-success",
+    suspended: "sran-badge-warning",
+    deleted: "sran-badge-error",
   };
-  const m = map[status] ?? { cls: "sran-badge-neutral", label: status };
-  return <span className={`sran-badge ${m.cls}`}>{m.label}</span>;
+  const key = STATUS_KEYS[status];
+  return (
+    <span className={`sran-badge ${cls[status] ?? "sran-badge-neutral"}`}>
+      {key ? t(key) : status}
+    </span>
+  );
 }
 
 function PlanChip({ plan }: { plan: string }) {
-  const pretty = plan.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const t = useT();
   const color = plan === "free_trial" ? "#64748b" : "var(--accent-primary)";
   return (
     <span style={{ fontSize: 12, fontWeight: 500, color }}>
-      {pretty}
+      {planLabel(plan, t)}
     </span>
   );
 }
 
 export default function PortalUsersPage() {
+  const t = useT();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
@@ -159,7 +196,7 @@ export default function PortalUsersPage() {
       const d = await api.get(`/admin/portal-users/${u.id}`);
       setDetail(d as UserDetail);
     } catch (e) {
-      toast("Failed to load user details", "error");
+      toast(t("padmin.users.detailLoadFailed"), "error");
     } finally {
       setDetailLoading(false);
     }
@@ -180,7 +217,7 @@ export default function PortalUsersPage() {
     if (!topupUser) return;
     const amount = parseInt(topupAmount, 10);
     if (!Number.isFinite(amount) || amount <= 0) {
-      toast("Amount must be a positive number", "error");
+      toast(t("padmin.users.amountInvalid"), "error");
       return;
     }
     setTopupSaving(true);
@@ -189,13 +226,13 @@ export default function PortalUsersPage() {
         amount,
         description: topupDesc.trim() || undefined,
       });
-      toast(`Topped up ${amount.toLocaleString()} tokens`);
+      toast(t("padmin.users.topupSuccess", { amount: amount.toLocaleString() }));
       setTopupUser(null);
       refetch();
       if (detailUser?.id === topupUser.id) openDetail(topupUser);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.body?.error?.message : "Top-up failed";
-      toast(msg || "Top-up failed", "error");
+      const msg = e instanceof ApiError ? e.body?.error?.message : null;
+      toast(msg || t("padmin.users.topupFailed"), "error");
     } finally {
       setTopupSaving(false);
     }
@@ -210,12 +247,12 @@ export default function PortalUsersPage() {
         ? `/admin/portal-users/${u.id}/suspend`
         : `/admin/portal-users/${u.id}/activate`;
       await api.post(path, {});
-      toast(next === "suspended" ? "User suspended" : "User activated");
+      toast(next === "suspended" ? t("padmin.users.suspendedToast") : t("padmin.users.activatedToast"));
       setSuspendTarget(null);
       refetch();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.body?.error?.message : "Failed to update status";
-      toast(msg || "Failed to update status", "error");
+      const msg = e instanceof ApiError ? e.body?.error?.message : null;
+      toast(msg || t("padmin.users.statusUpdateFailed"), "error");
     } finally {
       setSuspendWorking(false);
     }
@@ -227,19 +264,19 @@ export default function PortalUsersPage() {
     <div className="p-4 sm:p-6 lg:p-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
       <div className="sran-page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h1 className="sran-page-title">Portal Users</h1>
+          <h1 className="sran-page-title">{t("padmin.users.title")}</h1>
           <p className="sran-page-subtitle">
-            Manage portal accounts, credit balances, and access status.
+            {t("padmin.users.subtitle")}
           </p>
         </div>
         <ThemeToggle />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: 14, marginBottom: 20 }}>
-        <StatCard label="Total Users" value={stats.total} trend="active" />
-        <StatCard label="Active" value={stats.active} />
-        <StatCard label="Suspended" value={stats.suspended} />
-        <StatCard label="Free Trial" value={stats.freeTrial} />
+        <StatCard label={t("padmin.users.statTotal")} value={stats.total} trend="active" />
+        <StatCard label={t("field.active")} value={stats.active} />
+        <StatCard label={t("padmin.users.suspended")} value={stats.suspended} />
+        <StatCard label={t("padmin.users.freeTrial")} value={stats.freeTrial} />
       </div>
 
       <div className="sran-card" style={{ padding: 0, overflow: "hidden" }}>
@@ -250,7 +287,7 @@ export default function PortalUsersPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by email or name..."
+              placeholder={t("padmin.users.searchPlaceholder")}
               className="sran-input"
               style={{ width: "100%", paddingLeft: 34 }}
             />
@@ -267,11 +304,11 @@ export default function PortalUsersPage() {
 
           <div style={{ display: "flex", gap: 4 }}>
             {([
-              { k: "all",         label: "All",         count: allUsers.length,       dot: null },
-              { k: "active",      label: "Active",      count: stats.active,          dot: "#10b981" },
-              { k: "suspended",   label: "Suspended",   count: stats.suspended,       dot: "#f59e0b" },
-              { k: "free_trial",  label: "Free Trial",  count: stats.freeTrial,       dot: "#64748b" },
-              { k: "paid",        label: "Paid",        count: allUsers.length - stats.freeTrial, dot: "#1e3a5f" },
+              { k: "all",         label: t("field.all"),                count: allUsers.length,       dot: null },
+              { k: "active",      label: t("field.active"),             count: stats.active,          dot: "#10b981" },
+              { k: "suspended",   label: t("padmin.users.suspended"),   count: stats.suspended,       dot: "#f59e0b" },
+              { k: "free_trial",  label: t("padmin.users.freeTrial"),   count: stats.freeTrial,       dot: "#64748b" },
+              { k: "paid",        label: t("padmin.users.paid"),        count: allUsers.length - stats.freeTrial, dot: "#1e3a5f" },
             ] as { k: StatusFilter; label: string; count: number; dot: string | null }[]).map((f) => {
               const active = statusFilter === f.k;
               return (
@@ -343,19 +380,19 @@ export default function PortalUsersPage() {
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<Icon name="users" size={22} />}
-            message="No portal users yet. Share your signup link to get started."
+            message={t("padmin.users.empty")}
           />
         ) : (
           <div className="overflow-x-auto">
           <table className="sran-table">
             <thead>
               <tr>
-                <th style={{ paddingLeft: 20 }}>User</th>
-                <th>Plan</th>
-                <th style={{ width: 200 }}>Credits</th>
-                <th>Usage</th>
-                <th style={{ textAlign: "center", width: 110 }}>Status</th>
-                <th style={{ width: 120 }}>Created</th>
+                <th style={{ paddingLeft: 20 }}>{t("field.user")}</th>
+                <th>{t("padmin.users.plan")}</th>
+                <th style={{ width: 200 }}>{t("padmin.users.credits")}</th>
+                <th>{t("padmin.users.usage")}</th>
+                <th style={{ textAlign: "center", width: 110 }}>{t("field.status")}</th>
+                <th style={{ width: 120 }}>{t("field.created")}</th>
                 <th style={{ width: 60 }}></th>
               </tr>
             </thead>
@@ -389,7 +426,7 @@ export default function PortalUsersPage() {
                     <td><PlanChip plan={u.plan} /></td>
                     <td>
                       {u.credit_balance <= 0 ? (
-                        <span className="sran-badge sran-badge-error">No credits</span>
+                        <span className="sran-badge sran-badge-error">{t("padmin.users.noCredits")}</span>
                       ) : (
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <div style={{ width: 60, height: 6, borderRadius: 3, background: "var(--bg-elevated)", overflow: "hidden", flexShrink: 0 }}>
@@ -402,7 +439,7 @@ export default function PortalUsersPage() {
                       )}
                     </td>
                     <td style={{ fontSize: 12, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" }}>
-                      {formatTokensCompact(u.credit_used)} used
+                      {t("padmin.users.usedAmount", { amount: formatTokensCompact(u.credit_used) })}
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <StatusBadge status={u.status} />
@@ -429,10 +466,10 @@ export default function PortalUsersPage() {
       <Modal
         open={!!detailUser}
         onClose={closeDetail}
-        title="User Detail"
+        title={t("padmin.users.detailTitle")}
         footer={
           <button className="sran-btn sran-btn-secondary" onClick={closeDetail}>
-            Close
+            {t("action.close")}
           </button>
         }
       >
@@ -449,17 +486,17 @@ export default function PortalUsersPage() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem 1rem" }}>
-              <DetailRow label="Plan" value={detailUser.plan.replace(/_/g, " ")} />
-              <DetailRow label="Status" value={<StatusBadge status={detailUser.status} />} />
-              <DetailRow label="Joined" value={formatDate(detailUser.created_at)} />
-              <DetailRow label="User ID" value={<code style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace" }}>{detailUser.id.slice(0, 8)}…</code>} />
+              <DetailRow label={t("padmin.users.plan")} value={planLabel(detailUser.plan, t)} />
+              <DetailRow label={t("field.status")} value={<StatusBadge status={detailUser.status} />} />
+              <DetailRow label={t("padmin.users.joined")} value={formatDate(detailUser.created_at)} />
+              <DetailRow label={t("padmin.users.userId")} value={<code style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace" }}>{detailUser.id.slice(0, 8)}…</code>} />
             </div>
 
             <div style={{ borderTop: "1px solid var(--color-border-default)", paddingTop: "0.75rem" }}>
-              <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)", marginBottom: 8 }}>Credits</div>
+              <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)", marginBottom: 8 }}>{t("padmin.users.credits")}</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Balance</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_balance)}</div></div>
-                <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Used</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_used)}</div></div>
+                <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("padmin.users.balance")}</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_balance)}</div></div>
+                <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("padmin.users.used")}</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_used)}</div></div>
               </div>
               <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: "var(--bg-elevated)", overflow: "hidden" }}>
                 <div style={{
@@ -472,47 +509,52 @@ export default function PortalUsersPage() {
 
             <div style={{ display: "flex", gap: 8 }}>
               <button className="sran-btn sran-btn-primary" onClick={() => openTopup(detailUser)}>
-                <Icon name="dollar" size={14} /> Top-up Credits
+                <Icon name="dollar" size={14} /> {t("padmin.users.topup")}
               </button>
               <button
                 className="sran-btn sran-btn-secondary"
                 onClick={() => setSuspendTarget(detailUser)}
               >
-                {detailUser.status === "active" ? (<><Icon name="pause" size={14} /> Suspend</>) : (<><Icon name="play" size={14} /> Activate</>)}
+                {detailUser.status === "active"
+                  ? (<><Icon name="pause" size={14} /> {t("padmin.users.suspend")}</>)
+                  : (<><Icon name="play" size={14} /> {t("padmin.users.activate")}</>)}
               </button>
             </div>
 
             <div style={{ borderTop: "1px solid var(--color-border-default)", paddingTop: "0.75rem" }}>
-              <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)", marginBottom: 8 }}>Recent Transactions</div>
+              <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)", marginBottom: 8 }}>{t("padmin.users.recentTransactions")}</div>
               {detailLoading ? (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading…</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("state.loading")}</div>
               ) : detail && detail.transactions.length > 0 ? (
                 <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ textAlign: "left", color: "var(--text-tertiary)" }}>
-                      <th style={{ padding: "4px 8px 4px 0", fontWeight: 500 }}>Date</th>
-                      <th style={{ padding: "4px 8px", fontWeight: 500 }}>Type</th>
-                      <th style={{ padding: "4px 8px", fontWeight: 500, textAlign: "right" }}>Amount</th>
-                      <th style={{ padding: "4px 0 4px 8px", fontWeight: 500, textAlign: "right" }}>Balance</th>
+                      <th style={{ padding: "4px 8px 4px 0", fontWeight: 500 }}>{t("padmin.users.txDate")}</th>
+                      <th style={{ padding: "4px 8px", fontWeight: 500 }}>{t("field.type")}</th>
+                      <th style={{ padding: "4px 8px", fontWeight: 500, textAlign: "right" }}>{t("padmin.users.amount")}</th>
+                      <th style={{ padding: "4px 0 4px 8px", fontWeight: 500, textAlign: "right" }}>{t("padmin.users.balance")}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.transactions.map((t) => (
-                      <tr key={t.id} style={{ borderTop: "1px solid var(--border-default)" }}>
-                        <td style={{ padding: "6px 8px 6px 0", color: "var(--text-tertiary)" }}>{formatDate(t.created_at)}</td>
-                        <td style={{ padding: "6px 8px" }}>{t.type.replace(/_/g, " ")}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: t.amount >= 0 ? "#10b981" : "var(--text-primary)" }}>
-                          {t.amount >= 0 ? "+" : ""}{formatTokensFull(t.amount)}
+                    {detail.transactions.map((tx) => {
+                      const typeKey = TX_TYPE_KEYS[tx.type];
+                      return (
+                      <tr key={tx.id} style={{ borderTop: "1px solid var(--border-default)" }}>
+                        <td style={{ padding: "6px 8px 6px 0", color: "var(--text-tertiary)" }}>{formatDate(tx.created_at)}</td>
+                        <td style={{ padding: "6px 8px" }}>{typeKey ? t(typeKey) : prettifySlug(tx.type)}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: tx.amount >= 0 ? "#10b981" : "var(--text-primary)" }}>
+                          {tx.amount >= 0 ? "+" : ""}{formatTokensFull(tx.amount)}
                         </td>
                         <td style={{ padding: "6px 0 6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                          {formatTokensFull(t.balance_after)}
+                          {formatTokensFull(tx.balance_after)}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No transactions yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("padmin.users.noTransactions")}</div>
               )}
             </div>
           </div>
@@ -523,7 +565,7 @@ export default function PortalUsersPage() {
       <Modal
         open={!!topupUser}
         onClose={() => !topupSaving && setTopupUser(null)}
-        title="Top-up Credits"
+        title={t("padmin.users.topup")}
         footer={
           <>
             <button
@@ -531,14 +573,14 @@ export default function PortalUsersPage() {
               onClick={() => setTopupUser(null)}
               disabled={topupSaving}
             >
-              Cancel
+              {t("action.cancel")}
             </button>
             <button
               className="sran-btn sran-btn-primary"
               onClick={handleTopup}
               disabled={topupSaving}
             >
-              {topupSaving ? "Processing…" : "Confirm Top-up"}
+              {topupSaving ? t("padmin.users.processing") : t("padmin.users.confirmTopup")}
             </button>
           </>
         }
@@ -546,19 +588,19 @@ export default function PortalUsersPage() {
         {topupUser ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              User: <strong>{topupUser.display_name || topupUser.email}</strong>
+              {t("field.user")}: <strong>{topupUser.display_name || topupUser.email}</strong>
               <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 2 }}>
-                Current balance: <strong style={{ color: "var(--text-primary)" }}>{formatTokensFull(topupUser.credit_balance)}</strong> tokens
+                {t("padmin.users.currentBalance")}: <strong style={{ color: "var(--text-primary)" }}>{formatTokensFull(topupUser.credit_balance)}</strong> {t("padmin.tokensUnit")}
               </div>
             </div>
 
             <div>
-              <label className="sran-label">Amount (tokens)</label>
+              <label className="sran-label">{t("padmin.users.amountTokens")}</label>
               <input
                 type="number"
                 min={1}
                 className="sran-input"
-                placeholder="e.g. 100000"
+                placeholder={t("padmin.users.amountPlaceholder")}
                 value={topupAmount}
                 onChange={(e) => setTopupAmount(e.target.value)}
                 autoFocus
@@ -578,11 +620,11 @@ export default function PortalUsersPage() {
             </div>
 
             <div>
-              <label className="sran-label">Description (optional)</label>
+              <label className="sran-label">{t("padmin.users.descriptionOptional")}</label>
               <input
                 type="text"
                 className="sran-input"
-                placeholder="e.g. Promotional credit"
+                placeholder={t("padmin.users.descPlaceholder")}
                 value={topupDesc}
                 onChange={(e) => setTopupDesc(e.target.value)}
                 maxLength={500}
@@ -596,13 +638,17 @@ export default function PortalUsersPage() {
         open={!!suspendTarget}
         onClose={() => !suspendWorking && setSuspendTarget(null)}
         onConfirm={() => suspendTarget && toggleStatus(suspendTarget)}
-        title={suspendTarget?.status === "active" ? "Suspend user?" : "Activate user?"}
+        title={suspendTarget?.status === "active" ? t("padmin.users.suspendTitle") : t("padmin.users.activateTitle")}
         message={
           suspendTarget?.status === "active"
-            ? `Suspend ${suspendTarget?.display_name || suspendTarget?.email}? They will immediately lose gateway access.`
-            : `Reactivate ${suspendTarget?.display_name || suspendTarget?.email}? They will regain gateway access.`
+            ? t("padmin.users.suspendBody", {
+                name: suspendTarget?.display_name || suspendTarget?.email || "",
+              })
+            : t("padmin.users.activateBody", {
+                name: suspendTarget?.display_name || suspendTarget?.email || "",
+              })
         }
-        confirmLabel={suspendTarget?.status === "active" ? "Suspend" : "Activate"}
+        confirmLabel={suspendTarget?.status === "active" ? t("padmin.users.suspend") : t("padmin.users.activate")}
         loading={suspendWorking}
       />
     </div>
@@ -629,6 +675,7 @@ function RowActions({
   onToggle: () => void;
   onView: () => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position: "relative", display: "flex", justifyContent: "flex-end", paddingRight: 12 }}>
@@ -638,7 +685,7 @@ function RowActions({
           setOpen((v) => !v);
         }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        title="Actions"
+        title={t("field.actions")}
         style={{
           background: "none",
           border: "1px solid transparent",
@@ -679,13 +726,13 @@ function RowActions({
             zIndex: 5,
           }}
         >
-          <ActionItem icon={<Icon name="dollar" size={14} />} label="Top-up Credits" onClick={() => { setOpen(false); onTopup(); }} />
+          <ActionItem icon={<Icon name="dollar" size={14} />} label={t("padmin.users.topup")} onClick={() => { setOpen(false); onTopup(); }} />
           <ActionItem
             icon={user.status === "active" ? <Icon name="pause" size={14} /> : <Icon name="play" size={14} />}
-            label={user.status === "active" ? "Suspend" : "Activate"}
+            label={user.status === "active" ? t("padmin.users.suspend") : t("padmin.users.activate")}
             onClick={() => { setOpen(false); onToggle(); }}
           />
-          <ActionItem icon={<Icon name="eye" size={14} />} label="View Details" onClick={() => { setOpen(false); onView(); }} />
+          <ActionItem icon={<Icon name="eye" size={14} />} label={t("action.viewDetails")} onClick={() => { setOpen(false); onView(); }} />
         </div>
       ) : null}
     </div>

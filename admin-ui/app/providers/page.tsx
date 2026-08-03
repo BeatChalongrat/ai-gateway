@@ -10,6 +10,9 @@ import { SkeletonCards } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
+import { useT, type DictKey } from "../../lib/i18n";
+
+type Translate = (key: DictKey, vars?: Record<string, string | number>) => string;
 
 interface ProviderKey {
   id: string;
@@ -33,11 +36,12 @@ interface ProviderItem {
 
 // Brand color + display initial per provider. Used for the logo fallback
 // tile when no PNG is present. Keeping the map co-located with the page
-// since it's purely presentational.
-const BRAND: Record<string, { color: string; initial: string; display: string; note?: string }> = {
+// since it's purely presentational. Provider names and model ids stay in
+// English; only `noteKey` (a human-facing blurb) is localized.
+const BRAND: Record<string, { color: string; initial: string; display: string; noteKey?: DictKey }> = {
   openai:     { color: "#10a37f", initial: "O", display: "OpenAI" },
   anthropic:  { color: "#d97757", initial: "A", display: "Anthropic" },
-  openrouter: { color: "#1a1f36", initial: "OR", display: "OpenRouter", note: "Unified billing across 300+ models" },
+  openrouter: { color: "#1a1f36", initial: "OR", display: "OpenRouter", noteKey: "infra.providers.note.openrouter" },
   google:     { color: "#4285f4", initial: "G", display: "Google AI" },
   groq:       { color: "#f55036", initial: "Q", display: "Groq" },
   deepseek:   { color: "#4d6bfe", initial: "D", display: "DeepSeek" },
@@ -49,27 +53,28 @@ const BRAND: Record<string, { color: string; initial: string; display: string; n
   qwen:       { color: "#615ced", initial: "Q", display: "Qwen" },
   kimi:       { color: "#1877f2", initial: "K", display: "Kimi" },
   zai:        { color: "#8b5cf6", initial: "Z", display: "Z.AI" },
-  replicate:  { color: "#000000", initial: "R", display: "Replicate", note: "Video generation (Kling, Wan)" },
-  elevenlabs: { color: "#000000", initial: "E", display: "ElevenLabs", note: "Text-to-speech voices" },
+  replicate:  { color: "#000000", initial: "R", display: "Replicate", noteKey: "infra.providers.note.replicate" },
+  elevenlabs: { color: "#000000", initial: "E", display: "ElevenLabs", noteKey: "infra.providers.note.elevenlabs" },
 };
 
 function brandFor(name: string) {
-  return BRAND[name] ?? { color: "#64748b", initial: name.charAt(0).toUpperCase(), display: name };
+  return BRAND[name] ?? { color: "#64748b", initial: name.charAt(0).toUpperCase(), display: name, noteKey: undefined };
 }
 
-function timeAgo(iso: string | null): string {
-  if (!iso) return "never";
+function timeAgo(iso: string | null, t: Translate): string {
+  if (!iso) return t("infra.never");
   const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60000) return "just now";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return `${Math.floor(diff / 86400000)}d ago`;
+  if (diff < 60000) return t("time.justNow");
+  if (diff < 3600000) return t("time.minutesAgo", { n: Math.floor(diff / 60000) });
+  if (diff < 86400000) return t("time.hoursAgo", { n: Math.floor(diff / 3600000) });
+  return t("time.daysAgo", { n: Math.floor(diff / 86400000) });
 }
 
 function StatusBadge({ status }: { status: string }) {
-  if (status === "valid") return <Badge variant="success">valid</Badge>;
-  if (status === "invalid") return <Badge variant="error">invalid</Badge>;
-  return <Badge variant="neutral">untested</Badge>;
+  const t = useT();
+  if (status === "valid") return <Badge variant="success">{t("infra.providers.statusValid")}</Badge>;
+  if (status === "invalid") return <Badge variant="error">{t("infra.providers.statusInvalid")}</Badge>;
+  return <Badge variant="neutral">{t("infra.providers.statusUntested")}</Badge>;
 }
 
 /* ── Logo ────────────────────────────────────────────────────────── */
@@ -143,6 +148,7 @@ function KeysPanel({
   const [adding, setAdding] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const { toast } = useToast();
+  const t = useT();
 
   const loadKeys = useCallback(async () => {
     setKeysError(null);
@@ -150,10 +156,10 @@ function KeysPanel({
       const data = await api.get(`/admin/providers/${providerName}/keys`);
       setKeys(data.items || []);
     } catch (e: any) {
-      setKeysError(e?.body?.error?.message || "Failed to load keys for this provider.");
+      setKeysError(e?.body?.error?.message || t("infra.providers.keysLoadError"));
     }
     setLoading(false);
-  }, [providerName]);
+  }, [providerName, t]);
 
   useEffect(() => {
     loadKeys();
@@ -167,12 +173,12 @@ function KeysPanel({
         api_key: keyInput.trim(),
         label: label.trim() || undefined,
       });
-      toast(`Key validated (${result.latency_ms}ms) and saved`);
+      toast(t("infra.providers.toastKeySaved", { ms: result.latency_ms }));
       setKeyInput("");
       setLabel("");
       loadKeys();
     } catch (e: any) {
-      const msg = e.body?.error?.message || "Failed to add key";
+      const msg = e.body?.error?.message || t("infra.providers.toastAddFailed");
       toast(msg, "error");
     } finally {
       setAdding(false);
@@ -183,11 +189,11 @@ function KeysPanel({
     setTestingId(keyId);
     try {
       const result = await api.post(`/admin/providers/${providerName}/keys/${keyId}/test`, {});
-      if (result.valid) toast(`Key valid (${result.latency_ms}ms)`);
-      else toast(`Key invalid: ${result.error}`, "error");
+      if (result.valid) toast(t("infra.providers.toastKeyValid", { ms: result.latency_ms }));
+      else toast(t("infra.providers.toastKeyInvalid", { error: result.error }), "error");
       loadKeys();
     } catch {
-      toast("Test failed", "error");
+      toast(t("infra.testFailed"), "error");
     } finally {
       setTestingId(null);
     }
@@ -196,10 +202,10 @@ function KeysPanel({
   async function handleDelete(keyId: string) {
     try {
       await api.delete(`/admin/providers/${providerName}/keys/${keyId}`);
-      toast("Key deactivated");
+      toast(t("infra.providers.toastDeactivated"));
       loadKeys();
     } catch {
-      toast("Failed to delete", "error");
+      toast(t("infra.providers.toastDeleteFailed"), "error");
     }
   }
 
@@ -220,38 +226,38 @@ function KeysPanel({
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
         <h4 style={{ margin: 0, fontSize: "var(--font-size-base)", fontWeight: 600 }}>
-          API Keys for <span>{b.display}</span>
+          {t("infra.providers.keysTitle", { name: b.display })}
           {activeKeys.length > 0 && (
             <span style={{ marginLeft: "0.5rem", fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", fontWeight: 400 }}>
-              {validCount} valid / {activeKeys.length} total
+              {t("infra.providers.keysSummary", { valid: validCount, total: activeKeys.length })}
             </span>
           )}
         </h4>
         <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={onClose}>
-          Close
+          {t("action.close")}
         </button>
       </div>
 
       {loading ? (
         <div className="sran-empty" style={{ padding: "1rem" }}>
-          Loading keys...
+          {t("infra.providers.loadingKeys")}
         </div>
       ) : keysError ? (
         <div className="sran-empty" style={{ padding: "1rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
           <span style={{ color: "var(--color-status-error)", fontWeight: 500 }}>{keysError}</span>
-          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => { setLoading(true); loadKeys(); }}>Retry</button>
+          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => { setLoading(true); loadKeys(); }}>{t("action.retry")}</button>
         </div>
       ) : activeKeys.length > 0 ? (
         <div style={{ overflowX: "auto", marginBottom: "1.25rem" }}>
           <table className="sran-table">
             <thead>
               <tr>
-                <th>Label</th>
-                <th>Key</th>
-                <th>Status</th>
-                <th>Latency</th>
-                <th>Last Tested</th>
-                <th style={{ width: "140px" }}>Actions</th>
+                <th>{t("infra.providers.colLabel")}</th>
+                <th>{t("infra.providers.colKey")}</th>
+                <th>{t("field.status")}</th>
+                <th>{t("infra.providers.colLatency")}</th>
+                <th>{t("infra.providers.colLastTested")}</th>
+                <th style={{ width: "140px" }}>{t("field.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -261,14 +267,14 @@ function KeysPanel({
                   <td><code style={{ fontSize: "var(--font-size-xs)" }}>{k.key_masked}</code></td>
                   <td><StatusBadge status={k.last_test_status} /></td>
                   <td>{k.last_test_latency_ms ? `${k.last_test_latency_ms}ms` : "—"}</td>
-                  <td style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>{timeAgo(k.last_tested_at)}</td>
+                  <td style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>{timeAgo(k.last_tested_at, t)}</td>
                   <td>
                     <div style={{ display: "flex", gap: "0.375rem" }}>
                       <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => handleTest(k.id)} disabled={testingId === k.id}>
-                        {testingId === k.id ? "..." : "Test"}
+                        {testingId === k.id ? "…" : t("action.test")}
                       </button>
                       <button className="sran-btn sran-btn-danger sran-btn-sm" onClick={() => handleDelete(k.id)}>
-                        Delete
+                        {t("action.delete")}
                       </button>
                     </div>
                   </td>
@@ -289,29 +295,28 @@ function KeysPanel({
             borderRadius: "var(--radius-md)",
           }}
         >
-          A key is currently being read from the <code>{providerName.toUpperCase()}_API_KEY</code> environment
-          variable. Adding a key here will <strong>override</strong> the env value and let you rotate or test
-          keys without redeploying.
+          {t("infra.providers.envNoteIntro")} <code>{providerName.toUpperCase()}_API_KEY</code>{" "}
+          {t("infra.providers.envNoteBody")}
         </div>
       ) : (
         <div style={{ padding: "0.75rem 0", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)", marginBottom: "1rem" }}>
-          No keys configured. Add one below.
+          {t("infra.providers.noKeysConfigured")}
         </div>
       )}
 
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap" }}>
         <div style={{ flex: "0 0 140px" }}>
-          <label className="sran-label">Label</label>
+          <label className="sran-label">{t("infra.providers.colLabel")}</label>
           <input
             className="sran-input"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="Primary"
+            placeholder={t("infra.providers.labelPlaceholder")}
             style={{ fontSize: "var(--font-size-sm)" }}
           />
         </div>
         <div style={{ flex: 1, minWidth: "200px" }}>
-          <label className="sran-label">API Key *</label>
+          <label className="sran-label">{t("infra.providers.apiKeyLabel")}</label>
           <input
             className="sran-input"
             type="password"
@@ -341,7 +346,7 @@ function KeysPanel({
           disabled={adding || !keyInput.trim()}
           style={{ whiteSpace: "nowrap" }}
         >
-          {adding ? "Validating..." : "Add & Validate"}
+          {adding ? t("infra.providers.validating") : t("infra.providers.addValidate")}
         </button>
       </div>
     </div>
@@ -361,6 +366,7 @@ function ProviderCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   const b = brandFor(p.provider_name);
   const totalKeys = keyStatus?.total_keys ?? p.key_count ?? 0;
   const validKeys = keyStatus?.valid_keys ?? 0;
@@ -432,10 +438,10 @@ function ProviderCard({
                 flexShrink: 0,
                 background: p.enabled ? "#10b981" : "#cbd5e1",
               }}
-              title={p.enabled ? "Active" : "Disabled"}
+              title={p.enabled ? t("field.active") : t("field.disabled")}
             />
           </div>
-          {b.note && (
+          {b.noteKey && (
             <div
               style={{
                 fontSize: "0.6875rem",
@@ -446,7 +452,7 @@ function ProviderCard({
                 textOverflow: "ellipsis",
               }}
             >
-              {b.note}
+              {t(b.noteKey)}
             </div>
           )}
         </div>
@@ -464,7 +470,7 @@ function ProviderCard({
               lineHeight: 1.4,
             }}
           >
-            NEW
+            {t("infra.providers.new")}
           </span>
         )}
       </div>
@@ -481,19 +487,19 @@ function ProviderCard({
           />
         ) : totalKeys > 0 ? (
           <Badge variant={validKeys > 0 ? "success" : "warning"}>
-            {validKeys}/{totalKeys} keys
+            {t("infra.providers.keyCount", { valid: validKeys, total: totalKeys })}
           </Badge>
         ) : keyStatus?.source === "environment" ? (
           <Badge
             variant="warning"
-            title="Key set via environment variable — add a key below to override it from the UI"
+            title={t("infra.providers.viaEnvTitle")}
           >
-            via env
+            {t("infra.providers.viaEnv")}
           </Badge>
         ) : keyStatus?.configured ? (
-          <Badge variant="success">key set</Badge>
+          <Badge variant="success">{t("infra.providers.keySet")}</Badge>
         ) : (
-          <Badge variant="neutral">no key</Badge>
+          <Badge variant="neutral">{t("infra.providers.noKey")}</Badge>
         )}
         <span
           style={{
@@ -504,7 +510,9 @@ function ProviderCard({
             letterSpacing: "0.04em",
           }}
         >
-          {p.models.length} model{p.models.length !== 1 ? "s" : ""}
+          {p.models.length === 1
+            ? t("infra.providers.modelCountOne")
+            : t("infra.providers.modelCount", { n: p.models.length })}
         </span>
       </div>
 
@@ -552,6 +560,7 @@ function ProviderCard({
 type FilterTab = "all" | "configured" | "available";
 
 export default function ProvidersPage() {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<{ items: ProviderItem[] }>("/admin/providers");
   const [keyStatuses, setKeyStatuses] = useState<Record<string, any>>({});
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
@@ -610,7 +619,7 @@ export default function ProvidersPage() {
 
   return (
     <>
-      <PageHeader title="Providers" subtitle="LLM provider adapters and API key management" />
+      <PageHeader title={t("infra.providers.title")} subtitle={t("infra.providers.subtitle")} />
 
       {/* Search + filter bar */}
       <div
@@ -624,7 +633,7 @@ export default function ProvidersPage() {
       >
         <input
           className="sran-input"
-          placeholder="Search providers..."
+          placeholder={t("infra.providers.searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{ flex: 1, minWidth: 200, maxWidth: 360, fontSize: "var(--font-size-sm)" }}
@@ -646,11 +655,11 @@ export default function ProvidersPage() {
         >
           {(
             [
-              ["all", "All", counts.all],
-              ["configured", "Configured", counts.configured],
-              ["available", "Available", counts.available],
-            ] as const
-          ).map(([key, label, count]) => {
+              ["all", "field.all", counts.all],
+              ["configured", "infra.providers.tabConfigured", counts.configured],
+              ["available", "infra.providers.tabAvailable", counts.available],
+            ] as [FilterTab, DictKey, number][]
+          ).map(([key, labelKey, count]) => {
             const active = filter === key;
             return (
               <button
@@ -671,7 +680,7 @@ export default function ProvidersPage() {
                   transition: "background 120ms, color 120ms",
                 }}
               >
-                {label}
+                {t(labelKey)}
                 <span
                   style={{
                     marginLeft: "0.375rem",
@@ -699,11 +708,11 @@ export default function ProvidersPage() {
         </div>
       ) : !items.length ? (
         <div className="sran-card">
-          <EmptyState message="No providers registered" icon={<Icon name="server" size={22} />} />
+          <EmptyState message={t("infra.providers.empty")} icon={<Icon name="server" size={22} />} />
         </div>
       ) : filtered.length === 0 ? (
         <div className="sran-card">
-          <EmptyState message={`No providers match "${query}"`} icon={<Icon name="search" size={22} />} />
+          <EmptyState message={t("infra.providers.noMatch", { query })} icon={<Icon name="search" size={22} />} />
         </div>
       ) : (
         <div

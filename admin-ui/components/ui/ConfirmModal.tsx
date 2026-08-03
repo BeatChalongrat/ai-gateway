@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "../../lib/i18n";
 import Modal from "./Modal";
 
 interface Props {
@@ -16,23 +17,27 @@ export default function ConfirmModal({
   open,
   onClose,
   onConfirm,
-  title = "Confirm Action",
+  // Defaults are resolved in the body, not in the parameter list, so they
+  // re-render in the active locale instead of being frozen in English.
+  title,
   message,
-  confirmLabel = "Confirm",
+  confirmLabel,
   loading,
 }: Props) {
+  const t = useT();
+
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={title}
+      title={title ?? t("confirm.title")}
       footer={
         <>
           <button className="sran-btn sran-btn-secondary" onClick={onClose} disabled={loading}>
-            Cancel
+            {t("action.cancel")}
           </button>
           <button className="sran-btn sran-btn-danger" onClick={onConfirm} disabled={loading}>
-            {loading ? "Processing..." : confirmLabel}
+            {loading ? t("ui.modal.processing") : (confirmLabel ?? t("action.confirm"))}
           </button>
         </>
       }

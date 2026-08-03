@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useT } from "../../lib/i18n";
 import EmptyState from "./EmptyState";
 import ErrorState from "./ErrorState";
 import { SkeletonTable } from "./Skeleton";
@@ -36,7 +37,9 @@ export default function DataTable<T extends Record<string, any>>({
   data,
   loading,
   error,
-  emptyMessage = "No data found",
+  // Resolved in the body (not the parameter list) so the fallback follows
+  // the active locale instead of being frozen in English.
+  emptyMessage,
   emptyIcon,
   emptyAction,
   onRowClick,
@@ -46,6 +49,7 @@ export default function DataTable<T extends Record<string, any>>({
   pageSize = 10,
   onRetry,
 }: Props<T>) {
+  const t = useT();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
@@ -75,7 +79,7 @@ export default function DataTable<T extends Record<string, any>>({
 
   if (loading) return <SkeletonTable rows={pageSize > 8 ? 8 : pageSize} cols={columns.length} />;
   if (error) return <ErrorState message={error} onRetry={onRetry} />;
-  if (!data || data.length === 0) return <EmptyState message={emptyMessage} icon={emptyIcon} action={emptyAction} />;
+  if (!data || data.length === 0) return <EmptyState message={emptyMessage ?? t("state.empty")} icon={emptyIcon} action={emptyAction} />;
 
   return (
     <>
@@ -85,7 +89,7 @@ export default function DataTable<T extends Record<string, any>>({
         </div>
       )}
       {filtered && filtered.length === 0 ? (
-        <EmptyState message={`No results for "${search}"`} icon="⌕" />
+        <EmptyState message={t("ui.table.noResultsFor", { query: search })} icon="⌕" />
       ) : (
         <>
           <div style={{ overflowX: "auto" }}>

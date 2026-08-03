@@ -4,6 +4,8 @@
 // Newest first. Shows actor, action, time, reason, and a compact before→after
 // for pattern/status changes.
 
+import { useT, type DictKey } from "../../lib/i18n";
+
 export interface AuditEntry {
   id: string;
   action: string;
@@ -24,6 +26,18 @@ const ACTION_COLOR: Record<string, string> = {
   delete: "var(--color-status-error)",
 };
 
+// Only the actions the backend currently emits are translated; anything
+// new falls back to the raw identifier so it is still legible (and
+// greppable) rather than rendering blank.
+const ACTION_LABEL: Record<string, DictKey> = {
+  create: "ui.audit.action.create",
+  update: "ui.audit.action.update",
+  activate: "ui.audit.action.activate",
+  move_to_testing: "ui.audit.action.moveToTesting",
+  disable: "ui.audit.action.disable",
+  delete: "ui.audit.action.delete",
+};
+
 function patternOf(v?: Record<string, any> | null): string | null {
   if (!v) return null;
   if (v.pattern && typeof v.pattern === "object") {
@@ -33,10 +47,12 @@ function patternOf(v?: Record<string, any> | null): string | null {
 }
 
 export default function AuditLogTimeline({ entries }: { entries: AuditEntry[] }) {
+  const t = useT();
+
   if (!entries.length) {
     return (
       <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>
-        No history yet.
+        {t("ui.audit.noHistory")}
       </div>
     );
   }
@@ -49,6 +65,8 @@ export default function AuditLogTimeline({ entries }: { entries: AuditEntry[] })
         const statusChange =
           e.before_value?.status && e.after_value?.status &&
           e.before_value.status !== e.after_value.status;
+        const actionKey = ACTION_LABEL[e.action];
+        const actionLabel = actionKey ? t(actionKey) : e.action.replace(/_/g, " ");
         return (
           <div key={e.id} style={{ display: "flex", gap: 12 }}>
             {/* rail */}
@@ -62,16 +80,19 @@ export default function AuditLogTimeline({ entries }: { entries: AuditEntry[] })
             <div style={{ paddingBottom: 16, flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
                 <span style={{ color, textTransform: "capitalize" }}>
-                  {e.action.replace(/_/g, " ")}
+                  {actionLabel}
                 </span>{" "}
-                by {e.changed_by_user_id}
+                {t("ui.audit.by", { user: e.changed_by_user_id })}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                 {new Date(e.changed_at).toLocaleString()}
               </div>
               {statusChange && (
                 <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
-                  status: {e.before_value!.status} → {e.after_value!.status}
+                  {t("ui.audit.statusChange", {
+                    from: e.before_value!.status,
+                    to: e.after_value!.status,
+                  })}
                 </div>
               )}
               {beforeP && afterP && beforeP !== afterP && (
@@ -82,7 +103,7 @@ export default function AuditLogTimeline({ entries }: { entries: AuditEntry[] })
               )}
               {e.reason && (
                 <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2, fontStyle: "italic" }}>
-                  reason: {e.reason}
+                  {t("ui.audit.reason", { reason: e.reason })}
                 </div>
               )}
             </div>

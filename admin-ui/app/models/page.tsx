@@ -8,6 +8,7 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import Pagination from "../../components/ui/Pagination";
 import { useApi } from "../../lib/useApi";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { useT, type DictKey } from "../../lib/i18n";
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -99,6 +100,23 @@ const CAP: Record<string, { color: string; bg: string }> = {
   code:   { color: "#ca8a04", bg: "rgba(202,138,4,0.07)" },
 };
 
+// Capability + tier VALUES are human-facing labels, so they carry a
+// dictionary key. An unknown value from the API falls back to the raw
+// string rather than rendering blank.
+const CAP_LABEL: Record<string, DictKey> = {
+  vision: "infra.models.cap.vision",
+  tools: "infra.models.cap.tools",
+  code: "infra.models.cap.code",
+};
+const TIER_LABEL: Record<string, DictKey> = {
+  budget: "infra.models.tier.budget",
+  standard: "infra.models.tier.standard",
+  premium: "infra.models.tier.premium",
+  fast: "infra.models.tier.fast",
+  medium: "infra.models.tier.medium",
+  slow: "infra.models.tier.slow",
+};
+
 /* ── Tier badge styles ────────────────────────────────────────────── */
 
 const TIER: Record<string, { color: string; bg: string }> = {
@@ -159,24 +177,26 @@ function ContextBar({ ctx, ctxK }: { ctx: string; ctxK: number }) {
 }
 
 function CapTag({ cap }: { cap: string }) {
+  const t = useT();
   const s = CAP[cap] || { color: "#64748b", bg: "rgba(100,116,139,0.06)" };
   return (
     <span style={{
       display: "inline-block", padding: "0.0625rem 0.375rem",
       fontSize: "0.625rem", fontWeight: 600, color: s.color, background: s.bg,
       borderRadius: 4, lineHeight: 1.6, textTransform: "capitalize",
-    }}>{cap}</span>
+    }}>{CAP_LABEL[cap] ? t(CAP_LABEL[cap]) : cap}</span>
   );
 }
 
 function TierBadge({ value }: { value: string }) {
+  const t = useT();
   const s = TIER[value] || TIER.standard;
   return (
     <span style={{
       display: "inline-block", padding: "0.0625rem 0.4375rem",
       fontSize: "0.6875rem", fontWeight: 600, color: s.color, background: s.bg,
       borderRadius: 4, lineHeight: 1.5, textTransform: "capitalize",
-    }}>{value}</span>
+    }}>{TIER_LABEL[value] ? t(TIER_LABEL[value]) : value}</span>
   );
 }
 
@@ -248,6 +268,7 @@ function StatCard({ value, label, icon, accent, delay = 0, iconClass }: {
 const PAGE_SIZE = 15;
 
 export default function ModelsPage() {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<{ items: ModelItem[] }>("/admin/models");
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
@@ -304,8 +325,8 @@ export default function ModelsPage() {
       {/* ── Header ── */}
       <div className="sran-page-header" style={{ marginBottom: "1.25rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h1 className="sran-page-title">Model Registry</h1>
-          <p className="sran-page-subtitle">Capabilities, cost tiers, and latency metadata for all registered models</p>
+          <h1 className="sran-page-title">{t("infra.models.title")}</h1>
+          <p className="sran-page-subtitle">{t("infra.models.subtitle")}</p>
         </div>
         <ThemeToggle />
       </div>
@@ -313,9 +334,9 @@ export default function ModelsPage() {
       {/* ── Stats row ── */}
       {!loading && !error && items.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: "0.75rem", marginBottom: "1.25rem" }}>
-          <StatCard value={items.length} label="Total Models" icon={iconModels} accent="#3b82f6" delay={0} iconClass="mr-icon-pulse" />
-          <StatCard value={providers.length} label="Providers" icon={iconProviders} accent="#8b5cf6" delay={80} iconClass="mr-icon-rock" />
-          <StatCard value={streamingCount} label="Streaming" icon={iconStream} accent="#10a37f" delay={160} iconClass="mr-icon-breathe" />
+          <StatCard value={items.length} label={t("infra.models.statTotal")} icon={iconModels} accent="#3b82f6" delay={0} iconClass="mr-icon-pulse" />
+          <StatCard value={providers.length} label={t("infra.models.statProviders")} icon={iconProviders} accent="#8b5cf6" delay={80} iconClass="mr-icon-rock" />
+          <StatCard value={streamingCount} label={t("infra.models.statStreaming")} icon={iconStream} accent="#10a37f" delay={160} iconClass="mr-icon-breathe" />
         </div>
       )}
 
@@ -331,7 +352,7 @@ export default function ModelsPage() {
         ) : error ? (
           <ErrorState message={error} onRetry={refetch} />
         ) : items.length === 0 ? (
-          <EmptyState message="No models registered" icon={<Icon name="box" size={22} />} />
+          <EmptyState message={t("infra.models.empty")} icon={<Icon name="box" size={22} />} />
         ) : (
           <>
             {/* ── Toolbar ── */}
@@ -350,7 +371,7 @@ export default function ModelsPage() {
                 <input
                   type="text" value={search}
                   onChange={(e) => handleSearch(e.target.value)}
-                  placeholder="Search models..."
+                  placeholder={t("infra.models.searchPlaceholder")}
                   style={{
                     width: "100%",
                     padding: "0.3125rem 1.5rem 0.3125rem 1.75rem",
@@ -392,7 +413,7 @@ export default function ModelsPage() {
                   background: providerFilter === null ? "rgba(99,102,241,0.12)" : "transparent",
                   color: providerFilter === null ? "var(--accent-primary)" : "var(--text-tertiary)",
                   fontFamily: "inherit",
-                }}>All <span style={{ fontSize: "0.5625rem", fontWeight: 700, marginLeft: 3, color: providerFilter === null ? "var(--accent-primary)" : "var(--text-muted)" }}>{items.length}</span></button>
+                }}>{t("field.all")} <span style={{ fontSize: "0.5625rem", fontWeight: 700, marginLeft: 3, color: providerFilter === null ? "var(--accent-primary)" : "var(--text-muted)" }}>{items.length}</span></button>
                 {providers.map(([name, count]) => (
                   <ProviderChip
                     key={name} name={name} count={count}
@@ -416,7 +437,7 @@ export default function ModelsPage() {
                 transition: "all 120ms",
               }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                Stream
+                {t("infra.models.stream")}
               </button>
 
               {/* Spacer + view toggle + count */}
@@ -445,7 +466,9 @@ export default function ModelsPage() {
                 fontSize: "0.6875rem", fontWeight: 500, color: "var(--text-tertiary)",
                 whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
               }}>
-                {isFiltered ? `${filtered.length} of ${items.length}` : `${items.length} models`}
+                {isFiltered
+                  ? t("infra.models.countFiltered", { n: filtered.length, total: items.length })
+                  : t("infra.models.countAll", { n: items.length })}
               </span>
             </div>
 
@@ -453,14 +476,14 @@ export default function ModelsPage() {
             {filtered.length === 0 ? (
               <div style={{ padding: "3rem 1rem", textAlign: "center" }}>
                 <p style={{ fontSize: "0.8125rem", color: "var(--text-tertiary)", margin: "0 0 0.75rem" }}>
-                  No models match the current filters
+                  {t("infra.models.noFilterMatch")}
                 </p>
                 <button onClick={() => { setSearch(""); setProviderFilter(null); setStreamingOnly(false); setPage(1); }}
                   style={{
                     padding: "0.375rem 0.875rem", fontSize: "0.8125rem", fontWeight: 500,
                     borderRadius: 6, border: "1.5px solid var(--border-default)", background: "var(--bg-surface)",
                     color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit",
-                  }}>Clear filters</button>
+                  }}>{t("infra.models.clearFilters")}</button>
               </div>
             ) : view === "list" ? (
               <>
@@ -468,12 +491,12 @@ export default function ModelsPage() {
                   <table className="mr-table" style={{ minWidth: 820 }}>
                     <thead>
                       <tr>
-                        <th style={{ paddingLeft: "1.125rem", width: "28%" }}>Model</th>
-                        <th style={{ width: "15%" }}>Context</th>
-                        <th>Capabilities</th>
-                        <th style={{ textAlign: "center", width: 64 }}>Stream</th>
-                        <th style={{ width: 84 }}>Cost</th>
-                        <th style={{ width: 84 }}>Latency</th>
+                        <th style={{ paddingLeft: "1.125rem", width: "28%" }}>{t("field.model")}</th>
+                        <th style={{ width: "15%" }}>{t("infra.models.colContext")}</th>
+                        <th>{t("infra.models.colCapabilities")}</th>
+                        <th style={{ textAlign: "center", width: 64 }}>{t("infra.models.stream")}</th>
+                        <th style={{ width: 84 }}>{t("infra.models.colCost")}</th>
+                        <th style={{ width: 84 }}>{t("infra.models.colLatency")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -607,7 +630,7 @@ export default function ModelsPage() {
                               color: "#10a37f", background: "rgba(16,163,127,0.07)", borderRadius: 4,
                             }}>
                               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-                              stream
+                              {t("infra.models.stream")}
                             </span>
                           )}
                           <TierBadge value={m.cost_tier} />

@@ -20,6 +20,9 @@ import StatCard from "../../components/ui/StatCard";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
+import { useT, type DictKey } from "../../lib/i18n";
+
+type Translate = ReturnType<typeof useT>;
 
 // Lightweight inline skeletons — the admin-ui Skeleton module only
 // ships table + cards helpers, but we need a stat-card placeholder
@@ -54,11 +57,13 @@ import {
   fetchAnalytics,
 } from "../../lib/chatEdgeApi";
 
-const PERIODS: { value: AnalyticsPeriod; label: string }[] = [
-  { value: "today", label: "Today" },
-  { value: "7d", label: "Last 7 Days" },
-  { value: "30d", label: "Last 30 Days" },
-  { value: "90d", label: "Last 90 Days" },
+// Built at module scope, so it stores dictionary KEYS and the component
+// resolves them at render time — same trick as the Sidebar nav.
+const PERIODS: { value: AnalyticsPeriod; label: DictKey }[] = [
+  { value: "today", label: "chat.analytics.periodToday" },
+  { value: "7d", label: "time.last7d" },
+  { value: "30d", label: "time.last30d" },
+  { value: "90d", label: "time.last90d" },
 ];
 
 // Brand colors keep the by-model chart legible across providers.
@@ -102,17 +107,18 @@ function formatCost(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function formatRelative(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "—";
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+function formatRelative(iso: string, t: Translate): string {
+  const ms = new Date(iso).getTime();
+  if (Number.isNaN(ms)) return "—";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return t("time.justNow");
+  if (diff < 3_600_000) return t("time.minutesAgo", { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("time.hoursAgo", { n: Math.floor(diff / 3_600_000) });
+  return t("time.daysAgo", { n: Math.floor(diff / 86_400_000) });
 }
 
 export default function ChatAnalyticsPage() {
+  const t = useT();
   const [period, setPeriod] = useState<AnalyticsPeriod>("30d");
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [recent, setRecent] = useState<AdminConversationListResponse | null>(
@@ -132,24 +138,29 @@ export default function ChatAnalyticsPage() {
     );
   }, []);
 
-  const load = useCallback(async (p: AnalyticsPeriod) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [analytics, recentList] = await Promise.all([
-        fetchAnalytics(p),
-        fetchAdminConversations({ limit: 10 }),
-      ]);
-      setData(analytics);
-      setRecent(recentList);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analytics");
-      setData(null);
-      setRecent(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (p: AnalyticsPeriod) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [analytics, recentList] = await Promise.all([
+          fetchAnalytics(p),
+          fetchAdminConversations({ limit: 10 }),
+        ]);
+        setData(analytics);
+        setRecent(recentList);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : t("chat.analytics.loadError"),
+        );
+        setData(null);
+        setRecent(null);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     void load(period);
@@ -179,7 +190,7 @@ export default function ChatAnalyticsPage() {
     >
       {PERIODS.map((p) => (
         <option key={p.value} value={p.value}>
-          {p.label}
+          {t(p.label)}
         </option>
       ))}
     </select>
@@ -188,8 +199,8 @@ export default function ChatAnalyticsPage() {
   return (
     <div>
       <PageHeader
-        title="Chat Analytics"
-        subtitle="Web Chat usage, model breakdown, and recent conversations"
+        title={t("chat.analytics.title")}
+        subtitle={t("chat.analytics.subtitle")}
         actions={periodSelector}
       />
 
@@ -216,24 +227,28 @@ export default function ChatAnalyticsPage() {
             ) : (
               <>
                 <StatCard
-                  label="Conversations"
+                  label={t("chat.col.conversations")}
                   value={compactNumber(data.totals.conversations)}
-                  subtitle={`${data.totals.messages.toLocaleString()} messages`}
+                  subtitle={t("chat.analytics.messagesCount", {
+                    n: data.totals.messages.toLocaleString(),
+                  })}
                 />
                 <StatCard
-                  label="Active Users"
+                  label={t("chat.analytics.statActiveUsers")}
                   value={compactNumber(data.totals.active_users)}
-                  subtitle={`${data.totals.files_uploaded.toLocaleString()} files uploaded`}
+                  subtitle={t("chat.analytics.filesUploaded", {
+                    n: data.totals.files_uploaded.toLocaleString(),
+                  })}
                 />
                 <StatCard
-                  label="Tokens Used"
+                  label={t("chat.analytics.statTokensUsed")}
                   value={compactNumber(data.totals.tokens_used)}
-                  subtitle="input + output"
+                  subtitle={t("chat.analytics.inputOutput")}
                 />
                 <StatCard
-                  label="Est. Cost"
+                  label={t("chat.analytics.statEstCost")}
                   value={formatCost(data.totals.estimated_cost_usd)}
-                  subtitle="provider list pricing"
+                  subtitle={t("chat.analytics.listPricing")}
                 />
               </>
             )}
@@ -264,17 +279,17 @@ export default function ChatAnalyticsPage() {
                     margin: 0,
                   }}
                 >
-                  Messages Over Time
+                  {t("chat.analytics.messagesOverTime")}
                 </h3>
                 <span style={{ fontSize: "0.7rem", color: "var(--color-text-muted)" }}>
-                  daily
+                  {t("chat.analytics.daily")}
                 </span>
               </div>
               <div style={{ height: 240 }}>
                 {loading || !data ? (
                   <SkeletonChart />
                 ) : data.daily.length === 0 ? (
-                  <EmptyState message="No chat data yet" />
+                  <EmptyState message={t("chat.analytics.noChatData")} />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
@@ -325,13 +340,13 @@ export default function ChatAnalyticsPage() {
                   margin: "0 0 0.625rem",
                 }}
               >
-                Usage by Model
+                {t("chat.analytics.usageByModel")}
               </h3>
               <div style={{ height: 240 }}>
                 {loading || !data ? (
                   <SkeletonChart />
                 ) : byModel.length === 0 ? (
-                  <EmptyState message="No model usage yet" />
+                  <EmptyState message={t("chat.analytics.noModelUsage")} />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -397,7 +412,7 @@ export default function ChatAnalyticsPage() {
                   margin: 0,
                 }}
               >
-                Recent Conversations
+                {t("chat.analytics.recentConversations")}
               </h3>
               <Link
                 href="/chat-conversations"
@@ -406,24 +421,24 @@ export default function ChatAnalyticsPage() {
                   color: "var(--color-sran-500, #60a5fa)",
                 }}
               >
-                View all →
+                {t("chat.analytics.viewAll")} →
               </Link>
             </div>
             {loading || !recent ? (
               <SkeletonTable rows={6} cols={6} />
             ) : recent.conversations.length === 0 ? (
-              <EmptyState message="No conversations yet" />
+              <EmptyState message={t("chat.analytics.noConversations")} />
             ) : (
               <div style={{ overflowX: "auto" }}>
                 <table className="sran-table" style={{ minWidth: 720 }}>
                   <thead>
                     <tr>
-                      <th>Title</th>
-                      <th>User</th>
-                      <th>Model</th>
-                      <th style={{ textAlign: "right" }}>Messages</th>
-                      <th style={{ textAlign: "right" }}>Tokens</th>
-                      <th>Last Active</th>
+                      <th>{t("chat.col.title")}</th>
+                      <th>{t("field.user")}</th>
+                      <th>{t("field.model")}</th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.messages")}</th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.tokens")}</th>
+                      <th>{t("chat.col.lastActive")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -437,7 +452,7 @@ export default function ChatAnalyticsPage() {
                               fontWeight: 500,
                             }}
                           >
-                            {c.title || "Untitled"}
+                            {c.title || t("chat.untitled")}
                           </Link>
                         </td>
                         <td style={{ color: "var(--color-text-secondary)" }}>
@@ -453,7 +468,7 @@ export default function ChatAnalyticsPage() {
                           {compactNumber(c.token_count)}
                         </td>
                         <td style={{ color: "var(--color-text-muted)" }}>
-                          {formatRelative(c.updated_at)}
+                          {formatRelative(c.updated_at, t)}
                         </td>
                       </tr>
                     ))}

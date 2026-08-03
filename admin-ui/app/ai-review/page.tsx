@@ -8,6 +8,7 @@ import ErrorState from "../../components/ui/ErrorState";
 import { Icon } from "../../components/ui/Icon";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import { api, ApiError } from "../../lib/api";
+import { useT, type DictKey } from "../../lib/i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -106,6 +107,7 @@ interface KeyPickerProps {
 }
 
 function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, onCancel, onOpen, onPillRemove }: KeyPickerProps) {
+  const t = useT();
   const [search, setSearch] = useState("");
   const [draftScope, setDraftScope] = useState(scope);
   const [draftIds, setDraftIds] = useState(selectedIds);
@@ -145,9 +147,9 @@ function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, on
     return (
       <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
         {scope === "all" ? (
-          <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: "99px", background: "var(--color-status-success-bg)", color: "var(--color-status-success)", fontSize: "12px", fontWeight: 600 }}>All keys</span>
+          <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: "99px", background: "var(--color-status-success-bg)", color: "var(--color-status-success)", fontSize: "12px", fontWeight: 600 }}>{t("obs.air.key.all")}</span>
         ) : selectedIds.length === 0 ? (
-          <span style={{ fontSize: "12px", color: "var(--color-text-muted)", fontStyle: "italic" }}>No keys selected</span>
+          <span style={{ fontSize: "12px", color: "var(--color-text-muted)", fontStyle: "italic" }}>{t("obs.air.key.none")}</span>
         ) : (
           <>
             {selectedIds.slice(0, MAX_PILLS).map((id) => (
@@ -157,15 +159,15 @@ function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, on
               </span>
             ))}
             {selectedIds.length > MAX_PILLS && (
-              <span style={{ fontSize: "12px", color: "var(--color-text-muted)", fontWeight: 500 }}>+{selectedIds.length - MAX_PILLS} more</span>
+              <span style={{ fontSize: "12px", color: "var(--color-text-muted)", fontWeight: 500 }}>{t("obs.air.key.more", { n: selectedIds.length - MAX_PILLS })}</span>
             )}
           </>
         )}
         <button onClick={(e) => { e.stopPropagation(); onOpen(); }} className="sran-btn sran-btn-secondary" style={{ padding: "2px 10px", fontSize: "11px", marginLeft: "auto" }}>
-          {scope === "all" ? "Change" : "Edit keys"}
+          {scope === "all" ? t("obs.air.key.change") : t("obs.air.key.edit")}
         </button>
         {scope === "specific" && selectedIds.length > 0 && (
-          <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>{selectedIds.length} of {allKeys.length} keys selected</span>
+          <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>{t("obs.air.key.selectedOf", { n: selectedIds.length, total: allKeys.length })}</span>
         )}
       </div>
     );
@@ -184,7 +186,7 @@ function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, on
                 border: active ? "1.5px solid var(--color-status-info)" : "1px solid var(--color-border-default)",
                 background: active ? "var(--color-status-info-bg)" : "transparent",
                 color: active ? "var(--color-status-info)" : "var(--color-text-primary)" }}>
-              {s === "all" ? "All keys" : "Specific keys"}
+              {s === "all" ? t("obs.air.key.all") : t("obs.air.key.specific")}
             </button>
           );
         })}
@@ -195,17 +197,17 @@ function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, on
           {/* Search + count header */}
           <div style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--color-border-default)" }}>
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name or prefix…"
+              placeholder={t("obs.air.key.searchPlaceholder")}
               style={{ flex: 1, padding: "8px 12px", border: "none", fontSize: "13px", outline: "none", background: "var(--color-surface-primary)" }} />
-            <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", padding: "0 12px", whiteSpace: "nowrap" }}>{draftIds.length} selected</span>
+            <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", padding: "0 12px", whiteSpace: "nowrap" }}>{t("obs.air.key.selectedCount", { n: draftIds.length })}</span>
           </div>
 
           {/* Scrollable key list */}
           <div style={{ maxHeight: "240px", overflowY: "auto" }}>
             {allKeys.length === 0 ? (
-              <div style={{ padding: "12px", fontSize: "12px", color: "var(--color-text-muted)" }}>No active API keys found.</div>
+              <div style={{ padding: "12px", fontSize: "12px", color: "var(--color-text-muted)" }}>{t("obs.air.key.noneActive")}</div>
             ) : filtered.length === 0 ? (
-              <div style={{ padding: "12px", fontSize: "12px", color: "var(--color-text-muted)" }}>No keys match &quot;{search}&quot;.</div>
+              <div style={{ padding: "12px", fontSize: "12px", color: "var(--color-text-muted)" }}>{t("obs.air.key.noMatch", { q: search })}</div>
             ) : Object.entries(byTenant).map(([tid, keys]) => {
               const tName = tenantMap[tid] || tid.slice(0, 12);
               const tIds = keys.map((k) => k.key_id);
@@ -215,8 +217,8 @@ function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, on
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", background: "var(--color-surface-secondary)", borderBottom: "1px solid var(--color-border-default)" }}>
                     <span style={{ fontSize: "12px", fontWeight: 500 }}>{tName} ({keys.length})</span>
                     <span style={{ fontSize: "11px" }}>
-                      {!allSel && <button onClick={() => setDraftIds([...new Set([...draftIds, ...tIds])])} style={{ background: "none", border: "none", color: "var(--color-status-info)", cursor: "pointer", fontSize: "11px", padding: 0, marginRight: "6px" }}>Select all</button>}
-                      <button onClick={() => setDraftIds(draftIds.filter((id) => !tIds.includes(id)))} style={{ background: "none", border: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: "11px", padding: 0 }}>Clear</button>
+                      {!allSel && <button onClick={() => setDraftIds([...new Set([...draftIds, ...tIds])])} style={{ background: "none", border: "none", color: "var(--color-status-info)", cursor: "pointer", fontSize: "11px", padding: 0, marginRight: "6px" }}>{t("obs.air.key.selectAll")}</button>}
+                      <button onClick={() => setDraftIds(draftIds.filter((id) => !tIds.includes(id)))} style={{ background: "none", border: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: "11px", padding: 0 }}>{t("action.clear")}</button>
                     </span>
                   </div>
                   {keys.map((k) => (
@@ -238,8 +240,8 @@ function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, on
 
       {/* Footer */}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", padding: "10px 12px", borderTop: "1px solid var(--color-border-default)", background: "var(--color-surface-secondary)" }}>
-        <button className="sran-btn sran-btn-secondary" onClick={onCancel} style={{ fontSize: "12px", padding: "4px 12px" }}>Cancel</button>
-        <button className="sran-btn sran-btn-primary" onClick={() => onConfirm(draftScope, draftIds)} style={{ fontSize: "12px", padding: "4px 12px" }}>Confirm selection</button>
+        <button className="sran-btn sran-btn-secondary" onClick={onCancel} style={{ fontSize: "12px", padding: "4px 12px" }}>{t("action.cancel")}</button>
+        <button className="sran-btn sran-btn-primary" onClick={() => onConfirm(draftScope, draftIds)} style={{ fontSize: "12px", padding: "4px 12px" }}>{t("obs.air.key.confirm")}</button>
       </div>
     </div>
   );
@@ -250,18 +252,20 @@ function KeyPicker({ open, scope, selectedIds, allKeys, tenantMap, onConfirm, on
 // ---------------------------------------------------------------------------
 
 function StatusStrip({ settings }: { settings: Settings }) {
+  const t = useT();
   const provider = settings.review_provider ?? "anthropic";
+  // `provider / model` stays verbatim — both are identifiers.
   const model = settings.review_model || PROVIDER_DEFAULTS[provider] || "default";
   const items: { label: string; variant: "success" | "error" | "warning" | "info" }[] = [
-    settings.enabled ? { label: "Enabled", variant: "success" } : { label: "Disabled", variant: "error" },
+    settings.enabled ? { label: t("field.enabled"), variant: "success" } : { label: t("field.disabled"), variant: "error" },
     { label: `${provider} / ${model}`, variant: "info" },
-    settings.review_api_key_set ? { label: "Key set", variant: "success" } : { label: "No key", variant: "warning" },
-    settings.realtime_enabled ? { label: "Realtime on", variant: "info" } : { label: "Realtime off", variant: "info" },
+    settings.review_api_key_set ? { label: t("obs.air.status.keySet"), variant: "success" } : { label: t("obs.air.status.noKey"), variant: "warning" },
+    settings.realtime_enabled ? { label: t("obs.air.status.realtimeOn"), variant: "info" } : { label: t("obs.air.status.realtimeOff"), variant: "info" },
   ];
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
       {items.map((it, i) => <Badge key={i} variant={it.variant}>{it.label}</Badge>)}
-      {settings.last_scan_at && <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginLeft: "0.25rem" }}>Last scan: {new Date(settings.last_scan_at).toLocaleString()}</span>}
+      {settings.last_scan_at && <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginLeft: "0.25rem" }}>{t("obs.air.lastScan", { time: new Date(settings.last_scan_at).toLocaleString() })}</span>}
     </div>
   );
 }
@@ -285,6 +289,7 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
 // ---------------------------------------------------------------------------
 
 export default function AiReviewPage() {
+  const t = useT();
   const [savedSettings, setSavedSettings] = useState<Settings | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -379,9 +384,9 @@ export default function AiReviewPage() {
       setDraftModel(st.review_model ?? ""); setDraftEndpoint(st.review_endpoint ?? ""); setDraftKey("");
       syncModeDrafts(st);
     } catch (err) {
-      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Failed to load");
+      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.load"));
     } finally { setLoading(false); }
-  }, []);
+  }, [t]);
 
   useEffect(() => { reloadAll(); loadKeysAndTenants(); }, [reloadAll]);
 
@@ -393,7 +398,7 @@ export default function AiReviewPage() {
       setSettings(st); setSavedSettings(st);
       setSummary((await api.get("/admin/ai-review/summary")) as Summary);
     } catch (err) {
-      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Failed to update settings");
+      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.updateSettings"));
     }
   }
 
@@ -407,7 +412,7 @@ export default function AiReviewPage() {
       setDraftProvider(st.review_provider ?? "anthropic");
       setDraftModel(st.review_model ?? ""); setDraftEndpoint(st.review_endpoint ?? "");
     } catch (err) {
-      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Failed to save provider settings");
+      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.saveProvider"));
     }
   }
 
@@ -416,7 +421,7 @@ export default function AiReviewPage() {
       const st = (await api.patch("/admin/ai-review/settings", { review_api_key: null })) as Settings;
       setSettings(st); setSavedSettings(st); setDraftKey("");
     } catch (err) {
-      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Failed to clear key");
+      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.clearKey"));
     }
   }
 
@@ -435,7 +440,7 @@ export default function AiReviewPage() {
       syncModeDrafts(st);
       setScanSaved(true); setTimeout(() => setScanSaved(false), 3000);
     } catch (err) {
-      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Failed to save settings");
+      setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.saveSettings"));
     }
   }
 
@@ -446,20 +451,20 @@ export default function AiReviewPage() {
   async function testConnection() {
     setConnTesting(true); setConnResult(null);
     try { setConnResult((await api.post("/admin/ai-review/test-connection", {})) as ConnTestResult); }
-    catch (err) { setConnResult({ success: false, latency_ms: 0, model_used: "", error: err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Connection test failed" }); }
+    catch (err) { setConnResult({ success: false, latency_ms: 0, model_used: "", error: err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.connTest") }); }
     finally { setConnTesting(false); setTimeout(() => setConnResult(null), 10000); }
   }
 
   async function runScan() {
     setScanning(true); setError(null);
     try { await api.post("/admin/ai-review/scan", {}); await reloadAll(); }
-    catch (err) { setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Scan failed"); }
+    catch (err) { setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.scan")); }
     finally { setScanning(false); }
   }
 
   async function patchFinding(fid: string, status: string) {
     try { await api.patch(`/admin/ai-review/findings/${fid}`, { status }); await reloadAll(); }
-    catch (err) { setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : "Failed to update finding"); }
+    catch (err) { setError(err instanceof ApiError && err.body?.error?.message ? err.body.error.message : t("obs.air.err.updateFinding")); }
   }
 
   function handleProviderSwitch(p: Provider) {
@@ -477,7 +482,7 @@ export default function AiReviewPage() {
 
   return (
     <>
-      <PageHeader title="AI Sensitive Data Reviewer" subtitle="Scans AI provider responses for sensitive data that DLP filters may have missed on the way out" />
+      <PageHeader title={t("obs.air.title")} subtitle={t("obs.air.subtitle")} />
 
       {error && <div className="sran-card" style={{ marginBottom: "1rem" }}><ErrorState message={error} onRetry={reloadAll} /></div>}
 
@@ -485,11 +490,11 @@ export default function AiReviewPage() {
       <div className="sran-card" style={{ marginBottom: "1.5rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }} onClick={toggleSettings}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {savedSettings ? <StatusStrip settings={savedSettings} /> : <span style={{ color: "var(--color-text-muted)", fontSize: "var(--font-size-xs)" }}>Loading…</span>}
+            {savedSettings ? <StatusStrip settings={savedSettings} /> : <span style={{ color: "var(--color-text-muted)", fontSize: "var(--font-size-xs)" }}>{t("state.loading")}</span>}
           </div>
           <button className="sran-btn sran-btn-secondary" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", padding: "0.375rem 0.75rem", fontSize: "var(--font-size-xs)", flexShrink: 0, marginLeft: "0.75rem" }}
             onClick={(e) => { e.stopPropagation(); toggleSettings(); }}>
-            <Icon name="settings" size={12} /> Settings {settingsOpen ? <Icon name="chevron-up" size={12} /> : <Icon name="chevron-down" size={12} />}
+            <Icon name="settings" size={12} /> {t("obs.air.settings")} {settingsOpen ? <Icon name="chevron-up" size={12} /> : <Icon name="chevron-down" size={12} />}
           </button>
         </div>
 
@@ -498,24 +503,24 @@ export default function AiReviewPage() {
             {/* Enable toggle */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
               <div>
-                <div style={{ fontWeight: 600, fontSize: "var(--font-size-base)" }}>AI review enabled</div>
-                <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>When on, scan and realtime hooks can execute.</div>
+                <div style={{ fontWeight: 600, fontSize: "var(--font-size-base)" }}>{t("obs.air.enabledTitle")}</div>
+                <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>{t("obs.air.enabledHint")}</div>
               </div>
               <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
                 <input type="checkbox" checked={settings.enabled} disabled={loading}
                   onChange={(e) => patchSettingsImmediate({ enabled: e.target.checked })}
                   style={{ width: 18, height: 18, cursor: "pointer" }} />
-                <span style={{ fontSize: "var(--font-size-sm)", fontWeight: 600 }}>{settings.enabled ? "On" : "Off"}</span>
+                <span style={{ fontSize: "var(--font-size-sm)", fontWeight: 600 }}>{settings.enabled ? t("obs.air.on") : t("obs.air.off")}</span>
               </label>
             </div>
 
             {!settings.enabled ? (
-              <div style={{ fontSize: "var(--font-size-sm)", color: "var(--color-text-muted)" }}>Enable AI review to configure the provider and start scanning.</div>
+              <div style={{ fontSize: "var(--font-size-sm)", color: "var(--color-text-muted)" }}>{t("obs.air.disabledHint")}</div>
             ) : (
               <>
                 {/* Provider config */}
                 <div style={{ borderTop: "1px solid var(--color-border-default)", paddingTop: "1rem", marginBottom: "1rem" }}>
-                  <div style={{ fontWeight: 600, fontSize: "var(--font-size-sm)", marginBottom: "0.75rem" }}>Provider configuration</div>
+                  <div style={{ fontWeight: 600, fontSize: "var(--font-size-sm)", marginBottom: "0.75rem" }}>{t("obs.air.providerConfig")}</div>
                   <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
                     {(["anthropic", "openai", "openrouter", "custom"] as Provider[]).map((p) => {
                       const a = draftProvider === p;
@@ -524,51 +529,51 @@ export default function AiReviewPage() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: "1rem", marginBottom: "0.75rem" }}>
                     <div>
-                      <label className="sran-label">Model</label>
+                      <label className="sran-label">{t("field.model")}</label>
                       <input type="text" className="sran-input" value={draftModel} onChange={(e) => setDraftModel(e.target.value)} placeholder={PROVIDER_DEFAULTS[draftProvider]} />
                     </div>
                     <div>
-                      <label className="sran-label">API key {settings.review_api_key_set && <span style={{ color: "var(--color-status-success)", fontSize: "var(--font-size-xs)" }}>(key set)</span>}</label>
+                      <label className="sran-label">{t("obs.air.apiKey")} {settings.review_api_key_set && <span style={{ color: "var(--color-status-success)", fontSize: "var(--font-size-xs)" }}>{t("obs.air.keySetNote")}</span>}</label>
                       <div style={{ display: "flex", gap: "0.25rem" }}>
                         <input type="password" className="sran-input" value={draftKey} onChange={(e) => setDraftKey(e.target.value)}
-                          placeholder={settings.review_api_key_set ? "••••••••• (key set — type to replace)" : PROVIDER_KEY_HINT[draftProvider]} />
-                        {settings.review_api_key_set && <button className="sran-btn sran-btn-secondary" style={{ padding: "0 0.5rem" }} onClick={clearProviderKey}>Clear</button>}
+                          placeholder={settings.review_api_key_set ? t("obs.air.keyPlaceholder") : PROVIDER_KEY_HINT[draftProvider]} />
+                        {settings.review_api_key_set && <button className="sran-btn sran-btn-secondary" style={{ padding: "0 0.5rem" }} onClick={clearProviderKey}>{t("action.clear")}</button>}
                       </div>
-                      <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>This key is used only for AI review scans.</div>
+                      <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>{t("obs.air.keyOnlyNote")}</div>
                     </div>
                   </div>
                   {draftProvider === "custom" && (
                     <div style={{ marginBottom: "0.75rem" }}>
-                      <label className="sran-label">Endpoint URL</label>
+                      <label className="sran-label">{t("obs.air.endpointUrl")}</label>
                       <input type="text" className="sran-input" value={draftEndpoint} onChange={(e) => setDraftEndpoint(e.target.value)} placeholder="https://your-llm-endpoint.com/v1/chat/completions" />
-                      <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>Must be OpenAI-compatible.</div>
+                      <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>{t("obs.air.endpointNote")}</div>
                     </div>
                   )}
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <button className="sran-btn sran-btn-primary" onClick={saveProviderSettings}>Save provider settings</button>
-                    <button className="sran-btn sran-btn-secondary" onClick={testConnection} disabled={connTesting}>{connTesting ? "Testing…" : "Test connection"}</button>
-                    {connResult && <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 600, color: connResult.success ? "var(--color-status-success)" : "var(--color-status-error)" }}>{connResult.success ? `Connected · ${connResult.latency_ms}ms · ${connResult.model_used}` : `Failed: ${connResult.error}`}</span>}
+                    <button className="sran-btn sran-btn-primary" onClick={saveProviderSettings}>{t("obs.air.saveProvider")}</button>
+                    <button className="sran-btn sran-btn-secondary" onClick={testConnection} disabled={connTesting}>{connTesting ? t("action.testing") : t("obs.air.testConnection")}</button>
+                    {connResult && <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 600, color: connResult.success ? "var(--color-status-success)" : "var(--color-status-error)" }}>{connResult.success ? t("obs.air.connOk", { ms: connResult.latency_ms, model: connResult.model_used }) : t("obs.air.connFail", { error: connResult.error ?? "" })}</span>}
                   </div>
                 </div>
 
                 {/* Scan mode — two independent toggles in one card */}
                 <div style={{ borderTop: "1px solid var(--color-border-default)", paddingTop: "1rem" }}>
-                  <div style={{ fontWeight: 600, fontSize: "var(--font-size-sm)", marginBottom: "0.75rem" }}>Scan mode</div>
+                  <div style={{ fontWeight: 600, fontSize: "var(--font-size-sm)", marginBottom: "0.75rem" }}>{t("obs.air.scanMode")}</div>
 
                   <div style={{ border: "1px solid var(--color-border-default)", borderRadius: "var(--radius-md)", overflow: "hidden", marginBottom: "1rem" }}>
                     {/* Real-time monitoring */}
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 16px" }}>
                         <div style={{ flex: 1, opacity: draftRtEnabled ? 1 : 0.5 }}>
-                          <div style={{ fontWeight: 600, fontSize: "13px" }}>Real-time monitoring</div>
-                          <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>Scan AI responses as they happen</div>
+                          <div style={{ fontWeight: 600, fontSize: "13px" }}>{t("obs.air.realtimeTitle")}</div>
+                          <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>{t("obs.air.realtimeHint")}</div>
                         </div>
-                        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "var(--color-status-success-bg)", color: "var(--color-status-success)", fontWeight: 600, opacity: draftRtEnabled ? 1 : 0.5 }}>Live</span>
+                        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "var(--color-status-success-bg)", color: "var(--color-status-success)", fontWeight: 600, opacity: draftRtEnabled ? 1 : 0.5 }}>{t("obs.air.live")}</span>
                         <ToggleSwitch checked={draftRtEnabled} onChange={setDraftRtEnabled} />
                       </div>
                       {draftRtEnabled && (
                         <div style={{ borderTop: "1px solid var(--color-border-default)", padding: "12px 16px", background: "var(--color-surface-secondary)" }}>
-                          <label className="sran-label" style={{ marginBottom: "6px", display: "block" }}>Monitor keys</label>
+                          <label className="sran-label" style={{ marginBottom: "6px", display: "block" }}>{t("obs.air.monitorKeys")}</label>
                           <KeyPicker open={rtPickerOpen} scope={draftRtScope} selectedIds={draftRtIds} allKeys={allKeys} tenantMap={tenantMap}
                             onOpen={() => setRtPickerOpen(true)} onCancel={() => setRtPickerOpen(false)}
                             onConfirm={(s, ids) => { setDraftRtScope(s); setDraftRtIds(ids); setRtPickerOpen(false); }}
@@ -584,25 +589,25 @@ export default function AiReviewPage() {
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 16px" }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: "13px" }}>Manual scan</div>
-                          <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>Run on demand, scan recent requests</div>
+                          <div style={{ fontWeight: 600, fontSize: "13px" }}>{t("obs.air.manualTitle")}</div>
+                          <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>{t("obs.air.manualHint")}</div>
                         </div>
                         {/* No toggle: manual scan is always available via "Run scan now"
                             below, so the scope/limit config is always shown. */}
-                        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "var(--color-status-info-bg)", color: "var(--color-status-info)", fontWeight: 600 }}>On demand</span>
+                        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "var(--color-status-info-bg)", color: "var(--color-status-info)", fontWeight: 600 }}>{t("obs.air.onDemand")}</span>
                       </div>
                         <div style={{ borderTop: "1px solid var(--color-border-default)", padding: "12px 16px", background: "var(--color-surface-secondary)" }}>
-                          <label className="sran-label" style={{ marginBottom: "6px", display: "block" }}>Scan scope</label>
+                          <label className="sran-label" style={{ marginBottom: "6px", display: "block" }}>{t("obs.air.scanScope")}</label>
                           <KeyPicker open={manualPickerOpen} scope={draftManualScope} selectedIds={draftManualIds} allKeys={allKeys} tenantMap={tenantMap}
                             onOpen={() => setManualPickerOpen(true)} onCancel={() => setManualPickerOpen(false)}
                             onConfirm={(s, ids) => { setDraftManualScope(s); setDraftManualIds(ids); setManualPickerOpen(false); }}
                             onPillRemove={(id) => { setDraftManualIds(draftManualIds.filter((i) => i !== id)); }} />
                           <div style={{ marginTop: "0.75rem" }}>
-                            <label className="sran-label">Scan limit</label>
+                            <label className="sran-label">{t("obs.air.scanLimit")}</label>
                             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                               <input type="number" min={1} max={200} className="sran-input" style={{ width: "5rem" }} value={draftScanLimit}
                                 onChange={(e) => { const n = parseInt(e.target.value, 10); if (!isNaN(n)) setDraftScanLimit(Math.max(1, Math.min(200, n))); }} />
-                              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>requests per run</span>
+                              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>{t("obs.air.perRun")}</span>
                             </div>
                           </div>
                         </div>
@@ -611,14 +616,16 @@ export default function AiReviewPage() {
 
                   {/* Save / Cancel row */}
                   <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                    <button className="sran-btn sran-btn-secondary" onClick={cancelModeSettings}>Cancel</button>
-                    <button className="sran-btn sran-btn-primary" onClick={saveModeSettings}>Save settings</button>
-                    {scanSaved && <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 600, color: "var(--color-status-success)" }}>Saved &#10003;</span>}
+                    <button className="sran-btn sran-btn-secondary" onClick={cancelModeSettings}>{t("action.cancel")}</button>
+                    <button className="sran-btn sran-btn-primary" onClick={saveModeSettings}>{t("obs.air.saveSettings")}</button>
+                    {scanSaved && <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 600, color: "var(--color-status-success)" }}>{t("state.saved")} &#10003;</span>}
                     <button className="sran-btn sran-btn-primary" onClick={runScan} disabled={scanning || loading} style={{ marginLeft: "auto" }}>
-                      {scanning ? "Scanning…" : "Run scan now"}
+                      {scanning ? t("obs.air.scanning") : t("obs.air.runScan")}
                     </button>
                     <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>
-                      Last scan: {settings.last_scan_at ? new Date(settings.last_scan_at).toLocaleString() : "never"}
+                      {t("obs.air.lastScan", {
+                        time: settings.last_scan_at ? new Date(settings.last_scan_at).toLocaleString() : t("obs.air.never"),
+                      })}
                     </span>
                   </div>
                 </div>
@@ -631,28 +638,38 @@ export default function AiReviewPage() {
       {/* Summary stat cards */}
       {summary && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
-          <StatCard label="New patterns found" value={summary.new_patterns} trend={summary.new_patterns > 0 ? "up" : undefined} subtitle="Not yet in DLP coverage" />
-          <StatCard label="Total findings" value={summary.total_findings} subtitle="Across all scans" />
-          <StatCard label="Already covered" value={summary.already_covered} subtitle="Found but already detected by DLP" />
-          <StatCard label="New (unreviewed)" value={summary.new_findings} subtitle="Awaiting review" />
+          <StatCard label={t("obs.air.stat.newPatterns")} value={summary.new_patterns} trend={summary.new_patterns > 0 ? "up" : undefined} subtitle={t("obs.air.stat.newPatternsSub")} />
+          <StatCard label={t("obs.air.stat.totalFindings")} value={summary.total_findings} subtitle={t("obs.air.stat.totalFindingsSub")} />
+          <StatCard label={t("obs.air.stat.covered")} value={summary.already_covered} subtitle={t("obs.air.stat.coveredSub")} />
+          <StatCard label={t("obs.air.stat.unreviewed")} value={summary.new_findings} subtitle={t("obs.air.stat.unreviewedSub")} />
         </div>
       )}
 
       {/* Findings + scan history */}
       <div className="sran-card" style={{ padding: 0 }}>
         <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--color-border-default)" }}>
-          {([["new_patterns", "New patterns"], ["already_covered", "Already covered"], ["all", "All findings"], ["history", "Scan history"]] as [Tab, string][]).map(([key, label]) => {
+          {([["new_patterns", "obs.air.tab.newPatterns"], ["already_covered", "obs.air.tab.covered"], ["all", "obs.air.tab.all"], ["history", "obs.air.tab.history"]] as [Tab, DictKey][]).map(([key, label]) => {
             const a = tab === key;
-            return <button key={key} onClick={() => setTab(key)} style={{ padding: "0.75rem 1.25rem", background: "none", border: "none", borderBottom: a ? "2px solid var(--color-status-info)" : "2px solid transparent", fontWeight: a ? 600 : 400, fontSize: "var(--font-size-sm)", color: a ? "var(--color-text-primary)" : "var(--color-text-muted)", cursor: "pointer" }}>{label}</button>;
+            return <button key={key} onClick={() => setTab(key)} style={{ padding: "0.75rem 1.25rem", background: "none", border: "none", borderBottom: a ? "2px solid var(--color-status-info)" : "2px solid transparent", fontWeight: a ? 600 : 400, fontSize: "var(--font-size-sm)", color: a ? "var(--color-text-primary)" : "var(--color-text-muted)", cursor: "pointer" }}>{t(label)}</button>;
           })}
         </div>
 
         {tab === "history" ? (
           <div>
-            {scanRuns.length === 0 ? <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>No scan runs yet.</div> : (
+            {scanRuns.length === 0 ? <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>{t("obs.air.noRuns")}</div> : (
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", fontSize: "var(--font-size-xs)", borderCollapse: "collapse" }}>
-                  <thead><tr>{["Time", "Trigger", "Provider", "Model", "Requests", "Findings", "Tokens", "Cost", "Status"].map((h) => <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", fontWeight: 600 }}>{h}</th>)}</tr></thead>
+                  <thead><tr>{([
+                    "obs.air.col.time",
+                    "obs.air.col.trigger",
+                    "field.provider",
+                    "field.model",
+                    "obs.air.col.requestsScanned",
+                    "obs.air.col.findings",
+                    "obs.air.col.tokens",
+                    "obs.air.col.cost",
+                    "field.status",
+                  ] as DictKey[]).map((h) => <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", fontWeight: 600 }}>{t(h)}</th>)}</tr></thead>
                   <tbody>{scanRuns.map((r) => (
                     <tr key={r.scan_run_id}>
                       <td className="air-td">{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</td>
@@ -669,18 +686,26 @@ export default function AiReviewPage() {
                 </table>
               </div>
             )}
-            {scanAggregate && <div style={{ padding: "0.75rem 1rem", borderTop: "1px solid var(--color-border-default)", fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>Total AI review cost: <strong>{formatCost(scanAggregate.total_cost_usd)}</strong> across {scanAggregate.total_runs} runs ({scanAggregate.total_tokens.toLocaleString()} tokens).</div>}
+            {scanAggregate && <div style={{ padding: "0.75rem 1rem", borderTop: "1px solid var(--color-border-default)", fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>{t("obs.air.totalCostLabel")} <strong>{formatCost(scanAggregate.total_cost_usd)}</strong> {t("obs.air.totalCostSuffix", { runs: scanAggregate.total_runs, tokens: scanAggregate.total_tokens.toLocaleString() })}</div>}
           </div>
         ) : loading ? (
           <div style={{ padding: "0.5rem 0.75rem" }}>
             <SkeletonTable rows={6} cols={7} />
           </div>
         ) : visibleFindings.length === 0 ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>No findings in this tab yet. {settings?.enabled ? "Run a scan to populate." : "Enable AI review first."}</div>
+          <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)" }}>{t("obs.air.noFindingsTab")} {settings?.enabled ? t("obs.air.runScanHint") : t("obs.air.enableFirst")}</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", fontSize: "var(--font-size-xs)", borderCollapse: "collapse" }}>
-              <thead><tr>{["Request", "Entity type", "Risk", "Sample", "Suggested detector", "Status", "Actions"].map((h) => <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", fontWeight: 600 }}>{h}</th>)}</tr></thead>
+              <thead><tr>{([
+                "obs.air.col.request",
+                "obs.air.col.entityType",
+                "obs.air.col.risk",
+                "obs.air.col.sample",
+                "obs.air.col.suggestedDetector",
+                "field.status",
+                "field.actions",
+              ] as DictKey[]).map((h) => <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--color-border-default)", fontWeight: 600 }}>{t(h)}</th>)}</tr></thead>
               <tbody>{visibleFindings.map((f) => (
                 <tr key={f.id}>
                   <td className="air-td"><code>{f.request_id.slice(0, 16)}…</code></td>
@@ -691,9 +716,9 @@ export default function AiReviewPage() {
                   <td className="air-td"><Badge variant={f.status === "dismissed" ? "info" : f.status === "added_to_dlp" ? "success" : f.status === "reviewed" ? "warning" : "info"}>{f.status}</Badge></td>
                   <td className="air-td">
                     <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                      <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "reviewed")}>Mark reviewed</button>
-                      <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "added_to_dlp")}>Add to DLP</button>
-                      <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "dismissed")}>Dismiss</button>
+                      <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "reviewed")}>{t("obs.air.act.markReviewed")}</button>
+                      <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "added_to_dlp")}>{t("obs.air.act.addToDlp")}</button>
+                      <button className="sran-btn sran-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "var(--font-size-xs)" }} onClick={() => patchFinding(f.id, "dismissed")}>{t("obs.air.act.dismiss")}</button>
                     </div>
                   </td>
                 </tr>

@@ -9,6 +9,7 @@ import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
 import { SkeletonTable } from "../../components/ui/Skeleton";
+import { useT } from "../../lib/i18n";
 import {
   AdminConvQuery,
   AdminConversationListResponse,
@@ -30,6 +31,7 @@ function formatDate(iso: string): string {
 }
 
 export default function ChatConversationsPage() {
+  const t = useT();
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<AdminConvQuery>({});
   // Local filter draft — applied only when "Apply Filters" clicks
@@ -51,12 +53,12 @@ export default function ChatConversationsPage() {
       });
       setData(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(err instanceof Error ? err.message : t("state.errorLoad"));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [filters, page]);
+  }, [filters, page, t]);
 
   useEffect(() => {
     void load();
@@ -76,8 +78,8 @@ export default function ChatConversationsPage() {
   return (
     <div>
       <PageHeader
-        title="Conversation Logs"
-        subtitle="Filter and inspect chat conversations across the workspace"
+        title={t("chat.conversations.title")}
+        subtitle={t("chat.conversations.subtitle")}
       />
 
       {/* Filters */}
@@ -92,7 +94,7 @@ export default function ChatConversationsPage() {
             alignItems: "end",
           }}
         >
-          <Field label="Search title">
+          <Field label={t("chat.conversations.searchTitleLabel")}>
             <input
               type="text"
               value={draft.q ?? ""}
@@ -100,22 +102,22 @@ export default function ChatConversationsPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") applyFilters();
               }}
-              placeholder="Search conversations..."
+              placeholder={t("chat.conversations.searchPlaceholder")}
               className="sran-input"
             />
           </Field>
-          <Field label="Model id">
+          <Field label={t("chat.conversations.modelIdLabel")}>
             <input
               type="text"
               value={draft.model_id ?? ""}
               onChange={(e) =>
                 setDraft({ ...draft, model_id: e.target.value || undefined })
               }
-              placeholder="e.g. gpt-4o"
+              placeholder={t("chat.conversations.modelIdPlaceholder")}
               className="sran-input"
             />
           </Field>
-          <Field label="From">
+          <Field label={t("chat.conversations.from")}>
             <input
               type="date"
               value={draft.date_from ?? ""}
@@ -125,7 +127,7 @@ export default function ChatConversationsPage() {
               className="sran-input"
             />
           </Field>
-          <Field label="To">
+          <Field label={t("chat.conversations.to")}>
             <input
               type="date"
               value={draft.date_to ?? ""}
@@ -141,14 +143,14 @@ export default function ChatConversationsPage() {
               onClick={applyFilters}
               className="sran-btn sran-btn-primary sran-btn-sm"
             >
-              Apply
+              {t("action.apply")}
             </button>
             <button
               type="button"
               onClick={resetFilters}
               className="sran-btn sran-btn-secondary sran-btn-sm"
             >
-              Reset
+              {t("action.reset")}
             </button>
           </div>
         </div>
@@ -165,7 +167,7 @@ export default function ChatConversationsPage() {
             </div>
           ) : !data || data.conversations.length === 0 ? (
             <div style={{ padding: "2rem 1rem" }}>
-              <EmptyState message="No conversations match these filters" />
+              <EmptyState message={t("state.noResults")} />
             </div>
           ) : (
             <>
@@ -173,15 +175,15 @@ export default function ChatConversationsPage() {
                 <table className="sran-table" style={{ minWidth: 920 }}>
                   <thead>
                     <tr>
-                      <th>Title</th>
-                      <th>User</th>
-                      <th>Model</th>
-                      <th style={{ textAlign: "right" }}>Msgs</th>
-                      <th style={{ textAlign: "right" }}>Tokens</th>
-                      <th>Files</th>
-                      <th>Shared</th>
-                      <th>Created</th>
-                      <th>Last Active</th>
+                      <th>{t("chat.col.title")}</th>
+                      <th>{t("field.user")}</th>
+                      <th>{t("field.model")}</th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.msgs")}</th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.tokens")}</th>
+                      <th>{t("chat.col.files")}</th>
+                      <th>{t("chat.col.shared")}</th>
+                      <th>{t("field.created")}</th>
+                      <th>{t("chat.col.lastActive")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -192,7 +194,7 @@ export default function ChatConversationsPage() {
                             href={`/chat-conversations/${c.id}`}
                             style={{ color: "var(--color-text-primary)", fontWeight: 500 }}
                           >
-                            {c.title || "Untitled"}
+                            {c.title || t("chat.untitled")}
                           </Link>
                         </td>
                         <td style={{ color: "var(--color-text-secondary)" }}>

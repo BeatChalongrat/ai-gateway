@@ -3,6 +3,7 @@ import { Outfit } from "next/font/google";
 import { ToastProvider } from "../components/ui/Toast";
 import ShellWrapper from "../components/ShellWrapper";
 import { ThemeProvider } from "../components/ThemeProvider";
+import { I18nProvider } from "../lib/i18n";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -31,9 +32,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ThemeProvider>
-          <ToastProvider>
-            <ShellWrapper>{children}</ShellWrapper>
-          </ToastProvider>
+          {/* Outside ToastProvider so toast copy can be translated too. */}
+          <I18nProvider>
+            <ToastProvider>
+              <ShellWrapper>{children}</ShellWrapper>
+            </ToastProvider>
+          </I18nProvider>
         </ThemeProvider>
       </body>
     </html>
