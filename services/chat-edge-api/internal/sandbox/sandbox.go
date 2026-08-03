@@ -75,13 +75,13 @@ type InputFile struct {
 // Limits are the server-enforced resource ceilings. Zero fields fall back
 // to DefaultLimits. Clamp() prevents a caller widening past the hard caps.
 type Limits struct {
-	Wall         time.Duration
-	MemoryMB     int64
-	PidsLimit    int64
-	CPUs         string
-	MaxOutputB   int64 // per-stream stdout/stderr cap (runner-enforced)
-	FileSizeB    int64 // ulimit fsize
-	ScratchMB    int64 // tmpfs /tmp size
+	Wall       time.Duration
+	MemoryMB   int64
+	PidsLimit  int64
+	CPUs       string
+	MaxOutputB int64 // per-stream stdout/stderr cap (runner-enforced)
+	FileSizeB  int64 // ulimit fsize
+	ScratchMB  int64 // tmpfs /tmp size
 }
 
 // DefaultLimits are the conservative defaults for plan-exec. Part B's
@@ -154,12 +154,12 @@ func (l Limits) clamp() Limits {
 // contract; "out/<name>" args are writable targets, everything else is
 // resolved read-only under /job/in (see sandbox_runner.py).
 type Spec struct {
-	Mode    Mode
-	Script  string // ModeScript: baked-in script basename
-	Code    string // ModeCode: free-form python
-	Args    []string
-	Inputs  []InputFile
-	Limits  Limits
+	Mode   Mode
+	Script string // ModeScript: baked-in script basename
+	Code   string // ModeCode: free-form python
+	Args   []string
+	Inputs []InputFile
+	Limits Limits
 }
 
 // Artifact is a file the job produced under /job/out (excluding the __*
@@ -222,7 +222,7 @@ type Runner struct {
 
 var (
 	// ErrUnavailable means the sandbox can't run (docker/image/config
-	// missing). Callers may fall back to a legacy path ONLY in dev.
+	// missing). Security-sensitive callers must fail closed.
 	ErrUnavailable = errors.New("sandbox: unavailable")
 	// ErrJobFailed means the container ran but the runner reported an
 	// internal failure (bad job spec, unknown script).

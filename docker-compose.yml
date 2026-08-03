@@ -558,9 +558,22 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
         NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
+        # Where SRAN Chat lives — the "Open SRAN Chat" dashboard link plus
+        # the three redirect allowlists (middleware.ts, LoginForm,
+        # oauth-complete) all read this. It was never set anywhere, so the
+        # bundler inlined the localhost:3002 fallback at build time and the
+        # portal→chat handoff broke on any real hostname. NEXT_PUBLIC_* is a
+        # BUILD-time substitution: changing WEB_CHAT_PUBLIC_URL requires
+        # rebuilding the portal image (`make build`), not just a restart.
+        # The three allowlist sites take .origin of this value, so the /chat
+        # suffix the dashboard link wants is harmless to them.
+        NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-http://localhost:3002/chat}
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
       NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
+      # Runtime twin of the build arg above (server-render parity). The build
+      # arg is the authoritative one for anything the browser executes.
+      NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-http://localhost:3002/chat}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}
       BACKEND_URL: http://backend:8080

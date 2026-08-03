@@ -112,10 +112,17 @@ comments for the exact flags.
   with pgvector embeddings.
 - **Desktop agentic app** — `SranDesktop/`, a .NET 8 WPF client over
   gateway + chat-edge + MCP.
-- **Code interpreter / sandbox** — model-authored Python (`run_python`) and
-  plan-exec workspaces (Excel/Doc/Pptx). **OFF by default** (`SANDBOX_ENABLED`
-  defaults to false); when off, `run_python` returns 503 and plan-exec falls back
-  to the in-process path. See §5 for the trust boundary.
+- **Code interpreter / sandbox** — model-authored Python (`run_python`), the
+  plan-exec workspaces (Excel/Doc/Pptx), file text extraction, inspectors,
+  validators, version compare and vision image resize. The binary default is
+  still off (`SANDBOX_ENABLED` defaults to false in `internal/config`), but
+  **the webchat stack now ships it ON** (`docker-compose.webchat.yml`) because
+  every one of those paths **fails closed** — with no sandbox they return
+  `Err*SandboxUnavailable` instead of running model-influenced python inside
+  the secret-bearing process, so "off" means the document features are off,
+  not that they degrade. `make webchat-up` builds the required per-run image
+  first; chat-edge fail-LOUDs (exit 1) if enabled-but-unavailable. The
+  base/desktop stack keeps the opt-in overlay. See §5 for the trust boundary.
 - **OAuth connectors** — per-user GitHub / Slack / Google, tokens stored
   AES-256-GCM in `connector_tokens` (migration 063), brokered to mcp-gateway.
 - **MCP per-user workspaces** — `mcp-gateway` hosts stdio MCP servers behind a
@@ -159,7 +166,13 @@ detailed in [docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md); the summary:
    Interpreter stdout/artifacts re-enter the model only through the normal DLP
    mask pipeline. Pinned by a Go test (`TestSandbox_DockerArgsAlwaysNoNetwork`)
    and the Python egress invariant test (which asserts the interpreter is
-   *absent* from the raw-egress whitelist). **OFF by default.**
+   *absent* from the raw-egress whitelist). **On by default on the webchat
+   stack** (see §4); off elsewhere unless the overlay is applied. The cost of
+   that default is the `/var/run/docker.sock` bind-mount into chat-edge —
+   host-root-equivalent, acceptable only because the `docker run` argv is
+   built entirely by trusted Go from server constants with no model input.
+   The hardening path is a broker service that owns the socket and exposes
+   only `execute(job)`.
 
 ---
 
@@ -183,7 +196,7 @@ detailed in [docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md); the summary:
 | Shape | Command | What runs |
 |---|---|---|
 | **dev** | `make up` (`docker-compose.yml`) | Core stack, ports on 0.0.0.0. chat-edge/mcp/nginx are `profiles: [desktop]` and do **not** start here |
-| **web-chat dev** | `docker-compose.webchat.yml` overlay | Adds web-chat `:3002` + chat-edge on its own pg/redis |
+| **web-chat dev** | `make webchat-up` | Adds web-chat `:3002` + chat-edge on its own pg/redis, **with the code-interpreter sandbox enabled** (builds `ai-gateway-sandbox:latest` first) |
 | **prod-desktop** | `make prod-desktop` | base + `docker-compose.prod.yml` + `--profile desktop` → chat-edge + mcp-gateway + nginx (`:80/:443`), all bound to 127.0.0.1 behind nginx |
 | **sandbox overlay** | `+ docker-compose.sandbox.yml` on webchat | Wires chat-edge to spawn per-run sandbox containers (`SANDBOX_ENABLED=1`); requires building `ai-gateway-sandbox:latest` and a docker socket — read the header in that file first |
 

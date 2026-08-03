@@ -110,6 +110,19 @@ services:
     restart: always
 
   portal:
+    # The portal→chat handoff ("Open SRAN Chat" + the three redirect
+    # allowlists) is baked into the bundle at BUILD time. Unset, it silently
+    # becomes http://localhost:3002 — a dead button and a redirect allowlist
+    # that no longer matches the real chat origin. Hard-required here for the
+    # same reason CORS_ORIGINS and PORTAL_PUBLIC_URL are.
+    # NOTE: this is a BUILD arg — after changing it, rebuild the portal image
+    # (`docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+    # portal`); restarting the container alone will NOT pick it up.
+    build:
+      args:
+        NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:?WEB_CHAT_PUBLIC_URL must be set in .env for prod (e.g. https://chat.sran.net/chat) — it is baked into the portal bundle at build time}
+    environment:
+      NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL}
     ports: !override
       - "127.0.0.1:3001:3001"
     restart: always

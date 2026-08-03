@@ -103,9 +103,31 @@ seeds the admin and portal users. `make help` lists every target. Raw steps:
 | Shape | Command | Notes |
 |---|---|---|
 | **dev** | `make up` | Core stack. chat-edge / mcp-gateway / nginx are on the `desktop` profile and don't start here |
-| **web-chat dev** | `docker-compose.webchat.yml` overlay | Adds web-chat `:3002` + chat-edge |
+| **web-chat dev** | `make webchat-up` | Adds web-chat `:3002` + chat-edge. Code-interpreter sandbox is **ON by default** here — it also builds the required `ai-gateway-sandbox:latest` image first |
 | **prod-desktop** | `make prod-desktop` | base + prod + `--profile desktop` (chat-edge + mcp + nginx `:80/:443`), bound to 127.0.0.1 |
-| **sandbox** | `+ docker-compose.sandbox.yml` (or `make sandbox-up`) | Enables the code interpreter (`SANDBOX_ENABLED=1`); read that file's header first — needs a built sandbox image + docker socket |
+| **sandbox** | `+ docker-compose.sandbox.yml` (or `make sandbox-up`) | Enables the code interpreter on the **base/desktop** stack; the webchat stack already has it inline. Read that file's header first — needs a built sandbox image + docker socket |
+
+> **Why the webchat stack enables the sandbox by default.** chat-edge fails
+> *closed* on every python path it shells out to: PDF/DOCX/XLSX text
+> extraction, the Excel/Doc/Pptx plan executors, inspectors, validators,
+> version compare, large-image vision resize and `run_python`. Without a
+> sandbox those return `Err*SandboxUnavailable` rather than running
+> model-influenced python in the secret-bearing process — so "sandbox off" is
+> not a degraded mode, it is *document features off*. Opt out with
+> `SANDBOX_ENABLED=0` knowing that. Note the stack bind-mounts
+> `/var/run/docker.sock` into chat-edge (host-root-equivalent); the
+> justification and the hardening path are in the header of
+> `docker-compose.webchat.yml`.
+
+**Public URLs are baked in at build time.** `NEXT_PUBLIC_*` values are inlined
+by the bundler, so setting them only as container env has no effect on the
+browser bundle. Two vars matter for a non-localhost deploy — set them in
+`.env` and **rebuild** the images (`make build`), not just restart:
+
+| Var | Default | Baked into |
+|---|---|---|
+| `WEB_CHAT_API_URL` | `http://localhost:4000/api/v1` | web-chat → chat-edge API base |
+| `WEB_CHAT_PUBLIC_URL` | `http://localhost:3002/chat` | portal's "Open SRAN Chat" link + the three redirect allowlists (`middleware.ts`, login, oauth-complete). Required (`:?`) in `docker-compose.prod.yml` |
 
 ### Migrations
 
