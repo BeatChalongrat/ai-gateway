@@ -164,7 +164,7 @@ public static class ContextBudgeter
                 var toolName = call.Function.Name;
                 if (!toolNames.Contains(toolName))
                     toolNames.Add(toolName);
-                if (toolName is "read_file" or "write_file"
+                if (toolName is "read_file" or "read_document" or "write_file"
                     && TryExtractPath(call.Function.Arguments) is { } path
                     && !paths.Contains(path))
                     paths.Add(path);

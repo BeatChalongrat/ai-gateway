@@ -1436,7 +1436,12 @@ public partial class ChatViewModel : ObservableObject
             gatewayMessages[^1] = new GatewayMessage
             {
                 Role = "user",
-                Content = lastText + "\n\n[The user attached these files (local paths — use read_file to view them):\n"
+                // Steer PDFs/Office files to read_document: read_file hands the
+                // model base64 for those, which is the difference between
+                // "summarize this PDF" working and silently failing.
+                Content = lastText + "\n\n[The user attached these files (local paths). "
+                          + "Use read_document for PDF/Word/Excel/PowerPoint and other documents; "
+                          + "use read_file for source code and other plain files:\n"
                           + string.Join("\n", attachedPaths) + "]"
             };
         }

@@ -17,6 +17,10 @@ public sealed class SensitiveReadGuard : ISensitiveReadGuard
     private static readonly Dictionary<string, string> PathArgByTool = new(StringComparer.OrdinalIgnoreCase)
     {
         ["read_file"] = "path",
+        // read_document extracts the TEXT of a PDF/Office file, so it exposes
+        // strictly more than read_file does for the same path — it must be
+        // gated the same way or it becomes the silent way around this guard.
+        ["read_document"] = "path",
         ["list_directory"] = "path",
         ["search_files"] = "directory",
     };
