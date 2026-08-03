@@ -9,6 +9,7 @@ import { SkeletonCards, SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api, ApiError } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { useT, type DictKey } from "../../lib/i18n";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -74,14 +75,24 @@ const SEV: Record<string, { color: string; bg: string }> = {
   low:      { color: "#059669", bg: "rgba(16,185,129,0.08)" },
 };
 
+// Severity is a human-facing level, so it is localized; an unrecognized
+// value from the API falls through to the raw string.
+const SEV_LABEL: Record<string, DictKey> = {
+  critical: "infra.severity.critical",
+  high: "infra.severity.high",
+  medium: "infra.severity.medium",
+  low: "infra.severity.low",
+};
+
 function SevBadge({ severity }: { severity: string }) {
+  const t = useT();
   const s = SEV[severity] || SEV.medium;
   return (
     <span style={{
       display: "inline-block", padding: "2px 10px",
       fontSize: "10.5px", fontWeight: 700, color: s.color, background: s.bg,
       borderRadius: 100, textTransform: "capitalize", lineHeight: 1.6,
-    }}>{severity}</span>
+    }}>{SEV_LABEL[severity] ? t(SEV_LABEL[severity]) : severity}</span>
   );
 }
 
@@ -171,10 +182,11 @@ function ActionSel({ value, onChange, disabled }: {
 /* ── Save indicator ───────────────────────────────────────────────── */
 
 function SaveDot({ state }: { state: SaveState }) {
+  const t = useT();
   if (state === "idle") return <span style={{ color: "#d1d5db" }}>—</span>;
-  if (state === "saving") return <span style={{ color: C.textTertiary, fontSize: "12px" }}>saving…</span>;
-  if (state === "saved") return <span style={{ color: "#059669", fontSize: "12px", fontWeight: 600 }}><Icon name="check" size={12} /> saved</span>;
-  return <span style={{ color: "#dc2626", fontSize: "12px", fontWeight: 600 }}>error</span>;
+  if (state === "saving") return <span style={{ color: C.textTertiary, fontSize: "12px" }}>{t("action.saving")}</span>;
+  if (state === "saved") return <span style={{ color: "#059669", fontSize: "12px", fontWeight: 600 }}><Icon name="check" size={12} /> {t("state.saved")}</span>;
+  return <span style={{ color: "#dc2626", fontSize: "12px", fontWeight: 600 }}>{t("infra.policies.saveError")}</span>;
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -186,6 +198,7 @@ const iconFileCheck = <svg width="20" height="20" viewBox="0 0 24 24" fill="none
 const iconTag = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>;
 
 export default function PoliciesPage() {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("profiles");
   const { data: detData } = useApi<{ items: Detector[] }>("/admin/dlp/detectors");
   const { data: profData } = useApi<{ items: Profile[] }>("/admin/policy-profiles");
@@ -197,10 +210,10 @@ export default function PoliciesPage() {
     return new Set(detData.items.map((d) => d.category)).size;
   }, [detData]);
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "profiles", label: "Policy Profiles" },
-    { key: "detectors", label: "Detectors" },
-    { key: "ner", label: "NER / Presidio" },
+  const tabs: { key: Tab; label: DictKey }[] = [
+    { key: "profiles", label: "infra.policies.profiles" },
+    { key: "detectors", label: "infra.policies.detectors" },
+    { key: "ner", label: "infra.policies.ner" },
   ];
 
   return (
@@ -209,10 +222,10 @@ export default function PoliciesPage() {
       <div style={{ marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <h1 style={{ fontSize: "30px", fontWeight: 800, color: C.textPrimary, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>
-            DLP Policies
+            {t("infra.policies.title")}
           </h1>
           <p style={{ fontSize: "15px", fontWeight: 500, color: C.textSecondary, margin: "4px 0 0", lineHeight: 1.4 }}>
-            Detector categories, policy profiles, and NER settings
+            {t("infra.policies.subtitle")}
           </p>
         </div>
         <ThemeToggle />
@@ -221,9 +234,9 @@ export default function PoliciesPage() {
       {/* Stats */}
       {(detectorCount > 0 || profileCount > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: "12px", marginBottom: "20px" }}>
-          <StatCard value={detectorCount} label="Total Detectors" icon={iconShield} accent="#3b6cf6" delay={0} iconClass="dlp-icon-pulse" />
-          <StatCard value={profileCount} label="Policy Profiles" icon={iconFileCheck} accent="#10b981" delay={80} iconClass="dlp-icon-swing" />
-          <StatCard value={categoryCount} label="Categories" icon={iconTag} accent="#8b5cf6" delay={160} iconClass="dlp-icon-glow" />
+          <StatCard value={detectorCount} label={t("infra.dlp.totalDetectors")} icon={iconShield} accent="#3b6cf6" delay={0} iconClass="dlp-icon-pulse" />
+          <StatCard value={profileCount} label={t("infra.policies.profiles")} icon={iconFileCheck} accent="#10b981" delay={80} iconClass="dlp-icon-swing" />
+          <StatCard value={categoryCount} label={t("infra.policies.categories")} icon={iconTag} accent="#8b5cf6" delay={160} iconClass="dlp-icon-glow" />
         </div>
       )}
 
@@ -236,15 +249,15 @@ export default function PoliciesPage() {
       }}>
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: `1px solid ${C.borderLight}`, background: "var(--bg-surface-2)" }}>
-          {tabs.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)} style={{
+          {tabs.map((item) => (
+            <button key={item.key} onClick={() => setTab(item.key)} style={{
               background: "none", border: "none", cursor: "pointer",
               padding: "12px 20px", fontSize: "13px", fontFamily: "inherit",
-              fontWeight: tab === t.key ? 600 : 500,
-              color: tab === t.key ? C.accent : C.textTertiary,
-              borderBottom: tab === t.key ? `2px solid ${C.accent}` : "2px solid transparent",
+              fontWeight: tab === item.key ? 600 : 500,
+              color: tab === item.key ? C.accent : C.textTertiary,
+              borderBottom: tab === item.key ? `2px solid ${C.accent}` : "2px solid transparent",
               marginBottom: "-1px", transition: "color 120ms, border-color 120ms",
-            }}>{t.label}</button>
+            }}>{t(item.label)}</button>
           ))}
         </div>
 
@@ -264,11 +277,12 @@ export default function PoliciesPage() {
 /* ═══════════════════════════════════════════════════════════════════ */
 
 function ProfilesTab() {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<{ items: Profile[] }>("/admin/policy-profiles");
 
   if (loading) return <div style={{ padding: 20 }}><SkeletonCards count={2} /></div>;
   if (error) return <div style={{ padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>;
-  if (!data?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No policy profiles configured" icon={<Icon name="shield" size={22} />} /></div>;
+  if (!data?.items.length) return <div style={{ padding: 20 }}><EmptyState message={t("infra.policies.noProfiles")} icon={<Icon name="shield" size={22} />} /></div>;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: "20px", padding: "20px" }}>
@@ -278,6 +292,7 @@ function ProfilesTab() {
 }
 
 function ProfCard({ profile, idx }: { profile: Profile; idx: number }) {
+  const t = useT();
   const [actions, setActions] = useState<Record<string, Action>>(profile.category_actions);
   const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
   const a = profAccent(profile.profile_id);
@@ -338,10 +353,10 @@ function ProfCard({ profile, idx }: { profile: Profile; idx: number }) {
       </div>
       <table className="dlp-table">
         <thead><tr>
-          <th>Category</th>
-          <th style={{ width: 130 }}>Inbound</th>
-          <th style={{ width: 150 }}>Outbound</th>
-          <th style={{ width: 80, textAlign: "center" }}>Status</th>
+          <th>{t("infra.policies.colCategory")}</th>
+          <th style={{ width: 130 }}>{t("infra.policies.colInbound")}</th>
+          <th style={{ width: 150 }}>{t("infra.policies.colOutbound")}</th>
+          <th style={{ width: 80, textAlign: "center" }}>{t("field.status")}</th>
         </tr></thead>
         <tbody>
           {CATEGORIES.map((cat, i) => {
@@ -364,6 +379,7 @@ function ProfCard({ profile, idx }: { profile: Profile; idx: number }) {
 }
 
 function OutboundCell({ value, inherited }: { value: Action; inherited: boolean }) {
+  const t = useT();
   const pillBg =
     value === "block" ? "rgba(220,38,38,0.08)"
     : value === "mask" ? "rgba(59,108,246,0.08)"
@@ -382,9 +398,9 @@ function OutboundCell({ value, inherited }: { value: Action; inherited: boolean 
       }}>{value}</span>
       {inherited && (
         <span
-          title="Outbound inherits the inbound action for this category"
+          title={t("infra.policies.inheritedTitle")}
           style={{ fontSize: 11, fontWeight: 500, color: C.textTertiary }}
-        >(inherited)</span>
+        >{t("infra.policies.inherited")}</span>
       )}
     </span>
   );
@@ -395,6 +411,7 @@ function OutboundCell({ value, inherited }: { value: Action; inherited: boolean 
 /* ═══════════════════════════════════════════════════════════════════ */
 
 function DetectorsTab() {
+  const t = useT();
   const { data: detectorData, loading: dL, error: dE, refetch: dR } = useApi<{ items: Detector[] }>("/admin/dlp/detectors");
   const { data: profileData, loading: pL } = useApi<{ items: Profile[] }>("/admin/policy-profiles");
 
@@ -404,7 +421,7 @@ function DetectorsTab() {
 
   if (dL || pL) return <div style={{ padding: 20 }}><SkeletonTable rows={8} cols={6} /></div>;
   if (dE) return <div style={{ padding: 20 }}><ErrorState message={dE} onRetry={dR} /></div>;
-  if (!detectorData?.items.length) return <div style={{ padding: 20 }}><EmptyState message="No detectors registered" icon={<Icon name="shield" size={22} />} /></div>;
+  if (!detectorData?.items.length) return <div style={{ padding: 20 }}><EmptyState message={t("infra.policies.noDetectors")} icon={<Icon name="shield" size={22} />} /></div>;
 
   // Detectors tab is a read-only view of the built-in detector registry.
   // The "Default Action" column shows the action inherited from the default
@@ -424,7 +441,7 @@ function DetectorsTab() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filter detectors..."
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("infra.policies.filterDetectors")}
             style={{
               width: "100%", padding: "5px 24px 5px 28px", fontSize: "13px", fontFamily: "inherit",
               border: `1.5px solid ${C.borderLight}`, borderRadius: 6,
@@ -438,7 +455,9 @@ function DetectorsTab() {
         </div>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: "12px", fontWeight: 500, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
-          {filtered.length} detector{filtered.length !== 1 ? "s" : ""}
+          {filtered.length === 1
+            ? t("infra.dlp.detectorCountOne")
+            : t("infra.dlp.detectorCount", { n: filtered.length })}
         </span>
       </div>
 
@@ -446,10 +465,10 @@ function DetectorsTab() {
       <div style={{ overflowX: "auto" }}>
         <table className="dlp-table" style={{ minWidth: 740 }}>
           <thead><tr>
-            <th style={{ paddingLeft: 18 }}>Detector</th>
-            <th>Category</th><th>Severity</th>
-            <th style={{ textAlign: "center", width: 72 }}>Enabled</th>
-            <th style={{ width: 150 }}>Default Action <span style={{ fontSize: 11, fontWeight: 400, color: C.textTertiary, textTransform: "none", letterSpacing: 0 }}>(read-only)</span></th>
+            <th style={{ paddingLeft: 18 }}>{t("infra.policies.colDetector")}</th>
+            <th>{t("infra.policies.colCategory")}</th><th>{t("infra.policies.colSeverity")}</th>
+            <th style={{ textAlign: "center", width: 72 }}>{t("field.enabled")}</th>
+            <th style={{ width: 150 }}>{t("infra.policies.colDefaultAction")} <span style={{ fontSize: 11, fontWeight: 400, color: C.textTertiary, textTransform: "none", letterSpacing: 0 }}>{t("infra.policies.readOnly")}</span></th>
           </tr></thead>
           <tbody>
             {filtered.map((det, i) => {
@@ -469,14 +488,14 @@ function DetectorsTab() {
                         indicator instead of an interactive switch so the control
                         doesn't imply it can be toggled from the UI. */}
                     <span
-                      title="Set via server configuration (DLP_DISABLED_DETECTORS) — not editable here."
+                      title={t("infra.policies.enabledTitle")}
                       style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: det.enabled ? "var(--accent-success)" : C.textTertiary }}
                     >
                       <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: det.enabled ? "var(--accent-success)" : C.textTertiary }} />
-                      {det.enabled ? "Enabled" : "Disabled"}
+                      {det.enabled ? t("field.enabled") : t("field.disabled")}
                     </span>
                   </td>
-                  <td><span title="Inherited from the default policy profile — edit on the Policy Profiles tab." style={{ display: "inline-block" }}><ActionSel value={actionFor(det)} onChange={() => {}} disabled /></span></td>
+                  <td><span title={t("infra.policies.defaultActionTitle")} style={{ display: "inline-block" }}><ActionSel value={actionFor(det)} onChange={() => {}} disabled /></span></td>
                 </tr>
               );
             })}
@@ -492,6 +511,7 @@ function DetectorsTab() {
 /* ═══════════════════════════════════════════════════════════════════ */
 
 function NerTab() {
+  const t = useT();
   const [status, setStatus] = useState<NerStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -500,9 +520,9 @@ function NerTab() {
 
   const load = useCallback(async () => {
     try { const d = await api.get("/admin/ner/status"); setStatus(d); }
-    catch (err) { setError(err instanceof ApiError ? `Error ${err.status}` : String(err)); }
+    catch (err) { setError(err instanceof ApiError ? t("infra.errorStatus", { status: err.status }) : String(err)); }
     finally { setLoading(false); }
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -516,7 +536,7 @@ function NerTab() {
   const toggle = async (next: boolean) => {
     setToggling(true);
     try { await api.patch("/admin/settings", { ner_enabled: next }); await load(); }
-    catch (err) { setError(err instanceof ApiError ? `Error ${err.status}` : String(err)); }
+    catch (err) { setError(err instanceof ApiError ? t("infra.errorStatus", { status: err.status }) : String(err)); }
     finally { setToggling(false); }
   };
 
@@ -528,24 +548,24 @@ function NerTab() {
 
   const isReady = enabled && s === "ready";
   const dotColor = !enabled ? "#9ca3af" : s === "loading" ? "#f59e0b" : s === "ready" ? "#10b981" : "#ef4444";
-  const statusText = !enabled ? "Presidio model not loaded — enable NER to initialize"
-    : s === "loading" ? "Loading Presidio model…"
-    : s === "ready" ? "Presidio model loaded and running"
-    : `Presidio error: ${status?.message ?? "unknown"}`;
+  const statusText = !enabled ? t("infra.policies.nerNotLoaded")
+    : s === "loading" ? t("infra.policies.nerLoading")
+    : s === "ready" ? t("infra.policies.nerReady")
+    : t("infra.policies.nerError", { message: status?.message ?? t("infra.policies.nerUnknown") });
 
   return (
     <div style={{ padding: "24px", maxWidth: 640 }}>
       <div className="dlp-card-anim" style={{ animationDelay: "0.1s" }}>
-        <h3 style={{ fontSize: "20px", fontWeight: 700, color: C.textPrimary, margin: "0 0 6px" }}>NER / Presidio</h3>
+        <h3 style={{ fontSize: "20px", fontWeight: 700, color: C.textPrimary, margin: "0 0 6px" }}>{t("infra.policies.ner")}</h3>
         <p style={{ color: C.textSecondary, fontSize: "14px", margin: "0 0 20px", lineHeight: 1.6 }}>
-          Optional Presidio-backed NER stage for entity recognition. Enables detection of named entities like person names, locations, and organizations.
+          {t("infra.policies.nerDesc")}
         </p>
 
         {/* Toggle row */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
           <Toggle checked={enabled} disabled={toggling} onChange={toggle} />
-          <span style={{ fontSize: "14px", fontWeight: 600, color: C.textPrimary }}>Enable NER stage</span>
-          {toggling && <span style={{ fontSize: "12px", color: C.textTertiary }}>updating…</span>}
+          <span style={{ fontSize: "14px", fontWeight: 600, color: C.textPrimary }}>{t("infra.policies.nerEnable")}</span>
+          {toggling && <span style={{ fontSize: "12px", color: C.textTertiary }}>{t("infra.policies.nerUpdating")}</span>}
         </div>
 
         {/* Status indicator */}
@@ -573,7 +593,7 @@ function NerTab() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
-          <span>NER initialization downloads a ~500MB Presidio model, which requires significant memory and may take 30-60 seconds to initialize.</span>
+          <span>{t("infra.policies.nerWarning")}</span>
         </div>
       </div>
     </div>

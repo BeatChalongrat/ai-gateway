@@ -13,6 +13,12 @@ import {
 
 import PageHeader from "../components/ui/PageHeader";
 import { api } from "../lib/api";
+import { useT } from "../lib/i18n";
+
+// The translate function, for the handful of helpers that live outside the
+// React tree and therefore take `t` as an argument instead of calling the
+// hook themselves.
+type T = ReturnType<typeof useT>;
 
 /* ── Types ───────────────────────────────────────────────────────── */
 
@@ -101,11 +107,12 @@ const PROVIDER_COLOR: Record<string, string> = {
   other: "#64718a",
 };
 
+// Brand names, deliberately untranslated. The catch-all "other" bucket is
+// NOT here — it is real UI copy and comes from the dictionary instead.
 const PROVIDER_LABEL: Record<string, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   google: "Google",
-  other: "Others",
 };
 
 // Top-model bar gradients — CSS vars don't work inside linear-gradient() values
@@ -125,14 +132,14 @@ const PROVIDER_GLOW: Record<string, string> = {
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
-function timeAgo(iso: string | null): string {
+function timeAgo(iso: string | null, t: T): string {
   if (!iso) return "—";
   const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 5000) return "just now";
-  if (diff < 60000) return `${Math.floor(diff / 1000)}s ago`;
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return `${Math.floor(diff / 86400000)}d ago`;
+  if (diff < 5000) return t("time.justNow");
+  if (diff < 60000) return t("dash.time.secondsAgo", { n: Math.floor(diff / 1000) });
+  if (diff < 3600000) return t("time.minutesAgo", { n: Math.floor(diff / 60000) });
+  if (diff < 86400000) return t("time.hoursAgo", { n: Math.floor(diff / 3600000) });
+  return t("time.daysAgo", { n: Math.floor(diff / 86400000) });
 }
 
 function fmt(n: number): string {
@@ -271,8 +278,10 @@ function DeltaChip({
   compareLabel: string;
   invertDeltaColor?: boolean;
 }) {
+  const t = useT();
+
   if (delta === null) {
-    return <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No prior data</span>;
+    return <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{t("dash.kpi.noPriorData")}</span>;
   }
 
   const good = invertDeltaColor ? direction === "down" : direction === "up";
@@ -449,10 +458,18 @@ function KpiCard({
 
 /* ── Period selector (segmented control) ────────────────────────── */
 
+const PERIOD_LABEL = {
+  "24h": "dash.period.24h",
+  "7d": "dash.period.7d",
+  "30d": "dash.period.30d",
+} as const;
+
 function PeriodSelector({ period, onChange }: { period: Period; onChange: (p: Period) => void }) {
+  const t = useT();
   return (
     <div
       role="tablist"
+      aria-label={t("time.range")}
       style={{
         display: "inline-flex",
         background: "var(--bg-elevated)",
@@ -483,7 +500,7 @@ function PeriodSelector({ period, onChange }: { period: Period; onChange: (p: Pe
               transition: "background 120ms, color 120ms, box-shadow 120ms",
             }}
           >
-            {p}
+            {t(PERIOD_LABEL[p])}
           </button>
         );
       })}
@@ -499,6 +516,7 @@ type SectionState<T> =
   | { status: "error" };
 
 export default function DashboardPage() {
+  const t = useT();
   const [period, setPeriod] = useState<Period>("24h");
   const [overviewState, setOverviewState] = useState<SectionState<Overview>>({ status: "loading" });
   const [volumeState, setVolumeState] = useState<SectionState<VolumeResp>>({ status: "loading" });
@@ -582,10 +600,10 @@ export default function DashboardPage() {
   }, [loadRecent]);
 
   const compareLabel = useMemo(() => {
-    if (period === "24h") return "vs. prior 24h";
-    if (period === "7d") return "vs. prior week";
-    return "vs. prior 30d";
-  }, [period]);
+    if (period === "24h") return t("dash.kpi.vs24h");
+    if (period === "7d") return t("dash.kpi.vs7d");
+    return t("dash.kpi.vs30d");
+  }, [period, t]);
 
   const updatedAgo = Math.max(0, Math.floor((Date.now() - lastUpdated) / 1000));
 
@@ -594,8 +612,8 @@ export default function DashboardPage() {
       <PageStyles />
 
       <PageHeader
-        title="Dashboard"
-        subtitle={`Platform overview · updated ${updatedAgo}s ago`}
+        title={t("nav.dashboard")}
+        subtitle={t("dash.header.subtitle", { n: updatedAgo })}
         actions={<PeriodSelector period={period} onChange={setPeriod} />}
       />
 
@@ -609,7 +627,7 @@ export default function DashboardPage() {
         }}
       >
         <KpiCard
-          label="Requests"
+          label={t("dash.kpi.requests")}
           rawValue={overview?.requests.value ?? 0}
           formatValue={(n) => (overview ? fmt(n) : "—")}
           delta={overview?.requests.delta_pct ?? null}
@@ -623,7 +641,7 @@ export default function DashboardPage() {
           animationDelay={0.05}
         />
         <KpiCard
-          label="Success rate"
+          label={t("dash.kpi.successRate")}
           rawValue={overview?.success_rate.value ?? 0}
           formatValue={(n) => (overview ? `${n.toFixed(1)}%` : "—")}
           delta={overview?.success_rate.delta_pct ?? null}
@@ -637,7 +655,7 @@ export default function DashboardPage() {
           animationDelay={0.10}
         />
         <KpiCard
-          label="Avg latency"
+          label={t("dash.kpi.avgLatency")}
           rawValue={overview?.avg_latency_ms.value ?? 0}
           formatValue={(n) => (overview ? `${Math.round(n)}ms` : "—")}
           delta={overview?.avg_latency_ms.delta_pct ?? null}
@@ -652,7 +670,7 @@ export default function DashboardPage() {
           animationDelay={0.15}
         />
         <KpiCard
-          label="Spend"
+          label={t("dash.kpi.spend")}
           rawValue={overview?.spend_usd.value ?? 0}
           formatValue={(n) => (overview ? `$${n.toFixed(2)}` : "—")}
           delta={overview?.spend_usd.delta_pct ?? null}
@@ -692,6 +710,7 @@ export default function DashboardPage() {
 /* ── Volume chart ────────────────────────────────────────────────── */
 
 function VolumeChart({ state }: { state: SectionState<VolumeResp> }) {
+  const t = useT();
   const data = state.status === "ok" ? state.data : null;
   const buckets = data?.buckets ?? [];
   const total = useMemo(
@@ -712,16 +731,18 @@ function VolumeChart({ state }: { state: SectionState<VolumeResp> }) {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>Request volume</h3>
+          <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>{t("dash.volume.title")}</h3>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-            {total.toLocaleString()} requests total · by provider
+            {t("dash.volume.subtitle", { total: total.toLocaleString() })}
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {["openai", "anthropic", "google", "other"].map((p) => (
             <div key={p} style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: PROVIDER_COLOR[p], display: "inline-block" }} />
-              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{PROVIDER_LABEL[p]}</span>
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                {PROVIDER_LABEL[p] ?? t("dash.provider.other")}
+              </span>
             </div>
           ))}
         </div>
@@ -730,11 +751,11 @@ function VolumeChart({ state }: { state: SectionState<VolumeResp> }) {
       <div style={{ width: "100%", height: 220, marginTop: 8 }}>
         {state.status === "loading" ? (
           <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-muted)", fontSize: 12 }}>
-            Loading…
+            {t("state.loading")}
           </div>
         ) : state.status === "error" ? (
           <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--accent-warning)", fontSize: 12 }}>
-            Failed to load volume data
+            {t("dash.volume.error")}
           </div>
         ) : total === 0 ? (
           <div
@@ -762,9 +783,10 @@ function VolumeChart({ state }: { state: SectionState<VolumeResp> }) {
               <path d="M3 3v18h18" />
               <path d="M7 14l4-4 4 4 5-5" />
             </svg>
-            <div style={{ fontWeight: 500, color: "var(--text-tertiary)" }}>No requests yet</div>
+            <div style={{ fontWeight: 500, color: "var(--text-tertiary)" }}>{t("dash.volume.emptyTitle")}</div>
             <div style={{ fontSize: 11, marginTop: 2 }}>
-              Send a request to <code>/v1/chat/completions</code> to see data
+              {t("dash.volume.emptyHintPrefix")} <code>/v1/chat/completions</code>{" "}
+              {t("dash.volume.emptyHintSuffix")}
             </div>
           </div>
         ) : (
@@ -827,7 +849,7 @@ function VolumeChart({ state }: { state: SectionState<VolumeResp> }) {
                 dataKey="other"
                 stackId="a"
                 fill={PROVIDER_COLOR.other}
-                name="Others"
+                name={t("dash.provider.other")}
                 radius={[3, 3, 0, 0]}
                 isAnimationActive
                 animationDuration={600}
@@ -844,6 +866,7 @@ function VolumeChart({ state }: { state: SectionState<VolumeResp> }) {
 /* ── Top models list ─────────────────────────────────────────────── */
 
 function TopModelsList({ state }: { state: SectionState<TopModelsResp> }) {
+  const t = useT();
   const data = state.status === "ok" ? state.data : null;
   const items = data?.items ?? [];
   const max = items.length ? items[0].count : 1;
@@ -857,13 +880,15 @@ function TopModelsList({ state }: { state: SectionState<TopModelsResp> }) {
         animation: "fadeInUp 0.5s ease-out 0.3s both",
       }}
     >
-      <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>Top models</h3>
-      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, marginBottom: 10 }}>By request count</div>
+      <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>{t("dash.topModels.title")}</h3>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, marginBottom: 10 }}>
+        {t("dash.topModels.subtitle")}
+      </div>
 
       {state.status === "loading" ? (
-        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Loading…</div>
+        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("state.loading")}</div>
       ) : state.status === "error" ? (
-        <div style={{ color: "var(--accent-warning)", fontSize: 12 }}>Failed to load top models</div>
+        <div style={{ color: "var(--accent-warning)", fontSize: 12 }}>{t("dash.topModels.error")}</div>
       ) : items.length === 0 ? (
         <div
           style={{
@@ -891,8 +916,8 @@ function TopModelsList({ state }: { state: SectionState<TopModelsResp> }) {
             <rect x="10" y="6" width="4" height="14" rx="1" />
             <rect x="17" y="13" width="4" height="7" rx="1" />
           </svg>
-          <div style={{ fontWeight: 500, color: "var(--text-tertiary)" }}>No models yet</div>
-          <div style={{ fontSize: 11, marginTop: 2 }}>No requests in this period.</div>
+          <div style={{ fontWeight: 500, color: "var(--text-tertiary)" }}>{t("dash.topModels.emptyTitle")}</div>
+          <div style={{ fontSize: 11, marginTop: 2 }}>{t("dash.topModels.emptyHint")}</div>
         </div>
       ) : (
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -957,6 +982,7 @@ function TopModelsList({ state }: { state: SectionState<TopModelsResp> }) {
 /* ── Recent requests ─────────────────────────────────────────────── */
 
 function RecentRequests({ items }: { items: RecentRequest[] }) {
+  const t = useT();
   const seenRef = useRef<Set<string> | null>(null);
   const mountedAtRef = useRef<number>(Date.now());
   const [filter, setFilter] = useState("");
@@ -1001,7 +1027,7 @@ function RecentRequests({ items }: { items: RecentRequest[] }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>Recent requests</h3>
+            <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>{t("dash.recent.title")}</h3>
             <span
               style={{
                 fontSize: 10,
@@ -1021,18 +1047,19 @@ function RecentRequests({ items }: { items: RecentRequest[] }) {
                 className="live-dot"
                 style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent-success)" }}
               />
-              LIVE
+              {t("dash.recent.live")}
             </span>
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-            Last {items.length} · auto-refresh 5s
+            {t("dash.recent.meta", { n: items.length })}
           </div>
         </div>
         <input
           type="search"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by model, provider, status…"
+          aria-label={t("dash.recent.filterPlaceholder")}
+          placeholder={t("dash.recent.filterPlaceholder")}
           style={{
             height: 28,
             padding: "0 10px",
@@ -1049,7 +1076,7 @@ function RecentRequests({ items }: { items: RecentRequest[] }) {
 
       {filtered.length === 0 ? (
         <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-          {filter ? "No matching requests." : "No recent requests."}
+          {filter ? t("dash.recent.noMatch") : t("dash.recent.empty")}
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -1064,11 +1091,11 @@ function RecentRequests({ items }: { items: RecentRequest[] }) {
                   letterSpacing: "0.05em",
                 }}
               >
-                <th style={{ padding: "6px 8px 6px 0", fontWeight: 500 }}>Status</th>
-                <th style={{ padding: "6px 8px", fontWeight: 500 }}>Provider</th>
-                <th style={{ padding: "6px 8px", fontWeight: 500 }}>Model</th>
-                <th style={{ padding: "6px 8px", fontWeight: 500, textAlign: "right" }}>Latency</th>
-                <th style={{ padding: "6px 0 6px 8px", fontWeight: 500, textAlign: "right" }}>When</th>
+                <th style={{ padding: "6px 8px 6px 0", fontWeight: 500 }}>{t("field.status")}</th>
+                <th style={{ padding: "6px 8px", fontWeight: 500 }}>{t("field.provider")}</th>
+                <th style={{ padding: "6px 8px", fontWeight: 500 }}>{t("field.model")}</th>
+                <th style={{ padding: "6px 8px", fontWeight: 500, textAlign: "right" }}>{t("dash.recent.latency")}</th>
+                <th style={{ padding: "6px 0 6px 8px", fontWeight: 500, textAlign: "right" }}>{t("dash.recent.when")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1189,7 +1216,7 @@ function RecentRequests({ items }: { items: RecentRequest[] }) {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {timeAgo(r.created_at)}
+                      {timeAgo(r.created_at, t)}
                     </td>
                   </tr>
                 );
@@ -1499,6 +1526,7 @@ function DataProtectionSection({
   state: SectionState<DlpStats>;
   period: Period;
 }) {
+  const t = useT();
   const data = state.status === "ok" ? state.data : null;
   const loading = state.status === "loading";
   const errored = state.status === "error";
@@ -1513,11 +1541,14 @@ function DataProtectionSection({
   const categoriesTotal = categories.reduce((s, c) => s + c.count, 0);
   const projectMax = projects.reduce((m, p) => Math.max(m, p.findings), 0);
 
-  const subtitleWindow = period === "24h"
-    ? "last 24 hours"
+  // Whole-sentence keys per window rather than one sentence with a
+  // substituted phrase — Thai puts the window before the noun, so a shared
+  // frame with a slot would read as machine translation.
+  const subtitle = period === "24h"
+    ? t("dash.dlp.subtitle24h")
     : period === "7d"
-      ? "last 7 days"
-      : "last 30 days";
+      ? t("dash.dlp.subtitle7d")
+      : t("dash.dlp.subtitle30d");
 
   return (
     <section
@@ -1526,7 +1557,7 @@ function DataProtectionSection({
         animation: "fadeInUp 0.5s ease-out 0.3s both",
       }}
     >
-      <DlpSectionLabel>Data protection</DlpSectionLabel>
+      <DlpSectionLabel>{t("dash.dlp.title")}</DlpSectionLabel>
       <p
         style={{
           fontSize: 12,
@@ -1534,7 +1565,7 @@ function DataProtectionSection({
           margin: "-4px 0 14px",
         }}
       >
-        DLP findings from the {subtitleWindow}
+        {subtitle}
       </p>
 
       {errored ? (
@@ -1548,7 +1579,7 @@ function DataProtectionSection({
             fontSize: 13,
           }}
         >
-          Failed to load DLP stats.
+          {t("dash.dlp.error")}
         </div>
       ) : (
         <>
@@ -1561,7 +1592,7 @@ function DataProtectionSection({
           >
             <DlpStatTile
               icon={<IconShield />}
-              label="Total findings"
+              label={t("dash.dlp.totalFindings")}
               value={loading ? "—" : fmt(totalFindings)}
               accentColor="#534AB7"
               iconBg="rgba(83, 74, 183, 0.12)"
@@ -1570,7 +1601,7 @@ function DataProtectionSection({
             />
             <DlpStatTile
               icon={<IconShieldCheck />}
-              label="Requests protected"
+              label={t("dash.dlp.requestsProtected")}
               value={loading ? "—" : fmt(requestsProtected)}
               accentColor="#1D9E75"
               iconBg="rgba(29, 158, 117, 0.12)"
@@ -1579,7 +1610,7 @@ function DataProtectionSection({
             />
             <DlpStatTile
               icon={<IconShieldX />}
-              label="Blocked"
+              label={t("dash.dlp.blocked")}
               value={loading ? "—" : fmt(blocked)}
               accentColor="#E24B4A"
               iconBg="rgba(226, 75, 74, 0.12)"
@@ -1588,7 +1619,7 @@ function DataProtectionSection({
             />
             <DlpStatTile
               icon={<IconEyeOff />}
-              label="Masked"
+              label={t("dash.dlp.masked")}
               value={loading ? "—" : fmt(masked)}
               accentColor="#378ADD"
               iconBg="rgba(55, 138, 221, 0.12)"
@@ -1604,7 +1635,7 @@ function DataProtectionSection({
             }}
           >
             <div>
-              <DlpSectionLabel>By category</DlpSectionLabel>
+              <DlpSectionLabel>{t("dash.dlp.byCategory")}</DlpSectionLabel>
               <div
                 style={{
                   padding: "4px 0",
@@ -1615,11 +1646,11 @@ function DataProtectionSection({
               >
                 {loading ? (
                   <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>
-                    Loading…
+                    {t("state.loading")}
                   </div>
                 ) : categories.length === 0 ? (
                   <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
-                    No findings in this period
+                    {t("dash.dlp.empty")}
                   </div>
                 ) : (
                   categories.map((c, i) => (
@@ -1636,7 +1667,7 @@ function DataProtectionSection({
               </div>
             </div>
             <div>
-              <DlpSectionLabel>By project</DlpSectionLabel>
+              <DlpSectionLabel>{t("dash.dlp.byProject")}</DlpSectionLabel>
               <div
                 style={{
                   padding: "4px 0",
@@ -1647,11 +1678,11 @@ function DataProtectionSection({
               >
                 {loading ? (
                   <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>
-                    Loading…
+                    {t("state.loading")}
                   </div>
                 ) : projects.length === 0 ? (
                   <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
-                    No findings in this period
+                    {t("dash.dlp.empty")}
                   </div>
                 ) : (
                   projects.map((p, i) => (

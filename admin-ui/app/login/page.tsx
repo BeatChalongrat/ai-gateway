@@ -3,16 +3,22 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { useT, type DictKey } from "../../lib/i18n";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 
 export default function LoginPage() {
   const router = useRouter();
+  const t = useT();
   // The backend session login accepts either a username (e.g. "admin")
   // or an email address. The JSON field name stays `email` for wire-
   // compat; the label/input type below reflect the real accepted shape.
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  // The error is held as a dictionary KEY, not rendered text, so flipping
+  // the language switcher re-labels a visible error instead of stranding
+  // it in whichever locale was active when the request failed.
+  const [error, setError] = useState<DictKey | "">("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -28,15 +34,15 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       if (!res.ok) {
-        if (res.status === 429) setError("Too many attempts. Try again later.");
-        else setError("Invalid credentials");
+        if (res.status === 429) setError("dash.login.errorRateLimited");
+        else setError("dash.login.errorInvalid");
         setLoading(false);
         return;
       }
       // Backend set admin_session + csrf_token cookies. Navigate home.
       router.push("/");
     } catch {
-      setError("Unable to reach the backend. Try again.");
+      setError("dash.login.errorNetwork");
       setLoading(false);
     }
   }
@@ -111,10 +117,10 @@ export default function LoginPage() {
             }}
           />
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#E8E9ED", margin: "0 0 0.35rem", letterSpacing: "0.05em" }}>
-            SRAN AI Gateway
+            {t("app.title")}
           </h1>
           <p style={{ fontSize: "0.75rem", color: "rgba(160, 170, 200, 0.6)", margin: 0, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            Admin Console
+            {t("app.subtitle")}
           </p>
         </div>
 
@@ -131,12 +137,12 @@ export default function LoginPage() {
         }}>
           <form onSubmit={handleSubmit} style={{ width: "100%" }}>
             <div style={{ marginBottom: "24px" }}>
-              <label style={labelStyle}>Username or email</label>
+              <label style={labelStyle}>{t("dash.login.identifier")}</label>
               <input
                 type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin or you@example.com"
+                placeholder={t("dash.login.identifierPlaceholder")}
                 autoComplete="username"
                 required
                 aria-invalid={error ? true : undefined}
@@ -146,12 +152,12 @@ export default function LoginPage() {
             </div>
 
             <div style={{ marginBottom: "24px" }}>
-              <label style={labelStyle}>Password</label>
+              <label style={labelStyle}>{t("dash.login.password")}</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
+                placeholder={t("dash.login.passwordPlaceholder")}
                 autoComplete="current-password"
                 required
                 aria-invalid={error ? true : undefined}
@@ -170,7 +176,7 @@ export default function LoginPage() {
                 fontSize: "0.8rem",
                 marginBottom: "24px",
               }}>
-                {error}
+                {t(error)}
               </div>
             )}
 
@@ -194,7 +200,7 @@ export default function LoginPage() {
                 boxSizing: "border-box" as const,
               }}
             >
-              {loading ? "Authenticating..." : "Sign In"}
+              {loading ? t("dash.login.submitting") : t("dash.login.submit")}
             </button>
           </form>
         </div>

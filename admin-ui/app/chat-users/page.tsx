@@ -8,6 +8,7 @@ import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useToast } from "../../components/ui/Toast";
+import { useT } from "../../lib/i18n";
 import {
   AdminUserListResponse,
   AdminUserRow,
@@ -23,15 +24,17 @@ function compact(n: number): string {
   return String(n);
 }
 
-function formatRelative(iso?: string): string {
+type Translate = ReturnType<typeof useT>;
+
+function formatRelative(iso: string | undefined, t: Translate): string {
   if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "—";
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+  const ms = new Date(iso).getTime();
+  if (Number.isNaN(ms)) return "—";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return t("time.justNow");
+  if (diff < 3_600_000) return t("time.minutesAgo", { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("time.hoursAgo", { n: Math.floor(diff / 3_600_000) });
+  return t("time.daysAgo", { n: Math.floor(diff / 86_400_000) });
 }
 
 export default function ChatUsersPage() {
@@ -43,6 +46,7 @@ export default function ChatUsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const { toast } = useToast();
+  const t = useT();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,12 +59,12 @@ export default function ChatUsersPage() {
       });
       setData(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(err instanceof Error ? err.message : t("state.errorLoad"));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [page, appliedSearch]);
+  }, [page, appliedSearch, t]);
 
   useEffect(() => {
     void load();
@@ -82,7 +86,10 @@ export default function ChatUsersPage() {
           : prev,
       );
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to update user", "error");
+      toast(
+        err instanceof Error ? err.message : t("chat.users.updateFailed"),
+        "error",
+      );
       // refetch to recover from any drift
       void load();
     } finally {
@@ -98,8 +105,8 @@ export default function ChatUsersPage() {
   return (
     <div>
       <PageHeader
-        title="Chat Users"
-        subtitle="Per-user chat usage and access controls"
+        title={t("chat.users.title")}
+        subtitle={t("chat.users.subtitle")}
       />
 
       <div
@@ -118,7 +125,7 @@ export default function ChatUsersPage() {
           onKeyDown={(e) => {
             if (e.key === "Enter") submitSearch();
           }}
-          placeholder="Search by email or name..."
+          placeholder={t("chat.users.searchPlaceholder")}
           className="sran-input"
           style={{
             flex: 1,
@@ -135,7 +142,7 @@ export default function ChatUsersPage() {
           onClick={submitSearch}
           className="sran-btn sran-btn-primary sran-btn-sm"
         >
-          Search
+          {t("action.search")}
         </button>
         {appliedSearch ? (
           <button
@@ -147,7 +154,7 @@ export default function ChatUsersPage() {
             }}
             className="sran-btn sran-btn-secondary sran-btn-sm"
           >
-            Clear
+            {t("action.clear")}
           </button>
         ) : null}
       </div>
@@ -162,7 +169,7 @@ export default function ChatUsersPage() {
             </div>
           ) : !data || data.users.length === 0 ? (
             <div style={{ padding: "2rem 1rem" }}>
-              <EmptyState message="No users match" />
+              <EmptyState message={t("state.noResults")} />
             </div>
           ) : (
             <>
@@ -170,13 +177,15 @@ export default function ChatUsersPage() {
                 <table className="sran-table" style={{ minWidth: 820 }}>
                   <thead>
                     <tr>
-                      <th>User</th>
-                      <th>Role</th>
-                      <th style={{ textAlign: "right" }}>Conversations</th>
-                      <th style={{ textAlign: "right" }}>Messages</th>
-                      <th style={{ textAlign: "right" }}>Tokens</th>
-                      <th>Last Active</th>
-                      <th>Status</th>
+                      <th>{t("field.user")}</th>
+                      <th>{t("field.role")}</th>
+                      <th style={{ textAlign: "right" }}>
+                        {t("chat.col.conversations")}
+                      </th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.messages")}</th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.tokens")}</th>
+                      <th>{t("chat.col.lastActive")}</th>
+                      <th>{t("field.status")}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -249,10 +258,10 @@ export default function ChatUsersPage() {
                           {compact(u.token_count)}
                         </td>
                         <td style={{ color: "var(--color-text-muted)" }}>
-                          {formatRelative(u.last_active_at)}
+                          {formatRelative(u.last_active_at, t)}
                         </td>
                         <td>
-                          <StatusPill active={u.is_active} />
+                          <StatusPill active={u.is_active} label={u.is_active ? t("field.active") : t("field.disabled")} />
                         </td>
                         <td>
                           <button
@@ -264,13 +273,17 @@ export default function ChatUsersPage() {
                             // is the positive (primary) action; disabling an
                             // active user is the neutral (secondary) action.
                             className={`sran-btn sran-btn-sm ${u.is_active ? "sran-btn-secondary" : "sran-btn-primary"}`}
-                            title={u.is_active ? "Disable user" : "Enable user"}
+                            title={
+                              u.is_active
+                                ? t("chat.users.disableUser")
+                                : t("chat.users.enableUser")
+                            }
                           >
                             {pendingId === u.id
                               ? "…"
                               : u.is_active
-                                ? "Disable"
-                                : "Enable"}
+                                ? t("action.disable")
+                                : t("action.enable")}
                           </button>
                         </td>
                       </tr>
@@ -299,7 +312,7 @@ export default function ChatUsersPage() {
   );
 }
 
-function StatusPill({ active }: { active: boolean }) {
+function StatusPill({ active, label }: { active: boolean; label: string }) {
   const bg = active ? "var(--color-status-success-bg)" : "var(--color-status-error-bg)";
   const fg = active ? "var(--color-status-success)" : "var(--color-status-error)";
   return (
@@ -315,7 +328,7 @@ function StatusPill({ active }: { active: boolean }) {
         fontWeight: 600,
       }}
     >
-      {active ? "Active" : "Disabled"}
+      {label}
     </span>
   );
 }

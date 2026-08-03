@@ -6,6 +6,7 @@ import { useApi } from "../../lib/useApi";
 import { api, ApiError } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
+import { useT, type DictKey } from "../../lib/i18n";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -64,6 +65,21 @@ const PRI: Record<string, { color: string; bg: string }> = {
   low:    { color: "#059669", bg: "rgba(16,185,129,0.08)" },
 };
 
+// Severity and gap priority are human-facing levels, so they carry a
+// dictionary key; the detector NAMES, category ids and detection methods
+// (regex / ner / checksum) stay in English — they are identifiers.
+const SEV_LABEL: Record<string, DictKey> = {
+  CRITICAL: "infra.severity.critical",
+  HIGH: "infra.severity.high",
+  MEDIUM: "infra.severity.medium",
+  LOW: "infra.severity.low",
+};
+const PRI_LABEL: Record<string, DictKey> = {
+  high: "infra.priority.high",
+  medium: "infra.priority.medium",
+  low: "infra.priority.low",
+};
+
 function Pill({ text, color, bg }: { text: string; color: string; bg: string }) {
   return <span style={{ display: "inline-block", padding: "2px 10px", fontSize: "10px", fontWeight: 700, color, background: bg, borderRadius: 100, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.6 }}>{text}</span>;
 }
@@ -96,6 +112,7 @@ const CSS = `
 /* ═══════════════════════════════════════════════════════════════════ */
 
 export default function DlpCoveragePage() {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<CoverageResponse>("/admin/dlp/coverage");
   const [testInput, setTestInput] = useState("");
   const [testResult, setTestResult] = useState<TestResponse | null>(null);
@@ -106,10 +123,10 @@ export default function DlpCoveragePage() {
 
   async function runTest() {
     setTestError(null); setTestResult(null);
-    if (!testInput.trim()) { setTestError("Enter some text to scan."); return; }
+    if (!testInput.trim()) { setTestError(t("infra.coverage.enterText")); return; }
     setTesting(true);
     try { const r = await api.post("/admin/dlp/test", { text: testInput }); setTestResult(r as TestResponse); }
-    catch (err) { setTestError(err instanceof ApiError ? err.body?.error?.message || `Error ${err.status}` : err instanceof Error ? err.message : "Test failed"); }
+    catch (err) { setTestError(err instanceof ApiError ? err.body?.error?.message || t("infra.errorStatus", { status: err.status }) : err instanceof Error ? err.message : t("infra.testFailed")); }
     finally { setTesting(false); }
   }
 
@@ -157,10 +174,10 @@ export default function DlpCoveragePage() {
     return (
       <div className={outfit.className} style={{ background: T.bg, margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
         <div style={{ marginBottom: 20 }}>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", margin: 0 }}>DLP Coverage</h1>
-          <p style={{ fontSize: 15, color: T.ts, margin: "4px 0 0" }}>Detector catalog and known gaps</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", margin: 0 }}>{t("infra.coverage.title")}</h1>
+          <p style={{ fontSize: 15, color: T.ts, margin: "4px 0 0" }}>{t("infra.coverage.subtitle")}</p>
         </div>
-        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 24 }}>Loading…</div>
+        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 24 }}>{t("state.loading")}</div>
       </div>
     );
   }
@@ -169,11 +186,11 @@ export default function DlpCoveragePage() {
     return (
       <div className={outfit.className} style={{ background: T.bg, margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
         <div style={{ marginBottom: 20 }}>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", margin: 0 }}>DLP Coverage</h1>
-          <p style={{ fontSize: 15, color: T.ts, margin: "4px 0 0" }}>Detector catalog and known gaps</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", margin: 0 }}>{t("infra.coverage.title")}</h1>
+          <p style={{ fontSize: 15, color: T.ts, margin: "4px 0 0" }}>{t("infra.coverage.subtitle")}</p>
         </div>
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 24, color: "#dc2626" }}>
-          {error || "Failed to load."} <button onClick={refetch} style={{ marginLeft: 8, padding: "4px 12px", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>Retry</button>
+          {error || t("state.errorLoad")} <button onClick={refetch} style={{ marginLeft: 8, padding: "4px 12px", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>{t("action.retry")}</button>
         </div>
       </div>
     );
@@ -186,8 +203,8 @@ export default function DlpCoveragePage() {
       {/* ── Header ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>DLP Coverage</h1>
-          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>Detector catalog and known gaps</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>{t("infra.coverage.title")}</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>{t("infra.coverage.subtitle")}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={refetch} style={{
@@ -197,7 +214,7 @@ export default function DlpCoveragePage() {
             color: T.ts, cursor: "pointer", transition: "all 120ms",
           }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-            Refresh
+            {t("action.refresh")}
           </button>
           <ThemeToggle />
         </div>
@@ -207,7 +224,7 @@ export default function DlpCoveragePage() {
       <div className="dc-anim" style={{ animationDelay: "0.05s", background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: "22px 32px", marginBottom: 16, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
         {/* Total */}
         <div style={{ paddingRight: 32, borderRight: `1px solid ${T.bl}`, marginRight: 28 }}>
-          <div style={{ fontSize: "10.5px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.2px", color: T.th, marginBottom: 4 }}>Total Detectors</div>
+          <div style={{ fontSize: "10.5px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.2px", color: T.th, marginBottom: 4 }}>{t("infra.dlp.totalDetectors")}</div>
           <div style={{ fontFamily: T.mono, fontSize: 32, fontWeight: 800, color: T.tp, lineHeight: 1, letterSpacing: "-0.02em" }}>{data.summary.total}</div>
         </div>
         {/* Per-category */}
@@ -236,7 +253,7 @@ export default function DlpCoveragePage() {
         {/* Search */}
         <div style={{ position: "relative", flex: "0 1 280px", minWidth: 160 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search detectors..."
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("infra.coverage.searchPlaceholder")}
             style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: "inherit", border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
             onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
@@ -251,7 +268,7 @@ export default function DlpCoveragePage() {
             border: catFilter === null ? `1.5px solid ${T.accent}` : "1.5px solid transparent",
             background: catFilter === null ? "rgba(59,108,246,0.06)" : "transparent",
             color: catFilter === null ? T.accent : T.tt, transition: "all 120ms",
-          }}>All <span style={{ fontWeight: 700, fontSize: 10, marginLeft: 2 }}>{data.summary.total}</span></button>
+          }}>{t("field.all")} <span style={{ fontWeight: 700, fontSize: 10, marginLeft: 2 }}>{data.summary.total}</span></button>
           {sortedCats.map(([cat, info]) => {
             const cs = catStyle(cat);
             const active = catFilter === cat;
@@ -273,7 +290,11 @@ export default function DlpCoveragePage() {
         </div>
 
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>{filteredCats.length} categor{filteredCats.length === 1 ? "y" : "ies"}</span>
+        <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>
+          {filteredCats.length === 1
+            ? t("infra.coverage.categoryCountOne")
+            : t("infra.coverage.categoryCount", { n: filteredCats.length })}
+        </span>
       </div>
 
       {/* ── Category cards ── */}
@@ -294,7 +315,11 @@ export default function DlpCoveragePage() {
               {/* Header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid var(--border-default)" }}>
                 <Pill text={cat} color={cs.color} bg={cs.bg} />
-                <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>{info.count} detector{info.count !== 1 ? "s" : ""}</span>
+                <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>
+                  {info.count === 1
+                    ? t("infra.dlp.detectorCountOne")
+                    : t("infra.dlp.detectorCount", { n: info.count })}
+                </span>
               </div>
               {/* Rows */}
               {info.detectors.map((name, ri) => {
@@ -322,9 +347,13 @@ export default function DlpCoveragePage() {
                     }}>{name}</span>
                     <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
                       {isDisabled && (
-                        <Pill text="disabled" color="#6b7280" bg="rgba(107,114,128,0.12)" />
+                        <Pill text={t("field.disabled")} color="#6b7280" bg="rgba(107,114,128,0.12)" />
                       )}
-                      <Pill text={d.severity.toLowerCase()} color={sv.color} bg={sv.bg} />
+                      <Pill
+                        text={SEV_LABEL[d.severity] ? t(SEV_LABEL[d.severity]) : d.severity.toLowerCase()}
+                        color={sv.color}
+                        bg={sv.bg}
+                      />
                       <Pill text={d.method} color={mt.color} bg={mt.bg} />
                     </div>
                   </div>
@@ -339,10 +368,10 @@ export default function DlpCoveragePage() {
       {data.known_gaps.length > 0 && (
         <div style={{ marginBottom: 32 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: T.tp, margin: 0 }}>Known Gaps</h2>
-            <Pill text={`${data.known_gaps.length} gaps`} color="#d97706" bg="rgba(245,158,11,0.08)" />
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: T.tp, margin: 0 }}>{t("infra.coverage.knownGaps")}</h2>
+            <Pill text={t("infra.coverage.gapCount", { n: data.known_gaps.length })} color="#d97706" bg="rgba(245,158,11,0.08)" />
           </div>
-          <p style={{ fontSize: "13.5px", color: T.tt, margin: "0 0 14px" }}>Areas the detector catalog does not cover yet. Contributions welcome.</p>
+          <p style={{ fontSize: "13.5px", color: T.tt, margin: "0 0 14px" }}>{t("infra.coverage.gapsDesc")}</p>
 
           <div className="dc-anim" style={{
             animationDelay: "0.4s",
@@ -353,10 +382,10 @@ export default function DlpCoveragePage() {
             <div className="overflow-x-auto">
             <table className="dc-table">
               <thead><tr>
-                <th style={{ paddingLeft: 18 }}>Category</th>
-                <th>Description</th>
-                <th>Why Not Implemented</th>
-                <th style={{ width: 80 }}>Priority</th>
+                <th style={{ paddingLeft: 18 }}>{t("infra.policies.colCategory")}</th>
+                <th>{t("field.description")}</th>
+                <th>{t("infra.coverage.colWhy")}</th>
+                <th style={{ width: 80 }}>{t("infra.coverage.colPriority")}</th>
               </tr></thead>
               <tbody>
                 {data.known_gaps.map((g, i) => {
@@ -367,7 +396,7 @@ export default function DlpCoveragePage() {
                       <td style={{ paddingLeft: 18 }}><Pill text={g.category} color={cs.color} bg={cs.bg} /></td>
                       <td style={{ fontSize: 13, color: T.ts }}>{g.description}</td>
                       <td style={{ fontSize: "12.5px", color: T.tt }}>{g.reason}</td>
-                      <td><Pill text={g.priority} color={pr.color} bg={pr.bg} /></td>
+                      <td><Pill text={PRI_LABEL[g.priority] ? t(PRI_LABEL[g.priority]) : g.priority} color={pr.color} bg={pr.bg} /></td>
                     </tr>
                   );
                 })}
@@ -385,14 +414,14 @@ export default function DlpCoveragePage() {
         border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
         padding: "28px 32px",
       }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: T.tp, margin: "0 0 4px" }}>Quick Test</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: T.tp, margin: "0 0 4px" }}>{t("infra.coverage.quickTest")}</h2>
         <p style={{ fontSize: 13, color: T.ts, margin: "0 0 18px", lineHeight: 1.5 }}>
-          Scan a message against every detector. Output is masked for review — no gateway request is made.
+          {t("infra.coverage.quickTestDesc")}
         </p>
 
         <textarea
           value={testInput} onChange={(e) => setTestInput(e.target.value)}
-          placeholder="Paste or type text containing PII to test detection…"
+          placeholder={t("infra.coverage.testPlaceholder")}
           rows={5}
           style={{
             width: "100%", fontFamily: T.mono, fontSize: 13, padding: "14px 16px",
@@ -412,13 +441,13 @@ export default function DlpCoveragePage() {
             cursor: testing ? "wait" : "pointer", opacity: testing ? 0.7 : 1, transition: "opacity 120ms",
           }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            {testing ? "Scanning…" : "Run Detection"}
+            {testing ? t("infra.coverage.scanning") : t("infra.coverage.runDetection")}
           </button>
           <button onClick={() => { setTestInput(""); setTestResult(null); setTestError(null); }} disabled={testing} style={{
             padding: "8px 18px", fontSize: 13, fontWeight: 500, fontFamily: "inherit",
             borderRadius: 8, border: `1.5px solid ${T.bl}`, background: T.card,
             color: T.ts, cursor: "pointer", transition: "all 120ms",
-          }}>Clear</button>
+          }}>{t("action.clear")}</button>
         </div>
 
         {testError && (
@@ -430,12 +459,12 @@ export default function DlpCoveragePage() {
         {testResult && (
           <div style={{ marginTop: 20 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: T.tp }}>Detections found:</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: T.tp }}>{t("infra.coverage.detectionsFound")}</span>
               <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700, color: T.accent }}>{testResult.findings.length}</span>
             </div>
 
             {testResult.findings.length === 0 ? (
-              <p style={{ fontSize: 13, color: T.tt, margin: 0 }}>No detectors matched.</p>
+              <p style={{ fontSize: 13, color: T.tt, margin: 0 }}>{t("infra.coverage.noMatches")}</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {testResult.findings.map((f, i) => {
@@ -462,7 +491,7 @@ export default function DlpCoveragePage() {
 
             {testResult.masked_text && (
               <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: T.th, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Masked Output</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: T.th, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{t("infra.coverage.maskedOutput")}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 13, padding: "14px 16px", borderRadius: 10, background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, whiteSpace: "pre-wrap", lineHeight: 1.6, color: T.tp }}>
                   {testResult.masked_text}
                 </div>

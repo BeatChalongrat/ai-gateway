@@ -17,6 +17,7 @@ import ErrorState from "../../../components/ui/ErrorState";
 import ConfirmModal from "../../../components/ui/ConfirmModal";
 import StatCard from "../../../components/ui/StatCard";
 import { SkeletonTable } from "../../../components/ui/Skeleton";
+import { useT, type DictKey } from "../../../lib/i18n";
 import {
   AdminKBDetailResponse,
   AdminKBDocRow,
@@ -37,7 +38,10 @@ function humanSize(n: number): string {
   return `${n} B`;
 }
 
+type Translate = ReturnType<typeof useT>;
+
 export default function ChatKnowledgeDetailPage() {
+  const t = useT();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = typeof params?.id === "string" ? params.id : "";
@@ -59,12 +63,12 @@ export default function ChatKnowledgeDetailPage() {
       const res = await fetchAdminKnowledgeBase(id);
       setData(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(err instanceof Error ? err.message : t("state.errorLoad"));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, t]);
 
   useEffect(() => {
     void load();
@@ -77,13 +81,17 @@ export default function ChatKnowledgeDetailPage() {
     try {
       const res = await reindexAdminKnowledgeBase(id);
       setActionMessage(
-        `Reindexed ${res.reindexed} of ${res.total} documents` +
-          (res.failed > 0 ? ` (${res.failed} failed)` : ""),
+        t("chat.kb.reindexResult", { done: res.reindexed, total: res.total }) +
+          (res.failed > 0
+            ? ` ${t("chat.kb.reindexFailedSuffix", { failed: res.failed })}`
+            : ""),
       );
       await load();
     } catch (err) {
       setActionMessage(
-        err instanceof Error ? `Reindex failed: ${err.message}` : "Reindex failed",
+        err instanceof Error
+          ? t("chat.kb.reindexError", { message: err.message })
+          : t("chat.kb.reindexErrorPlain"),
       );
     } finally {
       setReindexing(false);
@@ -100,7 +108,9 @@ export default function ChatKnowledgeDetailPage() {
       router.push("/chat-knowledge");
     } catch (err) {
       setActionMessage(
-        err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed",
+        err instanceof Error
+          ? t("chat.kb.deleteError", { message: err.message })
+          : t("chat.kb.deleteErrorPlain"),
       );
       setDeleting(false);
       setDeleteConfirmOpen(false);
@@ -111,8 +121,8 @@ export default function ChatKnowledgeDetailPage() {
     return (
       <div>
         <PageHeader
-          title="Knowledge Base"
-          subtitle="Loading…"
+          title={t("chat.kb.detailTitle")}
+          subtitle={t("state.loading")}
         />
         <div className="sran-card" style={{ padding: "0.75rem" }}>
           <SkeletonTable rows={6} cols={5} />
@@ -124,10 +134,13 @@ export default function ChatKnowledgeDetailPage() {
     return (
       <div>
         <PageHeader
-          title="Knowledge Base"
-          subtitle="Could not load this knowledge base"
+          title={t("chat.kb.detailTitle")}
+          subtitle={t("chat.kb.detailLoadError")}
         />
-        <ErrorState message={error ?? "Not found"} onRetry={() => void load()} />
+        <ErrorState
+          message={error ?? t("chat.kb.notFound")}
+          onRetry={() => void load()}
+        />
       </div>
     );
   }
@@ -138,14 +151,14 @@ export default function ChatKnowledgeDetailPage() {
     <div>
       <PageHeader
         title={kb.name}
-        subtitle={kb.description || "No description"}
+        subtitle={kb.description || t("chat.kb.noDescription")}
         actions={
           <Link
             href="/chat-knowledge"
             className="sran-btn sran-btn-secondary sran-btn-sm"
             style={{ display: "inline-flex", alignItems: "center" }}
           >
-            ← All KBs
+            ← {t("chat.kb.allKbs")}
           </Link>
         }
       />
@@ -176,13 +189,22 @@ export default function ChatKnowledgeDetailPage() {
           marginBottom: "0.875rem",
         }}
       >
-        <StatCard label="Documents" value={kb.document_count.toString()} />
-        <StatCard label="Chunks" value={kb.total_chunks.toString()} />
-        <StatCard label="Chunk size" value={`${kb.chunk_size} chars`} />
-        <StatCard label="Overlap" value={`${kb.chunk_overlap} chars`} />
         <StatCard
-          label="Status"
-          value={kb.is_active ? "Active" : "Inactive"}
+          label={t("chat.col.documents")}
+          value={kb.document_count.toString()}
+        />
+        <StatCard label={t("chat.col.chunks")} value={kb.total_chunks.toString()} />
+        <StatCard
+          label={t("chat.kb.chunkSize")}
+          value={t("chat.kb.chars", { n: kb.chunk_size })}
+        />
+        <StatCard
+          label={t("chat.kb.overlap")}
+          value={t("chat.kb.chars", { n: kb.chunk_overlap })}
+        />
+        <StatCard
+          label={t("field.status")}
+          value={kb.is_active ? t("field.active") : t("field.inactive")}
         />
       </div>
 
@@ -191,9 +213,9 @@ export default function ChatKnowledgeDetailPage() {
         className="sran-card"
         style={{ padding: "0.875rem 1rem", marginBottom: "0.875rem" }}
       >
-        <DLRow label="ID" value={<Mono>{kb.id}</Mono>} />
+        <DLRow label={t("field.id")} value={<Mono>{kb.id}</Mono>} />
         <DLRow
-          label="Tenant"
+          label={t("field.tenant")}
           value={
             <>
               {kb.tenant_name ? (
@@ -209,9 +231,12 @@ export default function ChatKnowledgeDetailPage() {
             </>
           }
         />
-        <DLRow label="Embedding model" value={<Mono>{kb.embedding_model}</Mono>} />
-        <DLRow label="Created" value={formatDate(kb.created_at)} />
-        <DLRow label="Updated" value={formatDate(kb.updated_at)} last />
+        <DLRow
+          label={t("chat.kb.embeddingModel")}
+          value={<Mono>{kb.embedding_model}</Mono>}
+        />
+        <DLRow label={t("field.created")} value={formatDate(kb.created_at)} />
+        <DLRow label={t("field.updated")} value={formatDate(kb.updated_at)} last />
       </div>
 
       {/* Documents table */}
@@ -225,7 +250,7 @@ export default function ChatKnowledgeDetailPage() {
           letterSpacing: "0.04em",
         }}
       >
-        Documents ({data.documents.length})
+        {t("chat.kb.documentsCount", { n: data.documents.length })}
       </h2>
       <div className="sran-card" style={{ padding: 0, marginBottom: "0.875rem" }}>
         {data.documents.length === 0 ? (
@@ -236,23 +261,23 @@ export default function ChatKnowledgeDetailPage() {
               fontSize: "0.875rem",
             }}
           >
-            No documents indexed.
+            {t("chat.kb.noDocuments")}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table className="sran-table" style={{ minWidth: 760 }}>
               <thead>
                 <tr>
-                  <th>Filename</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: "right" }}>Chunks</th>
-                  <th style={{ textAlign: "right" }}>Size</th>
-                  <th>Uploaded</th>
+                  <th>{t("chat.col.filename")}</th>
+                  <th>{t("field.status")}</th>
+                  <th style={{ textAlign: "right" }}>{t("chat.col.chunks")}</th>
+                  <th style={{ textAlign: "right" }}>{t("chat.col.size")}</th>
+                  <th>{t("chat.col.uploaded")}</th>
                 </tr>
               </thead>
               <tbody>
                 {data.documents.map((doc) => (
-                  <DocRow key={doc.id} doc={doc} />
+                  <DocRow key={doc.id} doc={doc} t={t} />
                 ))}
               </tbody>
             </table>
@@ -271,7 +296,7 @@ export default function ChatKnowledgeDetailPage() {
           letterSpacing: "0.04em",
         }}
       >
-        Sample chunks
+        {t("chat.kb.sampleChunks")}
       </h2>
       <div className="sran-card" style={{ padding: 0, marginBottom: "0.875rem" }}>
         {data.sample_chunks.length === 0 ? (
@@ -282,7 +307,7 @@ export default function ChatKnowledgeDetailPage() {
               fontSize: "0.875rem",
             }}
           >
-            No chunks yet — upload a document to populate this list.
+            {t("chat.kb.noChunks")}
           </div>
         ) : (
           data.sample_chunks.map((c, i) => (
@@ -303,7 +328,8 @@ export default function ChatKnowledgeDetailPage() {
                   marginBottom: 4,
                 }}
               >
-                <Mono>{c.filename}</Mono> · section {c.chunk_index + 1}
+                <Mono>{c.filename}</Mono> ·{" "}
+                {t("chat.kb.section", { n: c.chunk_index + 1 })}
               </div>
               <div
                 style={{
@@ -338,7 +364,7 @@ export default function ChatKnowledgeDetailPage() {
             marginBottom: "0.5rem",
           }}
         >
-          Admin actions
+          {t("chat.kb.adminActions")}
         </h2>
         <p
           style={{
@@ -347,8 +373,7 @@ export default function ChatKnowledgeDetailPage() {
             marginBottom: "0.75rem",
           }}
         >
-          Reindex re-embeds every document — useful after a chunk-size config
-          change. Delete cascades to documents, chunks, and on-disk / S3 blobs.
+          {t("chat.kb.adminActionsBody")}
         </p>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <button
@@ -357,7 +382,7 @@ export default function ChatKnowledgeDetailPage() {
             disabled={reindexing || deleting}
             onClick={() => setReindexConfirmOpen(true)}
           >
-            {reindexing ? "Reindexing…" : "Reindex all documents"}
+            {reindexing ? t("chat.kb.reindexing") : t("chat.kb.reindexAll")}
           </button>
           <button
             type="button"
@@ -370,14 +395,14 @@ export default function ChatKnowledgeDetailPage() {
               border: "1px solid var(--color-status-error)",
             }}
           >
-            {deleting ? "Deleting…" : "Delete knowledge base"}
+            {deleting ? t("action.deleting") : t("chat.kb.deleteKb")}
           </button>
           <Link
             href="/chat-knowledge"
             className="sran-btn sran-btn-secondary sran-btn-sm"
             style={{ display: "inline-flex", alignItems: "center" }}
           >
-            Back to list
+            {t("chat.kb.backToList")}
           </Link>
         </div>
       </div>
@@ -386,9 +411,16 @@ export default function ChatKnowledgeDetailPage() {
         open={reindexConfirmOpen}
         onClose={() => !reindexing && setReindexConfirmOpen(false)}
         onConfirm={() => void doReindex()}
-        title="Reindex documents?"
-        message={`Re-index all documents in "${kb.name}"? This re-embeds ${data.documents.length} document${data.documents.length === 1 ? "" : "s"} and may take a while.`}
-        confirmLabel="Reindex"
+        title={t("chat.kb.confirmReindexTitle")}
+        message={
+          data.documents.length === 1
+            ? t("chat.kb.confirmReindexBodyOne", { name: kb.name })
+            : t("chat.kb.confirmReindexBody", {
+                name: kb.name,
+                count: data.documents.length,
+              })
+        }
+        confirmLabel={t("chat.kb.reindex")}
         loading={reindexing}
       />
 
@@ -396,16 +428,20 @@ export default function ChatKnowledgeDetailPage() {
         open={deleteConfirmOpen}
         onClose={() => !deleting && setDeleteConfirmOpen(false)}
         onConfirm={() => void doDelete()}
-        title="Delete knowledge base?"
-        message={`Delete "${kb.name}"? ${kb.document_count} documents and ${kb.total_chunks} chunks will be permanently removed.`}
-        confirmLabel="Delete"
+        title={t("chat.kb.confirmDeleteTitle")}
+        message={t("chat.kb.confirmDeleteBody", {
+          name: kb.name,
+          documents: kb.document_count,
+          chunks: kb.total_chunks,
+        })}
+        confirmLabel={t("action.delete")}
         loading={deleting}
       />
     </div>
   );
 }
 
-function DocRow({ doc }: { doc: AdminKBDocRow }) {
+function DocRow({ doc, t }: { doc: AdminKBDocRow; t: Translate }) {
   return (
     <tr>
       <td>
@@ -428,7 +464,7 @@ function DocRow({ doc }: { doc: AdminKBDocRow }) {
         ) : null}
       </td>
       <td>
-        <DocStatusPill status={doc.status} />
+        <DocStatusPill status={doc.status} t={t} />
       </td>
       <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
         {doc.chunk_count}
@@ -443,7 +479,23 @@ function DocRow({ doc }: { doc: AdminKBDocRow }) {
   );
 }
 
-function DocStatusPill({ status }: { status: AdminKBDocRow["status"] }) {
+// The indexing status is UI chrome, not an identifier an operator would
+// paste into a bug report, so it is localized. Unknown statuses (a newer
+// backend enum member) fall through to the raw value rather than a blank.
+const DOC_STATUS_KEY: Record<AdminKBDocRow["status"], DictKey> = {
+  pending: "chat.kb.docStatus.pending",
+  processing: "chat.kb.docStatus.processing",
+  indexed: "chat.kb.docStatus.indexed",
+  failed: "chat.kb.docStatus.failed",
+};
+
+function DocStatusPill({
+  status,
+  t,
+}: {
+  status: AdminKBDocRow["status"];
+  t: Translate;
+}) {
   const palette: Record<AdminKBDocRow["status"], { bg: string; fg: string; border: string }> = {
     pending: {
       bg: "var(--bg-elevated)",
@@ -482,7 +534,7 @@ function DocStatusPill({ status }: { status: AdminKBDocRow["status"] }) {
         border: `1px solid ${p.border}`,
       }}
     >
-      {status}
+      {DOC_STATUS_KEY[status] ? t(DOC_STATUS_KEY[status]) : status}
     </span>
   );
 }

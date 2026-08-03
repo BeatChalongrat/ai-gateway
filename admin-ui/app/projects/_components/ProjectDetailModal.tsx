@@ -21,6 +21,11 @@ import { Icon } from "../../../components/ui/Icon";
 import Modal from "../../../components/ui/Modal";
 import { useToast } from "../../../components/ui/Toast";
 import { api, ApiError } from "../../../lib/api";
+import { useT } from "../../../lib/i18n";
+
+/// The translate function handed down to the module-scope helpers below,
+/// which render copy but sit outside the component that owns the hook.
+type Translate = ReturnType<typeof useT>;
 
 interface ProjectMemberRow {
   user_id: string;
@@ -131,14 +136,14 @@ function Avatar({
   );
 }
 
-function formatRelative(iso: string | null): string {
-  if (!iso) return "Never";
+function formatRelative(iso: string | null, t: Translate): string {
+  if (!iso) return t("tenancy.detail.never");
   const d = new Date(iso);
   const sec = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (sec < 60) return "just now";
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
-  if (sec < 86400 * 30) return `${Math.floor(sec / 86400)}d ago`;
+  if (sec < 60) return t("time.justNow");
+  if (sec < 3600) return t("time.minutesAgo", { n: Math.floor(sec / 60) });
+  if (sec < 86400) return t("time.hoursAgo", { n: Math.floor(sec / 3600) });
+  if (sec < 86400 * 30) return t("time.daysAgo", { n: Math.floor(sec / 86400) });
   return d.toLocaleDateString();
 }
 
@@ -149,6 +154,7 @@ export default function ProjectDetailModal({
   onMutated,
 }: Props) {
   const { toast } = useToast();
+  const t = useT();
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -179,8 +185,9 @@ export default function ProjectDetailModal({
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || `Load failed (${err.status})`
-          : "Load failed";
+          ? err.body?.error?.message ||
+            t("tenancy.detail.loadFailedStatus", { status: err.status })
+          : t("state.errorLoad");
       toast(msg, "error");
     } finally {
       setLoading(false);
@@ -198,15 +205,15 @@ export default function ProjectDetailModal({
     setArchiving(true);
     try {
       await api.post(`/admin/projects/${projectId}/archive`, {});
-      toast("Project archived");
+      toast(t("tenancy.detail.archivedToast"));
       setArchiveOpen(false);
       onMutated?.();
       onClose();
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || "Archive failed"
-          : "Archive failed";
+          ? err.body?.error?.message || t("tenancy.detail.archiveFailed")
+          : t("tenancy.detail.archiveFailed");
       toast(msg, "error");
     } finally {
       setArchiving(false);
@@ -220,14 +227,14 @@ export default function ProjectDetailModal({
       await api.delete(
         `/admin/projects/${projectId}/members/${removeTarget.user_id}`
       );
-      toast("Member removed");
+      toast(t("tenancy.detail.memberRemoved"));
       setRemoveTarget(null);
       await fetchDetail();
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || "Remove failed"
-          : "Remove failed";
+          ? err.body?.error?.message || t("tenancy.detail.removeFailed")
+          : t("tenancy.detail.removeFailed");
       toast(msg, "error");
     } finally {
       setRemoving(false);
@@ -244,13 +251,13 @@ export default function ProjectDetailModal({
         `/admin/projects/${projectId}/members/${userId}`,
         { role }
       );
-      toast(`Role changed to ${role}`);
+      toast(t("tenancy.detail.roleChanged", { role }));
       await fetchDetail();
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || "Role change failed"
-          : "Role change failed";
+          ? err.body?.error?.message || t("tenancy.detail.roleChangeFailed")
+          : t("tenancy.detail.roleChangeFailed");
       toast(msg, "error");
     }
   }
@@ -261,14 +268,14 @@ export default function ProjectDetailModal({
       await api.put(`/admin/projects/${projectId}`, {
         policy_profile_id: profileId,
       });
-      toast("Policy updated");
+      toast(t("tenancy.detail.policyUpdated"));
       setEditingPolicy(false);
       await fetchDetail();
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || "Policy update failed"
-          : "Policy update failed";
+          ? err.body?.error?.message || t("tenancy.detail.policyUpdateFailed")
+          : t("tenancy.detail.policyUpdateFailed");
       toast(msg, "error");
     }
   }
@@ -278,11 +285,11 @@ export default function ProjectDetailModal({
       <Modal
         open={open}
         onClose={onClose}
-        title={detail?.name || "Project"}
+        title={detail?.name || t("field.project")}
         maxWidth="640px"
         footer={
           <button className="sran-btn sran-btn-secondary" onClick={onClose}>
-            Close
+            {t("action.close")}
           </button>
         }
       >
@@ -295,7 +302,7 @@ export default function ProjectDetailModal({
               fontSize: 13,
             }}
           >
-            Loading project detail…
+            {t("tenancy.detail.loading")}
           </div>
         ) : detail ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -310,10 +317,10 @@ export default function ProjectDetailModal({
             </code>
 
             {/* Overview */}
-            <Section title="Overview">
-              <DlRow label="Tenant" value={detail.tenant_name || detail.tenant_id} />
+            <Section title={t("tenancy.detail.overview")}>
+              <DlRow label={t("field.tenant")} value={detail.tenant_name || detail.tenant_id} />
               <DlRow
-                label="Policy"
+                label={t("tenancy.field.policy")}
                 value={
                   editingPolicy ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -334,7 +341,7 @@ export default function ProjectDetailModal({
                         className="sran-btn sran-btn-secondary sran-btn-sm"
                         onClick={() => setEditingPolicy(false)}
                       >
-                        Cancel
+                        {t("action.cancel")}
                       </button>
                     </div>
                   ) : (
@@ -351,14 +358,14 @@ export default function ProjectDetailModal({
                           fontWeight: 500,
                         }}
                       >
-                        Change →
+                        {t("tenancy.detail.change")}
                       </button>
                     </span>
                   )
                 }
               />
               <DlRow
-                label="Created"
+                label={t("field.created")}
                 value={
                   detail.created_at
                     ? new Date(detail.created_at).toLocaleString()
@@ -366,7 +373,7 @@ export default function ProjectDetailModal({
                 }
               />
               <DlRow
-                label="Created by"
+                label={t("tenancy.detail.createdBy")}
                 value={
                   detail.created_by ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -407,7 +414,7 @@ export default function ProjectDetailModal({
                               color: "var(--color-text-muted)",
                             }}
                           >
-                            Pre-034 project with no recorded creator
+                            {t("tenancy.detail.systemCreator")}
                           </div>
                         ) : null}
                       </div>
@@ -418,12 +425,12 @@ export default function ProjectDetailModal({
                 }
               />
               <DlRow
-                label="Last activity"
-                value={formatRelative(detail.last_activity_at)}
+                label={t("tenancy.detail.lastActivity")}
+                value={formatRelative(detail.last_activity_at, t)}
               />
               {detail.archived_at ? (
                 <DlRow
-                  label="Archived"
+                  label={t("tenancy.status.archived")}
                   value={
                     <span style={{ color: "var(--color-status-warning)" }}>
                       {new Date(detail.archived_at).toLocaleString()}
@@ -434,7 +441,7 @@ export default function ProjectDetailModal({
             </Section>
 
             {/* Activity */}
-            <Section title="Activity">
+            <Section title={t("tenancy.detail.activity")}>
               <div
                 style={{
                   display: "grid",
@@ -444,30 +451,36 @@ export default function ProjectDetailModal({
               >
                 <KpiBox
                   value={detail.request_count_last_7d.toLocaleString()}
-                  label="requests (last 7 days)"
+                  label={t("tenancy.detail.kpiRequests")}
                 />
                 <KpiBox
                   value={detail.api_keys_count.toString()}
-                  label={detail.api_keys_count === 1 ? "API key" : "API keys"}
+                  label={t(
+                    detail.api_keys_count === 1
+                      ? "tenancy.detail.kpiApiKey"
+                      : "tenancy.detail.kpiApiKeys",
+                  )}
                 />
                 <KpiBox
                   value={detail.members.length.toString()}
-                  label={
-                    detail.members.length === 1 ? "member" : "members"
-                  }
+                  label={t(
+                    detail.members.length === 1
+                      ? "tenancy.detail.kpiMember"
+                      : "tenancy.detail.kpiMembers",
+                  )}
                 />
               </div>
             </Section>
 
             {/* Members */}
             <Section
-              title={`Members (${detail.members.length})`}
+              title={t("tenancy.detail.members", { n: detail.members.length })}
               actions={
                 <button
                   className="sran-btn sran-btn-secondary sran-btn-sm"
                   onClick={() => setAddOpen(true)}
                 >
-                  + Add member
+                  {t("tenancy.detail.addMember")}
                 </button>
               }
             >
@@ -480,8 +493,7 @@ export default function ProjectDetailModal({
                     textAlign: "center",
                   }}
                 >
-                  No explicit members. Add teammates to give them scoped
-                  access to this project.
+                  {t("tenancy.detail.noMembers")}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -489,6 +501,7 @@ export default function ProjectDetailModal({
                     <MemberRow
                       key={m.user_id}
                       member={m}
+                      t={t}
                       onChangeRole={(r) => handleChangeRole(m.user_id, r)}
                       onRemove={() => setRemoveTarget(m)}
                     />
@@ -499,7 +512,7 @@ export default function ProjectDetailModal({
 
             {/* Danger zone */}
             {!detail.archived_at ? (
-              <Section title="Danger zone" danger>
+              <Section title={t("tenancy.detail.dangerZone")} danger>
                 <div
                   style={{
                     display: "flex",
@@ -510,7 +523,7 @@ export default function ProjectDetailModal({
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 2 }}>
-                      Archive project
+                      {t("tenancy.detail.archiveProject")}
                     </div>
                     <div
                       style={{
@@ -518,7 +531,7 @@ export default function ProjectDetailModal({
                         color: "var(--color-text-muted)",
                       }}
                     >
-                      Projects can be restored within 30 days.
+                      {t("tenancy.detail.archiveHint")}
                     </div>
                   </div>
                   <button
@@ -529,7 +542,7 @@ export default function ProjectDetailModal({
                     }}
                     onClick={() => setArchiveOpen(true)}
                   >
-                    Archive
+                    {t("tenancy.action.archive")}
                   </button>
                 </div>
               </Section>
@@ -542,18 +555,18 @@ export default function ProjectDetailModal({
         open={archiveOpen}
         onClose={() => setArchiveOpen(false)}
         onConfirm={handleArchive}
-        title="Archive project?"
-        message="The project will be hidden from the default list but can be restored for 30 days. API keys and request logs stay intact."
-        confirmLabel="Archive"
+        title={t("tenancy.detail.archiveConfirmTitle")}
+        message={t("tenancy.detail.archiveConfirmMessage")}
+        confirmLabel={t("tenancy.action.archive")}
         loading={archiving}
       />
       <ConfirmModal
         open={removeTarget !== null}
         onClose={() => setRemoveTarget(null)}
         onConfirm={handleRemoveMember}
-        title={`Remove ${removeTarget?.email}?`}
-        message="They'll lose access to this project immediately. This doesn't affect their tenant membership."
-        confirmLabel="Remove"
+        title={t("tenancy.detail.removeConfirmTitle", { email: removeTarget?.email ?? "" })}
+        message={t("tenancy.detail.removeConfirmMessage")}
+        confirmLabel={t("action.remove")}
         loading={removing}
       />
       <AddMemberModal
@@ -693,10 +706,12 @@ function MemberRow({
   member,
   onChangeRole,
   onRemove,
+  t,
 }: {
   member: ProjectMemberRow;
   onChangeRole: (r: "admin" | "member" | "viewer") => void;
   onRemove: () => void;
+  t: Translate;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -765,7 +780,7 @@ function MemberRow({
       <div ref={ref} style={{ position: "relative" }}>
         <button
           type="button"
-          aria-label="Member actions"
+          aria-label={t("tenancy.detail.memberActions")}
           aria-expanded={open}
           aria-haspopup="menu"
           onClick={() => setOpen((v) => !v)}
@@ -809,7 +824,7 @@ function MemberRow({
                 color: "var(--color-text-muted)",
               }}
             >
-              Change role
+              {t("tenancy.detail.changeRole")}
             </div>
             {(["admin", "member", "viewer"] as const).map((r) => (
               <button
@@ -867,7 +882,7 @@ function MemberRow({
                 cursor: "pointer",
               }}
             >
-              Remove from project
+              {t("tenancy.detail.removeFromProject")}
             </button>
           </div>
         ) : null}
@@ -924,6 +939,7 @@ function AddMemberModal({
   existingMemberIds: Set<string>;
 }) {
   const { toast } = useToast();
+  const t = useT();
   const [search, setSearch] = useState("");
   const [users, setUsers] = useState<SearchableUser[]>([]);
   const [role, setRole] = useState<"admin" | "member" | "viewer">("member");
@@ -974,13 +990,13 @@ function AddMemberModal({
         user_id: picked.id,
         role,
       });
-      toast("Member added");
+      toast(t("tenancy.detail.memberAdded"));
       onAdded();
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? err.body?.error?.message || "Add failed"
-          : "Add failed";
+          ? err.body?.error?.message || t("tenancy.detail.addFailed")
+          : t("tenancy.detail.addFailed");
       toast(msg, "error");
     } finally {
       setAdding(false);
@@ -991,18 +1007,18 @@ function AddMemberModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Add member"
+      title={t("tenancy.detail.addMemberTitle")}
       footer={
         <>
           <button className="sran-btn sran-btn-secondary" onClick={onClose}>
-            Cancel
+            {t("action.cancel")}
           </button>
           <button
             className="sran-btn sran-btn-primary"
             disabled={!picked || adding}
             onClick={handleAdd}
           >
-            {adding ? "Adding…" : "Add"}
+            {adding ? t("tenancy.detail.adding") : t("action.add")}
           </button>
         </>
       }
@@ -1010,7 +1026,7 @@ function AddMemberModal({
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <input
           className="sran-input"
-          placeholder="Search name or email…"
+          placeholder={t("tenancy.detail.searchUserPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           autoFocus
@@ -1034,7 +1050,7 @@ function AddMemberModal({
                 fontSize: 13,
               }}
             >
-              Searching…
+              {t("tenancy.detail.searching")}
             </div>
           ) : users.length === 0 ? (
             <div
@@ -1045,7 +1061,7 @@ function AddMemberModal({
                 fontSize: 13,
               }}
             >
-              No users in this tenant match.
+              {t("tenancy.detail.noUsers")}
             </div>
           ) : (
             users.map((u) => {
@@ -1106,7 +1122,7 @@ function AddMemberModal({
                         color: "var(--color-text-muted)",
                       }}
                     >
-                      Already a member
+                      {t("tenancy.detail.alreadyMember")}
                     </span>
                   ) : null}
                 </button>
@@ -1128,7 +1144,7 @@ function AddMemberModal({
               marginBottom: 4,
             }}
           >
-            Role
+            {t("field.role")}
           </label>
           <select
             className="sran-input"

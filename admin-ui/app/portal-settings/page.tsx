@@ -7,9 +7,17 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useToast } from "../../components/ui/Toast";
 import { api, ApiError } from "../../lib/api";
 import { useApi } from "../../lib/useApi";
+import { useT, type DictKey } from "../../lib/i18n";
 import { ThemeToggle } from "../../components/ThemeToggle";
 
 type Tab = "general" | "trial" | "security";
+
+// The tier values are backend identifiers; only their LABEL is localized.
+const TIER_KEYS: Record<string, DictKey> = {
+  budget: "padmin.settings.tierBudget",
+  standard: "padmin.settings.tierStandard",
+  premium: "padmin.settings.tierPremium",
+};
 
 type SettingKey =
   | "free_trial_tokens"
@@ -149,6 +157,7 @@ function StatCard({ value, label, icon, accent, bg, delay = 0 }: {
 // ---------------------------------------------------------------------------
 
 export default function PortalSettingsPage() {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("general");
   const { data, loading, error, refetch } = useApi<Setting[]>("/admin/system-settings");
   const settings = data ?? [];
@@ -172,9 +181,9 @@ export default function PortalSettingsPage() {
       {/* Page header */}
       <div className="sran-page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h1 className="sran-page-title">Portal Settings</h1>
+          <h1 className="sran-page-title">{t("padmin.settings.title")}</h1>
           <p className="sran-page-subtitle">
-            Configure portal behavior, free trial, and default values.
+            {t("padmin.settings.subtitle")}
           </p>
         </div>
         <ThemeToggle />
@@ -187,15 +196,21 @@ export default function PortalSettingsPage() {
           accent="#4f46e5"
           bg="rgba(99,102,241,0.1)"
           value={loading ? "—" : Number(freeTrialTokens).toLocaleString()}
-          label="tokens per signup"
+          label={t("padmin.settings.statTokensPerSignup")}
           delay={0}
         />
         <StatCard
           icon={<IconLayers />}
           accent="#059669"
           bg="rgba(5,150,105,0.1)"
-          value={loading ? "—" : trialTier.charAt(0).toUpperCase() + trialTier.slice(1)}
-          label="maximum tier"
+          value={
+            loading
+              ? "—"
+              : TIER_KEYS[trialTier]
+              ? t(TIER_KEYS[trialTier])
+              : trialTier.charAt(0).toUpperCase() + trialTier.slice(1)
+          }
+          label={t("padmin.settings.statMaxTier")}
           delay={80}
         />
         <StatCard
@@ -203,7 +218,7 @@ export default function PortalSettingsPage() {
           accent="#d97706"
           bg="rgba(217,119,6,0.1)"
           value={loading ? "—" : Number(lowThreshold).toLocaleString()}
-          label="warning threshold"
+          label={t("padmin.settings.statWarnThreshold")}
           delay={160}
         />
       </div>
@@ -217,9 +232,9 @@ export default function PortalSettingsPage() {
           background: "var(--bg-surface-2)",
         }}>
           {([
-            { k: "general" as Tab, label: "General" },
-            { k: "trial" as Tab, label: "Trial & Credits" },
-            { k: "security" as Tab, label: "Security" },
+            { k: "general" as Tab, label: t("padmin.settings.tabGeneral") },
+            { k: "trial" as Tab, label: t("padmin.settings.tabTrial") },
+            { k: "security" as Tab, label: t("padmin.settings.tabSecurity") },
           ]).map((t) => (
             <button
               key={t.k}
@@ -279,11 +294,14 @@ async function patchSetting(key: SettingKey, value: string): Promise<void> {
 }
 
 function useSaveError() {
+  const t = useT();
   return (e: unknown): string => {
     if (e instanceof ApiError) {
-      return e.body?.error?.message || `Save failed (${e.status})`;
+      // The backend message is passed through verbatim — it is operator
+      // diagnostics, not UI copy.
+      return e.body?.error?.message || t("padmin.saveFailedStatus", { status: e.status });
     }
-    return "Save failed";
+    return t("padmin.saveFailed");
   };
 }
 
@@ -298,6 +316,7 @@ function GeneralTab({
   setting?: Setting;
   onSaved: () => void;
 }) {
+  const t = useT();
   const { toast } = useToast();
   const formatError = useSaveError();
   const current = (setting?.value || "true").toLowerCase() === "true";
@@ -314,7 +333,7 @@ function GeneralTab({
     setSaving(true);
     try {
       await patchSetting("portal_signup_enabled", next ? "true" : "false");
-      toast(next ? "Portal signups enabled" : "Portal signups disabled");
+      toast(next ? t("padmin.settings.signupsEnabled") : t("padmin.settings.signupsDisabled"));
       onSaved();
     } catch (e) {
       setEnabled(prev);
@@ -327,7 +346,7 @@ function GeneralTab({
   return (
     <div style={{ maxWidth: 640 }}>
       <h2 style={{ fontSize: "1.0625rem", fontWeight: 600, margin: "0 0 1rem", color: "var(--text-primary)" }}>
-        Portal Registration
+        {t("padmin.settings.registrationHeading")}
       </h2>
       <div className="ps-setting-card" style={{
         display: "flex", alignItems: "center", gap: "1rem",
@@ -337,10 +356,10 @@ function GeneralTab({
       }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-primary)", marginBottom: 2 }}>
-            Allow new user signups
+            {t("padmin.settings.allowSignups")}
           </div>
           <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 8 }}>
-            When disabled, the signup page shows a &ldquo;Registration is currently closed&rdquo; message.
+            {t("padmin.settings.allowSignupsDesc")}
           </div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}>
             <span style={{
@@ -351,7 +370,7 @@ function GeneralTab({
               fontSize: "0.6875rem", fontWeight: 600,
               color: enabled ? "var(--accent-success)" : "var(--accent-danger)",
             }}>
-              {enabled ? "Active" : "Disabled"}
+              {enabled ? t("field.active") : t("field.disabled")}
             </span>
           </div>
         </div>
@@ -366,11 +385,9 @@ function GeneralTab({
         fontSize: "0.75rem", color: "var(--text-tertiary)", lineHeight: 1.5,
       }}>
         <div style={{ fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
-          About Portal Registration
+          {t("padmin.settings.aboutRegistration")}
         </div>
-        Controls whether new users can create accounts through the self-service portal.
-        Existing users can still log in regardless of this setting. Disabling signup is
-        useful during maintenance or when onboarding is handled via admin invite only.
+        {t("padmin.settings.aboutRegistrationBody")}
       </div>
     </div>
   );
@@ -436,6 +453,7 @@ function TrialTab({
   threshold?: Setting;
   onSaved: () => void;
 }) {
+  const t = useT();
   const { toast } = useToast();
   const formatError = useSaveError();
 
@@ -475,7 +493,7 @@ function TrialTab({
     if (failed) {
       toast(failed, "error");
     } else {
-      toast("Settings saved");
+      toast(t("padmin.settings.settingsSaved"));
     }
     onSaved();
   }
@@ -483,7 +501,7 @@ function TrialTab({
   return (
     <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <h2 style={{ fontSize: "1.0625rem", fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
-        Free Trial Configuration
+        {t("padmin.settings.trialHeading")}
       </h2>
 
       {/* Free trial tokens */}
@@ -496,10 +514,10 @@ function TrialTab({
           display: "block", fontSize: "0.8125rem", fontWeight: 600,
           color: "var(--text-primary)", marginBottom: 4,
         }}>
-          Free trial tokens
+          {t("padmin.settings.freeTrialTokens")}
         </label>
         <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 10 }}>
-          Tokens granted to each new user on signup.
+          {t("padmin.settings.freeTrialTokensDesc")}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{
@@ -532,7 +550,7 @@ function TrialTab({
             <span style={{
               padding: "0.5rem 0.75rem", fontSize: "0.75rem",
               color: "var(--text-tertiary)", fontWeight: 500,
-            }}>tokens</span>
+            }}>{t("padmin.tokensUnit")}</span>
           </div>
         </div>
       </div>
@@ -547,34 +565,33 @@ function TrialTab({
           display: "block", fontSize: "0.8125rem", fontWeight: 600,
           color: "var(--text-primary)", marginBottom: 4,
         }}>
-          Trial model tier
+          {t("padmin.settings.trialTier")}
         </label>
         <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 10 }}>
-          Maximum model tier available to trial users.
+          {t("padmin.settings.trialTierDesc")}
         </div>
         <div style={{ display: "inline-flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border-default)" }}>
-          {(["budget", "standard", "premium"] as const).map((t) => {
-            const sel = tierValue === t;
+          {(["budget", "standard", "premium"] as const).map((opt) => {
+            const sel = tierValue === opt;
             return (
               <button
-                key={t}
+                key={opt}
                 type="button"
-                onClick={() => setTierValue(t)}
+                onClick={() => setTierValue(opt)}
                 style={{
                   padding: "0.4375rem 1rem",
                   border: "none",
-                  borderRight: t !== "premium" ? "1px solid var(--border-default)" : "none",
+                  borderRight: opt !== "premium" ? "1px solid var(--border-default)" : "none",
                   background: sel ? "var(--accent-primary)" : "var(--bg-surface)",
                   color: sel ? "#ffffff" : "var(--text-secondary)",
                   fontSize: "0.8125rem",
                   fontWeight: sel ? 600 : 500,
                   cursor: "pointer",
-                  textTransform: "capitalize",
                   transition: "background 150ms, color 150ms",
                   fontFamily: "inherit",
                 }}
               >
-                {t}
+                {t(TIER_KEYS[opt])}
               </button>
             );
           })}
@@ -591,10 +608,10 @@ function TrialTab({
           display: "block", fontSize: "0.8125rem", fontWeight: 600,
           color: "var(--text-primary)", marginBottom: 4,
         }}>
-          Low credit warning threshold
+          {t("padmin.settings.lowThreshold")}
         </label>
         <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginBottom: 10 }}>
-          Warn user in the portal when their balance drops below this value.
+          {t("padmin.settings.lowThresholdDesc")}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{
@@ -627,7 +644,7 @@ function TrialTab({
             <span style={{
               padding: "0.5rem 0.75rem", fontSize: "0.75rem",
               color: "var(--text-tertiary)", fontWeight: 500,
-            }}>tokens</span>
+            }}>{t("padmin.tokensUnit")}</span>
           </div>
         </div>
       </div>
@@ -649,7 +666,7 @@ function TrialTab({
           }}
         >
           {saving && <IconLoader />}
-          {saving ? "Saving…" : "Save Changes"}
+          {saving ? t("action.saving") : t("padmin.saveChanges")}
         </button>
         {dirty && !saving && (
           <span style={{
@@ -657,7 +674,7 @@ function TrialTab({
             display: "inline-flex", alignItems: "center", gap: "0.25rem",
           }}>
             <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent-warning)" }} />
-            Unsaved changes
+            {t("padmin.settings.unsavedChanges")}
           </span>
         )}
       </div>
@@ -670,6 +687,7 @@ function TrialTab({
 // ---------------------------------------------------------------------------
 
 function SecurityTab() {
+  const t = useT();
   return (
     <div style={{
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -684,10 +702,10 @@ function SecurityTab() {
         fontSize: "1.0625rem", fontWeight: 600, color: "var(--text-secondary)",
         marginBottom: "0.375rem",
       }}>
-        Coming soon
+        {t("padmin.settings.comingSoon")}
       </div>
       <div style={{ fontSize: "0.8125rem", color: "var(--text-tertiary)", maxWidth: 320 }}>
-        Rate limits, IP allowlist, and session controls will live here.
+        {t("padmin.settings.securitySoonBody")}
       </div>
     </div>
   );

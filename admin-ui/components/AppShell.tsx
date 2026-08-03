@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useT } from "../lib/i18n";
 import Sidebar from "./Sidebar";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Lock background scroll while the mobile drawer is open.
@@ -46,7 +48,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <button
           type="button"
           onClick={() => setMobileMenuOpen(true)}
-          aria-label="Open menu"
+          aria-label={t("nav.openMenu")}
           aria-expanded={mobileMenuOpen}
           className="tap-44"
           style={{
@@ -66,7 +68,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
           <img src="/sran-logo.png" alt="" style={{ width: 26, height: 26, borderRadius: 6, flexShrink: 0 }} />
           <span style={{ fontSize: "0.9rem", fontWeight: 700, letterSpacing: "0.06em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            SRAN AI Gateway
+            {t("app.title")}
           </span>
         </div>
       </header>

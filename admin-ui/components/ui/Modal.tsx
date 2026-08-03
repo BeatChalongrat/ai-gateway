@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useT } from "../../lib/i18n";
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -23,6 +25,8 @@ export default function Modal({
   footer,
   maxWidth = "28rem",
 }: Props) {
+  const t = useT();
+
   useEffect(() => {
     if (open) {
       document.body.style.overflow = "hidden";
@@ -82,6 +86,9 @@ export default function Modal({
           <h2 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: 0 }}>{title}</h2>
           <button
             onClick={onClose}
+            type="button"
+            aria-label={t("action.close")}
+            title={t("action.close")}
             style={{
               background: "none", border: "none", cursor: "pointer",
               fontSize: "1.25rem", color: "var(--color-text-muted)", padding: "0.25rem",

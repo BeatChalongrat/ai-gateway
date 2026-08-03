@@ -11,6 +11,7 @@ import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { useT } from "../../lib/i18n";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -97,6 +98,7 @@ const CSS = `
 /* ── Sparkline ────────────────────────────────────────────────────── */
 
 function Sparkline({ items }: { items: any[] }) {
+  const t = useT();
   // Build 48 buckets (30min each over 24h) from request timestamps
   const now = Date.now();
   const buckets = useMemo(() => {
@@ -132,16 +134,16 @@ function Sparkline({ items }: { items: any[] }) {
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green }} />
           <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.tp }}>{totalOk}</span>
-          <span style={{ fontSize: 11, color: T.tt }}>ok</span>
+          <span style={{ fontSize: 11, color: T.tt }}>{t("obs.req.spark.ok")}</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.red }} />
           <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.tp }}>{totalErr}</span>
-          <span style={{ fontSize: 11, color: T.tt }}>err</span>
+          <span style={{ fontSize: 11, color: T.tt }}>{t("obs.req.spark.err")}</span>
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, background: "rgba(16,185,129,0.08)", fontSize: 11, fontWeight: 600, color: "#059669" }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, animation: "rqBlink 1.2s ease-in-out infinite" }} />
-          Live
+          {t("obs.req.spark.live")}
         </span>
       </div>
     </div>
@@ -173,6 +175,7 @@ function JsonBlock({ data }: { data: any }) {
 // on the left, "Copy JSON" action on the right. Hoisted so the page
 // body doesn't repeat the layout markup.
 function JsonPanelHeader({ label, onCopy }: { label: string; onCopy: () => void }) {
+  const t = useT();
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
       <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{label}</span>
@@ -180,7 +183,7 @@ function JsonPanelHeader({ label, onCopy }: { label: string; onCopy: () => void 
         onClick={(e) => { e.stopPropagation(); onCopy(); }}
         style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: T.accent, padding: 0, fontFamily: "inherit" }}
       >
-        Copy JSON
+        {t("obs.copyJson")}
       </button>
     </div>
   );
@@ -205,6 +208,7 @@ export default function RequestsPage() {
   const [secureReasonOpen, setSecureReasonOpen] = useState(false);
   const [secureReason, setSecureReason] = useState("");
   const { toast } = useToast();
+  const t = useT();
 
   const items = data?.items ?? [];
 
@@ -325,9 +329,9 @@ export default function RequestsPage() {
       const path = `/admin/requests/${detail.request_id}/secure-trace?reason=${encodeURIComponent(reason || "admin-debug")}`;
       const d = await api.get(path);
       setSecureTrace(d as SecureTrace);
-      toast("Secure trace loaded. Access was audited.");
+      toast(t("obs.req.secureLoaded"));
     } catch {
-      toast("Secure trace unavailable or permission denied");
+      toast(t("obs.req.secureDenied"));
       setSecureTrace(null);
     } finally {
       setSecureTraceLoading(false);
@@ -400,9 +404,9 @@ export default function RequestsPage() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast(`Downloaded ${rows.length} record${rows.length === 1 ? "" : "s"}`);
+      toast(t("obs.req.downloaded", { n: rows.length }));
     } catch (e: any) {
-      toast(e?.body?.error?.message || "Download failed", "error");
+      toast(e?.body?.error?.message || t("obs.req.downloadFailed"), "error");
     } finally {
       setDownloading(false);
     }
@@ -415,13 +419,13 @@ export default function RequestsPage() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>Requests</h1>
-          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>Gateway request log with routing, DLP, and provider details</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>{t("obs.req.title")}</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>{t("obs.req.subtitle")}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={refetch} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 8, border: `1px solid ${T.bl}`, background: T.card, color: T.ts, cursor: "pointer" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-            Refresh
+            {t("action.refresh")}
           </button>
           <button
             onClick={handleDownload}
@@ -435,7 +439,7 @@ export default function RequestsPage() {
             }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            {downloading ? "Preparing…" : "Download"}
+            {downloading ? t("obs.req.preparing") : t("obs.req.download")}
           </button>
           <ThemeToggle />
         </div>
@@ -446,12 +450,12 @@ export default function RequestsPage() {
           two pages were folded together. */}
       {!loading && !error && items.length > 0 && (
         <div className="rq-anim" style={{ animationDelay: "0.02s", display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          {[
-            { label: "total records", count: items.length, dot: null },
-            { label: "allowed", count: allowedCount, dot: T.green },
-            { label: "masked", count: maskedCount, dot: "#f59e0b" },
-            { label: "blocked", count: blockedCount, dot: T.red },
-          ].map((c) => (
+          {([
+            { label: "obs.req.chip.totalRecords", count: items.length, dot: null },
+            { label: "obs.req.chip.allowed", count: allowedCount, dot: T.green },
+            { label: "obs.req.chip.masked", count: maskedCount, dot: "#f59e0b" },
+            { label: "obs.req.chip.blocked", count: blockedCount, dot: T.red },
+          ] as const).map((c) => (
             <span key={c.label} style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "6px 14px", borderRadius: 16,
@@ -459,7 +463,7 @@ export default function RequestsPage() {
             }}>
               {c.dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.dot }} />}
               <span style={{ fontFamily: T.mono, fontWeight: 600, color: T.tp }}>{c.count}</span>
-              <span style={{ color: T.ts }}>{c.label}</span>
+              <span style={{ color: T.ts }}>{t(c.label)}</span>
             </span>
           ))}
         </div>
@@ -473,7 +477,7 @@ export default function RequestsPage() {
         <div className="rq-anim" style={{ animationDelay: "0.05s", display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
           <div style={{ position: "relative", flex: "0 1 320px", minWidth: 160 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Filter requests..."
+            <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder={t("obs.req.searchPlaceholder")}
               style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: T.mono, border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
               onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
               onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
@@ -481,12 +485,12 @@ export default function RequestsPage() {
             {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.tt, fontSize: 12, padding: 2 }}><Icon name="x" size={12} /></button>}
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            {[
-              { key: null, label: "All", count: items.length, dot: null },
-              { key: "ok", label: "OK", count: okCount, dot: T.green },
-              { key: "error", label: "Error", count: errCount, dot: T.red },
-              { key: "masked", label: "Masked", count: maskedCount, dot: "#f59e0b" },
-            ].map((f) => {
+            {([
+              { key: null, label: "field.all", count: items.length, dot: null },
+              { key: "ok", label: "obs.req.filter.ok", count: okCount, dot: T.green },
+              { key: "error", label: "obs.req.filter.error", count: errCount, dot: T.red },
+              { key: "masked", label: "obs.req.filter.masked", count: maskedCount, dot: "#f59e0b" },
+            ] as const).map((f) => {
               const active = statusFilter === f.key;
               return (
                 <button key={f.label} onClick={() => { setStatusFilter(f.key); setPage(1); }} style={{
@@ -495,13 +499,13 @@ export default function RequestsPage() {
                   background: active ? "rgba(59,108,246,0.06)" : "transparent", color: active ? T.accent : T.tt, transition: "all 120ms",
                 }}>
                   {f.dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: f.dot, opacity: active ? 1 : 0.5 }} />}
-                  {f.label} <span style={{ fontWeight: 700, fontSize: 10 }}>{f.count}</span>
+                  {t(f.label)} <span style={{ fontWeight: 700, fontSize: 10 }}>{f.count}</span>
                 </button>
               );
             })}
           </div>
           <span style={{ flex: 1 }} />
-          <span style={{ fontFamily: T.mono, fontSize: 12, color: T.tt }}>{filtered.length} results</span>
+          <span style={{ fontFamily: T.mono, fontSize: 12, color: T.tt }}>{t("obs.req.results", { n: filtered.length })}</span>
         </div>
       )}
 
@@ -511,7 +515,7 @@ export default function RequestsPage() {
       ) : error ? (
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>
       ) : items.length === 0 ? (
-        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><EmptyState message="No requests recorded yet" icon={<Icon name="inbox" size={22} />} /></div>
+        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><EmptyState message={t("obs.req.empty")} icon={<Icon name="inbox" size={22} />} /></div>
       ) : (
         <div className="rq-anim rq-split" style={{ animationDelay: "0.1s", display: "grid", gridTemplateColumns: "1fr 380px", gap: 16 }}>
           {/* Left: list */}
@@ -519,7 +523,7 @@ export default function RequestsPage() {
             <div style={{ flex: 1, overflowY: "auto" }}>
               {filtered.length === 0 ? (
                 <div style={{ padding: "40px 20px", textAlign: "center", color: T.tt, fontSize: 13 }}>
-                  No results match the current filter.
+                  {t("obs.req.noMatch")}
                 </div>
               ) : null}
               {paged.map((r) => {
@@ -556,12 +560,18 @@ export default function RequestsPage() {
             {/* Pagination */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderTop: `1px solid ${T.bl}`, fontSize: 12 }}>
               <span style={{ fontFamily: T.mono, color: T.tt }}>
-                {filtered.length > 0 ? `${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}
+                {filtered.length > 0
+                  ? t("obs.req.pageRange", {
+                      from: (page - 1) * pageSize + 1,
+                      to: Math.min(page * pageSize, filtered.length),
+                      total: filtered.length,
+                    })
+                  : t("obs.req.results", { n: 0 })}
               </span>
               <div style={{ display: "flex", gap: 6 }}>
-                <button disabled={page <= 1} onClick={() => setPage(page - 1)} style={{ padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, color: page <= 1 ? T.tt : T.ts, cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1 }}>Prev</button>
+                <button disabled={page <= 1} onClick={() => setPage(page - 1)} style={{ padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, color: page <= 1 ? T.tt : T.ts, cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1 }}>{t("table.previous")}</button>
                 <span style={{ fontFamily: T.mono, fontSize: 12, color: T.tt, padding: "4px 6px" }}>{page}/{totalPages}</span>
-                <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} style={{ padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, color: page >= totalPages ? T.tt : T.ts, cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.5 : 1 }}>Next</button>
+                <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} style={{ padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, color: page >= totalPages ? T.tt : T.ts, cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.5 : 1 }}>{t("table.next")}</button>
               </div>
             </div>
           </div>
@@ -573,32 +583,37 @@ export default function RequestsPage() {
             <div className="rq-sheet-backdrop" onClick={() => setSelected(null)} aria-hidden="true" />
           )}
           <div className={`rq-detail-panel${selected ? " rq-detail-open" : ""}`} style={{ background: T.card, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: 24 }}>
-            <button className="rq-sheet-close" onClick={() => setSelected(null)} aria-label="Close details" style={{ position: "absolute", top: 12, right: 12, background: "none", border: "none", cursor: "pointer", color: T.tt, padding: 4 }}>
+            <button className="rq-sheet-close" onClick={() => setSelected(null)} aria-label={t("obs.req.closeDetails")} style={{ position: "absolute", top: 12, right: 12, background: "none", border: "none", cursor: "pointer", color: T.tt, padding: 4 }}>
               <Icon name="x" size={18} />
             </button>
             {!selected ? (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>Select a request to view details</div>
+              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>{t("obs.req.selectPrompt")}</div>
             ) : detailLoading ? (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>Loading…</div>
+              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>{t("state.loading")}</div>
             ) : detail ? (
               <div className="rq-detail-in" key={detail.request_id}>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt, marginBottom: 16 }}>Request Detail</div>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt, marginBottom: 16 }}>{t("obs.req.detailTitle")}</div>
 
                 {/* Request ID */}
                 <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 3 }}>Request ID</div>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 3 }}>{t("obs.req.requestId")}</div>
                   <div style={{ fontFamily: T.mono, fontSize: 12, color: T.tp, wordBreak: "break-all" }}>{detail.request_id}</div>
                 </div>
 
                 {/* Grid fields */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 14px", marginBottom: 18 }}>
                   {[
-                    ["Provider", <span key="p" style={{ textTransform: "capitalize" }}>{detail.provider}</span>],
-                    ["Model", <span key="m" style={{ fontFamily: T.mono, fontSize: 12 }}>{detail.model}</span>],
-                    ["Status", <span key="s" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, color: detail.status === "success" ? "#059669" : "#dc2626", background: detail.status === "success" ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)" }}>{detail.status}</span>],
-                    ["DLP Policy", <span key="d" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, color: detail.policy_action === "allow" ? "#059669" : "#d97706", background: detail.policy_action === "allow" ? "rgba(16,185,129,0.08)" : "rgba(245,158,11,0.08)" }}>{detail.policy_action}</span>],
-                    ["Latency", <span key="l" style={{ fontFamily: T.mono, fontSize: 12 }}>{detail.latency_ms}ms</span>],
-                    ["Tokens", <span key="t" style={{ fontFamily: T.mono, fontSize: 12 }}>{detail.prompt_tokens ?? "—"} in / {detail.completion_tokens ?? "—"} out</span>],
+                    [t("field.provider"), <span key="p" style={{ textTransform: "capitalize" }}>{detail.provider}</span>],
+                    [t("field.model"), <span key="m" style={{ fontFamily: T.mono, fontSize: 12 }}>{detail.model}</span>],
+                    [t("field.status"), <span key="s" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, color: detail.status === "success" ? "#059669" : "#dc2626", background: detail.status === "success" ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)" }}>{detail.status}</span>],
+                    [t("obs.req.dlpPolicy"), <span key="d" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, color: detail.policy_action === "allow" ? "#059669" : "#d97706", background: detail.policy_action === "allow" ? "rgba(16,185,129,0.08)" : "rgba(245,158,11,0.08)" }}>{detail.policy_action}</span>],
+                    [t("obs.req.latency"), <span key="l" style={{ fontFamily: T.mono, fontSize: 12 }}>{detail.latency_ms}ms</span>],
+                    [
+                      t("obs.req.tokens"),
+                      <span key="t" style={{ fontFamily: T.mono, fontSize: 12 }}>
+                        {t("obs.req.tokensInOut", { in: detail.prompt_tokens ?? "—", out: detail.completion_tokens ?? "—" })}
+                      </span>,
+                    ],
                   ].map(([label, value]) => (
                     <div key={label as string}>
                       <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 3 }}>{label}</div>
@@ -612,8 +627,8 @@ export default function RequestsPage() {
                   <div style={{ marginBottom: 18 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt }}>Safe Trace</div>
-                        <div style={{ fontSize: 11, color: T.tt, marginTop: 2 }}>Persisted logs are masked for support and monitoring.</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt }}>{t("obs.req.safeTrace")}</div>
+                        <div style={{ fontSize: 11, color: T.tt, marginTop: 2 }}>{t("obs.req.safeTraceHint")}</div>
                       </div>
                       <button
                         onClick={() => { setSecureReason(""); setSecureReasonOpen(true); }}
@@ -625,32 +640,36 @@ export default function RequestsPage() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {secureTraceLoading ? "Loading..." : "Admin Secure Trace"}
+                        {secureTraceLoading ? t("state.loading") : t("obs.req.secureTrace")}
                       </button>
                     </div>
                     {(() => {
                       const panel = safeTracePanel;
                       const stages = [
                         {
-                          label: "User → Service",
+                          id: "user_to_service",
+                          label: t("obs.req.stage.userToService"),
                           value: panel?.user_to_service ?? detail.input_raw,
                           tone: "#3b6cf6",
                           source: panel?.source_user,
                         },
                         {
-                          label: "Service → AI",
+                          id: "service_to_ai",
+                          label: t("obs.req.stage.serviceToAi"),
                           value: panel?.service_to_ai ?? detail.input_masked,
                           tone: "#f59e0b",
                           source: "persisted" as const,
                         },
                         {
-                          label: "AI → Service",
+                          id: "ai_to_service",
+                          label: t("obs.req.stage.aiToService"),
                           value: panel?.ai_to_service ?? detail.output_raw,
                           tone: "#10b981",
                           source: "persisted" as const,
                         },
                         {
-                          label: "Service → User",
+                          id: "service_to_user",
+                          label: t("obs.req.stage.serviceToUser"),
                           value: panel?.service_to_user ?? detail.output_final,
                           tone: "#6366f1",
                           source: panel?.source_final,
@@ -659,9 +678,9 @@ export default function RequestsPage() {
                       const sourceBadge = (src?: string) => {
                         if (!src) return null;
                         const label =
-                          src === "persisted" ? "decrypted" :
-                          src === "secure_trace" ? "in-memory" :
-                          src === "placeholder" ? "placeholder" :
+                          src === "persisted" ? t("obs.req.source.decrypted") :
+                          src === "secure_trace" ? t("obs.req.source.inMemory") :
+                          src === "placeholder" ? t("obs.req.source.placeholder") :
                           src;
                         const tint =
                           src === "persisted" ? "rgba(99,102,241,0.14)" :
@@ -680,7 +699,7 @@ export default function RequestsPage() {
                         );
                       };
                       return stages.map((stage) => (
-                        <div key={stage.label} style={{ marginBottom: 8 }}>
+                        <div key={stage.id} style={{ marginBottom: 8 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                             <span style={{ width: 6, height: 6, borderRadius: "50%", background: stage.tone, flexShrink: 0 }} />
                             <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
@@ -697,21 +716,21 @@ export default function RequestsPage() {
                     })()}
                     {detail.dlp_findings && detail.dlp_findings.length > 0 && (
                       <div style={{ marginTop: 10 }}>
-                        <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>DLP Findings ({detail.dlp_findings.length})</div>
+                        <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>{t("obs.req.dlpFindings", { n: detail.dlp_findings.length })}</div>
                         <JsonBlock data={detail.dlp_findings} />
                       </div>
                     )}
                     {secureTrace && (
                       <div style={{ marginTop: 12, border: `1px solid rgba(220,38,38,0.35)`, borderRadius: 8, padding: 10, background: "rgba(220,38,38,0.04)" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#dc2626", marginBottom: 4 }}>Admin Secure Trace</div>
-                        <div style={{ fontSize: 11, color: T.tt, marginBottom: 10 }}>Sensitive raw data visible. Access is audited.</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#dc2626", marginBottom: 4 }}>{t("obs.req.secureTrace")}</div>
+                        <div style={{ fontSize: 11, color: T.tt, marginBottom: 10 }}>{t("obs.req.secureWarning")}</div>
                         {[
-                          { label: "User -> Service", value: secureTrace.stages.user_to_service?.content, tone: "#3b6cf6" },
-                          { label: "Service -> AI", value: secureTrace.stages.service_to_ai?.content, tone: "#f59e0b" },
-                          { label: "AI -> Service", value: secureTrace.stages.ai_to_service?.content, tone: "#10b981" },
-                          { label: "Service -> User", value: secureTrace.stages.service_to_user?.content, tone: "#6366f1" },
+                          { id: "user_to_service", label: t("obs.req.stage.userToService"), value: secureTrace.stages.user_to_service?.content, tone: "#3b6cf6" },
+                          { id: "service_to_ai", label: t("obs.req.stage.serviceToAi"), value: secureTrace.stages.service_to_ai?.content, tone: "#f59e0b" },
+                          { id: "ai_to_service", label: t("obs.req.stage.aiToService"), value: secureTrace.stages.ai_to_service?.content, tone: "#10b981" },
+                          { id: "service_to_user", label: t("obs.req.stage.serviceToUser"), value: secureTrace.stages.service_to_user?.content, tone: "#6366f1" },
                         ].map((stage) => (
-                          <div key={`secure-${stage.label}`} style={{ marginBottom: 8 }}>
+                          <div key={`secure-${stage.id}`} style={{ marginBottom: 8 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                               <span style={{ width: 6, height: 6, borderRadius: "50%", background: stage.tone, flexShrink: 0 }} />
                               <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
@@ -745,10 +764,10 @@ export default function RequestsPage() {
                   return (
                     <>
                       <JsonPanelHeader
-                        label="Raw Payload"
+                        label={t("obs.req.rawPayload")}
                         onCopy={() => {
                           navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-                          toast("JSON copied to clipboard");
+                          toast(t("obs.req.jsonCopied"));
                         }}
                       />
                       <JsonBlock data={payload} />
@@ -757,7 +776,7 @@ export default function RequestsPage() {
                 })()}
               </div>
             ) : (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>Failed to load details</div>
+              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>{t("obs.req.detailFailed")}</div>
             )}
           </div>
         </div>
@@ -766,21 +785,21 @@ export default function RequestsPage() {
       <Modal
         open={secureReasonOpen}
         onClose={() => setSecureReasonOpen(false)}
-        title="Admin Secure Trace"
+        title={t("obs.req.secureTrace")}
         footer={
           <>
             <button
               className="sran-btn sran-btn-secondary"
               onClick={() => setSecureReasonOpen(false)}
             >
-              Cancel
+              {t("action.cancel")}
             </button>
             <button
               className="sran-btn sran-btn-primary"
               onClick={submitSecureReason}
               disabled={!secureReason.trim()}
             >
-              View trace
+              {t("obs.req.viewTrace")}
             </button>
           </>
         }
@@ -788,7 +807,7 @@ export default function RequestsPage() {
         <label
           style={{ display: "block", fontSize: 13, fontWeight: 600, color: T.ts, marginBottom: 8 }}
         >
-          Reason for viewing sensitive raw trace
+          {t("obs.req.reasonLabel")}
         </label>
         <input
           className="sran-input"
@@ -796,7 +815,7 @@ export default function RequestsPage() {
           value={secureReason}
           onChange={(e) => setSecureReason(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") submitSecureReason(); }}
-          placeholder="Reason for viewing sensitive raw trace"
+          placeholder={t("obs.req.reasonLabel")}
           style={{ width: "100%" }}
         />
       </Modal>

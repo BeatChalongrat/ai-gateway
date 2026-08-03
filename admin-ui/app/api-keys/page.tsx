@@ -12,6 +12,7 @@ import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { useT, type DictKey } from "../../lib/i18n";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -41,6 +42,7 @@ const CSS = `
 `;
 
 export default function ApiKeysPage() {
+  const t = useT();
   const { data, loading, error, refetch } = useApi<{ items: any[] }>("/admin/api-keys");
   const projects = useApi<{ items: any[] }>("/admin/projects");
   const [showCreate, setShowCreate] = useState(false);
@@ -49,7 +51,9 @@ export default function ApiKeysPage() {
   const [revokeTarget, setRevokeTarget] = useState<any | null>(null);
   const [revoking, setRevoking] = useState(false);
   const [form, setForm] = useState({ tenant_id: "", project_id: "", name: "" });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Dictionary KEYS, not rendered text — a validation error already on
+  // screen re-labels itself when the language switcher is used.
+  const [errors, setErrors] = useState<Record<string, DictKey>>({});
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -96,9 +100,9 @@ export default function ApiKeysPage() {
 
   // CRUD
   function validate() {
-    const e: Record<string, string> = {};
-    if (!form.project_id) e.project_id = "Project is required";
-    if (!form.name.trim()) e.name = "Key name is required";
+    const e: Record<string, DictKey> = {};
+    if (!form.project_id) e.project_id = "tenancy.err.projectRequired";
+    if (!form.name.trim()) e.name = "tenancy.err.keyNameRequired";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -110,8 +114,8 @@ export default function ApiKeysPage() {
       const result = await api.post("/admin/api-keys", form);
       setRawKey(result.key);
       setForm({ tenant_id: "", project_id: "", name: "" }); setErrors({});
-      toast("API key created successfully"); refetch();
-    } catch (e: any) { toast(e.body?.error?.message || "Failed to create key", "error"); }
+      toast(t("tenancy.apiKeys.createdToast")); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || t("tenancy.apiKeys.createFailed"), "error"); }
     finally { setSaving(false); }
   }
 
@@ -120,8 +124,8 @@ export default function ApiKeysPage() {
     setRevoking(true);
     try {
       await api.delete(`/admin/api-keys/${revokeTarget.key_id}`);
-      toast("API key revoked"); setRevokeTarget(null); refetch();
-    } catch (e: any) { toast(e.body?.error?.message || "Failed to revoke", "error"); }
+      toast(t("tenancy.apiKeys.revokedToast")); setRevokeTarget(null); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || t("tenancy.apiKeys.revokeFailed"), "error"); }
     finally { setRevoking(false); }
   }
 
@@ -132,13 +136,13 @@ export default function ApiKeysPage() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>API Keys</h1>
-          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>Manage authentication keys for project access</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>{t("tenancy.apiKeys.title")}</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>{t("tenancy.apiKeys.subtitle")}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button className="sran-btn sran-btn-primary" onClick={() => setShowCreate(true)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Create Key
+            {t("tenancy.apiKeys.create")}
           </button>
           <ThemeToggle />
         </div>
@@ -149,7 +153,7 @@ export default function ApiKeysPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
           <div style={{ position: "relative", flex: "0 1 300px", minWidth: 160 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search keys..."
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("tenancy.apiKeys.searchPlaceholder")}
               style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: "inherit", border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
               onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
               onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
@@ -159,9 +163,9 @@ export default function ApiKeysPage() {
 
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             {[
-              { key: null, label: "All", count: items.length, dot: null },
-              { key: "active", label: "Active", count: activeCount, dot: "#10b981" },
-              { key: "revoked", label: "Revoked", count: revokedCount, dot: "#ef4444" },
+              { key: null, label: t("field.all"), count: items.length, dot: null },
+              { key: "active", label: t("field.active"), count: activeCount, dot: "#10b981" },
+              { key: "revoked", label: t("tenancy.status.revoked"), count: revokedCount, dot: "#ef4444" },
             ].map((f) => {
               const active = statusFilter === f.key;
               return (
@@ -189,12 +193,12 @@ export default function ApiKeysPage() {
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>
       ) : items.length === 0 ? (
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}>
-          <EmptyState message="No API keys yet" icon={<Icon name="key" size={22} />} action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>Create your first key</button>} />
+          <EmptyState message={t("tenancy.apiKeys.empty")} icon={<Icon name="key" size={22} />} action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>{t("tenancy.apiKeys.emptyAction")}</button>} />
         </div>
       ) : grouped.length === 0 ? (
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: "40px 20px", textAlign: "center" }}>
-          <p style={{ fontSize: 13, color: T.tt, margin: "0 0 12px" }}>No keys match the current filters</p>
-          <button onClick={() => { setSearch(""); setStatusFilter(null); }} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1.5px solid ${T.bl}`, background: T.card, color: T.tp, cursor: "pointer" }}>Clear filters</button>
+          <p style={{ fontSize: 13, color: T.tt, margin: "0 0 12px" }}>{t("tenancy.apiKeys.noMatch")}</p>
+          <button onClick={() => { setSearch(""); setStatusFilter(null); }} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1.5px solid ${T.bl}`, background: T.card, color: T.tp, cursor: "pointer" }}>{t("tenancy.apiKeys.clearFilters")}</button>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -257,7 +261,7 @@ export default function ApiKeysPage() {
                             <button onClick={(e) => {
                               e.stopPropagation();
                               navigator.clipboard.writeText(k.key_prefix);
-                              toast("Copied to clipboard");
+                              toast(t("tenancy.apiKeys.copiedPrefix"));
                             }} style={{
                               background: "none", border: "none", cursor: "pointer", padding: 2,
                               color: T.tt, display: "flex", alignItems: "center",
@@ -290,7 +294,7 @@ export default function ApiKeysPage() {
                               }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(245,158,11,0.06)"; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                              >Revoke</button>
+                              >{t("tenancy.action.revoke")}</button>
                             ) : null}
                           </div>
                         </div>
@@ -305,62 +309,62 @@ export default function ApiKeysPage() {
       )}
 
       {/* Detail modal */}
-      <Modal open={!!selected && !revokeTarget} onClose={() => setSelected(null)} title="API Key Detail" footer={<button className="sran-btn sran-btn-secondary" onClick={() => setSelected(null)}>Close</button>}>
+      <Modal open={!!selected && !revokeTarget} onClose={() => setSelected(null)} title={t("tenancy.apiKeys.detailTitle")} footer={<button className="sran-btn sran-btn-secondary" onClick={() => setSelected(null)}>{t("action.close")}</button>}>
         {selected && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-            <div className="sran-detail-field"><div className="sran-detail-label">Name</div><div className="sran-detail-value">{selected.name}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Status</div><div className="sran-detail-value">{selected.status}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Key Prefix</div><div className="sran-detail-value"><code>{selected.key_prefix}••••</code></div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Project</div><div className="sran-detail-value">{projectName(selected.project_id)}</div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Key ID</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{selected.key_id}</code></div></div>
-            <div className="sran-detail-field"><div className="sran-detail-label">Created</div><div className="sran-detail-value">{selected.created_at ? new Date(selected.created_at).toLocaleString() : "—"}</div></div>
-            {selected.last_used_at && <div className="sran-detail-field"><div className="sran-detail-label">Last Used</div><div className="sran-detail-value">{new Date(selected.last_used_at).toLocaleString()}</div></div>}
+            <div className="sran-detail-field"><div className="sran-detail-label">{t("field.name")}</div><div className="sran-detail-value">{selected.name}</div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">{t("field.status")}</div><div className="sran-detail-value">{selected.status}</div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">{t("tenancy.field.keyPrefix")}</div><div className="sran-detail-value"><code>{selected.key_prefix}••••</code></div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">{t("field.project")}</div><div className="sran-detail-value">{projectName(selected.project_id)}</div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">{t("tenancy.field.keyId")}</div><div className="sran-detail-value"><code style={{ fontSize: 11 }}>{selected.key_id}</code></div></div>
+            <div className="sran-detail-field"><div className="sran-detail-label">{t("field.created")}</div><div className="sran-detail-value">{selected.created_at ? new Date(selected.created_at).toLocaleString() : "—"}</div></div>
+            {selected.last_used_at && <div className="sran-detail-field"><div className="sran-detail-label">{t("tenancy.field.lastUsed")}</div><div className="sran-detail-value">{new Date(selected.last_used_at).toLocaleString()}</div></div>}
           </div>
         )}
       </Modal>
 
       {/* Revoke confirm */}
-      <ConfirmModal open={!!revokeTarget} onClose={() => setRevokeTarget(null)} onConfirm={handleRevoke} title="Revoke API Key" message={`Are you sure you want to revoke "${revokeTarget?.name}"? This action cannot be undone and will immediately invalidate the key.`} confirmLabel="Revoke Key" loading={revoking} />
+      <ConfirmModal open={!!revokeTarget} onClose={() => setRevokeTarget(null)} onConfirm={handleRevoke} title={t("tenancy.apiKeys.revokeTitle")} message={t("tenancy.apiKeys.revokeMessage", { name: revokeTarget?.name ?? "" })} confirmLabel={t("tenancy.apiKeys.revokeConfirm")} loading={revoking} />
 
       {/* Create modal */}
-      <Modal open={showCreate && !rawKey} onClose={() => { setShowCreate(false); setErrors({}); }} title="Create API Key" footer={
-        <><button className="sran-btn sran-btn-secondary" onClick={() => { setShowCreate(false); setErrors({}); }}>Cancel</button>
-        <button className="sran-btn sran-btn-primary" onClick={handleCreate} disabled={saving}>{saving ? "Creating..." : "Create"}</button></>
+      <Modal open={showCreate && !rawKey} onClose={() => { setShowCreate(false); setErrors({}); }} title={t("tenancy.apiKeys.createTitle")} footer={
+        <><button className="sran-btn sran-btn-secondary" onClick={() => { setShowCreate(false); setErrors({}); }}>{t("action.cancel")}</button>
+        <button className="sran-btn sran-btn-primary" onClick={handleCreate} disabled={saving}>{saving ? t("action.creating") : t("action.create")}</button></>
       }>
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
-            <label className="sran-label">Project *</label>
+            <label className="sran-label">{t("field.project")} *</label>
             <select className={`sran-input ${errors.project_id ? "sran-input-error" : ""}`} value={form.project_id} onChange={(e) => {
               const proj = projectItems.find((p: any) => p.project_id === e.target.value);
               setForm({ ...form, project_id: e.target.value, tenant_id: proj?.tenant_id || "" });
             }}>
-              <option value="">Select project...</option>
+              <option value="">{t("tenancy.apiKeys.selectProject")}</option>
               {projectItems.map((p: any) => (<option key={p.project_id} value={p.project_id}>{p.name}</option>))}
             </select>
-            {errors.project_id && <div className="sran-field-error">{errors.project_id}</div>}
+            {errors.project_id && <div className="sran-field-error">{t(errors.project_id)}</div>}
           </div>
           <div>
-            <label className="sran-label">Key Name *</label>
-            <input className={`sran-input ${errors.name ? "sran-input-error" : ""}`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Production CI Key" maxLength={64} />
-            {errors.name && <div className="sran-field-error">{errors.name}</div>}
+            <label className="sran-label">{t("tenancy.field.keyName")} *</label>
+            <input className={`sran-input ${errors.name ? "sran-input-error" : ""}`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t("tenancy.apiKeys.namePlaceholder")} maxLength={64} />
+            {errors.name && <div className="sran-field-error">{t(errors.name)}</div>}
             <div className="sran-char-count">{form.name.length}/64</div>
           </div>
         </div>
       </Modal>
 
       {/* Raw key display */}
-      <Modal open={!!rawKey} onClose={() => { setRawKey(null); setShowCreate(false); }} title="API Key Created" footer={
-        <button className="sran-btn sran-btn-primary" onClick={() => { setRawKey(null); setShowCreate(false); }}>Done</button>
+      <Modal open={!!rawKey} onClose={() => { setRawKey(null); setShowCreate(false); }} title={t("tenancy.apiKeys.createdTitle")} footer={
+        <button className="sran-btn sran-btn-primary" onClick={() => { setRawKey(null); setShowCreate(false); }}>{t("tenancy.apiKeys.done")}</button>
       }>
         <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "var(--accent-warning)", lineHeight: 1.5 }}>
-          Save this key now. It will not be shown again.
+          {t("tenancy.apiKeys.saveWarning")}
         </div>
         <div style={{ position: "relative" }}>
           <div style={{ fontFamily: T.mono, fontSize: 13, padding: "14px 16px", borderRadius: 10, background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, userSelect: "all", wordBreak: "break-all", lineHeight: 1.6, color: T.tp }}>
             {rawKey}
           </div>
-          <button onClick={() => { navigator.clipboard.writeText(rawKey || ""); toast("Key copied to clipboard"); }}
-            style={{ position: "absolute", top: 8, right: 8, padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 4, border: `1px solid ${T.bl}`, background: T.card, color: T.ts, cursor: "pointer" }}>Copy</button>
+          <button onClick={() => { navigator.clipboard.writeText(rawKey || ""); toast(t("tenancy.apiKeys.copiedKey")); }}
+            style={{ position: "absolute", top: 8, right: 8, padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 4, border: `1px solid ${T.bl}`, background: T.card, color: T.ts, cursor: "pointer" }}>{t("action.copy")}</button>
         </div>
       </Modal>
     </div>

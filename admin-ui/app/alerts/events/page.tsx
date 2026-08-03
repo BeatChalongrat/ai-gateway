@@ -7,6 +7,7 @@ import DataTable, { Column } from "../../../components/ui/DataTable";
 import { Icon } from "../../../components/ui/Icon";
 import Modal from "../../../components/ui/Modal";
 import { useApi } from "../../../lib/useApi";
+import { useT } from "../../../lib/i18n";
 
 // ---------------------------------------------------------------------------
 // Types — derived from backend AlertEventResponse (schemas/admin.py:233).
@@ -92,33 +93,44 @@ function formatDateTime(iso: string | null): string {
   return new Date(iso).toLocaleString();
 }
 
-const columns: Column<AlertEvent>[] = [
-  {
-    key: "fired_at",
-    header: "Fired at",
-    render: (r) => (
-      <span style={{ fontSize: "var(--font-size-sm)", whiteSpace: "nowrap" }}>{formatDateTime(r.fired_at)}</span>
-    ),
-  },
-  { key: "alert_type", header: "Alert type", render: (r) => <code style={{ fontSize: "var(--font-size-xs)" }}>{r.alert_type}</code> },
-  { key: "severity", header: "Severity", render: (r) => severityBadge(r.severity) },
-  {
-    key: "message",
-    header: "Message",
-    render: (r) => (
-      <span style={{ fontSize: "var(--font-size-sm)" }}>{truncate(r.message, 60)}</span>
-    ),
-  },
-  { key: "delivery_status", header: "Delivery", render: (r) => deliveryBadge(r.delivery_status) },
-  {
-    key: "tenant_id",
-    header: "Tenant",
-    render: (r) =>
-      r.tenant_id ? <code style={{ fontSize: "var(--font-size-xs)" }}>{r.tenant_id}</code> : "—",
-  },
-];
+// Column headers are translated; the VALUES (alert_type, severity,
+// delivery_status, tenant id) stay verbatim — they are identifiers an
+// operator quotes in a ticket.
+function useColumns(): Column<AlertEvent>[] {
+  const t = useT();
+  return useMemo(
+    () => [
+      {
+        key: "fired_at",
+        header: t("obs.alerts.col.firedAt"),
+        render: (r) => (
+          <span style={{ fontSize: "var(--font-size-sm)", whiteSpace: "nowrap" }}>{formatDateTime(r.fired_at)}</span>
+        ),
+      },
+      { key: "alert_type", header: t("obs.alerts.col.alertType"), render: (r) => <code style={{ fontSize: "var(--font-size-xs)" }}>{r.alert_type}</code> },
+      { key: "severity", header: t("obs.alerts.col.severity"), render: (r) => severityBadge(r.severity) },
+      {
+        key: "message",
+        header: t("obs.alerts.col.message"),
+        render: (r) => (
+          <span style={{ fontSize: "var(--font-size-sm)" }}>{truncate(r.message, 60)}</span>
+        ),
+      },
+      { key: "delivery_status", header: t("obs.alerts.col.delivery"), render: (r) => deliveryBadge(r.delivery_status) },
+      {
+        key: "tenant_id",
+        header: t("field.tenant"),
+        render: (r) =>
+          r.tenant_id ? <code style={{ fontSize: "var(--font-size-xs)" }}>{r.tenant_id}</code> : "—",
+      },
+    ],
+    [t],
+  );
+}
 
 export default function AlertEventsPage() {
+  const t = useT();
+  const columns = useColumns();
   const { data, loading, error, refetch } = useApi<AlertEventListResponse>("/admin/alert-events?limit=50");
   const [selected, setSelected] = useState<AlertEvent | null>(null);
   const [sevFilter, setSevFilter] = useState<string>("");
@@ -145,11 +157,11 @@ export default function AlertEventsPage() {
   return (
     <>
       <PageHeader
-        title="Alert events"
-        subtitle="Recent fired alert events across all rules"
+        title={t("obs.alerts.title")}
+        subtitle={t("obs.alerts.subtitle")}
         action={
           <button className="sran-btn sran-btn-secondary" onClick={refetch}>
-            Refresh
+            {t("action.refresh")}
           </button>
         }
       />
@@ -157,8 +169,8 @@ export default function AlertEventsPage() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: "1.25rem", marginBottom: "0.875rem" }}>
           {severities.length > 1 && (
             <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>Severity</span>
-              <FilterPill active={sevFilter === ""} onClick={() => setSevFilter("")}>All</FilterPill>
+              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>{t("obs.alerts.col.severity")}</span>
+              <FilterPill active={sevFilter === ""} onClick={() => setSevFilter("")}>{t("field.all")}</FilterPill>
               {severities.map((s) => (
                 <FilterPill key={s} active={sevFilter === s} onClick={() => setSevFilter(sevFilter === s ? "" : s)}>{s}</FilterPill>
               ))}
@@ -166,8 +178,8 @@ export default function AlertEventsPage() {
           )}
           {statuses.length > 1 && (
             <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>Delivery</span>
-              <FilterPill active={statusFilter === ""} onClick={() => setStatusFilter("")}>All</FilterPill>
+              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>{t("obs.alerts.col.delivery")}</span>
+              <FilterPill active={statusFilter === ""} onClick={() => setStatusFilter("")}>{t("field.all")}</FilterPill>
               {statuses.map((s) => (
                 <FilterPill key={s} active={statusFilter === s} onClick={() => setStatusFilter(statusFilter === s ? "" : s)}>{s}</FilterPill>
               ))}
@@ -182,12 +194,12 @@ export default function AlertEventsPage() {
           data={filtered}
           loading={loading}
           error={error}
-          emptyMessage="No alert events recorded yet"
+          emptyMessage={t("obs.alerts.empty")}
           emptyIcon={<Icon name="bell" size={22} />}
           rowKey={(r) => r.id}
           onRowClick={(row) => setSelected(row)}
           searchable
-          searchPlaceholder="Search by type, severity, message..."
+          searchPlaceholder={t("obs.alerts.searchPlaceholder")}
           onRetry={refetch}
         />
       </div>
@@ -195,53 +207,53 @@ export default function AlertEventsPage() {
       <Modal
         open={!!selected}
         onClose={() => setSelected(null)}
-        title="Alert event detail"
+        title={t("obs.alerts.detailTitle")}
         footer={
-          <button className="sran-btn sran-btn-secondary" onClick={() => setSelected(null)}>Close</button>
+          <button className="sran-btn sran-btn-secondary" onClick={() => setSelected(null)}>{t("action.close")}</button>
         }
       >
         {selected && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", fontSize: "var(--font-size-sm)" }}>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Event ID</div>
+              <div className="sran-detail-label">{t("obs.alerts.detail.eventId")}</div>
               <div className="sran-detail-value"><code style={{ fontSize: "var(--font-size-xs)" }}>{selected.id}</code></div>
             </div>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Rule ID</div>
+              <div className="sran-detail-label">{t("obs.alerts.detail.ruleId")}</div>
               <div className="sran-detail-value">
                 {selected.rule_id ? <code style={{ fontSize: "var(--font-size-xs)" }}>{selected.rule_id}</code> : "—"}
               </div>
             </div>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Alert type</div>
+              <div className="sran-detail-label">{t("obs.alerts.col.alertType")}</div>
               <div className="sran-detail-value"><code>{selected.alert_type}</code></div>
             </div>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Severity</div>
+              <div className="sran-detail-label">{t("obs.alerts.col.severity")}</div>
               <div className="sran-detail-value">{severityBadge(selected.severity)}</div>
             </div>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Delivery</div>
+              <div className="sran-detail-label">{t("obs.alerts.col.delivery")}</div>
               <div className="sran-detail-value">{deliveryBadge(selected.delivery_status)}</div>
             </div>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Fired at</div>
+              <div className="sran-detail-label">{t("obs.alerts.col.firedAt")}</div>
               <div className="sran-detail-value">{formatDateTime(selected.fired_at)}</div>
             </div>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Tenant</div>
+              <div className="sran-detail-label">{t("field.tenant")}</div>
               <div className="sran-detail-value">
                 {selected.tenant_id ? <code style={{ fontSize: "var(--font-size-xs)" }}>{selected.tenant_id}</code> : "—"}
               </div>
             </div>
             <div className="sran-detail-field">
-              <div className="sran-detail-label">Project</div>
+              <div className="sran-detail-label">{t("field.project")}</div>
               <div className="sran-detail-value">
                 {selected.project_id ? <code style={{ fontSize: "var(--font-size-xs)" }}>{selected.project_id}</code> : "—"}
               </div>
             </div>
             <div className="sran-detail-field" style={{ gridColumn: "1 / -1" }}>
-              <div className="sran-detail-label">Webhook URL</div>
+              <div className="sran-detail-label">{t("obs.alerts.detail.webhookUrl")}</div>
               <div className="sran-detail-value">
                 {selected.webhook_url ? (
                   <code style={{ fontSize: "var(--font-size-xs)", wordBreak: "break-all" }}>{selected.webhook_url}</code>
@@ -251,7 +263,7 @@ export default function AlertEventsPage() {
               </div>
             </div>
             <div className="sran-detail-field" style={{ gridColumn: "1 / -1" }}>
-              <div className="sran-detail-label">Message</div>
+              <div className="sran-detail-label">{t("obs.alerts.col.message")}</div>
               <div className="sran-detail-value" style={{ whiteSpace: "pre-wrap" }}>{selected.message}</div>
             </div>
           </div>

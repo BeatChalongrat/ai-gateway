@@ -8,10 +8,13 @@ import PageHeader from "../../../components/ui/PageHeader";
 import ErrorState from "../../../components/ui/ErrorState";
 import { SkeletonTable } from "../../../components/ui/Skeleton";
 import { Icon } from "../../../components/ui/Icon";
+import { useT } from "../../../lib/i18n";
 import {
   AdminConversationDetail,
   fetchAdminConversation,
 } from "../../../lib/chatEdgeApi";
+
+type Translate = ReturnType<typeof useT>;
 
 function formatBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
@@ -26,7 +29,10 @@ function formatDate(iso: string | null | undefined): string {
   return d.toLocaleString();
 }
 
-function roleColor(role: string): { bg: string; tint: string; fg: string; label: string } {
+function roleColor(
+  role: string,
+  t: Translate,
+): { bg: string; tint: string; fg: string; label: string } {
   // Token-driven so the role tints read correctly in BOTH themes (the prior
   // rgba literals were tuned for dark and went low-contrast on light). bg =
   // pill fill, tint = message-tile fill, fg = pill text + left accent border.
@@ -36,14 +42,14 @@ function roleColor(role: string): { bg: string; tint: string; fg: string; label:
         bg: "color-mix(in srgb, var(--accent-primary) 16%, transparent)",
         tint: "color-mix(in srgb, var(--accent-primary) 7%, transparent)",
         fg: "var(--accent-primary)",
-        label: "User",
+        label: t("chat.role.user"),
       };
     case "assistant":
       return {
         bg: "color-mix(in srgb, var(--accent-success) 16%, transparent)",
         tint: "color-mix(in srgb, var(--accent-success) 7%, transparent)",
         fg: "var(--accent-success)",
-        label: "Assistant",
+        label: t("chat.role.assistant"),
       };
     default:
       return {
@@ -56,6 +62,7 @@ function roleColor(role: string): { bg: string; tint: string; fg: string; label:
 }
 
 export default function ChatConversationDetailPage() {
+  const t = useT();
   const params = useParams();
   const id = typeof params?.id === "string" ? params.id : "";
 
@@ -71,12 +78,12 @@ export default function ChatConversationDetailPage() {
       const d = await fetchAdminConversation(id);
       setData(d);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(err instanceof Error ? err.message : t("state.errorLoad"));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, t]);
 
   useEffect(() => {
     void load();
@@ -85,7 +92,7 @@ export default function ChatConversationDetailPage() {
   return (
     <div>
       <PageHeader
-        title={data?.conversation.title ?? "Conversation"}
+        title={data?.conversation.title ?? t("chat.conversation.title")}
         subtitle={
           data
             ? `${data.conversation.user_email} · ${data.conversation.model_id}`
@@ -96,7 +103,7 @@ export default function ChatConversationDetailPage() {
             href="/chat-conversations"
             className="sran-btn sran-btn-secondary sran-btn-sm"
           >
-            ← Back to logs
+            ← {t("chat.conversation.backToLogs")}
           </Link>
         }
       />
@@ -120,10 +127,7 @@ export default function ChatConversationDetailPage() {
         }}
       >
         <span aria-hidden style={{ fontSize: "0.95rem" }}><Icon name="alert-triangle" size={14} /></span>
-        <span>
-          Viewing masked content — PII has been redacted by the DLP pipeline.
-          Raw user prompts are never stored in this database.
-        </span>
+        <span>{t("chat.conversation.maskedBanner")}</span>
       </div>
 
       {error ? (
@@ -145,16 +149,22 @@ export default function ChatConversationDetailPage() {
               gap: "0.75rem",
             }}
           >
-            <Summary label="User" value={data.conversation.user_email || "—"} />
-            <Summary label="User name" value={data.conversation.user_name || "—"} />
-            <Summary label="Model" value={data.conversation.model_id || "—"} />
+            <Summary label={t("field.user")} value={data.conversation.user_email || "—"} />
             <Summary
-              label="Messages"
+              label={t("chat.conversation.userName")}
+              value={data.conversation.user_name || "—"}
+            />
+            <Summary label={t("field.model")} value={data.conversation.model_id || "—"} />
+            <Summary
+              label={t("chat.col.messages")}
               value={String(data.conversation.message_count)}
             />
-            <Summary label="Created" value={formatDate(data.conversation.created_at)} />
             <Summary
-              label="Last active"
+              label={t("field.created")}
+              value={formatDate(data.conversation.created_at)}
+            />
+            <Summary
+              label={t("chat.col.lastActive")}
               value={formatDate(data.conversation.updated_at)}
             />
           </div>
@@ -172,11 +182,11 @@ export default function ChatConversationDetailPage() {
                 margin: "0 0 0.875rem",
               }}
             >
-              Messages
+              {t("chat.col.messages")}
             </h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               {data.messages.map((m) => {
-                const rc = roleColor(m.role);
+                const rc = roleColor(m.role, t);
                 return (
                   <div
                     key={m.id}
@@ -252,7 +262,10 @@ export default function ChatConversationDetailPage() {
                           color: "var(--color-text-muted)",
                         }}
                       >
-                        {m.token_input ?? 0} in · {m.token_output ?? 0} out tokens
+                        {t("chat.conversation.tokenSummary", {
+                          input: m.token_input ?? 0,
+                          output: m.token_output ?? 0,
+                        })}
                       </div>
                     ) : null}
                   </div>
@@ -272,15 +285,15 @@ export default function ChatConversationDetailPage() {
                   color: "var(--color-text-primary)",
                 }}
               >
-                Attachments
+                {t("chat.conversation.attachments")}
               </h3>
               <table className="sran-table">
                 <thead>
                   <tr>
-                    <th>Filename</th>
-                    <th>Type</th>
-                    <th style={{ textAlign: "right" }}>Size</th>
-                    <th>Uploaded</th>
+                    <th>{t("chat.col.filename")}</th>
+                    <th>{t("field.type")}</th>
+                    <th style={{ textAlign: "right" }}>{t("chat.col.size")}</th>
+                    <th>{t("chat.col.uploaded")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -307,8 +320,7 @@ export default function ChatConversationDetailPage() {
                   color: "var(--color-text-muted)",
                 }}
               >
-                File downloads are intentionally disabled on the admin
-                surface — admins see metadata only.
+                {t("chat.conversation.downloadsDisabled")}
               </p>
             </div>
           ) : null}

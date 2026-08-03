@@ -16,6 +16,7 @@ import PageHeader from "../../components/ui/PageHeader";
 import Pagination from "../../components/ui/Pagination";
 import ErrorState from "../../components/ui/ErrorState";
 import { SkeletonTable } from "../../components/ui/Skeleton";
+import { useT } from "../../lib/i18n";
 import {
   AdminKBListResponse,
   AdminKBQuery,
@@ -31,6 +32,7 @@ function formatDate(iso: string): string {
 }
 
 export default function ChatKnowledgePage() {
+  const t = useT();
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<AdminKBQuery>({});
   const [draft, setDraft] = useState<AdminKBQuery>({});
@@ -49,12 +51,12 @@ export default function ChatKnowledgePage() {
       });
       setData(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(err instanceof Error ? err.message : t("state.errorLoad"));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [filters, page]);
+  }, [filters, page, t]);
 
   useEffect(() => {
     void load();
@@ -78,8 +80,8 @@ export default function ChatKnowledgePage() {
   return (
     <div>
       <PageHeader
-        title="Knowledge Bases"
-        subtitle="Inspect retrieval-augmented knowledge bases across every tenant"
+        title={t("chat.kb.title")}
+        subtitle={t("chat.kb.subtitle")}
       />
 
       <div
@@ -93,7 +95,7 @@ export default function ChatKnowledgePage() {
             alignItems: "end",
           }}
         >
-          <Field label="Search by name">
+          <Field label={t("chat.kb.filterName")}>
             <input
               type="text"
               value={draft.q ?? ""}
@@ -101,12 +103,12 @@ export default function ChatKnowledgePage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") applyFilters();
               }}
-              placeholder="Search knowledge bases..."
+              placeholder={t("chat.kb.searchPlaceholder")}
               className="sran-input"
               style={inputStyle}
             />
           </Field>
-          <Field label="Tenant ID (uuid)">
+          <Field label={t("chat.kb.filterTenantId")}>
             <input
               type="text"
               value={draft.tenant_id ?? ""}
@@ -124,14 +126,14 @@ export default function ChatKnowledgePage() {
               onClick={applyFilters}
               className="sran-btn sran-btn-primary sran-btn-sm"
             >
-              Apply
+              {t("action.apply")}
             </button>
             <button
               type="button"
               onClick={resetFilters}
               className="sran-btn sran-btn-secondary sran-btn-sm"
             >
-              Reset
+              {t("action.reset")}
             </button>
           </div>
         </div>
@@ -148,22 +150,22 @@ export default function ChatKnowledgePage() {
           ) : !data || data.knowledge_bases.length === 0 ? (
             hasActiveFilters ? (
               <KbEmptyState
-                title="No knowledge bases match these filters"
-                description="Try a broader search term or a different tenant id."
+                title={t("chat.kb.emptyFilteredTitle")}
+                description={t("chat.kb.emptyFilteredBody")}
                 action={
                   <button
                     type="button"
                     onClick={resetFilters}
                     className="sran-btn sran-btn-secondary sran-btn-sm"
                   >
-                    Clear filters
+                    {t("chat.kb.clearFilters")}
                   </button>
                 }
               />
             ) : (
               <KbEmptyState
-                title="No knowledge bases yet"
-                description="Knowledge bases created by users in SRAN Chat will appear here, with their per-tenant documents and chunk counts."
+                title={t("chat.kb.emptyTitle")}
+                description={t("chat.kb.emptyBody")}
               />
             )
           ) : (
@@ -172,13 +174,13 @@ export default function ChatKnowledgePage() {
                 <table className="sran-table" style={{ minWidth: 920 }}>
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Tenant</th>
-                      <th style={{ textAlign: "right" }}>Documents</th>
-                      <th style={{ textAlign: "right" }}>Chunks</th>
-                      <th>Status</th>
-                      <th>Created</th>
-                      <th>Updated</th>
+                      <th>{t("field.name")}</th>
+                      <th>{t("field.tenant")}</th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.documents")}</th>
+                      <th style={{ textAlign: "right" }}>{t("chat.col.chunks")}</th>
+                      <th>{t("field.status")}</th>
+                      <th>{t("field.created")}</th>
+                      <th>{t("field.updated")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -230,7 +232,12 @@ export default function ChatKnowledgePage() {
                           {kb.total_chunks}
                         </td>
                         <td>
-                          <StatusPill active={kb.is_active} />
+                          <StatusPill
+                            active={kb.is_active}
+                            label={
+                              kb.is_active ? t("field.active") : t("field.inactive")
+                            }
+                          />
                         </td>
                         <td style={{ color: "var(--color-text-muted)" }}>
                           {formatDate(kb.created_at)}
@@ -358,7 +365,7 @@ function Field({
   );
 }
 
-function StatusPill({ active }: { active: boolean }) {
+function StatusPill({ active, label }: { active: boolean; label: string }) {
   return (
     <span
       style={{
@@ -380,7 +387,7 @@ function StatusPill({ active }: { active: boolean }) {
           : "1px solid var(--color-border)",
       }}
     >
-      {active ? "Active" : "Inactive"}
+      {label}
     </span>
   );
 }

@@ -16,6 +16,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
+import { useT, type DictKey } from "../../lib/i18n";
 
 ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip);
 
@@ -198,6 +199,7 @@ function UsageStat({
 }
 
 export default function UsagePage() {
+  const t = useT();
   const isDark = useThemeIsDark();
   const tickColor = isDark ? "#8B96BA" : "#6B6D78";
   const gridColor = isDark ? "#1F2A55" : "#ECEDF2";
@@ -234,12 +236,12 @@ export default function UsagePage() {
         typeof err === "object" && err && "body" in err
           ? ((err as { body?: { error?: { message?: string } } }).body?.error?.message ?? null)
           : null;
-      setUsageError(msg || "Failed to load usage data");
+      setUsageError(msg || t("obs.usage.errorUser"));
       setUsage(null);
     } finally {
       setLoadingUsage(false);
     }
-  }, []);
+  }, [t]);
 
   const loadSystem = useCallback(async () => {
     setSystemError(null);
@@ -270,11 +272,11 @@ export default function UsagePage() {
         typeof err === "object" && err && "body" in err
           ? ((err as { body?: { error?: { message?: string } } }).body?.error?.message ?? null)
           : null;
-      setSystemError(msg || "Failed to load AI review cost data");
+      setSystemError(msg || t("obs.usage.errorSystem"));
     } finally {
       setLoadingSystem(false);
     }
-  }, []);
+  }, [t]);
 
   const loadByUser = useCallback(async (projectId: string) => {
     setByUser(null);
@@ -328,7 +330,7 @@ export default function UsagePage() {
   const otherCost = donutTotal - donutTop.reduce((s, m) => s + m.cost, 0);
   const donutSegs = [
     ...donutTop.map((m) => ({ label: m.model, cost: m.cost })),
-    ...(otherCost > 1e-9 ? [{ label: "Other", cost: otherCost }] : []),
+    ...(otherCost > 1e-9 ? [{ label: t("obs.usage.chart.other"), cost: otherCost }] : []),
   ];
   const donutColors = [...DONUT_PALETTE, "#9CA3AF"].slice(0, donutSegs.length);
   const maxUserTokens = Math.max(...(byUser ?? []).map((u) => u.tokens), 1);
@@ -363,8 +365,8 @@ export default function UsagePage() {
   );
 
   const triggerRows = [
-    { label: "Realtime", count: systemSummary?.realtime_runs ?? 0, color: "#3B82F6" },
-    { label: "Manual", count: systemSummary?.manual_runs ?? 0, color: "#8B5CF6" },
+    { id: "realtime", label: t("obs.usage.trigger.realtime"), count: systemSummary?.realtime_runs ?? 0, color: "#3B82F6" },
+    { id: "manual", label: t("obs.usage.trigger.manual"), count: systemSummary?.manual_runs ?? 0, color: "#8B5CF6" },
   ];
   const maxTriggerCount = Math.max(...triggerRows.map((t) => t.count), 1);
 
@@ -383,16 +385,16 @@ export default function UsagePage() {
   return (
     <>
       <PageHeader
-        title="Usage & Cost"
-        subtitle="Token consumption and cost for user traffic and the AI review system"
+        title={t("obs.usage.title")}
+        subtitle={t("obs.usage.subtitle")}
       />
 
       {/* Tab bar */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--color-border-default)", marginBottom: "1.5rem" }}>
         {([
-          ["user", "User traffic"],
-          ["system", "AI review (system)"],
-        ] as [Tab, string][]).map(([key, label]) => {
+          ["user", "obs.usage.tab.user"],
+          ["system", "obs.usage.tab.system"],
+        ] as [Tab, DictKey][]).map(([key, label]) => {
           const active = tab === key;
           return (
             <button
@@ -409,7 +411,7 @@ export default function UsagePage() {
                 cursor: "pointer",
               }}
             >
-              {label}
+              {t(label)}
             </button>
           );
         })}
@@ -420,7 +422,7 @@ export default function UsagePage() {
           {/* Scope pills — replaces the old SCOPE dropdown card. */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
             {[
-              { id: ALL_PROJECTS, name: "All projects" },
+              { id: ALL_PROJECTS, name: t("obs.usage.allProjects") },
               ...(projects.data?.items.map((p) => ({ id: p.project_id, name: p.name })) ?? []),
             ].map((p) => {
               const active = selectedProject === p.id;
@@ -468,25 +470,25 @@ export default function UsagePage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 12 }}>
               <UsageStat
                 accent="#3B82F6"
-                label="Total requests"
+                label={t("obs.usage.stat.requests")}
                 value={usage.total_requests.toLocaleString()}
                 sub={
                   usage.total_requests > 0
-                    ? `~${Math.round(usage.total_tokens / usage.total_requests)} tokens/request avg`
-                    : "No requests yet"
+                    ? t("obs.usage.stat.requestsSub", { n: Math.round(usage.total_tokens / usage.total_requests) })
+                    : t("obs.usage.stat.noRequests")
                 }
               />
               <UsageStat
                 accent="#8B5CF6"
-                label="Total tokens"
+                label={t("obs.usage.stat.tokens")}
                 value={formatTokensShort(usage.total_tokens)}
-                sub={`${usage.total_tokens.toLocaleString()} tokens`}
+                sub={t("obs.usage.stat.tokensSub", { n: usage.total_tokens.toLocaleString() })}
               />
               <UsageStat
                 accent="#10B981"
-                label="Estimated cost"
+                label={t("obs.usage.stat.cost")}
                 value={formatCost(usage.total_estimated_cost_usd)}
-                sub="Based on per-model rates"
+                sub={t("obs.usage.stat.costSub")}
               />
             </div>
           )}
@@ -494,12 +496,12 @@ export default function UsagePage() {
           {/* Charts */}
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 12, marginBottom: 12 }}>
             <div style={panelCard}>
-              <div style={{ ...panelTitle, marginBottom: 10 }}>Requests by project</div>
+              <div style={{ ...panelTitle, marginBottom: 10 }}>{t("obs.usage.chart.byProject")}</div>
               {byProject.loading ? (
                 <div className="sran-skeleton" style={{ width: "100%", height: 160 }} />
               ) : barItems.length === 0 ? (
                 <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "3rem 0", textAlign: "center" }}>
-                  No request data yet
+                  {t("obs.usage.chart.noRequestData")}
                 </div>
               ) : (
                 <div style={{ height: 160 }}>
@@ -539,12 +541,12 @@ export default function UsagePage() {
             </div>
 
             <div style={panelCard}>
-              <div style={{ ...panelTitle, marginBottom: 10 }}>Cost by model</div>
+              <div style={{ ...panelTitle, marginBottom: 10 }}>{t("obs.usage.chart.costByModel")}</div>
               {byModel.loading ? (
                 <div className="sran-skeleton" style={{ width: "100%", height: 100 }} />
               ) : donutSegs.length === 0 ? (
                 <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "2.5rem 0", textAlign: "center" }}>
-                  No cost data yet
+                  {t("obs.usage.chart.noCostData")}
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -603,8 +605,8 @@ export default function UsagePage() {
           {/* User breakdown table */}
           <div style={{ ...panelCard, padding: 0 }}>
             <div style={{ padding: "14px 16px 0" }}>
-              <div style={panelTitle}>Usage by user</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>Top users by token consumption</div>
+              <div style={panelTitle}>{t("obs.usage.byUser")}</div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{t("obs.usage.byUserSub")}</div>
             </div>
             {byUser === null ? (
               <div style={{ padding: "14px 16px" }}>
@@ -612,18 +614,25 @@ export default function UsagePage() {
               </div>
             ) : byUser.length === 0 ? (
               <div style={{ padding: "14px 16px", fontSize: 11, color: "var(--text-muted)" }}>
-                No user data for this scope.
+                {t("obs.usage.byUserEmpty")}
               </div>
             ) : (
               <div style={{ overflowX: "auto", marginTop: 10 }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, color: "var(--text-primary)" }}>
                   <thead>
                     <tr>
-                      {["User", "Project", "Requests", "Tokens", "Usage", "Cost"].map((h) => (
+                      {([
+                        "field.user",
+                        "field.project",
+                        "obs.usage.col.requests",
+                        "obs.usage.col.tokens",
+                        "obs.usage.col.usage",
+                        "obs.usage.col.cost",
+                      ] as DictKey[]).map((h) => (
                         <th
                           key={h}
                           style={{
-                            textAlign: h === "Cost" ? "right" : "left",
+                            textAlign: h === "obs.usage.col.cost" ? "right" : "left",
                             padding: "6px 16px",
                             fontSize: 9,
                             textTransform: "uppercase",
@@ -634,7 +643,7 @@ export default function UsagePage() {
                             borderBottom: "1px solid var(--border-color)",
                           }}
                         >
-                          {h}
+                          {t(h)}
                         </th>
                       ))}
                     </tr>
@@ -721,30 +730,33 @@ export default function UsagePage() {
                 <UsageStat
                   compact
                   accent="#3B82F6"
-                  label="Total runs"
+                  label={t("obs.usage.sys.stat.runs")}
                   value={systemSummary.total_runs.toLocaleString()}
-                  sub={`${systemSummary.manual_runs} manual, ${systemSummary.realtime_runs} realtime`}
+                  sub={t("obs.usage.sys.stat.runsSub", { manual: systemSummary.manual_runs, realtime: systemSummary.realtime_runs })}
                 />
                 <UsageStat
                   compact
                   accent="#8B5CF6"
-                  label="Findings"
+                  label={t("obs.usage.sys.stat.findings")}
                   value={(findingsSummary?.total_findings ?? fetchedFindingsTotal).toLocaleString()}
-                  sub={`${findingsSummary?.new_patterns ?? 0} new, ${findingsSummary?.already_covered ?? 0} already covered`}
+                  sub={t("obs.usage.sys.stat.findingsSub", {
+                    fresh: findingsSummary?.new_patterns ?? 0,
+                    covered: findingsSummary?.already_covered ?? 0,
+                  })}
                 />
                 <UsageStat
                   compact
                   accent="#10B981"
-                  label="Total cost"
+                  label={t("obs.usage.sys.stat.cost")}
                   value={formatCost(systemSummary.total_cost_usd)}
-                  sub={`Avg ${formatCost(systemSummary.avg_cost_per_run)}/run`}
+                  sub={t("obs.usage.sys.stat.costSub", { cost: formatCost(systemSummary.avg_cost_per_run) })}
                 />
                 <UsageStat
                   compact
                   accent="#F59E0B"
-                  label="Detection rate"
+                  label={t("obs.usage.sys.stat.detection")}
                   value={`${detectionRate.toFixed(1)}%`}
-                  sub={`${fetchedFindingsTotal} findings / ${systemRuns.length} runs`}
+                  sub={t("obs.usage.sys.stat.detectionSub", { findings: fetchedFindingsTotal, runs: systemRuns.length })}
                 />
               </div>
 
@@ -752,7 +764,7 @@ export default function UsagePage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                 <div style={{ ...panelCard, padding: "12px 14px" }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
-                    Scan activity (last 14 days)
+                    {t("obs.usage.sys.activity")}
                   </div>
                   <div style={{ height: 120 }}>
                     <Bar
@@ -799,24 +811,24 @@ export default function UsagePage() {
                 >
                   <div>
                     <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
-                      Runs by trigger
+                      {t("obs.usage.sys.byTrigger")}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {triggerRows.map((t) => (
-                        <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ width: 55, fontSize: 10, color: "var(--text-secondary)", flexShrink: 0 }}>{t.label}</span>
+                      {triggerRows.map((row) => (
+                        <div key={row.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ width: 55, fontSize: 10, color: "var(--text-secondary)", flexShrink: 0 }}>{row.label}</span>
                           <div style={{ flex: 1, height: 14, borderRadius: 3, background: "var(--bg-subtle)", overflow: "hidden" }}>
                             <div
                               style={{
-                                width: `${Math.round((t.count / maxTriggerCount) * 100)}%`,
+                                width: `${Math.round((row.count / maxTriggerCount) * 100)}%`,
                                 height: "100%",
                                 borderRadius: 3,
-                                background: t.color,
+                                background: row.color,
                               }}
                             />
                           </div>
                           <span style={{ fontSize: 10, fontWeight: 600, minWidth: "3ch", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                            {t.count.toLocaleString()}
+                            {row.count.toLocaleString()}
                           </span>
                         </div>
                       ))}
@@ -824,15 +836,15 @@ export default function UsagePage() {
                   </div>
                   <div>
                     <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
-                      Findings breakdown
+                      {t("obs.usage.sys.findingsBreakdown")}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
                       {[
-                        { color: "#EF4444", label: "New patterns", count: findingsSummary?.new_patterns ?? 0 },
-                        { color: "#F59E0B", label: "Already covered", count: findingsSummary?.already_covered ?? 0 },
-                        { color: "#10B981", label: "No findings", count: cleanRuns },
+                        { id: "new", color: "#EF4444", label: t("obs.usage.sys.newPatterns"), count: findingsSummary?.new_patterns ?? 0 },
+                        { id: "covered", color: "#F59E0B", label: t("obs.usage.sys.alreadyCovered"), count: findingsSummary?.already_covered ?? 0 },
+                        { id: "clean", color: "#10B981", label: t("obs.usage.sys.noFindings"), count: cleanRuns },
                       ].map((it) => (
-                        <div key={it.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--text-secondary)" }}>
+                        <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--text-secondary)" }}>
                           <span style={{ width: 7, height: 7, borderRadius: "50%", background: it.color, flexShrink: 0 }} />
                           {it.label}
                           <span style={{ fontWeight: 700, color: "var(--color-text-primary)" }}>{it.count.toLocaleString()}</span>
@@ -847,16 +859,16 @@ export default function UsagePage() {
               <div style={{ ...panelCard, padding: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "12px 14px 0", gap: 8, flexWrap: "wrap" }}>
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)" }}>Recent scan runs</div>
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>Last 20 runs sorted by time</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)" }}>{t("obs.usage.sys.recentRuns")}</div>
+                    <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>{t("obs.usage.sys.recentRunsSub")}</div>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     {([
-                      ["all", "All"],
-                      ["findings", "With findings"],
-                      ["realtime", "Realtime"],
-                      ["manual", "Manual"],
-                    ] as [RunFilter, string][]).map(([key, label]) => {
+                      ["all", "field.all"],
+                      ["findings", "obs.usage.sys.filter.withFindings"],
+                      ["realtime", "obs.usage.trigger.realtime"],
+                      ["manual", "obs.usage.trigger.manual"],
+                    ] as [RunFilter, DictKey][]).map(([key, label]) => {
                       const active = runFilter === key;
                       return (
                         <button
@@ -874,7 +886,7 @@ export default function UsagePage() {
                             color: active ? "#fff" : "var(--text-secondary)",
                           }}
                         >
-                          {label}
+                          {t(label)}
                         </button>
                       );
                     })}
@@ -882,18 +894,26 @@ export default function UsagePage() {
                 </div>
                 {filteredRuns.length === 0 ? (
                   <div style={{ padding: "2rem 1rem" }}>
-                    <EmptyState message="No scan runs match this filter" icon={<Icon name="info" />} />
+                    <EmptyState message={t("obs.usage.sys.noRuns")} icon={<Icon name="info" />} />
                   </div>
                 ) : (
                   <div style={{ overflowX: "auto", marginTop: 8 }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, color: "var(--text-primary)" }}>
                       <thead>
                         <tr>
-                          {["Time", "Trigger", "Model", "Findings", "Tokens", "Cost", "Status"].map((h) => (
+                          {([
+                            "obs.usage.col.time",
+                            "obs.usage.col.trigger",
+                            "field.model",
+                            "obs.usage.col.findings",
+                            "obs.usage.col.tokens",
+                            "obs.usage.col.cost",
+                            "field.status",
+                          ] as DictKey[]).map((h) => (
                             <th
                               key={h}
                               style={{
-                                textAlign: h === "Cost" ? "right" : "left",
+                                textAlign: h === "obs.usage.col.cost" ? "right" : "left",
                                 padding: "6px 14px",
                                 fontSize: 9,
                                 textTransform: "uppercase",
@@ -904,7 +924,7 @@ export default function UsagePage() {
                                 borderBottom: "1px solid var(--border-color)",
                               }}
                             >
-                              {h}
+                              {t(h)}
                             </th>
                           ))}
                         </tr>
@@ -950,9 +970,9 @@ export default function UsagePage() {
                                     />
                                     {split
                                       ? split.newCount > 0
-                                        ? `${split.newCount} new`
-                                        : `${split.covered} covered`
-                                      : `${r.findings_count} found`}
+                                        ? t("obs.usage.sys.findingsNew", { n: split.newCount })
+                                        : t("obs.usage.sys.findingsCovered", { n: split.covered })
+                                      : t("obs.usage.sys.findingsFound", { n: r.findings_count })}
                                   </span>
                                 )}
                               </td>
@@ -986,7 +1006,7 @@ export default function UsagePage() {
               </div>
 
               <div style={{ marginTop: "1rem", padding: "0.75rem 1rem", fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", fontStyle: "italic" }}>
-                These costs are incurred by the gateway itself for AI review scans, separate from user/tenant traffic costs.
+                {t("obs.usage.sys.note")}
               </div>
             </>
           )}

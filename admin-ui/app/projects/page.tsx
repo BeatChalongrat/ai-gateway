@@ -12,6 +12,7 @@ import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import { useT, type DictKey } from "../../lib/i18n";
 import ProjectDetailModal from "./_components/ProjectDetailModal";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
@@ -63,6 +64,7 @@ const CSS = `
 /* ═══════════════════════════════════════════════════════════════════ */
 
 export default function ProjectsPage() {
+  const t = useT();
   const [showArchived, setShowArchived] = useState(false);
   const { data, loading, error, refetch } = useApi<{ items: any[] }>(
     `/admin/projects${showArchived ? "?include_archived=true" : ""}`
@@ -73,7 +75,9 @@ export default function ProjectsPage() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({ tenant_id: "", name: "", policy_profile_id: "" });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Dictionary KEYS, not rendered text — a validation error already on
+  // screen re-labels itself when the language switcher is used.
+  const [errors, setErrors] = useState<Record<string, DictKey>>({});
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [policyFilter, setPolicyFilter] = useState<string | null>(null);
@@ -83,10 +87,10 @@ export default function ProjectsPage() {
   async function handleRestore(projectId: string) {
     try {
       await api.post(`/admin/projects/${projectId}/restore`, {});
-      toast("Project restored");
+      toast(t("tenancy.projects.restoredToast"));
       refetch();
     } catch {
-      toast("Restore failed", "error");
+      toast(t("tenancy.projects.restoreFailed"), "error");
     }
   }
 
@@ -94,15 +98,15 @@ export default function ProjectsPage() {
   const tenantItems = tenants.data?.items ?? [];
 
   function tenantName(tid: string) {
-    const t = tenantItems.find((t: any) => t.tenant_id === tid);
-    return t ? t.name : tid.slice(0, 8) + "…";
+    const tn = tenantItems.find((row: any) => row.tenant_id === tid);
+    return tn ? tn.name : tid.slice(0, 8) + "…";
   }
 
   function isProtected(p: any): boolean {
     const nm = (p.name || "").toLowerCase();
     if (nm === "demo" || nm === "demo project") return true;
-    const t = tenantItems.find((t: any) => t.tenant_id === p.tenant_id);
-    return t?.slug === "demo";
+    const tn = tenantItems.find((row: any) => row.tenant_id === p.tenant_id);
+    return tn?.slug === "demo";
   }
 
   // Stats
@@ -127,9 +131,9 @@ export default function ProjectsPage() {
 
   // CRUD
   function validate() {
-    const e: Record<string, string> = {};
-    if (!form.tenant_id) e.tenant_id = "Tenant is required";
-    if (!form.name.trim()) e.name = "Name is required";
+    const e: Record<string, DictKey> = {};
+    if (!form.tenant_id) e.tenant_id = "tenancy.err.tenantRequired";
+    if (!form.name.trim()) e.name = "tenancy.err.nameRequired";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -140,8 +144,8 @@ export default function ProjectsPage() {
     try {
       await api.post("/admin/projects", { ...form, policy_profile_id: form.policy_profile_id || null });
       setShowCreate(false); setForm({ tenant_id: "", name: "", policy_profile_id: "" }); setErrors({});
-      toast("Project created successfully"); refetch();
-    } catch (e: any) { toast(e.body?.error?.message || "Failed to create project", "error"); }
+      toast(t("tenancy.projects.created")); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || t("tenancy.projects.createFailed"), "error"); }
     finally { setSaving(false); }
   }
 
@@ -150,8 +154,8 @@ export default function ProjectsPage() {
     setDeleting(true);
     try {
       await api.delete(`/admin/projects/${deleteTarget.project_id}`);
-      toast(`Project "${deleteTarget.name}" deleted`); setDeleteTarget(null); refetch();
-    } catch (e: any) { toast(e.body?.error?.message || "Failed to delete project", "error"); }
+      toast(t("tenancy.projects.deletedToast", { name: deleteTarget.name })); setDeleteTarget(null); refetch();
+    } catch (e: any) { toast(e.body?.error?.message || t("tenancy.projects.deleteFailed"), "error"); }
     finally { setDeleting(false); }
   }
 
@@ -167,13 +171,13 @@ export default function ProjectsPage() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>Projects</h1>
-          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>Project-level configuration and policy assignment</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>{t("tenancy.projects.title")}</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>{t("tenancy.projects.subtitle")}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button className="sran-btn sran-btn-primary" onClick={() => setShowCreate(true)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Create Project
+            {t("tenancy.projects.create")}
           </button>
           <ThemeToggle />
         </div>
@@ -199,9 +203,9 @@ export default function ProjectsPage() {
           {/* Stats */}
           <div style={{ display: "flex", gap: 32 }}>
             {[
-              { v: items.length, l: "Total Projects", c: T.tp },
-              { v: activeCount, l: "Active", c: "#059669" },
-              { v: policyDefault, l: "Default Policy", c: T.tp },
+              { v: items.length, l: t("tenancy.projects.statTotal"), c: T.tp },
+              { v: activeCount, l: t("field.active"), c: "#059669" },
+              { v: policyDefault, l: t("tenancy.projects.statDefaultPolicy"), c: T.tp },
             ].map((s) => (
               <div key={s.l}>
                 <div style={{ fontFamily: T.mono, fontSize: 22, fontWeight: 700, color: s.c, lineHeight: 1, letterSpacing: "-0.02em" }}>{s.v}</div>
@@ -227,7 +231,9 @@ export default function ProjectsPage() {
                 >{name.charAt(0).toUpperCase()}</div>
               ))}
             </div>
-            <span style={{ fontSize: 11, color: T.tt, fontWeight: 500, marginLeft: 10, whiteSpace: "nowrap" }}>{uniqueTenants.length} tenant{uniqueTenants.length !== 1 ? "s" : ""}</span>
+            <span style={{ fontSize: 11, color: T.tt, fontWeight: 500, marginLeft: 10, whiteSpace: "nowrap" }}>
+              {t(uniqueTenants.length === 1 ? "tenancy.tenants.countOne" : "tenancy.tenants.count", { n: uniqueTenants.length })}
+            </span>
           </div>
         </div>
       )}
@@ -237,7 +243,7 @@ export default function ProjectsPage() {
         <div className="pj-anim" style={{ animationDelay: "0.1s", display: "flex", alignItems: "center", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
           <div style={{ position: "relative", flex: "0 1 300px", minWidth: 160 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search projects or tenants..."
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("tenancy.projects.searchPlaceholder")}
               style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: "inherit", border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
               onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
               onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
@@ -247,8 +253,8 @@ export default function ProjectsPage() {
 
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             {[
-              { key: null, label: "All", count: items.length },
-              { key: "default", label: "Default Policy", count: policyDefault },
+              { key: null, label: t("field.all"), count: items.length },
+              { key: "default", label: t("tenancy.projects.statDefaultPolicy"), count: policyDefault },
             ].map((f) => {
               const active = policyFilter === f.key;
               return (
@@ -286,7 +292,7 @@ export default function ProjectsPage() {
               onChange={(e) => setShowArchived(e.target.checked)}
               style={{ cursor: "pointer" }}
             />
-            Show archived
+            {t("tenancy.projects.showArchived")}
           </label>
 
           {/* View toggle */}
@@ -317,7 +323,7 @@ export default function ProjectsPage() {
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>
       ) : items.length === 0 ? (
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}>
-          <EmptyState message="No projects yet" icon={<Icon name="folder" size={22} />} action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>Create your first project</button>} />
+          <EmptyState message={t("tenancy.projects.empty")} icon={<Icon name="folder" size={22} />} action={<button onClick={() => setShowCreate(true)} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 8, border: "none", background: T.accent, color: "white", cursor: "pointer" }}>{t("tenancy.projects.emptyAction")}</button>} />
         </div>
       ) : view === "grid" ? (
         /* ── Grid view ── */
@@ -351,7 +357,7 @@ export default function ProjectsPage() {
                         fontSize: 11, fontWeight: 600, color: "var(--accent-warning)",
                         background: "rgba(245,158,11,0.12)",
                       }}>
-                        archived
+                        {t("tenancy.status.archived")}
                       </span>
                     ) : (
                       <span style={{
@@ -361,7 +367,7 @@ export default function ProjectsPage() {
                         background: "rgba(16,185,129,0.08)",
                       }}>
                         <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", animation: "pjDotPulse 2s ease-in-out infinite" }} />
-                        active
+                        {t("field.active")}
                       </span>
                     )}
                   </div>
@@ -376,11 +382,11 @@ export default function ProjectsPage() {
                   {/* Meta */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderTop: `1px solid ${T.bl}`, paddingTop: 14, marginTop: 18 }}>
                     <div>
-                      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>Policy</div>
+                      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>{t("tenancy.field.policy")}</div>
                       <span style={{ display: "inline-block", padding: "2px 10px", fontSize: 11, fontWeight: 600, color: policyColor.color, background: policyColor.bg, borderRadius: 100 }}>{policy}</span>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>Created</div>
+                      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>{t("field.created")}</div>
                       <span style={{ fontFamily: T.mono, fontSize: "12.5px", color: T.ts }}>{p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}</span>
                     </div>
                   </div>
@@ -402,7 +408,7 @@ export default function ProjectsPage() {
                     border: "1px solid rgba(99,102,241,0.35)", background: "var(--bg-surface)", color: T.accent, cursor: "pointer",
                   }}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                    Open
+                    {t("tenancy.projects.open")}
                   </button>
                   {p.archived_at ? (
                     <button onClick={() => handleRestore(p.project_id)} style={{
@@ -411,7 +417,7 @@ export default function ProjectsPage() {
                       border: "1px solid rgba(16,185,129,0.35)", background: "var(--bg-surface)", color: "var(--accent-success)", cursor: "pointer",
                     }}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1015.88-5.94L21 9"/><polyline points="21 3 21 9 15 9"/></svg>
-                      Restore
+                      {t("tenancy.action.restore")}
                     </button>
                   ) : !isProtected(p) && (
                     <button onClick={() => setDeleteTarget(p)} style={{
@@ -420,7 +426,7 @@ export default function ProjectsPage() {
                       border: "1px solid rgba(239,68,68,0.35)", background: "var(--bg-surface)", color: "var(--accent-danger)", cursor: "pointer",
                     }}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                      Delete
+                      {t("action.delete")}
                     </button>
                   )}
                 </div>
@@ -434,10 +440,10 @@ export default function ProjectsPage() {
           <div style={{ overflowX: "auto" }}>
             <table className="pj-table" style={{ minWidth: 600 }}>
               <thead><tr>
-                <th style={{ paddingLeft: 20 }}>Project</th>
-                <th style={{ width: 110 }}>Policy</th>
-                <th style={{ textAlign: "center", width: 100 }}>Status</th>
-                <th style={{ width: 110 }}>Created</th>
+                <th style={{ paddingLeft: 20 }}>{t("field.project")}</th>
+                <th style={{ width: 110 }}>{t("tenancy.field.policy")}</th>
+                <th style={{ textAlign: "center", width: 100 }}>{t("field.status")}</th>
+                <th style={{ width: 110 }}>{t("field.created")}</th>
               </tr></thead>
               <tbody>
                 {filtered.map((p, i) => {
@@ -460,12 +466,12 @@ export default function ProjectsPage() {
                       <td style={{ textAlign: "center" }}>
                         {p.archived_at ? (
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: "11.5px", fontWeight: 600, color: "var(--accent-warning)", background: "rgba(245,158,11,0.12)" }}>
-                            archived
+                            {t("tenancy.status.archived")}
                           </span>
                         ) : (
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: "11.5px", fontWeight: 600, color: "#059669", background: "rgba(16,185,129,0.08)" }}>
                             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", animation: "pjDotPulse 2s ease-in-out infinite" }} />
-                            active
+                            {t("field.active")}
                           </span>
                         )}
                       </td>
@@ -480,7 +486,7 @@ export default function ProjectsPage() {
       )}
 
       {/* Delete confirm */}
-      <ConfirmModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title="Delete Project" message={`Delete project "${deleteTarget?.name}"? Associated API keys will be orphaned.`} confirmLabel="Delete Project" loading={deleting} />
+      <ConfirmModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title={t("tenancy.projects.deleteTitle")} message={t("tenancy.projects.deleteMessage", { name: deleteTarget?.name ?? "" })} confirmLabel={t("tenancy.projects.deleteTitle")} loading={deleting} />
 
       {/* Detail modal — new in 2026-04-24 redesign: sections for
           Overview, Activity, Members, Danger zone. Backed by the
@@ -493,29 +499,29 @@ export default function ProjectsPage() {
       />
 
       {/* Create modal */}
-      <Modal open={showCreate} onClose={() => { setShowCreate(false); setErrors({}); }} title="Create Project" footer={
-        <><button className="sran-btn sran-btn-secondary" onClick={() => { setShowCreate(false); setErrors({}); }}>Cancel</button>
-        <button className="sran-btn sran-btn-primary" onClick={handleCreate} disabled={saving}>{saving ? "Creating..." : "Create"}</button></>
+      <Modal open={showCreate} onClose={() => { setShowCreate(false); setErrors({}); }} title={t("tenancy.projects.create")} footer={
+        <><button className="sran-btn sran-btn-secondary" onClick={() => { setShowCreate(false); setErrors({}); }}>{t("action.cancel")}</button>
+        <button className="sran-btn sran-btn-primary" onClick={handleCreate} disabled={saving}>{saving ? t("action.creating") : t("action.create")}</button></>
       }>
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
-            <label className="sran-label">Tenant *</label>
+            <label className="sran-label">{t("field.tenant")} *</label>
             <select className={`sran-input ${errors.tenant_id ? "sran-input-error" : ""}`} value={form.tenant_id} onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}>
-              <option value="">Select tenant...</option>
-              {tenantItems.filter((t: any) => t.status === "active").map((t: any) => (<option key={t.tenant_id} value={t.tenant_id}>{t.name} ({t.slug})</option>))}
+              <option value="">{t("tenancy.projects.selectTenant")}</option>
+              {tenantItems.filter((tn: any) => tn.status === "active").map((tn: any) => (<option key={tn.tenant_id} value={tn.tenant_id}>{tn.name} ({tn.slug})</option>))}
             </select>
-            {errors.tenant_id && <div className="sran-field-error">{errors.tenant_id}</div>}
+            {errors.tenant_id && <div className="sran-field-error">{t(errors.tenant_id)}</div>}
           </div>
           <div>
-            <label className="sran-label">Name *</label>
-            <input className={`sran-input ${errors.name ? "sran-input-error" : ""}`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Production" maxLength={64} />
-            {errors.name && <div className="sran-field-error">{errors.name}</div>}
+            <label className="sran-label">{t("field.name")} *</label>
+            <input className={`sran-input ${errors.name ? "sran-input-error" : ""}`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t("tenancy.projects.namePlaceholder")} maxLength={64} />
+            {errors.name && <div className="sran-field-error">{t(errors.name)}</div>}
             <div className="sran-char-count">{form.name.length}/64</div>
           </div>
           <div>
-            <label className="sran-label">Policy Profile</label>
+            <label className="sran-label">{t("tenancy.projects.policyProfile")}</label>
             <select className="sran-input" value={form.policy_profile_id} onChange={(e) => setForm({ ...form, policy_profile_id: e.target.value })}>
-              <option value="">Default</option><option value="default">default</option><option value="strict">strict</option>
+              <option value="">{t("tenancy.projects.policyDefaultOption")}</option><option value="default">default</option><option value="strict">strict</option>
             </select>
           </div>
         </div>

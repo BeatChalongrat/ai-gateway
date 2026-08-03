@@ -37,6 +37,7 @@ import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
+import { useT, type DictKey } from "../../lib/i18n";
 
 // -----------------------------------------------------------------------
 // Constants + palettes
@@ -56,13 +57,16 @@ function severityOf(outcome: string | null): "success" | "failure" | "neutral" {
   return "neutral";
 }
 
-// Table category pills.
+// Table category pills. `labelKey` is resolved at render time so switching
+// language re-labels the pills; `dlp` carries a literal instead because the
+// acronym is the same word in Thai and translating it would only obscure
+// which DLP subsystem the row came from.
 type TableCat = "other" | "auth" | "key" | "dlp";
-const TABLE_CATS: Record<TableCat, { label: string; bg: string; fg: string }> = {
-  other: { label: "Other", bg: "var(--bg-subtle)", fg: "var(--text-secondary)" },
-  auth: { label: "Auth", bg: "#ECFDF5", fg: "#059669" },
-  key: { label: "Key", bg: "#FFFBEB", fg: "#92600A" },
-  dlp: { label: "DLP", bg: "#EEF4FF", fg: "#3B82F6" },
+const TABLE_CATS: Record<TableCat, { labelKey: DictKey | null; label?: string; bg: string; fg: string }> = {
+  other: { labelKey: "obs.audit.cat.other", bg: "var(--bg-subtle)", fg: "var(--text-secondary)" },
+  auth: { labelKey: "obs.audit.cat.auth", bg: "#ECFDF5", fg: "#059669" },
+  key: { labelKey: "obs.audit.cat.key", bg: "#FFFBEB", fg: "#92600A" },
+  dlp: { labelKey: null, label: "DLP", bg: "#EEF4FF", fg: "#3B82F6" },
 };
 
 function tableCatOf(action: string): TableCat {
@@ -75,11 +79,11 @@ function tableCatOf(action: string): TableCat {
 
 // Timeline stacking categories (spec order: key → dlp/trace → failed → auth).
 type TimelineCat = "dlp" | "auth" | "key" | "failed";
-const TIMELINE_CATS: { key: TimelineCat; label: string; color: string }[] = [
-  { key: "dlp", label: "DLP / Trace", color: "#3B82F6" },
-  { key: "auth", label: "Auth", color: "#10B981" },
-  { key: "key", label: "Key ops", color: "#F59E0B" },
-  { key: "failed", label: "Failed", color: "#EF4444" },
+const TIMELINE_CATS: { key: TimelineCat; label: DictKey; color: string }[] = [
+  { key: "dlp", label: "obs.audit.timeline.dlp", color: "#3B82F6" },
+  { key: "auth", label: "obs.audit.timeline.auth", color: "#10B981" },
+  { key: "key", label: "obs.audit.timeline.key", color: "#F59E0B" },
+  { key: "failed", label: "obs.audit.timeline.failed", color: "#EF4444" },
 ];
 
 function timelineCatOf(r: AuditRow): TimelineCat {
@@ -148,12 +152,12 @@ type TimeWindow = "1h" | "24h" | "7d" | "30d" | "all";
 type QuickCat = "" | "failed" | "key" | "cross-tenant";
 type StatFilter = "" | "success" | "failed" | "key";
 
-const TIME_WINDOW_LABELS: Record<TimeWindow, string> = {
-  "1h": "Last hour",
-  "24h": "Last 24h",
-  "7d": "Last 7 days",
-  "30d": "Last 30 days",
-  all: "All time",
+const TIME_WINDOW_LABELS: Record<TimeWindow, DictKey> = {
+  "1h": "obs.audit.window.lastHour",
+  "24h": "time.last24h",
+  "7d": "time.last7d",
+  "30d": "time.last30d",
+  all: "time.allTime",
 };
 
 function windowToDateFrom(w: TimeWindow): string {
@@ -290,22 +294,25 @@ function StatCard({
 }
 
 function CatBadge({ cat }: { cat: TableCat }) {
+  const t = useT();
   const c = TABLE_CATS[cat];
   return (
     <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 10, fontSize: 10, fontWeight: 600, background: c.bg, color: c.fg }}>
-      {c.label}
+      {c.labelKey ? t(c.labelKey) : c.label}
     </span>
   );
 }
 
 function OutcomeBadge({ outcome }: { outcome: string | null }) {
+  const t = useT();
   if (!outcome) return <span style={{ color: "var(--text-muted)", fontSize: 14 }}>—</span>;
   const sev = severityOf(outcome);
+  // An unrecognised outcome renders the backend's own value verbatim.
   const [label, bg, fg] =
     sev === "success"
-      ? ["Success", "#ECFDF5", "#059669"]
+      ? [t("obs.audit.outcome.success"), "#ECFDF5", "#059669"]
       : sev === "failure"
-        ? ["Denied", "#FEF2F2", "#DC2626"]
+        ? [t("obs.audit.outcome.denied"), "#FEF2F2", "#DC2626"]
         : [outcome, "var(--bg-subtle)", "var(--text-secondary)"];
   return (
     <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 10, fontSize: 10, fontWeight: 600, background: bg, color: fg }}>
@@ -350,6 +357,7 @@ function JsonBlock({ data }: { data: unknown }) {
 
 export default function AuditLogPage() {
   const { toast } = useToast();
+  const t = useT();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("7d");
@@ -408,15 +416,15 @@ export default function AuditLogPage() {
       if (reqRef.current !== reqId) return;
       setError(
         err instanceof ApiError
-          ? err.body?.error?.message || `Error ${err.status}`
+          ? err.body?.error?.message || t("obs.audit.errorStatus", { status: err.status })
           : err instanceof Error
             ? err.message
-            : "Failed to load audit log.",
+            : t("obs.audit.errorLoad"),
       );
     } finally {
       if (reqRef.current === reqId) setLoading(false);
     }
-  }, [queryString]);
+  }, [queryString, t]);
 
   useEffect(() => {
     load();
@@ -564,9 +572,9 @@ export default function AuditLogPage() {
   async function handleCopyJson(row: AuditRow) {
     try {
       await navigator.clipboard.writeText(JSON.stringify(row, null, 2));
-      toast("Copied JSON to clipboard", "success");
+      toast(t("obs.audit.copied"), "success");
     } catch {
-      toast("Copy failed — clipboard unavailable", "error");
+      toast(t("obs.audit.copyFailed"), "error");
     }
   }
 
@@ -582,7 +590,7 @@ export default function AuditLogPage() {
       const res = await fetch(`${base}/admin/audit-log?${params.toString()}`, {
         credentials: "include",
       });
-      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      if (!res.ok) throw new Error(t("obs.audit.exportFailedStatus", { status: res.status }));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -593,7 +601,7 @@ export default function AuditLogPage() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Export failed", "error");
+      toast(err instanceof Error ? err.message : t("obs.audit.exportFailed"), "error");
     } finally {
       setExporting(false);
     }
@@ -617,9 +625,9 @@ export default function AuditLogPage() {
       {/* 1. Page header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>Admin actions</h1>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>{t("obs.audit.title")}</h1>
           <p style={{ fontSize: 15, fontWeight: 500, color: "var(--text-secondary)", margin: "3px 0 0" }}>
-            Who did what, when, and where. Click any row for full context.
+            {t("obs.audit.subtitle")}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -643,7 +651,7 @@ export default function AuditLogPage() {
             }}
           >
             <MiniIcon d={ICON_DOWNLOAD} size={13} />
-            {exporting ? "Exporting…" : "Export CSV"}
+            {exporting ? t("obs.audit.exporting") : t("action.exportCsv")}
           </button>
           <ThemeToggle />
         </div>
@@ -656,9 +664,9 @@ export default function AuditLogPage() {
           iconBg="var(--icon-bg-blue)"
           iconColor="#3B82F6"
           icon={<MiniIcon d={ICON_LIST} />}
-          label="Total events"
+          label={t("obs.audit.stat.total")}
           value={stats.total.toLocaleString()}
-          sub={TIME_WINDOW_LABELS[timeWindow]}
+          sub={t(TIME_WINDOW_LABELS[timeWindow])}
           active={statFilter === ""}
           onClick={() => setStatFilter("")}
         />
@@ -667,9 +675,9 @@ export default function AuditLogPage() {
           iconBg="var(--icon-bg-green)"
           iconColor="#10B981"
           icon={<MiniIcon d={ICON_CHECK} />}
-          label="Success"
+          label={t("obs.audit.stat.success")}
           value={stats.success.toLocaleString()}
-          sub={`${successRate}% success rate`}
+          sub={t("obs.audit.stat.successSub", { rate: successRate })}
           active={statFilter === "success"}
           onClick={() => setStatFilter(statFilter === "success" ? "" : "success")}
         />
@@ -678,9 +686,9 @@ export default function AuditLogPage() {
           iconBg="var(--icon-bg-red)"
           iconColor="#EF4444"
           icon={<MiniIcon d={ICON_ALERT} />}
-          label="Failed / denied"
+          label={t("obs.audit.stat.failed")}
           value={stats.failed.toLocaleString()}
-          sub={stats.failed === 0 ? "No failures" : `${stats.failed.toLocaleString()} failures`}
+          sub={stats.failed === 0 ? t("obs.audit.stat.noFailures") : t("obs.audit.stat.failures", { n: stats.failed.toLocaleString() })}
           active={statFilter === "failed"}
           onClick={() => setStatFilter(statFilter === "failed" ? "" : "failed")}
         />
@@ -689,9 +697,9 @@ export default function AuditLogPage() {
           iconBg="var(--icon-bg-amber)"
           iconColor="#F59E0B"
           icon={<MiniIcon d={ICON_KEY} />}
-          label="Key operations"
+          label={t("obs.audit.stat.keyOps")}
           value={stats.key.toLocaleString()}
-          sub="API key changes"
+          sub={t("obs.audit.stat.keyOpsSub")}
           active={statFilter === "key"}
           onClick={() => setStatFilter(statFilter === "key" ? "" : "key")}
         />
@@ -699,12 +707,15 @@ export default function AuditLogPage() {
 
       {/* 3. Activity timeline */}
       <div style={{ ...whiteCard, padding: "14px 16px", marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Activity timeline</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>{t("obs.audit.timeline.title")}</div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 80 }}>
           {timeline.map((b, i) => (
             <div
               key={i}
-              title={`${b.day.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${b.total} events`}
+              title={t("obs.audit.timeline.tooltip", {
+                day: b.day.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+                count: b.total,
+              })}
               style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%", minWidth: 4 }}
             >
               {b.total === 0 ? (
@@ -738,7 +749,7 @@ export default function AuditLogPage() {
           {TIMELINE_CATS.map((c) => (
             <span key={c.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-secondary)" }}>
               <span style={{ width: 7, height: 7, background: c.color, borderRadius: 1, flexShrink: 0 }} />
-              {c.label}
+              {t(c.label)}
             </span>
           ))}
         </div>
@@ -746,7 +757,7 @@ export default function AuditLogPage() {
 
       {/* 4. Filter bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>Period:</span>
+        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>{t("obs.audit.period")}</span>
         {(["1h", "24h", "7d", "30d", "all"] as TimeWindow[]).map((w) => {
           const active = timeWindow === w;
           return (
@@ -765,18 +776,18 @@ export default function AuditLogPage() {
                 color: active ? "#fff" : "var(--text-secondary)",
               }}
             >
-              {w === "all" ? "All" : w}
+              {w === "all" ? t("field.all") : w}
             </button>
           );
         })}
         <span style={{ width: 6 }} />
-        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>Quick:</span>
+        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>{t("obs.audit.quick")}</span>
         {(
           [
-            ["failed", "Failed only", "chip-danger"],
-            ["key", "Key ops", "chip-warning"],
-            ["cross-tenant", "Cross-tenant", "chip-neutral"],
-          ] as [QuickCat, string, string][]
+            ["failed", "obs.audit.quick.failed", "chip-danger"],
+            ["key", "obs.audit.quick.key", "chip-warning"],
+            ["cross-tenant", "obs.audit.quick.crossTenant", "chip-neutral"],
+          ] as [QuickCat, DictKey, string][]
         ).map(([key, label, chipClass]) => {
           const active = quickCat === key;
           return (
@@ -794,14 +805,14 @@ export default function AuditLogPage() {
                 fontFamily: "inherit",
               }}
             >
-              {label}
+              {t(label)}
             </button>
           );
         })}
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search actions, actors..."
+          placeholder={t("obs.audit.searchPlaceholder")}
           style={{
             marginLeft: "auto",
             fontSize: 13,
@@ -838,58 +849,59 @@ export default function AuditLogPage() {
           <span style={{ display: "inline-flex", transform: advancedOpen ? "rotate(90deg)" : "none", transition: "transform 120ms" }}>
             <MiniIcon d={ICON_CHEVRON} size={14} />
           </span>
-          Advanced filters
+          {t("obs.audit.advanced")}
         </button>
         {advancedOpen ? (
           <form onSubmit={handleApply} style={{ marginTop: 8 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 0.8fr 1.2fr", gap: 6 }}>
               <label>
-                <span style={fieldLabel}>Search</span>
-                <input style={fieldInput} placeholder="resource id, action..." value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+                <span style={fieldLabel}>{t("action.search")}</span>
+                <input style={fieldInput} placeholder={t("obs.audit.ph.q")} value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
               </label>
               <label>
-                <span style={fieldLabel}>Action</span>
-                <input style={fieldInput} placeholder="e.g. key_create" value={filters.action} onChange={(e) => setFilters({ ...filters, action: e.target.value })} />
+                <span style={fieldLabel}>{t("obs.audit.field.action")}</span>
+                <input style={fieldInput} placeholder={t("obs.audit.ph.action")} value={filters.action} onChange={(e) => setFilters({ ...filters, action: e.target.value })} />
               </label>
               <label>
-                <span style={fieldLabel}>Tenant</span>
-                <input style={fieldInput} placeholder="tenant name" value={filters.tenant_id} onChange={(e) => setFilters({ ...filters, tenant_id: e.target.value })} />
+                <span style={fieldLabel}>{t("field.tenant")}</span>
+                <input style={fieldInput} placeholder={t("obs.audit.ph.tenant")} value={filters.tenant_id} onChange={(e) => setFilters({ ...filters, tenant_id: e.target.value })} />
               </label>
               <label>
-                <span style={fieldLabel}>Actor</span>
-                <input style={fieldInput} placeholder="actor id" value={filters.actor_key_id} onChange={(e) => setFilters({ ...filters, actor_key_id: e.target.value })} />
+                <span style={fieldLabel}>{t("obs.audit.field.actor")}</span>
+                <input style={fieldInput} placeholder={t("obs.audit.ph.actor")} value={filters.actor_key_id} onChange={(e) => setFilters({ ...filters, actor_key_id: e.target.value })} />
               </label>
               <label>
-                <span style={fieldLabel}>Outcome</span>
+                <span style={fieldLabel}>{t("obs.audit.field.outcome")}</span>
+                {/* option VALUES are the backend's outcome identifiers — only the labels are translated. */}
                 <select style={fieldInput} value={filters.outcome} onChange={(e) => setFilters({ ...filters, outcome: e.target.value })}>
-                  <option value="">All</option>
-                  <option value="success">Success</option>
-                  <option value="denied">Denied</option>
-                  <option value="error">Error</option>
+                  <option value="">{t("field.all")}</option>
+                  <option value="success">{t("obs.audit.outcome.success")}</option>
+                  <option value="denied">{t("obs.audit.outcome.denied")}</option>
+                  <option value="error">{t("obs.audit.outcome.error")}</option>
                 </select>
               </label>
               <label>
-                <span style={fieldLabel}>From</span>
+                <span style={fieldLabel}>{t("obs.audit.field.from")}</span>
                 <input style={fieldInput} type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
               </label>
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "flex-end" }}>
               <label>
-                <span style={fieldLabel}>To</span>
+                <span style={fieldLabel}>{t("obs.audit.field.to")}</span>
                 <input style={{ ...fieldInput, width: 160 }} type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
               </label>
               <button
                 type="submit"
                 style={{ padding: "6px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, border: "none", background: NAVY, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}
               >
-                Apply
+                {t("action.apply")}
               </button>
               <button
                 type="button"
                 onClick={handleClearAdvanced}
                 style={{ padding: "6px 16px", borderRadius: 6, fontSize: 13, fontWeight: 500, border: "1px solid var(--border-color)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit" }}
               >
-                Clear
+                {t("action.clear")}
               </button>
             </div>
           </form>
@@ -910,8 +922,8 @@ export default function AuditLogPage() {
           <EmptyState
             message={
               rows.length === 0 && timeWindow === "all"
-                ? "No admin actions recorded yet."
-                : "No actions match the current filter."
+                ? t("obs.audit.emptyAll")
+                : t("obs.audit.emptyFiltered")
             }
             icon={<Icon name="shield" size={22} />}
           />
@@ -920,16 +932,16 @@ export default function AuditLogPage() {
         <div style={{ ...whiteCard, overflow: "hidden" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid var(--border-color)" }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-              {totalFiltered.toLocaleString()} event{totalFiltered === 1 ? "" : "s"} in scope
+              {t("obs.audit.inScope", { n: totalFiltered.toLocaleString() })}
               {total > FETCH_LIMIT ? (
                 <span style={{ fontWeight: 400, color: "#B45309", marginLeft: 6 }}>
-                  (first {FETCH_LIMIT} of {total.toLocaleString()} loaded — narrow filters for full view)
+                  {t("obs.audit.truncated", { limit: FETCH_LIMIT, total: total.toLocaleString() })}
                 </span>
               ) : null}
             </span>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-secondary)", cursor: "pointer" }}>
               <input type="checkbox" checked={groupByDay} onChange={(e) => setGroupByDay(e.target.checked)} style={{ width: 16, height: 16 }} />
-              Group by day
+              {t("obs.audit.groupByDay")}
             </label>
           </div>
 
@@ -939,20 +951,20 @@ export default function AuditLogPage() {
                 <tr>
                   {(
                     [
-                      ["Time", 65],
-                      ["Category", 55],
-                      ["Action", undefined],
-                      ["Actor", undefined],
-                      ["Tenant", 65],
-                      ["Resource", undefined],
-                      ["Outcome", 50],
-                    ] as [string, number | undefined][]
+                      ["obs.audit.col.time", 65],
+                      ["obs.audit.col.category", 55],
+                      ["obs.audit.col.action", undefined],
+                      ["obs.audit.col.actor", undefined],
+                      ["field.tenant", 65],
+                      ["obs.audit.col.resource", undefined],
+                      ["obs.audit.col.outcome", 50],
+                    ] as [DictKey, number | undefined][]
                   ).map(([h, w]) => (
                     <th
                       key={h}
                       style={{
                         width: w,
-                        textAlign: h === "Outcome" ? "right" : "left",
+                        textAlign: h === "obs.audit.col.outcome" ? "right" : "left",
                         padding: "6px 16px",
                         fontSize: 9,
                         textTransform: "uppercase",
@@ -964,7 +976,7 @@ export default function AuditLogPage() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {h}
+                      {t(h)}
                     </th>
                   ))}
                 </tr>
@@ -974,9 +986,9 @@ export default function AuditLogPage() {
                   g.kind === "header" ? (
                     <tr key={g.key} style={{ background: "var(--bg-subtle)" }}>
                       <td colSpan={7} style={{ padding: "8px 16px", borderTop: "1px solid var(--border-color)", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                        {formatDayHeader(g.day)}
+                        {formatDayHeader(g.day, t("obs.audit.unknownDate"))}
                         <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-muted)", marginLeft: 8 }}>
-                          {g.count} event{g.count === 1 ? "" : "s"}
+                          {t("obs.audit.dayEvents", { n: g.count })}
                         </span>
                       </td>
                     </tr>
@@ -998,12 +1010,16 @@ export default function AuditLogPage() {
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", borderTop: "1px solid var(--border-color)" }}>
             <span style={{ fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
-              {pageStart + 1}-{Math.min(pageStart + PAGE_SIZE, totalFiltered)} of {totalFiltered.toLocaleString()}
+              {t("table.showing", {
+                from: pageStart + 1,
+                to: Math.min(pageStart + PAGE_SIZE, totalFiltered),
+                total: totalFiltered.toLocaleString(),
+              })}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <PaginationButton disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</PaginationButton>
+              <PaginationButton disabled={page <= 1} onClick={() => setPage(page - 1)}>{t("table.previous")}</PaginationButton>
               <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{page}/{totalPages}</span>
-              <PaginationButton disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</PaginationButton>
+              <PaginationButton disabled={page >= totalPages} onClick={() => setPage(page + 1)}>{t("table.next")}</PaginationButton>
             </div>
           </div>
         </div>
@@ -1031,6 +1047,7 @@ function AuditRowView({
   onCopyJson: () => void;
   parseDetails: (d: string | null) => unknown;
 }) {
+  const t = useT();
   const handleKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -1045,7 +1062,7 @@ function AuditRowView({
       ? ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
       : `${ts.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 
-  const actorKind = row.session_id_prefix ? "Session" : "API key";
+  const actorKind = row.session_id_prefix ? t("obs.audit.actor.session") : t("obs.audit.actor.apiKey");
   const td: React.CSSProperties = { padding: "8px 16px", borderBottom: "1px solid var(--border-color)", verticalAlign: "middle" };
 
   return (
@@ -1106,6 +1123,7 @@ function ExpandedDetail({
   parseDetails: (d: string | null) => unknown;
   onCopyJson: () => void;
 }) {
+  const t = useT();
   const parsed = parseDetails(row.details);
   const fullRow = {
     id: row.id,
@@ -1125,15 +1143,17 @@ function ExpandedDetail({
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "6px 20px", marginBottom: 10 }}>
-        <DetailField label="User-Agent" value={row.user_agent || "—"} mono />
-        <DetailField label="Session prefix" value={row.session_id_prefix || "—"} mono />
-        <DetailField label="Resource type" value={row.resource_type} mono />
-        <DetailField label="IP address" value={row.ip_address || "—"} mono />
+        {/* Labels are translated; the VALUES stay raw — they are what an
+            operator copies into an incident ticket. */}
+        <DetailField label={t("obs.audit.detail.userAgent")} value={row.user_agent || "—"} mono />
+        <DetailField label={t("obs.audit.detail.sessionPrefix")} value={row.session_id_prefix || "—"} mono />
+        <DetailField label={t("obs.audit.detail.resourceType")} value={row.resource_type} mono />
+        <DetailField label={t("obs.audit.detail.ip")} value={row.ip_address || "—"} mono />
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)" }}>
-          Full event JSON
+          {t("obs.audit.detail.fullJson")}
         </span>
         <button
           onClick={(e) => {
@@ -1142,7 +1162,7 @@ function ExpandedDetail({
           }}
           style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, color: NAVY, padding: 0, fontFamily: "inherit" }}
         >
-          Copy JSON
+          {t("obs.copyJson")}
         </button>
       </div>
       <JsonBlock data={fullRow} />
@@ -1166,8 +1186,8 @@ function DetailField({ label, value, mono }: { label: string; value: string; mon
 // -----------------------------------------------------------------------
 
 // "2026-06-29" → "Mon, Jun 29"
-function formatDayHeader(iso: string): string {
-  if (iso === "—") return "Unknown date";
+function formatDayHeader(iso: string, unknownLabel: string): string {
+  if (iso === "—") return unknownLabel;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
