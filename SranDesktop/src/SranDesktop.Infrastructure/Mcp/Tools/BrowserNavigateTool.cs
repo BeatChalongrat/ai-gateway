@@ -16,8 +16,10 @@ public sealed class BrowserNavigateTool : IMcpTool
 
     public string Name => "browser_navigate";
     public string Description =>
-        "Navigate a Chrome tab to a URL and wait for the page to finish loading. " +
-        "Returns the final URL and title.";
+        "THE tool for opening a website you will then read, search or interact with: navigates the " +
+        "user's paired Chrome to a URL and waits for the page to finish loading (returns the final " +
+        "URL and title). Follow up with browser_read_page / browser_find / browser_click / " +
+        "browser_type. Prefer this over open_url for every web task that needs you to see the page.";
     public ToolCategory Category => ToolCategory.Browser;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 
@@ -41,8 +43,19 @@ public sealed class BrowserNavigateTool : IMcpTool
 
         return BrowserToolHelpers.RequestAsync(_bridge, "page.navigate",
             new { url, tab_id = BrowserToolHelpers.GetTabId(arguments) },
-            r => ToolResult.Ok($"Loaded: {BrowserToolHelpers.GetString(r, "title")} — " +
-                               $"{BrowserToolHelpers.GetString(r, "url")}. " +
-                               "Use browser_read_page to see its content."), ct);
+            r =>
+            {
+                // Surface the REAL tab id — without it the model invents one
+                // (Chrome ids are arbitrary; "tab_id: 1" almost never exists).
+                var tabId = BrowserToolHelpers.GetInt(r, "tab_id");
+                var tabNote = tabId is { } id ? $"tab {id}" : "the current tab";
+                return ToolResult.Ok(
+                    $"Navigated {tabNote} to {BrowserToolHelpers.GetString(r, "url")} — " +
+                    $"{BrowserToolHelpers.GetString(r, "title")}. " +
+                    "Use browser_read_page to see its content" +
+                    (tabId is { } tid
+                        ? $" (pass tab_id {tid}, or omit tab_id to act on the current tab)."
+                        : " (omit tab_id to act on the current tab)."));
+            }, ct);
     }
 }

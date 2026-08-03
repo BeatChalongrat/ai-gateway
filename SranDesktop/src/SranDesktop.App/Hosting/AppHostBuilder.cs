@@ -172,7 +172,6 @@ public static class AppHostBuilder
                     registry.Register(new MoveFileTool());
                     registry.Register(new ListDirectoryTool());
                     registry.Register(new SearchFilesTool());
-                    registry.Register(new OpenUrlTool());
                     registry.Register(new ReadClipboardTool());
                     registry.Register(new WriteClipboardTool());
                     // Phase B PART 1: streams stdout/stderr live via the default
@@ -233,6 +232,11 @@ public static class AppHostBuilder
                     registry.Register(new BrowserClickTool(browserBridge));
                     registry.Register(new BrowserTypeTool(browserBridge));
                     registry.Register(new BrowserScreenshotTool(browserBridge));
+                    // open_url AFTER the browser_* tools (the model reads the list
+                    // in order) and bridge-aware: while the extension is connected
+                    // it opens a Chrome tab, never the OS default browser.
+                    registry.Register(new OpenUrlTool(
+                        browserBridge, sp.GetRequiredService<IBrowserLauncher>()));
                     // Phase 13 Part B: code interpreter. Thin client → chat-edge's
                     // /code/run (server-side hardened sandbox). DefaultPermission
                     // is Ask (deny-without-handler): it runs model code + can read

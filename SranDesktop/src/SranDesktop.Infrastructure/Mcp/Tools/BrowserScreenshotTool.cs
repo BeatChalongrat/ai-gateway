@@ -17,7 +17,8 @@ public sealed class BrowserScreenshotTool : IMcpTool
     public string Name => "browser_screenshot";
     public string Description =>
         "Take a screenshot of a Chrome tab's visible area. Prefer browser_read_page for " +
-        "interaction; use this to visually verify a page's state.";
+        "interaction; use this to visually verify a page's state. " +
+        BrowserToolHelpers.TabIdGuidance;
     public ToolCategory Category => ToolCategory.Browser;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
 

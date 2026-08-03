@@ -18,7 +18,8 @@ public sealed class BrowserClickTool : IMcpTool
     public string Name => "browser_click";
     public string Description =>
         "Click an element in a Chrome tab by its [n] ref from browser_read_page. " +
-        "If the click navigates, waits for the new page and returns its URL and title.";
+        "If the click navigates, waits for the new page and returns its URL and title. " +
+        BrowserToolHelpers.TabIdGuidance;
     public ToolCategory Category => ToolCategory.Browser;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 
