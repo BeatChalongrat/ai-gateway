@@ -19,7 +19,8 @@ public sealed class BrowserReadPageTool : IMcpTool
     public string Description =>
         "Read a Chrome tab: indexed list of interactive elements (use the [n] refs with " +
         "browser_click / browser_type) plus the page text with filter=full-text. " +
-        "Refs go stale when the page changes — re-read after navigation.";
+        "Refs go stale when the page changes — re-read after navigation. " +
+        BrowserToolHelpers.TabIdGuidance;
     public ToolCategory Category => ToolCategory.Browser;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
 

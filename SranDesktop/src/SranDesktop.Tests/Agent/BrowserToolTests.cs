@@ -96,6 +96,36 @@ public class BrowserToolTests
     }
 
     [Fact]
+    public async Task Navigate_Surfaces_The_Real_Tab_Id_For_FollowUp_Calls()
+    {
+        // Chrome tab ids are arbitrary numbers; the model used to invent
+        // "tab_id: 1" because navigate never told it the real one.
+        SetupResult("page.navigate", new { tab_id = 1387, url = "https://youtube.com/", title = "YouTube" });
+
+        var result = await new BrowserNavigateTool(_bridge.Object)
+            .ExecuteAsync(Args(new { url = "https://youtube.com" }), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Content.Should().Contain("tab 1387");
+        result.Content.Should().Contain("tab_id 1387");
+        result.Content.Should().Contain("YouTube");
+    }
+
+    [Fact]
+    public async Task Navigate_Still_Works_When_An_Old_Extension_Omits_Tab_Id()
+    {
+        // A not-yet-reloaded extension returns only {url, title}.
+        SetupResult("page.navigate", new { url = "https://example.com/", title = "Example" });
+
+        var result = await new BrowserNavigateTool(_bridge.Object)
+            .ExecuteAsync(Args(new { url = "https://example.com" }), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Content.Should().Contain("the current tab");
+        result.Content.Should().Contain("https://example.com/");
+    }
+
+    [Fact]
     public async Task Navigate_Rejects_Bad_Schemes_Without_Calling_The_Bridge()
     {
         var result = await new BrowserNavigateTool(_bridge.Object)

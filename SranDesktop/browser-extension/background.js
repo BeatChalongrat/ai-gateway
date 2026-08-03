@@ -106,7 +106,9 @@ async function route(method, p) {
       const tabId = await resolveTab(p.tab_id);
       await chrome.tabs.update(tabId, { url: p.url });
       const done = await waitForLoad(tabId);
-      return { url: done.url, title: done.title };
+      // tab_id in the result: the model needs the REAL id for follow-up
+      // read/click calls (it used to invent one — Chrome ids aren't 1,2,3).
+      return { tab_id: tabId, url: done.url, title: done.title };
     }
     case 'page.read':
       return contentCall(p.tab_id, { cmd: 'read', filter: p.filter || 'interactive' });
@@ -145,7 +147,17 @@ async function route(method, p) {
 }
 
 async function resolveTab(tabId) {
-  if (typeof tabId === 'number') return tabId;
+  if (typeof tabId === 'number') {
+    // Trust-but-verify: a model sometimes invents ids (1, 2, ...). A number
+    // that names no real tab falls back to the active tab instead of erroring
+    // the whole call ("No tab with id: 1").
+    try {
+      await chrome.tabs.get(tabId);
+      return tabId;
+    } catch (e) {
+      // not a real tab — fall through to the active one
+    }
+  }
   const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!active) throw new Error('No active tab.');
   return active.id;

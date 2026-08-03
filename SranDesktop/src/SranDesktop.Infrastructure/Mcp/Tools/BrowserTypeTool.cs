@@ -18,7 +18,8 @@ public sealed class BrowserTypeTool : IMcpTool
     public string Name => "browser_type";
     public string Description =>
         "Type text into an input element by its [n] ref from browser_read_page. " +
-        "clear=true replaces the existing value (default); submit=true presses Enter after typing.";
+        "clear=true replaces the existing value (default); submit=true presses Enter after typing. " +
+        BrowserToolHelpers.TabIdGuidance;
     public ToolCategory Category => ToolCategory.Browser;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 

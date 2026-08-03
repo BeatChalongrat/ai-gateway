@@ -17,7 +17,8 @@ public sealed class BrowserFindTool : IMcpTool
     public string Name => "browser_find";
     public string Description =>
         "Find elements in a Chrome tab matching a text description or CSS selector. " +
-        "Returns matching refs usable with browser_click / browser_type.";
+        "Returns matching refs usable with browser_click / browser_type. " +
+        BrowserToolHelpers.TabIdGuidance;
     public ToolCategory Category => ToolCategory.Browser;
     public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
 

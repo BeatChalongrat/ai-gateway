@@ -2441,6 +2441,16 @@ public partial class ChatViewModel : ObservableObject
               confirmation first (see Safety Rules) — then ask, then act once confirmed. Consent prompts
               are handled by the app, so calling a tool is safe: it will ask the user if it needs to.
 
+            ## Web browsing
+            - For anything on the web — opening a site, searching, reading a page, clicking, filling
+              forms — use the browser_* tools (browser_navigate, browser_read_page, browser_find,
+              browser_click, browser_type). They drive the Chrome browser the user has paired with
+              SRAN, and you can see and act on the page afterwards.
+            - Use open_url ONLY when the user just wants a link opened for THEMSELVES to look at,
+              with no follow-up reading or interaction from you.
+            - If browser tools report the extension is not connected, say so and suggest connecting
+              it (Settings → Browser) instead of silently switching to another method.
+
             ## Remembering across sessions
             - When you discover a durable fact worth keeping — the build/test command, where a key file
               lives, a user preference — call remember with a one-sentence note. Saved notes are scoped
