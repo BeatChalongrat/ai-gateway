@@ -277,6 +277,18 @@ input {
   padding-left: 1.4rem;
   margin: 0.5rem 0 1rem;
 }
+/* Tailwind's preflight resets every ul/ol to `list-style: none`, so
+   markdown lists rendered with no marker at all — the indent was the
+   only cue that they were lists. Restore the markers explicitly, with
+   a depth ladder so nested levels stay distinguishable. The task-list
+   rule below re-hides them for checkbox lists (higher specificity). */
+.prose-chat ul { list-style: disc; }
+.prose-chat ul ul { list-style: circle; }
+.prose-chat ul ul ul { list-style: square; }
+.prose-chat ol { list-style: decimal; }
+.prose-chat ol ol { list-style: lower-alpha; }
+/* Muted markers keep the eye on the text, not the bullets. */
+.prose-chat li::marker { color: var(--text-tertiary); }
 .prose-chat li             { margin: 0.25rem 0; }
 .prose-chat li > p         { margin: 0.15rem 0; }
 .prose-chat li input[type="checkbox"] {
@@ -313,11 +325,16 @@ input {
 .prose-chat blockquote p { margin: 0.25rem 0; }
 .prose-chat code:not(pre code) {
   background: var(--bg-surface);
-  padding: 0.12rem 0.4rem;
-  border-radius: 4px;
+  /* Hairline keeps inline code legible where the surface tint is close
+     to the message background (notably the light theme). */
+  border: 1px solid var(--border-subtle);
+  padding: 0.1rem 0.38rem;
+  border-radius: 5px;
   font-family: var(--font-mono);
   font-size: 0.875em;
   color: var(--text-primary);
+  /* A long identifier must break rather than widen the column. */
+  overflow-wrap: break-word;
 }
 /* Direct-child only — the elevated .code-block panel renders its
    own pre wrapped two levels deep, so the descendant selector used
@@ -339,26 +356,110 @@ input {
   padding: 0;
   font-family: var(--font-mono);
 }
-.prose-chat table {
-  border-collapse: collapse;
-  margin: 0.8rem 0;
-  font-size: 0.9rem;
-  width: 100%;
-  display: block;
+/* ─── Tables ────────────────────────────────────────────────
+   The frame lives on the WRAPPER (.md-table-wrap, emitted by the
+   `table` override in Markdown.tsx), not on the table. That split is
+   what makes all three of these possible at once:
+     • real column sizing — the table stays `display: table` instead of
+       the old `display:block` scroll hack, which turned it into a
+       block box and stopped columns tracking their content;
+     • rounded corners — `border-collapse: collapse` cannot be rounded,
+       so cells use `separate` + zero spacing and the wrapper clips;
+     • horizontal scroll that does NOT widen the chat column, so a wide
+       table scrolls inside the message on mobile instead of pushing
+       the page sideways.
+   Colors are theme tokens only, so light/dark follow automatically. */
+.prose-chat .md-table-wrap {
+  margin: 1rem 0;
+  max-width: 100%;
   overflow-x: auto;
-}
-.prose-chat th, .prose-chat td {
   border: 1px solid var(--border-default);
-  padding: 0.5rem 0.75rem;
-  text-align: left;
+  border-radius: 10px;
+  /* Own background so the rounded corners clip cleanly over whatever
+     the message sits on. */
+  background: var(--bg-primary);
+  -webkit-overflow-scrolling: touch;
 }
-.prose-chat th {
+/* Only the horizontal scroll is meaningful; a focus ring on the
+   region would otherwise fire on every table when tabbing through a
+   long answer. Keep it visible for keyboard users, quiet for mouse. */
+.prose-chat .md-table-wrap:focus-visible {
+  outline: 2px solid var(--border-hover);
+  outline-offset: -2px;
+}
+.prose-chat table {
+  display: table;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  /* Wrap long prose inside cells, but never squash a column below the
+     widest unbreakable word — past that the wrapper scrolls instead. */
+  min-width: min-content;
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+.prose-chat th,
+.prose-chat td {
+  padding: 0.6rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* Column rules, minus the trailing edge (the wrapper border is there). */
+.prose-chat th:not(:last-child),
+.prose-chat td:not(:last-child) {
+  border-right: 1px solid var(--border-subtle);
+}
+.prose-chat thead th {
   background: var(--bg-surface);
   color: var(--text-primary);
   font-weight: 600;
+  /* Stronger rule under the header so it reads as a header even when
+     the first body row is a zebra row. */
+  border-bottom: 1px solid var(--border-default);
 }
-.prose-chat tr:nth-child(even) td {
+/* Zebra: a softened form of the surface token so the header (full
+   --bg-surface) still stands out against striped rows. The plain
+   declaration is the fallback for engines without color-mix() — it is
+   exactly the previous behaviour, so degradation is a no-op. */
+.prose-chat tbody tr:nth-child(even) td {
   background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 55%, transparent);
+}
+.prose-chat tbody tr:hover td {
+  background: var(--bg-surface);
+}
+/* The wrapper draws the bottom edge. */
+.prose-chat tbody tr:last-child td {
+  border-bottom: 0;
+}
+.prose-chat td > p:only-child,
+.prose-chat th > p:only-child {
+  margin: 0;
+}
+
+/* ─── Remaining block rhythm ────────────────────────────────
+   A message must never open with a leading gap — a reply that starts
+   with a heading, list or table would otherwise inherit that block's
+   top margin and float away from the avatar. */
+.prose-chat > *:first-child { margin-top: 0; }
+.prose-chat > *:last-child  { margin-bottom: 0; }
+/* Nested lists sit tighter than top-level ones so the hierarchy reads
+   as one group instead of three stacked paragraphs. */
+.prose-chat li > ul,
+.prose-chat li > ol {
+  margin: 0.25rem 0 0.35rem;
+}
+/* Markdown images (![alt](url)) — raw <img> HTML stays inert, so this
+   only ever styles author-intended images. Bounded so a large asset
+   cannot widen the chat column. */
+.prose-chat img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  margin: 0.6rem 0;
 }
 
 /* ─── CodeBlock panel (rendered by CodeBlock.tsx) ────────────
