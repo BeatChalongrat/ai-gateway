@@ -79,12 +79,14 @@ public sealed class EditFileTool : IMcpTool
             : string.Concat(content.AsSpan(0, firstIndex), newString,
                 content.AsSpan(firstIndex + oldString.Length));
 
+        var backup = ToolHelpers.BackupBeforeOverwrite(path); // FIX-G
         await File.WriteAllTextAsync(path, updated, Encoding.UTF8, ct);
 
         var line = LineNumberAt(content, firstIndex);
+        var backupNote = backup is null ? "" : $" Previous version saved to {backup}";
         return ToolResult.Ok(replaceAll
-            ? $"Replaced {occurrences} occurrence(s) in {path}."
-            : $"Edited {path} at line {line} (1 replacement).");
+            ? $"Replaced {occurrences} occurrence(s) in {path}.{backupNote}"
+            : $"Edited {path} at line {line} (1 replacement).{backupNote}");
     }
 
     private static int CountOccurrences(string haystack, string needle)

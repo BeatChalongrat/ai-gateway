@@ -80,6 +80,13 @@ public sealed class BrowserBridgeServiceTests : IAsyncDisposable
         var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         await client.ConnectAsync(5000);
         await Send(client, new { token, hello = true });
+        if (token == Token)
+        {
+            // FIX-B: a correct hello is acked so the extension can show an
+            // honest status — drain it here so tests read requests next.
+            using var ack = await Receive(client);
+            ack.RootElement.TryGetProperty("hello_ack", out _).Should().BeTrue();
+        }
         return client;
     }
 
@@ -163,6 +170,16 @@ public sealed class BrowserBridgeServiceTests : IAsyncDisposable
 
         var act = () => _service.RequestAsync("tabs.list");
         await act.Should().ThrowAsync<BrowserNotConnectedException>();
+    }
+
+    [Fact]
+    public async Task Wrong_Token_Receives_A_Reject_Frame_Before_The_Drop()
+    {
+        await using var client = await ConnectClientAsync(token: "wrong-token");
+
+        using var reject = await Receive(client);
+        reject.RootElement.GetProperty("hello_reject").GetString().Should().Be("token_mismatch");
+        _service.IsConnected.Should().BeFalse();
     }
 
     [Fact]

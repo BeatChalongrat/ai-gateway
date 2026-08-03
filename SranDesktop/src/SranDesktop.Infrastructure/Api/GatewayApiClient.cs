@@ -78,10 +78,13 @@ public sealed class GatewayApiClient : IGatewayApiClient
                 catch (Exception ex) when (ex is HttpRequestException or IOException && !ct.IsCancellationRequested)
                 {
                     _logger.LogWarning(ex, "Gateway unreachable for agent completion");
+                    // FIX-D: the old text pointed at a "robot button" that no
+                    // longer exists. The code is what the UI localizes on; this
+                    // message is the raw fallback.
                     connectionError =
                         "{\"error\":{\"code\":\"gateway_unreachable\",\"message\":\"Could not reach the gateway. " +
-                        "Agent Mode requires the gateway - check the Gateway URL in Settings, or turn off Agent Mode " +
-                        "(the robot button) to use standard chat.\"}}";
+                        "Check your connection and the Gateway URL in Settings, then try again - " +
+                        "or contact your administrator.\"}}";
                 }
             }
 

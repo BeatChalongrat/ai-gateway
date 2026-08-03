@@ -10,33 +10,37 @@ const SETTLE_MS = 800; // network-quiet fallback after readyState complete (no w
 
 let port = null;
 let backoffMs = 1000;
+let tokenRejected = false; // this connection died on a pairing-token mismatch
 
 async function getToken() {
   const stored = await chrome.storage.local.get('token');
   return stored.token || '';
 }
 
-async function setStatus(connected) {
-  await chrome.storage.local.set({ status: { connected, at: Date.now() } });
+async function setStatus(connected, reason) {
+  await chrome.storage.local.set({ status: { connected, reason: reason || null, at: Date.now() } });
 }
 
 function connect() {
+  if (port) return; // already connected (or hello in flight)
+  tokenRejected = false;
   try {
     port = chrome.runtime.connectNative(HOST);
   } catch (e) {
     scheduleReconnect();
     return;
   }
-  port.onMessage.addListener(onRequest);
+  port.onMessage.addListener(onMessage);
   port.onDisconnect.addListener(() => {
     port = null;
-    setStatus(false);
+    // Keep the actionable "token mismatch" status the reject just wrote —
+    // a plain "not connected" would overwrite the one hint the user needs.
+    if (!tokenRejected) setStatus(false);
     scheduleReconnect();
   });
   getToken().then((token) => {
     if (port) port.postMessage({ token, hello: true });
-    setStatus(true);
-    backoffMs = 1000;
+    // Status stays as-is until the app acks the hello (no optimistic green).
   });
 }
 
@@ -45,8 +49,30 @@ function scheduleReconnect() {
   backoffMs = Math.min(backoffMs * 2, 30000);
 }
 
-async function onRequest(msg) {
-  if (!msg || typeof msg.id === 'undefined') return;
+// Belt-and-braces reconnect: the backoff setTimeout dies with the MV3 service
+// worker (~30s idle), so a Chrome left open before the desktop app starts
+// would otherwise stay grey until a manual poke. Alarms survive worker death —
+// every minute, reconnect if we aren't connected. An established native port
+// keeps the worker alive by itself, so the alarm is a no-op while healthy.
+chrome.alarms.create('sran-reconnect', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'sran-reconnect' && !port) connect();
+});
+
+async function onMessage(msg) {
+  if (!msg) return;
+  // Control frames from the app (FIX-B): honest connection status.
+  if (msg.hello_ack) {
+    backoffMs = 1000;
+    await setStatus(true);
+    return;
+  }
+  if (msg.hello_reject) {
+    tokenRejected = true;
+    await setStatus(false, 'token_mismatch');
+    return; // the app drops the connection right after this
+  }
+  if (typeof msg.id === 'undefined') return;
   const token = await getToken();
   try {
     const result = await route(msg.method, msg.params || {});
@@ -180,4 +206,5 @@ async function waitForLoad(tabId) {
 }
 
 chrome.runtime.onStartup.addListener(connect);
+chrome.runtime.onInstalled.addListener(connect); // first install + extension update/reload
 connect();

@@ -263,6 +263,8 @@ public static class AppHostBuilder
                     sp.GetRequiredService<McpToolRegistry>(),
                     sp.GetRequiredService<IMcpConnectorService>()));
                 services.AddSingleton<IPermissionService, PermissionService>();
+                // FIX-F: out-of-scope reads (outside working/granted folders) ask first.
+                services.AddSingleton<ISensitiveReadGuard, SensitiveReadGuard>();
                 // Explicit factory: the ctor's optional cap parameters (used by
                 // run_subagent's nested instance) must stay at their defaults
                 // for the app-wide singleton.
@@ -274,7 +276,8 @@ public static class AppHostBuilder
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatOrchestrator>>(),
                     shellSession: sp.GetRequiredService<ShellSession>(),
                     scopeResolver: sp.GetRequiredService<IToolScopeResolver>(),
-                    settings: sp.GetRequiredService<ISettingsService>()));
+                    settings: sp.GetRequiredService<ISettingsService>(),
+                    readGuard: sp.GetRequiredService<ISensitiveReadGuard>()));
 
                 // Application services
                 services.AddSingleton<IAuthService, AuthService>();

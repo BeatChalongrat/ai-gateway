@@ -35,8 +35,10 @@ public sealed class WriteFileTool : IMcpTool
             return ToolResult.Fail("'content' is required.");
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var backup = ToolHelpers.BackupBeforeOverwrite(path); // FIX-G
         await File.WriteAllTextAsync(path, content, Encoding.UTF8, ct);
 
-        return ToolResult.Ok($"Written {Encoding.UTF8.GetByteCount(content)} bytes to {path}");
+        return ToolResult.Ok($"Written {Encoding.UTF8.GetByteCount(content)} bytes to {path}"
+                             + (backup is null ? "" : $". Previous version saved to {backup}"));
     }
 }

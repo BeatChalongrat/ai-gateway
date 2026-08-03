@@ -44,6 +44,15 @@ public sealed class PermissionService : IPermissionService
     public void RecordSessionDecision(string toolName, string scope, PermissionLevel level) =>
         _sessionCache[CacheKey(toolName, scope)] = level;
 
+    public async Task<bool> HasStoredDecisionAsync(
+        string toolName, string scope, CancellationToken ct = default)
+    {
+        var persisted = await _store.GetToolPermissionAsync(toolName, scope, ct);
+        if (persisted is "allow_always" or "deny_always")
+            return true;
+        return _sessionCache.ContainsKey(CacheKey(toolName, scope));
+    }
+
     public Task PersistDecisionAsync(
         string toolName, string scope, string permission, CancellationToken ct = default) =>
         _store.SetToolPermissionAsync(toolName, scope, permission, ct);

@@ -71,6 +71,9 @@ public static class Dict
         ["perm.auto.desc"] = "Runs on its own and pauses to ask if anything looks unsafe.",
         ["perm.skip.name"] = "Skip all approvals",
         ["perm.skip.desc"] = "Never pauses, even for unsafe actions.",
+        // FIX-F — confirm before entering skip mode
+        ["perm.skipConfirmTitle"] = "Skip all approvals?",
+        ["perm.skipConfirmBody"] = "In this mode the AI acts without ever asking first — including risky actions like running commands, changing files, and controlling your screen. You can switch back at any time. Continue?",
 
         // Conversation / folder context menus
         ["conv.rename"] = "Rename",
@@ -207,6 +210,12 @@ public static class Dict
         // Errors / status
         ["error.serverUnreachable"] = "Can't reach the chat server. Check your connection and the server URL in Settings, then try again.",
         ["error.connectionLost"] = "Connection lost while streaming. Please try again.",
+        // FIX-D — actionable localized turn errors (code-mapped)
+        ["error.insufficientCredits"] = "You have no credits left. Ask your administrator to top up your account, then try again.",
+        ["error.gatewayUnreachable"] = "Can't reach the server. Check your connection and the Gateway URL in Settings, then try again — or contact your administrator.",
+        ["error.authFailed"] = "Your sign-in could not be verified. Sign out and sign in again; if it keeps happening, contact your administrator.",
+        ["error.streamStalled"] = "The connection stalled while the AI was answering. Please try again.",
+        ["error.rateLimited"] = "Too many requests right now. Wait a moment and try again.",
         ["status.stopped"] = "Stopped",
         // FIX 9 — a completed turn that could not land on the server yet.
         ["chat.turnNotSynced"] = "Not synced to the server yet — will retry",
@@ -233,6 +242,14 @@ public static class Dict
         ["confirm.deleteChat"] = "Delete \"{0}\"? This cannot be undone.",
         ["confirm.deleteChatTitle"] = "Delete chat",
         ["cleanup.noneFound"] = "No empty conversations to clean up.",
+        // FIX-C — consent dialog chrome (was hardcoded English)
+        ["consent.title"] = "Permission required",
+        ["consent.heading"] = "AI wants to use a tool",
+        ["consent.deny"] = "Deny",
+        ["consent.allowOnce"] = "Allow Once",
+        ["consent.allowAlways"] = "Always Allow",
+        ["consent.alwaysAllowNote"] = "Always Allow remembers this tool for the same target permanently.",
+        ["consent.truncated"] = "(truncated)",
         // Phase C PART 3 — capability-specific consent danger banner
         ["consent.dangerPrefix"] = "This action",
         ["consent.dangerReview"] = "Review the arguments carefully before allowing.",
@@ -543,6 +560,7 @@ public static class Dict
         ["login.errorInvalid"] = "Invalid email or password.",
         ["login.errorUnreachable"] = "Cannot reach the server. Check that the gateway is running and the server URL is correct.",
         ["login.errorTimeout"] = "The server took too long to respond. Please try again.",
+        ["login.serverSettings"] = "Server settings",
 
         // R9 — Writing style
         ["style.learn"] = "Learn my style",
@@ -620,6 +638,9 @@ public static class Dict
         ["perm.auto.desc"] = "ทำงานเอง จะหยุดถามเฉพาะการกระทำที่ดูไม่ปลอดภัย",
         ["perm.skip.name"] = "ข้ามการอนุมัติทั้งหมด",
         ["perm.skip.desc"] = "ไม่หยุดถามเลย แม้การกระทำที่ไม่ปลอดภัย",
+        // FIX-F — confirm before entering skip mode
+        ["perm.skipConfirmTitle"] = "ข้ามการอนุมัติทั้งหมด?",
+        ["perm.skipConfirmBody"] = "ในโหมดนี้ AI จะทำงานโดยไม่ถามคุณก่อนเลย รวมถึงการกระทำที่เสี่ยง เช่น รันคำสั่ง แก้ไขไฟล์ และควบคุมหน้าจอของคุณ คุณเปลี่ยนกลับได้ทุกเมื่อ ยืนยันหรือไม่?",
 
         // Conversation / folder context menus
         ["conv.rename"] = "เปลี่ยนชื่อ",
@@ -756,6 +777,12 @@ public static class Dict
         // Errors / status
         ["error.serverUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์แชทไม่ได้ กรุณาตรวจสอบการเชื่อมต่อและ URL เซิร์ฟเวอร์ในการตั้งค่า แล้วลองใหม่",
         ["error.connectionLost"] = "การเชื่อมต่อหลุดระหว่างสตรีม กรุณาลองใหม่",
+        // FIX-D — actionable localized turn errors (code-mapped)
+        ["error.insufficientCredits"] = "เครดิตของคุณหมด กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต แล้วลองใหม่อีกครั้ง",
+        ["error.gatewayUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบการเชื่อมต่อและ Gateway URL ในการตั้งค่า แล้วลองใหม่ หรือติดต่อผู้ดูแลระบบ",
+        ["error.authFailed"] = "ยืนยันสิทธิ์การเข้าสู่ระบบไม่สำเร็จ กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่ หากยังไม่หายให้ติดต่อผู้ดูแลระบบ",
+        ["error.streamStalled"] = "การเชื่อมต่อค้างระหว่างที่ AI กำลังตอบ กรุณาลองใหม่อีกครั้ง",
+        ["error.rateLimited"] = "มีการใช้งานถี่เกินไปในขณะนี้ กรุณารอสักครู่แล้วลองใหม่",
         ["status.stopped"] = "หยุดแล้ว",
         // FIX 9 — a completed turn that could not land on the server yet.
         ["chat.turnNotSynced"] = "ยังไม่ได้ซิงก์ขึ้นเซิร์ฟเวอร์ — จะลองใหม่อีกครั้ง",
@@ -782,6 +809,14 @@ public static class Dict
         ["confirm.deleteChat"] = "ลบ \"{0}\" หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้",
         ["confirm.deleteChatTitle"] = "ลบแชท",
         ["cleanup.noneFound"] = "ไม่มีบทสนทนาว่างเปล่าให้ล้าง",
+        // FIX-C — consent dialog chrome (was hardcoded English)
+        ["consent.title"] = "ต้องขออนุญาต",
+        ["consent.heading"] = "AI ต้องการใช้เครื่องมือ",
+        ["consent.deny"] = "ไม่อนุญาต",
+        ["consent.allowOnce"] = "อนุญาตครั้งนี้",
+        ["consent.allowAlways"] = "อนุญาตตลอดไป",
+        ["consent.alwaysAllowNote"] = "\"อนุญาตตลอดไป\" จะจำการอนุญาตเครื่องมือนี้กับเป้าหมายเดิมไว้ถาวร",
+        ["consent.truncated"] = "(ตัดย่อ)",
         // Phase C PART 3 — capability-specific consent danger banner
         ["consent.dangerPrefix"] = "การกระทำนี้",
         ["consent.dangerReview"] = "โปรดตรวจสอบพารามิเตอร์อย่างรอบคอบก่อนอนุญาต",
@@ -1092,6 +1127,7 @@ public static class Dict
         ["login.errorInvalid"] = "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
         ["login.errorUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่า gateway ทำงานอยู่และ URL เซิร์ฟเวอร์ถูกต้อง",
         ["login.errorTimeout"] = "เซิร์ฟเวอร์ตอบสนองช้าเกินไป กรุณาลองใหม่อีกครั้ง",
+        ["login.serverSettings"] = "ตั้งค่าเซิร์ฟเวอร์",
 
         // R9 — Writing style
         ["style.learn"] = "เรียนรู้สไตล์เขียน",

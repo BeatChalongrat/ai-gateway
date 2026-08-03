@@ -42,7 +42,11 @@ public sealed class ComputerScreenshotTool : IMcpTool
         "(games, custom-drawn apps, Chrome without accessibility) or to visually verify " +
         "an action's outcome.";
     public ToolCategory Category => ToolCategory.Screen;
-    public PermissionLevel DefaultPermission => PermissionLevel.AllowAlways; // read-only
+    // FIX-F: Ask, not AllowAlways — a full-desktop capture can carry whatever
+    // is open (email, chat, payroll) up to the gateway without the user ever
+    // seeing it happen. First approval + "Always Allow" restores the smooth
+    // screenshot→act loop for users who opt in.
+    public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 
     public JsonElement ParametersSchema { get; } = ToolHelpers.Schema("""
         {

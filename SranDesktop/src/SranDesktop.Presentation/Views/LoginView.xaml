@@ -267,6 +267,16 @@
                 </Hyperlink>
             </TextBlock>
 
+            <!-- Server settings escape hatch (FIX-A): reachable BEFORE login so
+                 a wrong server URL is never a dead-end. -->
+            <TextBlock HorizontalAlignment="Center" Margin="0,8,0,0">
+                <Hyperlink Command="{Binding OpenServerSettingsCommand}"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           TextDecorations="{x:Null}">
+                    <Run Text="{loc:T login.serverSettings}" FontSize="12" />
+                </Hyperlink>
+            </TextBlock>
+
         </StackPanel>
         </Border>
 

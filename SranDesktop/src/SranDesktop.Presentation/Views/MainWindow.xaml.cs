@@ -47,6 +47,11 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         Loaded += MainWindow_Loaded;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
+
+        // FIX-A escape hatch: the login overlay's "Server settings" link opens
+        // the same Settings dialog as the in-app button — works pre-login.
+        viewModel.Login.ServerSettingsRequested += (_, _) =>
+            SettingsButton_Click(this, new RoutedEventArgs());
     }
 
     // A borderless (WindowStyle=None) window maximizes to the full MONITOR by

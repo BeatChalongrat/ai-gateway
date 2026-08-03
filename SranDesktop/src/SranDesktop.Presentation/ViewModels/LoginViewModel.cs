@@ -61,6 +61,16 @@ public partial class LoginViewModel : ObservableObject
 
     public event EventHandler? LoginSucceeded;
 
+    /// <summary>Escape hatch (FIX-A): the login overlay covers the whole window
+    /// while unauthenticated, so a wrong server URL used to be a dead-end (the
+    /// only way out was hand-deleting settings.json). MainWindow subscribes and
+    /// opens the Settings dialog — no authentication required.</summary>
+    public event EventHandler? ServerSettingsRequested;
+
+    [RelayCommand]
+    private void OpenServerSettings() =>
+        ServerSettingsRequested?.Invoke(this, EventArgs.Empty);
+
     public LoginViewModel(IAuthService authService, ISettingsService settings)
     {
         _authService = authService;

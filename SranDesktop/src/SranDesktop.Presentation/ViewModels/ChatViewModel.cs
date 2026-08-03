@@ -28,6 +28,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly ILogger<ChatViewModel> _logger;
     /// <summary>Consent-flow foreground restore (computer-use self-interference fix).</summary>
     private readonly IForegroundTargetTracker? _foregroundTracker;
+    private readonly IDialogService? _dialogs;
     private readonly IReadOnlyList<ILocalPlanExecutor> _localPlanExecutors;
 
     /// <summary>Phase 16 A: the run_subagent tool, when it exposes live nested
@@ -248,12 +249,31 @@ public partial class ChatViewModel : ObservableObject
         });
 
     /// <summary>Persist the chosen approval mode ("manual" | "auto" | "skip").
-    /// ChatOrchestrator reads it live from settings on every tool call.</summary>
+    /// ChatOrchestrator reads it live from settings on every tool call.
+    /// FIX-F: entering Skip (never pause, even for unsafe actions) requires an
+    /// explicit localized confirmation — it disables every guardrail at once
+    /// and must never happen from an annoyed reflex click.</summary>
     [RelayCommand]
-    private void SelectApprovalMode(string? mode)
+    private async Task SelectApprovalModeAsync(string? mode)
     {
         if (string.IsNullOrWhiteSpace(mode))
             return;
+        var parsed = Domain.Enums.ApprovalModeParser.Parse(mode);
+        if (parsed == Domain.Enums.ApprovalMode.Skip
+            && CurrentApprovalMode != Domain.Enums.ApprovalMode.Skip
+            && _dialogs is not null)
+        {
+            // destructive:false → the confirm button reads "Confirm", not "Delete".
+            var confirmed = await _dialogs.ConfirmAsync(
+                Localization.LocaleService.Instance.T("perm.skipConfirmTitle"),
+                Localization.LocaleService.Instance.T("perm.skipConfirmBody"),
+                destructive: false);
+            if (!confirmed)
+            {
+                IsPermissionPopupOpen = false;
+                return; // keep the previous mode
+            }
+        }
         var updated = _settings.Current.Clone();
         updated.ApprovalMode = Domain.Enums.ApprovalModeParser.ToSettingsValue(
             Domain.Enums.ApprovalModeParser.Parse(mode));
@@ -573,7 +593,8 @@ public partial class ChatViewModel : ObservableObject
         ILogger<ChatViewModel> logger,
         IEnumerable<ILocalPlanExecutor>? localPlanExecutors = null,
         IMcpToolHost? toolHost = null,
-        IForegroundTargetTracker? foregroundTracker = null)
+        IForegroundTargetTracker? foregroundTracker = null,
+        IDialogService? dialogs = null)
     {
         _api = api;
         _gateway = gateway;
@@ -587,6 +608,7 @@ public partial class ChatViewModel : ObservableObject
         _agentSync = agentSync;
         _logger = logger;
         _foregroundTracker = foregroundTracker;
+        _dialogs = dialogs;
         // Phase 12 E: on-device excel/doc/pptx plan executors; anything they
         // can't reproduce falls back to chat-edge.
         _localPlanExecutors = localPlanExecutors?.ToList() ?? new List<ILocalPlanExecutor>();
@@ -1591,9 +1613,7 @@ public partial class ChatViewModel : ObservableObject
 
                     case AgentErrorEvent error:
                         _logger.LogWarning("Turn error: {Message}", error.Message);
-                        assistantMessage.SetError(error.Code == "context_length_exceeded"
-                            ? Localization.LocaleService.Instance.T("agent.contextTooLong")
-                            : error.Message);
+                        assistantMessage.SetError(LocalizeTurnError(error.Code, error.Message));
                         break;
                 }
             }
@@ -1786,7 +1806,7 @@ public partial class ChatViewModel : ObservableObject
 
                     case StreamErrorEvent error:
                         _logger.LogWarning("chat-edge turn error: {Message}", error.Message);
-                        assistantMessage.SetError(error.Message);
+                        assistantMessage.SetError(LocalizeTurnError(error.Code, error.Message));
                         break;
                 }
             }
@@ -2236,6 +2256,25 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogDebug(ex, "Pending memory count unavailable");
         }
+    }
+
+    /// <summary>FIX-D: map well-known turn-error codes to actionable localized
+    /// text ("what happened + what to do"). Unknown codes fall back to the raw
+    /// server message — better an English truth than a wrong translation.</summary>
+    internal static string LocalizeTurnError(string? code, string message)
+    {
+        var key = code switch
+        {
+            "context_length_exceeded" => "agent.contextTooLong",
+            "insufficient_credits" or "quota_exceeded" => "error.insufficientCredits",
+            "gateway_unreachable" or "no_agent_key" => "error.gatewayUnreachable",
+            "agent_key_reprovision_failed" or "authentication_error"
+                or "invalid_api_key" or "invalid_token" => "error.authFailed",
+            "stream_stalled" => "error.streamStalled",
+            "rate_limit_exceeded" or "rate_limited" => "error.rateLimited",
+            _ => null
+        };
+        return key is null ? message : Localization.LocaleService.Instance.T(key);
     }
 
     /// <summary>Router fallback notice for either turn path (Phase 5 Task 2) —

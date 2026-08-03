@@ -49,6 +49,7 @@ public sealed class ChatOrchestrator : IChatOrchestrator
     private readonly ShellSession? _shellSession;
     private readonly IToolScopeResolver? _scopeResolver;
     private readonly ISettingsService? _settings;
+    private readonly ISensitiveReadGuard? _readGuard;
 
     public event Func<ToolConsentRequest, Task<ToolConsentResponse>>? ConsentRequested;
 
@@ -65,7 +66,8 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         TimeSpan? maxDuration = null,
         ShellSession? shellSession = null,
         IToolScopeResolver? scopeResolver = null,
-        ISettingsService? settings = null)
+        ISettingsService? settings = null,
+        ISensitiveReadGuard? readGuard = null)
     {
         if (maxIterations < 1)
             throw new ArgumentOutOfRangeException(nameof(maxIterations), "At least one iteration is required.");
@@ -80,6 +82,7 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         _shellSession = shellSession;
         _scopeResolver = scopeResolver;
         _settings = settings;
+        _readGuard = readGuard;
     }
 
     /// <summary>
@@ -320,6 +323,22 @@ public sealed class ChatOrchestrator : IChatOrchestrator
         var scope = _scopeResolver?.Resolve(tool, argumentsJson, conversationId)
                     ?? ExtractScope(tool, argumentsJson);
         var decision = ApplyApprovalMode(await _permissions.CheckAsync(tool, scope, ct), tool);
+
+        // FIX-F: a silent read that leaves the user's chosen folders (working
+        // folder + grants) must ask first — read tools are otherwise
+        // consent-free, which let the agent read ~/.ssh without a prompt.
+        // An explicit user decision (Always Allow / session allow) wins over
+        // the gate; Skip mode and handler-less runs (run_subagent fan-out,
+        // which is read-only by construction) keep their existing behavior.
+        if (decision == PermissionDecision.Auto
+            && _readGuard is not null
+            && ConsentRequested is not null
+            && ApprovalModeParser.Parse(_settings?.Current.ApprovalMode ?? "auto") != ApprovalMode.Skip
+            && _readGuard.RequiresConsent(tool, argumentsJson)
+            && !await _permissions.HasStoredDecisionAsync(tool.Name, scope, ct))
+        {
+            decision = PermissionDecision.NeedsConsent;
+        }
 
         if (decision == PermissionDecision.NeedsConsent)
         {
