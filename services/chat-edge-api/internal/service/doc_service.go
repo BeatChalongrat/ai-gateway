@@ -25,9 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,13 +85,14 @@ func IsDocContentType(ct string) bool {
 // ---------------------------------------------------------------------------
 
 var (
-	ErrDocInspectorFailed = errors.New("doc: inspector failed")
-	ErrDocGeneratorFailed = errors.New("doc: generator failed")
-	ErrDocValidatorFailed = errors.New("doc: validator failed")
-	ErrDocSourceNotFound  = errors.New("doc: source file not found")
-	ErrDocInvalidPlan     = errors.New("doc: invalid plan")
-	ErrDocUnsupported     = errors.New("doc: unsupported file type")
-	ErrDocInvalidFormat   = errors.New("doc: format must be 'docx', 'pdf', or 'pptx'")
+	ErrDocInspectorFailed    = errors.New("doc: inspector failed")
+	ErrDocGeneratorFailed    = errors.New("doc: generator failed")
+	ErrDocValidatorFailed    = errors.New("doc: validator failed")
+	ErrDocSourceNotFound     = errors.New("doc: source file not found")
+	ErrDocInvalidPlan        = errors.New("doc: invalid plan")
+	ErrDocUnsupported        = errors.New("doc: unsupported file type")
+	ErrDocInvalidFormat      = errors.New("doc: format must be 'docx', 'pdf', or 'pptx'")
+	ErrDocSandboxUnavailable = errors.New("doc: sandbox unavailable")
 )
 
 // ---------------------------------------------------------------------------
@@ -152,7 +151,7 @@ type DocService struct {
 
 	// sandbox, when non-nil, routes the docx/pdf/pptx generators (which
 	// apply the model-authored plan) through the Phase 13 hardened
-	// sandbox. nil → legacy in-process path. See ExcelService.SetSandbox.
+	// sandbox. A nil sandbox fails closed.
 	sandbox *sandbox.Runner
 }
 
@@ -206,25 +205,33 @@ func (s *DocService) scriptPath(name string) (string, error) {
 	return candidate, nil
 }
 
-func (s *DocService) runScript(
-	parent context.Context, script string, timeout time.Duration, args ...string,
+func (s *DocService) runReadOnlyScript(
+	ctx context.Context, script, path string, timeout time.Duration,
 ) ([]byte, error) {
-	abs, err := s.scriptPath(script)
-	if err != nil {
+	if s.sandbox == nil {
+		return nil, ErrDocSandboxUnavailable
+	}
+	inputName := filepath.Base(path)
+	res, err := s.sandbox.Execute(ctx, sandbox.Spec{
+		Mode:   sandbox.ModeScript,
+		Script: filepath.Base(script),
+		Args:   []string{inputName},
+		Inputs: []sandbox.InputFile{{Name: inputName, LocalPath: path}},
+		Limits: sandbox.Limits{Wall: timeout},
+	})
+	if res != nil {
+		defer res.Cleanup()
+	}
+	if err != nil || res == nil {
+		if err == nil {
+			err = ErrDocSandboxUnavailable
+		}
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, s.pythonBin, append([]string{abs}, args...)...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		slog.Warn("doc script failed",
-			"script", script, "err", err, "stderr", stderr.String())
-		return nil, err
+	if res.Exit != 0 {
+		return nil, fmt.Errorf("sandboxed document script exited with code %d", res.Exit)
 	}
-	return out, nil
+	return res.Stdout, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +263,7 @@ func (s *DocService) InspectDocument(
 	}
 	defer cleanup()
 
-	out, err := s.runScript(ctx, script, docInspectorTimeout, path)
+	out, err := s.runReadOnlyScript(ctx, script, path, docInspectorTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrDocInspectorFailed, err)
 	}
@@ -486,10 +493,9 @@ func (s *DocService) ExecutePlan(
 	return row, validation, &genResult, nil
 }
 
-// runGenerator runs a docx/pdf/pptx generator. When a sandbox is wired it
-// runs inside the Phase 13 hardened container with the plan (+ optional
-// source) mounted read-only and the output collected from the per-run
-// scratch; otherwise it falls back to the legacy in-process python exec.
+// runGenerator runs a docx/pdf/pptx generator only inside the hardened
+// container with the plan (+ optional source) mounted read-only and the
+// output collected from the per-run scratch.
 // Returns the generator's stdout (the DocGenerationResult JSON) and leaves
 // the generated file at outPath — the surrounding validate/upload/
 // versioning flow is UNCHANGED.
@@ -500,11 +506,7 @@ func (s *DocService) runGenerator(
 	ctx context.Context, scriptName string, planBytes []byte, planPath, srcPath, outPath, format string,
 ) ([]byte, error) {
 	if s.sandbox == nil {
-		args := []string{planPath, outPath}
-		if srcPath != "" {
-			args = append(args, srcPath)
-		}
-		return s.runScript(ctx, scriptName, docGeneratorTimeout, args...)
+		return nil, ErrDocSandboxUnavailable
 	}
 	outName := "output." + format
 	inputs := []sandbox.InputFile{{Name: "plan.json", Bytes: planBytes}}
@@ -560,7 +562,7 @@ func (s *DocService) ValidateDocument(
 }
 
 func (s *DocService) validatePath(ctx context.Context, path string) (*DocValidationResult, error) {
-	out, err := s.runScript(ctx, docValidatorScript, docValidatorTimeout, path)
+	out, err := s.runReadOnlyScript(ctx, docValidatorScript, path, docValidatorTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrDocValidatorFailed, err)
 	}

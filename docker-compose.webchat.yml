@@ -67,11 +67,76 @@ services:
       # generate_image tool calls (gpt-image-1 is OpenAI's current image model).
       - IMAGE_GEN_MODEL=${IMAGE_GEN_MODEL:-gpt-image-1}
       - CHAT_EDGE_IMAGE_TIMEOUT_SECONDS=${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}
+      # ── Code-interpreter sandbox — ON BY DEFAULT on this stack ──────────
+      # Every python path chat-edge shells out to (text extraction from
+      # PDF/DOCX/XLSX, the Excel/Doc/Pptx plan executors, the inspectors and
+      # validators, version compare, vision image resize, run_python) is
+      # fail-closed: with no sandbox the services return Err*SandboxUnavailable
+      # rather than running model-influenced python inside this
+      # secret-bearing process. Leaving SANDBOX_ENABLED off therefore does
+      # not "degrade gracefully" — it turns document reading and every
+      # Office plan card into an error. So the stack ships it ON.
+      #
+      # Values below are IDENTICAL to docker-compose.sandbox.yml (which stays
+      # for the base/desktop stack + `make sandbox-up`); this file just makes
+      # them the default for the webchat stack instead of an opt-in overlay.
+      #
+      # Opt out with SANDBOX_ENABLED=0 in the environment — but read the
+      # paragraph above first; the document features go with it.
+      #
+      # PREREQUISITE: the per-run image must exist on the daemon, else
+      # chat-edge refuses to start (fail-loud, cmd/server/main.go). Use
+      # `make webchat-up`, which builds it before bringing the stack up:
+      #   docker build -f services/chat-edge-api/sandbox/Dockerfile.sandbox \
+      #     -t ai-gateway-sandbox:latest services/chat-edge-api
+      - SANDBOX_ENABLED=${SANDBOX_ENABLED:-1}
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-ai-gateway-sandbox:latest}
+      # Path INSIDE the chat-edge container where the docker CLI reads the
+      # seccomp profile (the CLI reads it and ships JSON to the daemon).
+      - SANDBOX_SECCOMP_PATH=/sandbox/seccomp.json
+      # ── HOST-vs-CONTAINER PATH — READ THIS (subtle, easy to invert) ──────
+      # chat-edge is ITSELF a container, but the per-run sandbox is launched
+      # by the HOST docker daemon. So there are TWO distinct paths:
+      #   SANDBOX_WORKDIR      = the IN-CONTAINER staging root (the bind mount
+      #                          target below) where chat-edge writes per-run
+      #                          in/out dirs.
+      #   SANDBOX_HOST_WORKDIR = the SAME dir AS THE DAEMON SEES IT — the HOST
+      #                          side of that bind, used to build the
+      #                          `docker run -v <host>:/job/out` source.
+      # Setting HOST_WORKDIR to the in-container path makes the daemon -v a
+      # path that exists only inside chat-edge → root-owned empty dir on the
+      # host → uid-65534 can't write __meta.json → every run 503s.
+      - SANDBOX_WORKDIR=/sandbox-runs
+      - SANDBOX_HOST_WORKDIR=${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}
     # Persist uploaded + AI-generated files across container restarts.
     # FILE_STORAGE_ROOT defaults to ./data/uploads → /app/data/uploads
     # (WORKDIR /app); generated images land under conversation-files/.
     volumes:
       - chat_edge_uploads:/app/data/uploads
+      # ─────────────────────────────────────────────────────────────────────
+      # DOCKER-SOCKET PRIVILEGE — READ THIS.
+      # Mounting /var/run/docker.sock gives chat-edge the ability to control
+      # the Docker daemon = effectively host root. That is a real privilege
+      # increase. It is acceptable ONLY because the docker `run` argv is built
+      # entirely by trusted Go (internal/sandbox) from server constants — NO
+      # model input ever reaches it; the model only supplies a plan/code FILE
+      # that runs INSIDE the no-privilege sandbox (--network none, seccomp
+      # default-deny, --cap-drop ALL, uid 65534, read-only rootfs).
+      # For a hardened prod posture, replace this socket mount with a minimal
+      # BROKER service that owns the socket and exposes only execute(job);
+      # then a chat-edge RCE still cannot issue arbitrary docker commands.
+      # This is the pragmatic single-host form.
+      # ─────────────────────────────────────────────────────────────────────
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared staging dir. MUST be a bind to a real, ABSOLUTE host path so
+      # the per-run in/out dirs chat-edge writes are the SAME inodes the
+      # daemon bind-mounts into the sandbox container. A named volume would
+      # NOT work (the daemon can't -v a path that exists only inside another
+      # container's volume); a RELATIVE path would not resolve for
+      # `docker run -v`. ${PWD} makes the default absolute.
+      - ${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}:/sandbox-runs
+      # Seccomp profile available to the CLI inside chat-edge.
+      - ./services/chat-edge-api/sandbox/seccomp.json:/sandbox/seccomp.json:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -168,15 +233,25 @@ services:
   # Web Chat front-end — Next.js standalone build. The browser talks
   # to chat-edge-api on the host (port 4000) so CORS + cookies work
   # the same dev vs prod; build-time env var bakes in the API base.
+  #
+  # NEXT_PUBLIC_* is INLINED BY THE BUNDLER AT BUILD TIME. Setting it only
+  # under `environment:` had no effect on the browser bundle — the build ran
+  # without it and baked in lib/api.ts's localhost fallback, so any
+  # non-localhost deploy silently talked to the wrong host. It is now passed
+  # as a build arg (authoritative) AND kept as runtime env (server-side
+  # rendering + parity). Changing WEB_CHAT_API_URL requires a REBUILD of this
+  # image, not just a restart.
   web-chat:
     build:
       context: ./apps/web-chat
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${WEB_CHAT_API_URL:-http://localhost:4000/api/v1}
     container_name: ai-gateway-web-chat
     ports:
       - "3002:3002"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1
+      - NEXT_PUBLIC_API_URL=${WEB_CHAT_API_URL:-http://localhost:4000/api/v1}
       - PORT=3002
     depends_on:
       - chat-edge-api

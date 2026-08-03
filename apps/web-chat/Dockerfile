@@ -7,6 +7,14 @@ COPY package.json package-lock.json* ./
 RUN npm ci || npm install
 
 COPY . .
+
+# NEXT_PUBLIC_* is inlined into the browser bundle by the bundler AT BUILD
+# TIME — a value supplied only as a container `environment:` entry never
+# reaches client code. It must be present HERE, before `npm run build`, or
+# lib/api.ts falls back to its hardcoded http://localhost:4000/api/v1 and
+# every non-localhost deploy talks to the wrong host.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 # --- runner --------------------------------------------------

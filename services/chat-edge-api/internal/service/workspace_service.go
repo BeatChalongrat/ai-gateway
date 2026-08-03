@@ -25,9 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -36,6 +34,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
 
@@ -49,12 +48,13 @@ const (
 // ---------------------------------------------------------------------------
 
 var (
-	ErrWorkspaceTargetNotFound  = errors.New("workspace: target version not found")
-	ErrWorkspaceTargetMismatch  = errors.New("workspace: target version does not belong to this lineage")
-	ErrWorkspaceCompareTypes    = errors.New("workspace: cannot compare files of different types")
-	ErrWorkspaceCompareFailed   = errors.New("workspace: compare script failed")
-	ErrWorkspaceRollbackFailed  = errors.New("workspace: rollback failed")
-	ErrWorkspaceCompareNotGen   = errors.New("workspace: only generated files can be compared")
+	ErrWorkspaceTargetNotFound     = errors.New("workspace: target version not found")
+	ErrWorkspaceTargetMismatch     = errors.New("workspace: target version does not belong to this lineage")
+	ErrWorkspaceCompareTypes       = errors.New("workspace: cannot compare files of different types")
+	ErrWorkspaceCompareFailed      = errors.New("workspace: compare script failed")
+	ErrWorkspaceSandboxUnavailable = errors.New("workspace: sandbox unavailable")
+	ErrWorkspaceRollbackFailed     = errors.New("workspace: rollback failed")
+	ErrWorkspaceCompareNotGen      = errors.New("workspace: only generated files can be compared")
 )
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,11 @@ type WorkspaceService struct {
 
 	pythonBin  string
 	scriptsDir string
+	sandbox    *sandbox.Runner
+}
+
+func (s *WorkspaceService) SetSandbox(r *sandbox.Runner) {
+	s.sandbox = r
 }
 
 // NewWorkspaceService wires the repos + Python runtime. The
@@ -390,11 +395,6 @@ func (s *WorkspaceService) Compare(ctx context.Context, in CompareInput) (*Compa
 		return nil, fmt.Errorf("%w: %s vs %s", ErrWorkspaceCompareTypes, v1.ContentType, v2.ContentType)
 	}
 
-	abs, err := s.scriptPath(compareScript)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrWorkspaceCompareFailed, err)
-	}
-
 	// Two storage local copies, each with its own cleanup.
 	p1, cleanup1, err := s.storage.OpenLocalCopy(ctx, v1.StoragePath)
 	if err != nil {
@@ -407,18 +407,34 @@ func (s *WorkspaceService) Compare(ctx context.Context, in CompareInput) (*Compa
 	}
 	defer cleanup2()
 
-	cctx, cancel := context.WithTimeout(ctx, compareTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(cctx, s.pythonBin, abs, p1, p2)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		slog.Warn("compare script failed",
-			"v1", v1.ID.String(), "v2", v2.ID.String(),
-			"err", err, "stderr", stderr.String())
+	if s.sandbox == nil {
+		return nil, ErrWorkspaceSandboxUnavailable
+	}
+	name1 := "version-1" + filepath.Ext(p1)
+	name2 := "version-2" + filepath.Ext(p2)
+	res, err := s.sandbox.Execute(ctx, sandbox.Spec{
+		Mode:   sandbox.ModeScript,
+		Script: filepath.Base(compareScript),
+		Args:   []string{name1, name2},
+		Inputs: []sandbox.InputFile{
+			{Name: name1, LocalPath: p1},
+			{Name: name2, LocalPath: p2},
+		},
+		Limits: sandbox.Limits{Wall: compareTimeout},
+	})
+	if res != nil {
+		defer res.Cleanup()
+	}
+	if err != nil || res == nil {
+		if err == nil {
+			err = ErrWorkspaceSandboxUnavailable
+		}
 		return nil, fmt.Errorf("%w: %v", ErrWorkspaceCompareFailed, err)
 	}
+	if res.Exit != 0 {
+		return nil, fmt.Errorf("%w: sandbox exit %d", ErrWorkspaceCompareFailed, res.Exit)
+	}
+	out := res.Stdout
 	var probe map[string]any
 	if err := json.Unmarshal(out, &probe); err != nil {
 		return nil, fmt.Errorf("%w: decode: %v", ErrWorkspaceCompareFailed, err)

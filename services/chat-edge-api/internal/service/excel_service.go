@@ -26,9 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -63,11 +61,12 @@ func IsExcelContentType(ct string) bool {
 // ---------------------------------------------------------------------------
 
 var (
-	ErrExcelInspectorFailed = errors.New("excel: inspector failed")
-	ErrExcelExecutorFailed  = errors.New("excel: executor failed")
-	ErrExcelValidatorFailed = errors.New("excel: validator failed")
-	ErrExcelSourceNotFound  = errors.New("excel: source file not found")
-	ErrExcelInvalidPlan     = errors.New("excel: invalid plan")
+	ErrExcelInspectorFailed    = errors.New("excel: inspector failed")
+	ErrExcelExecutorFailed     = errors.New("excel: executor failed")
+	ErrExcelValidatorFailed    = errors.New("excel: validator failed")
+	ErrExcelSourceNotFound     = errors.New("excel: source file not found")
+	ErrExcelInvalidPlan        = errors.New("excel: invalid plan")
+	ErrExcelSandboxUnavailable = errors.New("excel: sandbox unavailable")
 )
 
 // ---------------------------------------------------------------------------
@@ -114,13 +113,12 @@ type ExcelService struct {
 	// sandbox, when non-nil, routes the plan-executor (model-authored
 	// plan) through the hardened Phase 13 sandbox instead of running
 	// python in-process-with-secrets. Injected via SetSandbox from
-	// main.go when SANDBOX_ENABLED. nil → legacy in-process path.
+	// main.go when SANDBOX_ENABLED. A nil sandbox fails closed.
 	sandbox *sandbox.Runner
 }
 
-// SetSandbox migrates the plan-executor into the Phase 13 hardened
-// sandbox. Nil-safe: leaving it unset keeps the legacy in-process
-// behaviour (dev without docker-in-docker wiring).
+// SetSandbox wires the Phase 13 hardened sandbox. Leaving it unset blocks
+// inspection, validation and generation.
 func (s *ExcelService) SetSandbox(r *sandbox.Runner) { s.sandbox = r }
 
 func NewExcelService(
@@ -167,25 +165,33 @@ func (s *ExcelService) scriptPath(name string) (string, error) {
 // runScript executes a Python script with the provided args, enforces
 // a timeout, and returns trimmed stdout. Stderr is captured so the
 // log entry on failure has the Python traceback.
-func (s *ExcelService) runScript(
-	parent context.Context, script string, timeout time.Duration, args ...string,
+func (s *ExcelService) runReadOnlyScript(
+	ctx context.Context, script, path string, timeout time.Duration,
 ) ([]byte, error) {
-	abs, err := s.scriptPath(script)
-	if err != nil {
+	if s.sandbox == nil {
+		return nil, ErrExcelSandboxUnavailable
+	}
+	inputName := filepath.Base(path)
+	res, err := s.sandbox.Execute(ctx, sandbox.Spec{
+		Mode:   sandbox.ModeScript,
+		Script: filepath.Base(script),
+		Args:   []string{inputName},
+		Inputs: []sandbox.InputFile{{Name: inputName, LocalPath: path}},
+		Limits: sandbox.Limits{Wall: timeout},
+	})
+	if res != nil {
+		defer res.Cleanup()
+	}
+	if err != nil || res == nil {
+		if err == nil {
+			err = ErrExcelSandboxUnavailable
+		}
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, s.pythonBin, append([]string{abs}, args...)...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		slog.Warn("excel script failed",
-			"script", script, "err", err, "stderr", stderr.String())
-		return nil, err
+	if res.Exit != 0 {
+		return nil, fmt.Errorf("sandboxed spreadsheet script exited with code %d", res.Exit)
 	}
-	return out, nil
+	return res.Stdout, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +215,7 @@ func (s *ExcelService) InspectWorkbook(
 	}
 	defer cleanup()
 
-	out, err := s.runScript(ctx, inspectorScript, inspectorTimeout, path)
+	out, err := s.runReadOnlyScript(ctx, inspectorScript, path, inspectorTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrExcelInspectorFailed, err)
 	}
@@ -389,11 +395,9 @@ func (s *ExcelService) ExecutePlan(
 	return row, validation, nil
 }
 
-// runExecutor runs the excel plan-executor. When a sandbox is wired it
-// runs inside the Phase 13 hardened container (no network, non-root,
-// seccomp, read-only rootfs, stripped env) with the plan + source mounted
-// read-only and the output collected from the per-run scratch. Otherwise
-// it falls back to the legacy in-process python exec. Either way it
+// runExecutor runs the excel plan-executor only inside the hardened
+// container (no network, non-root, seccomp, read-only rootfs, stripped
+// env) with the plan + source mounted read-only. It
 // returns the executor's stdout (the ExecutionResult JSON) and leaves the
 // generated workbook at outPath, so the surrounding ExecutePlan
 // validate/upload/versioning flow is UNCHANGED.
@@ -401,7 +405,7 @@ func (s *ExcelService) runExecutor(
 	ctx context.Context, planBytes []byte, planPath, srcPath, outPath string,
 ) ([]byte, error) {
 	if s.sandbox == nil {
-		return s.runScript(ctx, executorScript, executorTimeout, planPath, srcPath, outPath)
+		return nil, ErrExcelSandboxUnavailable
 	}
 	res, err := s.sandbox.Execute(ctx, sandbox.Spec{
 		Mode:   sandbox.ModeScript,
@@ -474,7 +478,7 @@ func (s *ExcelService) ValidateWorkbook(
 }
 
 func (s *ExcelService) validatePath(ctx context.Context, path string) (*ValidationResult, error) {
-	out, err := s.runScript(ctx, validatorScript, validatorTimeout, path)
+	out, err := s.runReadOnlyScript(ctx, validatorScript, path, validatorTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrExcelValidatorFailed, err)
 	}

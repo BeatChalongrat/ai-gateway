@@ -281,9 +281,11 @@ func main() {
 		}
 		excelSvc.SetSandbox(sbx)
 		docSvc.SetSandbox(sbx)
+		fileSvc.SetSandbox(sbx)
+		workspaceSvc.SetSandbox(sbx)
 		slog.Info("plan-exec sandbox active", "image", cfg.SandboxImage)
 	} else {
-		slog.Warn("SANDBOX_ENABLED=0 — plan-exec runs IN-PROCESS (Phase 13: enable in prod)")
+		slog.Warn("SANDBOX_ENABLED=0: document, extraction, compare, and code execution fail closed")
 	}
 
 	fileSvc.SetExcelService(excelSvc)

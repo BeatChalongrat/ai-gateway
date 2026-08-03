@@ -1,4 +1,4 @@
-.PHONY: up preflight prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
+.PHONY: up preflight prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up sandbox-image webchat-up webchat-down health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -11,8 +11,10 @@ help: ## Show this help
 	@echo "  dev           make bootstrap   first-run: gen .env + up + health-gate + migrate + seed"
 	@echo "                make up          start the dev stack (hot-reload; ports on 0.0.0.0)"
 	@echo "  prod-desktop  make prod-desktop  dev-set + chat-edge + mcp-gateway + nginx (:80/:443, --profile desktop)"
-	@echo "  webchat       docker compose -f docker-compose.webchat.yml up -d   SEPARATE stack + its OWN postgres:5433 / redis:6380 / web-chat:3002"
-	@echo "  sandbox       make sandbox-up  overlay: enable the hardened code-interpreter (docker-socket opt-in)"
+	@echo "  webchat       make webchat-up  SEPARATE stack + its OWN postgres:5433 / redis:6380 / web-chat:3002"
+	@echo "                                 code-interpreter sandbox is ON by default here (document reading,"
+	@echo "                                 Office plan cards and run_python fail closed without it)"
+	@echo "  sandbox       make sandbox-up  overlay for the BASE/desktop stack only — the webchat stack has it inline"
 
 preflight: ## Verify .env has the hard-required vars (REDIS_PASSWORD, ...) before compose up — fails loud with a fix hint
 	bash scripts/preflight.sh
@@ -146,7 +148,50 @@ prod-desktop: ## Deploy the full stack with desktop support (chat-edge + MCP + n
 chat-edge-migrate-main: ## Apply chat-edge SQL migrations to the MAIN-stack postgres (the init hook only runs on first volume init)
 	bash scripts/apply_chat_edge_migrations_main.sh
 
+# ── Web-chat stack (sandbox ON by default) ─────────────────────────
+# docker-compose.webchat.yml now carries the sandbox env + docker-socket
+# mount inline (it used to be the opt-in docker-compose.sandbox.yml overlay).
+# Reason: with the fail-closed chat-edge services, "sandbox off" is not a
+# degraded mode — text extraction from PDF/DOCX/XLSX, every Office plan card,
+# version compare, large-image vision and run_python all return errors. The
+# stack's default had to match what the product actually needs.
+#
+# The one prerequisite is the per-run image: chat-edge fail-LOUDS (exit 1) if
+# SANDBOX_ENABLED is on and ai-gateway-sandbox:latest is absent, so the
+# bring-up target below builds it FIRST. Bringing the stack up by hand with a
+# bare `docker compose -f docker-compose.webchat.yml up -d` still works — but
+# only after `make sandbox-image`, otherwise chat-edge exits on start.
+WEBCHAT_COMPOSE := -f docker-compose.webchat.yml
+
+sandbox-image: ## Build the per-run code-interpreter image (ai-gateway-sandbox:latest) — prerequisite for any stack with SANDBOX_ENABLED on
+	docker build -f services/chat-edge-api/sandbox/Dockerfile.sandbox -t ai-gateway-sandbox:latest services/chat-edge-api
+
+webchat-up: sandbox-image ## Start the web-chat stack (chat-edge:4000 + web-chat:3002 + own pg:5433/redis:6380) WITH the code-interpreter sandbox enabled
+	@test -f .env || (echo "ERROR: .env not found. Run 'make bootstrap' first." && exit 1)
+	@echo "════════════════════════════════════════════════════════════════"
+	@echo " DOCKER-SOCKET PRIVILEGE NOTICE"
+	@echo " This stack bind-mounts /var/run/docker.sock into chat-edge — that"
+	@echo " is HOST-ROOT-EQUIVALENT. It is acceptable ONLY because the docker"
+	@echo " run argv is built entirely from trusted server constants; no model"
+	@echo " input ever reaches it (model code runs INSIDE the no-privilege"
+	@echo " sandbox). See the header in docker-compose.webchat.yml."
+	@echo " Opt out with SANDBOX_ENABLED=0 — document reading, the Office plan"
+	@echo " cards, compare and run_python go with it (they fail closed)."
+	@echo "════════════════════════════════════════════════════════════════"
+	@mkdir -p ./data/sandbox-runs
+	docker compose -p ai-gateway $(WEBCHAT_COMPOSE) up -d --build
+	@bash scripts/sandbox_healthcheck.sh
+	@echo ""
+	@echo "Web chat:  http://localhost:3002   (log in with portal credentials)"
+	@echo "Chat edge: http://localhost:4000/health"
+
+webchat-down: ## Stop the web-chat stack (preserves volumes)
+	docker compose -p ai-gateway $(WEBCHAT_COMPOSE) down
+
 # ── Code-interpreter sandbox overlay (Phase 13 / 15) ───────────────
+# Kept for the BASE/desktop stack, where chat-edge-api is profile-gated and
+# does NOT get the inline sandbox wiring the webchat file now has. Layering it
+# on the webchat stack is a redundant no-op (identical values) — harmless.
 # The sandbox overlay adds env + the docker-socket mount to chat-edge-api.
 # We layer it on the WEBCHAT stack (which owns the running
 # ai-gateway-chat-edge-api container) — NOT the base file: base marks

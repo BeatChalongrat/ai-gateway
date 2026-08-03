@@ -1,5 +1,12 @@
 # Phase 13 Part A — hardened code-interpreter sandbox: chat-edge wiring.
 #
+# SCOPE NOTE: docker-compose.webchat.yml now carries this same wiring INLINE
+# (sandbox on by default), because the chat-edge services fail closed without
+# it — no sandbox means no PDF/DOCX/XLSX text extraction, no Office plan
+# cards, no compare, no run_python. This overlay remains for the BASE/desktop
+# stack, where chat-edge-api is profile-gated and does not get that default.
+# Layering it on the webchat stack is a redundant no-op (identical values).
+#
 # Apply ON TOP of the base + webchat compose to let chat-edge spawn
 # per-run sandbox containers:
 #
