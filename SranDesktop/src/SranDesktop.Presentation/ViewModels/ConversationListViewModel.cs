@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Services;
 using SranDesktop.Application.Models;
 using SranDesktop.Domain.Entities;
 using SranDesktop.Domain.Enums;
@@ -23,6 +24,7 @@ public partial class ConversationListViewModel : ObservableObject
     private readonly IAgentConversationSyncService _agentSync;
     private readonly ISettingsService _settings;
     private readonly IDialogService _dialogs;
+    private readonly IConversationActivityTracker? _activity;
     private readonly ILogger<ConversationListViewModel> _logger;
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = new();
@@ -68,7 +70,8 @@ public partial class ConversationListViewModel : ObservableObject
         IAgentConversationSyncService agentSync,
         ISettingsService settings,
         IDialogService dialogs,
-        ILogger<ConversationListViewModel> logger)
+        ILogger<ConversationListViewModel> logger,
+        IConversationActivityTracker? activity = null)
     {
         _api = api;
         _store = store;
@@ -76,6 +79,7 @@ public partial class ConversationListViewModel : ObservableObject
         _agentSync = agentSync;
         _settings = settings;
         _dialogs = dialogs;
+        _activity = activity;
         _logger = logger;
         DefaultModelId = settings.Current.DefaultModel;
         settings.SettingsChanged += (_, _) => DefaultModelId = settings.Current.DefaultModel;
@@ -751,6 +755,15 @@ public partial class ConversationListViewModel : ObservableObject
         foreach (var conv in Conversations.ToList())
         {
             if (conv == SelectedConversation)
+                continue;
+            // "Selected" is not the same as "in use". A new chat whose
+            // attachment is still being uploaded — the server OCRs a scanned
+            // PDF before it answers, which was measured at minutes — has no
+            // stored messages yet and stops being selected the moment the
+            // user clicks another chat while waiting. Deleting it there threw
+            // the reply away: the turn came back to a conversation that no
+            // longer existed locally (FOREIGN KEY) or on the server (404).
+            if (_activity?.IsBusy(conv.Id) == true)
                 continue;
             // Only untitled / placeholder-titled chats are eligible.
             if (!string.IsNullOrWhiteSpace(conv.Title)

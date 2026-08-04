@@ -213,6 +213,7 @@ public static class Dict
         // FIX-D — actionable localized turn errors (code-mapped)
         ["error.insufficientCredits"] = "You have no credits left. Ask your administrator to top up your account, then try again.",
         ["error.gatewayUnreachable"] = "Can't reach the server. Check your connection and the Gateway URL in Settings, then try again — or contact your administrator.",
+        ["chat.error.conversationGone"] = "This chat was removed while your file was uploading. Your message and files have been put back — pick or start a chat and send again.",
         ["error.authFailed"] = "Your sign-in could not be verified. Sign out and sign in again; if it keeps happening, contact your administrator.",
         ["error.streamStalled"] = "The connection stalled while the AI was answering. Please try again.",
         ["error.rateLimited"] = "Too many requests right now. Wait a moment and try again.",
@@ -782,6 +783,7 @@ public static class Dict
         // FIX-D — actionable localized turn errors (code-mapped)
         ["error.insufficientCredits"] = "เครดิตของคุณหมด กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต แล้วลองใหม่อีกครั้ง",
         ["error.gatewayUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบการเชื่อมต่อและ Gateway URL ในการตั้งค่า แล้วลองใหม่ หรือติดต่อผู้ดูแลระบบ",
+        ["chat.error.conversationGone"] = "แชทนี้ถูกลบระหว่างที่กำลังอัปโหลดไฟล์ ข้อความและไฟล์ของคุณถูกนำกลับมาให้แล้ว — เลือกหรือเริ่มแชทใหม่แล้วส่งอีกครั้ง",
         ["error.authFailed"] = "ยืนยันสิทธิ์การเข้าสู่ระบบไม่สำเร็จ กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่ หากยังไม่หายให้ติดต่อผู้ดูแลระบบ",
         ["error.streamStalled"] = "การเชื่อมต่อค้างระหว่างที่ AI กำลังตอบ กรุณาลองใหม่อีกครั้ง",
         ["error.rateLimited"] = "มีการใช้งานถี่เกินไปในขณะนี้ กรุณารอสักครู่แล้วลองใหม่",
