@@ -1,4 +1,4 @@
-namespace SranDesktop.Presentation.Localization;
+﻿namespace SranDesktop.Presentation.Localization;
 
 /// <summary>
 /// EN + TH translation dictionaries (desktop mirror of apps/web-chat's dict.ts).
@@ -410,6 +410,7 @@ public static class Dict
         ["toast.syncFailed"] = "Some chats could not be backed up — will retry",
         ["toast.updateReady"] = "An update is available",
         ["toast.pullFailed"] = "Could not open that chat — server unreachable",
+        ["toast.scannedUploadNotice"] = "ℹ️ Scanned files are sent to the SRAN server so OCR can read the text (documents that already contain text are read on this computer).",
 
         // Phase 8 — Empty states
         ["skill.empty"] = "No skills installed yet — add one to teach the AI a new trick",
@@ -978,6 +979,7 @@ public static class Dict
         ["toast.syncFailed"] = "สำรองบางแชทไม่สำเร็จ — จะลองใหม่อีกครั้ง",
         ["toast.updateReady"] = "มีอัปเดตใหม่พร้อมติดตั้ง",
         ["toast.pullFailed"] = "เปิดแชทไม่ได้ — เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ",
+        ["toast.scannedUploadNotice"] = "ℹ️ ไฟล์สแกนจะถูกส่งขึ้นเซิร์ฟเวอร์ SRAN เพื่อ OCR อ่านข้อความ (เอกสารที่มีข้อความอยู่แล้วอ่านในเครื่อง)",
 
         // Phase 8 — Empty states
         ["skill.empty"] = "ยังไม่มีสกิลติดตั้ง — เพิ่มสกิลเพื่อสอนความสามารถใหม่ให้ AI",

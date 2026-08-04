@@ -107,6 +107,13 @@ public sealed class UserSettings
     [JsonPropertyName("approval_mode")]
     public string ApprovalMode { get; set; } = "auto";
 
+    /// <summary>True once the "scanned files are read on the server" notice has
+    /// been shown. A UI seen-marker only: nothing consults it to decide whether
+    /// an upload may happen, so clearing it re-shows the notice and grants
+    /// nothing.</summary>
+    [JsonPropertyName("scanned_upload_notice_shown")]
+    public bool ScannedUploadNoticeShown { get; set; }
+
     public UserSettings Clone()
     {
         var copy = (UserSettings)MemberwiseClone();

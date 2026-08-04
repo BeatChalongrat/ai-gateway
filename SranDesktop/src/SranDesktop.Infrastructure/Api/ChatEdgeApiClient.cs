@@ -297,6 +297,14 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
         return result;
     }
 
+    public async Task<FileTextDto> GetFileTextAsync(string fileId, CancellationToken ct = default)
+    {
+        using var deadline = Deadline(ct);
+        using var response = await _http.GetAsync(
+            $"api/v1/files/{Uri.EscapeDataString(fileId)}/text", deadline.Token);
+        return await ReadAsync<FileTextDto>(response, deadline.Token);
+    }
+
     public async Task<byte[]> DownloadFileAsync(string downloadUrl, CancellationToken ct = default)
     {
         // download_url arrives relative ("/api/v1/files/{id}/download" or

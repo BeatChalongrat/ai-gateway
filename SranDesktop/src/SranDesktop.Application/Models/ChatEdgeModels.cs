@@ -62,6 +62,18 @@ public sealed record FileAttachmentDto(
     // generated files. Correlates a server file to its local manifest row.
     [property: JsonPropertyName("client_id")] string? ClientId = null);
 
+/// <summary>
+/// GET /files/{id}/text — the text chat-edge extracted from an attachment.
+/// <see cref="Text"/> is only populated once <see cref="ExtractionStatus"/> is
+/// "completed"; a non-terminal status means "still working, poll again" and
+/// must never be read as "this document is blank".
+/// </summary>
+public sealed record FileTextDto(
+    [property: JsonPropertyName("extraction_status")] string ExtractionStatus,
+    [property: JsonPropertyName("text")] string? Text,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("ocr")] bool Ocr);
+
 public sealed record ReasoningCapability(
     [property: JsonPropertyName("supported")] bool Supported,
     [property: JsonPropertyName("modes")] List<string>? Modes,

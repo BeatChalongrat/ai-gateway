@@ -122,6 +122,12 @@ public interface IChatEdgeApiClient
         string conversationId, Stream content, string fileName, string contentType, long? length,
         IProgress<double>? progress = null, string? clientId = null, CancellationToken ct = default);
 
+    /// <summary>GET .../files/{id}/text — the text the server extracted from an
+    /// attachment, plus the extraction status. Used by read_document to read a
+    /// scanned PDF, which only the server-side OCR pipeline can handle. The
+    /// status is authoritative: text arrives empty until it reads "completed".</summary>
+    Task<FileTextDto> GetFileTextAsync(string fileId, CancellationToken ct = default);
+
     // ── Plan execution (R7 Feature C) ───────────────────────────────────────
 
     /// <summary>POST .../excel/execute — the fenced plan JSON goes under "plan".</summary>
