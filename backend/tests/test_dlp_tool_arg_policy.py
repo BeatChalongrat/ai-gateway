@@ -113,6 +113,22 @@ class TestToolArgPolicy:
             "remember",
             "use_skill",
             "run_subagent",
+            # Tool-policy gap fix (after 831efd3): desktop tools that
+            # shipped after FIX 8 and were falling into the unknown-tool
+            # block. All argument-local: file path via PathGuard
+            # (read_document), coordinates / element ids / window titles
+            # (screen + UIA read layer), integer refs / DOM-local query
+            # (browser read layer).
+            "read_document",
+            "computer_zoom",
+            "get_computer_state",
+            "read_screen_elements",
+            "uia_click",
+            "browser_click",
+            "browser_find",
+            "browser_read_page",
+            "browser_screenshot",
+            "browser_list_tabs",
         ],
     )
     def test_desktop_local_tool_with_placeholder_allowed(self, tool):
@@ -143,6 +159,53 @@ class TestToolArgPolicy:
         )
         assert blocked is True and reason == "unknown_tool_blocked_masked_args"
         assert _is_blocked_marker(out)
+
+    # ------------------------------------------------------------------
+    # Tool-policy gap fix — regression for the live incident
+    # (read_document blocked as unknown) and the egress side of the new
+    # desktop classifications.
+    # ------------------------------------------------------------------
+
+    def test_read_document_with_echoed_inbound_token_allowed(self):
+        # The live incident: the model echoed an inbound mask token
+        # (<<CATEGORY_N>> shape, e.g. a masked person name inside the
+        # filename) into the path argument. read_document must execute
+        # (restore is the call sites' job), not come back as a blocked
+        # marker.
+        args = '{"path": "C:\\\\Users\\\\me\\\\IDP_<<PERSON_1>>.xlsx"}'
+        out, blocked, reason = enforce_tool_arg_safety("read_document", args)
+        assert blocked is False
+        assert reason == "local_execution"
+        assert out == args
+        assert is_local_execution_tool("read_document") is True
+
+    @pytest.mark.parametrize(
+        "tool, args",
+        [
+            ("web_fetch", '{"url": "https://x.test/?q=<r0>"}'),
+            ("browser_navigate", '{"url": "https://x.test/<r0>"}'),
+            ("browser_tabs", '{"action": "new", "url": "https://x.test/<r0>"}'),
+            ("browser_type", '{"ref": 3, "text": "<r0>"}'),
+            ("uia_set_value", '{"element_id": 7, "text": "<r0>"}'),
+        ],
+    )
+    def test_desktop_egress_tool_with_placeholder_blocked(self, tool, args):
+        # Arguments that leave the machine (URL to the network, free text
+        # into a live page / UI field) must never carry a placeholder —
+        # and must never be candidates for restore.
+        out, blocked, reason = enforce_tool_arg_safety(tool, args)
+        assert blocked is True
+        assert reason == "external_egress_blocked_masked_args"
+        assert _is_blocked_marker(out)
+        assert "<r0>" not in out
+        assert is_local_execution_tool(tool) is False
+
+    def test_generate_video_placeholder_safe_like_generate_image(self):
+        args = '{"prompt": "a person named <r0> waves"}'
+        out, blocked, reason = enforce_tool_arg_safety("generate_video", args)
+        assert blocked is False
+        assert reason == "placeholder_safe"
+        assert out == args
 
     def test_local_tool_clean_args_untouched(self):
         args = '{"command": "ping -n 4 localhost"}'

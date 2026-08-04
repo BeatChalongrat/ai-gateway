@@ -66,8 +66,11 @@ LOCAL_EXECUTION = "local_execution"
 # Per-tool policy. Conservative by default: anything NOT listed here is
 # treated as unsafe (blocked when its masked arguments carry a
 # placeholder). The names below match chat-edge's registered tools
-# (services/chat-edge-api/internal/service/tools.go) plus a few known
-# future PII-recipient tools classified ahead of time.
+# (services/chat-edge-api/internal/service/tools.go) and the SRAN
+# Desktop registry (SranDesktop.Infrastructure/Mcp/Tools/*Tool.cs),
+# plus a few known future PII-recipient tools classified ahead of time.
+# tests/test_dlp_tool_policy_parity.py sweeps both registries and fails
+# CI when a first-party tool is added without a classification here.
 TOOL_ARG_POLICY: dict[str, str] = {
     # Internal conversation tools — operate on already-DLP-governed
     # content; masked values are acceptable.
@@ -78,6 +81,9 @@ TOOL_ARG_POLICY: dict[str, str] = {
     # Image generation already runs on a DLP-masked prompt elsewhere in
     # the gateway, so masked placeholders in the prompt are consistent.
     "generate_image": PLACEHOLDER_SAFE,
+    # Video generation (chat-edge Sprint 2A) — same pipeline shape and
+    # same DLP treatment as generate_image, so the same classification.
+    "generate_video": PLACEHOLDER_SAFE,
     # External egress — never ship placeholders to a third-party service.
     "web_search": EXTERNAL_EGRESS,
     # Known future PII-recipient tools (not yet registered) — classified
@@ -116,6 +122,40 @@ TOOL_ARG_POLICY: dict[str, str] = {
     "remember": LOCAL_EXECUTION,
     "use_skill": LOCAL_EXECUTION,
     "run_subagent": LOCAL_EXECUTION,
+    # Desktop document reader — reads a local file through PathGuard +
+    # SensitiveReadGuard and returns its text into the already-DLP-
+    # governed conversation. Same class as read_file (its sibling that
+    # was classified in FIX 8; this one shipped later and was missed,
+    # which surfaced as unknown_tool_blocked_masked_args in production).
+    "read_document": LOCAL_EXECUTION,
+    # Desktop screen/UIA READ layer + pixel-region zoom — arguments are
+    # coordinates, element ids from the last read_screen_elements
+    # snapshot, or a window title matched against local windows; nothing
+    # in the arguments leaves the machine.
+    "computer_zoom": LOCAL_EXECUTION,
+    "get_computer_state": LOCAL_EXECUTION,
+    "read_screen_elements": LOCAL_EXECUTION,
+    "uia_click": LOCAL_EXECUTION,
+    # Browser-bridge tools whose arguments stay on the machine: integer
+    # refs/tab ids and enum filters, or (browser_find) a query matched
+    # against the ALREADY-LOADED DOM by the local content script — the
+    # query never reaches the website.
+    "browser_click": LOCAL_EXECUTION,
+    "browser_find": LOCAL_EXECUTION,
+    "browser_read_page": LOCAL_EXECUTION,
+    "browser_screenshot": LOCAL_EXECUTION,
+    "browser_list_tabs": LOCAL_EXECUTION,
+    # External egress — these arguments LEAVE the machine, so a restored
+    # PII value would egress raw: web_fetch, browser_navigate and
+    # browser_tabs (action=new) ship a URL to the network; browser_type
+    # and uia_set_value write free text into a live web page / focused
+    # UI field (the same channel their own credential guards treat as
+    # egress). Placeholders are blocked here, never restored.
+    "web_fetch": EXTERNAL_EGRESS,
+    "browser_navigate": EXTERNAL_EGRESS,
+    "browser_tabs": EXTERNAL_EGRESS,
+    "browser_type": EXTERNAL_EGRESS,
+    "uia_set_value": EXTERNAL_EGRESS,
 }
 
 # Tools for which executing on masked content is allowed but reduces
