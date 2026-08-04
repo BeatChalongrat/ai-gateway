@@ -261,10 +261,14 @@ public partial class ChatViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(mode))
             return;
         var parsed = Domain.Enums.ApprovalModeParser.Parse(mode);
+        var acknowledgedNow = false;
         if (parsed == Domain.Enums.ApprovalMode.Skip
             && CurrentApprovalMode != Domain.Enums.ApprovalMode.Skip
+            && !_settings.Current.SkipApprovalsAcknowledged
             && _dialogs is not null)
         {
+            // First-ever switch into Skip only (owner decision: warn once,
+            // don't nag — the acknowledgment persists across sessions).
             // destructive:false → the confirm button reads "Confirm", not "Delete".
             var confirmed = await _dialogs.ConfirmAsync(
                 Localization.LocaleService.Instance.T("perm.skipConfirmTitle"),
@@ -275,10 +279,13 @@ public partial class ChatViewModel : ObservableObject
                 IsPermissionPopupOpen = false;
                 return; // keep the previous mode
             }
+            acknowledgedNow = true;
         }
         var updated = _settings.Current.Clone();
         updated.ApprovalMode = Domain.Enums.ApprovalModeParser.ToSettingsValue(
             Domain.Enums.ApprovalModeParser.Parse(mode));
+        if (acknowledgedNow)
+            updated.SkipApprovalsAcknowledged = true;
         _settings.Save(updated);
         OnPropertyChanged(nameof(IsApprovalManual));
         OnPropertyChanged(nameof(IsApprovalAuto));

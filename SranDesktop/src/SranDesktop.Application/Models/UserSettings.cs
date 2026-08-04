@@ -107,6 +107,13 @@ public sealed class UserSettings
     [JsonPropertyName("approval_mode")]
     public string ApprovalMode { get; set; } = "auto";
 
+    /// <summary>True once the user has confirmed the Skip-all-approvals
+    /// warning. The confirm dialog fires only on the FIRST switch into Skip
+    /// (owner decision 2026-08-04: warn once, don't nag) — after that,
+    /// switching into Skip is a plain dropdown pick like the other modes.</summary>
+    [JsonPropertyName("skip_approvals_acknowledged")]
+    public bool SkipApprovalsAcknowledged { get; set; }
+
     /// <summary>True once the "scanned files are read on the server" notice has
     /// been shown. A UI seen-marker only: nothing consults it to decide whether
     /// an upload may happen, so clearing it re-shows the notice and grants

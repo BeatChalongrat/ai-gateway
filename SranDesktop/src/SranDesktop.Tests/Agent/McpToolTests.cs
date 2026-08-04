@@ -162,6 +162,10 @@ public class McpToolTests : IDisposable
     [InlineData("del /s C:\\Users")]
     [InlineData("shutdown /s /t 0")]
     [InlineData("FORMAT C:")]
+    [InlineData("format c:")]
+    [InlineData("format /q d:")]
+    [InlineData("format /fs:ntfs d:")]
+    [InlineData("echo y | format d: /q")]
     public async Task RunCommand_Blocklist_Rejects_Destructive_Commands(string command)
     {
         var result = await new RunCommandTool(NullLogger<RunCommandTool>.Instance).ExecuteAsync(
@@ -169,6 +173,137 @@ public class McpToolTests : IDisposable
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("blocklist");
+    }
+
+    /// <summary>Runner stub for blocklist PASS cases — proves the command
+    /// got past the gate without actually executing anything.</summary>
+    private sealed class NoopRunner : IProcessRunner
+    {
+        public string? RanCommand;
+        public Task<int> RunAsync(
+            ProcessRunSpec spec,
+            Action<string> onLine,
+            CancellationToken ct)
+        {
+            RanCommand = spec.Arguments;
+            onLine("ok");
+            return Task.FromResult(0);
+        }
+    }
+
+    private sealed class FakeApprovalSettings : SranDesktop.Application.Interfaces.ISettingsService
+    {
+        public FakeApprovalSettings(string mode) =>
+            Current = new SranDesktop.Application.Models.UserSettings { ApprovalMode = mode };
+        public SranDesktop.Application.Models.UserSettings Current { get; }
+        public bool IsFirstRun => false;
+        public event EventHandler? SettingsChanged;
+        public void Save(SranDesktop.Application.Models.UserSettings s)
+            => SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Captures log lines so the Skip-all audit trail is assertable.</summary>
+    private sealed class ListLogger : Microsoft.Extensions.Logging.ILogger<RunCommandTool>
+    {
+        public readonly List<string> Lines = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            lock (Lines) Lines.Add($"{logLevel}: {formatter(state, exception)}");
+        }
+    }
+
+    // ── Tier-aware blocklist (owner decision 2026-08-04) ────────────
+    // Manual + Auto (and no settings at all → fail-safe default) enforce
+    // the destructive-command net; Skip-all approvals bypasses it but
+    // leaves an audit log line.
+
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("auto")]
+    public async Task RunCommand_Blocklist_Enforced_In_Manual_And_Auto(string mode)
+    {
+        var runner = new NoopRunner();
+        var tool = new RunCommandTool(
+            NullLogger<RunCommandTool>.Instance,
+            new FakeApprovalSettings(mode),
+            processRunner: runner);
+
+        var result = await tool.ExecuteAsync(
+            Args(JsonSerializer.Serialize(new { command = "format c:" })),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("blocklist");
+        runner.RanCommand.Should().BeNull("blocked commands must never reach the runner");
+    }
+
+    [Fact]
+    public async Task RunCommand_SkipAll_Runs_Destructive_Command_And_Audit_Logs()
+    {
+        var runner = new NoopRunner();
+        var logger = new ListLogger();
+        var tool = new RunCommandTool(
+            logger, new FakeApprovalSettings("skip"), processRunner: runner);
+
+        var result = await tool.ExecuteAsync(
+            Args(JsonSerializer.Serialize(new { command = "format c:" })),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue("Skip-all approvals runs everything, no backstop");
+        runner.RanCommand.Should().NotBeNull();
+        lock (logger.Lines)
+            logger.Lines.Should().Contain(
+                l => l.StartsWith("Warning:") && l.Contains("Skip-all approvals"),
+                "a destructive command running under Skip-all must leave an audit trail");
+    }
+
+    [Fact]
+    public async Task RunCommand_SkipAll_Does_Not_Log_Audit_For_Safe_Commands()
+    {
+        var runner = new NoopRunner();
+        var logger = new ListLogger();
+        var tool = new RunCommandTool(
+            logger, new FakeApprovalSettings("skip"), processRunner: runner);
+
+        var result = await tool.ExecuteAsync(
+            Args(JsonSerializer.Serialize(new { command = "git status" })),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        lock (logger.Lines)
+            logger.Lines.Should().NotContain(l => l.Contains("Skip-all approvals"));
+    }
+
+    // The "format " substring entry used to catch the ubiquitous
+    // OUTPUT-FORMATTING flag and reject safe commands (`docker images
+    // --format "{{...}}"` came back "Command rejected by safety
+    // blocklist (matched \"format\")"). Only the real disk-wipe
+    // command shapes may match now.
+    [Theory]
+    [InlineData("docker images --format \"{{.Repository}}:{{.Tag}}\"")]
+    [InlineData("git log --format=%H -5")]
+    [InlineData("git log --format short")]
+    [InlineData("wmic os get caption /format:csv")]
+    [InlineData("dotnet test --logger \"console;format=detailed\"")]
+    public async Task RunCommand_Allows_Format_Flag_Commands(string command)
+    {
+        var runner = new NoopRunner();
+        var result = await new RunCommandTool(
+                NullLogger<RunCommandTool>.Instance, processRunner: runner)
+            .ExecuteAsync(
+                Args(JsonSerializer.Serialize(new { command })),
+                CancellationToken.None);
+
+        result.Success.Should().BeTrue(
+            $"'{command}' is a safe formatting flag, not the disk-wipe command");
+        runner.RanCommand.Should().NotBeNull("the command must reach the runner");
     }
 
     [Fact]
