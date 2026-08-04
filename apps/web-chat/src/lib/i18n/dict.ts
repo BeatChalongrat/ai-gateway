@@ -54,6 +54,12 @@ export const en = {
   "input.placeholder": "Message SRAN Chat…",
   "input.placeholder.streaming": "Streaming response…",
   "input.placeholder.uploading": "Uploading…",
+  // Shown once the bytes are sent and the server is still reading the
+  // file — OCR on a scan makes that the long part, not the transfer.
+  "input.placeholder.reading": "Reading the document…",
+  // Same phase, shown on the attachment chip itself. The chip stays
+  // sendable while this is up — extraction no longer blocks the turn.
+  "file.reading": "Reading…",
   "input.attach": "Attach files",
   "input.voice": "Voice input",
   "input.imageMode": "Generate an image",
@@ -375,6 +381,8 @@ const th: Record<DictKey, string> = {
   "input.placeholder": "ส่งข้อความถึง SRAN Chat…",
   "input.placeholder.streaming": "กำลังตอบ…",
   "input.placeholder.uploading": "กำลังอัปโหลด…",
+  "input.placeholder.reading": "กำลังอ่านเอกสาร…",
+  "file.reading": "กำลังอ่าน…",
   "input.attach": "แนบไฟล์",
   "input.voice": "ป้อนเสียง",
   "input.imageMode": "สร้างรูปภาพ",

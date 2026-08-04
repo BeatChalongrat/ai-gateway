@@ -59,6 +59,9 @@ export default function ConversationPage() {
   const updateFileProgress = useChatStore((s) => s.updateFileProgress);
   const markFileReady = useChatStore((s) => s.markFileReady);
   const markFileError = useChatStore((s) => s.markFileError);
+  const setFileExtractionStatus = useChatStore(
+    (s) => s.setFileExtractionStatus,
+  );
   const selectGlobalModel = useModelStore((s) => s.selectModel);
   const getModelById = useModelStore((s) => s.getModelById);
 
@@ -204,6 +207,7 @@ export default function ConversationPage() {
             updateFileProgress,
             markFileReady,
             markFileError,
+            setFileExtractionStatus,
           });
         }}
       >

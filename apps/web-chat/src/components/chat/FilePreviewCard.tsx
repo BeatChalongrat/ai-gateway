@@ -23,6 +23,8 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, ImageIcon, Loader2, RotateCw, X } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { useT } from "@/lib/i18n";
+import { isExtracting } from "@/lib/fileExtraction";
 import type { PendingFile } from "@/stores/chatStore";
 import {
   fileExtension,
@@ -45,6 +47,7 @@ function CardShell({
   name,
   size,
   status,
+  extracting,
   errorMsg,
   onRemove,
   onRetry,
@@ -53,12 +56,19 @@ function CardShell({
   name: string;
   size: number;
   status: PendingFile["status"];
+  /** Bytes are stored but the server is still reading the document
+   *  (OCR on a scan takes minutes). Distinct from `uploading`: this
+   *  state does NOT block sending, so it gets a quiet inline label
+   *  rather than the blocking dim-and-spin overlay. */
+  extracting?: boolean;
   errorMsg?: string;
   onRemove: () => void;
   onRetry?: () => void;
 }) {
+  const t = useT();
   const isError = status === "error";
   const isUploading = status === "uploading";
+  const isExtracting = Boolean(extracting) && !isUploading && !isError;
   return (
     <div
       className={`group relative flex flex-col overflow-hidden rounded-xl border transition-colors ${
@@ -77,9 +87,16 @@ function CardShell({
         >
           {name}
         </p>
-        <p className="mt-0.5 text-[11px] text-text-tertiary">
-          {formatBytes(size)}
-        </p>
+        {isExtracting ? (
+          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-text-tertiary">
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+            <span>{t("file.reading")}</span>
+          </p>
+        ) : (
+          <p className="mt-0.5 text-[11px] text-text-tertiary">
+            {formatBytes(size)}
+          </p>
+        )}
         {isError && errorMsg ? (
           <p
             className="mt-1 truncate text-[10px] text-status-danger"
@@ -155,6 +172,7 @@ function ImagePreviewCard({ pending, onRemove, onRetry }: Props) {
       name={pending.file.name}
       size={pending.file.size}
       status={pending.status}
+      extracting={isExtracting(pending.extractionStatus)}
       errorMsg={pending.error}
       onRemove={onRemove}
       onRetry={onRetry}
@@ -188,6 +206,7 @@ function DocumentPreviewCard({ pending, onRemove, onRetry }: Props) {
       name={pending.file.name}
       size={pending.file.size}
       status={pending.status}
+      extracting={isExtracting(pending.extractionStatus)}
       errorMsg={pending.error}
       onRemove={onRemove}
       onRetry={onRetry}

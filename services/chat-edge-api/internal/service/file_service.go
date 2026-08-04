@@ -7,6 +7,14 @@
 // or write the disk directly so the path-traversal hardening lives
 // in exactly one place.
 //
+// Extraction runs in the BACKGROUND. Upload persists the row as
+// ``processing`` and returns; a goroutine reads the file and flips the
+// row to a terminal extraction_status when it is done. Clients poll for
+// that status, and the send path blocks on it (waitForExtraction) so a
+// turn never reaches the model without its document — the guarantee the
+// old synchronous upload gave, without holding the HTTP response open
+// for the length of an OCR pass.
+//
 // Extraction strategy:
 //
 //	txt / csv     → read directly, UTF-8.
@@ -342,18 +350,62 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 		return nil, err
 	}
 
-	// Run the extractor synchronously per the Phase 2 contract. For
-	// big PDFs this can take a few seconds; that's acceptable for
-	// the initial implementation. A background-queue refactor lives
-	// in a future session.
+	// Extraction runs in the BACKGROUND. It used to run inline here,
+	// which meant a scanned PDF held the HTTP response open for the
+	// whole OCR pass (minutes) — the composer sat on "Uploading…" and
+	// the send button stayed disabled the entire time. The row is
+	// already persisted as ``processing``; the goroutine flips it to a
+	// terminal status when it finishes, clients poll for that, and the
+	// send path waits on it (see waitForExtraction) so a turn never
+	// reaches the model without its document.
+	//
+	// The goroutine gets its OWN copy of the row: the caller still owns
+	// ``row`` and the handler serialises it the moment we return, so
+	// sharing the pointer would be a data race.
+	job := *row
+	safeGo("file-extraction", func() {
+		// The request context is cancelled as soon as the upload
+		// response is written. WithoutCancel keeps its values (trace /
+		// tenant metadata) while detaching from that cancellation, then
+		// we impose our own ceiling so a wedged extractor can't leak a
+		// goroutine forever.
+		bg, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx), extractionJobTimeout)
+		defer cancel()
+		s.runExtraction(bg, &job)
+	})
+	return row, nil
+}
+
+// extractionJobTimeout bounds one whole background ingest (sandboxed
+// extractor + deep inspector). Comfortably above ``extractionWall`` so a
+// run that trips the sandbox ceiling still gets to record its terminal
+// status rather than being killed mid-write.
+const extractionJobTimeout = 8 * time.Minute
+
+// extractionStatusWriteTimeout is the budget for the FINAL status write.
+// It runs on a context detached from the job's deadline: if the extractor
+// itself burned the whole budget we must still be able to move the row
+// out of ``processing``, otherwise every later turn in that conversation
+// would wait on a row that is never coming.
+const extractionStatusWriteTimeout = 15 * time.Second
+
+// runExtraction is the background half of Upload: read the file's text,
+// cache the structural inspection, then flip the row to a terminal
+// extraction_status.
+//
+// Ordering matters. The terminal status write comes LAST, after the
+// inspector, so that "extraction_status is terminal" means "this file is
+// fully ingested". waitForExtraction keys on exactly that, so a turn that
+// unblocks is guaranteed to see both the extracted text and the cached
+// inspection_json — the same guarantee the old synchronous upload gave.
+func (s *FileService) runExtraction(ctx context.Context, row *model.ConversationFile) {
+	started := time.Now()
 	status, text := s.extract(ctx, row)
-	if err := s.files.UpdateExtraction(ctx, row.ID, status, text); err != nil {
-		// Extraction-record failure is non-fatal: the blob exists in
-		// storage + the row exists in the DB, the user just won't get
-		// AI context. Log and continue.
-		slog.Warn("file extraction update failed",
-			"file_id", row.ID.String(), "err", err)
-	}
+	// A scan reaches the model only through OCR, and OCR is the slow
+	// path — so remember whether it ran and skip the second sandbox
+	// round-trip below when it did.
+	usedOCR := text != nil && strings.Contains(*text, ocrPageMarker)
 	row.ExtractionStatus = status
 	row.ExtractedText = text
 
@@ -376,6 +428,14 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 			slog.Warn("excel auto-inspect failed",
 				"file_id", row.ID.String(), "err", err)
 		}
+	// A scanned PDF has already cost one slow OCR run; the inspector
+	// would spend a second sandbox round-trip (~6 s measured) only to
+	// report word_count 0 / table_count 0 for every page, because there
+	// is no text layer for it to inspect. The OCR text we just stored is
+	// strictly more informative, so skip it.
+	case s.docs != nil && IsDocContentType(row.ContentType) && usedOCR:
+		slog.Debug("skipping auto-inspect for an OCR'd scan",
+			"file_id", row.ID.String())
 	case s.docs != nil && IsDocContentType(row.ContentType):
 		if _, raw, err := s.docs.InspectDocument(ctx, row.StoragePath, row.ContentType); err == nil && len(raw) > 0 {
 			if uerr := s.files.UpdateInspectionJSON(ctx, row.ID, string(raw)); uerr != nil {
@@ -390,7 +450,25 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 				"file_id", row.ID.String(), "ct", row.ContentType, "err", err)
 		}
 	}
-	return row, nil
+
+	// Terminal write on a fresh, undeadlined context — see the constant's
+	// comment for why this must not inherit the job budget.
+	wctx, wcancel := context.WithTimeout(
+		context.WithoutCancel(ctx), extractionStatusWriteTimeout)
+	defer wcancel()
+	if err := s.files.UpdateExtraction(wctx, row.ID, status, text); err != nil {
+		// The blob is in storage and the row is in the DB; the user just
+		// won't get AI context for this file, and the row stays
+		// ``processing`` until waitForExtraction ages it out.
+		slog.Warn("file extraction update failed",
+			"file_id", row.ID.String(), "err", err)
+		return
+	}
+	slog.Info("file extraction finished",
+		"file_id", row.ID.String(),
+		"status", status,
+		"used_ocr", usedOCR,
+		"took_ms", time.Since(started).Milliseconds())
 }
 
 // ---------------------------------------------------------------------------
@@ -851,6 +929,90 @@ func (s *FileService) AttachToMessage(
 }
 
 // ---------------------------------------------------------------------------
+// Waiting on background extraction
+// ---------------------------------------------------------------------------
+
+// extractionWaitTimeout bounds how long a send will wait for a file that
+// is still being extracted. Above extractionWall (the sandbox ceiling) so
+// the normal outcome is "the extractor finished", not "we gave up".
+const extractionWaitTimeout = 6 * time.Minute
+
+// extractionWaitPoll is the gap between polls while waiting. Postgres,
+// not an in-process channel, is the rendezvous: it survives a restart and
+// stays correct if chat-edge is ever scaled past one replica.
+const extractionWaitPoll = 400 * time.Millisecond
+
+// extractionStaleAfter is how long a row may sit in a non-terminal state
+// before we stop believing anyone is still working on it. A process
+// killed mid-extraction leaves ``processing`` rows behind forever (there
+// are such rows in the live DB); without this every subsequent turn in
+// that conversation would burn the full extractionWaitTimeout waiting on
+// a goroutine that died with the old process.
+const extractionStaleAfter = 15 * time.Minute
+
+// extractionInFlight reports whether any file in the list is still being
+// extracted by a worker we have reason to believe is alive.
+func extractionInFlight(files []model.ConversationFile, now time.Time) bool {
+	for i := range files {
+		switch files[i].ExtractionStatus {
+		case "pending", "processing":
+		default:
+			continue
+		}
+		// updated_at is touched by both Create and UpdateExtraction, so
+		// it is the last sign of life for this row.
+		if now.Sub(files[i].UpdatedAt) > extractionStaleAfter {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// waitForExtraction returns the conversation's files once none of them is
+// mid-extraction, and doubles as the caller's list read so the common
+// (nothing in flight) path costs exactly one query.
+//
+// It gives up — returning the latest list rather than an error — when the
+// caller's context ends or extractionWaitTimeout elapses. Degrading to
+// "answer without the document" beats hanging the user's turn forever;
+// BuildContextBlock renders those rows as "[Content extraction still in
+// progress.]" so the model is told rather than silently misled.
+func (s *FileService) waitForExtraction(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) ([]model.ConversationFile, error) {
+	deadline := time.Now().Add(extractionWaitTimeout)
+	waited := false
+	for {
+		files, err := s.files.ListByConversation(ctx, tenantID, convID)
+		if err != nil {
+			return nil, err
+		}
+		if !extractionInFlight(files, time.Now()) {
+			if waited {
+				slog.Debug("waited for file extraction",
+					"conversation_id", convID.String())
+			}
+			return files, nil
+		}
+		if time.Now().After(deadline) {
+			slog.Warn("gave up waiting for file extraction",
+				"conversation_id", convID.String(),
+				"waited", extractionWaitTimeout.String())
+			return files, nil
+		}
+		waited = true
+		select {
+		case <-ctx.Done():
+			// Client hung up / request deadline hit. Hand back what we
+			// have; the caller is about to abandon this turn anyway.
+			return files, nil
+		case <-time.After(extractionWaitPoll):
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Context block (called by the message handler when assembling the
 // gateway request).
 // ---------------------------------------------------------------------------
@@ -867,7 +1029,16 @@ const fileContextBudget = 120_000
 func (s *FileService) BuildContextBlock(
 	ctx context.Context, tenantID, convID uuid.UUID,
 ) (string, error) {
-	files, err := s.files.ListByConversation(ctx, tenantID, convID)
+	// Uploads return before their text is extracted, so a user can hit
+	// send while the extractor is still running. Block here — this is
+	// the exact point where the document's text is consumed — rather
+	// than shipping the turn with "[extraction still in progress]" and
+	// letting the model answer about a file it cannot see.
+	//
+	// Costs nothing in the common case: the wait's first poll IS the
+	// list read we needed anyway, and it returns immediately when every
+	// row is already terminal.
+	files, err := s.waitForExtraction(ctx, tenantID, convID)
 	if err != nil {
 		return "", err
 	}
@@ -1432,16 +1603,73 @@ func (s *FileService) imageMetadataFromStorage(
 func (s *FileService) runPythonExtractorOnKey(
 	parent context.Context, key, ct string,
 ) (string, bool) {
+	text, _, ok := s.runPythonExtractorWithMeta(parent, key, ct)
+	return text, ok
+}
+
+// extractMetaPrefix marks the machine-readable header extract_text.py
+// writes as its first stdout line. Must match META_PREFIX there.
+const extractMetaPrefix = "#SRAN-EXTRACT-META "
+
+// ocrPageMarker is the provenance tag extract_text.py puts in front of a
+// page whose text came from OCR rather than a real text layer. Must match
+// the "[OCR] " prefix there.
+const ocrPageMarker = "[OCR] "
+
+// ExtractMeta is what the extractor reports about HOW it read a file.
+// Everything is zero-valued for a plain text-layer read (and for an
+// older sandbox image that predates the header), so callers can treat
+// absence as "no OCR involved".
+type ExtractMeta struct {
+	// Mode is "text" (text layer only), "ocr" (every page came from
+	// OCR) or "mixed" (a document with both).
+	Mode string `json:"mode"`
+	// Pages is the page count of the source document.
+	Pages int `json:"pages"`
+	// OCRPages is how many pages OCR actually produced text for.
+	OCRPages int `json:"ocr_pages"`
+	// OCRAvgConfidence is Tesseract's mean per-word confidence (0-100)
+	// over those pages, or nil when nothing was OCR'd. This is the
+	// signal the vision fallback keys on: a page of OCR garbage is long
+	// but low-confidence, which text length alone cannot detect.
+	OCRAvgConfidence *float64 `json:"ocr_avg_confidence"`
+	// OCRTruncated is true when the document had more OCR-needing pages
+	// than the per-run cap allowed.
+	OCRTruncated bool `json:"ocr_truncated"`
+	// OCRError carries the first per-page OCR failure, if any.
+	OCRError *string `json:"ocr_error"`
+}
+
+// UsedOCR reports whether any page's text came from OCR rather than a
+// real text layer.
+func (m ExtractMeta) UsedOCR() bool { return m.OCRPages > 0 }
+
+// extractionWall bounds the sandboxed extractor. OCR is far slower than
+// reading a text layer — rendering plus Tesseract runs on the order of a
+// second or two per page — so the old 30s ceiling would have failed
+// every scanned document that OCR was added to rescue. The per-run page
+// cap in extract_text.py is what actually bounds the work; this is the
+// backstop.
+const extractionWall = 240 * time.Second
+
+// runPythonExtractorWithMeta is runPythonExtractorOnKey plus the
+// extractor's self-report. Split out so the OCR-aware callers can see
+// how the text was obtained without every caller having to care.
+func (s *FileService) runPythonExtractorWithMeta(
+	parent context.Context, key, ct string,
+) (string, ExtractMeta, bool) {
+	var meta ExtractMeta
+
 	path, cleanup, err := s.storage.OpenLocalCopy(parent, key)
 	if err != nil {
 		slog.Warn("storage local copy failed", "key", key, "err", err)
-		return "", false
+		return "", meta, false
 	}
 	defer cleanup()
 
 	if s.sandbox == nil {
 		slog.Warn("python extractor blocked: sandbox unavailable")
-		return "", false
+		return "", meta, false
 	}
 	inputName := "source" + filepath.Ext(path)
 	res, err := s.sandbox.Execute(parent, sandbox.Spec{
@@ -1449,16 +1677,51 @@ func (s *FileService) runPythonExtractorOnKey(
 		Script: filepath.Base(s.knobs.ExtractScriptPath),
 		Args:   []string{inputName, ct},
 		Inputs: []sandbox.InputFile{{Name: inputName, LocalPath: path}},
-		Limits: sandbox.Limits{Wall: 30 * time.Second},
+		Limits: sandbox.Limits{Wall: extractionWall},
 	})
 	if res != nil {
 		defer res.Cleanup()
 	}
 	if err != nil || res == nil || res.Exit != 0 {
 		slog.Warn("sandboxed python extractor failed", "err", err)
-		return "", false
+		return "", meta, false
 	}
-	return string(res.Stdout), true
+
+	text, meta := splitExtractMeta(string(res.Stdout))
+	if meta.UsedOCR() {
+		slog.Info("extractor used OCR",
+			"key", key,
+			"mode", meta.Mode,
+			"pages", meta.Pages,
+			"ocr_pages", meta.OCRPages,
+			"ocr_avg_confidence", meta.OCRAvgConfidence,
+			"ocr_truncated", meta.OCRTruncated,
+		)
+	}
+	return text, meta, true
+}
+
+// splitExtractMeta peels the meta header off the extractor's stdout.
+// A payload without the header — an older sandbox image, or any
+// non-PDF branch — returns unchanged text and a zero meta, so the two
+// sides can be deployed in either order.
+func splitExtractMeta(out string) (string, ExtractMeta) {
+	var meta ExtractMeta
+	if !strings.HasPrefix(out, extractMetaPrefix) {
+		return out, meta
+	}
+	line, rest, found := strings.Cut(out, "\n")
+	if !found {
+		// Header with no body: nothing usable either way.
+		return "", meta
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, extractMetaPrefix)), &meta); err != nil {
+		// Malformed header is not worth failing the extraction over —
+		// drop the metadata, keep the document.
+		slog.Warn("extractor meta header unparseable", "err", err)
+		return rest, ExtractMeta{}
+	}
+	return rest, meta
 }
 
 // ---------------------------------------------------------------------------
