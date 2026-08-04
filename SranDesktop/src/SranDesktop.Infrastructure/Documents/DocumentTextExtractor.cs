@@ -152,11 +152,17 @@ public static class DocumentTextExtractor
 
         if (!anyText)
         {
-            return DocumentExtraction.Failed(
+            // A scan. This class stays offline-only, so it reports the finding
+            // rather than acting on it: the TOOL decides whether to fall back
+            // to the server's OCR (which needs the user's consent, because that
+            // is the one path where a local read leaves the machine). The Error
+            // sentence is still filled in for callers with no OCR route.
+            return DocumentExtraction.RequiresOcr(
                 $"'{Path.GetFileName(path)}' has {total} page(s) but no extractable text layer — " +
                 "it is almost certainly a scan or a photo of a document. " +
-                "Reading scanned pages needs OCR, which SRAN Desktop does not do yet. " +
-                "Ask the user for a text-based PDF, or for the original document.");
+                "Reading scanned pages needs OCR, which is not available offline. " +
+                "Ask the user for a text-based PDF, or for the original document.",
+                total);
         }
 
         return new DocumentExtraction(
@@ -400,10 +406,17 @@ public sealed record DocumentExtraction(
     string UnitLabel,
     int TotalUnits,
     int UnitsIncluded,
-    string? Error = null)
+    string? Error = null,
+    bool NeedsOcr = false)
 {
     public static DocumentExtraction Failed(string error) =>
         new("unknown", string.Empty, "unit", 0, 0, error);
+
+    /// <summary>A failure the caller may be able to recover from by sending the
+    /// document to an OCR service. <paramref name="pageCount"/> travels along so
+    /// the caller can size the work before deciding.</summary>
+    public static DocumentExtraction RequiresOcr(string error, int pageCount) =>
+        new("PDF", string.Empty, "page", pageCount, 0, error, NeedsOcr: true);
 
     public bool Success => Error is null;
 

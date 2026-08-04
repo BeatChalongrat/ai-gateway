@@ -168,7 +168,13 @@ public static class AppHostBuilder
                     // Registered right after read_file so the model meets the
                     // document-capable reader before it settles for the base64
                     // one. Same PathGuard + SensitiveReadGuard gates.
-                    registry.Register(new ReadDocumentTool());
+                    // Scanned PDFs go to chat-edge's OCR; settings + toasts are
+                    // only there for the one-time "this is read on the server"
+                    // notice, not to gate anything.
+                    registry.Register(new ReadDocumentTool(
+                        sp.GetRequiredService<IScannedDocumentOcr>(),
+                        sp.GetRequiredService<ISettingsService>(),
+                        sp.GetRequiredService<IToastService>()));
                     registry.Register(new WriteFileTool());
                     // Phase A PART 2: targeted edit + filesystem primitives a real
                     // agent needs (all PathGuard-confined + consent-gated).
@@ -292,6 +298,18 @@ public static class AppHostBuilder
                 services.AddSingleton<IAuthService, AuthService>();
                 services.AddSingleton<IChatService, ChatService>();
                 services.AddSingleton<IFileService, FileService>();
+                // Scanned PDFs have no text layer, so read_document falls back
+                // to chat-edge's OCR (Thai + English) — the same pipeline the
+                // web client uses. Consent for the upload lives in the tool.
+                // Explicit factory: the ctor's poll-interval / timeout
+                // parameters are optional (tests shrink them) and must keep
+                // their production defaults here.
+                services.AddSingleton<IScannedDocumentOcr>(sp => new ScannedDocumentOcrService(
+                    sp.GetRequiredService<IFileService>(),
+                    sp.GetRequiredService<IChatEdgeApiClient>(),
+                    sp.GetRequiredService<IConversationStore>(),
+                    sp.GetRequiredService<ShellSession>(),
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ScannedDocumentOcrService>>()));
                 services.AddSingleton<IConversationSyncService, ConversationSyncService>();
                 // Phase 3 D: one-way push backup of agent-mode conversations.
                 services.AddSingleton<IAgentConversationSyncService,
