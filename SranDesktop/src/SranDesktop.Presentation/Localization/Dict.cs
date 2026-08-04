@@ -70,10 +70,10 @@ public static class Dict
         ["perm.auto.name"] = "Automatically approve",
         ["perm.auto.desc"] = "Runs on its own and pauses to ask if anything looks unsafe.",
         ["perm.skip.name"] = "Skip all approvals",
-        ["perm.skip.desc"] = "Never pauses, even for unsafe actions.",
+        ["perm.skip.desc"] = "Runs every command without asking and without any safety blocking — including commands that can destroy your system.",
         // FIX-F — confirm before entering skip mode
         ["perm.skipConfirmTitle"] = "Skip all approvals?",
-        ["perm.skipConfirmBody"] = "In this mode the AI acts without ever asking first — including risky actions like running commands, changing files, and controlling your screen. You can switch back at any time. Continue?",
+        ["perm.skipConfirmBody"] = "This mode turns off the safety block for system-destroying commands (like wiping a disk) and the AI acts without ever asking first — running commands, changing files, and controlling your screen. You can switch back at any time. Continue?",
 
         // Conversation / folder context menus
         ["conv.rename"] = "Rename",
@@ -640,10 +640,10 @@ public static class Dict
         ["perm.auto.name"] = "อนุมัติอัตโนมัติ",
         ["perm.auto.desc"] = "ทำงานเอง จะหยุดถามเฉพาะการกระทำที่ดูไม่ปลอดภัย",
         ["perm.skip.name"] = "ข้ามการอนุมัติทั้งหมด",
-        ["perm.skip.desc"] = "ไม่หยุดถามเลย แม้การกระทำที่ไม่ปลอดภัย",
+        ["perm.skip.desc"] = "รันทุกคำสั่งโดยไม่ถามและไม่มีการบล็อกเพื่อความปลอดภัยใด ๆ รวมถึงคำสั่งที่อาจทำลายระบบ",
         // FIX-F — confirm before entering skip mode
         ["perm.skipConfirmTitle"] = "ข้ามการอนุมัติทั้งหมด?",
-        ["perm.skipConfirmBody"] = "ในโหมดนี้ AI จะทำงานโดยไม่ถามคุณก่อนเลย รวมถึงการกระทำที่เสี่ยง เช่น รันคำสั่ง แก้ไขไฟล์ และควบคุมหน้าจอของคุณ คุณเปลี่ยนกลับได้ทุกเมื่อ ยืนยันหรือไม่?",
+        ["perm.skipConfirmBody"] = "โหมดนี้ปิดการบล็อกคำสั่งที่อาจทำลายระบบ (เช่น ล้างดิสก์) และ AI จะทำงานโดยไม่ถามคุณก่อนเลย ทั้งรันคำสั่ง แก้ไขไฟล์ และควบคุมหน้าจอของคุณ คุณเปลี่ยนกลับได้ทุกเมื่อ ยืนยันหรือไม่?",
 
         // Conversation / folder context menus
         ["conv.rename"] = "เปลี่ยนชื่อ",

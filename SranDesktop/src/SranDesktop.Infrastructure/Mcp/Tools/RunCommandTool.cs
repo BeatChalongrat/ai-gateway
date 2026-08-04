@@ -13,14 +13,14 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
     private const int MinTimeoutSeconds = 5;
     private const int MaxTimeoutSeconds = 3600;
 
-    // Defense-in-depth only — the consent dialog (which shows the exact
-    // command) is the primary control.
-    private static readonly string[] Blocklist =
-    {
-        "format ", "del /s", "del /f /s", "rmdir /s", "rd /s", "rm -rf", "rm -fr",
-        "shutdown", "restart-computer", "mkfs", "dd if=", ":(){", "reg delete hklm",
-        "cipher /w", "diskpart", "bcdedit"
-    };
+    // Destructive-command net (DestructiveCommandDetector): tokenized
+    // command-shape rules, replacing the old substring blocklist that both
+    // over-matched (--format flags) and under-matched (Format-Volume).
+    // TIER-AWARE by owner decision (2026-08-04): Manual + Auto approval
+    // modes enforce the net; Skip-all approvals bypasses it entirely — the
+    // user opted out of every backstop — but each destructive command that
+    // runs under Skip is audit-logged. The consent dialog (which shows the
+    // exact command) remains the primary control in Manual/Auto.
 
     private readonly ILogger<RunCommandTool> _logger;
     private readonly ISettingsService? _settings;
@@ -70,11 +70,24 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
             return ToolResult.Fail("'command' is required.");
 
         var normalized = command.ToLowerInvariant().Trim();
-        foreach (var blocked in Blocklist)
+        var threat = DestructiveCommandDetector.Analyze(command);
+        if (threat is not null)
         {
-            if (normalized.Contains(blocked))
+            // No settings wired (tests / nested runs) → parser default Auto
+            // → the net stays on. Fail-safe.
+            var mode = ApprovalModeParser.Parse(_settings?.Current.ApprovalMode);
+            if (mode != ApprovalMode.Skip)
                 return ToolResult.Fail(
-                    $"Command rejected by safety blocklist (matched \"{blocked.Trim()}\").");
+                    $"Command rejected by safety blocklist (matched \"{threat.Keyword}\", rule {threat.Rule}).");
+
+            // Skip-all approvals: the user explicitly opted out of every
+            // backstop — run it, but leave an audit trail. Log the rule and
+            // the full command: under Skip the command executes anyway, so
+            // the log adds no exposure it doesn't already have.
+            _logger.LogWarning(
+                "run_command: destructive command executed under Skip-all approvals " +
+                "(rule={Rule}, matched={Keyword}): {Command}",
+                threat.Rule, threat.Keyword, command);
         }
 
         var workingDirectory = ResolveWorkingDirectory(arguments, out var wdError);
