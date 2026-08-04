@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Events;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Services;
 using SranDesktop.Application.Models;
 using SranDesktop.Domain.Enums;
 
@@ -18,6 +19,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IChatEdgeApiClient _api;
     private readonly IGatewayApiClient _gateway;
     private readonly IConversationStore _store;
+    private readonly IConversationActivityTracker? _activity;
     private readonly IFileService _fileService;
     private readonly IChatOrchestrator _orchestrator;
     private readonly IChatService _chatService;
@@ -594,11 +596,15 @@ public partial class ChatViewModel : ObservableObject
         IEnumerable<ILocalPlanExecutor>? localPlanExecutors = null,
         IMcpToolHost? toolHost = null,
         IForegroundTargetTracker? foregroundTracker = null,
-        IDialogService? dialogs = null)
+        IDialogService? dialogs = null,
+        // Optional so the many test constructions keep compiling; a null
+        // tracker degrades to "nothing is ever busy", i.e. today's behaviour.
+        IConversationActivityTracker? activity = null)
     {
         _api = api;
         _gateway = gateway;
         _store = store;
+        _activity = activity;
         _fileService = fileService;
         _orchestrator = orchestrator;
         _chatService = chatService;
@@ -1131,6 +1137,11 @@ public partial class ChatViewModel : ObservableObject
 
     private async Task UploadOneAsync(string conversationId, PendingFileViewModel pending)
     {
+        // Hold the conversation open for the whole upload. The server reads
+        // the file before it responds, so this call can run for minutes on a
+        // scanned PDF — long enough for the empty-chat cleaner to delete a
+        // brand-new conversation out from under the reply.
+        using var _busy = _activity?.Begin(conversationId) ?? NullDisposable.Instance;
         try
         {
             var progress = new Progress<double>(p => pending.Progress = p);
@@ -1208,6 +1219,26 @@ public partial class ChatViewModel : ObservableObject
             .Where(f => f.FileId is not null)
             .Select(f => f.FileId!)
             .ToList();
+
+        // The uploads above can run for minutes; make sure the conversation
+        // they belong to still exists before committing anything to it.
+        // It used to be possible for the empty-chat cleaner to delete a
+        // brand-new chat during that wait, after which the manifest write
+        // failed on a FOREIGN KEY, the turn 404'd, and BOTH were swallowed as
+        // warnings — the user's message vanished with nothing on screen.
+        // Give the message back instead of dropping it.
+        if (!await ConversationStillExistsAsync(conversation.Id))
+        {
+            _logger.LogError(
+                "Conversation {Id} disappeared while its attachments uploaded — restoring the message",
+                conversation.Id);
+            InputText = text;
+            foreach (var restored in readyFiles)
+                PendingFiles.Add(restored);
+            ErrorMessage = Localization.LocaleService.Instance.T("chat.error.conversationGone");
+            SendCommand.NotifyCanExecuteChanged();
+            return;
+        }
 
         // Record every attachment in the conversation's file manifest (Phase 14
         // A) BEFORE the turn runs, so this turn's system prompt already lists
@@ -1939,6 +1970,30 @@ public partial class ChatViewModel : ObservableObject
     /// <summary>Newest-first cap on the manifest so a long-lived conversation's
     /// file list can never itself balloon the never-trimmed system prompt.</summary>
     private const int MaxManifestFiles = 20;
+
+    /// <summary>True when the conversation is still on disk. A store error is
+    /// reported as "still there" on purpose: a transient SQLite failure must
+    /// not be read as "deleted" and make us throw a good message away.</summary>
+    private async Task<bool> ConversationStillExistsAsync(string conversationId)
+    {
+        try
+        {
+            return await _store.GetConversationAsync(conversationId) is not null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not confirm conversation {Id} exists", conversationId);
+            return true;
+        }
+    }
+
+    /// <summary>Shared no-op scope so the activity tracker can stay optional
+    /// without every call site needing a null check.</summary>
+    private sealed class NullDisposable : IDisposable
+    {
+        public static readonly NullDisposable Instance = new();
+        public void Dispose() { }
+    }
 
     /// <summary>
     /// Persists this turn's attachments into the conversation's `files` table

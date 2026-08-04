@@ -312,6 +312,12 @@ public static class AppHostBuilder
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ScannedDocumentOcrService>>()));
                 services.AddSingleton<IConversationSyncService, ConversationSyncService>();
                 // Phase 3 D: one-way push backup of agent-mode conversations.
+                // Shared between ChatViewModel (marks a conversation busy
+                // while its uploads/turn run) and ConversationListViewModel
+                // (refuses to prune a busy conversation). Singleton: both
+                // sides must see the same counts.
+                services.AddSingleton<SranDesktop.Application.Services.IConversationActivityTracker,
+                    SranDesktop.Application.Services.ConversationActivityTracker>();
                 services.AddSingleton<IAgentConversationSyncService,
                     SranDesktop.Infrastructure.Services.AgentConversationSyncService>();
 
