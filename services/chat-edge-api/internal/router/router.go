@@ -221,6 +221,10 @@ func New(
 			r.Post("/conversations/{id}/files", h.File.Upload)
 			r.Get("/conversations/{id}/files", h.File.List)
 			r.Get("/files/{fileID}/download", h.File.Download)
+			// Extracted text of one attachment. The desktop agent's
+			// read_document tool reads it for scanned PDFs, which only
+			// the server-side OCR pipeline can handle.
+			r.Get("/files/{fileID}/text", h.File.Text)
 			r.Delete("/files/{fileID}", h.File.Delete)
 
 			// User preferences (custom instructions).
