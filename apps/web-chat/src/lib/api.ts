@@ -42,6 +42,15 @@ const API_BASE =
     ? process.env.NEXT_PUBLIC_API_URL
     : "http://localhost:4000/api/v1";
 
+// Ceiling for a file upload. Shared by both upload paths, which now
+// differ in what they wait for: a KB document is still extracted inside
+// the request (OCR for a scanned PDF, up to the server's 240 s wall),
+// while a conversation-file upload returns as soon as the bytes land and
+// extracts in the background. Sized for the slower of the two, and
+// finite either way so a stuck request eventually surfaces as an error
+// instead of disabling the composer forever.
+const UPLOAD_TIMEOUT_MS = 300_000;
+
 // Single-flight refresh shared across all concurrent 401s (parallel
 // page-mount fetches + an in-flight stream must not stampede the gateway;
 // the backend has a 30s rotation grace window too, but coalescing keeps
@@ -839,6 +848,24 @@ class ApiClient {
       xhr.onabort = () => {
         reject(new ApiError("ABORTED", "Upload cancelled", 0));
       };
+      // The server extracts synchronously — a scanned PDF is OCR'd
+      // before the response comes back — so this request is long by
+      // design. It must still END: with no timeout at all, a hung
+      // extraction left the upload pending forever, which in the
+      // composer meant a permanently disabled send button and no way
+      // for the user to tell a slow read from a dead one. The ceiling
+      // sits above the server's own extraction budget so a genuinely
+      // slow scan still finishes instead of being cut off here.
+      xhr.timeout = UPLOAD_TIMEOUT_MS;
+      xhr.ontimeout = () => {
+        reject(
+          new ApiError(
+            "UPLOAD_TIMEOUT",
+            "The server took too long to read this file",
+            0,
+          ),
+        );
+      };
       if (opts?.signal) {
         if (opts.signal.aborted) {
           xhr.abort();
@@ -925,6 +952,24 @@ class ApiClient {
       };
       xhr.onabort = () => {
         reject(new ApiError("ABORTED", "Upload cancelled", 0));
+      };
+      // Conversation-file uploads no longer wait on text extraction:
+      // the endpoint returns as soon as the bytes are stored, with
+      // extraction_status "processing", and the reader runs server-side
+      // in the background (tracked client-side by lib/fileExtraction).
+      // So this request is short again. The generous ceiling stays as a
+      // pure transfer-side backstop — it has to exist at all because
+      // with no timeout a wedged request stays pending forever and the
+      // chip never leaves "uploading", which DOES still block sending.
+      xhr.timeout = UPLOAD_TIMEOUT_MS;
+      xhr.ontimeout = () => {
+        reject(
+          new ApiError(
+            "UPLOAD_TIMEOUT",
+            "The upload took too long. Please try again.",
+            0,
+          ),
+        );
       };
       if (opts?.signal) {
         if (opts.signal.aborted) {

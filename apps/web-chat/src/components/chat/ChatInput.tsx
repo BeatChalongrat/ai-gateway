@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import type { ExtractionStatus } from "@/lib/fileExtraction";
+import { isExtracting, watchExtraction } from "@/lib/fileExtraction";
 import {
   FILE_PICKER_ACCEPT,
   MAX_FILES_PER_MESSAGE,
@@ -199,8 +201,10 @@ export function ChatInput({
   const updateFileProgress = useChatStore((s) => s.updateFileProgress);
   const markFileReady = useChatStore((s) => s.markFileReady);
   const markFileError = useChatStore((s) => s.markFileError);
+  const setFileExtractionStatus = useChatStore((s) => s.setFileExtractionStatus);
   const removePendingFile = useChatStore((s) => s.removePendingFile);
   const clearPendingFiles = useChatStore((s) => s.clearPendingFiles);
+  const stageOutgoingFiles = useChatStore((s) => s.stageOutgoingFiles);
 
   // Auto Thinking Mode — there is no user-facing reasoning control. The
   // system decides whether to think by picking the right model: a complex
@@ -311,6 +315,16 @@ export function ChatInput({
   };
 
   const isUploading = pendingFiles.some((p) => p.status === "uploading");
+  // Extraction is a SEPARATE, non-blocking phase: the upload resolves
+  // as soon as the bytes land, then the server reads the document in
+  // the background (OCR on a scanned PDF can take minutes). We say what
+  // is happening — "Reading the document…" — but we deliberately do not
+  // gate `canSend` on it. The user can type and send straight away; the
+  // send path waits server-side for the text so the model never answers
+  // about a document it hasn't been given.
+  const isReadingDocument = pendingFiles.some(
+    (p) => p.status === "ready" && isExtracting(p.extractionStatus),
+  );
   const readyFileIds = pendingFiles
     .filter((p) => p.status === "ready" && p.serverId)
     .map((p) => p.serverId!);
@@ -323,6 +337,25 @@ export function ChatInput({
   function submit() {
     if (!canSend) return;
     const t = text.trim();
+    // Hand the attachment metadata to the store BEFORE onSend. The
+    // clearPendingFiles calls below run synchronously, but on the
+    // landing page onSend awaits ensureConv() before it reaches
+    // sendMessage — so sendMessage would otherwise read an
+    // already-emptied bucket and render the user's own message with no
+    // file chips (B1).
+    const idSet = new Set(readyFileIds);
+    stageOutgoingFiles(
+      pendingFiles
+        .filter((p) => p.serverId && idSet.has(p.serverId))
+        .map((p) => ({
+          id: p.serverId!,
+          filename: p.file.name,
+          content_type: p.file.type || "application/octet-stream",
+          file_size_bytes: p.file.size,
+          extraction_status: p.extractionStatus ?? "completed",
+          created_at: new Date().toISOString(),
+        })),
+    );
     onSend(t, readyFileIds, imageMode, videoMode);
     setText("");
     // Clear whichever bucket the visible chips were rendering from —
@@ -396,7 +429,13 @@ export function ChatInput({
       const row = await api.uploadFile(netConvId, file, {
         onProgress: (p) => updateFileProgress(chipBucket, pendingId, p),
       });
-      markFileReady(chipBucket, pendingId, row.id);
+      markFileReady(chipBucket, pendingId, row.id, row.extraction_status);
+      // The upload call now returns before the server has finished
+      // reading the document, so follow the row until extraction lands.
+      // Fire-and-forget: the chip is already usable and sendable.
+      watchExtraction(netConvId, row.id, row.extraction_status, (status) =>
+        setFileExtractionStatus(chipBucket, pendingId, status),
+      );
     } catch (err) {
       const msg =
         err instanceof ApiError ? err.message : "Upload failed. Try again.";
@@ -649,9 +688,11 @@ export function ChatInput({
               placeholder={
                 streaming
                   ? t("input.placeholder.streaming")
-                  : isUploading
-                    ? t("input.placeholder.uploading")
-                    : imageMode
+                  : isReadingDocument
+                    ? t("input.placeholder.reading")
+                    : isUploading
+                      ? t("input.placeholder.uploading")
+                      : imageMode
                       ? t("input.placeholder.image")
                       : t("input.placeholder")
               }
@@ -858,8 +899,20 @@ export async function uploadFiles(
   store: {
     addPendingFile: (id: string, f: File) => string;
     updateFileProgress: (id: string, pid: string, p: number) => void;
-    markFileReady: (id: string, pid: string, sid: string) => void;
+    markFileReady: (
+      id: string,
+      pid: string,
+      sid: string,
+      extractionStatus?: ExtractionStatus,
+    ) => void;
     markFileError: (id: string, pid: string, err: string) => void;
+    /** Optional so existing callers that don't care about the
+     *  background-extraction phase keep compiling unchanged. */
+    setFileExtractionStatus?: (
+      id: string,
+      pid: string,
+      extractionStatus: ExtractionStatus,
+    ) => void;
   },
   chipBucket: string = netConvId,
 ): Promise<void> {
@@ -874,7 +927,13 @@ export async function uploadFiles(
       const row = await api.uploadFile(netConvId, f, {
         onProgress: (p) => store.updateFileProgress(chipBucket, pid, p),
       });
-      store.markFileReady(chipBucket, pid, row.id);
+      store.markFileReady(chipBucket, pid, row.id, row.extraction_status);
+      const onStatus = store.setFileExtractionStatus;
+      if (onStatus) {
+        watchExtraction(netConvId, row.id, row.extraction_status, (status) =>
+          onStatus(chipBucket, pid, status),
+        );
+      }
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Upload failed.";
       store.markFileError(chipBucket, pid, msg);

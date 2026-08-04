@@ -33,6 +33,9 @@ export default function ChatLanding() {
   const updateFileProgress = useChatStore((s) => s.updateFileProgress);
   const markFileReady = useChatStore((s) => s.markFileReady);
   const markFileError = useChatStore((s) => s.markFileError);
+  const setFileExtractionStatus = useChatStore(
+    (s) => s.setFileExtractionStatus,
+  );
 
   // Landing text is buffered locally so the user sees what they
   // typed survive the navigation into the new conversation.
@@ -130,6 +133,7 @@ export default function ChatLanding() {
             updateFileProgress,
             markFileReady,
             markFileError,
+            setFileExtractionStatus,
           },
           DRAFT_CONV_KEY,
         );

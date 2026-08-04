@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -119,4 +120,83 @@ func containsString(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Background-extraction gating (B2).
+//
+// extractionInFlight is the predicate the send path uses to decide whether
+// to wait for a still-extracting upload. Two properties matter: it must
+// hold the turn for a live extraction, and it must NOT hold the turn for a
+// row orphaned by a process that died mid-extraction (there are such rows
+// in the live DB) — otherwise every later turn in that conversation burns
+// the full wait timeout for nothing.
+// ---------------------------------------------------------------------------
+
+func fileWithStatus(status string, age time.Duration) model.ConversationFile {
+	return model.ConversationFile{
+		ID:               uuid.New(),
+		ExtractionStatus: status,
+		UpdatedAt:        time.Now().Add(-age),
+	}
+}
+
+func TestExtractionInFlight_WaitsForAFreshProcessingRow(t *testing.T) {
+	files := []model.ConversationFile{
+		fileWithStatus("completed", time.Minute),
+		fileWithStatus("processing", 2*time.Second),
+	}
+	if !extractionInFlight(files, time.Now()) {
+		t.Fatal("a just-uploaded processing row must hold the turn")
+	}
+}
+
+func TestExtractionInFlight_WaitsForAPendingRow(t *testing.T) {
+	files := []model.ConversationFile{fileWithStatus("pending", time.Second)}
+	if !extractionInFlight(files, time.Now()) {
+		t.Fatal("a pending row must hold the turn")
+	}
+}
+
+func TestExtractionInFlight_IgnoresAnOrphanedProcessingRow(t *testing.T) {
+	// Killed mid-extraction: nothing will ever move this row on.
+	files := []model.ConversationFile{
+		fileWithStatus("processing", extractionStaleAfter+time.Minute),
+	}
+	if extractionInFlight(files, time.Now()) {
+		t.Fatal("a stale processing row must not hold the turn hostage")
+	}
+}
+
+func TestExtractionInFlight_TerminalStatusesNeverWait(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "unsupported"} {
+		files := []model.ConversationFile{fileWithStatus(status, time.Second)}
+		if extractionInFlight(files, time.Now()) {
+			t.Fatalf("status %q is terminal and must not wait", status)
+		}
+	}
+}
+
+func TestExtractionInFlight_EmptyConversationDoesNotWait(t *testing.T) {
+	if extractionInFlight(nil, time.Now()) {
+		t.Fatal("a conversation with no files must never wait")
+	}
+}
+
+// The wait ceiling has to sit above the sandbox's own wall clock,
+// otherwise the send path would abandon extractions that were still
+// perfectly healthy and about to finish.
+func TestExtractionTimeouts_AreOrdered(t *testing.T) {
+	if extractionWaitTimeout <= extractionWall {
+		t.Fatalf("wait timeout %v must exceed the sandbox wall %v",
+			extractionWaitTimeout, extractionWall)
+	}
+	if extractionJobTimeout <= extractionWall {
+		t.Fatalf("job timeout %v must exceed the sandbox wall %v",
+			extractionJobTimeout, extractionWall)
+	}
+	if extractionStaleAfter <= extractionJobTimeout {
+		t.Fatalf("stale-after %v must exceed the job timeout %v so a live job is never declared orphaned",
+			extractionStaleAfter, extractionJobTimeout)
+	}
 }

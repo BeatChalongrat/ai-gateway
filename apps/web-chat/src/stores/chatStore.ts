@@ -56,6 +56,14 @@ export interface PendingFile {
   status: "uploading" | "ready" | "error";
   progress: number; // 0..100
   error?: string;
+  /** Server-side text extraction state, tracked separately from
+   *  `status` because the two are now independent: the upload
+   *  resolves as soon as the bytes land, while extraction (OCR on a
+   *  scanned PDF can take minutes) continues in the background. A
+   *  chip can therefore be "ready" AND still extracting — which is
+   *  exactly the state where sending is allowed but the composer
+   *  should say what is happening. */
+  extractionStatus?: FileAttachment["extraction_status"];
 }
 
 interface ChatState {
@@ -95,6 +103,18 @@ interface ChatState {
   loadingOlder: Record<string, boolean>;
   /** Files staged for the next user message, keyed by conv id. */
   pendingFiles: Record<string, PendingFile[]>;
+  /** Attachment shells handed over by the composer at the instant of
+   *  send, keyed by server file id.
+   *
+   *  Why this exists: `submit()` clears its pending-file bucket
+   *  synchronously right after calling `onSend`, but on the landing
+   *  page `onSend` awaits `ensureConv()` before it reaches
+   *  `sendMessage` — so by the time sendMessage looked for the chips
+   *  they were already gone and the user's own message rendered with
+   *  no attachments (the file was linked server-side all along; only
+   *  the transcript was missing it). Handing the metadata over
+   *  explicitly removes the ordering dependency entirely. */
+  outgoingFiles: Record<string, FileAttachment>;
   errorBanner: string | null;
   setError: (msg: string | null) => void;
 
@@ -102,9 +122,25 @@ interface ChatState {
   addPendingFile: (convId: string, file: File) => string;
   removePendingFile: (convId: string, pendingId: string) => void;
   updateFileProgress: (convId: string, pendingId: string, progress: number) => void;
-  markFileReady: (convId: string, pendingId: string, serverId: string) => void;
+  markFileReady: (
+    convId: string,
+    pendingId: string,
+    serverId: string,
+    extractionStatus?: FileAttachment["extraction_status"],
+  ) => void;
   markFileError: (convId: string, pendingId: string, error: string) => void;
+  /** Background text extraction finished (or moved on) for a chip
+   *  that has already finished uploading. */
+  setFileExtractionStatus: (
+    convId: string,
+    pendingId: string,
+    extractionStatus: FileAttachment["extraction_status"],
+  ) => void;
   clearPendingFiles: (convId: string) => void;
+  /** Hand the composer's staged attachment metadata to the store just
+   *  before `onSend`, so the optimistic user bubble can render chips
+   *  no matter how long the send path takes to reach sendMessage. */
+  stageOutgoingFiles: (files: FileAttachment[]) => void;
 
   // ── conversation ops ─────────────────────────────────────
   loadConversations: () => Promise<void>;
@@ -197,6 +233,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   hasMoreMessages: {},
   loadingOlder: {},
   pendingFiles: {},
+  outgoingFiles: {},
   errorBanner: null,
   nextConversationTemporary: false,
   setNextConversationTemporary(v) {
@@ -241,17 +278,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
     }));
   },
-  markFileReady(convId, pendingId, serverId) {
+  markFileReady(convId, pendingId, serverId, extractionStatus) {
     set((s) => ({
       pendingFiles: {
         ...s.pendingFiles,
         [convId]: (s.pendingFiles[convId] ?? []).map((p) =>
           p.id === pendingId
-            ? { ...p, status: "ready", progress: 100, serverId }
+            ? {
+                ...p,
+                status: "ready",
+                progress: 100,
+                serverId,
+                extractionStatus: extractionStatus ?? p.extractionStatus,
+              }
             : p,
         ),
       },
     }));
+  },
+  setFileExtractionStatus(convId, pendingId, extractionStatus) {
+    set((s) => {
+      // Late arrival: extraction polling outlives the chip (submit()
+      // clears the bucket while the server is still reading a scan).
+      // Bail rather than writing an empty bucket back into the map.
+      const bucket = s.pendingFiles[convId];
+      if (!bucket?.some((p) => p.id === pendingId)) return {};
+      return {
+        pendingFiles: {
+          ...s.pendingFiles,
+          [convId]: bucket.map((p) =>
+            p.id === pendingId ? { ...p, extractionStatus } : p,
+          ),
+        },
+      };
+    });
   },
   markFileError(convId, pendingId, error) {
     set((s) => ({
@@ -268,6 +328,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const next = { ...s.pendingFiles };
       delete next[convId];
       return { pendingFiles: next };
+    });
+  },
+  stageOutgoingFiles(files) {
+    if (files.length === 0) return;
+    set((s) => {
+      const next = { ...s.outgoingFiles };
+      for (const f of files) next[f.id] = f;
+      return { outgoingFiles: next };
     });
   },
 
@@ -810,40 +878,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const convModelId =
       get().conversations.find((c) => c.id === convId)?.model_id ?? null;
 
-    // Build optimistic file shells from the current pendingFiles
-    // list so the user immediately sees badges/thumbnails under
-    // their message even before the server reloads message history.
+    // Build optimistic file shells so the user immediately sees
+    // badges/thumbnails under their own message, before the server
+    // reloads message history.
     //
-    // We search EVERY bucket and match by serverId because chips
-    // can be staged under two different keys depending on the entry
-    // point:
-    //   - Conv page: ChatInput stages into pendingFiles[convId]
-    //     (its render bucket equals the URL conv id).
-    //   - Landing page: ChatInput stages into pendingFiles[DRAFT]
-    //     because its conversationId prop stays null for the
-    //     instance's whole lifetime — only ensureConv knows the
-    //     real id, and it materialises here, not in the staging
-    //     bucket. A naive pendingFiles[convId] lookup misses every
-    //     landing send and the user bubble renders an empty pill
-    //     with no files visible.
-    // Filtering by fileIds keeps unrelated still-uploading rows
-    // (from a previous send that the user abandoned) off this
-    // message.
+    // PRIMARY source is `outgoingFiles` — the composer hands the
+    // metadata over synchronously in submit(), immediately before
+    // onSend. That matters because submit() also clears its chip
+    // bucket synchronously, while the landing page's onSend awaits
+    // ensureConv() before it ever reaches this function: reading the
+    // chips here would find an already-emptied bucket and render the
+    // user's message with no attachment (the classic "the AI clearly
+    // read my PDF but my message shows no file" report — the file was
+    // linked server-side the whole time, only the transcript was
+    // missing it).
+    //
+    // FALLBACK is the old every-bucket pendingFiles scan, matched by
+    // serverId. It still covers any caller that reaches sendMessage
+    // without going through the composer (tests, future entry points).
+    // Filtering by fileIds keeps unrelated still-uploading rows (from
+    // a send the user abandoned) off this message.
     const fileIdSet = new Set(fileIds ?? []);
-    const optimisticFiles: FileAttachment[] =
-      fileIdSet.size === 0
-        ? []
-        : Object.values(get().pendingFiles)
-            .flat()
-            .filter((p) => p.serverId && fileIdSet.has(p.serverId))
-            .map((p) => ({
-              id: p.serverId!,
-              filename: p.file.name,
-              content_type: p.file.type || "application/octet-stream",
-              file_size_bytes: p.file.size,
-              extraction_status: "completed" as const,
-              created_at: new Date().toISOString(),
-            }));
+    let optimisticFiles: FileAttachment[] = [];
+    if (fileIdSet.size > 0) {
+      const staged = get().outgoingFiles;
+      const fromPending = new Map<string, FileAttachment>();
+      for (const p of Object.values(get().pendingFiles).flat()) {
+        if (!p.serverId || !fileIdSet.has(p.serverId)) continue;
+        fromPending.set(p.serverId, {
+          id: p.serverId,
+          filename: p.file.name,
+          content_type: p.file.type || "application/octet-stream",
+          file_size_bytes: p.file.size,
+          extraction_status: p.extractionStatus ?? "completed",
+          created_at: new Date().toISOString(),
+        });
+      }
+      // Preserve the caller's order rather than bucket iteration order.
+      optimisticFiles = (fileIds ?? [])
+        .map((id) => staged[id] ?? fromPending.get(id))
+        .filter((f): f is FileAttachment => Boolean(f));
+      // Consume what we used so a later send can't resurrect stale
+      // shells for ids it wasn't given.
+      if (Object.keys(staged).length > 0) {
+        set((s) => {
+          const next = { ...s.outgoingFiles };
+          for (const id of fileIdSet) delete next[id];
+          return { outgoingFiles: next };
+        });
+      }
+    }
 
     set((s) => ({
       messages: {
