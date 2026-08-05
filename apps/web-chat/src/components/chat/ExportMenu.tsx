@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
-import { useT } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 
 interface Props {
@@ -37,7 +37,7 @@ export function ExportMenu({ conversationId, onShare }: Props) {
         format === "markdown" ? "text/markdown" : "application/json";
       downloadText(text, `conversation_${conversationId.slice(0, 8)}.${ext}`, mime);
     } catch {
-      toast("Export failed. Try again.");
+      toast(tOutside("export.toast.failed"));
     }
   }
 
@@ -57,9 +57,9 @@ export function ExportMenu({ conversationId, onShare }: Props) {
         document.execCommand("copy");
         document.body.removeChild(ta);
       }
-      toast("Copied to clipboard");
+      toast(tOutside("toast.copiedClipboard"));
     } catch {
-      toast("Couldn't copy.");
+      toast(tOutside("toast.copyFailed"));
     }
   }
 

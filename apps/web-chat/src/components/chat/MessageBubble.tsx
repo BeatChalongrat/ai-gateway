@@ -20,6 +20,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { FallbackAttempt, Message } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 import { fallbackNotice } from "@/lib/errorMessages";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
@@ -68,6 +69,7 @@ function MessageBubbleImpl({
   onEdit,
   onSwitchBranch,
 }: Props) {
+  const t = useT();
   const isUser = message.role === "user";
   const router = useRouter();
 
@@ -389,11 +391,11 @@ function MessageBubbleImpl({
         </div>
         {message.status === "error" ? (
           <span className="ml-2 text-[11px] text-status-danger">
-            AI service error
+            {t("msg.aiError")}
           </span>
         ) : null}
         {message.status === "cancelled" ? (
-          <span className="ml-2 text-[11px] text-text-muted">stopped</span>
+          <span className="ml-2 text-[11px] text-text-muted">{t("msg.stopped")}</span>
         ) : null}
         {!message.isStreaming ? <MessageMeta message={message} /> : null}
       </div>
@@ -439,6 +441,7 @@ function ErrorNotice({
   message: string;
   attempts?: FallbackAttempt[];
 }) {
+  const t = useT();
   const hasAttempts = Array.isArray(attempts) && attempts.length > 0;
   return (
     <div
@@ -452,15 +455,15 @@ function ErrorNotice({
       {hasAttempts ? (
         <details className="mt-1.5 pl-6 text-[11px] text-status-danger/80">
           <summary className="cursor-pointer select-none">
-            รายละเอียดการลองเชื่อมต่อ ({attempts!.length})
+            {t("msg.attempts", { n: String(attempts!.length) })}
           </summary>
           <ul className="mt-1 space-y-0.5">
             {attempts!.map((a, i) => (
               <li key={i}>
                 {a.model ?? a.provider ?? "model"}
                 {a.status === "success"
-                  ? " — สำเร็จ"
-                  : ` — ${a.error ?? a.error_code ?? "ล้มเหลว"}`}
+                  ? ` — ${t("msg.attemptOk")}`
+                  : ` — ${a.error ?? a.error_code ?? t("msg.attemptFail")}`}
               </li>
             ))}
           </ul>

@@ -220,6 +220,28 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
             yield return frame;
     }
 
+    public async IAsyncEnumerable<SseFrame> ResumeMessageStreamAsync(
+        string conversationId, string messageId,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        // Phase 5 Task 3: reattach to an in-flight generation. Same SSE reader
+        // as the POST send; a 409 (RESUME_UNAVAILABLE) or 404 surfaces as
+        // HttpRequestException with the status code set — the caller retries
+        // or gives up accordingly.
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"api/v1/conversations/{Uri.EscapeDataString(conversationId)}"
+            + $"/messages/{Uri.EscapeDataString(messageId)}/stream");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        await EnsureSuccessAsync(response, ct);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        await foreach (var frame in SseStreamReader.ParseAsync(stream, ct))
+            yield return frame;
+    }
+
     public async Task<bool> CancelStreamAsync(string conversationId, CancellationToken ct = default)
     {
         using var deadline = Deadline(ct);

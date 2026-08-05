@@ -245,7 +245,7 @@ public sealed class MarkdownRenderer
             HorizontalAlignment = HorizontalAlignment.Right,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
-            ToolTip = "Copy code"
+            ToolTip = Localization.LocaleService.Instance.T("artifact.copyCode")
         };
         copyButton.Click += (_, _) =>
         {

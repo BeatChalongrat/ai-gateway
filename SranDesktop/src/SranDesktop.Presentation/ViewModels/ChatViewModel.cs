@@ -33,6 +33,11 @@ public partial class ChatViewModel : ObservableObject
     private readonly IDialogService? _dialogs;
     private readonly IReadOnlyList<ILocalPlanExecutor> _localPlanExecutors;
 
+    /// <summary>OS-level completion notification: balloon when a turn finishes
+    /// while the window is unfocused. Null (tests / headless) = never notify.</summary>
+    private readonly ICompletionNotifier? _completionNotifier;
+    private readonly IWindowStateProvider? _windowState;
+
     /// <summary>Phase 16 A: the run_subagent tool, when it exposes live nested
     /// progress. Subscribed once (both this VM and the tool are singletons).</summary>
     private readonly ISupportsNestedProgress? _nestedProgressTool;
@@ -52,6 +57,17 @@ public partial class ChatViewModel : ObservableObject
 
     private CancellationTokenSource? _streamCts;
     private readonly System.Diagnostics.Stopwatch _uiThrottle = new();
+
+    // ── Phase 5 Task 3: reattach to an in-flight server-side generation ─────
+    // A chat-edge conversation opened while its reply is still streaming
+    // (started on web, or the app restarted mid-turn) shows a live bubble and
+    // resumes the stream instead of dropping the row.
+    private readonly StreamReattachRunner _reattach = new();
+    private CancellationTokenSource? _reattachCts;
+
+    /// <summary>The in-flight reattach for the open conversation (Phase 5
+    /// Task 3). Internal so tests can await it deterministically.</summary>
+    internal Task ReattachTask { get; private set; } = Task.CompletedTask;
 
     public ObservableCollection<MessageViewModel> Messages { get; } = new();
 
@@ -322,7 +338,7 @@ public partial class ChatViewModel : ObservableObject
         {
             // Revert the toggle; the resulting Stop call is a harmless no-op.
             IsListening = false;
-            ErrorMessage = "Speech recognition is unavailable (no recognizer, microphone, or speech key).";
+            ErrorMessage = Localization.LocaleService.Instance.T("voice.unavailable");
         }
     }
 
@@ -606,7 +622,10 @@ public partial class ChatViewModel : ObservableObject
         IDialogService? dialogs = null,
         // Optional so the many test constructions keep compiling; a null
         // tracker degrades to "nothing is ever busy", i.e. today's behaviour.
-        IConversationActivityTracker? activity = null)
+        IConversationActivityTracker? activity = null,
+        // Optional for the same reason; null = no OS-level completion balloon.
+        ICompletionNotifier? completionNotifier = null,
+        IWindowStateProvider? windowState = null)
     {
         _api = api;
         _gateway = gateway;
@@ -622,6 +641,8 @@ public partial class ChatViewModel : ObservableObject
         _logger = logger;
         _foregroundTracker = foregroundTracker;
         _dialogs = dialogs;
+        _completionNotifier = completionNotifier;
+        _windowState = windowState;
         // Phase 12 E: on-device excel/doc/pptx plan executors; anything they
         // can't reproduce falls back to chat-edge.
         _localPlanExecutors = localPlanExecutors?.ToList() ?? new List<ILocalPlanExecutor>();
@@ -709,6 +730,10 @@ public partial class ChatViewModel : ObservableObject
         // CancelStreaming so an abandoned chat-edge turn is also cancelled
         // server-side (the guard inside makes it a no-op when idle).
         CancelStreaming();
+        // A reattach belongs to the outgoing conversation too (Phase 5 Task 3);
+        // unlike CancelStreaming this must NOT cancel server-side — the
+        // generation keeps running and the next open reattaches again.
+        CancelReattach();
 
         // Persist the outgoing conversation's composer text before switching,
         // then reset the composer (the new conversation's draft restores below).
@@ -774,15 +799,26 @@ public partial class ChatViewModel : ObservableObject
             var serverRead = false;
             // Legacy local-first conversations read their Phase 3 mirror.
             var serverConversationId = conversation.ServerId ?? conversation.Id;
+            MessageDto? resumable = null;
 
             try
             {
                 var response = await _api.ListMessagesAsync(serverConversationId, 50);
                 serverRead = true;
+                var lastDto = response.Messages.Count > 0 ? response.Messages[^1] : null;
                 foreach (var dto in response.Messages)
                 {
                     if (dto.Role != "user" && string.IsNullOrWhiteSpace(dto.Content))
+                    {
+                        // Phase 5 Task 3: the LAST row still generating
+                        // server-side is live, not a cancelled leftover — keep
+                        // it and reattach to its stream below. Every other
+                        // empty assistant row drops as before.
+                        if (dto.Role == "assistant" && dto.Status == "streaming"
+                            && ReferenceEquals(dto, lastDto) && !IsStreaming)
+                            resumable = dto;
                         continue; // cancelled turns leave empty assistant rows
+                    }
                     var role = dto.Role switch
                     {
                         "user" => MessageRole.User,
@@ -860,6 +896,12 @@ public partial class ChatViewModel : ObservableObject
             UpdateLastAssistantFlag();
             MessageActivity?.Invoke(this, EventArgs.Empty);
 
+            // Phase 5 Task 3: the last assistant row is still generating
+            // server-side — add a live bubble and reattach to the in-flight
+            // stream in the background (prefix + live deltas).
+            if (resumable is not null)
+                StartReattach(conversation, serverConversationId, resumable);
+
             // Render the messages' server attachments (FIX 10) — uploads made
             // on web AND this device's own synced attachments. Fire-and-forget
             // so a slow download never blocks the open; the task is kept for
@@ -912,6 +954,175 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogDebug(ex, "Could not cache server transcript for {Id}", conversationId);
         }
+    }
+
+    // ── Phase 5 Task 3: reattach to an in-flight server-side generation ─────
+
+    /// <summary>Adds the streaming bubble for a server row still generating and
+    /// starts the background reattach. Runs on the UI thread (called from
+    /// OpenConversationAsync); the async continuations stay on it too.</summary>
+    private void StartReattach(
+        ConversationItemViewModel conversation, string serverConversationId, MessageDto dto)
+    {
+        var bubble = new MessageViewModel(dto.Id, MessageRole.Assistant, string.Empty, dto.CreatedAt)
+        {
+            IsStreaming = true,
+            IsServerMessage = true, // server row — feedback POSTs allowed
+            ModelId = dto.ModelId,
+            StatusText = Localization.LocaleService.Instance.T("status.reattaching")
+        };
+        Messages.Add(bubble);
+        UpdateLastAssistantFlag();
+        MessageActivity?.Invoke(this, EventArgs.Empty);
+
+        var cts = new CancellationTokenSource();
+        _reattachCts = cts;
+        ReattachTask = ReattachAsync(conversation, serverConversationId, dto.Id, bubble, cts);
+    }
+
+    private async Task ReattachAsync(
+        ConversationItemViewModel conversation, string serverConversationId,
+        string messageId, MessageViewModel bubble, CancellationTokenSource cts)
+    {
+        try
+        {
+            var outcome = await _reattach.RunAsync(
+                serverConversationId,
+                ct => _chatService.ResumeMessageAsync(serverConversationId, messageId, ct),
+                resetTarget: () =>
+                {
+                    // Every attempt re-delivers the full prefix — start empty
+                    // so a retry never duplicates text.
+                    bubble.ResetStreamedContent();
+                    bubble.StatusText = Localization.LocaleService.Instance.T("status.reattaching");
+                },
+                onEvent: evt => OnReattachEventAsync(conversation, bubble, evt, cts.Token),
+                cts.Token);
+
+            switch (outcome)
+            {
+                case ReattachOutcome.Completed:
+                    // Persist the finished row the same way the server read
+                    // caches rows, so the reply survives an offline reopen.
+                    await CacheReattachedRowAsync(conversation.Id, serverConversationId, bubble);
+                    break;
+                case ReattachOutcome.Lost:
+                    bubble.SetError(Localization.LocaleService.Instance.T("error.resumeLost"));
+                    break;
+                case ReattachOutcome.AlreadyRunning:
+                case ReattachOutcome.Cancelled:
+                    bubble.StatusText = null;
+                    break;
+                // Errored: the stream's own error event already set the bubble.
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Stream reattach failed for {Id}", serverConversationId);
+            bubble.SetError(Localization.LocaleService.Instance.T("error.resumeLost"));
+        }
+        finally
+        {
+            bubble.IsStreaming = false;
+            if (ReferenceEquals(_reattachCts, cts))
+                _reattachCts = null;
+            cts.Dispose();
+            MessageActivity?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>Maps reattach stream events onto the bubble — the SAME handling
+    /// the chat-edge send flow uses (RunChatEdgeTurnAsync), so reattached
+    /// replies render identically to live ones.</summary>
+    private async Task OnReattachEventAsync(
+        ConversationItemViewModel conversation, MessageViewModel bubble,
+        ChatStreamEvent evt, CancellationToken ct)
+    {
+        switch (evt)
+        {
+            case ContentDeltaEvent delta:
+                bubble.AppendContent(delta.Text);
+                RaiseThrottledActivity();
+                break;
+
+            case ReasoningDeltaEvent reasoning:
+                bubble.AppendReasoning(reasoning.Text);
+                break;
+
+            case StreamStatusEvent { Kind: "image" } status:
+                bubble.IsGeneratingImage =
+                    status.Status is not ("completed" or "failed" or "error");
+                MessageActivity?.Invoke(this, EventArgs.Empty);
+                break;
+
+            case StreamStatusEvent { Kind: "video" } status:
+                bubble.IsGeneratingVideo =
+                    status.Status is not ("completed" or "failed" or "error");
+                MessageActivity?.Invoke(this, EventArgs.Empty);
+                break;
+
+            case MessageFilesEvent files:
+                await AttachGeneratedFilesAsync(bubble, files, ct);
+                break;
+
+            case StreamCompletedEvent completed:
+                bubble.ModelId ??= ResolveModel(conversation);
+                ExtractPlanBlocks(conversation.Id, bubble);
+                bubble.Complete(completed.Usage);
+                break;
+
+            case FallbackInfoEvent fallback when !string.IsNullOrEmpty(fallback.ActualModel)
+                                                  && !string.IsNullOrEmpty(fallback.RequestedModel):
+                SetFallbackNotice(bubble, fallback.ActualModel!, fallback.RequestedModel!);
+                break;
+
+            case StreamErrorEvent error:
+                // Only ordinary turn errors reach here — the reattach control
+                // codes are consumed by the runner.
+                _logger.LogWarning("Reattached turn error: {Message}", error.Message);
+                bubble.SetError(LocalizeTurnError(error.Code, error.Message));
+                break;
+        }
+    }
+
+    /// <summary>Writes the reattached, now-complete reply into the local
+    /// offline cache via the same path the server read uses. Best-effort.</summary>
+    private async Task CacheReattachedRowAsync(
+        string conversationId, string serverConversationId, MessageViewModel bubble)
+    {
+        if (bubble.IsError || bubble.Content.Length == 0)
+            return;
+        try
+        {
+            var localRows = await _store.GetMessagesAsync(conversationId);
+            await CacheServerRowsAsync(conversationId, serverConversationId,
+                new List<(string, MessageRole, string, DateTimeOffset, string?, bool, List<FileAttachmentDto>?)>
+                {
+                    (bubble.Id, MessageRole.Assistant, bubble.Content, bubble.CreatedAt, bubble.ModelId, true, null)
+                },
+                localRows);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not cache reattached reply for {Id}", conversationId);
+        }
+    }
+
+    /// <summary>Stops the in-flight reattach (conversation switch). Client-side
+    /// only — the server keeps generating and a later open reattaches again.
+    /// The task owns its CTS and disposes it in its finally block.</summary>
+    private void CancelReattach()
+    {
+        try
+        {
+            _reattachCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The reattach task finished and disposed it between the null
+            // check and the cancel — nothing left to stop.
+        }
+        _reattachCts = null;
     }
 
     /// <summary>Attachment hydration in flight for the open conversation
@@ -1321,9 +1532,13 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogError(ex, "Streaming connection dropped");
             assistantMessage.SetError(Localization.LocaleService.Instance.T("error.connectionLost"));
+            // Phase 5 Task 3 (D3): the chain up to the last completed step is
+            // intact — let the user Continue instead of retyping.
+            OfferContinueAfterDrop(assistantMessage);
         }
         finally
         {
+            _currentLoopState = null;
             IsStreaming = false;
             assistantMessage.IsStreaming = false;
             _streamCts?.Dispose();
@@ -1332,6 +1547,9 @@ public partial class ChatViewModel : ObservableObject
             conversation.UpdatedAt = DateTimeOffset.Now;
             ExtractPlanBlocks(conversation.Id, assistantMessage);
             MessageActivity?.Invoke(this, EventArgs.Empty);
+
+            // OS-level "response ready" balloon when the window is unfocused.
+            NotifyTurnFinishedIfUnfocused(conversation, assistantMessage);
 
             // Auto-read the reply when enabled in Voice Settings (R9 J).
             if (_settings.Current.VoiceAutoRead
@@ -1549,6 +1767,11 @@ public partial class ChatViewModel : ObservableObject
         string modelId, int? contextWindow, ConversationItemViewModel conversation,
         int chainStart, CancellationToken ct)
     {
+        // Phase 5 Task 3 (D3): keep the loop's state reachable for the
+        // SendAsync/ContinueTurnAsync IOException handlers, which run after
+        // these locals have left scope.
+        _currentLoopState = new AgentResumeState(
+            gatewayMessages, chainStart, assistantMessage, conversation, modelId, contextWindow);
         try
         {
             await foreach (var evt in _orchestrator.RunAsync(
@@ -1565,7 +1788,8 @@ public partial class ChatViewModel : ObservableObject
                     case AgentStatusEvent status:
                         if (assistantMessage.Content.Length == 0)
                             assistantMessage.StatusText = status.Iteration > 1
-                                ? $"Working... (step {status.Iteration}/{status.MaxIterations})"
+                                ? Localization.LocaleService.Instance.T(
+                                    "agent.workingStep", status.Iteration, status.MaxIterations)
                                 : null;
                         break;
 
@@ -1589,7 +1813,8 @@ public partial class ChatViewModel : ObservableObject
                         break;
 
                     case AgentToolConsentRequestEvent consent:
-                        assistantMessage.StatusText = $"Waiting for permission: {consent.ToolName}...";
+                        assistantMessage.StatusText = Localization.LocaleService.Instance.T(
+                            "agent.waitingPermission", consent.ToolName);
                         break;
 
                     case AgentToolResultEvent result:
@@ -1687,6 +1912,29 @@ public partial class ChatViewModel : ObservableObject
 
     private AgentResumeState? _agentResume;
 
+    /// <summary>The live loop state of the CURRENT gateway agent turn, captured
+    /// at loop entry (Phase 5 Task 3 D3). The SendAsync-level IOException
+    /// handler cannot see the loop's locals, so this is how a mid-stream
+    /// connection drop can offer Continue with the chain up to the last
+    /// completed step. Cleared in the turn's finally blocks.</summary>
+    private AgentResumeState? _currentLoopState;
+
+    /// <summary>Phase 5 Task 3 (D3): after a mid-stream connection drop on the
+    /// GATEWAY path, the in-memory chain up to the last completed tool step is
+    /// still valid — surface the existing Continue affordance instead of
+    /// auto-retrying (agent tools are side-effectful; replaying them
+    /// automatically is unsafe). No-op when the drop wasn't a gateway agent
+    /// turn (chat-edge turns reattach server-side instead).</summary>
+    private void OfferContinueAfterDrop(MessageViewModel assistant)
+    {
+        if (_currentLoopState is not { } state || !ReferenceEquals(state.Assistant, assistant))
+            return;
+        _agentResume = state;
+        assistant.CanContinue = true;
+        assistant.MetaLine = Localization.LocaleService.Instance.T("status.continueAvailable");
+        ContinueTurnCommand.NotifyCanExecuteChanged();
+    }
+
     private bool CanContinueTurn() => !IsStreaming && _agentResume is not null;
 
     /// <summary>Continue a paused turn: re-enter the loop with the accumulated
@@ -1700,6 +1948,9 @@ public partial class ChatViewModel : ObservableObject
 
         var assistant = resume.Assistant;
         assistant.CanContinue = false;
+        // A turn resumed after a connection drop (D3) sheds its error state —
+        // including the injected error text when nothing had streamed yet.
+        assistant.ClearError();
         assistant.IsStreaming = true;
         assistant.MetaLine = null;
         assistant.StatusText = null;
@@ -1730,9 +1981,12 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogError(ex, "Continue connection dropped");
             assistant.SetError(Localization.LocaleService.Instance.T("error.connectionLost"));
+            // A drop during a Continue is recoverable the same way (D3).
+            OfferContinueAfterDrop(assistant);
         }
         finally
         {
+            _currentLoopState = null;
             IsStreaming = false;
             assistant.IsStreaming = false;
             _orchestrator.ConsentRequested -= OnConsentRequested;
@@ -1744,11 +1998,38 @@ public partial class ChatViewModel : ObservableObject
             ExtractPlanBlocks(resume.Conversation.Id, assistant);
             MessageActivity?.Invoke(this, EventArgs.Empty);
 
+            // OS-level "response ready" balloon when the window is unfocused.
+            NotifyTurnFinishedIfUnfocused(resume.Conversation, assistant);
+
             // The user row was saved on the first pass; re-persist the chain +
             // (now-complete) answer by their stable ids (upsert), then land
             // the visible text on the server (FIX 9 Part A).
             await PersistTurnAsync(resume.Conversation.Id, null, assistant);
             await LandTurnOnServerAsync(resume.Conversation.Id, assistant);
+        }
+    }
+
+    /// <summary>OS-level completion balloon: fires exactly once per finished
+    /// turn (the turn's finally block runs once), and only when the main
+    /// window is NOT focused at completion time — minimized, hidden to tray or
+    /// behind another app. The focused case stays silent (the in-window UI
+    /// already shows the reply). Null services (tests / headless) degrade to
+    /// "never notify"; a notifier failure never fails the turn.</summary>
+    private void NotifyTurnFinishedIfUnfocused(
+        ConversationItemViewModel conversation, MessageViewModel assistant)
+    {
+        if (_completionNotifier is null || _windowState is null)
+            return;
+        try
+        {
+            if (_windowState.IsWindowActive)
+                return;
+            _completionNotifier.NotifyTurnCompleted(
+                conversation.Id, conversation.Title, assistant.IsError);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Completion notification failed");
         }
     }
 
@@ -2629,9 +2910,12 @@ public partial class ChatViewModel : ObservableObject
         return gatewayMessages;
     }
 
-    /// <summary>Re-ask the last user message for a fresh response.</summary>
+    /// <summary>Re-ask the last user message for a fresh response.
+    /// Forks at the last user message via the branch infra (R9 F) so the
+    /// old reply is preserved as a ◀ n/m ▶ branch instead of the
+    /// transcript growing a duplicate user bubble.</summary>
     [RelayCommand]
-    private void Regenerate()
+    private async Task RegenerateAsync()
     {
         if (IsStreaming || Conversation is null)
             return;
@@ -2639,9 +2923,7 @@ public partial class ChatViewModel : ObservableObject
         if (lastUser is null || string.IsNullOrWhiteSpace(lastUser.Content))
             return;
 
-        InputText = lastUser.Content;
-        if (SendCommand.CanExecute(null))
-            SendCommand.Execute(null);
+        await ForkAndResendAsync(lastUser, lastUser.Content);
     }
 
     /// <summary>Load a user message back into the composer to edit and re-send.</summary>
@@ -2696,12 +2978,21 @@ public partial class ChatViewModel : ObservableObject
         if (newText.Length == 0 || newText == message.Content)
             return;
 
-        var index = Messages.IndexOf(message);
+        await ForkAndResendAsync(message, newText);
+    }
+
+    /// <summary>Shared fork core behind edit-in-place AND regenerate:
+    /// detach the tail from <paramref name="head"/> (head included) as a
+    /// branch, re-send <paramref name="text"/>, and register the fresh
+    /// tail as the active branch.</summary>
+    private async Task ForkAndResendAsync(MessageViewModel head, string text)
+    {
+        var index = Messages.IndexOf(head);
         if (index < 0)
             return;
 
         // The branch set is keyed by the original head's id (shared by siblings).
-        var key = message.BranchKey ?? message.Id;
+        var key = head.BranchKey ?? head.Id;
         if (!_branchSets.TryGetValue(key, out var set))
         {
             set = new BranchSet();
@@ -2717,8 +3008,8 @@ public partial class ChatViewModel : ObservableObject
         else
             set.Tails[set.Current] = oldTail;
 
-        // Send the edited content as the new branch.
-        InputText = newText;
+        // Send the content as the new branch.
+        InputText = text;
         await SendAsync();
 
         // The new head is the user message that landed at the fork position.

@@ -854,6 +854,40 @@
                 </TextBlock>
             </StackPanel>
 
+            <!-- Retry: an errored turn hides the hover action row (thumbs/copy make
+                 no sense on a failure), which used to leave NO affordance at all —
+                 the user had to retype. This standalone pill restores one: visible
+                 only on the LAST assistant message when it errored, wired to
+                 Regenerate, which forks the failed reply off as a branch and
+                 re-asks the same user message. -->
+            <StackPanel Orientation="Horizontal" Margin="-4,8,0,0">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsError}" Value="True" />
+                                    <Condition Binding="{Binding IsLastAssistantMessage}" Value="True" />
+                                    <Condition Binding="{Binding IsStreaming}" Value="False" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <Button Style="{DynamicResource PillButton}" Padding="12,4"
+                        AutomationProperties.Name="{loc:T common.retry}"
+                        Command="{Binding DataContext.RegenerateCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}">
+                    <StackPanel Orientation="Horizontal">
+                        <controls:IconView Geometry="{StaticResource Geo_Regenerate}"
+                                           Stroke="{DynamicResource TextSecondaryBrush}"
+                                           Width="15" Height="15" Margin="0,0,6,0" />
+                        <TextBlock Text="{loc:T common.retry}" FontSize="12.5" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
             <!-- Continue: resume a turn paused at its step/time budget (PART 1/6).
                  Standalone (not hover-gated) so the checkpoint is always actionable. -->
             <Button Margin="-4,8,0,0" HorizontalAlignment="Left"

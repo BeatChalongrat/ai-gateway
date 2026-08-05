@@ -100,6 +100,23 @@ export interface Conversation {
    *  unfiled — the conversation shows in the PINNED / time buckets. A UUID
    *  files it under that folder; the sidebar groups by this value. */
   folder_id?: UUID | null;
+  /** Phase-4 Projects. `null`/`undefined` means the conversation is
+   *  not assigned to any project; a UUID assigns it to that project
+   *  (server injects the project's instructions + KB into the flow). */
+  project_id?: UUID | null;
+}
+
+/** Phase-4 Projects — a workspace grouping conversations under shared
+ *  instructions and an optional knowledge base. */
+export interface Project {
+  id: UUID;
+  name: string;
+  instructions: string;
+  knowledge_base_id: UUID | null;
+  /** Live count of non-deleted conversations assigned to this project. */
+  conversation_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 /** A user-defined sidebar folder (migration 022). Flat (no nesting). */
@@ -117,6 +134,36 @@ export interface ConversationListResponse {
   conversations: Conversation[];
   has_more: boolean;
   next_cursor: string | null;
+}
+
+/** One hit from GET /search — the S6 full-text engine (ts_rank over
+ *  message bodies / titles / memories). Mirrors the Go
+ *  PastContextResult wire shape. */
+export interface PastContextSearchResult {
+  type: string; // "message" | "conversation" | "memory"
+  conversation_id?: string;
+  conversation_title?: string;
+  content: string;
+  role?: string;
+  date: string;
+  relevance: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  scope: string;
+  results: PastContextSearchResult[];
+  total: number;
+}
+
+/** Sidebar-friendly content match: one row per conversation whose
+ *  MESSAGE BODIES matched the search (title matches render as normal
+ *  conversation rows instead). */
+export interface ConversationSearchHit {
+  conversation_id: string;
+  conversation_title: string;
+  snippet: string;
+  date: string;
 }
 
 export type MessageRole = "user" | "assistant" | "system";

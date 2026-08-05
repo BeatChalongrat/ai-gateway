@@ -1,63 +1,60 @@
 // B1 (Layer 3) — map machine-readable gateway error codes to
-// user-friendly Thai messages. The gateway/chat-edge emit a stable
-// ``code`` plus an English ``message``; the frontend owns localization
-// so the wire stays language-neutral. Unknown codes fall back to the
-// server-provided message, then a generic Thai default.
+// user-friendly messages. The gateway/chat-edge emit a stable
+// ``code`` plus an English ``message``; the frontend owns
+// localization so the wire stays language-neutral.
+//
+// Phase-2 i18n sweep: the copy now lives in the EN/TH dictionary and
+// follows the ACTIVE locale at the moment the error is localized
+// (tOutside). These strings are captured onto message objects at
+// stream time, so an already-rendered error keeps the language it was
+// created in — same behavior as before, minus the always-Thai bug.
 
-const ERROR_MESSAGES_TH: Record<string, string> = {
-  provider_error: "ไม่สามารถเชื่อมต่อกับผู้ให้บริการ AI ได้ กรุณาลองใหม่อีกครั้ง",
-  provider_unavailable: "บริการ AI ไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่อีกครั้ง",
-  provider_timeout: "ผู้ให้บริการ AI ตอบสนองช้าเกินไป กรุณาลองใหม่อีกครั้ง",
-  all_models_failed:
-    "ไม่สามารถตอบได้ในขณะนี้ กรุณาลองใหม่ หรือเลือกโมเดลอื่น",
-  rate_limit_exceeded:
-    "มีคำขอมากเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง",
-  INSUFFICIENT_CREDITS:
-    "เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต",
-  insufficient_credits:
-    "เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต",
-  internal_error: "เกิดข้อผิดพลาดภายในระบบ กรุณาลองใหม่อีกครั้ง",
-  image_invalid_request:
-    "คำขอสร้างรูปไม่ถูกต้อง หรือโมเดล/ขนาดรูปไม่รองรับ",
-  image_auth_error:
-    "ระบบยังไม่มีสิทธิ์ใช้บริการสร้างรูป กรุณาตรวจสอบ OpenAI API key หรือสิทธิ์ของโมเดล",
-  image_rate_limited:
-    "โควต้าหรือ rate limit สำหรับสร้างรูปเต็มแล้ว กรุณารอสักครู่แล้วลองใหม่",
-  image_timeout:
-    "ระบบสร้างรูปใช้เวลานานเกินไป กรุณาลองใหม่อีกครั้ง",
-  image_provider_unavailable:
-    "บริการสร้างรูปไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่อีกครั้ง",
-  image_provider_error:
-    "ไม่สามารถสร้างรูปได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง",
-  image_service_not_configured:
-    "ระบบสร้างรูปยังไม่ได้ตั้งค่า กรุณาติดต่อผู้ดูแลระบบ",
-  image_empty_response:
-    "ระบบสร้างรูปไม่ส่งไฟล์รูปกลับมา กรุณาลองใหม่อีกครั้ง",
-  image_bad_response:
-    "ไฟล์รูปที่ได้รับไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง",
-  image_attachment_save_failed:
-    "สร้างรูปแล้วแต่บันทึกไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
-  image_cancelled: "ยกเลิกการสร้างรูปแล้ว",
+import { tOutside } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
+
+const ERROR_CODE_KEYS: Record<string, DictKey> = {
+  provider_error: "error.provider_error",
+  provider_unavailable: "error.provider_unavailable",
+  provider_timeout: "error.provider_timeout",
+  all_models_failed: "error.all_models_failed",
+  rate_limit_exceeded: "error.rate_limit_exceeded",
+  INSUFFICIENT_CREDITS: "error.insufficient_credits",
+  insufficient_credits: "error.insufficient_credits",
+  internal_error: "error.internal_error",
+  image_invalid_request: "error.image_invalid_request",
+  image_auth_error: "error.image_auth_error",
+  image_rate_limited: "error.image_rate_limited",
+  image_timeout: "error.image_timeout",
+  image_provider_unavailable: "error.image_provider_unavailable",
+  image_provider_error: "error.image_provider_error",
+  image_service_not_configured: "error.image_service_not_configured",
+  image_empty_response: "error.image_empty_response",
+  image_bad_response: "error.image_bad_response",
+  image_attachment_save_failed: "error.image_attachment_save_failed",
+  image_cancelled: "error.image_cancelled",
+  // Phase 5 — stream resume.
+  GENERATION_INTERRUPTED: "error.generationInterrupted",
 };
 
-const GENERIC_TH = "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง";
-
-/** Localized Thai message for a gateway error code. */
+/** Localized message for a gateway error code (active locale). */
 export function localizeErrorCode(
   code?: string,
   serverMessage?: string,
 ): string {
-  if (code && ERROR_MESSAGES_TH[code]) {
-    return ERROR_MESSAGES_TH[code];
+  if (code && ERROR_CODE_KEYS[code]) {
+    return tOutside(ERROR_CODE_KEYS[code]);
   }
-  return serverMessage?.trim() || GENERIC_TH;
+  return serverMessage?.trim() || tOutside("error.generic");
 }
 
-/** Short Thai notice shown under a message that a fallback answered.
- *  e.g. "ตอบโดย GPT-4o (claude-sonnet-4 ไม่พร้อมใช้งานชั่วคราว)". */
+/** Short notice shown under a message that a fallback model answered.
+ *  e.g. "Answered by GPT-4o (claude-sonnet-4 temporarily unavailable)". */
 export function fallbackNotice(
   requestedModel: string,
   actualModel: string,
 ): string {
-  return `ตอบโดย ${actualModel} (${requestedModel} ไม่พร้อมใช้งานชั่วคราว)`;
+  return tOutside("error.fallbackNotice", {
+    actual: actualModel,
+    requested: requestedModel,
+  });
 }

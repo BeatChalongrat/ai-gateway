@@ -16,13 +16,16 @@ import { create } from "zustand";
 
 import { bumpUsageVersion } from "@/hooks/useUsage";
 import { api, ApiError } from "@/lib/api";
+import { tOutside } from "@/lib/i18n";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
 import type {
   Conversation,
+  ConversationSearchHit,
   FileAttachment,
   Folder,
   Message,
+  Project,
   SSEAnalysisStatus,
   SSEContentDelta,
   SSEError,
@@ -76,6 +79,10 @@ interface ChatState {
   /** Server-side search results. Populated by searchConversations;
    *  empty array when no search is active. */
   conversationsSearchResults: Conversation[];
+  /** Content matches from the S6 full-text engine (message bodies),
+   *  one row per conversation, excluding conversations already in
+   *  conversationsSearchResults (title matches win the dedup). */
+  conversationsSearchHits: ConversationSearchHit[];
   conversationsSearchActive: boolean;
   conversationsSearchLoading: boolean;
   activeConversationId: string | null;
@@ -199,11 +206,56 @@ interface ChatState {
     folderId: string | null,
   ) => Promise<void>;
 
+  // ── project ops (Phase 4) ────────────────────────────────
+  /** Projects visible to the current user. */
+  projects: Project[];
+  projectsLoaded: boolean;
+  /** Set when the last loadProjects failed, so the page can render
+   *  an error state with retry instead of an empty list. */
+  projectsError: string | null;
+  loadProjects: () => Promise<void>;
+  /** Create a project. Throws on failure so the page can toast. */
+  createProject: (name: string, instructions: string) => Promise<Project>;
+  /** Patch name / instructions. Throws on failure. */
+  updateProject: (
+    id: string,
+    patch: { name?: string; instructions?: string },
+  ) => Promise<Project>;
+  /** Attach / detach ("null") the project's knowledge base. Throws
+   *  on failure. */
+  setProjectKnowledgeBase: (
+    id: string,
+    kbId: string | null,
+  ) => Promise<Project>;
+  /** Delete a project; its conversations are un-assigned (server SET
+   *  NULL), mirrored locally. Optimistic with rollback; rethrows so
+   *  the page can toast. */
+  deleteProject: (id: string) => Promise<void>;
+  /** Assign a conversation to a project, or `null` to un-assign.
+   *  Optimistic (conversations[].project_id + project counts);
+   *  rolls back on failure. */
+  moveConversationToProject: (
+    convId: string,
+    projectId: string | null,
+  ) => Promise<void>;
+  /** When set, the NEXT lazily-created conversation is assigned to
+   *  this project right after creation. Read + cleared by
+   *  createConversation() — same contract as
+   *  nextConversationTemporary. Used by the project page's "New chat
+   *  in this project" button. */
+  nextConversationProjectId: string | null;
+  setNextConversationProjectId: (v: string | null) => void;
+
   // ── message ops ──────────────────────────────────────────
   loadMessages: (convId: string) => Promise<void>;
   loadOlderMessages: (convId: string) => Promise<void>;
   sendMessage: (convId: string, content: string, fileIds?: string[], imageMode?: boolean, videoMode?: boolean) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
+  /** Phase 5 — reattach to a generation that is still running
+   *  server-side (page refresh / network drop mid-stream). Replays
+   *  the already-generated prefix and continues through the normal
+   *  streaming pipeline. */
+  resumeStream: (convId: string, messageId: string) => Promise<void>;
   regenerate: (convId: string, messageId: string) => Promise<void>;
   editMessage: (convId: string, messageId: string, newContent: string) => Promise<void>;
   switchBranch: (convId: string, messageId: string, branchIndex: number) => Promise<void>;
@@ -223,6 +275,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   hasMoreConversations: false,
   loadingMoreConversations: false,
   conversationsSearchResults: [],
+  conversationsSearchHits: [],
   conversationsSearchActive: false,
   conversationsSearchLoading: false,
   activeConversationId: null,
@@ -238,6 +291,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   nextConversationTemporary: false,
   setNextConversationTemporary(v) {
     set({ nextConversationTemporary: v });
+  },
+  projects: [],
+  projectsLoaded: false,
+  projectsError: null,
+  nextConversationProjectId: null,
+  setNextConversationProjectId(v) {
+    set({ nextConversationProjectId: v });
   },
 
   // ────────────────────────────────────────────────────────
@@ -394,26 +454,67 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({
         conversationsSearchActive: false,
         conversationsSearchResults: [],
+        conversationsSearchHits: [],
         conversationsSearchLoading: false,
       });
       return;
     }
     set({ conversationsSearchActive: true, conversationsSearchLoading: true });
-    try {
-      const res = await api.listConversationsSearch(q, 50);
-      set({
-        conversationsSearchResults: res.conversations,
-        conversationsSearchLoading: false,
-      });
-    } catch {
+
+    // Two engines, fired together: the legacy title substring match
+    // (keeps rename/pin/menu-capable conversation rows) plus the S6
+    // full-text search over message bodies. Each may fail
+    // independently — a dead /search endpoint must never take the
+    // title search down with it, so allSettled instead of all.
+    const [titles, fts] = await Promise.allSettled([
+      api.listConversationsSearch(q, 50),
+      api.searchMessages(q, 20),
+    ]);
+
+    if (titles.status === "rejected" && fts.status === "rejected") {
+      // Both engines down — stop the spinner, keep whatever was on
+      // screen rather than blanking the sidebar.
       set({ conversationsSearchLoading: false });
+      return;
     }
+
+    const titleConvs =
+      titles.status === "fulfilled" ? titles.value.conversations : [];
+    const titleIds = new Set(titleConvs.map((c) => c.id));
+
+    const hits: ConversationSearchHit[] = [];
+    if (fts.status === "fulfilled") {
+      const seen = new Set<string>();
+      for (const r of fts.value.results) {
+        if (r.type !== "message" || !r.conversation_id) continue;
+        // One row per conversation; title matches already render as
+        // full conversation rows above, so skip those too.
+        if (titleIds.has(r.conversation_id) || seen.has(r.conversation_id))
+          continue;
+        seen.add(r.conversation_id);
+        const content = r.content.trim();
+        hits.push({
+          conversation_id: r.conversation_id,
+          conversation_title: r.conversation_title?.trim() || "Untitled",
+          snippet:
+            content.length > 140 ? `${content.slice(0, 140)}…` : content,
+          date: r.date,
+        });
+      }
+    }
+
+    set({
+      conversationsSearchResults: titleConvs,
+      conversationsSearchHits: hits,
+      conversationsSearchLoading: false,
+    });
   },
 
   clearConversationsSearch() {
     set({
       conversationsSearchActive: false,
       conversationsSearchResults: [],
+      conversationsSearchHits: [],
       conversationsSearchLoading: false,
     });
   },
@@ -439,6 +540,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Non-fatal — the user can still toggle from the header.
       }
       set({ nextConversationTemporary: false });
+    }
+    // Phase 4 — "New chat in this project". Same consume-the-flag
+    // contract as nextConversationTemporary: the project page sets
+    // the flag before navigating to /chat, and the lazy create that
+    // follows assigns the fresh row to the project so the very first
+    // send already carries the project's instructions + KB.
+    const wantProjectId = get().nextConversationProjectId;
+    if (wantProjectId) {
+      try {
+        await api.moveConversationToProject(c.id, wantProjectId);
+        c = { ...c, project_id: wantProjectId };
+        // Keep the local project count honest without a refetch.
+        set((s) => ({
+          projects: s.projects.map((p) =>
+            p.id === wantProjectId
+              ? { ...p, conversation_count: p.conversation_count + 1 }
+              : p,
+          ),
+        }));
+      } catch {
+        // Non-fatal — the user can still move it from the sidebar.
+      }
+      set({ nextConversationProjectId: null });
     }
     // Brand-new conversation is, by definition, fully loaded with
     // zero messages — flip the discriminator so the page skips the
@@ -775,6 +899,111 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  // ── projects (Phase 4) ───────────────────────────────────
+  async loadProjects() {
+    try {
+      const res = await api.listProjects();
+      set({
+        projects: res?.projects ?? [],
+        projectsLoaded: true,
+        projectsError: null,
+      });
+    } catch {
+      set({
+        projectsLoaded: true,
+        projectsError: tOutside("projects.error.loadFailed"),
+      });
+    }
+  },
+
+  async createProject(name, instructions) {
+    const res = await api.createProject(name, instructions);
+    set((s) => ({ projects: [res.project, ...s.projects] }));
+    return res.project;
+  },
+
+  async updateProject(id, patch) {
+    const res = await api.updateProject(id, patch);
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === id ? { ...p, ...res.project } : p,
+      ),
+    }));
+    return res.project;
+  },
+
+  async setProjectKnowledgeBase(id, kbId) {
+    const res = await api.setProjectKnowledgeBase(id, kbId);
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === id ? { ...p, ...res.project } : p,
+      ),
+    }));
+    return res.project;
+  },
+
+  async deleteProject(id) {
+    const prevProjects = get().projects;
+    const prevConversations = get().conversations;
+    // Optimistic: drop the project and un-assign its conversations
+    // locally (server does the same via ON DELETE SET NULL — chats
+    // are NOT deleted).
+    set((s) => ({
+      projects: s.projects.filter((p) => p.id !== id),
+      conversations: s.conversations.map((c) =>
+        c.project_id === id ? { ...c, project_id: null } : c,
+      ),
+    }));
+    try {
+      await api.deleteProject(id);
+    } catch (err) {
+      set({ projects: prevProjects, conversations: prevConversations });
+      throw err;
+    }
+  },
+
+  async moveConversationToProject(convId, projectId) {
+    const existing = get().conversations.find((c) => c.id === convId);
+    const prevProjectId = existing?.project_id ?? null;
+    if (prevProjectId === projectId) return;
+    // Optimistic: re-assign + adjust project counts so the UI
+    // reflects the move immediately — mirrors moveConversationToFolder.
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === convId ? { ...c, project_id: projectId } : c,
+      ),
+      projects: s.projects.map((p) => {
+        if (p.id === prevProjectId) {
+          return { ...p, conversation_count: Math.max(0, p.conversation_count - 1) };
+        }
+        if (p.id === projectId) {
+          return { ...p, conversation_count: p.conversation_count + 1 };
+        }
+        return p;
+      }),
+    }));
+    try {
+      await api.moveConversationToProject(convId, projectId);
+    } catch {
+      // Roll back both the membership and the counts.
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === convId ? { ...c, project_id: prevProjectId } : c,
+        ),
+        projects: s.projects.map((p) => {
+          if (p.id === projectId) {
+            return { ...p, conversation_count: Math.max(0, p.conversation_count - 1) };
+          }
+          if (p.id === prevProjectId) {
+            return { ...p, conversation_count: p.conversation_count + 1 };
+          }
+          return p;
+        }),
+      }));
+      get().setError(tOutside("projects.error.moveFailed"));
+    }
+  },
+
   // ────────────────────────────────────────────────────────
   async loadMessages(convId) {
     try {
@@ -787,6 +1016,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [convId]: res?.has_more ?? false,
         },
       }));
+      // Phase 5 — the last assistant row still says "streaming": the
+      // generation is (probably) alive server-side and this client
+      // just wasn't attached (refresh mid-stream / reopened tab).
+      // Reattach in the background; resumeStream owns all fallbacks.
+      const list = res?.messages ?? [];
+      const last = list[list.length - 1];
+      if (last && last.role === "assistant" && last.status === "streaming") {
+        void get().resumeStream(convId, last.id);
+      }
     } catch (err) {
       // Mark the slot loaded so the skeleton clears, but populate
       // the array based on the failure shape so the page UI
@@ -857,7 +1095,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // with a user-visible toast rather than letting fetch hang.
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       get().setError(
-        "You're offline. Messages will send when you reconnect.",
+        tOutside("error.offline"),
       );
       return;
     }
@@ -1048,7 +1286,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
         finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
-      get().setError("Network error during streaming.");
+      // Phase 5 — a mid-stream network drop no longer kills the
+      // generation server-side (the handler detaches instead of
+      // cancelling), so if the assistant row already has its real id
+      // (message_start arrived) try to reattach before declaring the
+      // turn dead. Clear this send's streaming slot first — resume
+      // manages its own single-flight state.
+      if (!streamingId.startsWith("tmp-")) {
+        set((s) => {
+          const aborts = { ...s.abortControllers };
+          delete aborts[convId];
+          const sids = { ...s.streamingAssistantId };
+          delete sids[convId];
+          return { abortControllers: aborts, streamingAssistantId: sids };
+        });
+        await get().resumeStream(convId, streamingId);
+        return;
+      }
+      get().setError(tOutside("error.networkStream"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
       if (imageTimeout != null) {
@@ -1083,6 +1338,110 @@ export const useChatStore = create<ChatState>((set, get) => ({
       /* idempotent; ignore */
     }
     if (ctrl) ctrl.abort();
+  },
+
+  async resumeStream(convId, messageId) {
+    // Single-flight: an attached stream (or another resume) already
+    // owns this conversation's streaming slot.
+    if (get().streamingAssistantId[convId]) return;
+    const ctrl = new AbortController();
+    set((s) => ({
+      abortControllers: { ...s.abortControllers, [convId]: ctrl },
+      streamingAssistantId: { ...s.streamingAssistantId, [convId]: messageId },
+    }));
+
+    // Each attempt replays the FULL prefix as content_delta events, so
+    // the bubble must be reset first or retries would duplicate text.
+    const resetBubble = () =>
+      set((s) => {
+        const list = s.messages[convId] ?? [];
+        return {
+          messages: {
+            ...s.messages,
+            [convId]: list.map((m) =>
+              m.id === messageId
+                ? {
+                    ...m,
+                    content: "",
+                    reasoning_content: undefined,
+                    status: "streaming",
+                    isStreaming: true,
+                    error_code: undefined,
+                    error_message: undefined,
+                  }
+                : m,
+            ),
+          },
+        };
+      });
+
+    const messageState = () =>
+      (get().messages[convId] ?? []).find((m) => m.id === messageId);
+
+    try {
+      for (let attempt = 0; attempt < RESUME_RETRY_DELAYS.length; attempt++) {
+        if (RESUME_RETRY_DELAYS[attempt] > 0) {
+          await abortableSleep(RESUME_RETRY_DELAYS[attempt], ctrl.signal);
+        }
+        resetBubble();
+        let res: Response;
+        try {
+          res = await api.openResumeStream(convId, messageId, ctrl.signal);
+        } catch (err) {
+          if ((err as Error).name === "AbortError") throw err;
+          continue; // network refused — back off and retry
+        }
+        if (res.status === 409) continue; // not attachable yet — retry
+        if (res.status === 404) {
+          // Conversation/message gone (deleted elsewhere). Reload the
+          // authoritative list instead of inventing a local state.
+          await get().loadMessages(convId);
+          return;
+        }
+        if (!res.ok) continue;
+        try {
+          await consumeStream(res, ctrl.signal, set, get, convId, messageId);
+        } catch (err) {
+          if ((err as Error).name === "AbortError") throw err;
+          continue; // dropped mid-resume — reattach again
+        }
+        // The server cut this subscriber loose for lagging — the
+        // generation itself is fine, so reattach fresh (the reset at
+        // the top of the next attempt clears the error card).
+        if (messageState()?.error_code === "RESUME_LAGGED") continue;
+        return;
+      }
+      // Every attempt failed — surface the P1 error card.
+      get().setError(tOutside("error.resumeLost"));
+      finalizeMessage(set, get, convId, messageId, "error");
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
+        finalizeMessage(set, get, convId, messageId, "cancelled");
+        return;
+      }
+      get().setError(tOutside("error.resumeLost"));
+      finalizeMessage(set, get, convId, messageId, "error");
+    } finally {
+      set((s) => {
+        const aborts = { ...s.abortControllers };
+        if (aborts[convId] === ctrl) delete aborts[convId];
+        const sids = { ...s.streamingAssistantId };
+        if (sids[convId] === messageId) delete sids[convId];
+        return { abortControllers: aborts, streamingAssistantId: sids };
+      });
+      // Refresh sidebar metadata (updated_at / auto-title) like the
+      // primary send path does.
+      try {
+        const c = await api.getConversation(convId);
+        set((s) => ({
+          conversations: s.conversations.map((x) =>
+            x.id === convId ? { ...x, ...c } : x,
+          ),
+        }));
+      } catch {
+        /* non-fatal */
+      }
+    }
   },
 
   async regenerate(convId, messageId) {
@@ -1135,7 +1494,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
-      get().setError("Network error during regenerate.");
+      get().setError(tOutside("error.networkRegenerate"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
       set((s) => {
@@ -1215,7 +1574,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
-      get().setError("Network error during edit.");
+      get().setError(tOutside("error.networkEdit"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
       set((s) => {
@@ -1268,6 +1627,32 @@ type Set = (
     | ((state: ChatState) => ChatState | Partial<ChatState>),
 ) => void;
 type Get = () => ChatState;
+
+// Phase 5 — reattach backoff schedule (ms before each attempt). The
+// first attempt is immediate; later ones back off lightly so a brief
+// network blip reattaches fast without hammering the server.
+// Exported ONLY so tests can zero the delays (mutate + restore).
+export const RESUME_RETRY_DELAYS = [0, 1000, 2000, 4000];
+
+// Abortable sleep so a user Stop during the backoff window cancels the
+// resume loop immediately instead of after the timer.
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const t = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      window.clearTimeout(t);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 async function consumeStream(
   res: Response,
@@ -1647,9 +2032,9 @@ async function handleStreamPreError(
     // message; localizeErrorCode keeps a fallback if it didn't.
     get().setError(localizeErrorCode(code ?? "INSUFFICIENT_CREDITS", msg));
   } else if (res.status === 429) {
-    get().setError("Too many messages — slow down for a minute.");
+    get().setError(tOutside("error.tooManyMessages"));
   } else if (res.status === 502) {
-    get().setError("AI service is temporarily unavailable.");
+    get().setError(tOutside("error.serviceUnavailable"));
   } else if (res.status !== 401) {
     get().setError(msg);
   }

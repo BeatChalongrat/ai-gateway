@@ -16,6 +16,8 @@
 
 "use client";
 
+import { tOutside } from "@/lib/i18n";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "@/lib/api";
@@ -80,7 +82,7 @@ export function useWhisperInput(): UseWhisperInputReturn {
 
   const start = useCallback(async () => {
     if (!isSupported) {
-      setError("Microphone recording not supported in this browser.");
+      setError(tOutside("voice.err.recNotSupported"));
       return;
     }
     try {
@@ -98,10 +100,10 @@ export function useWhisperInput(): UseWhisperInputReturn {
     } catch (err) {
       if (err instanceof DOMException && err.name === "NotAllowedError") {
         setError(
-          "Microphone access denied. Allow access in your browser settings to use voice input.",
+          tOutside("voice.err.micDenied"),
         );
       } else {
-        setError(err instanceof Error ? err.message : "Couldn't start recording.");
+        setError(err instanceof Error ? err.message : tOutside("voice.err.startFailed"));
       }
       cleanup();
     }
@@ -135,7 +137,7 @@ export function useWhisperInput(): UseWhisperInputReturn {
     stopRecording();
     cleanup();
     if (!blob || blob.size === 0) {
-      setError("No audio captured. Try speaking closer to the microphone.");
+      setError(tOutside("voice.err.noAudio"));
       return;
     }
     setIsTranscribing(true);
@@ -145,7 +147,7 @@ export function useWhisperInput(): UseWhisperInputReturn {
     } catch (err) {
       if (err instanceof ApiError && err.status === 503) {
         setError(
-          "Whisper transcription is not configured on this server. Switch to browser voice input in settings.",
+          tOutside("voice.err.whisperNotConfigured"),
         );
       } else {
         setError(err instanceof Error ? err.message : "Transcription failed.");

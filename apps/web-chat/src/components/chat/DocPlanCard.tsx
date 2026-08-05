@@ -25,6 +25,7 @@ import {
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
+import { tOutside, useT } from "@/lib/i18n";
 import type { DocExecuteResponse } from "@/lib/types";
 
 import {
@@ -97,6 +98,7 @@ interface Props {
 }
 
 export function DocPlanCard({ convId, plan }: Props) {
+  const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">(
     "idle",
   );
@@ -119,7 +121,7 @@ export function DocPlanCard({ convId, plan }: Props) {
       setStatus("done");
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : (err as Error).message;
-      setError(msg || "Could not generate document.");
+      setError(msg || tOutside("plan.doc.execFailed"));
       setStatus("error");
     }
   }
@@ -135,17 +137,15 @@ export function DocPlanCard({ convId, plan }: Props) {
   const pageSize = (settings.page_size as string) || "A4";
   const actions = plan.actions ?? [];
 
-  const formatLabel = format === "PDF" ? "PDF Report" : "Word Document";
-
   return (
     <CardShell
       headerIcon={<FileTypeBadge extension={format === "PDF" ? ".pdf" : ".docx"} size="sm" />}
-      headerTitle={`${formatLabel} Plan`}
-      metadata={`${pageSize} ${orientation} · ${language} · ${actions.length} action${actions.length === 1 ? "" : "s"}`}
+      headerTitle={format === "PDF" ? t("plan.doc.titlePdf") : t("plan.doc.titleDocx")}
+      metadata={`${pageSize} ${orientation} · ${language} · ${actions.length} ${t(actions.length === 1 ? "unit.action" : "unit.actions")}`}
       footer={
         <>
           <PrimaryButton onClick={execute} loading={status === "running"}>
-            {status === "running" ? "Generating…" : "Generate Document"}
+            {status === "running" ? t("plan.generating") : t("plan.doc.generate")}
           </PrimaryButton>
           {error ? <ErrorLine message={error} /> : null}
         </>
@@ -157,7 +157,7 @@ export function DocPlanCard({ convId, plan }: Props) {
         </p>
       ) : null}
       {actions.length > 0 ? (
-        <PlanList title="Structure">
+        <PlanList title={t("plan.structure")}>
           {actions.map((a, i) => (
             <PlanListItem key={i} icon={actionIcon(a.type)}>
               {summarizeDocAction(a)}
@@ -170,6 +170,7 @@ export function DocPlanCard({ convId, plan }: Props) {
 }
 
 export function DocResultCard({ result }: { result: DocExecuteResponse }) {
+  const t = useT();
   const { file, validation, changes } = result;
   const fileTypeLabel = (file.content_type || "").includes("pdf") ? "PDF" : "DOCX";
   const headerIcon = (
@@ -193,16 +194,16 @@ export function DocResultCard({ result }: { result: DocExecuteResponse }) {
         <span>{fileTypeLabel}</span>
         <span>{humanSize(file.file_size_bytes)}</span>
         {pages != null ? (
-          <span>{pages} page{pages === 1 ? "" : "s"}</span>
+          <span>{pages} {t(pages === 1 ? "unit.page" : "unit.pages")}</span>
         ) : null}
         {words != null ? (
-          <span>{words} word{words === 1 ? "" : "s"}</span>
+          <span>{words} {t(words === 1 ? "unit.word" : "unit.words")}</span>
         ) : null}
       </MetadataRow>
       {changes && changes.length > 0 ? (
         <details>
           <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-text-tertiary">
-            Change log ({changes.length})
+            {t("plan.changeLog", { n: String(changes.length) })}
           </summary>
           <ul className="mt-2 space-y-1 text-sm text-text-primary">
             {changes.map((line, i) => {
@@ -235,46 +236,67 @@ export function DocResultCard({ result }: { result: DocExecuteResponse }) {
 function summarizeDocAction(a: DocAction): string {
   switch (a.type) {
     case "add_title_page":
-      return "Title page";
+      return tOutside("plan.doc.titlePage");
     case "add_heading": {
       const lvl = typeof a.level === "number" ? a.level : 1;
-      return `H${lvl}: ${truncate((a.text as string) || "", 60)}`;
+      return tOutside("plan.doc.heading", {
+        lvl: String(lvl),
+        text: truncate((a.text as string) || "", 60),
+      });
     }
     case "add_paragraph":
-      return `Paragraph: ${truncate((a.text as string) || "", 60)}`;
+      return tOutside("plan.doc.paragraph", {
+        text: truncate((a.text as string) || "", 60),
+      });
     case "add_bullet_list": {
       const n = Array.isArray(a.items) ? a.items.length : 0;
-      return `Bullet list (${n} item${n === 1 ? "" : "s"})`;
+      return n === 1
+        ? tOutside("plan.doc.bulletList.one")
+        : tOutside("plan.doc.bulletList.other", { n: String(n) });
     }
     case "add_numbered_list": {
       const n = Array.isArray(a.items) ? a.items.length : 0;
-      return `Numbered list (${n} item${n === 1 ? "" : "s"})`;
+      return n === 1
+        ? tOutside("plan.doc.numberedList.one")
+        : tOutside("plan.doc.numberedList.other", { n: String(n) });
     }
     case "add_table": {
       const cols = Array.isArray(a.headers) ? a.headers.length : 0;
       const rows = Array.isArray(a.rows) ? a.rows.length : 0;
-      return `Table (${cols} cols × ${rows} rows)`;
+      return tOutside("plan.doc.table", {
+        cols: String(cols),
+        rows: String(rows),
+      });
     }
     case "add_page_break":
-      return "Page break";
+      return tOutside("plan.doc.pageBreak");
     case "add_horizontal_rule":
-      return "Horizontal rule";
+      return tOutside("plan.doc.horizontalRule");
     case "add_spacer":
-      return "Spacer";
+      return tOutside("plan.doc.spacer");
     case "add_blockquote":
-      return `Blockquote: ${truncate((a.text as string) || "", 50)}`;
+      return tOutside("plan.doc.blockquote", {
+        text: truncate((a.text as string) || "", 50),
+      });
     case "add_code_block":
-      return "Code block";
+      return tOutside("plan.doc.codeBlock");
     case "replace_text": {
       const find = (a.find as string) || "";
       const repl = (a.replace as string) || "";
-      return `Replace "${truncate(find, 24)}" → "${truncate(repl, 24)}"`;
+      return tOutside("plan.doc.replaceText", {
+        find: truncate(find, 24),
+        replace: truncate(repl, 24),
+      });
     }
     case "set_header":
-      return `Set header: ${truncate((a.text as string) || "", 50)}`;
+      return tOutside("plan.doc.setHeader", {
+        text: truncate((a.text as string) || "", 50),
+      });
     case "set_footer":
-      return `Set footer: ${truncate((a.text as string) || "", 50)}`;
+      return tOutside("plan.doc.setFooter", {
+        text: truncate((a.text as string) || "", 50),
+      });
     default:
-      return a.type || "action";
+      return a.type || tOutside("plan.doc.action");
   }
 }

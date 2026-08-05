@@ -39,6 +39,7 @@ vi.mock("@/hooks/useUsage", () => ({
   bumpUsageVersion: mockBumpUsage,
 }));
 
+import { dictionaries } from "@/lib/i18n/dict";
 import { useChatStore } from "./chatStore";
 
 // Snapshot of the pristine store (state + actions) for per-test reset.
@@ -356,9 +357,9 @@ describe("sendMessage / consumeStream", () => {
     expect(msg?.status).toBe("error");
     expect(msg?.isStreaming).toBe(false);
     expect(msg?.error_code).toBe("rate_limit_exceeded");
-    // Localized Thai copy from errorMessages.ts — not the wire message.
+    // Localized copy from errorMessages.ts (active locale) — not the wire message.
     expect(msg?.error_message).toBe(
-      "มีคำขอมากเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง",
+      dictionaries.en["error.rate_limit_exceeded"],
     );
     expect(msg?.error_attempts).toEqual([
       { model: "claude-sonnet-4", error_code: "429" },
@@ -489,7 +490,7 @@ describe("sendMessage / consumeStream", () => {
 
     await useChatStore.getState().sendMessage("c1", "hi");
     expect(useChatStore.getState().errorBanner).toBe(
-      "เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต",
+      dictionaries.en["error.insufficient_credits"],
     );
   });
 

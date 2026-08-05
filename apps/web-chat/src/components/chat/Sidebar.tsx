@@ -22,11 +22,16 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { logoutSession } from "@/lib/auth";
 import { useI18nStore, useT } from "@/lib/i18n";
-import type { Conversation, Folder } from "@/lib/types";
+import type {
+  Conversation,
+  ConversationSearchHit,
+  Folder,
+  Project,
+} from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
-import { Brain, ChevronRight, Folder as FolderIcon, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import { Brain, ChevronRight, Folder as FolderIcon, FolderKanban, FolderPlus, Pencil, Trash2 } from "lucide-react";
 
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 
@@ -47,7 +52,9 @@ interface Props {
 type Row =
   | { kind: "header"; label: string; key: string }
   | { kind: "folder"; folder: Folder; collapsed: boolean; key: string }
-  | { kind: "conv"; conv: Conversation; key: string };
+  | { kind: "conv"; conv: Conversation; key: string }
+  // Full-text content match (message bodies) — search mode only.
+  | { kind: "hit"; hit: ConversationSearchHit; key: string };
 
 export function Sidebar({
   activeId,
@@ -65,6 +72,7 @@ export function Sidebar({
   const hasMoreConversations = useChatStore((s) => s.hasMoreConversations);
   const loadingMoreConversations = useChatStore((s) => s.loadingMoreConversations);
   const searchResults = useChatStore((s) => s.conversationsSearchResults);
+  const searchHits = useChatStore((s) => s.conversationsSearchHits);
   const searchActive = useChatStore((s) => s.conversationsSearchActive);
   const searchLoading = useChatStore((s) => s.conversationsSearchLoading);
   const runSearch = useChatStore((s) => s.searchConversations);
@@ -79,6 +87,10 @@ export function Sidebar({
   const renameFolder = useChatStore((s) => s.renameFolder);
   const deleteFolder = useChatStore((s) => s.deleteFolder);
   const moveConversationToFolder = useChatStore((s) => s.moveConversationToFolder);
+  const projects = useChatStore((s) => s.projects);
+  const projectsLoaded = useChatStore((s) => s.projectsLoaded);
+  const loadProjects = useChatStore((s) => s.loadProjects);
+  const moveConversationToProject = useChatStore((s) => s.moveConversationToProject);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const messagesByConv = useChatStore((s) => s.messages);
   const newChat = useNewChatHandler();
@@ -108,6 +120,10 @@ export function Sidebar({
   useEffect(() => {
     if (!foldersLoaded) void loadFolders();
   }, [foldersLoaded, loadFolders]);
+
+  useEffect(() => {
+    if (!projectsLoaded) void loadProjects();
+  }, [projectsLoaded, loadProjects]);
 
   function toggleFolderCollapsed(id: string) {
     setCollapsedFolders((prev) => {
@@ -145,11 +161,24 @@ export function Sidebar({
 
   const rows = useMemo<Row[]>(() => {
     if (searchActive) {
-      return searchResults.map((c) => ({
+      const out: Row[] = searchResults.map((c) => ({
         kind: "conv" as const,
         conv: c,
         key: c.id,
       }));
+      // Content matches (message bodies via the S6 full-text engine)
+      // render under their own section, below the title matches.
+      if (searchHits.length > 0) {
+        out.push({
+          kind: "header",
+          label: "sidebar.searchMessages",
+          key: "h-search-messages",
+        });
+        for (const h of searchHits) {
+          out.push({ kind: "hit", hit: h, key: `hit-${h.conversation_id}` });
+        }
+      }
+      return out;
     }
     // Hide conversations with no messages — they're either legacy
     // empties from before the lazy-create rollout or transient rows
@@ -214,7 +243,7 @@ export function Sidebar({
       }
     }
     return out;
-  }, [searchActive, searchResults, conversations, activeConversationId, messagesByConv, folders, collapsedFolders]);
+  }, [searchActive, searchResults, searchHits, conversations, activeConversationId, messagesByConv, folders, collapsedFolders]);
 
   function handleNew() {
     newChat();
@@ -416,6 +445,8 @@ export function Sidebar({
           folders={folders}
           onMoveToFolder={(id, folderId) => moveConversationToFolder(id, folderId)}
           onCreateFolderForMove={(id) => handleCreateFolderForMove(id)}
+          projects={projects}
+          onMoveToProject={(id, projectId) => moveConversationToProject(id, projectId)}
           onToggleFolder={toggleFolderCollapsed}
           onRenameFolder={(id, name) => renameFolder(id, name)}
           onDeleteFolder={(id) => deleteFolder(id)}
@@ -426,6 +457,7 @@ export function Sidebar({
           userDisplay={userDisplay}
           userInitial={userInitial}
           onKnowledgeBase={() => router.push("/chat/knowledge")}
+          onProjects={() => router.push("/chat/projects")}
           onVoiceSettings={() => setVoiceSettingsOpen(true)}
           onMemory={handleOpenMemory}
           onLogout={handleLogout}
@@ -449,6 +481,7 @@ function UserMenu({
   userDisplay,
   userInitial,
   onKnowledgeBase,
+  onProjects,
   onVoiceSettings,
   onMemory,
   onLogout,
@@ -456,6 +489,7 @@ function UserMenu({
   userDisplay: string;
   userInitial: string;
   onKnowledgeBase: () => void;
+  onProjects: () => void;
   onVoiceSettings: () => void;
   onMemory: () => void;
   onLogout: () => void;
@@ -513,6 +547,13 @@ function UserMenu({
             onClick={onKnowledgeBase}
             icon={<BookIcon />}
             label={t("menu.knowledgeBase")}
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onProjects}
+            icon={<FolderKanban width={14} height={14} aria-hidden />}
+            label={t("menu.projects")}
             trailing={<ArrowIcon />}
             setOpen={setOpen}
           />
@@ -794,6 +835,14 @@ function LogoutIcon() {
 
 // ─── Conversations area (virtualized + lazy-load) ─────────────
 
+/** Conversation id a row navigates to, or null for non-navigable rows.
+ *  Lets conv AND content-hit rows share the active-highlight logic. */
+function rowActiveId(row: Row): string | null {
+  if (row.kind === "conv") return row.conv.id;
+  if (row.kind === "hit") return row.hit.conversation_id;
+  return null;
+}
+
 interface AreaProps {
   rows: Row[];
   conversationsLoaded: boolean;
@@ -813,6 +862,8 @@ interface AreaProps {
   onToggleFolder: (id: string) => void;
   onRenameFolder: (id: string, name: string) => Promise<void> | void;
   onDeleteFolder: (id: string) => Promise<void> | void;
+  projects: Project[];
+  onMoveToProject: (id: string, projectId: string | null) => Promise<void> | void;
 }
 
 function ConversationsArea({
@@ -834,7 +885,10 @@ function ConversationsArea({
   onToggleFolder,
   onRenameFolder,
   onDeleteFolder,
+  projects,
+  onMoveToProject,
 }: AreaProps) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const useVirtual = rows.length >= VIRTUALIZE_THRESHOLD;
   const folderCtx: FolderCtx = {
@@ -844,6 +898,8 @@ function ConversationsArea({
     onToggleFolder,
     onRenameFolder,
     onDeleteFolder,
+    projects,
+    onMoveToProject,
   };
 
   const virtualizer = useVirtualizer({
@@ -879,9 +935,9 @@ function ConversationsArea({
         <div className="px-3 py-4 text-xs text-text-muted">
           {searchActive
             ? searchLoading
-              ? "Searching…"
-              : "No conversations found"
-            : "No conversations yet"}
+              ? t("sidebar.searching")
+              : t("sidebar.noResults")
+            : t("sidebar.empty")}
         </div>
       </nav>
     );
@@ -918,7 +974,7 @@ function ConversationsArea({
               >
                 <SidebarRow
                   row={row}
-                  active={row.kind === "conv" ? row.conv.id === activeId : false}
+                  active={rowActiveId(row) === activeId && activeId !== null}
                   onSelect={onSelect}
                   onRename={onRename}
                   onDelete={onDelete}
@@ -935,7 +991,7 @@ function ConversationsArea({
             <SidebarRow
               key={row.key}
               row={row}
-              active={row.kind === "conv" ? row.conv.id === activeId : false}
+              active={rowActiveId(row) === activeId && activeId !== null}
               onSelect={onSelect}
               onRename={onRename}
               onDelete={onDelete}
@@ -950,7 +1006,7 @@ function ConversationsArea({
           {loadingMore ? (
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
-              Loading more…
+              {t("sidebar.loadingMore")}
             </span>
           ) : (
             <button
@@ -958,7 +1014,7 @@ function ConversationsArea({
               onClick={onLoadMore}
               className="focus-ring rounded px-2 py-1 hover:text-text-primary"
             >
-              Load more
+              {t("sidebar.loadMore")}
             </button>
           )}
         </div>
@@ -976,6 +1032,9 @@ interface FolderCtx {
   onToggleFolder: (id: string) => void;
   onRenameFolder: (id: string, name: string) => Promise<void> | void;
   onDeleteFolder: (id: string) => Promise<void> | void;
+  // Phase-4 projects ride the same bundle so SidebarRow keeps one prop.
+  projects: Project[];
+  onMoveToProject: (id: string, projectId: string | null) => Promise<void> | void;
 }
 
 function SidebarRow({
@@ -1016,6 +1075,27 @@ function SidebarRow({
       />
     );
   }
+  if (row.kind === "hit") {
+    // Content match — click navigates to the conversation. Kept as a
+    // plain button (no rename/delete menu): the same conversation may
+    // also appear above as a title match with the full menu.
+    return (
+      <button
+        type="button"
+        onClick={() => onSelect(row.hit.conversation_id)}
+        className={`focus-ring flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors ${
+          active
+            ? "bg-bg-elevated text-text-primary"
+            : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+        }`}
+      >
+        <span className="w-full truncate">{row.hit.conversation_title}</span>
+        <span className="line-clamp-2 w-full text-[11px] leading-snug text-text-muted">
+          {row.hit.snippet}
+        </span>
+      </button>
+    );
+  }
   return (
     <ConversationItem
       conv={row.conv}
@@ -1027,6 +1107,8 @@ function SidebarRow({
       folders={folderCtx.folders}
       onMoveToFolder={(folderId) => folderCtx.onMoveToFolder(row.conv.id, folderId)}
       onCreateFolderForMove={() => folderCtx.onCreateFolderForMove(row.conv.id)}
+      projects={folderCtx.projects}
+      onMoveToProject={(projectId) => folderCtx.onMoveToProject(row.conv.id, projectId)}
     />
   );
 }

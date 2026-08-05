@@ -29,6 +29,8 @@ import type {
   Message,
   MessageListResponse,
   ModelListResponse,
+  Project,
+  SearchResponse,
   UsageResponse,
   VideoGenInput,
   ShareExpiry,
@@ -284,6 +286,45 @@ class ApiClient {
     });
   }
 
+  // -----------------------------------------------------------
+  // Projects (Phase 4).
+  // -----------------------------------------------------------
+  listProjects() {
+    return this.json<{ projects: Project[] }>("/projects");
+  }
+  createProject(name: string, instructions: string) {
+    return this.json<{ project: Project }>("/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, instructions }),
+    });
+  }
+  getProject(id: string) {
+    return this.json<{ project: Project }>(`/projects/${id}`);
+  }
+  updateProject(id: string, patch: { name?: string; instructions?: string }) {
+    return this.json<{ project: Project }>(`/projects/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+  }
+  /** Attach a knowledge base to a project, or detach with `null`. */
+  setProjectKnowledgeBase(id: string, knowledgeBaseId: string | null) {
+    return this.json<{ project: Project }>(`/projects/${id}/knowledge-base`, {
+      method: "PUT",
+      body: JSON.stringify({ knowledge_base_id: knowledgeBaseId }),
+    });
+  }
+  deleteProject(id: string) {
+    return this.raw(`/projects/${id}`, { method: "DELETE" });
+  }
+  /** Assign a conversation to a project, or `null` to un-assign. */
+  moveConversationToProject(id: string, projectId: string | null) {
+    return this.raw(`/conversations/${id}/project`, {
+      method: "PUT",
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  }
+
   deleteConversation(id: string) {
     return this.raw(`/conversations/${id}`, { method: "DELETE" });
   }
@@ -310,6 +351,16 @@ class ApiClient {
     return this.json<ConversationListResponse>(
       `/conversations?${params.toString()}`,
     );
+  }
+  /** Full-text search over MESSAGE BODIES via the S6 engine
+   *  (GET /search, ts_rank). Complements listConversationsSearch,
+   *  which only substring-matches conversation titles. */
+  searchMessages(q: string, limit = 20) {
+    const params = new URLSearchParams();
+    params.set("q", q);
+    params.set("scope", "messages");
+    params.set("limit", String(limit));
+    return this.json<SearchResponse>(`/search?${params.toString()}`);
   }
   listConversationsPage(opts?: { limit?: number; cursor?: string }) {
     const params = new URLSearchParams();
@@ -356,6 +407,20 @@ class ApiClient {
       `/conversations/${convId}/messages/${messageId}/regenerate`,
       { method: "POST", signal },
     );
+  }
+  /** Phase 5 — reattach to an in-flight generation (SSE, same event
+   *  vocabulary as openMessageStream). The server replays the already
+   *  generated prefix as one content_delta, then streams the live
+   *  tail. 409 RESUME_UNAVAILABLE = not attachable yet, retry. */
+  async openResumeStream(
+    convId: string,
+    messageId: string,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    return this.raw(`/conversations/${convId}/messages/${messageId}/stream`, {
+      method: "GET",
+      signal,
+    });
   }
 
   // ----- Feedback -------------------------------------------

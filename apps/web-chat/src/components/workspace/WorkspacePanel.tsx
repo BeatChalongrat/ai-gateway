@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { Download, FolderOpen, History, X } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import { tOutside, useT } from "@/lib/i18n";
 import type { GeneratedFileEntry } from "@/lib/types";
 
 import { VersionTimeline } from "./VersionTimeline";
@@ -30,6 +31,7 @@ interface SelectedLineage {
 }
 
 export function WorkspacePanel({ convId, open, onClose }: Props) {
+  const t = useT();
   const [files, setFiles] = useState<GeneratedFileEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export function WorkspacePanel({ convId, open, onClose }: Props) {
       const res = await api.listGeneratedFiles(convId);
       setFiles(res.files ?? []);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't load files.");
+      setError(err instanceof ApiError ? err.message : tOutside("ws.loadFilesFailed"));
     } finally {
       setLoading(false);
     }
@@ -91,22 +93,22 @@ export function WorkspacePanel({ convId, open, onClose }: Props) {
           open ? "translate-x-0" : "translate-x-full"
         }`}
         role="dialog"
-        aria-label="Workspace"
+        aria-label={t("ws.title")}
       >
         <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
           <FolderOpen className="h-5 w-5 text-text-tertiary" />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-text-primary">Workspace</div>
+            <div className="text-sm font-semibold text-text-primary">{t("ws.title")}</div>
             <div className="text-xs text-text-tertiary">
-              {totalFiles} file{totalFiles === 1 ? "" : "s"} ·{" "}
-              {totalVersions} version{totalVersions === 1 ? "" : "s"}
+              {totalFiles} {t(totalFiles === 1 ? "unit.file" : "unit.files")} ·{" "}
+              {totalVersions} {t(totalVersions === 1 ? "unit.version" : "unit.versions")}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="focus-ring rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-            aria-label="Close workspace"
+            aria-label={t("ws.close")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -157,8 +159,9 @@ function FileList({
   error: string | null;
   onPick: (f: GeneratedFileEntry) => void;
 }) {
+  const t = useT();
   if (loading && files == null) {
-    return <div className="text-xs text-text-tertiary">Loading workspace…</div>;
+    return <div className="text-xs text-text-tertiary">{t("ws.loading")}</div>;
   }
   if (error) {
     return (
@@ -170,8 +173,7 @@ function FileList({
   if (!files || files.length === 0) {
     return (
       <div className="rounded-md border border-border-subtle bg-bg-base/40 px-3 py-6 text-center text-xs text-text-tertiary">
-        No generated files yet. Ask the AI to create or edit a workbook,
-        document, or presentation and they'll appear here.
+        {t("ws.empty")}
       </div>
     );
   }
@@ -204,7 +206,9 @@ function FileList({
                 {f.parent_filename ? (
                   <>
                     <span>·</span>
-                    <span className="truncate">from {f.parent_filename}</span>
+                    <span className="truncate">
+                      {t("ws.fromParent", { name: f.parent_filename })}
+                    </span>
                   </>
                 ) : null}
               </div>
@@ -215,7 +219,7 @@ function FileList({
                   className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
                 >
                   <Download className="h-3 w-3" />
-                  Download
+                  {t("common.download")}
                 </button>
                 <button
                   type="button"
@@ -223,7 +227,7 @@ function FileList({
                   className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
                 >
                   <History className="h-3 w-3" />
-                  History ({f.version_count})
+                  {t("ws.history", { n: String(f.version_count) })}
                 </button>
               </div>
             </div>

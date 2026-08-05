@@ -11,11 +11,13 @@ import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
 import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
 import { ShareModal } from "@/components/chat/ShareModal";
+import { CanvasPanel } from "@/components/canvas/CanvasPanel";
 import { WorkspaceButton } from "@/components/workspace/WorkspaceButton";
 import { WorkspacePanel } from "@/components/workspace/WorkspacePanel";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageThreadSkeleton } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
+import { tOutside } from "@/lib/i18n";
 import { useIsStreaming } from "@/hooks/useStream";
 import { ApiError } from "@/lib/api";
 import { useChatStore } from "@/stores/chatStore";
@@ -137,7 +139,7 @@ export default function ConversationPage() {
             modelId === AUTO_MODEL_ID
               ? "Auto"
               : getModelById(modelId)?.name ?? modelId;
-          toast(`Switched to ${label}`);
+          toast(tOutside("chat.toast.modelSwitched", { label }));
         } catch (err) {
           // Surface the SERVER's reason rather than a generic
           // "Couldn't change model" — covers "model not allowed",
@@ -148,8 +150,8 @@ export default function ConversationPage() {
           console.error("setConversationModel failed", err);
           const msg =
             err instanceof ApiError && err.message
-              ? `Couldn't change model: ${err.message}`
-              : "Couldn't change model.";
+              ? tOutside("chat.toast.modelChangeFailedWith", { error: err.message })
+              : tOutside("chat.toast.modelChangeFailed");
           toast(msg);
         }
       }}
@@ -158,9 +160,9 @@ export default function ConversationPage() {
         if (!convId) return;
         try {
           await setConversationKB(convId, kbId);
-          toast(kbId ? "Knowledge base bound" : "Knowledge base unbound");
+          toast(kbId ? tOutside("chat.toast.kbBound") : tOutside("chat.toast.kbUnbound"));
         } catch {
-          toast("Couldn't change knowledge base.");
+          toast(tOutside("chat.toast.kbChangeFailed"));
         }
       }}
       onSend={(t, fileIds, imageMode, videoMode) =>
@@ -197,6 +199,11 @@ export default function ConversationPage() {
         open={workspaceOpen}
         onClose={() => setWorkspaceOpen(false)}
       />
+      {/* Phase 6 / C1 — read-only Canvas drawer. Store-driven (opened
+          from CodeBlock's "Open in Canvas" buttons); same modal
+          slide-over pattern as WorkspacePanel, so the two can never
+          be open at once (each is behind the other's backdrop). */}
+      <CanvasPanel />
 
       <AttachmentDropZone
         className="flex flex-1 flex-col overflow-hidden"

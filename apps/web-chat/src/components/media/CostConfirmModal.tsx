@@ -10,6 +10,8 @@
 // Confirm starts polling. Built on the shared Modal (ESC + backdrop close,
 // role=dialog, aria-modal, focus management).
 
+import { useT } from "@/lib/i18n";
+
 import { Modal } from "../ui/Modal";
 
 interface Props {
@@ -29,12 +31,13 @@ export function CostConfirmModal({
   onConfirm,
   onCancel,
 }: Props) {
+  const t = useT();
   return (
     <Modal
       open={open}
       onClose={onCancel}
-      title="⚠ Premium generation"
-      description="This generation is above the confirmation threshold."
+      title={t("media.confirm.title")}
+      description={t("media.confirm.description")}
       maxWidth={420}
       footer={
         <>
@@ -43,7 +46,7 @@ export function CostConfirmModal({
             onClick={onCancel}
             className="focus-ring rounded-full border border-border px-4 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -51,19 +54,19 @@ export function CostConfirmModal({
             autoFocus
             className="focus-ring rounded-full bg-rose-500 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-600"
           >
-            Confirm &amp; generate
+            {t("media.confirm.confirm")}
           </button>
         </>
       }
     >
       <div className="flex flex-col gap-3 text-sm">
         <div className="flex items-center justify-between">
-          <span className="text-text-tertiary">This will cost approximately</span>
+          <span className="text-text-tertiary">{t("media.confirm.costApprox")}</span>
           <span className="text-base font-semibold text-text-primary">{estimatedUsd}</span>
         </div>
         {balanceAfterUsd ? (
           <div className="flex items-center justify-between">
-            <span className="text-text-tertiary">Balance after</span>
+            <span className="text-text-tertiary">{t("media.confirm.balanceAfter")}</span>
             <span className="text-text-secondary">
               {balanceBeforeUsd ? `${balanceBeforeUsd} → ` : ""}
               {balanceAfterUsd}
@@ -71,9 +74,7 @@ export function CostConfirmModal({
           </div>
         ) : null}
         <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-500">
-          Generation is reserved but not yet started. Cancel to refund, or
-          confirm to begin processing. Once processing starts, the charge is
-          final — even if cancelled mid-generation.
+          {t("media.confirm.body")}
         </p>
       </div>
     </Modal>

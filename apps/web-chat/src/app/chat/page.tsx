@@ -20,6 +20,7 @@ import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ChatInput, DRAFT_CONV_KEY, uploadFiles } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { toast } from "@/components/ui/Toast";
+import { tOutside } from "@/lib/i18n";
 import { useChatStore } from "@/stores/chatStore";
 import { useModelStore } from "@/stores/modelStore";
 
@@ -69,7 +70,7 @@ export default function ChatLanding() {
       // finished loading yet (loadModels is async, no localStorage
       // pick on first visit). Surface it so the user understands
       // they're not stuck on a broken button.
-      toast("Pick a model before attaching files.");
+      toast(tOutside("chat.toast.pickModelFiles"));
       return null;
     }
     const promise = (async () => {
@@ -80,7 +81,7 @@ export default function ChatLanding() {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("chat/landing: createConversation failed", err);
-        toast("Couldn't start a new conversation. Please try again.");
+        toast(tOutside("chat.toast.newConvFailed"));
         return null;
       } finally {
         creatingRef.current = null;
@@ -97,7 +98,7 @@ export default function ChatLanding() {
     videoMode?: boolean,
   ) {
     if (!selectedModelId) {
-      toast("Pick a model first.");
+      toast(tOutside("chat.toast.pickModel"));
       return;
     }
     // Attaching a file already created the draft conv; reuse it so

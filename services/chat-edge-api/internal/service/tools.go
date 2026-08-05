@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -283,6 +284,10 @@ type ToolExecutor struct {
 	// the handler stays unit-testable without a live gateway / DB.
 	webSearch   webSearcher
 	searchSaver searchSourcesSaver
+	// Phase 3 — optional. When wired the executor exposes web_fetch:
+	// an SSRF-guarded reader for a specific URL the user references.
+	// Shares searchSaver so fetched pages render as citation chips.
+	webFetch webPageFetcher
 	// Phase 13 Part B — run_python code interpreter. When all three are
 	// wired the executor exposes run_python: resolve optional file inputs
 	// (ownership-checked), materialise them into the hardened sandbox,
@@ -390,6 +395,27 @@ func (e *ToolExecutor) HasWebSearch() bool {
 	return e.webSearch != nil && e.searchSaver != nil
 }
 
+// webPageFetcher abstracts the SSRF-guarded page reader so tests can
+// stub it. Satisfied by *WebFetcher.
+type webPageFetcher interface {
+	Fetch(ctx context.Context, rawURL string, maxChars int) (*WebFetchResult, error)
+}
+
+// SetWebFetch wires the web_fetch tool (Phase 3). The saver is shared
+// with web_search so fetched pages surface as the same citation chips;
+// it may be nil-free wired even when web_search itself is not.
+func (e *ToolExecutor) SetWebFetch(fetcher webPageFetcher, saver searchSourcesSaver) {
+	e.webFetch = fetcher
+	if saver != nil {
+		e.searchSaver = saver
+	}
+}
+
+// HasWebFetch reports whether the web_fetch tool is wired.
+func (e *ToolExecutor) HasWebFetch() bool {
+	return e.webFetch != nil
+}
+
 // SetCodeInterpreter wires the Phase-13-B run_python tool: the sandbox-
 // backed interpreter, the ownership-checked file resolver, and the
 // artifact saver. Optional — when any is nil, run_python is hidden. Must
@@ -459,6 +485,12 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	if e.HasWebSearch() {
 		defs = append(defs, webSearchToolDef())
 	}
+	// Phase 3 — web_fetch. Direct page fetch, no provider dependency, so
+	// unlike web_search there is no per-tenant provider gate: wired ⇒
+	// offered. DLP still vets the arguments (EXTERNAL_EGRESS class).
+	if e.HasWebFetch() {
+		defs = append(defs, webFetchToolDef())
+	}
 	// Phase 13 Part B — run_python. Not gated on MemoryEnabled (running
 	// analysis code doesn't write user memory); offered in every
 	// conversation where the sandbox-backed interpreter is wired.
@@ -507,6 +539,8 @@ func (e *ToolExecutor) Execute(
 		return e.execGenerateVideo(ctx, call.Function.Arguments, ec)
 	case "web_search":
 		return e.execWebSearch(ctx, call.Function.Arguments, ec)
+	case "web_fetch":
+		return e.execWebFetch(ctx, call.Function.Arguments, ec)
 	case "run_python":
 		return e.execRunPython(ctx, call.Function.Arguments, ec)
 	default:
@@ -1230,6 +1264,113 @@ func (e *ToolExecutor) execWebSearch(
 		"Use these sources to answer the user's question. Cite sources by number [N] " +
 			"when referencing specific information. Answer in the user's language.")
 	return sb.String()
+}
+
+// ---------------------------------------------------------------------------
+// web_fetch (Phase 3 — SSRF-guarded page reader)
+// ---------------------------------------------------------------------------
+
+// webFetchToolDef mirrors the desktop tool of the same name so the
+// gateway's tool-arg DLP policy (EXTERNAL_EGRESS) applies unchanged.
+func webFetchToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "web_fetch",
+			Description: "Fetch and read a specific web page. Use this when the user pastes a URL " +
+				"or asks you to read, summarize, or extract something from a specific page. " +
+				"Only public http/https pages can be fetched. Do NOT use it to search — use " +
+				"web_search for that. Cite the page as a source when you use its content.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url": map[string]any{
+						"type":        "string",
+						"description": "The full http(s) URL of the page to read.",
+					},
+					"max_length": map[string]any{
+						"type":        "integer",
+						"description": "Optional cap on returned characters (1000-200000, default 50000).",
+					},
+				},
+				"required": []string{"url"},
+			},
+		},
+	}
+}
+
+type webFetchArgs struct {
+	URL       string `json:"url"`
+	MaxLength int    `json:"max_length"`
+}
+
+func (e *ToolExecutor) execWebFetch(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if e.webFetch == nil {
+		return "Web page fetching isn't available right now."
+	}
+	var args webFetchArgs
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return "I couldn't parse the web_fetch arguments."
+	}
+	rawURL := strings.TrimSpace(args.URL)
+	if rawURL == "" {
+		return "Please provide a URL to fetch."
+	}
+
+	res, err := e.webFetch.Fetch(ctx, rawURL, args.MaxLength)
+	if err != nil {
+		// Never echo internal detail beyond the guard's category; the
+		// full error goes to the log only.
+		slog.Warn("web_fetch_failed",
+			"error", err.Error(),
+			"conversation_id", ec.ConversationID,
+		)
+		if strings.Contains(err.Error(), "blocked address") {
+			return "That URL points at a private or internal address, which I can't fetch for security reasons."
+		}
+		return fmt.Sprintf("I couldn't fetch that page (%v). Tell the user the page couldn't be read.", err)
+	}
+
+	// Surface the page as a citation chip, same store as web_search.
+	// Best-effort — a save failure must not lose the fetched content.
+	if ec.MessageID != uuid.Nil && e.searchSaver != nil {
+		title := res.Title
+		if title == "" {
+			title = res.FinalURL
+		}
+		src := []GatewaySearchResult{{
+			Title:  title,
+			URL:    res.FinalURL,
+			Domain: domainOf(res.FinalURL),
+		}}
+		if err := e.searchSaver.SaveSearchSources(ctx, ec.MessageID, src); err != nil {
+			slog.Error("web_fetch_source_save_failed",
+				"error", err.Error(),
+				"message_id", ec.MessageID.String(),
+			)
+		}
+	}
+
+	var sb strings.Builder
+	if res.Title != "" {
+		fmt.Fprintf(&sb, "Title: %s\n", res.Title)
+	}
+	fmt.Fprintf(&sb, "URL: %s\n\n", res.FinalURL)
+	sb.WriteString(res.Text)
+	if res.Truncated {
+		sb.WriteString("\n\n[Content truncated — the page is longer than what could be read.]")
+	}
+	sb.WriteString("\n\nUse this page's content to answer. Cite the page when referencing it. Answer in the user's language.")
+	return sb.String()
+}
+
+func domainOf(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil {
+		return u.Hostname()
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
