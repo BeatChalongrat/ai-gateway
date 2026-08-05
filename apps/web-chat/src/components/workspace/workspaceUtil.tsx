@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { ArrowUpDown, Minus, Plus } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { tOutside } from "@/lib/i18n";
 
 // fileTypeIcon — the workspace + timeline call this for per-file
 // glyphs. Returns a FileTypeBadge so every format gets the same
@@ -39,10 +40,13 @@ export function timeAgo(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
   const seconds = Math.max(0, (Date.now() - t) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hr ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)} day ago`;
+  if (seconds < 60) return tOutside("time.justNow");
+  if (seconds < 3600)
+    return tOutside("time.minAgo", { n: String(Math.floor(seconds / 60)) });
+  if (seconds < 86400)
+    return tOutside("time.hrAgo", { n: String(Math.floor(seconds / 3600)) });
+  if (seconds < 604800)
+    return tOutside("time.dayAgo", { n: String(Math.floor(seconds / 86400)) });
   return new Date(t).toLocaleDateString();
 }
 

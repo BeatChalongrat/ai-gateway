@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Download, GitCompare, RotateCcw } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import { tOutside, useT } from "@/lib/i18n";
 import type {
   ComparisonResponse,
   FileVersion,
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export function VersionTimeline({ convId, fileId, filename, contentType, onBack }: Props) {
+  const t = useT();
   const [versions, setVersions] = useState<FileVersion[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
       const sorted = [...(res.versions ?? [])].sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
       setVersions(sorted);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't load versions.");
+      setError(err instanceof ApiError ? err.message : tOutside("ws.loadVersionsFailed"));
     } finally {
       setLoading(false);
     }
@@ -59,7 +61,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
       const res = await api.compareVersions(convId, olderId, newerId);
       setComparison(res);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Compare failed.");
+      setError(err instanceof ApiError ? err.message : tOutside("ws.compareFailed"));
     } finally {
       setBusyAction(null);
     }
@@ -67,9 +69,10 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
 
   async function handleRollback(target: FileVersion) {
     const ok = window.confirm(
-      `Roll back to v${target.version}? A new version (v${
-        (versions?.[0]?.version ?? 0) + 1
-      }) will be created with v${target.version}'s content. No versions are deleted.`,
+      tOutside("ws.rollbackConfirm", {
+        target: String(target.version),
+        next: String((versions?.[0]?.version ?? 0) + 1),
+      }),
     );
     if (!ok) return;
     setBusyAction(`rollback:${target.id}`);
@@ -78,7 +81,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
       await api.rollbackFile(convId, fileId, target.id);
       await fetchVersions();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Rollback failed.");
+      setError(err instanceof ApiError ? err.message : tOutside("ws.rollbackFailed"));
     } finally {
       setBusyAction(null);
     }
@@ -95,7 +98,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
         className="focus-ring inline-flex items-center gap-1 self-start text-xs font-medium text-text-tertiary transition-colors hover:text-text-primary"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to files
+        {t("ws.backToFiles")}
       </button>
 
       <div className="flex items-center gap-2">
@@ -103,13 +106,13 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-text-primary">{filename}</div>
           <div className="text-xs text-text-tertiary">
-            {total} version{total === 1 ? "" : "s"}
+            {total} {t(total === 1 ? "unit.version" : "unit.versions")}
           </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-xs text-text-tertiary">Loading versions…</div>
+        <div className="text-xs text-text-tertiary">{t("ws.loadingVersions")}</div>
       ) : null}
       {error ? (
         <div className="rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-xs text-status-danger">
@@ -153,7 +156,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
                     v{v.version}
                     {v.is_current ? (
                       <span className="ml-2 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
-                        current
+                        {t("ws.current")}
                       </span>
                     ) : null}
                   </span>
@@ -176,7 +179,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
                     className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
                   >
                     <Download className="h-3 w-3" />
-                    Download
+                    {t("common.download")}
                   </button>
                   {olderNeighbor ? (
                     <button
@@ -186,7 +189,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
                       className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface disabled:opacity-60"
                     >
                       <GitCompare className="h-3 w-3" />
-                      Compare with v{olderNeighbor.version}
+                      {t("ws.compareWith", { n: String(olderNeighbor.version) })}
                     </button>
                   ) : null}
                   {!v.is_current ? (
@@ -197,7 +200,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
                       className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface disabled:opacity-60"
                     >
                       <RotateCcw className="h-3 w-3" />
-                      Roll back
+                      {t("ws.rollback")}
                     </button>
                   ) : null}
                 </div>
@@ -206,7 +209,7 @@ export function VersionTimeline({ convId, fileId, filename, contentType, onBack 
           );
         })}
         {!loading && list.length === 0 ? (
-          <li className="text-xs text-text-tertiary">No versions in this lineage.</li>
+          <li className="text-xs text-text-tertiary">{t("ws.noVersions")}</li>
         ) : null}
       </ol>
 

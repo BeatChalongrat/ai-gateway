@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Events;
@@ -21,15 +20,26 @@ public sealed class ChatService : IChatService
         _logger = logger;
     }
 
-    public async IAsyncEnumerable<ChatStreamEvent> SendMessageAsync(
+    public IAsyncEnumerable<ChatStreamEvent> SendMessageAsync(
         string conversationId,
         string content,
         IReadOnlyList<string>? fileIds = null,
         bool imageMode = false,
         bool videoMode = false,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
+        => MapFramesAsync(_api.StreamMessageAsync(conversationId, content, fileIds, imageMode, videoMode, ct));
+
+    public IAsyncEnumerable<ChatStreamEvent> ResumeMessageAsync(
+        string conversationId,
+        string messageId,
+        CancellationToken ct = default)
+        // Phase 5 Task 3: the reattach stream speaks the same SSE vocabulary
+        // as the send stream — one mapper serves both.
+        => MapFramesAsync(_api.ResumeMessageStreamAsync(conversationId, messageId, ct));
+
+    private async IAsyncEnumerable<ChatStreamEvent> MapFramesAsync(IAsyncEnumerable<SseFrame> frames)
     {
-        await foreach (var frame in _api.StreamMessageAsync(conversationId, content, fileIds, imageMode, videoMode, ct))
+        await foreach (var frame in frames)
         {
             ChatStreamEvent? mapped;
             try

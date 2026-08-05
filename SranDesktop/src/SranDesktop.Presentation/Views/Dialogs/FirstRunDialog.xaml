@@ -9,7 +9,7 @@
         xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:FirstRunViewModel}"
-        Title="Welcome to SRAN Desktop"
+        Title="{loc:T firstRun.title}"
         Width="520" SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
@@ -34,10 +34,10 @@
                        Foreground="{DynamicResource OnAccentBrush}"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Border>
-        <TextBlock Text="Welcome to SRAN Desktop" FontSize="22" FontWeight="SemiBold"
+        <TextBlock Text="{loc:T firstRun.title}" FontSize="22" FontWeight="SemiBold"
                    HorizontalAlignment="Center" Margin="0,12,0,0"
                    Foreground="{DynamicResource TextPrimaryBrush}" />
-        <TextBlock Text="An AI assistant that lives on your desktop"
+        <TextBlock Text="{loc:T firstRun.subtitle}"
                    HorizontalAlignment="Center" Margin="0,6,0,24"
                    Foreground="{DynamicResource TextSecondaryBrush}" />
 
@@ -53,7 +53,7 @@
         <Border Margin="24,0,0,8" Padding="8" CornerRadius="6"
                 Background="{DynamicResource BgSecondaryBrush}"
                 Visibility="{Binding IsCloudSelected, Converter={StaticResource BoolToVisibility}}">
-            <TextBlock Text="sran.ai (managed service)" FontSize="11"
+            <TextBlock Text="{loc:T firstRun.cloudDesc}" FontSize="11"
                        Foreground="{DynamicResource TextTertiaryBrush}" />
         </Border>
 
@@ -98,15 +98,15 @@
         <Border Background="{DynamicResource BgSecondaryBrush}" CornerRadius="8" Padding="16,12"
                 Margin="0,0,0,16">
             <StackPanel>
-                <TextBlock Text="Quick tips" FontWeight="SemiBold" Margin="0,0,0,6"
+                <TextBlock Text="{loc:T firstRun.quickTips}" FontWeight="SemiBold" Margin="0,0,0,6"
                            Foreground="{DynamicResource TextPrimaryBrush}" />
                 <TextBlock TextWrapping="Wrap" FontSize="13"
                            Foreground="{DynamicResource TextSecondaryBrush}">
-                    <Run Text="• Ctrl+Shift+Space" FontWeight="SemiBold" /> - open SRAN from anywhere
+                    <Run Text="• Ctrl+Shift+Space" FontWeight="SemiBold" /> <Run Text="{loc:T firstRun.tip.hotkeyDesc}" />
                     <LineBreak />
-                    <Run Text="• Agent Mode" FontWeight="SemiBold" /> - let the AI read files, run commands, and more
+                    <Run Text="{loc:T firstRun.tip.agentLabel}" FontWeight="SemiBold" /> <Run Text="{loc:T firstRun.tip.agentDesc}" />
                     <LineBreak />
-                    <Run Text="• Close to tray" FontWeight="SemiBold" /> - the app keeps running in the background
+                    <Run Text="{loc:T firstRun.tip.trayLabel}" FontWeight="SemiBold" /> <Run Text="{loc:T firstRun.tip.trayDesc}" />
                 </TextBlock>
             </StackPanel>
         </Border>
@@ -114,9 +114,9 @@
         <!-- Phase 8: the disabled "Show system tray icon" checkbox was a dead
              control (the tray icon is always created; no setting backs it) —
              removed rather than faked. -->
-        <CheckBox Content="Start with Windows" IsChecked="{Binding StartWithWindows}" Margin="0,0,0,20" />
+        <CheckBox Content="{loc:T firstRun.startWithWindows}" IsChecked="{Binding StartWithWindows}" Margin="0,0,0,20" />
 
-        <Button Content="Get Started" Style="{DynamicResource AccentButton}"
+        <Button Content="{loc:T firstRun.getStarted}" Style="{DynamicResource AccentButton}"
                 HorizontalAlignment="Center" MinWidth="160" Padding="16,10"
                 IsDefault="True"
                 IsEnabled="{Binding CanContinue}"

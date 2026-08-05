@@ -37,6 +37,9 @@ type Handlers struct {
 	// Folder owns the chat-folders surface (migration 022): folder CRUD +
 	// reorder, plus the conversation→folder move route.
 	Folder       *handler.FolderHandler
+	// Project owns the Phase-4 projects surface (migration 029): project
+	// CRUD + KB binding + the conversation→project move route.
+	Project      *handler.ProjectHandler
 	Message      *handler.MessageHandler
 	Model        *handler.ModelHandler
 	Feedback     *handler.FeedbackHandler
@@ -159,6 +162,18 @@ func New(
 				r.Put("/conversations/{id}/folder", h.Folder.MoveConversation)
 			}
 
+			// Phase 4 — Projects: shared instructions + KB per project.
+			if h.Project != nil {
+				r.Get("/projects", h.Project.List)
+				r.Post("/projects", h.Project.Create)
+				r.Get("/projects/{id}", h.Project.Get)
+				r.Put("/projects/{id}", h.Project.Update)
+				r.Put("/projects/{id}/knowledge-base", h.Project.SetKnowledgeBase)
+				r.Delete("/projects/{id}", h.Project.Delete)
+				// Conversation → project membership.
+				r.Put("/conversations/{id}/project", h.Project.MoveConversation)
+			}
+
 			// Desktop import — idempotent backup mirror of agent-mode
 			// chats. NOT rate-limited (no LLM cost; a first sync bursts
 			// legitimately). chi matches the literal "import" segment
@@ -177,6 +192,8 @@ func New(
 
 			// Messages.
 			r.Get("/conversations/{id}/messages", h.Message.List)
+			// Phase 5 — reattach to an in-flight generation (SSE).
+			r.Get("/conversations/{id}/messages/{messageID}/stream", h.Message.ResumeStream)
 
 			// Send + Regenerate go through the rate-limit middleware
 			// — both kick off an expensive Gateway round-trip.

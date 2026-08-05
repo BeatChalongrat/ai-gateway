@@ -88,6 +88,17 @@ public interface IChatEdgeApiClient
         CancellationToken ct = default);
 
     /// <summary>
+    /// Phase 5 Task 3: GET .../messages/{messageId}/stream — reattach to an
+    /// IN-FLIGHT server-side generation. Same SSE vocabulary as the POST send;
+    /// the already-generated prefix arrives as one large content_delta, then
+    /// live deltas. Throws HttpRequestException with StatusCode 409
+    /// (RESUME_UNAVAILABLE — not attachable yet, retry with backoff) or 404
+    /// (message/conversation gone).
+    /// </summary>
+    IAsyncEnumerable<SseFrame> ResumeMessageStreamAsync(
+        string conversationId, string messageId, CancellationToken ct = default);
+
+    /// <summary>
     /// GET a server file as raw bytes. <paramref name="downloadUrl"/> is the
     /// relative download_url from the server (e.g. "/api/v1/files/{id}/download").
     /// </summary>

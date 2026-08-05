@@ -378,6 +378,18 @@ func (r *MessageRepo) SearchUserMessages(
 	if r.displayLifecycle {
 		extraCols = `, m.display_state, m.content_canonical, m.canonical_status`
 	}
+	// Hybrid engine (migration 028): unsegmented-script queries (Thai,
+	// CJK, …) can't match tsvector word tokens, so they route to a
+	// trigram-indexed substring match ranked by similarity(). Spaced
+	// languages keep the original ts_rank branch unchanged.
+	rankExpr := `ts_rank(m.search_vector, plainto_tsquery('simple', $3))::float8`
+	matchExpr := `m.search_vector @@ plainto_tsquery('simple', $3)`
+	args := []any{userID, tenantID, q, limit}
+	if NeedsTrigramSearch(q) {
+		rankExpr = `similarity(m.content_masked, $3)::float8`
+		matchExpr = `m.content_masked ILIKE $5`
+		args = append(args, TrigramPattern(q))
+	}
 	sql := `
 		SELECT
 			m.id,
@@ -386,7 +398,7 @@ func (r *MessageRepo) SearchUserMessages(
 			m.role,
 			m.content_masked,
 			m.created_at,
-			ts_rank(m.search_vector, plainto_tsquery('simple', $3))::float8 AS rank` + extraCols + `
+			` + rankExpr + ` AS rank` + extraCols + `
 		FROM chat.messages_masked m
 		JOIN chat.conversations c ON c.id = m.conversation_id
 		WHERE c.user_id = $1
@@ -394,11 +406,11 @@ func (r *MessageRepo) SearchUserMessages(
 		  AND c.is_deleted = false
 		  AND m.is_active = true
 		  AND m.role IN ('user', 'assistant')
-		  AND m.search_vector @@ plainto_tsquery('simple', $3)
+		  AND ` + matchExpr + `
 		ORDER BY rank DESC, m.created_at DESC
 		LIMIT $4
 	`
-	rows, err := r.db.Query(ctx, sql, userID, tenantID, q, limit)
+	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search user messages: %w", err)
 	}
@@ -782,6 +794,21 @@ func (r *MessageRepo) UpdateContent(
 	`
 	if _, err := r.db.Exec(ctx, q, msgID, content, status, tokenInput, tokenOutput); err != nil {
 		return fmt.Errorf("update message content: %w", err)
+	}
+	return nil
+}
+
+// MarkInterrupted settles a row that a process restart orphaned
+// mid-generation (Phase 5 stream resume). Guarded: only flips a row
+// that is still in a non-terminal state, so it can never clobber a
+// completed/cancelled/error status written by a live finish callback.
+func (r *MessageRepo) MarkInterrupted(ctx context.Context, msgID uuid.UUID) error {
+	const q = `
+		UPDATE chat.messages_masked SET status = 'error'
+		WHERE id = $1 AND status IN ('streaming', 'pending')
+	`
+	if _, err := r.db.Exec(ctx, q, msgID); err != nil {
+		return fmt.Errorf("mark interrupted: %w", err)
 	}
 	return nil
 }

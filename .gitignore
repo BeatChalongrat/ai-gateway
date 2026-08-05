@@ -105,3 +105,6 @@ data/
 test-results/
 .next-dev/
 .next-fresh/
+
+# Local pre-fix backup snapshots (multi-GB) - never commit
+_retired-*/

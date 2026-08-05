@@ -78,4 +78,9 @@ type Conversation struct {
 	// NULL means "unfiled" (the conversation shows in the PINNED / time
 	// buckets). The frontend groups conversations under folders by this id.
 	FolderID *uuid.UUID
+
+	// ProjectID is the project membership (migration 029). Nullable — NULL
+	// means "no project". A project-assigned conversation inherits the
+	// project's instructions + knowledge base at prompt-compile time.
+	ProjectID *uuid.UUID
 }

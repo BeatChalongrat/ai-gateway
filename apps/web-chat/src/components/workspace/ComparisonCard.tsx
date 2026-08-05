@@ -6,6 +6,7 @@
 
 import { X } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
 import type { ComparisonResponse } from "@/lib/types";
 
 import { changeIcon, humanSize } from "./workspaceUtil";
@@ -16,31 +17,35 @@ interface Props {
 }
 
 export function ComparisonCard({ result, onClose }: Props) {
+  const t = useT();
   const { v1, v2, comparison } = result;
   return (
     <div className="my-3 overflow-hidden rounded-xl border border-border-default bg-bg-surface shadow-sm">
       <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
         <span className="text-sm font-semibold text-text-primary">
-          Comparing v{v1.version} → v{v2.version}
+          {t("ws.comparing", { a: String(v1.version), b: String(v2.version) })}
         </span>
         <button
           type="button"
           onClick={onClose}
           className="focus-ring ml-auto rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-          aria-label="Close comparison"
+          aria-label={t("ws.closeComparison")}
         >
           <X className="h-4 w-4" />
         </button>
       </div>
       <div className="space-y-3 px-4 py-3">
         <div className="text-xs text-text-tertiary">
-          Size: {humanSize(v1.file_size_bytes)} → {humanSize(v2.file_size_bytes)}
+          {t("ws.sizeChange", {
+            from: humanSize(v1.file_size_bytes),
+            to: humanSize(v2.file_size_bytes),
+          })}
           <span className="ml-2 text-text-secondary">({comparison.size_change})</span>
         </div>
         {comparison.structural_changes.length > 0 ? (
           <div>
             <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-text-tertiary">
-              Changes
+              {t("plan.changes")}
             </div>
             <ul className="space-y-1 text-sm text-text-primary">
               {comparison.structural_changes.map((c, i) => (

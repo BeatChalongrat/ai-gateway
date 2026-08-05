@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { tOutside, useT } from "@/lib/i18n";
 import type { MediaJobStatus, ModelEntry } from "@/lib/types";
 
 import { VideoGeneratingPlaceholder } from "../chat/VideoGeneratingPlaceholder";
@@ -44,6 +45,7 @@ type Phase =
 const GEN_ETA_FALLBACK_SEC = 60;
 
 export function VideoGenForm({ model, conversationId }: Props) {
+  const t = useT();
   const [prompt, setPrompt] = useState("");
   const [duration, setDuration] = useState(5);
   const [resolution, setResolution] = useState("1080p");
@@ -130,7 +132,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
           setPhase("done");
         } else if (j.status === "failed") {
           stopPolling();
-          setError(j.error_message || "Generation failed.");
+          setError(j.error_message || tOutside("media.genFailed"));
           setPhase("failed");
         } else if (j.status === "cancelled") {
           stopPolling();
@@ -175,7 +177,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
         setError(err.message);
         setErrorCode(mediaErrorCodeFromStatus(err.status, err.code));
       } else {
-        setError("Failed to submit video job.");
+        setError(tOutside("media.submitVideoFailed"));
         setErrorCode("unknown");
       }
       setPhase("failed");
@@ -225,12 +227,12 @@ export function VideoGenForm({ model, conversationId }: Props) {
             rows={3}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the video you want to generate…"
+            placeholder={t("media.video.placeholder")}
             className="w-full resize-none rounded-lg border border-border bg-bg-base px-3 py-2 text-[15px] text-text-primary placeholder:text-text-placeholder focus:border-border-strong focus:outline-none"
           />
           <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-sm text-text-secondary">
-              <span>Duration</span>
+              <span>{t("media.duration")}</span>
               <input
                 type="range"
                 min={1}
@@ -242,7 +244,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
               <span className="w-8 tabular-nums text-text-primary">{duration}s</span>
             </label>
             <label className="flex items-center gap-2 text-sm text-text-secondary">
-              <span>Resolution</span>
+              <span>{t("media.resolution")}</span>
               <select
                 value={resolution}
                 onChange={(e) => setResolution(e.target.value)}
@@ -259,7 +261,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
                 onChange={(e) => setHasAudio(e.target.checked)}
                 className="accent-rose-400"
               />
-              <span>Audio</span>
+              <span>{t("media.audio")}</span>
             </label>
           </div>
           {phase === "failed" && errorCode ? (
@@ -283,7 +285,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
             disabled={!prompt.trim()}
             className="self-end rounded-full bg-rose-500 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {phase === "failed" ? "Retry" : "Generate video"}
+            {phase === "failed" ? t("common.retry") : t("media.generateVideo")}
           </button>
         </>
       ) : null}
@@ -301,13 +303,13 @@ export function VideoGenForm({ model, conversationId }: Props) {
 
       {phase === "cancelled" ? (
         <div className="flex flex-col items-center gap-3 py-2">
-          <p className="text-sm text-text-secondary">Generation cancelled.</p>
+          <p className="text-sm text-text-secondary">{t("media.cancelled")}</p>
           <button
             type="button"
             onClick={reset}
             className="rounded-full border border-border px-4 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Start over
+            {t("media.startOver")}
           </button>
         </div>
       ) : null}
@@ -334,12 +336,12 @@ export function VideoGenForm({ model, conversationId }: Props) {
               />
             ) : outputFailed ? (
               <p className="py-4 text-center text-sm text-status-danger">
-                Couldn&apos;t load the generated video. Try again.
+                {t("media.loadVideoFailed")}
               </p>
             ) : (
               <div
                 className="aspect-video w-full animate-pulse rounded-lg bg-bg-elevated"
-                aria-label="Loading generated video"
+                aria-label={t("media.loadingVideo")}
               />
             )}
             {outputUrl && job.provenance ? (
@@ -353,7 +355,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
             onClick={reset}
             className="rounded-full border border-border px-4 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Generate another
+            {t("media.generateAnother")}
           </button>
         </div>
       ) : null}
