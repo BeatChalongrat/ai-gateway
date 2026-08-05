@@ -12,7 +12,7 @@ import {
   MAX_FILES_PER_MESSAGE,
   validateFile,
 } from "@/lib/fileUtil";
-import { useT } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useWhisperInput } from "@/hooks/useWhisperInput";
@@ -406,7 +406,7 @@ export function ChatInput({
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("ChatInput.ensureConvId: onRequestConversation threw", err);
-      toast("Couldn't prepare the conversation. Please try again.");
+      toast(tOutside("chat.toast.prepareFailed"));
       return null;
     }
   }
@@ -438,7 +438,7 @@ export function ChatInput({
       );
     } catch (err) {
       const msg =
-        err instanceof ApiError ? err.message : "Upload failed. Try again.";
+        err instanceof ApiError ? err.message : tOutside("file.err.uploadFailed");
       markFileError(chipBucket, pendingId, msg);
       toast(msg);
     }
@@ -452,14 +452,14 @@ export function ChatInput({
     const existing = pendingFiles.filter((p) => p.status !== "error").length;
     const slots = Math.max(0, MAX_FILES_PER_MESSAGE - existing);
     if (slots === 0) {
-      toast(`At most ${MAX_FILES_PER_MESSAGE} files per message.`);
+      toast(tOutside("input.toast.maxFiles", { max: String(MAX_FILES_PER_MESSAGE) }));
       return;
     }
 
     const accepted: File[] = [];
     for (const f of filesRaw) {
       if (accepted.length === slots) {
-        toast(`Only ${slots} more file(s) can attach to this message.`);
+        toast(tOutside("input.toast.slotsLeft", { n: String(slots) }));
         break;
       }
       const v = validateFile(f);

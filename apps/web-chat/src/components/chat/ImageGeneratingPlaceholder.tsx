@@ -8,13 +8,15 @@
 // reuses the global .skeleton shimmer + Tailwind's animate-pulse.
 
 import { ImageIcon } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 export function ImageGeneratingPlaceholder() {
+  const t = useT();
   return (
     <div
       className="relative mt-1 h-64 w-64 max-w-full overflow-hidden rounded-lg border border-border bg-bg-secondary"
       role="status"
-      aria-label="กำลังสร้างรูปภาพ"
+      aria-label={t("gen.image")}
     >
       {/* Shimmer layer — square corners; the wrapper clips them. */}
       <div className="skeleton absolute inset-0 rounded-none" aria-hidden />
@@ -25,9 +27,9 @@ export function ImageGeneratingPlaceholder() {
         />
         <div className="text-center">
           <p className="shimmer-text text-sm font-medium">
-            กำลังสร้างรูปภาพ...
+            {t("gen.image")}
           </p>
-          <p className="mt-0.5 text-xs text-text-muted">อาจใช้เวลาสักครู่</p>
+          <p className="mt-0.5 text-xs text-text-muted">{t("gen.mayTakeAWhile")}</p>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@
 // child crash) doesn't take down the whole chat surface.
 
 import { Component, ReactNode } from "react";
+import { tOutside } from "@/lib/i18n";
 
 interface Props {
   /** Reset key. When this value changes the boundary clears its
@@ -41,7 +42,7 @@ export class ErrorBoundary extends Component<Props, State> {
       <div className="flex h-full items-center justify-center px-4 text-center">
         <div className="max-w-sm rounded-lg border border-status-danger/30 bg-status-danger/10 p-4">
           <h3 className="text-sm font-semibold text-text-primary">
-            Something went wrong
+            {tOutside("boundary.title")}
           </h3>
           <p className="mt-1 text-[11px] text-text-muted">
             {error.message || "An unexpected error occurred while rendering."}
@@ -51,7 +52,7 @@ export class ErrorBoundary extends Component<Props, State> {
             onClick={this.reset}
             className="focus-ring mt-3 rounded-md bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base hover:opacity-90"
           >
-            Reload conversation
+            {tOutside("boundary.reload")}
           </button>
         </div>
       </div>

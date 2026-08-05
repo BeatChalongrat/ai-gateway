@@ -9,7 +9,7 @@
         xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
-        Title="Settings"
+        Title="{loc:T settings.title}"
         Width="500" Height="580"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -52,7 +52,7 @@
                                Stroke="{DynamicResource TextPrimaryBrush}"
                                Width="20" Height="20" Margin="0,0,10,0"
                                VerticalAlignment="Center" />
-            <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold"
+            <TextBlock Text="{loc:T settings.title}" FontSize="18" FontWeight="SemiBold"
                        VerticalAlignment="Center" />
         </StackPanel>
 
@@ -63,14 +63,14 @@
                 <!-- General -->
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <TextBlock Text="General" Style="{StaticResource SectionHeader}" />
+                        <TextBlock Text="{loc:T settings.general}" Style="{StaticResource SectionHeader}" />
 
-                        <TextBlock Text="Theme" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Text="{loc:T settings.theme}" Style="{StaticResource FieldLabel}" />
                         <ComboBox ItemsSource="{Binding Themes}"
                                   SelectedItem="{Binding SelectedTheme}"
                                   Margin="0,0,0,12" />
 
-                        <TextBlock Text="Default model (new chats)" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Text="{loc:T settings.defaultModel}" Style="{StaticResource FieldLabel}" />
                         <ComboBox ItemsSource="{Binding AvailableModels}"
                                   SelectedValue="{Binding SelectedModelId}"
                                   SelectedValuePath="Id">
@@ -90,11 +90,11 @@
                 <!-- Desktop Integration -->
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <TextBlock Text="Desktop Integration" Style="{StaticResource SectionHeader}" />
+                        <TextBlock Text="{loc:T settings.desktopIntegration}" Style="{StaticResource SectionHeader}" />
 
-                        <CheckBox Content="Minimize to system tray on close"
+                        <CheckBox Content="{loc:T settings.minimizeToTray}"
                                   IsChecked="{Binding MinimizeToTray}" Margin="0,0,0,8" />
-                        <CheckBox Content="Start with Windows (launches to the tray)"
+                        <CheckBox Content="{loc:T settings.startWithWindows}"
                                   IsChecked="{Binding StartWithWindows}" Margin="0,0,0,8" />
                         <!-- Opt-in crash telemetry (R11 A3c) -->
                         <CheckBox IsChecked="{Binding CrashReportingEnabled}" Margin="0,0,0,8">
@@ -115,8 +115,8 @@
                                    FontSize="12" Margin="24,0,0,8" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextTertiaryBrush}" />
 
-                        <TextBlock Text="Global hotkey" Style="{StaticResource FieldLabel}" />
-                        <TextBlock Text="Ctrl + Shift + Space (show / hide from anywhere)"
+                        <TextBlock Text="{loc:T settings.globalHotkey}" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Text="{loc:T settings.globalHotkeyDesc}"
                                    FontSize="12"
                                    Foreground="{DynamicResource TextTertiaryBrush}" />
                     </StackPanel>
@@ -258,7 +258,7 @@
                                 </ControlTemplate>
                             </ToggleButton.Template>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Advanced" Style="{StaticResource SectionHeader}" Margin="0" />
+                                <TextBlock Text="{loc:T settings.advanced}" Style="{StaticResource SectionHeader}" Margin="0" />
                                 <controls:IconView Geometry="{StaticResource Geo_ChevronDown}"
                                                    Stroke="{DynamicResource TextSecondaryBrush}"
                                                    Width="12" Height="12" Margin="8,2,0,0"
@@ -288,24 +288,24 @@
                         <StackPanel Margin="0,12,0,0"
                                     Visibility="{Binding IsChecked, ElementName=AdvancedToggle,
                                                  Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="Chat server URL (chat-edge-api)" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Text="{loc:T settings.chatServerUrl}" Style="{StaticResource FieldLabel}" />
                             <TextBox Text="{Binding ChatEdgeBaseUrl, UpdateSourceTrigger=PropertyChanged}"
                                      Margin="0,0,0,10" />
 
-                            <TextBlock Text="Gateway URL (auth + agent mode)" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Text="{loc:T settings.gatewayUrl}" Style="{StaticResource FieldLabel}" />
                             <TextBox Text="{Binding GatewayBaseUrl, UpdateSourceTrigger=PropertyChanged}"
                                      Margin="0,0,0,10" />
 
-                            <TextBlock Text="Changes to server URLs take effect after restarting the app."
+                            <TextBlock Text="{loc:T settings.restartNote}"
                                        FontSize="11" FontStyle="Italic" TextWrapping="Wrap"
                                        Foreground="{DynamicResource TextTertiaryBrush}" />
 
-                            <Button Content="Clean up empty chats" Margin="0,14,0,0"
+                            <Button Content="{loc:T settings.cleanupEmptyChats}" Margin="0,14,0,0"
                                     Padding="12,7" HorizontalAlignment="Left"
                                     Background="Transparent" BorderThickness="1"
                                     BorderBrush="{DynamicResource BorderBrush}"
                                     Command="{Binding CleanupEmptyChatsCommand}"
-                                    ToolTip="Delete untitled conversations that have no messages" />
+                                    ToolTip="{loc:T settings.cleanupEmptyChatsTip}" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -316,11 +316,11 @@
         <!-- Footer -->
         <StackPanel Grid.Row="2" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="24,12,24,18">
-            <Button Content="Cancel" MinWidth="84" Padding="12,7" Margin="0,0,8,0"
+            <Button Content="{loc:T common.cancel}" MinWidth="84" Padding="12,7" Margin="0,0,8,0"
                     IsCancel="True"
                     Background="Transparent" BorderThickness="1"
                     BorderBrush="{DynamicResource BorderBrush}" />
-            <Button Content="Save" MinWidth="84" Padding="12,7"
+            <Button Content="{loc:T common.save}" MinWidth="84" Padding="12,7"
                     IsDefault="True" Click="Save_Click"
                     Style="{DynamicResource AccentButton}" />
         </StackPanel>

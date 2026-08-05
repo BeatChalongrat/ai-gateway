@@ -87,6 +87,12 @@ type CompileContext struct {
 	TenantConfig *TenantPromptConfig
 	ActiveTools  []string // tool names active for this request
 
+	// ProjectInstructions — Phase 4. Pre-loaded by the caller when the
+	// conversation belongs to a project (needs the project repo the
+	// compiler deliberately doesn't hold). Empty ⇒ Layer 10 output is
+	// byte-identical to pre-Phase-4.
+	ProjectInstructions string
+
 	// Layer 13 — pre-rendered by the caller (needs file/KB repos).
 	RAGContext   string
 	FileContext  string
@@ -272,13 +278,73 @@ func (pc *PromptCompiler) outputFormat(in CompileContext) string {
 // Layer 5 — Capability Statement (always)
 // ---------------------------------------------------------------------------
 
-const capabilityBlock = `<capabilities>
-You CAN: converse, analyze, write, help with code, translate, summarize, brainstorm, do math; remember user facts across chats and search past conversations (via tools); generate and edit Excel (.xlsx), Word (.docx), PDF, and PowerPoint (.pptx) files, including charts inside Excel/PowerPoint (bar, line, pie, area, scatter); and process uploaded files (images, documents, spreadsheets, PDFs).
-You CANNOT (be honest, never pretend you can): show charts/graphs/visualizations inline in chat — only inside downloadable files; run code; browse the internet or open URLs; create or edit images; access real-time data (prices, scores, weather); send email or call external services; or access the user's device, camera, or microphone.
-</capabilities>`
-
+// capabilityStatement assembles Layer 5 per request from ActiveTools so
+// the statement never contradicts the tools actually attached. The old
+// static block told the model it could NOT run code / browse / create
+// images even when run_python / web_search / generate_image were live in
+// the same request — a direct contradiction that risked spurious
+// refusals of work the model can do.
 func (pc *PromptCompiler) capabilityStatement(in CompileContext) string {
-	block := capabilityBlock
+	active := make(map[string]bool, len(in.ActiveTools))
+	for _, t := range in.ActiveTools {
+		active[t] = true
+	}
+
+	can := []string{
+		"converse, analyze, write, help with code, translate, summarize, brainstorm, do math",
+		"remember user facts across chats and search past conversations (via tools)",
+		"generate and edit Excel (.xlsx), Word (.docx), PDF, and PowerPoint (.pptx) files, including charts inside Excel/PowerPoint (bar, line, pie, area, scatter)",
+		"process uploaded files (images, documents, spreadsheets, PDFs)",
+	}
+	cannot := []string{
+		"show charts/graphs/visualizations inline in chat — only inside downloadable files",
+	}
+
+	if active["run_python"] {
+		can = append(can, "run Python code in a secure sandbox (via the run_python tool) for calculations, data analysis, and chart files")
+	} else {
+		cannot = append(cannot, "run code")
+	}
+	if active["web_search"] {
+		can = append(can, "search the web for current information (via the web_search tool)")
+	}
+	if active["web_fetch"] {
+		can = append(can, "open and read a specific web page from a URL (via the web_fetch tool)")
+	}
+	switch {
+	case active["web_search"] && active["web_fetch"]:
+		// Both wired — no web-access denial at all.
+	case active["web_search"]:
+		cannot = append(cannot, "open or fetch a specific URL directly — you can only search")
+	case active["web_fetch"]:
+		cannot = append(cannot, "search the web — you can only read pages from URLs you are given")
+	default:
+		cannot = append(cannot,
+			"browse the internet or open URLs",
+			"access real-time data (prices, scores, weather)",
+		)
+	}
+	if active["generate_image"] {
+		can = append(can, "generate images from a text description (via the generate_image tool)")
+		cannot = append(cannot, "edit or transform an existing image")
+	} else {
+		cannot = append(cannot, "create or edit images")
+	}
+	if active["generate_video"] {
+		can = append(can, "generate short video clips (via the generate_video tool)")
+	}
+	cannot = append(cannot,
+		"send email or call external services",
+		"access the user's device, camera, or microphone",
+	)
+
+	var b strings.Builder
+	b.WriteString("<capabilities>\nYou CAN: ")
+	b.WriteString(strings.Join(can, "; "))
+	b.WriteString(".\nYou CANNOT (be honest, never pretend you can): ")
+	b.WriteString(strings.Join(cannot, "; "))
+	b.WriteString(".\n</capabilities>")
+	block := b.String()
 	if tc := in.TenantConfig; tc != nil {
 		if dis := strings.TrimSpace(tc.DisabledCapabs); dis != "" {
 			block += "\n<disabled_capabilities>\nThe following capabilities are " +
@@ -295,7 +361,7 @@ func (pc *PromptCompiler) capabilityStatement(in CompileContext) string {
 
 const safetyBlock = `<safety>
 - If you can't or shouldn't do something, briefly say why and offer what you CAN do instead — never a bare "I can't".
-- Don't invent facts or data; if unsure, say so. Don't pretend to browse, run code, or use capabilities you lack.
+- Don't invent facts or data; if unsure, say so. Don't pretend to use capabilities you lack (see <capabilities>).
 - Protect privacy: don't echo back secrets the user shares (passwords, API keys, IDs), and advise keeping them private.
 - For medical, legal, or financial topics: be helpful but note you're not a professional.
 </safety>`
@@ -327,12 +393,28 @@ var toolDescriptions = map[string]string{
 		"\"remember when we discussed...\").",
 	"update_conversation_state": "- update_conversation_state: Track the goal and " +
 		"progress of the current conversation as it evolves.",
+	"web_search": "- web_search: Search the web when the user asks about current " +
+		"events, recent releases, prices, or anything likely past your knowledge " +
+		"cutoff. Cite results as [N] per the tool's result format.",
+	"web_fetch": "- web_fetch: Fetch and read a specific web page when the user " +
+		"pastes a URL or asks about a particular page. Use web_search for open-ended " +
+		"queries; use web_fetch when you have the exact URL. Cite the page when you " +
+		"use its content.",
+	"run_python": "- run_python: Run Python in the sandbox for non-trivial " +
+		"calculations, data analysis over uploaded files, and chart generation. " +
+		"Prefer it over doing multi-step arithmetic by hand.",
+	"generate_image": "- generate_image: Create an image when the user asks for a " +
+		"picture, illustration, diagram, or logo. The image attaches to your reply " +
+		"automatically — never fabricate an image URL.",
+	"generate_video": "- generate_video: Create a short video clip when the user " +
+		"asks for one. The clip attaches to your reply automatically.",
 }
 
 // toolPolicyOrder fixes the paragraph order regardless of how ActiveTools
 // is sorted by the caller.
 var toolPolicyOrder = []string{
 	"save_memory", "list_memories", "search_past_conversations", "update_conversation_state",
+	"web_search", "web_fetch", "run_python", "generate_image", "generate_video",
 }
 
 func (pc *PromptCompiler) toolPolicy(in CompileContext) string {
@@ -397,10 +479,24 @@ func (pc *PromptCompiler) tenantSettings(in CompileContext) string {
 // ---------------------------------------------------------------------------
 
 func (pc *PromptCompiler) userCustomInstructions(ctx context.Context, in CompileContext) string {
-	if pc.prefs == nil {
-		return ""
+	var parts []string
+	if pc.prefs != nil {
+		if b := pc.prefs.BuildInstructionsBlock(ctx, in.TenantID, in.UserID); b != "" {
+			parts = append(parts, b)
+		}
 	}
-	return pc.prefs.BuildInstructionsBlock(ctx, in.TenantID, in.UserID)
+	// Phase 4 — project instructions render AFTER the user's personal
+	// custom instructions, deliberately: the project block is the more
+	// specific of the two, and with instruction-following models the
+	// later block wins on conflict. System layers (1-8) always outrank
+	// both. Priority order, most → least authoritative:
+	//   system layers (1-8)  >  project instructions  >  user custom
+	//   instructions (rendered first so the project can override).
+	// No project (empty string) ⇒ output byte-identical to pre-Phase-4.
+	if p := strings.TrimSpace(in.ProjectInstructions); p != "" {
+		parts = append(parts, "## Project instructions\n"+p+"\n")
+	}
+	return strings.Join(parts, "\n")
 }
 
 // ---------------------------------------------------------------------------

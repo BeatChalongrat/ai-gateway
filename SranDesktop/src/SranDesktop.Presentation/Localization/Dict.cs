@@ -218,6 +218,10 @@ public static class Dict
         ["error.streamStalled"] = "The connection stalled while the AI was answering. Please try again.",
         ["error.rateLimited"] = "Too many requests right now. Wait a moment and try again.",
         ["status.stopped"] = "Stopped",
+        // Phase 5 Task 3 — stream reattach + continue-after-drop
+        ["status.reattaching"] = "Reconnecting to the reply…",
+        ["status.continueAvailable"] = "Connection lost — press Continue to resume.",
+        ["error.resumeLost"] = "Connection lost and the reply could not be reattached.",
         // FIX 9 — a completed turn that could not land on the server yet.
         ["chat.turnNotSynced"] = "Not synced to the server yet — will retry",
         // FIX 10 — synced non-image attachment chip.
@@ -575,6 +579,67 @@ public static class Dict
         ["style.analyzing"] = "Analyzing...",
         ["style.active"] = "Style profile active",
         ["style.clear"] = "Clear profile",
+
+        // i18n sweep — agent status (ChatViewModel)
+        ["agent.workingStep"] = "Working... (step {0}/{1})",
+        ["agent.waitingPermission"] = "Waiting for permission: {0}...",
+        ["voice.unavailable"] = "Speech recognition is unavailable (no recognizer, microphone, or speech key).",
+
+        // i18n sweep — message meta (MessageViewModel)
+        ["msg.thinking"] = "Thinking...",
+        ["msg.thoughtFor"] = "Thought for {0:F1}s",
+        ["msg.tokens"] = "{0} tokens",
+
+        // i18n sweep — Settings window
+        ["settings.title"] = "Settings",
+        ["settings.general"] = "General",
+        ["settings.theme"] = "Theme",
+        ["settings.defaultModel"] = "Default model (new chats)",
+        ["settings.desktopIntegration"] = "Desktop Integration",
+        ["settings.minimizeToTray"] = "Minimize to system tray on close",
+        ["settings.startWithWindows"] = "Start with Windows (launches to the tray)",
+        ["settings.globalHotkey"] = "Global hotkey",
+        ["settings.globalHotkeyDesc"] = "Ctrl + Shift + Space (show / hide from anywhere)",
+        ["settings.advanced"] = "Advanced",
+        ["settings.chatServerUrl"] = "Chat server URL (chat-edge-api)",
+        ["settings.gatewayUrl"] = "Gateway URL (auth + agent mode)",
+        ["settings.restartNote"] = "Changes to server URLs take effect after restarting the app.",
+        ["settings.cleanupEmptyChats"] = "Clean up empty chats",
+        ["settings.cleanupEmptyChatsTip"] = "Delete untitled conversations that have no messages",
+
+        // i18n sweep — Keyboard shortcuts dialog
+        ["shortcuts.title"] = "Keyboard shortcuts",
+        ["shortcuts.searchConversations"] = "Search conversations",
+        ["shortcuts.toggleSidebar"] = "Toggle sidebar",
+        ["shortcuts.showHideAnywhere"] = "Show / hide from anywhere",
+        ["shortcuts.sendMessage"] = "Send message",
+        ["shortcuts.newLine"] = "New line",
+        ["shortcuts.stopGenerating"] = "Stop generating",
+        ["shortcuts.showHelp"] = "Show this help",
+
+        // i18n sweep — First-run dialog
+        ["firstRun.title"] = "Welcome to SRAN Desktop",
+        ["firstRun.subtitle"] = "An AI assistant that lives on your desktop",
+        ["firstRun.cloudDesc"] = "sran.ai (managed service)",
+        ["firstRun.quickTips"] = "Quick tips",
+        ["firstRun.tip.hotkeyDesc"] = "- open SRAN from anywhere",
+        ["firstRun.tip.agentLabel"] = "• Agent Mode",
+        ["firstRun.tip.agentDesc"] = "- let the AI read files, run commands, and more",
+        ["firstRun.tip.trayLabel"] = "• Close to tray",
+        ["firstRun.tip.trayDesc"] = "- the app keeps running in the background",
+        ["firstRun.startWithWindows"] = "Start with Windows",
+        ["firstRun.getStarted"] = "Get Started",
+
+        // i18n sweep — tray icon (looked up at menu-creation time)
+        ["tray.show"] = "Show SRAN Desktop",
+        ["tray.newChat"] = "New Chat",
+        ["tray.exit"] = "Exit",
+        ["tray.stillRunning"] = "Still running in the background - click the tray icon to reopen.",
+
+        // OS-level completion notification (balloon; looked up at show-time)
+        ["notify.turnDone"] = "Response ready",
+        ["notify.turnError"] = "The task hit an error",
+        ["notify.clickToOpen"] = "Click to open the conversation",
     };
 
     public static readonly IReadOnlyDictionary<string, string> Th = new Dictionary<string, string>
@@ -788,6 +853,10 @@ public static class Dict
         ["error.streamStalled"] = "การเชื่อมต่อค้างระหว่างที่ AI กำลังตอบ กรุณาลองใหม่อีกครั้ง",
         ["error.rateLimited"] = "มีการใช้งานถี่เกินไปในขณะนี้ กรุณารอสักครู่แล้วลองใหม่",
         ["status.stopped"] = "หยุดแล้ว",
+        // Phase 5 Task 3 — stream reattach + continue-after-drop
+        ["status.reattaching"] = "กำลังเชื่อมต่อกลับเข้าสู่คำตอบ…",
+        ["status.continueAvailable"] = "การเชื่อมต่อหลุด — กด Continue เพื่อทำต่อ",
+        ["error.resumeLost"] = "การเชื่อมต่อหลุดและไม่สามารถกลับเข้าสตรีมคำตอบได้",
         // FIX 9 — a completed turn that could not land on the server yet.
         ["chat.turnNotSynced"] = "ยังไม่ได้ซิงก์ขึ้นเซิร์ฟเวอร์ — จะลองใหม่อีกครั้ง",
         // FIX 10 — synced non-image attachment chip.
@@ -1145,5 +1214,66 @@ public static class Dict
         ["style.analyzing"] = "กำลังวิเคราะห์...",
         ["style.active"] = "โปรไฟล์สไตล์ทำงานอยู่",
         ["style.clear"] = "ล้างโปรไฟล์",
+
+        // i18n sweep — สถานะเอเจนต์ (ChatViewModel)
+        ["agent.workingStep"] = "กำลังทำงาน... (ขั้นตอนที่ {0}/{1})",
+        ["agent.waitingPermission"] = "กำลังรอการอนุญาต: {0}...",
+        ["voice.unavailable"] = "ไม่สามารถใช้การรู้จำเสียงพูดได้ (ไม่พบตัวรู้จำเสียง ไมโครโฟน หรือคีย์ Speech)",
+
+        // i18n sweep — ข้อมูลกำกับข้อความ (MessageViewModel)
+        ["msg.thinking"] = "กำลังคิด...",
+        ["msg.thoughtFor"] = "ใช้เวลาคิด {0:F1} วินาที",
+        ["msg.tokens"] = "{0} โทเคน",
+
+        // i18n sweep — หน้าต่างตั้งค่า
+        ["settings.title"] = "การตั้งค่า",
+        ["settings.general"] = "ทั่วไป",
+        ["settings.theme"] = "ธีม",
+        ["settings.defaultModel"] = "โมเดลเริ่มต้น (สำหรับแชทใหม่)",
+        ["settings.desktopIntegration"] = "การทำงานร่วมกับเดสก์ท็อป",
+        ["settings.minimizeToTray"] = "ย่อไปที่ system tray เมื่อปิดหน้าต่าง",
+        ["settings.startWithWindows"] = "เริ่มพร้อม Windows (เปิดแบบย่อใน tray)",
+        ["settings.globalHotkey"] = "คีย์ลัดส่วนกลาง",
+        ["settings.globalHotkeyDesc"] = "Ctrl + Shift + Space (แสดง/ซ่อนได้จากทุกที่)",
+        ["settings.advanced"] = "ขั้นสูง",
+        ["settings.chatServerUrl"] = "URL เซิร์ฟเวอร์แชท (chat-edge-api)",
+        ["settings.gatewayUrl"] = "URL ของ Gateway (การเข้าสู่ระบบ + โหมดเอเจนต์)",
+        ["settings.restartNote"] = "การเปลี่ยน URL เซิร์ฟเวอร์จะมีผลหลังรีสตาร์ทแอป",
+        ["settings.cleanupEmptyChats"] = "ล้างแชทที่ว่างเปล่า",
+        ["settings.cleanupEmptyChatsTip"] = "ลบบทสนทนาที่ไม่มีชื่อและไม่มีข้อความ",
+
+        // i18n sweep — หน้าต่างคีย์ลัด
+        ["shortcuts.title"] = "คีย์ลัด",
+        ["shortcuts.searchConversations"] = "ค้นหาบทสนทนา",
+        ["shortcuts.toggleSidebar"] = "ซ่อน/แสดงแถบข้าง",
+        ["shortcuts.showHideAnywhere"] = "แสดง/ซ่อนได้จากทุกที่",
+        ["shortcuts.sendMessage"] = "ส่งข้อความ",
+        ["shortcuts.newLine"] = "ขึ้นบรรทัดใหม่",
+        ["shortcuts.stopGenerating"] = "หยุดการตอบ",
+        ["shortcuts.showHelp"] = "แสดงหน้าช่วยเหลือนี้",
+
+        // i18n sweep — หน้าต่างเริ่มใช้งานครั้งแรก
+        ["firstRun.title"] = "ยินดีต้อนรับสู่ SRAN Desktop",
+        ["firstRun.subtitle"] = "ผู้ช่วย AI ที่อยู่บนเดสก์ท็อปของคุณ",
+        ["firstRun.cloudDesc"] = "sran.ai (บริการสำเร็จรูป)",
+        ["firstRun.quickTips"] = "เคล็ดลับการใช้งาน",
+        ["firstRun.tip.hotkeyDesc"] = "- เปิด SRAN ได้จากทุกที่",
+        ["firstRun.tip.agentLabel"] = "• โหมดเอเจนต์",
+        ["firstRun.tip.agentDesc"] = "- ให้ AI อ่านไฟล์ รันคำสั่ง และอื่น ๆ ได้",
+        ["firstRun.tip.trayLabel"] = "• ปิดลง tray",
+        ["firstRun.tip.trayDesc"] = "- แอปยังทำงานต่อในเบื้องหลัง",
+        ["firstRun.startWithWindows"] = "เริ่มพร้อม Windows",
+        ["firstRun.getStarted"] = "เริ่มใช้งาน",
+
+        // i18n sweep — ไอคอนใน tray (อ่านค่าตอนสร้างเมนู)
+        ["tray.show"] = "เปิด SRAN Desktop",
+        ["tray.newChat"] = "แชทใหม่",
+        ["tray.exit"] = "ออกจากโปรแกรม",
+        ["tray.stillRunning"] = "แอปยังทำงานอยู่ในเบื้องหลัง — คลิกไอคอนใน tray เพื่อเปิดอีกครั้ง",
+
+        // การแจ้งเตือนระดับระบบเมื่อทำงานเสร็จ (บอลลูน; อ่านค่าตอนแสดงผล)
+        ["notify.turnDone"] = "คำตอบพร้อมแล้ว",
+        ["notify.turnError"] = "เกิดข้อผิดพลาดระหว่างทำงาน",
+        ["notify.clickToOpen"] = "คลิกเพื่อเปิดบทสนทนา",
     };
 }

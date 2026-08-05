@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { useT } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import { useKnowledgeStore } from "@/stores/knowledgeStore";
 import type {
   KnowledgeBase,
@@ -62,10 +62,10 @@ export default function KnowledgeBasePage() {
     }
     try {
       await deleteKB(kb.id);
-      toast("Knowledge base deleted");
+      toast(tOutside("kb.toast.deleted"));
       if (expandedId === kb.id) setExpandedId(null);
     } catch {
-      toast("Couldn't delete knowledge base.");
+      toast(tOutside("kb.toast.deleteFailed"));
     }
   }
 
@@ -150,7 +150,7 @@ export default function KnowledgeBasePage() {
         onCreate={async (data) => {
           try {
             const kb = await createKB(data);
-            toast(`Created "${kb.name}"`);
+            toast(tOutside("kb.toast.created", { name: kb.name }));
             setCreateOpen(false);
             setExpandedId(kb.id);
           } catch (err) {
@@ -357,9 +357,9 @@ function KBDocumentsPanel({
       try {
         const doc = await uploadDocument(kb.id, file);
         if (doc.status === "failed") {
-          toast(`"${doc.filename}" failed: ${doc.error_message ?? "unknown"}`);
+          toast(tOutside("kb.toast.docFailed", { name: doc.filename, error: doc.error_message ?? "unknown" }));
         } else {
-          toast(`Indexed "${doc.filename}" (${doc.chunk_count} chunks)`);
+          toast(tOutside("kb.toast.docIndexed", { name: doc.filename, n: String(doc.chunk_count) }));
         }
       } catch (err) {
         toast(
@@ -373,18 +373,18 @@ function KBDocumentsPanel({
     if (!window.confirm(`Delete "${doc.filename}"?`)) return;
     try {
       await deleteDocument(kb.id, doc.id);
-      toast("Document deleted");
+      toast(tOutside("kb.toast.docDeleted"));
     } catch {
-      toast("Couldn't delete document.");
+      toast(tOutside("kb.toast.docDeleteFailed"));
     }
   }
 
   async function handleReindex(doc: KnowledgeDocument) {
     try {
       await reindexDocument(kb.id, doc.id);
-      toast(`Reindexing "${doc.filename}"…`);
+      toast(tOutside("kb.toast.reindexing", { name: doc.filename }));
     } catch {
-      toast("Couldn't reindex document.");
+      toast(tOutside("kb.toast.reindexFailed"));
     }
   }
 

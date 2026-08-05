@@ -110,7 +110,7 @@ function CardShell({
       {isUploading ? (
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 backdrop-blur-[1px]"
-          aria-label="Uploading"
+          aria-label={t("file.uploading")}
         >
           <Loader2 className="h-5 w-5 animate-spin text-white" aria-hidden />
         </div>
@@ -128,7 +128,7 @@ function CardShell({
           dark image thumbnail. */}
       <button
         type="button"
-        aria-label="Remove file"
+        aria-label={t("file.remove")}
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
@@ -141,7 +141,7 @@ function CardShell({
       {isError && onRetry ? (
         <button
           type="button"
-          aria-label="Retry upload"
+          aria-label={t("file.retryUpload")}
           onClick={(e) => {
             e.stopPropagation();
             onRetry();

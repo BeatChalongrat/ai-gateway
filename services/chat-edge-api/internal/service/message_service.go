@@ -67,6 +67,9 @@ type MessageService struct {
 	// Optional. Queries the knowledge base bound to the conversation
 	// and returns a retrieved-context block for the system prompt.
 	ragSvc RAGReader
+	// projectReader — Phase 4. Optional; nil keeps every conversation on
+	// the pre-Phase-4 prompt path.
+	projectReader ProjectReader
 	// Optional. Reads conversation files (with their cached
 	// inspection_json) so the Phase 4 Excel context block can
 	// inject the workbook structure + action catalog into the
@@ -161,6 +164,14 @@ type MessageService struct {
 	// conversation_id (one in-flight generation per conversation in
 	// Phase 1; the second concurrent send would race the first).
 	activeStreams sync.Map // map[uuid.UUID]*streamRegistration
+
+	// Phase 5 — stream resume. Mirrors every in-flight generation's
+	// events (keyed by assistant message id) so a disconnected client
+	// can reattach via GET .../messages/{id}/stream. In-process only;
+	// see stream_broker.go for the single-instance caveat. Nil in unit
+	// tests that construct MessageService directly — teeStream and
+	// ResumeAttach are nil-safe.
+	broker *StreamBroker
 }
 
 // FileLinker is the slice of FileService the message flow needs.
@@ -268,7 +279,18 @@ func NewMessageService(
 		models:                 models,
 		maxContext:             maxContext,
 		imageGenerationTimeout: 180 * time.Second,
+		broker:                 NewStreamBroker(),
 	}
+}
+
+// teeStream mirrors the pump channel into the resume broker keyed by
+// the assistant message id. Nil broker (direct-constructed tests) ⇒
+// pass-through unchanged.
+func (s *MessageService) teeStream(msgID uuid.UUID, ch chan StreamUpdate) <-chan StreamUpdate {
+	if s.broker == nil {
+		return ch
+	}
+	return s.broker.Tee(msgID, ch)
 }
 
 func (s *MessageService) SetImageGenerationTimeout(timeout time.Duration) {
@@ -428,6 +450,18 @@ func (s *MessageService) SetExcelLookup(e ExcelLookup) {
 	s.excelLookup = e
 }
 
+// ProjectReader supplies the project context (instructions + KB) a
+// conversation inherits (Phase 4). Satisfied by *repository.ProjectRepo.
+type ProjectReader interface {
+	GetForConversation(ctx context.Context, tenantID, convID uuid.UUID) (*model.Project, error)
+}
+
+// SetProjectReader wires the Phase-4 project-context lookup. Optional —
+// nil keeps every conversation on the pre-Phase-4 prompt path.
+func (s *MessageService) SetProjectReader(r ProjectReader) {
+	s.projectReader = r
+}
+
 // SetRAGReader wires the knowledge-base retrieval service. Same
 // lazy-wire pattern — kept out of the constructor so the service
 // boots fine when RAG isn't configured.
@@ -497,6 +531,15 @@ func (s *MessageService) SetVideoGeneration(gen videoGenerator, files generatedV
 func (s *MessageService) SetWebSearch(searcher webSearcher, saver searchSourcesSaver) {
 	if s.toolExec != nil {
 		s.toolExec.SetWebSearch(searcher, saver)
+	}
+}
+
+// SetWebFetch wires the Phase-3 web_fetch tool (SSRF-guarded page
+// reader). Shares the citation saver with web_search so fetched pages
+// render as the same source chips.
+func (s *MessageService) SetWebFetch(fetcher webPageFetcher, saver searchSourcesSaver) {
+	if s.toolExec != nil {
+		s.toolExec.SetWebFetch(fetcher, saver)
 	}
 }
 
@@ -773,7 +816,7 @@ type StreamHandle struct {
 	AssistantID    uuid.UUID // pre-allocated; sent on message_start
 	ConversationID uuid.UUID
 
-	Events chan StreamUpdate
+	Events <-chan StreamUpdate
 	finish func(content string, reasoning string, finishReason string, usage *GatewayChatUsage)
 	cancel func()
 }
@@ -1040,7 +1083,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}, nil
@@ -1293,7 +1336,7 @@ func (s *MessageService) openAssistantStream(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}, nil
@@ -1546,7 +1589,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}, nil
@@ -1633,8 +1676,18 @@ func (s *MessageService) fileContext(ctx context.Context, tenantID, convID uuid.
 // isn't configured, or retrieval came back empty. Errors are
 // swallowed for the same reason file_context does — never block the
 // reply because retrieval stuttered.
-func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv *model.Conversation, query string) string {
-	if s.ragSvc == nil || conv == nil || conv.KnowledgeBaseID == nil {
+// fallbackKB (Phase 4) is the project-inherited KB, consulted only when
+// the conversation has no explicit binding of its own — an explicit
+// per-conversation KB always wins over the inherited one.
+func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv *model.Conversation, query string, fallbackKB *uuid.UUID) string {
+	if s.ragSvc == nil || conv == nil {
+		return ""
+	}
+	kb := conv.KnowledgeBaseID
+	if kb == nil {
+		kb = fallbackKB
+	}
+	if kb == nil {
 		return ""
 	}
 	q := strings.TrimSpace(query)
@@ -1643,7 +1696,7 @@ func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv 
 	}
 	// FIX 2 — forward the end-user so the query-embedding egress (through
 	// the gateway) is attributed/audited to them.
-	return s.ragSvc.BuildContext(ctx, conv.TenantID, userID, *conv.KnowledgeBaseID, q)
+	return s.ragSvc.BuildContext(ctx, conv.TenantID, userID, *kb, q)
 }
 
 // buildSystemPrefix concatenates the user's custom instructions, the
@@ -1696,10 +1749,23 @@ func (s *MessageService) buildSystemPrefixWithSources(
 		CurrentTime: time.Now(),
 		ActiveTools: s.activeToolNames(conv),
 	}
+	// Phase 4 — project context. Loaded once per compile when the
+	// conversation belongs to a project; feeds BOTH the Layer-10
+	// instructions block and the RAG KB fallback below. A load failure
+	// degrades to no-project behavior — never blocks the reply. When
+	// conv.ProjectID is nil this branch is skipped entirely, so the
+	// non-project prompt stays byte-identical to pre-Phase-4.
+	var projectKB *uuid.UUID
+	if conv != nil && conv.ProjectID != nil && s.projectReader != nil {
+		if p, err := s.projectReader.GetForConversation(ctx, tenantID, conv.ID); err == nil && p != nil {
+			in.ProjectInstructions = p.Instructions
+			projectKB = p.KnowledgeBaseID
+		}
+	}
 	// Layer 13 inputs — built with the file/KB repos and gated exactly
 	// as before (each returns "" when its precondition isn't met).
 	if conv != nil {
-		in.RAGContext = s.ragContext(ctx, userID, conv, ragQuery)
+		in.RAGContext = s.ragContext(ctx, userID, conv, ragQuery, projectKB)
 		in.FileContext = s.fileContext(ctx, tenantID, conv.ID)
 		in.ExcelContext = s.excelContext(ctx, tenantID, conv.ID)
 		in.DocContext = s.docContext(ctx, tenantID, conv.ID)
@@ -1863,7 +1929,12 @@ func (s *MessageService) docContext(
 	}
 	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
 	if err != nil || len(files) == 0 {
-		return ""
+		// Zero attachments (or a failed lookup) must NOT suppress the
+		// contract: "create a PDF report about X" in a brand-new
+		// conversation should still yield a :::doc-plan card. The
+		// generator runs in create mode when source_file_id is omitted,
+		// so the headerless prompt is safe without any uploaded file.
+		return docCapabilitiesPromptHeaderless
 	}
 	// docx + pdf only — pptx is owned by pptxContext below so the
 	// two capabilities prompts stay orthogonal (the AI gets a
@@ -1978,7 +2049,10 @@ func (s *MessageService) pptxContext(
 	}
 	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
 	if err != nil || len(files) == 0 {
-		return ""
+		// Same rationale as docContext: a brand-new conversation with
+		// no files must still get the :::pptx-plan contract so
+		// create-from-scratch deck requests produce a plan card.
+		return pptxCapabilitiesPromptHeaderless
 	}
 	var latest *model.ConversationFile
 	for i := len(files) - 1; i >= 0; i-- {
@@ -3112,7 +3186,7 @@ func (s *MessageService) directImageStream(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}
@@ -3427,7 +3501,7 @@ func (s *MessageService) rejectImageStream(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}
@@ -3600,6 +3674,10 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			case "generate_video":
 				in.out <- StreamUpdate{VideoStatus: "started"}
 			case "web_search":
+				in.out <- StreamUpdate{SearchStatus: "searching"}
+			case "web_fetch":
+				// Reuses the web-search indicator — same "reading the
+				// web" affordance, no new SSE event type needed.
 				in.out <- StreamUpdate{SearchStatus: "searching"}
 			}
 		}

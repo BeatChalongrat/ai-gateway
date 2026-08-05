@@ -13,6 +13,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { Message } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
 
@@ -47,6 +48,7 @@ export function ChatThread({
   loadingOlder,
   onLoadEarlier,
 }: Props) {
+  const t = useT();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [autoStick, setAutoStick] = useState(true);
   const [farFromBottom, setFarFromBottom] = useState(false);
@@ -218,12 +220,12 @@ export function ChatThread({
               strokeLinejoin="round"
             />
           </svg>
-          New messages
+          {t("thread.newMessages")}
         </button>
       ) : farFromBottom ? (
         <button
           type="button"
-          aria-label="Scroll to latest"
+          aria-label={t("thread.scrollToLatest")}
           onClick={jumpToBottom}
           className="focus-ring popover-appear absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-border bg-bg-surface/85 p-2 text-text-secondary shadow-lg backdrop-blur-sm hover:text-text-primary"
         >
@@ -363,6 +365,7 @@ function LoadEarlierBar({
   loading: boolean;
   onClick: () => void;
 }) {
+  const t = useT();
   if (!visible) return null;
   return (
     <div className="-mt-2 flex justify-center pb-2">
@@ -385,7 +388,7 @@ function LoadEarlierBar({
             />
           </svg>
         )}
-        Load earlier messages
+        {t("thread.loadEarlier")}
       </button>
     </div>
   );

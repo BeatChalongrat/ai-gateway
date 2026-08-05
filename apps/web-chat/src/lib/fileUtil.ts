@@ -1,5 +1,7 @@
 // Shared helpers for file UI components.
 
+import { tOutside } from "@/lib/i18n";
+
 export const ALLOWED_FILE_MIMES: ReadonlySet<string> = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -55,15 +57,15 @@ export function isImageMime(contentType: string): boolean {
 export function validateFile(
   file: File,
 ): { ok: true } | { ok: false; reason: string } {
-  if (file.size === 0) return { ok: false, reason: "Empty file" };
+  if (file.size === 0) return { ok: false, reason: tOutside("file.err.empty") };
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    return { ok: false, reason: "File is larger than 25 MB" };
+    return { ok: false, reason: tOutside("file.err.tooLarge") };
   }
   const ext = fileExtension(file.name);
   const typeOk = file.type && ALLOWED_FILE_MIMES.has(file.type);
   const extOk = ext && ALLOWED_FILE_EXTENSIONS.has(ext);
   if (!typeOk && !extOk) {
-    return { ok: false, reason: "Unsupported file type" };
+    return { ok: false, reason: tOutside("file.err.unsupported") };
   }
   return { ok: true };
 }

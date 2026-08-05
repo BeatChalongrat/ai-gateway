@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 
 import { Video } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   /** Determinate progress (0–100). null/undefined → indeterminate shimmer. */
@@ -33,6 +34,7 @@ export function VideoGeneratingPlaceholder({
   estimatedDurationSec,
   onCancel,
 }: Props) {
+  const t = useT();
   // 1s tick to keep the ETA live; only runs once we have a start time.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -52,14 +54,16 @@ export function VideoGeneratingPlaceholder({
         ? (elapsed / progressPct!) * (100 - progressPct!)
         : Math.max(0, estimatedDurationSec - elapsed);
     etaText =
-      remaining > 0 ? `ETA: ~${Math.ceil(remaining)} seconds` : "Finishing up…";
+      remaining > 0
+        ? t("gen.eta", { s: String(Math.ceil(remaining)) })
+        : t("gen.finishing");
   }
 
   return (
     <div
       className="relative mt-1 h-[180px] w-[320px] max-w-full overflow-hidden rounded-lg border border-border bg-bg-secondary"
       role="status"
-      aria-label="กำลังสร้างวิดีโอ"
+      aria-label={t("gen.video")}
     >
       {/* Indeterminate shimmer only when there's no determinate progress. */}
       {!hasProgress ? (
@@ -86,11 +90,11 @@ export function VideoGeneratingPlaceholder({
           ) : null}
           <p className="shimmer-text text-sm font-medium">
             {hasProgress
-              ? `Generating video... ${progressPct}%`
-              : "กำลังสร้างวิดีโอ..."}
+              ? t("gen.videoPct", { pct: String(progressPct) })
+              : t("gen.video")}
           </p>
           <p className="mt-0.5 text-xs text-text-muted">
-            {etaText ?? "อาจใช้เวลาสักครู่"}
+            {etaText ?? t("gen.mayTakeAWhile")}
           </p>
         </div>
         {onCancel ? (

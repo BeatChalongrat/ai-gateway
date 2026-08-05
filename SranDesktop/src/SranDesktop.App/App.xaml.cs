@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SranDesktop.App.Hosting;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Presentation.Localization;
 using SranDesktop.Presentation.ViewModels;
 using SranDesktop.Presentation.Views;
 using SranDesktop.Presentation.Views.Dialogs;
@@ -23,6 +24,7 @@ public partial class App : System.Windows.Application
     private GlobalHotkey? _hotkey;
     private MainWindow? _mainWindow;
     private ISettingsService? _settings;
+    private Services.TrayCompletionNotifier? _completionNotifier;
     private bool _shuttingDown;
     private bool _trayTipShown;
 
@@ -87,6 +89,13 @@ public partial class App : System.Windows.Application
         MainWindow = _mainWindow;
 
         _trayIcon = CreateTrayIcon();
+
+        // OS-level completion notification: the DI singleton needs the live
+        // tray icon + window; clicking the balloon restores the window and
+        // opens the notified conversation.
+        _completionNotifier = _host.Services
+            .GetRequiredService<Services.TrayCompletionNotifier>();
+        _completionNotifier.Attach(_trayIcon, _mainWindow, OpenConversationFromNotification);
 
         _mainWindow.Closing += MainWindow_Closing;
 
@@ -220,6 +229,7 @@ public partial class App : System.Windows.Application
             _logger?.LogDebug(ex, "Draft flush on exit failed");
         }
 
+        _completionNotifier?.MarkShuttingDown();
         _hotkey?.Dispose();
         _trayIcon?.Dispose();
         SingleInstance.Release();
@@ -253,11 +263,12 @@ public partial class App : System.Windows.Application
     {
         var menu = new ContextMenu();
 
-        var show = new MenuItem { Header = "Show SRAN Desktop" };
+        // Localized at menu-creation time; a locale switch relabels after restart.
+        var show = new MenuItem { Header = LocaleService.Instance.T("tray.show") };
         show.Click += (_, _) => ShowMainWindow();
         menu.Items.Add(show);
 
-        var newChat = new MenuItem { Header = "New Chat" };
+        var newChat = new MenuItem { Header = LocaleService.Instance.T("tray.newChat") };
         newChat.Click += (_, _) =>
         {
             ShowMainWindow();
@@ -271,7 +282,7 @@ public partial class App : System.Windows.Application
 
         menu.Items.Add(new Separator());
 
-        var exit = new MenuItem { Header = "Exit" };
+        var exit = new MenuItem { Header = LocaleService.Instance.T("tray.exit") };
         exit.Click += (_, _) => ExitApplication();
         menu.Items.Add(exit);
 
@@ -294,7 +305,7 @@ public partial class App : System.Windows.Application
             _trayTipShown = true;
             _trayIcon?.ShowNotification(
                 title: "SRAN Desktop",
-                message: "Still running in the background - click the tray icon to reopen.",
+                message: LocaleService.Instance.T("tray.stillRunning"),
                 icon: NotificationIcon.Info);
         }
     }
@@ -321,9 +332,24 @@ public partial class App : System.Windows.Application
     private void ExitApplication()
     {
         _shuttingDown = true;
+        _completionNotifier?.MarkShuttingDown();
         _trayIcon?.Dispose();
         _trayIcon = null;
         Shutdown();
+    }
+
+    /// <summary>Completion-balloon click: bring the app forward and open the
+    /// conversation the finished turn belongs to. A conversation that has
+    /// since been deleted (or not yet loaded) degrades to just restoring
+    /// the window.</summary>
+    private void OpenConversationFromNotification(string conversationId)
+    {
+        ShowMainWindow();
+        if (MainWindow?.DataContext is not MainViewModel vm)
+            return;
+        var item = vm.Conversations.Conversations.FirstOrDefault(c => c.Id == conversationId);
+        if (item is not null)
+            vm.Conversations.SelectedConversation = item;
     }
 
     // ---------- global exception handling ----------

@@ -355,6 +355,16 @@ public static class AppHostBuilder
                         context.Configuration["Sran:McpCatalogUrl"],
                         sp.GetRequiredService<ITokenSession>()));
 
+                // OS-level completion notification (tray balloon): one concrete
+                // instance backs both interfaces — ChatViewModel gates on
+                // IWindowStateProvider and fires ICompletionNotifier; the tray
+                // icon + main window are attached in App.OnStartup.
+                services.AddSingleton<SranDesktop.App.Services.TrayCompletionNotifier>();
+                services.AddSingleton<ICompletionNotifier>(sp =>
+                    sp.GetRequiredService<SranDesktop.App.Services.TrayCompletionNotifier>());
+                services.AddSingleton<IWindowStateProvider>(sp =>
+                    sp.GetRequiredService<SranDesktop.App.Services.TrayCompletionNotifier>());
+
                 // ViewModels
                 services.AddSingleton<LoginViewModel>();
                 services.AddSingleton<ConversationListViewModel>();

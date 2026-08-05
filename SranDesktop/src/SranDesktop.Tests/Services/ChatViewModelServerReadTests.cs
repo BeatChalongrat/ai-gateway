@@ -24,6 +24,7 @@ public class ChatViewModelServerReadTests : IDisposable
     private readonly string _dbDir;
     private readonly SqliteConversationStore _store;
     private readonly Mock<IChatEdgeApiClient> _api = new();
+    private readonly Mock<IChatService> _chat = new();
     private readonly ChatViewModel _vm;
 
     private static readonly DateTimeOffset T0 = new(2026, 7, 1, 10, 0, 0, TimeSpan.Zero);
@@ -48,7 +49,7 @@ public class ChatViewModelServerReadTests : IDisposable
             _store,
             Mock.Of<IFileService>(),
             Mock.Of<IChatOrchestrator>(),
-            Mock.Of<IChatService>(),
+            _chat.Object,
             Mock.Of<ISkillManager>(),
             Mock.Of<ISpeechService>(),
             settings.Object,
@@ -293,6 +294,106 @@ public class ChatViewModelServerReadTests : IDisposable
         _api.Verify(a => a.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
         (await _store.GetFilesAsync("conv-1")).Should().BeEmpty("nothing may be cached for a rejected id");
+    }
+
+    // ── Phase 5 Task 3: reattach to an in-flight server-side generation ─────
+
+    private static MessageDto StreamingDto(string id, DateTimeOffset createdAt) =>
+        new(id, "assistant", "", "streaming", null, createdAt, null);
+
+    private static async IAsyncEnumerable<SranDesktop.Application.Events.ChatStreamEvent> Events(
+        params SranDesktop.Application.Events.ChatStreamEvent[] events)
+    {
+        foreach (var evt in events)
+        {
+            yield return evt;
+            await Task.Yield();
+        }
+    }
+
+    [Fact]
+    public async Task Last_Streaming_Assistant_Row_Reattaches_Instead_Of_Dropping()
+    {
+        // The reply is still generating server-side (started on web / before a
+        // restart): the empty row with status=streaming must render as a live
+        // bubble that reattaches, streams the prefix + tail, completes, and
+        // lands in the offline cache like any other server row.
+        var conversation = await SeedConversationAsync();
+        SetupServerMessages(
+            Dto("s-u1", "user", "long question", T0),
+            StreamingDto("s-a1", T0.AddSeconds(1)));
+        _chat.Setup(c => c.ResumeMessageAsync("conv-1", "s-a1", It.IsAny<CancellationToken>()))
+            .Returns(Events(
+                new SranDesktop.Application.Events.ContentDeltaEvent("the prefix so far"),
+                new SranDesktop.Application.Events.ContentDeltaEvent(" + the live tail"),
+                new SranDesktop.Application.Events.StreamCompletedEvent(null)));
+
+        await _vm.OpenConversationAsync(conversation);
+
+        _vm.Messages.Should().HaveCount(2, "the streaming row is kept, not dropped");
+        await _vm.ReattachTask;
+
+        var bubble = _vm.Messages[1];
+        bubble.Id.Should().Be("s-a1");
+        bubble.IsAssistant.Should().BeTrue();
+        bubble.Content.Should().Be("the prefix so far + the live tail");
+        bubble.IsStreaming.Should().BeFalse("the turn completed");
+        bubble.IsError.Should().BeFalse();
+
+        // The finished reply is cached offline via the server-row cache path.
+        (await _store.GetMessagesAsync("conv-1")).Should()
+            .Contain(m => m.Id == "s-a1" && m.Content == "the prefix so far + the live tail"
+                          && m.ServerId == "conv-1");
+    }
+
+    [Fact]
+    public async Task Empty_Rows_Still_Drop_Unless_Streaming_And_Last()
+    {
+        // Regression guard for the pre-existing behaviour: cancelled turns'
+        // empty assistant rows drop, and even a streaming row drops when it is
+        // NOT the last row (a stale marker, not a live generation).
+        var conversation = await SeedConversationAsync();
+        SetupServerMessages(
+            Dto("s-u1", "user", "q1", T0),
+            Dto("s-a1", "assistant", "", T0.AddSeconds(1)),
+            StreamingDto("s-a2", T0.AddSeconds(2)),
+            Dto("s-u2", "user", "q2", T0.AddSeconds(3)));
+
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.ReattachTask;
+
+        _vm.Messages.Select(m => m.Id).Should().Equal("s-u1", "s-u2");
+        _chat.Verify(c => c.ResumeMessageAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "nothing reattachable → no resume call");
+    }
+
+    [Fact]
+    public async Task Interrupted_Generation_Surfaces_Resume_Lost()
+    {
+        // GENERATION_INTERRUPTED is terminal: no retry, the bubble errors with
+        // the dedicated message.
+        var conversation = await SeedConversationAsync();
+        SetupServerMessages(
+            Dto("s-u1", "user", "ask", T0),
+            StreamingDto("s-a1", T0.AddSeconds(1)));
+        _chat.Setup(c => c.ResumeMessageAsync("conv-1", "s-a1", It.IsAny<CancellationToken>()))
+            .Returns(Events(
+                new SranDesktop.Application.Events.ContentDeltaEvent("partial"),
+                new SranDesktop.Application.Events.StreamErrorEvent(
+                    "GENERATION_INTERRUPTED", "generation died")));
+
+        await _vm.OpenConversationAsync(conversation);
+        await _vm.ReattachTask;
+
+        var bubble = _vm.Messages[1];
+        bubble.IsError.Should().BeTrue();
+        bubble.IsStreaming.Should().BeFalse();
+        bubble.MetaLine.Should().Be(
+            SranDesktop.Presentation.Localization.LocaleService.Instance.T("error.resumeLost"));
+        _chat.Verify(c => c.ResumeMessageAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once, "a dead generation must not be retried");
     }
 
     [Fact]

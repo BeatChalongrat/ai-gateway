@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { BrainCircuit, Folder as FolderIcon, FolderPlus, Pin, PinOff } from "lucide-react";
+import { BrainCircuit, Folder as FolderIcon, FolderKanban, FolderPlus, Pin, PinOff } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
-import type { Conversation, Folder } from "@/lib/types";
+import type { Conversation, Folder, Project } from "@/lib/types";
 
 interface Props {
   conv: Conversation;
@@ -20,6 +20,10 @@ interface Props {
   onMoveToFolder?: (folderId: string | null) => void | Promise<void>;
   /** Create a brand-new folder and move this conversation into it. */
   onCreateFolderForMove?: () => void | Promise<void>;
+  /** Projects available as assignment targets (Phase 4). */
+  projects?: Project[];
+  /** Assign this conversation to a project, or `null` to un-assign. */
+  onMoveToProject?: (projectId: string | null) => void | Promise<void>;
 }
 
 export function ConversationItem({
@@ -32,10 +36,13 @@ export function ConversationItem({
   folders = [],
   onMoveToFolder,
   onCreateFolderForMove,
+  projects = [],
+  onMoveToProject,
 }: Props) {
   const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [moveProjectOpen, setMoveProjectOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(conv.title);
@@ -55,6 +62,7 @@ export function ConversationItem({
       if (!menuRef.current?.contains(e.target as Node)) {
         setMenuOpen(false);
         setMoveOpen(false);
+        setMoveProjectOpen(false);
       }
     };
     document.addEventListener("mousedown", off);
@@ -260,6 +268,63 @@ export function ConversationItem({
                       >
                         <span aria-hidden className="shrink-0 text-[12px]">✕</span>
                         <span className="truncate">{t("conv.removeFromFolder")}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {onMoveToProject && (projects.length > 0 || conv.project_id) ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setMoveProjectOpen((v) => !v)}
+                  aria-expanded={moveProjectOpen}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                >
+                  <FolderKanban width={14} height={14} aria-hidden />
+                  <span className="flex-1">{t("conv.moveToProject")}</span>
+                  <span aria-hidden className="text-text-muted">
+                    {moveProjectOpen ? "▾" : "▸"}
+                  </span>
+                </button>
+                {moveProjectOpen ? (
+                  <div className="max-h-48 overflow-y-auto border-t border-border/60 bg-bg-base/40">
+                    {projects.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={p.id === conv.project_id}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setMoveProjectOpen(false);
+                          void onMoveToProject(p.id);
+                        }}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                          p.id === conv.project_id
+                            ? "text-text-muted"
+                            : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                        }`}
+                      >
+                        <FolderKanban width={12} height={12} aria-hidden className="shrink-0" />
+                        <span className="truncate">{p.name}</span>
+                        {p.id === conv.project_id ? (
+                          <span aria-hidden className="ml-auto text-[10px]">✓</span>
+                        ) : null}
+                      </button>
+                    ))}
+                    {conv.project_id ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setMoveProjectOpen(false);
+                          void onMoveToProject(null);
+                        }}
+                        className="flex w-full items-center gap-2 border-t border-border/60 px-3 py-1.5 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                      >
+                        <span aria-hidden className="shrink-0 text-[12px]">✕</span>
+                        <span className="truncate">{t("conv.removeFromProject")}</span>
                       </button>
                     ) : null}
                   </div>

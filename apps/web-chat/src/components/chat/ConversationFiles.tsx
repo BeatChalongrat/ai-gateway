@@ -7,6 +7,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useT } from "@/lib/i18n";
+
 import { api } from "@/lib/api";
 import { formatBytes, isImageMime } from "@/lib/fileUtil";
 import type { FileAttachment } from "@/lib/types";
@@ -18,6 +20,7 @@ interface Props {
 }
 
 export function ConversationFiles({ conversationId }: Props) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<FileAttachment[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,8 +76,8 @@ export function ConversationFiles({ conversationId }: Props) {
           if (!open) void refetch();
         }}
         className="focus-ring inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[11px] text-text-secondary hover:text-text-primary"
-        aria-label={`Conversation files (${count})`}
-        title={`Conversation files (${count})`}
+        aria-label={t("convfiles.aria", { n: String(count) })}
+        title={t("convfiles.aria", { n: String(count) })}
       >
         <span aria-hidden>📎</span>
         <span>{count} file{count === 1 ? "" : "s"}</span>
@@ -82,7 +85,7 @@ export function ConversationFiles({ conversationId }: Props) {
       {open ? (
         <div className="popover-appear absolute right-0 top-full z-20 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-bg-surface shadow-2xl">
           <div className="border-b border-border/60 px-3 py-2 text-[10px] uppercase tracking-wider text-text-muted">
-            Files in this conversation
+            {t("convfiles.header")}
           </div>
           <div className="scrollbar-thin max-h-72 overflow-y-auto py-1">
             {loading ? (
@@ -93,7 +96,7 @@ export function ConversationFiles({ conversationId }: Props) {
               files.map((f) => <FileRow key={f.id} file={f} />)
             ) : (
               <div className="px-3 py-3 text-center text-[11px] text-text-muted">
-                No files attached.
+                {t("convfiles.empty")}
               </div>
             )}
           </div>
@@ -109,6 +112,7 @@ export function ConversationFiles({ conversationId }: Props) {
 // 401 → silent-refresh → retry contract (a bare <a download> broke
 // the moment the access cookie lapsed).
 function FileRow({ file }: { file: FileAttachment }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const isImage = isImageMime(file.content_type);
   return (
@@ -124,7 +128,7 @@ function FileRow({ file }: { file: FileAttachment }) {
         }
       }}
       className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-bg-elevated disabled:opacity-60"
-      title={`Download ${file.filename}`}
+      title={t("file.downloadTitle", { name: file.filename })}
     >
       {isImage ? (
         <AuthedImage
