@@ -19,14 +19,17 @@ import { api, ApiError } from "@/lib/api";
 import { tOutside } from "@/lib/i18n";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
+// One-way dependency: the chat store nudges the canvas store after a
+// turn (Phase 8). canvasStore must never import chatStore back.
+import { useCanvasStore } from "@/stores/canvasStore";
 import type {
   Conversation,
   ConversationSearchHit,
   FileAttachment,
-  Folder,
   Message,
   Project,
   SSEAnalysisStatus,
+  SSECodeExecution,
   SSEContentDelta,
   SSEError,
   SSEFallbackInfo,
@@ -188,23 +191,18 @@ interface ChatState {
   togglePinConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
 
-  // ── folder ops (migration 022) ───────────────────────────
-  /** User-defined sidebar folders, ordered by position. */
-  folders: Folder[];
-  foldersLoaded: boolean;
-  loadFolders: () => Promise<void>;
-  createFolder: (name: string) => Promise<Folder | null>;
-  renameFolder: (id: string, name: string) => Promise<void>;
-  /** Delete a folder; its conversations become unfiled (server SET NULL),
-   *  mirrored locally so the sidebar re-buckets without a refetch. */
-  deleteFolder: (id: string) => Promise<void>;
-  reorderFolders: (folderIds: string[]) => Promise<void>;
-  /** Move a conversation into a folder, or `null` to unfile it. Optimistic
-   *  (the sidebar re-groups immediately); rolls back on failure. */
-  moveConversationToFolder: (
-    convId: string,
-    folderId: string | null,
-  ) => Promise<void>;
+  // ── archive (migration 032) ──────────────────────────────
+  /** Archive / un-archive. NOT a delete — the chat only leaves the
+   *  sidebar list. Optimistic: the row disappears (or comes back)
+   *  immediately; rolls back on failure. */
+  setConversationArchived: (id: string, archived: boolean) => Promise<void>;
+  /** Archived conversations, loaded on demand by the archive view.
+   *  Kept out of `conversations` so the sidebar's grouping/pagination
+   *  logic never has to filter them out. */
+  archivedConversations: Conversation[];
+  archivedLoaded: boolean;
+  archivedLoading: boolean;
+  loadArchivedConversations: () => Promise<void>;
 
   // ── project ops (Phase 4) ────────────────────────────────
   /** Projects visible to the current user. */
@@ -269,8 +267,9 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   conversationsLoaded: false,
-  folders: [],
-  foldersLoaded: false,
+  archivedConversations: [],
+  archivedLoaded: false,
+  archivedLoading: false,
   conversationsCursor: null,
   hasMoreConversations: false,
   loadingMoreConversations: false,
@@ -613,6 +612,55 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  async setConversationArchived(id, archived) {
+    const existing =
+      get().conversations.find((c) => c.id === id) ??
+      get().archivedConversations.find((c) => c.id === id);
+    if (!existing) return;
+
+    // Optimistic move between the two lists. Archiving must feel like
+    // filing, not loading: the row leaves the sidebar at once.
+    set((s) => ({
+      conversations: archived
+        ? s.conversations.filter((c) => c.id !== id)
+        : [{ ...existing, is_archived: false }, ...s.conversations.filter((c) => c.id !== id)],
+      archivedConversations: archived
+        ? [{ ...existing, is_archived: true }, ...s.archivedConversations.filter((c) => c.id !== id)]
+        : s.archivedConversations.filter((c) => c.id !== id),
+    }));
+
+    try {
+      await api.setConversationArchived(id, archived);
+    } catch {
+      // Put it back exactly where it was.
+      set((s) => ({
+        conversations: archived
+          ? [{ ...existing, is_archived: false }, ...s.conversations.filter((c) => c.id !== id)]
+          : s.conversations.filter((c) => c.id !== id),
+        archivedConversations: archived
+          ? s.archivedConversations.filter((c) => c.id !== id)
+          : [{ ...existing, is_archived: true }, ...s.archivedConversations.filter((c) => c.id !== id)],
+      }));
+      get().setError(tOutside("archive.error.failed"));
+    }
+  },
+
+  async loadArchivedConversations() {
+    if (get().archivedLoading) return;
+    set({ archivedLoading: true });
+    try {
+      const res = await api.listArchivedConversations();
+      set({
+        archivedConversations: res?.conversations ?? [],
+        archivedLoaded: true,
+        archivedLoading: false,
+      });
+    } catch {
+      set({ archivedLoading: false, archivedLoaded: true });
+      get().setError(tOutside("archive.error.loadFailed"));
+    }
+  },
+
   async setConversationModel(id, modelId) {
     // Optimistic: flip the sidebar entry immediately so the model
     // pill in the chat header / input updates without waiting on
@@ -745,158 +793,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async deleteConversation(id) {
-    // Capture folder membership BEFORE the await — mirrors
-    // moveConversationToFolder, which reads folder_id via get() before
+    // Capture project membership BEFORE the await — mirrors
+    // moveConversationToProject, which reads project_id via get() before
     // mutating. Reading it only inside the post-await set() risks a null
     // if the conversation list is mutated during the request window.
-    const beforeFolderId = get().conversations.find((c) => c.id === id)?.folder_id ?? null;
+    const beforeProjectId = get().conversations.find((c) => c.id === id)?.project_id ?? null;
     await api.deleteConversation(id);
     set((s) => {
       const next = { ...s.messages };
       delete next[id];
       const nextLoaded = { ...s.messagesLoaded };
       delete nextLoaded[id];
-      // If the deleted conversation was filed in a folder, decrement that
-      // folder's count so the sidebar "(N)" stays accurate without a
-      // refetch — mirrors the count adjust in moveConversationToFolder.
-      const insideFolderId = s.conversations.find((c) => c.id === id)?.folder_id ?? null;
+      // If the deleted conversation belonged to a project, decrement that
+      // project's count so the sidebar "(N)" stays accurate without a
+      // refetch — mirrors the count adjust in moveConversationToProject.
+      const insideProjectId = s.conversations.find((c) => c.id === id)?.project_id ?? null;
       // Prefer the pre-await value; fall back to the in-set lookup.
-      const deletedFolderId = beforeFolderId ?? insideFolderId;
+      const deletedProjectId = beforeProjectId ?? insideProjectId;
       return {
         conversations: s.conversations.filter((c) => c.id !== id),
-        folders: deletedFolderId
-          ? s.folders.map((f) =>
-              f.id === deletedFolderId
-                ? { ...f, conversation_count: Math.max(0, f.conversation_count - 1) }
-                : f,
+        projects: deletedProjectId
+          ? s.projects.map((p) =>
+              p.id === deletedProjectId
+                ? { ...p, conversation_count: Math.max(0, p.conversation_count - 1) }
+                : p,
             )
-          : s.folders,
+          : s.projects,
         messages: next,
         messagesLoaded: nextLoaded,
         activeConversationId:
           s.activeConversationId === id ? null : s.activeConversationId,
       };
     });
-  },
-
-  // ── folders (migration 022) ──────────────────────────────
-  async loadFolders() {
-    try {
-      const res = await api.listFolders();
-      set({ folders: res?.folders ?? [], foldersLoaded: true });
-    } catch {
-      // Non-fatal: the sidebar simply renders without folders.
-      set({ foldersLoaded: true });
-    }
-  },
-
-  async createFolder(name) {
-    try {
-      const folder = await api.createFolder(name);
-      set((s) => ({ folders: [...s.folders, folder] }));
-      return folder;
-    } catch {
-      get().setError("Couldn't create folder. Please try again.");
-      return null;
-    }
-  },
-
-  async renameFolder(id, name) {
-    const prev = get().folders;
-    // Optimistic rename.
-    set((s) => ({
-      folders: s.folders.map((f) => (f.id === id ? { ...f, name } : f)),
-    }));
-    try {
-      const updated = await api.renameFolder(id, name);
-      set((s) => ({
-        folders: s.folders.map((f) => (f.id === id ? { ...f, ...updated } : f)),
-      }));
-    } catch {
-      set({ folders: prev });
-      get().setError("Couldn't rename folder. Please try again.");
-    }
-  },
-
-  async deleteFolder(id) {
-    const prevFolders = get().folders;
-    const prevConversations = get().conversations;
-    // Optimistic: drop the folder and unfile its conversations locally
-    // (server does the same via ON DELETE SET NULL).
-    set((s) => ({
-      folders: s.folders.filter((f) => f.id !== id),
-      conversations: s.conversations.map((c) =>
-        c.folder_id === id ? { ...c, folder_id: null } : c,
-      ),
-    }));
-    try {
-      await api.deleteFolder(id);
-    } catch {
-      set({ folders: prevFolders, conversations: prevConversations });
-      get().setError("Couldn't delete folder. Please try again.");
-    }
-  },
-
-  async reorderFolders(folderIds) {
-    const prev = get().folders;
-    // Optimistic: reorder locally to match the requested id order.
-    const byId = new Map(prev.map((f) => [f.id, f]));
-    const next = folderIds
-      .map((fid, i) => {
-        const f = byId.get(fid);
-        return f ? { ...f, position: i + 1 } : null;
-      })
-      .filter((f): f is Folder => f !== null);
-    set({ folders: next });
-    try {
-      const res = await api.reorderFolders(folderIds);
-      if (res?.folders) set({ folders: res.folders });
-    } catch {
-      set({ folders: prev });
-      get().setError("Couldn't reorder folders. Please try again.");
-    }
-  },
-
-  async moveConversationToFolder(convId, folderId) {
-    const existing = get().conversations.find((c) => c.id === convId);
-    const prevFolderId = existing?.folder_id ?? null;
-    if (prevFolderId === folderId) return;
-    // Optimistic: re-file the conversation + adjust folder counts so the
-    // sidebar re-groups immediately.
-    set((s) => ({
-      conversations: s.conversations.map((c) =>
-        c.id === convId ? { ...c, folder_id: folderId } : c,
-      ),
-      folders: s.folders.map((f) => {
-        if (f.id === prevFolderId) {
-          return { ...f, conversation_count: Math.max(0, f.conversation_count - 1) };
-        }
-        if (f.id === folderId) {
-          return { ...f, conversation_count: f.conversation_count + 1 };
-        }
-        return f;
-      }),
-    }));
-    try {
-      await api.moveConversationToFolder(convId, folderId);
-    } catch {
-      // Roll back both the membership and the counts.
-      set((s) => ({
-        conversations: s.conversations.map((c) =>
-          c.id === convId ? { ...c, folder_id: prevFolderId } : c,
-        ),
-        folders: s.folders.map((f) => {
-          if (f.id === folderId) {
-            return { ...f, conversation_count: Math.max(0, f.conversation_count - 1) };
-          }
-          if (f.id === prevFolderId) {
-            return { ...f, conversation_count: f.conversation_count + 1 };
-          }
-          return f;
-        }),
-      }));
-      get().setError("Couldn't move conversation. Please try again.");
-    }
   },
 
   // ── projects (Phase 4) ───────────────────────────────────
@@ -967,7 +895,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const prevProjectId = existing?.project_id ?? null;
     if (prevProjectId === projectId) return;
     // Optimistic: re-assign + adjust project counts so the UI
-    // reflects the move immediately — mirrors moveConversationToFolder.
+    // reflects the move immediately.
     set((s) => ({
       conversations: s.conversations.map((c) =>
         c.id === convId ? { ...c, project_id: projectId } : c,
@@ -1881,6 +1809,34 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "code_execution") {
+        // Phase 8 — sandboxed run_python progress. Upsert by id so the
+        // "running" frame and the terminal frame are ONE card. Not
+        // rAF-batched: at most a couple of frames per run, and the
+        // "running" frame must paint immediately (that is the whole
+        // point — the sandbox job can take up to 60s).
+        const data = evt.data as SSECodeExecution;
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) => {
+                if (m.id !== id) return m;
+                const runs = m.code_runs ?? [];
+                const at = runs.findIndex((r) => r.id === data.id);
+                return {
+                  ...m,
+                  code_runs:
+                    at === -1
+                      ? [...runs, data]
+                      : runs.map((r, i) => (i === at ? data : r)),
+                };
+              }),
+            },
+          };
+        });
       } else if (evt.event === "message_sources") {
         const data = evt.data as SSEMessageSources;
         set((s) => {
@@ -1933,6 +1889,11 @@ async function consumeStream(
         });
         // Refresh the credit badge — this turn just spent credits.
         bumpUsageVersion();
+        // Phase 8 — the turn may have called update_canvas_artifact. If
+        // the panel is open on a persisted artifact, re-read its lineage
+        // so the model's new version replaces what's on screen (the
+        // store keeps unsaved user edits; see loadVersions).
+        useCanvasStore.getState().refreshIfOpen();
       } else if (evt.event === "fallback_info") {
         // B2 — a fallback model answered. Stash the requested/actual
         // model pair on the message so MessageBubble can show a small

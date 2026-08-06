@@ -1,0 +1,148 @@
+<Window x:Class="SranDesktop.Presentation.Views.Dialogs.CanvasWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:SranDesktop.Presentation.Converters"
+        xmlns:controls="clr-namespace:SranDesktop.Presentation.Controls"
+        xmlns:loc="clr-namespace:SranDesktop.Presentation.Localization"
+        xmlns:vm="clr-namespace:SranDesktop.Presentation.ViewModels"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="{Binding Title}"
+        Width="1040" Height="720"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BgPrimaryBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <Window.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
+    <Window.InputBindings>
+        <KeyBinding Key="Escape" Command="{Binding CloseCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+    </Window.InputBindings>
+
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Header: title + Preview/Code toggle -->
+        <DockPanel Grid.Row="0" Grid.ColumnSpan="2" Margin="0,0,0,10">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Command="{Binding ToggleCodeModeCommand}" MinWidth="96" Padding="10,5" Margin="0,0,8,0">
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="{loc:T canvas.showCode}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCodeMode}" Value="True">
+                                        <Setter Property="Text" Value="{loc:T canvas.showPreview}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Button>
+                <Button Content="{loc:T canvas.copy}" Padding="10,5" Margin="0,0,8,0"
+                        Command="{Binding CopySourceCommand}" />
+                <Button Content="{loc:T canvas.download}" Padding="10,5"
+                        Command="{Binding DownloadCommand}" />
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Type}" FontSize="11"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Body -->
+        <Border Grid.Row="1" Grid.Column="0" CornerRadius="10" ClipToBounds="True"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource BorderBrush}"
+                Background="{DynamicResource BgSecondaryBrush}">
+            <Grid>
+                <!-- Preview: model-authored code runs here, under CanvasSandbox. -->
+                <wv2:WebView2 x:Name="CanvasView"
+                              Visibility="{Binding IsPreviewMode, Converter={StaticResource BoolToVisibility}}" />
+
+                <!-- Code: plain editor. Edits commit on a debounce and re-render
+                     through the SAME sandbox — the posture never softens. -->
+                <TextBox Text="{Binding Draft, UpdateSourceTrigger=PropertyChanged}"
+                         Visibility="{Binding IsCodeMode, Converter={StaticResource BoolToVisibility}}"
+                         AcceptsReturn="True" AcceptsTab="True"
+                         TextWrapping="NoWrap"
+                         HorizontalScrollBarVisibility="Auto"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Cascadia Code, Consolas, monospace" FontSize="13"
+                         Background="Transparent" BorderThickness="0" Padding="10"
+                         Foreground="{DynamicResource TextPrimaryBrush}"
+                         CaretBrush="{DynamicResource TextPrimaryBrush}" />
+
+                <ProgressBar Height="2" VerticalAlignment="Top" IsIndeterminate="True"
+                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}" />
+            </Grid>
+        </Border>
+
+        <!-- Version rail (mirrors the web) -->
+        <Border Grid.Row="1" Grid.Column="1" Width="196" Margin="10,0,0,0"
+                CornerRadius="10" BorderThickness="1"
+                BorderBrush="{DynamicResource BorderBrush}"
+                Background="{DynamicResource BgSecondaryBrush}"
+                Visibility="{Binding CanPersist, Converter={StaticResource BoolToVisibility}}">
+            <DockPanel Margin="10">
+                <TextBlock DockPanel.Dock="Top" Text="{loc:T canvas.versions}"
+                           FontSize="12" FontWeight="Medium" Margin="0,0,0,8"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                <Button DockPanel.Dock="Top" Content="{loc:T canvas.saveVersion}"
+                        Padding="8,5" Margin="0,0,0,10"
+                        Command="{Binding SaveVersionCommand}" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Versions}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:CanvasVersionRow}">
+                                <Border BorderThickness="1" CornerRadius="8" Margin="0,0,0,6" Padding="8,6"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        Background="{DynamicResource BgPrimaryBrush}">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right"
+                                                Content="{loc:T canvas.revert}"
+                                                FontSize="10.5" Padding="6,2"
+                                                Command="{Binding DataContext.RevertCommand,
+                                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}" />
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Label}" FontSize="12" FontWeight="Medium"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                                            <TextBlock Text="{Binding When}" FontSize="10"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- Footer: runtime error + status -->
+        <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="0,10,0,0">
+            <Border CornerRadius="8" Padding="10,7"
+                    Background="{DynamicResource BgSecondaryBrush}"
+                    Visibility="{Binding HasRuntimeError, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="{Binding RuntimeError}" TextWrapping="Wrap" FontSize="11.5"
+                           FontFamily="Cascadia Code, Consolas, monospace"
+                           Foreground="{DynamicResource AccentRedBrush}" />
+            </Border>
+            <TextBlock Text="{Binding StatusMessage}" FontSize="11" Margin="0,6,0,0"
+                       Foreground="{DynamicResource TextTertiaryBrush}" />
+        </StackPanel>
+    </Grid>
+</Window>

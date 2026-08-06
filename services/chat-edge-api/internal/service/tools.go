@@ -38,6 +38,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -243,6 +244,20 @@ type ToolExecContext struct {
 	ConversationID uuid.UUID
 	MessageID      uuid.UUID
 	Sources        *SourcesAccumulator
+
+	// Emit pushes a progress frame onto the live SSE stream mid-tool
+	// (Phase 8 Task 2 — run_python's code+output card). Nil on the
+	// non-streaming path and in unit tests; always call via emit().
+	// MUST NOT block: the streaming caller owns a buffered channel and
+	// a slow send would stall the whole turn.
+	Emit func(StreamUpdate)
+}
+
+// emit is the nil-safe form. Tools call this, never ec.Emit directly.
+func (ec ToolExecContext) emit(u StreamUpdate) {
+	if ec.Emit != nil {
+		ec.Emit(u)
+	}
 }
 
 // ToolExecutor dispatches a single tool call to its handler.
@@ -299,6 +314,19 @@ type ToolExecutor struct {
 	codeInterp *CodeInterpreter
 	codeFiles  codeFileResolver
 	codeSaver  generatedFileSaver
+	// Phase 8 Task 3 — optional. When wired the executor exposes
+	// update_canvas_artifact: append a new version to an EXISTING canvas
+	// artifact lineage the user has open. Interface (not the concrete
+	// *CanvasArtifactService) so the tool is unit-testable without a DB.
+	canvas canvasArtifactUpdater
+}
+
+// canvasArtifactUpdater is the slice of *CanvasArtifactService the
+// canvas tool needs. Both methods assert conversation ownership, so the
+// tool never re-implements an access check of its own.
+type canvasArtifactUpdater interface {
+	GetLatest(ctx context.Context, tenantID, userID, convID uuid.UUID, key string) (*model.CanvasArtifact, error)
+	Save(ctx context.Context, tenantID, userID, convID uuid.UUID, messageID *uuid.UUID, key, typ, title, content string) (*model.CanvasArtifact, error)
 }
 
 // codeFileResolver resolves + materialises a run_python file input to a
@@ -432,6 +460,16 @@ func (e *ToolExecutor) HasCodeInterpreter() bool {
 	return e.codeInterp != nil && e.codeFiles != nil && e.codeSaver != nil
 }
 
+// SetCanvasArtifacts wires the Phase-8 update_canvas_artifact tool.
+// Optional — when nil the tool is hidden and the model can only produce
+// artifacts by writing code blocks (the C1-C3 behaviour).
+func (e *ToolExecutor) SetCanvasArtifacts(c canvasArtifactUpdater) {
+	e.canvas = c
+}
+
+// HasCanvasArtifacts reports whether update_canvas_artifact is wired.
+func (e *ToolExecutor) HasCanvasArtifacts() bool { return e.canvas != nil }
+
 // SetConversationStateService wires the S3 state layer. Optional
 // so unit tests that don't exercise the state path stay decoupled.
 func (e *ToolExecutor) SetConversationStateService(s *ConversationStateService) {
@@ -497,6 +535,13 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	if e.HasCodeInterpreter() {
 		defs = append(defs, runPythonToolDef())
 	}
+	// Phase 8 Task 3 — canvas updates. Only useful when the conversation
+	// actually HAS artifacts; the caller decides that (the tool is
+	// attached alongside the "## Canvas Artifacts" system block, and an
+	// unknown key is refused server-side either way).
+	if e.HasCanvasArtifacts() {
+		defs = append(defs, updateCanvasArtifactToolDef())
+	}
 	return defs
 }
 
@@ -542,7 +587,9 @@ func (e *ToolExecutor) Execute(
 	case "web_fetch":
 		return e.execWebFetch(ctx, call.Function.Arguments, ec)
 	case "run_python":
-		return e.execRunPython(ctx, call.Function.Arguments, ec)
+		return e.execRunPython(ctx, call.ID, call.Function.Arguments, ec)
+	case "update_canvas_artifact":
+		return e.execUpdateCanvasArtifact(ctx, call.Function.Arguments, ec)
 	default:
 		return fmt.Sprintf("Unknown tool %q.", call.Function.Name)
 	}
@@ -1422,9 +1469,11 @@ type runPythonArgs struct {
 	Files []string `json:"files"`
 }
 
+// The named return lets the deferred guard reuse the user-facing error
+// text as the card's stderr, so a card can never be left spinning.
 func (e *ToolExecutor) execRunPython(
-	ctx context.Context, rawArgs string, ec ToolExecContext,
-) string {
+	ctx context.Context, callID, rawArgs string, ec ToolExecContext,
+) (result string) {
 	if !e.HasCodeInterpreter() {
 		return "The code interpreter isn't available right now."
 	}
@@ -1439,6 +1488,38 @@ func (e *ToolExecutor) execRunPython(
 	if len(code) > maxCodeBytes {
 		return fmt.Sprintf("The code is too large (max %d KB).", maxCodeBytes>>10)
 	}
+
+	// Show the card the instant we commit to running: the sandbox job
+	// can take up to 60s and until now the UI showed nothing at all.
+	// Every later frame reuses this id so the card updates in place.
+	runID := callID
+	if runID == "" {
+		runID = uuid.NewString()
+	}
+	started := time.Now()
+	ec.emit(StreamUpdate{CodeExecution: &CodeExecutionUpdate{
+		ID:     runID,
+		Status: "running",
+		Code:   code,
+	}})
+	// Every exit path below must resolve the card — one stuck on
+	// "running" forever is worse than no card at all. finish() marks it
+	// settled; the defer catches the paths that return early (denied
+	// file id, sandbox unavailable, job failure) and reuses the text the
+	// model gets as the card's error line.
+	settled := false
+	finish := func(u CodeExecutionUpdate) {
+		u.ID = runID
+		u.Code = code
+		u.DurationMS = time.Since(started).Milliseconds()
+		ec.emit(StreamUpdate{CodeExecution: &u})
+		settled = true
+	}
+	defer func() {
+		if !settled {
+			finish(CodeExecutionUpdate{Status: "error", ExitCode: -1, Stderr: result})
+		}
+	}()
 
 	// Resolve + materialise each requested file input. Ownership +
 	// conversation scope are enforced by the resolver BEFORE any sandbox
@@ -1527,7 +1608,43 @@ func (e *ToolExecutor) execRunPython(
 		}
 	}
 
+	stdout, outClipped := truncateForDisplay(string(res.Stdout))
+	stderr, errClipped := truncateForDisplay(string(res.Stderr))
+	status := "completed"
+	if res.Exit != 0 || res.TimedOut {
+		status = "error"
+	}
+	finish(CodeExecutionUpdate{
+		Status:    status,
+		Stdout:    stdout,
+		Stderr:    stderr,
+		ExitCode:  res.Exit,
+		TimedOut:  res.TimedOut,
+		Artifacts: append(append([]string{}, savedImages...), savedFiles...),
+		Truncated: outClipped || errClipped,
+	})
+
 	return formatRunPythonResult(res, savedImages, savedFiles, ec.MessageID == uuid.Nil)
+}
+
+// maxDisplayOutputBytes caps what one run's stdout/stderr contributes to
+// an SSE frame. The sandbox already caps each stream at 256 KiB for the
+// MODEL; the browser card only needs enough to read, and a 256 KiB frame
+// per run would stall the rAF-batched stream consumer.
+const maxDisplayOutputBytes = 16 << 10
+
+// truncateForDisplay clips output to maxDisplayOutputBytes on a rune
+// boundary (so Thai/emoji output never arrives as a broken code point)
+// and reports whether it clipped.
+func truncateForDisplay(s string) (string, bool) {
+	if len(s) <= maxDisplayOutputBytes {
+		return s, false
+	}
+	cut := s[:maxDisplayOutputBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut, true
 }
 
 // resStderr safely reads stderr off a possibly-nil result.
@@ -1623,4 +1740,116 @@ func searchHitLabel(h *PastContextResult) string {
 		return h.Content
 	}
 	return "Past conversation"
+}
+
+// ---------------------------------------------------------------------------
+// update_canvas_artifact (Phase 8 Task 3 — model-driven canvas edits)
+// ---------------------------------------------------------------------------
+
+// updateCanvasArtifactToolDef lets the model revise an artifact the user
+// already has open in the canvas instead of re-emitting a whole new code
+// block. The new source lands as the NEXT VERSION of the same lineage
+// (chat.canvas_artifacts, migration 030), so the user sees it appear in
+// the panel they are looking at and can revert it from the C3 version
+// rail.
+//
+// Deliberately update-only: the model can revise artifacts the system
+// prompt listed for this conversation, and cannot invent a new lineage
+// out of a key it made up. Creating an artifact stays what it always
+// was — writing a fenced code block, which the user opens in the canvas.
+func updateCanvasArtifactToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "update_canvas_artifact",
+			Description: "Update an artifact the user has open in the canvas panel (the ones listed " +
+				"under '## Canvas Artifacts' in your context). Use this INSTEAD of writing a new code " +
+				"block when the user asks to change something about an existing artifact (\"make the " +
+				"button green\", \"add a column\", \"fix the legend\"): the change becomes a new version " +
+				"of the SAME artifact and appears immediately in the panel they are looking at. " +
+				"You MUST send the COMPLETE new source in 'content' — it replaces the artifact, it is " +
+				"not a patch or a diff. After calling this, reply with one short sentence describing " +
+				"what you changed; do NOT repeat the source in your reply.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"artifact_key": map[string]any{
+						"type":        "string",
+						"description": "The artifact_key exactly as listed in your context. Never invent one.",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "The complete new source of the artifact (full file, not a fragment).",
+					},
+					"title": map[string]any{
+						"type":        "string",
+						"description": "Optional new display title. Omit to keep the current one.",
+					},
+				},
+				"required": []string{"artifact_key", "content"},
+			},
+		},
+	}
+}
+
+type updateCanvasArtifactArgs struct {
+	ArtifactKey string `json:"artifact_key"`
+	Content     string `json:"content"`
+	Title       string `json:"title"`
+}
+
+func (e *ToolExecutor) execUpdateCanvasArtifact(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if e.canvas == nil {
+		return "The canvas isn't available right now."
+	}
+	var args updateCanvasArtifactArgs
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return "I couldn't parse the update_canvas_artifact arguments."
+	}
+	key := strings.TrimSpace(args.ArtifactKey)
+	if key == "" {
+		return "I need the artifact_key of the artifact to update."
+	}
+	if strings.TrimSpace(args.Content) == "" {
+		return "I need the complete new source of the artifact."
+	}
+
+	// Resolve the existing lineage FIRST: this is both the "does it
+	// exist" check and the ownership gate (the service asserts the
+	// caller owns the conversation), and it supplies the type/title the
+	// new version inherits.
+	current, err := e.canvas.GetLatest(ctx, ec.TenantID, ec.UserID, ec.ConversationID, key)
+	if err != nil {
+		slog.Info("canvas_update_unknown_artifact",
+			"conversation_id", ec.ConversationID.String(),
+			"artifact_key", key,
+		)
+		return "I couldn't find that artifact in this conversation. Only the artifacts listed in your context can be updated."
+	}
+
+	title := strings.TrimSpace(args.Title)
+	if title == "" && current.Title != nil {
+		title = *current.Title
+	}
+
+	// Type is INHERITED, never taken from the model: it selects the
+	// renderer (and therefore the sandbox posture) on the client, so it
+	// must not be switchable by tool arguments.
+	saved, err := e.canvas.Save(
+		ctx, ec.TenantID, ec.UserID, ec.ConversationID,
+		nilOrUUID(ec.MessageID), key, current.Type, title, args.Content,
+	)
+	if err != nil {
+		if errors.Is(err, ErrArtifactTooLarge) {
+			return "That artifact is too large to save (the limit is 512 KB)."
+		}
+		slog.Error("canvas_update_failed", "error", err.Error())
+		return "I couldn't save the updated artifact. Please try again."
+	}
+	return fmt.Sprintf(
+		"Updated the artifact %q to version %d. It is now showing in the canvas panel.",
+		key, saved.Version,
+	)
 }

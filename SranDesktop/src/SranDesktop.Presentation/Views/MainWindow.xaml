@@ -157,59 +157,22 @@
                   ClipToBounds="True"
                   Background="{DynamicResource BgSidebarBrush}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />     <!-- sidebar body -->
+                    <RowDefinition Height="Auto" />  <!-- account footer -->
                 </Grid.RowDefinitions>
 
-                <!-- Projects section (R9 Feature B4) -->
-                <StackPanel Grid.Row="0"
-                            Visibility="{Binding IsAuthenticated, Converter={StaticResource BoolToVisibility}}">
-                    <DockPanel Margin="16,10,10,2">
-                        <Button DockPanel.Dock="Right" Style="{DynamicResource IconButton}"
-                                Width="22" Height="22"
-                                Command="{Binding CreateProjectCommand}"
-                                AutomationProperties.Name="New project"
-                                ToolTip="{loc:T project.create}">
-                            <controls:IconView Geometry="{StaticResource Geo_Plus}"
-                                               Stroke="{DynamicResource TextTertiaryBrush}"
-                                               Width="12" Height="12" />
-                        </Button>
-                        <TextBlock Text="{loc:T sidebar.projects}" FontSize="10" FontWeight="Medium"
-                                   Foreground="{DynamicResource TextTertiaryBrush}"
-                                   VerticalAlignment="Center" />
-                    </DockPanel>
-                    <ItemsControl ItemsSource="{Binding Projects}" MaxHeight="150">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Button Style="{DynamicResource FlatRowButton}" Margin="8,1"
-                                        Command="{Binding DataContext.OpenProjectCommand,
-                                                  RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                        CommandParameter="{Binding}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <controls:IconView Geometry="{StaticResource Geo_Folder}"
-                                                           Stroke="{DynamicResource AccentBrush}"
-                                                           Width="14" Height="14" Margin="0,0,8,0"
-                                                           VerticalAlignment="Center" />
-                                        <TextBlock Text="{Binding Name}" FontSize="13"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
-                                    </StackPanel>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <Border Height="1" Margin="12,6,12,0"
-                            Background="{DynamicResource BorderBrush}" Opacity="0.5" />
-                </StackPanel>
-
-                <views:SidebarView Grid.Row="1" x:Name="SidebarControl"
+                <!-- The sidebar owns its whole body: brand, nav, search,
+                     projects and the conversation list. Projects used to be a
+                     SECOND list rendered here, above the sidebar's own header
+                     and backed by a different (local-only) store — retired in
+                     Phase 11 so there is one projects list, the server-backed
+                     one inside SidebarView. -->
+                <views:SidebarView Grid.Row="0" x:Name="SidebarControl"
                                    DataContext="{Binding Conversations}"
                                    CollapseRequested="SidebarControl_CollapseRequested" />
 
                 <!-- Account footer: avatar + email + overflow menu (web parity Fix 2) -->
-                <Border Grid.Row="2"
+                <Border Grid.Row="1"
                         BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="0,1,0,0"
                         Padding="12,8">

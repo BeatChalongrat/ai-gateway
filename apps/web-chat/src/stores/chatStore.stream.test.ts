@@ -302,14 +302,14 @@ describe("sendMessage / consumeStream", () => {
     const files = [
       {
         id: "art-img",
-        original_filename: "chart.png",
+        filename: "chart.png",
         content_type: "image/png",
         is_generated: true,
         download_url: "/api/v1/files/art-img/download",
       },
       {
         id: "art-xlsx",
-        original_filename: "report.xlsx",
+        filename: "report.xlsx",
         content_type:
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         is_generated: true,
@@ -323,9 +323,9 @@ describe("sendMessage / consumeStream", () => {
     expect(msg?.files).toHaveLength(2);
     expect(msg?.files?.[0]).toMatchObject({
       content_type: "image/png",
-      original_filename: "chart.png",
+      filename: "chart.png",
     });
-    expect(msg?.files?.[1]?.original_filename).toBe("report.xlsx");
+    expect(msg?.files?.[1]?.filename).toBe("report.xlsx");
     expect(msg?.is_generating_image).toBe(false);
     expect(msg?.is_generating_video).toBe(false);
 

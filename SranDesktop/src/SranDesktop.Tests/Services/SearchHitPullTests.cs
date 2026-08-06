@@ -34,7 +34,7 @@ public class SearchHitPullTests
         Id: id, Title: "Pulled chat", ModelId: "gpt-4o", MessageCount: 3,
         CreatedAt: DateTimeOffset.UtcNow.AddDays(-1),
         UpdatedAt: DateTimeOffset.UtcNow,
-        IsPinned: false, FolderId: null);
+        IsPinned: false, ProjectId: null);
 
     [Fact]
     public async Task Server_Only_Hit_Pulls_Upserts_And_Opens()

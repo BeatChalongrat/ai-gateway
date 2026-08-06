@@ -12,16 +12,53 @@ public partial class ChatView : UserControl
     private bool _autoScroll = true;
     private ScrollViewer? _messageScroll;
 
+    // ── Per-conversation scroll memory (Phase 13 Task 3) ────────────────────
+    // The id whose position we are currently recording, and whether the newly
+    // opened chat still owes us a restore. Both live in the view because the
+    // offsets are a property of the rendered list, not of the conversation.
+    private string? _trackedConversationId;
+    private bool _restorePending;
+
+    private readonly SranDesktop.Application.Services.ScrollMemory _scrollMemory =
+        SranDesktop.Application.Services.ScrollMemory.Instance;
+
     public ChatView()
     {
         InitializeComponent();
         DataContextChanged += (_, e) =>
         {
             if (e.OldValue is ChatViewModel oldVm)
+            {
                 oldVm.MessageActivity -= OnMessageActivity;
+                oldVm.PropertyChanged -= OnViewModelPropertyChanged;
+            }
             if (e.NewValue is ChatViewModel newVm)
+            {
                 newVm.MessageActivity += OnMessageActivity;
+                newVm.PropertyChanged += OnViewModelPropertyChanged;
+                OnConversationChanged(newVm);
+            }
         };
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChatViewModel.Conversation) && sender is ChatViewModel vm)
+            OnConversationChanged(vm);
+    }
+
+    /// <summary>A different chat is now open: stop recording against the old
+    /// id and arm a restore for the new one. The old chat's offset was already
+    /// captured on its last user scroll, so nothing is read here — by now the
+    /// list may have been cleared and its offset reset to 0.</summary>
+    private void OnConversationChanged(ChatViewModel vm)
+    {
+        var next = vm.Conversation?.Id;
+        if (next == _trackedConversationId)
+            return;
+        _trackedConversationId = next;
+        _autoScroll = true;                     // new chats start at the newest message
+        _restorePending = next is not null && _scrollMemory.Recall(next) is not null;
     }
 
     /// <summary>The ListBox's internal ScrollViewer (materialized after the template applies).</summary>
@@ -42,11 +79,48 @@ public partial class ChatView : UserControl
         // A user scroll (no content growth) sets the intent: away from the
         // bottom pauses auto-scroll, returning to the bottom resumes it.
         if (e.ExtentHeightChange == 0)
+        {
             _autoScroll = scroll.VerticalOffset >= scroll.ScrollableHeight - Services.ScrollStateHelper.BottomThreshold;
+            // Remember where the user left this chat. Recorded on the user's
+            // own scrolls only — content growth during a stream must not
+            // overwrite the place they deliberately scrolled to.
+            _scrollMemory.Remember(_trackedConversationId, scroll.VerticalOffset);
+            _restorePending = false; // they've taken over; don't yank them later
+        }
+        else if (_restorePending && TryRestoreScroll(scroll))
+        {
+            // restored — leave the offset alone this pass
+        }
         else if (_autoScroll)
+        {
             scroll.ScrollToVerticalOffset(scroll.ExtentHeight);
+        }
 
         UpdateJumpToLatest(scroll);
+    }
+
+    /// <summary>Puts the freshly rendered transcript back where the user left
+    /// it. Returns false when there is nothing to restore (or the remembered
+    /// place was the bottom), leaving the normal auto-stick in charge.</summary>
+    private bool TryRestoreScroll(ScrollViewer scroll)
+    {
+        var target = SranDesktop.Application.Services.ScrollRestore.Resolve(
+            _scrollMemory.Recall(_trackedConversationId),
+            scroll.ScrollableHeight,
+            Services.ScrollStateHelper.BottomThreshold);
+        if (target is not { } offset)
+        {
+            // Only stop trying once the list actually has scrollable content;
+            // the first pass of a long transcript can still be laying out.
+            if (scroll.ScrollableHeight > 0)
+                _restorePending = false;
+            return false;
+        }
+
+        scroll.ScrollToVerticalOffset(offset);
+        _autoScroll = false; // the user's place wins over following the stream
+        _restorePending = false;
+        return true;
     }
 
     /// <summary>Phase C PART 2: show the jump button only when scrolled up with
@@ -65,6 +139,10 @@ public partial class ChatView : UserControl
         var scroll = MessageScroll;
         if (scroll is null) return;
         _autoScroll = true; // re-pin so the stream keeps following
+        // Explicitly asking for the newest message clears the remembered
+        // place — otherwise reopening this chat would scroll back up again.
+        _scrollMemory.Forget(_trackedConversationId);
+        _restorePending = false;
         Services.AnimatedScroller.ScrollToBottom(scroll); // snaps when reduced-motion
         JumpToLatestButton.Visibility = Visibility.Collapsed;
     }

@@ -99,6 +99,10 @@ type CompileContext struct {
 	ExcelContext string
 	DocContext   string
 	PptxContext  string
+	// CanvasContext — Phase 8 Task 3. Lists the conversation's canvas
+	// artifacts (key + type + latest source) so the model can revise one
+	// with update_canvas_artifact instead of emitting a fresh block.
+	CanvasContext string
 }
 
 // PromptCompiler assembles the system prompt. It holds only the
@@ -533,9 +537,10 @@ func (pc *PromptCompiler) conversationState(ctx context.Context, in CompileConte
 // order the legacy assembler used: RAG, file, then the per-format
 // Excel/Doc/Pptx capability prompts. Each is "" when absent.
 func (pc *PromptCompiler) ragAndFileContext(in CompileContext) string {
-	parts := make([]string, 0, 5)
+	parts := make([]string, 0, 6)
 	for _, p := range []string{
 		in.RAGContext, in.FileContext, in.ExcelContext, in.DocContext, in.PptxContext,
+		in.CanvasContext,
 	} {
 		if strings.TrimSpace(p) != "" {
 			parts = append(parts, p)

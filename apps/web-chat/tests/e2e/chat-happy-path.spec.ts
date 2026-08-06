@@ -90,7 +90,7 @@ test("login handoff → send message → streamed tokens render", async ({ page 
     const path = new URL(req.url()).pathname;
 
     if (path === "/api/v1/models") return json(route, { models: [MODEL] });
-    if (path === "/api/v1/folders") return json(route, { folders: [] });
+    if (path === "/api/v1/projects") return json(route, { projects: [] });
     if (path === "/api/v1/memories/pending-count") return json(route, { count: 0 });
     if (path === "/api/v1/usage/me") {
       return json(route, {

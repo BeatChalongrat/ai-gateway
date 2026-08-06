@@ -1,3 +1,12 @@
+// DEPRECATED (Phase 9) — folders were merged into projects.
+//
+// migrations/031_merge_folders_into_projects.sql turned every folder into a
+// project (same id) and repointed its conversations, and router.go no longer
+// registers any /folders route. This code is kept UNWIRED for one release so
+// the migration stays reversible; the live organiser is projects
+// (project_repo.go / project_service.go / handler/project.go). Do not wire
+// it back — extend projects instead.
+
 // Folder handlers — CRUD over chat.folders + conversation→folder moves.
 //
 // All routes sit behind RequireAuth (see router.go) so each handler pulls

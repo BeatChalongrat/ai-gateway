@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -92,8 +93,11 @@ func (h *ExcelHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type executePlanRequest struct {
-	// SourceFileID identifies the workbook the plan modifies. Must
-	// belong to the conversation in the URL.
+	// SourceFileID identifies the workbook the plan modifies. When
+	// present it must belong to the conversation in the URL. OPTIONAL
+	// since Phase 8: omitting it (or sending "") runs the executor in
+	// create-from-scratch mode, the same contract /document/execute
+	// already had for docx/pptx/pdf.
 	SourceFileID string `json:"source_file_id"`
 	// OutputFilename is optional; when empty the service derives
 	// "<original>_edited.xlsx".
@@ -126,10 +130,18 @@ func (h *ExcelHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			"plan is required")
 		return
 	}
-	srcID, err := uuid.Parse(req.SourceFileID)
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid source_file_id")
-		return
+	// Empty / absent source_file_id → create-from-scratch. A NON-empty
+	// but malformed id is still a 400: silently treating it as
+	// "create new" would hide a client bug and produce a file the user
+	// didn't ask for.
+	var srcID uuid.UUID
+	if strings.TrimSpace(req.SourceFileID) != "" {
+		parsed, err := uuid.Parse(strings.TrimSpace(req.SourceFileID))
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid source_file_id")
+			return
+		}
+		srcID = parsed
 	}
 
 	row, validation, err := h.excel.ExecutePlan(r.Context(), service.PlannedExecution{

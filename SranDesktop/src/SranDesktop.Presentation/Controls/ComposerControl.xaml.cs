@@ -177,6 +177,42 @@ public partial class ComposerControl : UserControl
 
     private void InputBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Phase 12 — the slash menu owns the arrow keys + Enter/Tab/Esc while
+        // it is open, so the user can drive it without leaving the keyboard.
+        // Everything below (Enter-to-send, Shift+Enter, Ctrl+V) is untouched
+        // when the menu is closed, which is every keystroke of normal typing.
+        if (DataContext is ChatViewModel slashVm && slashVm.IsSlashMenuOpen)
+        {
+            switch (e.Key)
+            {
+                case Key.Down:
+                    e.Handled = true;
+                    slashVm.MoveSlashSelection(1);
+                    return;
+                case Key.Up:
+                    e.Handled = true;
+                    slashVm.MoveSlashSelection(-1);
+                    return;
+                case Key.Escape:
+                    e.Handled = true;
+                    slashVm.DismissSlashMenu();
+                    return;
+                case Key.Enter:
+                case Key.Tab:
+                    // An IME committing a candidate reports ImeProcessedKey;
+                    // that Enter means "accept the candidate", never "run the
+                    // command" — same guard as web's isComposing check.
+                    if (e.Key == Key.Enter && e.ImeProcessedKey == Key.ImeProcessed)
+                        break;
+                    if (slashVm.RunSelectedSlashCommand())
+                    {
+                        e.Handled = true;
+                        return;
+                    }
+                    break;
+            }
+        }
+
         // Enter sends, Shift+Enter inserts a newline.
         if (e.Key == Key.Enter && !Keyboard.IsKeyDown(Key.LeftShift) && !Keyboard.IsKeyDown(Key.RightShift))
         {
@@ -187,8 +223,11 @@ public partial class ComposerControl : UserControl
         }
 
         // Ctrl+V with an image on the clipboard pastes it as an attachment (R9 D1).
+        // The image takes precedence over any text/HTML alternative shipped with
+        // it (browser and Word copies carry both) — see ClipboardPasteDecider.
         if (e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.Control
-            && Clipboard.ContainsImage() && !Clipboard.ContainsText())
+            && Services.ClipboardPasteDecider.Decide(
+                   Clipboard.ContainsImage(), Clipboard.ContainsText()) == Services.PasteMode.Image)
         {
             if (Clipboard.GetImage() is { } image && DataContext is ChatViewModel vm)
             {

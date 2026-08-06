@@ -14,6 +14,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { Message } from "@/lib/types";
 import { useT } from "@/lib/i18n";
+import { recallScroll, rememberScroll } from "@/lib/scrollMemory";
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
 
@@ -57,6 +58,17 @@ export function ChatThread({
   const lastLastContent = useRef("");
   const autoScrolling = useRef(false);
 
+  // Phase 7 — pending scroll restore for the conversation just opened.
+  // null = no saved position (keep the default bottom-anchored view).
+  const pendingRestore = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    pendingRestore.current = recallScroll(convId);
+    // Force the message effect below to treat this as a fresh render so
+    // the restore (or the default scroll-to-bottom) actually fires.
+    lastLen.current = -1;
+    lastLastContent.current = "\u0000";
+  }, [convId]);
+
   // Track the top message id + scroll offset BEFORE every render so
   // a prepend (older-page load) can restore the user's viewport.
   const prevFirstId = useRef<string | null>(null);
@@ -96,6 +108,24 @@ export function ChatThread({
     lastLen.current = messages.length;
     lastLastContent.current = last?.content ?? "";
 
+    // Phase 7 — scroll memory. On the first render after switching to a
+    // conversation we've seen before, restore where the user was
+    // instead of snapping to the bottom. Runs before the auto-stick
+    // branch below so it wins exactly once per switch.
+    if (pendingRestore.current !== null && el.scrollHeight > 0) {
+      const target = pendingRestore.current;
+      pendingRestore.current = null;
+      autoScrolling.current = true;
+      el.scrollTop = target;
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setAutoStick(distance < NEAR_BOTTOM_PX);
+      setFarFromBottom(distance > SHOW_SCROLL_BUTTON_PX);
+      requestAnimationFrame(() => {
+        autoScrolling.current = false;
+      });
+      return;
+    }
+
     if (autoStick) {
       autoScrolling.current = true;
       el.scrollTop = el.scrollHeight;
@@ -127,6 +157,8 @@ export function ChatThread({
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     if (autoScrolling.current) return;
     const el = e.currentTarget;
+    // Phase 7 — remember where the user is, per conversation.
+    rememberScroll(convId, el.scrollTop);
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = distance < NEAR_BOTTOM_PX;
     setAutoStick(nearBottom);

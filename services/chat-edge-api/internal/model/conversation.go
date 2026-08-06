@@ -22,6 +22,10 @@ type Conversation struct {
 	MessageCount int
 	IsDeleted    bool
 	DeletedAt    *time.Time
+	// IsArchived (migration 032) hides the conversation from the SIDEBAR
+	// LIST only. Unlike IsDeleted it does not affect Get / Search / send /
+	// export — an archived chat is fully readable, it is just filed away.
+	IsArchived bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	// KnowledgeBaseID is the per-conversation RAG binding. Nullable

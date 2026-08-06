@@ -10,10 +10,15 @@ public sealed record ConversationDto(
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
     [property: JsonPropertyName("is_pinned")] bool IsPinned,
-    [property: JsonPropertyName("folder_id")] string? FolderId,
+    [property: JsonPropertyName("project_id")] string? ProjectId,
     [property: JsonPropertyName("knowledge_base_id")] string? KnowledgeBaseId = null,
     // Absent ⇒ treat as enabled (matches web's default-on behaviour).
-    [property: JsonPropertyName("memory_enabled")] bool? MemoryEnabled = null);
+    [property: JsonPropertyName("memory_enabled")] bool? MemoryEnabled = null,
+    // Phase 13 — Thinking Mode. Absent ⇒ off, which is the server default
+    // (migration 019); "off" also means the gateway picks Auto Thinking.
+    [property: JsonPropertyName("reasoning_enabled")] bool? ReasoningEnabled = null,
+    // Phase 14 — archived (chat-edge migration 032). Absent ⇒ not archived.
+    [property: JsonPropertyName("is_archived")] bool IsArchived = false);
 
 public sealed record ConversationListResponse(
     [property: JsonPropertyName("conversations")] List<ConversationDto> Conversations,
@@ -73,6 +78,72 @@ public sealed record FileTextDto(
     [property: JsonPropertyName("text")] string? Text,
     [property: JsonPropertyName("truncated")] bool Truncated,
     [property: JsonPropertyName("ocr")] bool Ocr);
+
+// ---------------------------------------------------------------------------
+// GET /files/{id}/preview-data — structured preview (Phase 16).
+//
+// The companion to FileTextDto: that one carries the flat text the MODEL
+// reads, these carry the structure a PERSON reads — a spreadsheet as
+// sheets and cells, Word as ordered blocks, a deck slide by slide.
+// Shapes mirror services/chat-edge-api/scripts/preview_data.py exactly,
+// and the web client's src/lib/previewData.ts mirrors the same thing, so
+// both clients render identical content from one producer.
+// ---------------------------------------------------------------------------
+
+/// <summary>One paragraph-level element: a heading, a paragraph, a bullet,
+/// or a table. <c>Rows</c> is populated only for <c>type == "table"</c>.</summary>
+public sealed record PreviewBlockDto(
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("level")] int Level,
+    [property: JsonPropertyName("text")] string? Text,
+    [property: JsonPropertyName("rows")] List<List<string>>? Rows);
+
+/// <summary>A window of ONE sheet, plus the names of every sheet so the
+/// client can draw the tab strip without a second request.</summary>
+public sealed record SheetPreviewDto(
+    [property: JsonPropertyName("names")] List<string>? Names,
+    [property: JsonPropertyName("index")] int Index,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("columns")] List<string>? Columns,
+    [property: JsonPropertyName("rows")] List<List<string>>? Rows,
+    [property: JsonPropertyName("offset")] int Offset,
+    [property: JsonPropertyName("total_rows")] int TotalRows,
+    [property: JsonPropertyName("has_more")] bool HasMore,
+    [property: JsonPropertyName("columns_truncated")] bool ColumnsTruncated);
+
+public sealed record DocumentPreviewDto(
+    [property: JsonPropertyName("blocks")] List<PreviewBlockDto>? Blocks,
+    [property: JsonPropertyName("offset")] int Offset,
+    [property: JsonPropertyName("total_blocks")] int TotalBlocks,
+    [property: JsonPropertyName("has_more")] bool HasMore);
+
+public sealed record SlidePreviewDto(
+    [property: JsonPropertyName("index")] int Index,
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("blocks")] List<PreviewBlockDto>? Blocks);
+
+public sealed record SlidesPreviewDto(
+    [property: JsonPropertyName("slides")] List<SlidePreviewDto>? Slides,
+    [property: JsonPropertyName("offset")] int Offset,
+    [property: JsonPropertyName("total_slides")] int TotalSlides,
+    [property: JsonPropertyName("has_more")] bool HasMore);
+
+/// <summary><c>Kind</c> says which of the three is populated.</summary>
+public sealed record FilePreviewDataDto(
+    [property: JsonPropertyName("kind")] string? Kind,
+    [property: JsonPropertyName("sheet")] SheetPreviewDto? Sheet,
+    [property: JsonPropertyName("document")] DocumentPreviewDto? Document,
+    [property: JsonPropertyName("slides")] SlidesPreviewDto? Slides);
+
+/// <summary>
+/// GET/PUT /user/preferences — ChatGPT-style "custom instructions" that apply
+/// to EVERY chat of this account, on the server, so the web app and the
+/// desktop see (and edit) the same two fields. Phase 13 Task 1.
+/// </summary>
+public sealed record UserPreferencesDto(
+    [property: JsonPropertyName("custom_instructions_about")] string? CustomInstructionsAbout,
+    [property: JsonPropertyName("custom_instructions_respond")] string? CustomInstructionsRespond,
+    [property: JsonPropertyName("updated_at")] string? UpdatedAt = null);
 
 public sealed record ReasoningCapability(
     [property: JsonPropertyName("supported")] bool Supported,
@@ -145,16 +216,28 @@ public sealed record UsageResponse(
     [property: JsonPropertyName("total_credits_used")] long TotalCreditsUsed,
     [property: JsonPropertyName("period")] string? Period);
 
-public sealed record FolderDto(
+// Phase 9 — the ONE sidebar organiser (chat-edge migration 031 merged
+// folders into projects). Instructions + knowledge base are optional: a
+// project carrying neither is pure grouping, i.e. the old folder.
+// Note there is no ``position`` — the server lists projects newest-first
+// by created_at, so the desktop keeps the server's order verbatim.
+public sealed record ProjectDto(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("name")] string? Name,
-    [property: JsonPropertyName("position")] int Position,
+    [property: JsonPropertyName("instructions")] string? Instructions,
+    [property: JsonPropertyName("knowledge_base_id")] string? KnowledgeBaseId,
     [property: JsonPropertyName("conversation_count")] int ConversationCount,
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
 
-public sealed record FolderListResponse(
-    [property: JsonPropertyName("folders")] List<FolderDto> Folders);
+public sealed record ProjectListResponse(
+    [property: JsonPropertyName("projects")] List<ProjectDto> Projects);
+
+/// <summary>Single-project envelope — create / rename answer
+/// <c>{"project": {...}}</c>, unlike the old folder routes which returned
+/// the row bare.</summary>
+public sealed record ProjectEnvelope(
+    [property: JsonPropertyName("project")] ProjectDto Project);
 
 public sealed record KnowledgeBaseDto(
     [property: JsonPropertyName("id")] string Id,

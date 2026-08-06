@@ -85,6 +85,35 @@
             </ListBox.ItemTemplate>
         </ListBox>
 
+        <!-- Transcript skeleton (Phase 13 Task 3): placeholder bubbles while the
+             first page of a chat loads, in the same 768px column the real
+             messages use so nothing shifts when they arrive. Only shown when
+             the list is still empty — see ShowHistorySkeleton. -->
+        <ItemsControl Grid.Row="0" Margin="24,16,24,0"
+                      IsHitTestVisible="False"
+                      Focusable="False"
+                      VerticalAlignment="Top"
+                      Visibility="{Binding ShowHistorySkeleton, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel Width="768" HorizontalAlignment="Center">
+                <!-- user bubble, right-aligned -->
+                <Border Style="{DynamicResource SkeletonBar}" Width="220" Height="34"
+                        HorizontalAlignment="Right" Margin="0,0,0,18" />
+                <!-- assistant paragraph, left-aligned -->
+                <Border Style="{DynamicResource SkeletonBar}" Width="520"
+                        HorizontalAlignment="Left" Margin="0,0,0,8" />
+                <Border Style="{DynamicResource SkeletonBar}" Width="600"
+                        HorizontalAlignment="Left" Margin="0,0,0,8" />
+                <Border Style="{DynamicResource SkeletonBar}" Width="380"
+                        HorizontalAlignment="Left" Margin="0,0,0,26" />
+                <Border Style="{DynamicResource SkeletonBar}" Width="160" Height="34"
+                        HorizontalAlignment="Right" Margin="0,0,0,18" />
+                <Border Style="{DynamicResource SkeletonBar}" Width="560"
+                        HorizontalAlignment="Left" Margin="0,0,0,8" />
+                <Border Style="{DynamicResource SkeletonBar}" Width="300"
+                        HorizontalAlignment="Left" />
+            </StackPanel>
+        </ItemsControl>
+
         <!-- Jump to latest (Phase C PART 2): shown only when scrolled up with
              content below; click smooth-scrolls to the newest message + re-pins. -->
         <Button x:Name="JumpToLatestButton" Grid.Row="0"

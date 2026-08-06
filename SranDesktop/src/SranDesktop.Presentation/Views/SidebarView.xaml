@@ -15,7 +15,7 @@
         <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <conv:UpperCaseConverter x:Key="UpperCase" />
 
-        <!-- Row chrome shared by every conversation row (folder sections + time
+        <!-- Row chrome shared by every conversation row (project sections + time
              buckets). Selection is VM-authoritative (IsSelected), so plain Buttons
              replace Selector items — no Selector null-push when live filters move
              rows between sections. -->
@@ -53,7 +53,7 @@
                             Value="{DynamicResource SidebarActiveBrush}" />
                     <Setter TargetName="HoverOverlay" Property="Background" Value="Transparent" />
                 </DataTrigger>
-                <!-- Phase 8 drag-drop: highlight a folder header while a
+                <!-- Phase 8 drag-drop: highlight a project header while a
                      dragged conversation hovers it. (Conversation rows have
                      no IsDropTarget — the binding just never matches.) -->
                 <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
@@ -128,16 +128,41 @@
                                                    Width="14" Height="14" />
                             </MenuItem.Icon>
                         </MenuItem>
-                        <!-- 3. Move to folder (sub-items filled in code-behind on open) -->
-                        <MenuItem Header="{loc:T conv.moveToFolder}" Tag="move-target">
+                        <!-- 3. Move to project (sub-items filled in code-behind on open) -->
+                        <MenuItem Header="{loc:T conv.moveToProject}" Tag="move-target">
                             <MenuItem.Icon>
                                 <controls:IconView Geometry="{StaticResource Geo_Folder}"
                                                    Stroke="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}"
                                                    Width="14" Height="14" />
                             </MenuItem.Icon>
                         </MenuItem>
+                        <!-- 4. Archive / Unarchive (Phase 14) — hides the chat
+                             from the list without destroying it. -->
+                        <MenuItem Command="{Binding PlacementTarget.Tag.ToggleArchiveCommand,
+                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding}">
+                            <MenuItem.Header>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="{loc:T conv.archive}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsArchived}" Value="True">
+                                                    <Setter Property="Text" Value="{loc:T conv.unarchive}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </MenuItem.Header>
+                            <MenuItem.Icon>
+                                <controls:IconView Geometry="{StaticResource Geo_Store}"
+                                                   Stroke="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}"
+                                                   Width="14" Height="14" />
+                            </MenuItem.Icon>
+                        </MenuItem>
                         <Separator />
-                        <!-- 4. Delete -->
+                        <!-- 5. Delete -->
                         <MenuItem Header="{loc:T conv.delete}"
                                   Tag="Danger"
                                   Foreground="{DynamicResource AccentRedBrush}"
@@ -199,14 +224,14 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />  <!-- brand + new chat / new project -->
+            <RowDefinition Height="Auto" />  <!-- search -->
+            <RowDefinition Height="*" />     <!-- projects + conversations -->
+            <RowDefinition Height="Auto" />  <!-- account footer -->
         </Grid.RowDefinitions>
 
         <!-- Brand wordmark + collapse chevron + new chat. Also the Phase 8
-             "remove from folder" drop zone: dropping a filed chat here
+             "remove from project" drop zone: dropping a filed chat here
              unfiles it (Background=Transparent keeps it drop-hit-testable). -->
         <StackPanel Grid.Row="0" x:Name="HeaderDropZone"
                     Background="Transparent" AllowDrop="True"
@@ -231,10 +256,34 @@
                 </TextBlock>
             </DockPanel>
 
+            <!-- Archive view header (Phase 14): replaces the New chat / New
+                 project rows while the archive is open, so there is always an
+                 obvious way back to the live list. -->
+            <Button Command="{Binding ExitArchiveCommand}"
+                    Style="{DynamicResource FlatRowButton}"
+                    Margin="8,0,8,0"
+                    Visibility="{Binding IsArchiveView, Converter={StaticResource BoolToVisibility}}"
+                    AutomationProperties.Name="{loc:T sidebar.backToChats}"
+                    ToolTip="{loc:T sidebar.backToChats}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <controls:IconView Grid.Column="0" Geometry="{StaticResource Geo_ChevronLeft}"
+                                       Stroke="{DynamicResource TextPrimaryBrush}"
+                                       Width="16" Height="16" Margin="0,0,10,0" />
+                    <TextBlock Grid.Column="1" Text="{loc:T sidebar.archiveTitle}" FontSize="14"
+                               FontWeight="Medium" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                </Grid>
+            </Button>
+
             <!-- New chat: flat row, no border (web parity R2 Fix 1a) -->
             <Button Command="{Binding NewChatCommand}"
                     Style="{DynamicResource FlatRowButton}"
                     Margin="8,0,8,0"
+                    Visibility="{Binding IsMainView, Converter={StaticResource BoolToVisibility}}"
                     AutomationProperties.Name="New chat"
                     ToolTip="New chat (Ctrl+N)">
                 <Grid>
@@ -255,11 +304,12 @@
                 </Grid>
             </Button>
 
-            <!-- New folder: same flat row (web parity R2 Fix 1b) -->
-            <Button Command="{Binding NewFolderCommand}"
+            <!-- New project: same flat row (web parity R2 Fix 1b) -->
+            <Button Command="{Binding NewProjectCommand}"
                     Style="{DynamicResource FlatRowButton}"
                     Margin="8,0,8,0"
-                    AutomationProperties.Name="New folder">
+                    Visibility="{Binding IsMainView, Converter={StaticResource BoolToVisibility}}"
+                    AutomationProperties.Name="New project">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -268,15 +318,37 @@
                     <controls:IconView Grid.Column="0" Geometry="{StaticResource Geo_Folder}"
                                        Stroke="{DynamicResource TextSecondaryBrush}"
                                        Width="16" Height="16" Margin="0,0,10,0" />
-                    <TextBlock Grid.Column="1" Text="{loc:T sidebar.newFolder}" FontSize="14"
+                    <TextBlock Grid.Column="1" Text="{loc:T sidebar.newProject}" FontSize="14"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                </Grid>
+            </Button>
+
+            <!-- Archive entry (Phase 14) — parity with the web's /chat/archive. -->
+            <Button Command="{Binding ShowArchiveCommand}"
+                    Style="{DynamicResource FlatRowButton}"
+                    Margin="8,0,8,0"
+                    Visibility="{Binding IsMainView, Converter={StaticResource BoolToVisibility}}"
+                    AutomationProperties.Name="{loc:T sidebar.archive}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <controls:IconView Grid.Column="0" Geometry="{StaticResource Geo_Store}"
+                                       Stroke="{DynamicResource TextSecondaryBrush}"
+                                       Width="16" Height="16" Margin="0,0,10,0" />
+                    <TextBlock Grid.Column="1" Text="{loc:T sidebar.archive}" FontSize="14"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}" />
                 </Grid>
             </Button>
         </StackPanel>
 
-        <!-- Search: collapsed button row ↔ expanded inline input (web parity R2 Fix 1c) -->
-        <Grid Grid.Row="1" Margin="8,2,8,4">
+        <!-- Search: collapsed button row ↔ expanded inline input (web parity R2 Fix 1c).
+             Hidden in the archive view: message search hits belong to live chats. -->
+        <Grid Grid.Row="1" Margin="8,2,8,4"
+              Visibility="{Binding IsMainView, Converter={StaticResource BoolToVisibility}}">
             <!-- Button mode (default) -->
             <Button x:Name="SearchButton"
                     Style="{DynamicResource FlatRowButton}"
@@ -364,10 +436,11 @@
             </Border>
         </Grid>
 
-        <!-- Sidebar body (Phase 8 Task 2): ONE virtualized flat list — folder
+        <!-- Sidebar body (Phase 8 Task 2): ONE virtualized flat list — project
              sections, time buckets and the "In messages" section are all rows
              of SidebarRows, so 500+ conversations realize only the viewport.
              Pixel scrolling keeps the feel identical to the old ScrollViewer. -->
+
         <ItemsControl Grid.Row="2" x:Name="SidebarList"
                       ItemsSource="{Binding SidebarRows}"
                       Focusable="False"
@@ -407,8 +480,8 @@
                                       ContentTemplate="{StaticResource ConversationRowTemplate}" />
                 </DataTemplate>
 
-                <!-- Conversation filed in a folder: same row, indented -->
-                <DataTemplate DataType="{x:Type vm:FolderConversationRow}">
+                <!-- Conversation filed in a project: same row, indented -->
+                <DataTemplate DataType="{x:Type vm:ProjectConversationRow}">
                     <ContentPresenter Content="{Binding Conversation}"
                                       ContentTemplate="{StaticResource ConversationRowTemplate}"
                                       Margin="12,0,0,0" />
@@ -453,25 +526,35 @@
                     </Button>
                 </DataTemplate>
 
-                <!-- Folder header row: click toggles, right-click / "..." = menu,
+                <!-- Project header row: click toggles, right-click / "..." = menu,
                      drop target for conversation drag-drop (Phase 8). -->
-                <DataTemplate DataType="{x:Type vm:FolderItemViewModel}">
+                <DataTemplate DataType="{x:Type vm:ProjectItemViewModel}">
                     <Button Template="{StaticResource ConversationRowChrome}"
                             Margin="8,1" Cursor="Hand"
                             HorizontalContentAlignment="Stretch"
                             Command="{Binding ToggleExpandCommand}"
                             AutomationProperties.Name="{Binding Name}"
                             AllowDrop="True"
-                            DragEnter="FolderRow_DragEnter"
-                            DragLeave="FolderRow_DragLeave"
-                            DragOver="FolderRow_DragOver"
-                            Drop="FolderRow_Drop"
+                            DragEnter="ProjectRow_DragEnter"
+                            DragLeave="ProjectRow_DragLeave"
+                            DragOver="ProjectRow_DragOver"
+                            Drop="ProjectRow_Drop"
                             Tag="{Binding DataContext,
                                   RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}">
                                     <Button.ContextMenu>
                                         <ContextMenu>
-                                            <MenuItem Header="{loc:T folder.rename}"
-                                                      Command="{Binding PlacementTarget.Tag.RenameFolderCommand,
+                                            <MenuItem Header="{loc:T project.settings}"
+                                                      Command="{Binding PlacementTarget.Tag.OpenProjectSettingsCommand,
+                                                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding}">
+                                                <MenuItem.Icon>
+                                                    <controls:IconView Geometry="{StaticResource Geo_Settings}"
+                                                                       Stroke="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}"
+                                                                       Width="14" Height="14" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Header="{loc:T project.rename}"
+                                                      Command="{Binding PlacementTarget.Tag.RenameProjectCommand,
                                                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                       CommandParameter="{Binding}">
                                                 <MenuItem.Icon>
@@ -481,10 +564,10 @@
                                                 </MenuItem.Icon>
                                             </MenuItem>
                                             <Separator />
-                                            <MenuItem Header="{loc:T folder.delete}"
+                                            <MenuItem Header="{loc:T project.delete}"
                                                       Tag="Danger"
                                                       Foreground="{DynamicResource AccentRedBrush}"
-                                                      Command="{Binding PlacementTarget.Tag.DeleteFolderCommand,
+                                                      Command="{Binding PlacementTarget.Tag.DeleteProjectCommand,
                                                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                       CommandParameter="{Binding}">
                                                 <MenuItem.Icon>
@@ -561,8 +644,8 @@
                                         <Button Grid.Column="4"
                                                 Style="{StaticResource RowOverflowButton}"
                                                 Click="Overflow_Click"
-                                                AutomationProperties.Name="Folder options"
-                                                ToolTip="Folder options">
+                                                AutomationProperties.Name="Project options"
+                                                ToolTip="Project options">
                                             <controls:IconView Geometry="{StaticResource Geo_More}"
                                                                Stroke="{DynamicResource TextSecondaryBrush}"
                                                                Width="14" Height="14" />
@@ -572,6 +655,38 @@
                 </DataTemplate>
             </ItemsControl.Resources>
         </ItemsControl>
+
+        <!-- Archive empty state (Phase 14): an empty archive is a normal,
+             common state — say so rather than showing a blank panel. -->
+        <TextBlock Grid.Row="2" Margin="16,14,16,0"
+                   Text="{loc:T sidebar.archiveEmpty}"
+                   FontSize="12" TextWrapping="Wrap"
+                   VerticalAlignment="Top"
+                   Foreground="{DynamicResource TextTertiaryBrush}"
+                   Visibility="{Binding ShowArchiveEmptyState, Converter={StaticResource BoolToVisibility}}" />
+
+        <!-- Sidebar skeleton (Phase 13 Task 3): chat-row placeholders on a cold
+             start, so the first seconds show the shape of a chat list rather
+             than an empty panel. Hidden the moment any row exists — see
+             ShowListSkeleton. -->
+        <StackPanel Grid.Row="2" Margin="14,10,14,0"
+                    VerticalAlignment="Top"
+                    IsHitTestVisible="False"
+                    Visibility="{Binding ShowListSkeleton, Converter={StaticResource BoolToVisibility}}">
+            <Border Style="{DynamicResource SkeletonBar}" Width="70" Height="9"
+                    HorizontalAlignment="Left" Margin="0,0,0,10" />
+            <Border Style="{DynamicResource SkeletonBar}" Margin="0,0,0,9" />
+            <Border Style="{DynamicResource SkeletonBar}" Width="150"
+                    HorizontalAlignment="Left" Margin="0,0,0,9" />
+            <Border Style="{DynamicResource SkeletonBar}" Margin="0,0,0,9" />
+            <Border Style="{DynamicResource SkeletonBar}" Width="120"
+                    HorizontalAlignment="Left" Margin="0,0,0,18" />
+            <Border Style="{DynamicResource SkeletonBar}" Width="70" Height="9"
+                    HorizontalAlignment="Left" Margin="0,0,0,10" />
+            <Border Style="{DynamicResource SkeletonBar}" Margin="0,0,0,9" />
+            <Border Style="{DynamicResource SkeletonBar}" Width="170"
+                    HorizontalAlignment="Left" />
+        </StackPanel>
 
         <!-- Status / footer -->
         <StackPanel Grid.Row="3" Margin="12,4,12,10">

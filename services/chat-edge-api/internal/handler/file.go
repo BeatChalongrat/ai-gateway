@@ -14,9 +14,11 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -174,6 +176,27 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(FileToWire(row))
 }
 
+// humanBytes renders a byte cap the way a user reads it ("200 MB",
+// "1 GB"). Binary units, one decimal only when it isn't whole, so the
+// common power-of-two caps print cleanly.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return trimZero(float64(n)/float64(1<<30)) + " GB"
+	case n >= 1<<20:
+		return trimZero(float64(n)/float64(1<<20)) + " MB"
+	case n >= 1<<10:
+		return trimZero(float64(n)/float64(1<<10)) + " KB"
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
+func trimZero(v float64) string {
+	s := fmt.Sprintf("%.1f", v)
+	return strings.TrimSuffix(s, ".0")
+}
+
 func (h *FileHandler) writeUploadError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrFileConvNotFound):
@@ -181,12 +204,17 @@ func (h *FileHandler) writeUploadError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrFileEmpty):
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "empty upload")
 	case errors.Is(err, service.ErrFileTooLarge):
-		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError, "file too large (max 25 MB)")
+		// Phase 7: report the CONFIGURED cap. The old text said "25 MB"
+		// while the service enforced MAX_FILE_SIZE_BYTES (200 MiB by
+		// default), so users saw a limit that did not exist.
+		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError,
+			fmt.Sprintf("file too large (max %s)", humanBytes(h.files.MaxUploadBytes())))
 	case errors.Is(err, service.ErrFileTypeNotAllowed):
 		WriteError(w, http.StatusUnsupportedMediaType, CodeValidationError, "file type not allowed")
 	case errors.Is(err, service.ErrFileConvQuotaExceeded):
 		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError,
-			"conversation file quota exceeded (max 100 MB total)")
+			fmt.Sprintf("conversation file quota exceeded (max %s total)",
+				humanBytes(h.files.MaxConversationBytes())))
 	default:
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 	}
