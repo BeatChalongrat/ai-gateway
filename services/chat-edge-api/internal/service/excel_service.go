@@ -104,8 +104,14 @@ type ValidationResult struct {
 // ---------------------------------------------------------------------------
 
 type ExcelService struct {
-	files   *repository.FileRepo
-	storage storage.Backend
+	files *repository.FileRepo
+	// conversations is only consulted on the CREATE-FROM-SCRATCH path
+	// (Phase 8 Task 1): with no source file to walk ownership back
+	// through, the destination conversation itself is the thing that
+	// must be proven to belong to the caller. Same rule DocService
+	// applies (doc_service.go).
+	conversations *repository.ConversationRepo
+	storage       storage.Backend
 
 	pythonBin  string
 	scriptsDir string // dir containing excel_*.py; falls back to "scripts"
@@ -122,7 +128,8 @@ type ExcelService struct {
 func (s *ExcelService) SetSandbox(r *sandbox.Runner) { s.sandbox = r }
 
 func NewExcelService(
-	files *repository.FileRepo, store storage.Backend, pythonBin, scriptsDir string,
+	files *repository.FileRepo, conversations *repository.ConversationRepo,
+	store storage.Backend, pythonBin, scriptsDir string,
 ) *ExcelService {
 	if pythonBin == "" {
 		pythonBin = "python3"
@@ -131,10 +138,11 @@ func NewExcelService(
 		scriptsDir = "scripts"
 	}
 	return &ExcelService{
-		files:      files,
-		storage:    store,
-		pythonBin:  pythonBin,
-		scriptsDir: scriptsDir,
+		files:         files,
+		conversations: conversations,
+		storage:       store,
+		pythonBin:     pythonBin,
+		scriptsDir:    scriptsDir,
 	}
 }
 
@@ -246,11 +254,18 @@ func (s *ExcelService) InspectWorkbook(
 // it should mutate. SourceFileID and TenantID let the service look
 // up the storage key + clone safety metadata; the handler resolves
 // the tenant from the caller and passes both verbatim.
+//
+// Phase 8 Task 1: SourceFileID is OPTIONAL. uuid.Nil means
+// create-from-scratch — no source workbook is downloaded and the
+// executor builds a brand-new file from the plan alone (the
+// `create_workbook` operation excel_executor.py already supports).
+// This is what makes "สร้างตาราง Excel สรุปยอดขาย" work in a chat with
+// no attachments; before it, the plan card 404'd on Execute.
 type PlannedExecution struct {
 	TenantID       uuid.UUID
 	ConversationID uuid.UUID
 	UserID         uuid.UUID
-	SourceFileID   uuid.UUID
+	SourceFileID   uuid.UUID // uuid.Nil → from scratch
 	// Plan is the parsed JSON object — `any` because the schema is
 	// open-ended (see excel_executor.py for the recognised types).
 	Plan any
@@ -267,21 +282,44 @@ type PlannedExecution struct {
 func (s *ExcelService) ExecutePlan(
 	ctx context.Context, in PlannedExecution,
 ) (*model.ConversationFile, *ValidationResult, error) {
-	source, err := s.files.GetByID(ctx, in.TenantID, in.SourceFileID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+	var source *model.ConversationFile
+	if in.SourceFileID != uuid.Nil {
+		f, err := s.files.GetByID(ctx, in.TenantID, in.SourceFileID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, nil, ErrExcelSourceNotFound
+			}
+			return nil, nil, err
+		}
+		if f.ConversationID != in.ConversationID {
+			// Don't leak cross-conversation existence.
 			return nil, nil, ErrExcelSourceNotFound
 		}
-		return nil, nil, err
-	}
-	if source.ConversationID != in.ConversationID {
-		// Don't leak cross-conversation existence.
-		return nil, nil, ErrExcelSourceNotFound
-	}
-	if source.UserID != in.UserID {
-		// Same-tenant-different-user — never returns 403, always 404
-		// shape so the existence of the file isn't probeable.
-		return nil, nil, ErrExcelSourceNotFound
+		if f.UserID != in.UserID {
+			// Same-tenant-different-user — never returns 403, always 404
+			// shape so the existence of the file isn't probeable.
+			return nil, nil, ErrExcelSourceNotFound
+		}
+		source = f
+	} else {
+		// Create-from-scratch — there is no source row whose ownership
+		// stands in for the caller's, so the DESTINATION conversation
+		// must be proven to be theirs. Without this a same-tenant
+		// attacker could plant a generated workbook in someone else's
+		// thread by guessing a conversation id.
+		if s.conversations == nil {
+			return nil, nil, ErrExcelSourceNotFound
+		}
+		conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, nil, ErrExcelSourceNotFound
+			}
+			return nil, nil, err
+		}
+		if conv.UserID != in.UserID {
+			return nil, nil, ErrExcelSourceNotFound
+		}
 	}
 
 	tmp, err := os.MkdirTemp("", "excel-exec-*")
@@ -290,14 +328,26 @@ func (s *ExcelService) ExecutePlan(
 	}
 	defer os.RemoveAll(tmp)
 
-	srcPath, cleanup, err := s.storage.OpenLocalCopy(ctx, source.StoragePath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("source download: %w", err)
+	// Only the edit path materialises a source workbook; create-mode
+	// never touches storage for input.
+	var srcPath string
+	if source != nil {
+		p, cleanup, err := s.storage.OpenLocalCopy(ctx, source.StoragePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("source download: %w", err)
+		}
+		defer cleanup()
+		srcPath = p
 	}
-	defer cleanup()
 
 	planPath := filepath.Join(tmp, "plan.json")
-	planBytes, err := json.Marshal(in.Plan)
+	// With no source, force operation=create_workbook: the executor
+	// defaults to "modify_workbook", which would call load_workbook()
+	// on a file that isn't there. The edit path is left EXACTLY as the
+	// model wrote it — a plan that says create_workbook while a source
+	// is attached is the documented "generate a fresh workbook from
+	// this data" case and must keep working.
+	planBytes, err := json.Marshal(planForExecution(in.Plan, source != nil))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: marshal: %v", ErrExcelInvalidPlan, err)
 	}
@@ -335,7 +385,13 @@ func (s *ExcelService) ExecutePlan(
 	// Determine the output filename (user-supplied wins).
 	outFilename := strings.TrimSpace(in.OutputFilename)
 	if outFilename == "" {
-		outFilename = deriveEditedFilename(source.OriginalFilename)
+		if source != nil {
+			outFilename = deriveEditedFilename(source.OriginalFilename)
+		} else {
+			// Same shape DocService uses for from-scratch output so the
+			// two features name their files consistently.
+			outFilename = fmt.Sprintf("workbook_%s.xlsx", time.Now().UTC().Format("20060102_150405"))
+		}
 	}
 	outFilename = sanitizeFilename(outFilename)
 
@@ -370,7 +426,17 @@ func (s *ExcelService) ExecutePlan(
 		inspectionPtr = &s
 	}
 
-	parentID := source.ID
+	// From-scratch output starts its own lineage: no parent, version 1
+	// (identical to DocService's create path), so the workspace
+	// timeline shows it as an origin rather than dangling off a file
+	// that doesn't exist.
+	var parentID *uuid.UUID
+	version := 1
+	if source != nil {
+		pid := source.ID
+		parentID = &pid
+		version = source.Version + 1
+	}
 	changeLog := strings.Join(execResult.Changes, "\n")
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
@@ -383,8 +449,8 @@ func (s *ExcelService) ExecutePlan(
 		StoragePath:      newKey,
 		ExtractionStatus: "completed",
 		IsGenerated:      true,
-		ParentFileID:     &parentID,
-		Version:          source.Version + 1,
+		ParentFileID:     parentID,
+		Version:          version,
 		ChangeLog:        &changeLog,
 		InspectionJSON:   inspectionPtr,
 	})
@@ -401,20 +467,26 @@ func (s *ExcelService) ExecutePlan(
 // returns the executor's stdout (the ExecutionResult JSON) and leaves the
 // generated workbook at outPath, so the surrounding ExecutePlan
 // validate/upload/versioning flow is UNCHANGED.
+//
+// srcPath is empty in create-from-scratch mode: no source is mounted and
+// the executor never opens argv[2] (operation=create_workbook builds a
+// fresh openpyxl.Workbook). The argv slot is still passed so the script's
+// argument contract stays identical in both modes.
 func (s *ExcelService) runExecutor(
 	ctx context.Context, planBytes []byte, planPath, srcPath, outPath string,
 ) ([]byte, error) {
 	if s.sandbox == nil {
 		return nil, ErrExcelSandboxUnavailable
 	}
+	inputs := []sandbox.InputFile{{Name: "plan.json", Bytes: planBytes}}
+	if srcPath != "" {
+		inputs = append(inputs, sandbox.InputFile{Name: "source.xlsx", LocalPath: srcPath})
+	}
 	res, err := s.sandbox.Execute(ctx, sandbox.Spec{
 		Mode:   sandbox.ModeScript,
 		Script: "excel_executor.py",
 		Args:   []string{"plan.json", "source.xlsx", "out/output.xlsx"},
-		Inputs: []sandbox.InputFile{
-			{Name: "plan.json", Bytes: planBytes},
-			{Name: "source.xlsx", LocalPath: srcPath},
-		},
+		Inputs: inputs,
 		Limits: sandbox.Limits{Wall: executorTimeout},
 	})
 	if err != nil {
@@ -492,6 +564,41 @@ func (s *ExcelService) validatePath(ctx context.Context, path string) (*Validati
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// planForExecution picks what actually ships to the executor for the
+// mode ExecutePlan resolved. Split out of ExecutePlan so the rule is
+// unit-testable without a database, storage backend, or sandbox.
+func planForExecution(plan any, hasSource bool) any {
+	if hasSource {
+		return plan
+	}
+	return forceCreateWorkbookOperation(plan)
+}
+
+// forceCreateWorkbookOperation returns the plan with
+// operation="create_workbook" so the executor builds a fresh workbook
+// instead of trying to load a source that was never downloaded.
+//
+// Only object plans can be rewritten; anything else is returned
+// untouched and fails downstream in the executor with its own message
+// (this helper is not the place to invent validation). The input map is
+// never mutated — the caller's plan is the request body and other code
+// may still read it.
+func forceCreateWorkbookOperation(plan any) any {
+	m, ok := plan.(map[string]any)
+	if !ok {
+		return plan
+	}
+	out := make(map[string]any, len(m)+1)
+	for k, v := range m {
+		out[k] = v
+	}
+	out["operation"] = "create_workbook"
+	// A stale source_file_id in the body would be misleading in logs
+	// and in any future replay of the plan; the mode is authoritative.
+	delete(out, "source_file_id")
+	return out
+}
 
 // deriveEditedFilename appends "_edited" before the extension so
 // "report.xlsx" becomes "report_edited.xlsx". Used when the plan

@@ -13,8 +13,8 @@ using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.Presentation.ViewModels;
 
-/// <summary>Move a conversation into a folder (null FolderId = unfile).</summary>
-public sealed record MoveToFolderRequest(ConversationItemViewModel Conversation, string? FolderId);
+/// <summary>Move a conversation into a project (null ProjectId = unfile).</summary>
+public sealed record MoveToProjectRequest(ConversationItemViewModel Conversation, string? ProjectId);
 
 public partial class ConversationListViewModel : ObservableObject
 {
@@ -30,11 +30,11 @@ public partial class ConversationListViewModel : ObservableObject
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = new();
 
     /// <summary>Grouped (Pinned/Today/Yesterday/…) and search-filtered view for the sidebar.
-    /// Conversations filed in a known folder are excluded — they render in their folder section.</summary>
+    /// Conversations filed in a known project are excluded — they render in their project section.</summary>
     public ICollectionView ConversationsView { get; }
 
-    /// <summary>Sidebar chat folders (server-side, migration 022), ordered by position.</summary>
-    public ObservableCollection<FolderItemViewModel> Folders { get; } = new();
+    /// <summary>Sidebar chat projects (server-side, migration 022), ordered by position.</summary>
+    public ObservableCollection<ProjectItemViewModel> Projects { get; } = new();
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -47,7 +47,28 @@ public partial class ConversationListViewModel : ObservableObject
     private ConversationItemViewModel? _selectedConversation;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowListSkeleton))]
+    [NotifyPropertyChangedFor(nameof(ShowArchiveEmptyState))]
     private bool _isLoading;
+
+    /// <summary>
+    /// Phase 14 — the sidebar is showing the ARCHIVE instead of the live chat
+    /// list. One list, two modes (rather than a second window) so every row
+    /// behaviour — select, rename, open, delete — works unchanged in there.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMainView))]
+    [NotifyPropertyChangedFor(nameof(ShowArchiveEmptyState))]
+    private bool _isArchiveView;
+
+    /// <summary>Convenience inverse for XAML (New-chat / search hide in the archive).</summary>
+    public bool IsMainView => !IsArchiveView;
+
+    partial void OnIsArchiveViewChanged(bool value)
+    {
+        ConversationsView.Refresh();
+        RebuildSidebarRowsNow();
+    }
 
     [ObservableProperty]
     private string? _statusMessage;
@@ -97,7 +118,7 @@ public partial class ConversationListViewModel : ObservableObject
         view.LiveSortingProperties.Add(nameof(ConversationItemViewModel.GroupRank));
         view.LiveSortingProperties.Add(nameof(ConversationItemViewModel.UpdatedAt));
         view.LiveGroupingProperties.Add(nameof(ConversationItemViewModel.GroupKey));
-        view.LiveFilteringProperties.Add(nameof(ConversationItemViewModel.FolderId));
+        view.LiveFilteringProperties.Add(nameof(ConversationItemViewModel.ProjectId));
         ConversationsView = view;
 
         // Phase 8 Task 2: the sidebar body renders SidebarRows (one flat,
@@ -105,7 +126,7 @@ public partial class ConversationListViewModel : ObservableObject
         // changes. Item-level hooks mirror what the old live-shaping
         // CollectionView listened to.
         Conversations.CollectionChanged += OnConversationsCollectionChanged;
-        Folders.CollectionChanged += OnFoldersCollectionChanged;
+        Projects.CollectionChanged += OnProjectsCollectionChanged;
         MessageSearchResults.CollectionChanged += (_, _) => ScheduleRowsRebuild();
 
         // FIX 9 Part C: a push that finds the conversation deleted on the
@@ -139,13 +160,24 @@ public partial class ConversationListViewModel : ObservableObject
     // ── Flat sidebar rows (Phase 8 Task 2) ─────────────────────────────────
 
     /// <summary>Heterogeneous rows for the single virtualized sidebar list:
-    /// FolderItemViewModel / FolderConversationRow / SidebarGroupHeaderRow /
+    /// ProjectItemViewModel / ProjectConversationRow / SidebarGroupHeaderRow /
     /// ConversationItemViewModel / SidebarSearchHeaderRow / hit rows.</summary>
     public ObservableCollection<object> SidebarRows { get; } = new();
 
+    /// <summary>
+    /// Phase 13 Task 3 — placeholder rows while the very first load runs.
+    /// Gated on the list being EMPTY, so a background refresh of an already
+    /// populated sidebar never replaces the user's chats with grey bars.
+    /// </summary>
+    public bool ShowListSkeleton => IsLoading && SidebarRows.Count == 0;
+
+    /// <summary>Phase 14 — "nothing archived yet". Only in the archive view,
+    /// and never while the list is still loading (that is the skeleton's job).</summary>
+    public bool ShowArchiveEmptyState => IsArchiveView && !IsLoading && SidebarRows.Count == 0;
+
     private System.Windows.Threading.DispatcherTimer? _rowsRebuildTimer;
     private readonly HashSet<ConversationItemViewModel> _hookedConversations = new();
-    private readonly HashSet<FolderItemViewModel> _hookedFolders = new();
+    private readonly HashSet<ProjectItemViewModel> _hookedProjects = new();
 
     private void OnConversationsCollectionChanged(
         object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
@@ -170,24 +202,24 @@ public partial class ConversationListViewModel : ObservableObject
         ScheduleRowsRebuild();
     }
 
-    private void OnFoldersCollectionChanged(
+    private void OnProjectsCollectionChanged(
         object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
         if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
         {
-            foreach (var hooked in _hookedFolders)
-                hooked.PropertyChanged -= OnFolderRowPropertyChanged;
-            _hookedFolders.Clear();
+            foreach (var hooked in _hookedProjects)
+                hooked.PropertyChanged -= OnProjectRowPropertyChanged;
+            _hookedProjects.Clear();
         }
-        foreach (var item in e.OldItems?.OfType<FolderItemViewModel>() ?? Enumerable.Empty<FolderItemViewModel>())
+        foreach (var item in e.OldItems?.OfType<ProjectItemViewModel>() ?? Enumerable.Empty<ProjectItemViewModel>())
         {
-            if (_hookedFolders.Remove(item))
-                item.PropertyChanged -= OnFolderRowPropertyChanged;
+            if (_hookedProjects.Remove(item))
+                item.PropertyChanged -= OnProjectRowPropertyChanged;
         }
-        foreach (var item in Folders)
+        foreach (var item in Projects)
         {
-            if (_hookedFolders.Add(item))
-                item.PropertyChanged += OnFolderRowPropertyChanged;
+            if (_hookedProjects.Add(item))
+                item.PropertyChanged += OnProjectRowPropertyChanged;
         }
         ScheduleRowsRebuild();
     }
@@ -198,14 +230,14 @@ public partial class ConversationListViewModel : ObservableObject
         if (e.PropertyName is nameof(ConversationItemViewModel.GroupKey)
             or nameof(ConversationItemViewModel.GroupRank)
             or nameof(ConversationItemViewModel.UpdatedAt)
-            or nameof(ConversationItemViewModel.FolderId)
+            or nameof(ConversationItemViewModel.ProjectId)
             or nameof(ConversationItemViewModel.Title))
             ScheduleRowsRebuild();
     }
 
-    private void OnFolderRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    private void OnProjectRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(FolderItemViewModel.IsExpanded))
+        if (e.PropertyName is nameof(ProjectItemViewModel.IsExpanded))
             ScheduleRowsRebuild();
     }
 
@@ -232,18 +264,23 @@ public partial class ConversationListViewModel : ObservableObject
 
     public void RebuildSidebarRowsNow()
     {
+        // Phase 14 — the sidebar shows exactly one side of the archive line.
+        // The archive view is deliberately FLAT (no project sections): it is a
+        // recovery surface, and an archived chat's project no longer says
+        // anything useful about where to find it.
+        var visible = Conversations.Where(c => c.IsArchived == IsArchiveView).ToList();
         var rows = SidebarRowsBuilder.Build(
-            Folders.ToList(),
-            Conversations.ToList(),
+            IsArchiveView ? new List<ProjectItemViewModel>() : Projects.ToList(),
+            visible,
             MatchesSearch,
-            MessageSearchResults.ToList(),
-            showSearchSection: IsSearchingMessages || HasMessageSearchResults);
+            IsArchiveView ? new List<MessageSearchHitViewModel>() : MessageSearchResults.ToList(),
+            showSearchSection: !IsArchiveView && (IsSearchingMessages || HasMessageSearchResults));
 
         // In-place reconcile (FIX 12 Part B). The old Clear()+Add-all forced
         // WPF to drop and rebind every row container on every refresh — the
         // rebind churn behind the wrong-type CanExecute requeries (and visible
         // flicker). Most rebuilds produce an element-equal list (conversation/
-        // folder/hit rows are stable VM references; header and folder-member
+        // project/hit rows are stable VM references; header and project-member
         // rows are value-equal records), so usually this touches nothing.
         var shared = Math.Min(SidebarRows.Count, rows.Count);
         for (var i = 0; i < shared; i++)
@@ -255,6 +292,12 @@ public partial class ConversationListViewModel : ObservableObject
             SidebarRows.RemoveAt(i);
         for (var i = shared; i < rows.Count; i++)
             SidebarRows.Add(rows[i]);
+
+        // The skeleton is gated on the row count, and the in-place reconcile
+        // above can change it without a single collection event the binding
+        // would notice; raise it explicitly.
+        OnPropertyChanged(nameof(ShowListSkeleton));
+        OnPropertyChanged(nameof(ShowArchiveEmptyState));
     }
 
     partial void OnIsSearchingMessagesChanged(bool value) => ScheduleRowsRebuild();
@@ -264,8 +307,8 @@ public partial class ConversationListViewModel : ObservableObject
     partial void OnSearchTextChanged(string value)
     {
         ConversationsView.Refresh();
-        foreach (var folder in Folders)
-            folder.RefreshFilter(); // folder header counts stay live
+        foreach (var project in Projects)
+            project.RefreshFilter(); // project header counts stay live
         ScheduleRowsRebuild();
         ScheduleMessageSearch(value);
     }
@@ -439,104 +482,126 @@ public partial class ConversationListViewModel : ObservableObject
             SearchText = string.Empty;
     }
 
-    // ── Folders (web parity round 3) ────────────────────────────────────────
+    // ── Projects (web parity round 3) ────────────────────────────────────────
 
-    /// <summary>Rebuilds the folder list from the server, keeping expand state.</summary>
-    private async Task LoadFoldersAsync()
+    /// <summary>Rebuilds the project list from the server, keeping expand state.</summary>
+    private async Task LoadProjectsAsync()
     {
         try
         {
-            var response = await _api.ListFoldersAsync();
-            var expandState = Folders.ToDictionary(f => f.Id, f => f.IsExpanded);
+            var response = await _api.ListProjectsAsync();
+            var expandState = Projects.ToDictionary(f => f.Id, f => f.IsExpanded);
 
-            Folders.Clear();
-            foreach (var dto in response.Folders.OrderBy(f => f.Position))
+            Projects.Clear();
+            foreach (var dto in response.Projects)
             {
-                var folder = new FolderItemViewModel(dto, Conversations, MatchesSearch);
-                if (expandState.TryGetValue(folder.Id, out var wasExpanded))
-                    folder.IsExpanded = wasExpanded;
-                Folders.Add(folder);
+                var project = new ProjectItemViewModel(dto, Conversations, MatchesSearch);
+                if (expandState.TryGetValue(project.Id, out var wasExpanded))
+                    project.IsExpanded = wasExpanded;
+                Projects.Add(project);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Could not load folders");
+            _logger.LogWarning(ex, "Could not load projects");
         }
 
-        // Main-list filter depends on which folders exist.
+        // Main-list filter depends on which projects exist.
         ConversationsView.Refresh();
     }
 
     [RelayCommand]
-    private async Task NewFolderAsync()
+    private async Task NewProjectAsync()
     {
         try
         {
-            var dto = await _api.CreateFolderAsync("New folder");
-            var folder = new FolderItemViewModel(dto, Conversations, MatchesSearch);
-            Folders.Add(folder);
+            var dto = await _api.CreateProjectAsync(
+                Localization.LocaleService.Instance.T("project.defaultName"));
+            var project = new ProjectItemViewModel(dto, Conversations, MatchesSearch);
+            Projects.Add(project);
 
-            // Web parity: the fresh folder appears with its name in inline edit mode.
-            folder.EditingName = folder.Name;
-            folder.IsRenaming = true;
+            // Web parity: the fresh project appears with its name in inline edit mode.
+            project.EditingName = project.Name;
+            project.IsRenaming = true;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogError(ex, "Failed to create folder");
-            StatusMessage = "Could not create folder - server unreachable";
+            _logger.LogError(ex, "Failed to create project");
+            StatusMessage = "Could not create project - server unreachable";
         }
     }
 
-    /// <summary>Context-menu Rename folder: inline editor in the header row.</summary>
+    /// <summary>Raised when the user asks to manage a project (Phase 12).
+    /// The shell owns the dialog; this VM owns no windows.</summary>
+    public event EventHandler<ProjectItemViewModel>? ProjectSettingsRequested;
+
+    /// <summary>Context-menu "Project settings": shared instructions + KB,
+    /// server-backed so the change shows up on web too.</summary>
     [RelayCommand]
-    private void RenameFolder(object? parameter)
+    private void OpenProjectSettings(object? parameter)
     {
         // FIX 12: object? + match — see SelectConversation.
-        if (parameter is not FolderItemViewModel folder)
-            return;
-        folder.EditingName = folder.Name;
-        folder.IsRenaming = true;
+        if (parameter is ProjectItemViewModel project)
+            ProjectSettingsRequested?.Invoke(this, project);
     }
 
-    /// <summary>Inline folder-rename confirm (Enter / focus lost). Empty or unchanged = cancel.</summary>
-    public async Task CommitFolderInlineRenameAsync(FolderItemViewModel folder)
+    /// <summary>Re-reads a single project after the settings dialog saved, so
+    /// the sidebar name stays in step without a full reload.</summary>
+    public async Task RefreshProjectsAfterSettingsAsync()
     {
-        if (!folder.IsRenaming)
-            return;
-        folder.IsRenaming = false;
+        await LoadProjectsAsync();
+    }
 
-        var name = folder.EditingName.Trim();
-        if (name.Length == 0 || name == folder.Name)
+    /// <summary>Context-menu Rename project: inline editor in the header row.</summary>
+    [RelayCommand]
+    private void RenameProject(object? parameter)
+    {
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not ProjectItemViewModel project)
+            return;
+        project.EditingName = project.Name;
+        project.IsRenaming = true;
+    }
+
+    /// <summary>Inline project-rename confirm (Enter / focus lost). Empty or unchanged = cancel.</summary>
+    public async Task CommitProjectInlineRenameAsync(ProjectItemViewModel project)
+    {
+        if (!project.IsRenaming)
+            return;
+        project.IsRenaming = false;
+
+        var name = project.EditingName.Trim();
+        if (name.Length == 0 || name == project.Name)
             return;
 
         try
         {
-            var dto = await _api.RenameFolderAsync(folder.Id, name);
-            folder.Name = string.IsNullOrWhiteSpace(dto.Name) ? name : dto.Name!;
+            var dto = await _api.RenameProjectAsync(project.Id, name);
+            project.Name = string.IsNullOrWhiteSpace(dto.Name) ? name : dto.Name!;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogError(ex, "Failed to rename folder {Id}", folder.Id);
-            StatusMessage = "Could not rename folder - server unreachable";
+            _logger.LogError(ex, "Failed to rename project {Id}", project.Id);
+            StatusMessage = "Could not rename project - server unreachable";
         }
     }
 
     [RelayCommand]
-    private async Task DeleteFolderAsync(object? parameter)
+    private async Task DeleteProjectAsync(object? parameter)
     {
         // FIX 12: object? + match — see SelectConversation.
-        if (parameter is not FolderItemViewModel folder)
+        if (parameter is not ProjectItemViewModel project)
             return;
 
         var confirmed = await _dialogs.ConfirmAsync(
-            Localization.LocaleService.Instance.T("confirm.deleteFolderTitle"),
-            Localization.LocaleService.Instance.T("confirm.deleteFolder", folder.Name));
+            Localization.LocaleService.Instance.T("confirm.deleteProjectTitle"),
+            Localization.LocaleService.Instance.T("confirm.deleteProject", project.Name));
         if (!confirmed)
             return;
 
         try
         {
-            await _api.DeleteFolderAsync(folder.Id);
+            await _api.DeleteProjectAsync(project.Id);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -544,70 +609,72 @@ public partial class ConversationListViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogError(ex, "Failed to delete folder {Id}", folder.Id);
-            StatusMessage = "Could not delete folder - server unreachable";
+            _logger.LogError(ex, "Failed to delete project {Id}", project.Id);
+            StatusMessage = "Could not delete project - server unreachable";
             return;
         }
 
-        Folders.Remove(folder);
+        Projects.Remove(project);
 
         // The server unfiles members; mirror that locally so they reappear
         // in the time buckets and survive offline restarts.
-        foreach (var conv in Conversations.Where(c => c.FolderId == folder.Id).ToList())
+        foreach (var conv in Conversations.Where(c => c.ProjectId == project.Id).ToList())
         {
-            conv.FolderId = null;
+            conv.ProjectId = null;
             await _store.UpsertConversationAsync(conv.ToEntity());
         }
         ConversationsView.Refresh();
     }
 
     [RelayCommand]
-    private async Task MoveToFolderAsync(MoveToFolderRequest? request)
+    private async Task MoveToProjectAsync(MoveToProjectRequest? request)
     {
         if (request is null)
             return;
-        var (conv, folderId) = (request.Conversation, request.FolderId);
-        if (conv.FolderId == folderId)
+        var (conv, projectId) = (request.Conversation, request.ProjectId);
+        if (conv.ProjectId == projectId)
             return;
 
         try
         {
-            await _api.MoveConversationToFolderAsync(conv.Id, folderId);
+            await _api.MoveConversationToProjectAsync(conv.Id, projectId);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogError(ex, "Failed to move conversation {Id} to folder", conv.Id);
+            _logger.LogError(ex, "Failed to move conversation {Id} to project", conv.Id);
             StatusMessage = "Could not move chat - server unreachable";
             return;
         }
 
-        // Live filtering on FolderId re-homes the row in both sections.
-        conv.FolderId = folderId;
+        // Live filtering on ProjectId re-homes the row in both sections.
+        conv.ProjectId = projectId;
         await _store.UpsertConversationAsync(conv.ToEntity());
     }
 
-    /// <summary>Context-menu "New folder…": create a folder, then file the chat into it.</summary>
+    /// <summary>Context-menu "New project…": create a project, then file the chat into it.</summary>
     [RelayCommand]
-    private async Task MoveToNewFolderAsync(object? parameter)
+    private async Task MoveToNewProjectAsync(object? parameter)
     {
         // FIX 12: object? + match — see SelectConversation.
         if (parameter is not ConversationItemViewModel conv)
             return;
         var name = Views.Dialogs.InputDialog.Show(
-            System.Windows.Application.Current?.MainWindow, "New folder", "Folder name:");
+            System.Windows.Application.Current?.MainWindow,
+            Localization.LocaleService.Instance.T("project.new"),
+            Localization.LocaleService.Instance.T("project.namePrompt"));
         if (string.IsNullOrWhiteSpace(name))
             return;
 
         try
         {
-            var dto = await _api.CreateFolderAsync(name.Trim());
-            Folders.Add(new FolderItemViewModel(dto, Conversations, MatchesSearch));
-            await MoveToFolderAsync(new MoveToFolderRequest(conv, dto.Id));
+            var dto = await _api.CreateProjectAsync(name.Trim());
+            Projects.Add(new ProjectItemViewModel(dto, Conversations, MatchesSearch));
+            await MoveToProjectAsync(new MoveToProjectRequest(conv, dto.Id));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogError(ex, "Failed to create folder for move");
-            StatusMessage = "Could not create folder - server unreachable";
+            _logger.LogError(ex, "Failed to create project for move");
+            StatusMessage = "Could not create project - server unreachable";
         }
     }
 
@@ -615,7 +682,7 @@ public partial class ConversationListViewModel : ObservableObject
         ConversationItemViewModel? oldValue, ConversationItemViewModel? newValue)
     {
         // Selection is VM-authoritative: rows live in several ItemsControls
-        // (folder sections + time buckets), so each row highlights itself
+        // (project sections + time buckets), so each row highlights itself
         // off IsSelected instead of a Selector.
         if (oldValue is not null) oldValue.IsSelected = false;
         if (newValue is not null) newValue.IsSelected = true;
@@ -648,51 +715,115 @@ public partial class ConversationListViewModel : ObservableObject
     {
         if (item is not ConversationItemViewModel vm)
             return false;
-        // Hide chats filed in a folder we know about (they render in that folder's
-        // section). Unknown folder ids (offline, stale) fall back to the time buckets
+        // Phase 14 — archived chats belong to the archive view only.
+        if (vm.IsArchived != IsArchiveView)
+            return false;
+        // Hide chats filed in a project we know about (they render in that project's
+        // section). Unknown project ids (offline, stale) fall back to the time buckets
         // so the chat never disappears.
-        if (vm.FolderId is not null && Folders.Any(f => f.Id == vm.FolderId))
+        if (vm.ProjectId is not null && Projects.Any(f => f.Id == vm.ProjectId))
             return false;
         return MatchesSearch(vm);
     }
 
+    /// <summary>
+    /// Loads the sidebar. Structured so that ONE failing step cannot blank the
+    /// chat history: the conversation list is the primary job and everything
+    /// after it (projects, model catalog, empty-chat cleanup) is an
+    /// enhancement that fails on its own.
+    ///
+    /// This shape is the lesson from the Phase-9 regression: a SQLite error
+    /// raised while reading the local store propagated out of the single
+    /// try/catch wrapping the whole method, so the user saw "Failed to load
+    /// conversations" and an EMPTY sidebar even though the server sync, the
+    /// projects fetch and the rest were fine.
+    /// </summary>
     public async Task LoadAsync()
     {
         IsLoading = true;
         StatusMessage = null;
         try
         {
-            // Local first for instant paint…
-            await RepopulateFromStoreAsync();
+            // 1. The primary job: show the chat history. Local first for
+            //    instant paint, then reconcile with the server.
+            var listLoaded = await LoadConversationListAsync();
 
-            // …then reconcile with the server.
-            var synced = await _syncService.SyncFromServerAsync();
-            if (synced)
+            // 2. Enhancements. Each is isolated: a failure here degrades one
+            //    part of the sidebar, never the history.
+            await RunIsolatedAsync(LoadProjectsAsync, "load projects");
+            await RunIsolatedAsync(ResolveDefaultModelAsync, "resolve default model");
+            if (listLoaded)
             {
-                await RepopulateFromStoreAsync();
-                await LoadFoldersAsync();
-                await ResolveDefaultModelAsync();
                 // Prune leftover empty "New conversation" placeholders so the sidebar
                 // matches the web (which never lists never-used chats). Silent: these
                 // have zero messages, so there is nothing to lose.
-                await CleanupEmptyChatsSilentAsync();
+                await RunIsolatedAsync(CleanupEmptyChatsSilentAsync, "cleanup empty chats");
                 // Phase 3 D: push local agent conversations to their server
                 // mirror (fire-and-forget — sidebar must not wait on it).
                 _ = Task.Run(() => _agentSync.SyncAllAsync());
             }
-            else
-            {
-                StatusMessage = "Offline - showing local history";
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load conversations");
-            StatusMessage = "Failed to load conversations";
         }
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    /// <summary>Local store → server sync → local store. Returns false when
+    /// the history could not be shown at all, which is the only case that
+    /// deserves the hard error message.</summary>
+    private async Task<bool> LoadConversationListAsync()
+    {
+        var shownFromLocal = false;
+        try
+        {
+            await RepopulateFromStoreAsync();
+            shownFromLocal = true;
+        }
+        catch (Exception ex)
+        {
+            // A broken local mirror must not stop the server reconcile below —
+            // that is what repopulates the store and can heal this.
+            _logger.LogError(ex, "Could not read the local conversation store");
+        }
+
+        try
+        {
+            var synced = await _syncService.SyncFromServerAsync();
+            if (!synced)
+            {
+                StatusMessage = shownFromLocal
+                    ? "Offline - showing local history"
+                    : "Failed to load conversations";
+                return shownFromLocal;
+            }
+            await RepopulateFromStoreAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load conversations");
+            // Keep whatever the local read managed to show; only claim failure
+            // when the user is actually looking at an empty sidebar.
+            StatusMessage = shownFromLocal
+                ? "Offline - showing local history"
+                : "Failed to load conversations";
+            return shownFromLocal;
+        }
+    }
+
+    /// <summary>Runs a sidebar enhancement, logging and swallowing any
+    /// failure. Deliberately catches EVERYTHING: the caller's contract is
+    /// "the chat history stays on screen no matter what this step does".</summary>
+    private async Task RunIsolatedAsync(Func<Task> step, string what)
+    {
+        try
+        {
+            await step();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Sidebar step failed: {Step}", what);
         }
     }
 
@@ -925,6 +1056,58 @@ public partial class ConversationListViewModel : ObservableObject
             SelectedConversation = null;
     }
 
+    /// <summary>
+    /// Phase 14 — archive or restore a chat. Server first: unlike pin, this
+    /// decides which LIST the chat belongs to, so a local flag the server
+    /// never accepted would make the chat vanish here and stay put on the web.
+    /// </summary>
+    [RelayCommand]
+    private async Task ToggleArchiveAsync(object? parameter)
+    {
+        // FIX 12: object? + match — see SelectConversation.
+        if (parameter is not ConversationItemViewModel item) return;
+
+        var newValue = !item.IsArchived;
+        try
+        {
+            // A local-only agent chat has no server row of its own; archive it
+            // on its mirror when it has one, otherwise keep it local.
+            var serverId = item.Source == ConversationSource.Server
+                ? item.Id
+                : (await _store.GetConversationAsync(item.Id))?.ServerId;
+            if (serverId is { Length: > 0 })
+                await _api.SetConversationArchivedAsync(serverId, newValue);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogError(ex, "Failed to archive conversation {Id}", item.Id);
+            StatusMessage = newValue
+                ? "Could not archive - server unreachable"
+                : "Could not restore - server unreachable";
+            return;
+        }
+
+        item.IsArchived = newValue;
+        await _store.UpsertConversationAsync(item.ToEntity());
+
+        // The row just left the list the user is looking at. Drop the
+        // selection so the chat pane doesn't keep showing a chat that is no
+        // longer listed (mirror of the web behaviour).
+        if (SelectedConversation == item)
+            SelectedConversation = null;
+
+        ConversationsView.Refresh();
+        RebuildSidebarRowsNow();
+    }
+
+    /// <summary>Open the archive view (sidebar footer / user menu).</summary>
+    [RelayCommand]
+    private void ShowArchive() => IsArchiveView = true;
+
+    /// <summary>Back to the live chat list.</summary>
+    [RelayCommand]
+    private void ExitArchive() => IsArchiveView = false;
+
     [RelayCommand]
     private async Task TogglePinAsync(object? parameter)
     {
@@ -972,7 +1155,7 @@ public partial class ConversationListViewModel : ObservableObject
     public void Clear()
     {
         Conversations.Clear();
-        Folders.Clear();
+        Projects.Clear();
         SelectedConversation = null;
         SearchText = string.Empty;
         StatusMessage = null;

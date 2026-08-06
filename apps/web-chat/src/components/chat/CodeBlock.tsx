@@ -16,6 +16,10 @@
 import { Children, isValidElement, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import {
+  artifactKeyFor,
+  useCanvasSource,
+} from "@/components/canvas/CanvasSourceContext";
 import { canvasTypeForBlock } from "@/components/canvas/canvasUtil";
 import { useT } from "@/lib/i18n";
 import { useCanvasStore } from "@/stores/canvasStore";
@@ -109,10 +113,25 @@ function OpenCanvasButton({
 }) {
   const t = useT();
   const openCanvas = useCanvasStore((s) => s.openCanvas);
+  // C3 — bind the artifact to its conversation/message so edits can be
+  // saved as versions. Outside a chat message (public shared view) the
+  // source is null and the canvas opens in session-only mode.
+  const source = useCanvasSource();
   return (
     <button
       type="button"
-      onClick={() => openCanvas({ type, content, title })}
+      onClick={() =>
+        openCanvas({
+          type,
+          content,
+          title,
+          conversationId: source?.conversationId,
+          messageId: source?.messageId,
+          artifactKey: source
+            ? artifactKeyFor(source.messageId, content)
+            : undefined,
+        })
+      }
       className="code-block-copy focus-ring"
       aria-label={t("canvas.open")}
     >

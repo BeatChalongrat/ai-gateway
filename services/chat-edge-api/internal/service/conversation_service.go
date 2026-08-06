@@ -110,6 +110,7 @@ func (s *ConversationService) List(
 	tenantID, userID uuid.UUID,
 	limit int,
 	cursor uuid.UUID,
+	archived bool,
 ) ([]model.Conversation, uuid.UUID, error) {
 	if limit <= 0 {
 		limit = 50
@@ -117,7 +118,7 @@ func (s *ConversationService) List(
 	if limit > 100 {
 		limit = 100
 	}
-	return s.conversations.ListByUser(ctx, tenantID, userID, limit, cursor)
+	return s.conversations.ListByUser(ctx, tenantID, userID, limit, cursor, archived)
 }
 
 // Search runs a title ILIKE query on the user's conversations.
@@ -134,7 +135,7 @@ func (s *ConversationService) Search(
 		// that's the right UX; the front-end short-circuits the
 		// search path when the input is empty so this is mostly a
 		// safety net.
-		convs, _, err := s.List(ctx, tenantID, userID, limit, uuid.Nil)
+		convs, _, err := s.List(ctx, tenantID, userID, limit, uuid.Nil, false)
 		return convs, err
 	}
 	if limit <= 0 {
@@ -254,6 +255,25 @@ func (s *ConversationService) SetPinned(
 		return err
 	}
 	if err := s.conversations.UpdatePinned(ctx, tenantID, convID, pinned); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// SetArchived files a conversation away from the sidebar (or brings it
+// back). User-scope gate first so a same-tenant caller can't archive
+// someone else's conversation. Archiving is NOT deleting: the chat stays
+// openable, searchable and sendable — only the list hides it.
+func (s *ConversationService) SetArchived(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, archived bool,
+) error {
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
+	if err := s.conversations.UpdateArchived(ctx, tenantID, convID, archived); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrConversationNotFound
 		}

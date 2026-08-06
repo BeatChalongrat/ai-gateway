@@ -19,6 +19,64 @@
          box fills that width instead of shrinking to its toolbar content (Fix 3).
          Stretch + MaxWidth renders at 768 and is centred by WPF when space allows. -->
     <StackPanel MaxWidth="768" HorizontalAlignment="Stretch">
+        <!-- Slash quick actions (Phase 12 — port of the web P10 composer).
+             Derived from InputText: shown while the whole box is a bare
+             slash token, so a "/" typed mid-sentence never hijacks typing. -->
+        <Border Visibility="{Binding IsSlashMenuOpen, Converter={StaticResource BoolToVisibility}}"
+                Margin="0,0,0,6"
+                CornerRadius="12"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource BorderBrush}"
+                Background="{DynamicResource BgSecondaryBrush}"
+                HorizontalAlignment="Left"
+                MinWidth="300">
+            <StackPanel>
+                <TextBlock Text="{loc:T slash.empty}"
+                           Visibility="{Binding HasNoSlashMatches, Converter={StaticResource BoolToVisibility}}"
+                           Margin="12,10" FontSize="12"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
+                <ItemsControl ItemsSource="{Binding SlashItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Style="{DynamicResource FlatRowButton}"
+                                    Margin="4,2"
+                                    Command="{Binding DataContext.RunSlashCommand,
+                                              RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <controls:IconView Grid.Column="0"
+                                                       Geometry="{DynamicResource Geo_Tool}"
+                                                       Stroke="{DynamicResource TextTertiaryBrush}"
+                                                       Width="14" Height="14"
+                                                       Margin="0,0,10,0"
+                                                       VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Label}" FontSize="13"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{Binding Hint}" FontSize="11"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    </StackPanel>
+                                    <Border Grid.Column="2" CornerRadius="4" Padding="5,1"
+                                            Margin="8,0,0,0" VerticalAlignment="Center"
+                                            Background="{DynamicResource BgPrimaryBrush}">
+                                        <TextBlock Text="{Binding Typed}" FontSize="10"
+                                                   FontFamily="Consolas"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    </Border>
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
         <Border HorizontalAlignment="Stretch"
                 CornerRadius="24"
                 BorderThickness="1"
@@ -352,6 +410,71 @@
                                         </ControlTemplate>
                                     </ToggleButton.Template>
                                 </ToggleButton>
+                                <!-- Audio generation (Phase 14 Task 3): opens the
+                                     speech/music form. A Button, not a mode toggle,
+                                     because audio has no model-callable tool — the
+                                     desktop dispatches the job itself. Shown only for
+                                     a concrete audio/tts model (never on Auto). -->
+                                <Button Command="{Binding OpenAudioGenCommand}"
+                                        ToolTip="{loc:T media.audioTitle}" AutomationProperties.Name="{loc:T media.audioTitle}"
+                                        Visibility="{Binding CurrentModelSupportsAudio, Converter={StaticResource BoolToVisibility}}"
+                                        Margin="0,0,2,0"
+                                        Width="28" Height="28"
+                                        Cursor="Hand">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="Bg" Background="Transparent"
+                                                    CornerRadius="6" Padding="5">
+                                                <controls:IconView Geometry="{StaticResource Geo_AudioBadge}"
+                                                                   Stroke="{DynamicResource TextTertiaryBrush}"
+                                                                   Width="14" Height="14" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource BgSelectedBrush}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <!-- Thinking Mode (Phase 13 Task 1): per-conversation
+                                     reasoning_enabled. Hidden on Auto and on models the
+                                     catalogue says can't think — see CanToggleReasoning.
+
+                                     A plain Button, NOT a ToggleButton, on purpose: the
+                                     "on" state lives on the server and must revert when
+                                     the PATCH fails, and a ToggleButton flips its own
+                                     IsChecked on click — which sets a local value that
+                                     permanently detaches a one-way binding, so a reverted
+                                     toggle would keep showing "on". The lit state is
+                                     driven entirely from IsReasoningOn instead. -->
+                                <Button Command="{Binding ToggleReasoningCommand}"
+                                        ToolTip="{loc:T input.reasoning}" AutomationProperties.Name="{loc:T input.reasoning}"
+                                        Visibility="{Binding CanToggleReasoning, Converter={StaticResource BoolToVisibility}}"
+                                        Margin="0,0,2,0"
+                                        Width="28" Height="28"
+                                        Cursor="Hand">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="Bg" Background="Transparent"
+                                                    CornerRadius="6" Padding="5">
+                                                <controls:IconView x:Name="Icon"
+                                                                   Geometry="{StaticResource Geo_Brain}"
+                                                                   Stroke="{DynamicResource TextTertiaryBrush}"
+                                                                   Width="14" Height="14" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource BgSelectedBrush}" />
+                                                </Trigger>
+                                                <DataTrigger Binding="{Binding IsReasoningOn}" Value="True">
+                                                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource BgSelectedBrush}" />
+                                                    <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
+                                                </DataTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
                                 <!-- Web-search toggle: offers the web_search tool (R9 C3) -->
                                 <ToggleButton IsChecked="{Binding IsWebSearchOn}"
                                               ToolTip="{loc:T input.webSearch}" AutomationProperties.Name="{loc:T input.webSearch}"
@@ -489,11 +612,11 @@
                                             <TextBlock Text="{Binding DisplayName}" FontSize="13"
                                                        TextTrimming="CharacterEllipsis"
                                                        Foreground="{DynamicResource TextPrimaryBrush}" />
-                                            <!-- Phase C PART 4: provider · context window -->
-                                            <TextBlock Text="{Binding MetaLine}" FontSize="11"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"
-                                                       Visibility="{Binding HasMetaLine, Converter={StaticResource BoolToVisibility}}" />
-                                            <!-- Phase C PART 4: one-line model description (was unrendered) -->
+                                            <!-- Phase C PART 4: one-line model description (was unrendered).
+                                                 Phase 13.1 dropped the meta line that sat above this
+                                                 (provider · context · price) — internal tool, no
+                                                 purchase decision to inform. Provider still shows as
+                                                 the section header. -->
                                             <TextBlock Text="{Binding Description}" FontSize="11"
                                                        TextWrapping="Wrap" MaxWidth="320" Margin="0,1,0,0"
                                                        Foreground="{DynamicResource TextTertiaryBrush}"

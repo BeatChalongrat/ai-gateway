@@ -505,6 +505,17 @@ Loop:
 					"status": ev.SearchStatus,
 				})
 			}
+			// Phase 8 Task 2 — run_python progress: the code the model
+			// wrote, then its stdout/stderr + exit status. Rendered as a
+			// code+output card. Deliberately NOT persisted on the message
+			// row: chat-edge stores DLP-masked content only and has no
+			// masking path of its own, so writing raw sandbox stdout at
+			// rest would open a new plaintext surface. It survives a
+			// mid-stream reconnect via the resume snapshot below; after
+			// the turn completes only the produced files remain.
+			if ev.CodeExecution != nil {
+				writeSSEEvent(w, flusher, "code_execution", ev.CodeExecution)
+			}
 			// B1: a provider error frame from the Gateway. Forward it as
 			// an ``error`` event so the client renders an error bubble
 			// rather than ending blank. Not a ``break`` — the Gateway
@@ -888,6 +899,11 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	if snap.FallbackInfo != nil {
 		writeSSEEvent(w, flusher, "fallback_info", snap.FallbackInfo)
+	}
+	// run_python cards, latest frame each — a refresh in the middle of a
+	// 60s sandbox run must not lose the code the model is running.
+	for i := range snap.CodeExecutions {
+		writeSSEEvent(w, flusher, "code_execution", snap.CodeExecutions[i])
 	}
 	if snap.Content != "" {
 		writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": snap.Content})

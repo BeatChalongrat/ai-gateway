@@ -20,7 +20,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { FallbackAttempt, Message } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useI18nStore, useT } from "@/lib/i18n";
 import { fallbackNotice } from "@/lib/errorMessages";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
@@ -33,6 +33,9 @@ import { ExcelPlanCard } from "./ExcelPlanCard";
 import type { ExcelPlan } from "./ExcelPlanCard";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { ImageGeneratingPlaceholder } from "./ImageGeneratingPlaceholder";
+import { CanvasSourceProvider } from "@/components/canvas/CanvasSourceContext";
+
+import { CodeRunCard } from "./CodeRunCard";
 import { Markdown } from "./Markdown";
 import { VideoGeneratingPlaceholder } from "./VideoGeneratingPlaceholder";
 import { SearchCitations } from "./SearchCitations";
@@ -291,6 +294,14 @@ function MessageBubbleImpl({
         />
       ) : null}
 
+      {/* Phase 8 — sandboxed run_python. Above the body for the same
+          reason as ThinkingBlock: the model runs the code first and
+          then explains the result. Absent on every turn that didn't
+          call the tool. */}
+      {message.code_runs?.map((run) => (
+        <CodeRunCard key={run.id} run={run} />
+      ))}
+
       {/* Body */}
       <div className="prose-chat w-full text-text-primary">
         <AssistantContent message={message} convId={convId} />
@@ -398,8 +409,60 @@ function MessageBubbleImpl({
           <span className="ml-2 text-[11px] text-text-muted">{t("msg.stopped")}</span>
         ) : null}
         {!message.isStreaming ? <MessageMeta message={message} /> : null}
+        {!message.isStreaming ? (
+          <MessageTime createdAt={message.created_at} />
+        ) : null}
       </div>
     </div>
+  );
+}
+
+// Phase 7 — per-message timestamp. The data was always on the message
+// (created_at) but never rendered, so a long conversation gave no sense
+// of when anything happened.
+//
+// Compact by design: time-only for today ("14:32"), date + time once
+// it's older, with the FULL localized timestamp on hover/screen-reader
+// via <time title>. Rendered in the browser's local zone (Asia/Bangkok
+// for these users) because toLocaleTimeString resolves the host zone —
+// the server stores UTC.
+export function formatMessageTime(
+  createdAt: string | undefined,
+  locale: string,
+  now: Date = new Date(),
+): { short: string; full: string } | null {
+  if (!createdAt) return null;
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return null;
+  const tag = locale === "th" ? "th-TH" : "en-US";
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString(tag, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const short = sameDay
+    ? time
+    : `${d.toLocaleDateString(tag, { day: "numeric", month: "short" })} ${time}`;
+  return { short, full: d.toLocaleString(tag) };
+}
+
+function MessageTime({ createdAt }: { createdAt?: string }) {
+  const locale = useI18nStore((s) => s.locale);
+  const parts = formatMessageTime(createdAt, locale);
+  if (!parts) return null;
+  return (
+    <time
+      dateTime={createdAt}
+      title={parts.full}
+      className="ml-2 text-[11px] text-text-muted"
+      data-testid="message-time"
+    >
+      {parts.short}
+    </time>
   );
 }
 
@@ -637,7 +700,27 @@ const StreamingMarkdown = memo(function StreamingMarkdown({
   );
 });
 
-function AssistantContent({ message, convId }: { message: Message; convId: string }) {
+function AssistantContent(props: { message: Message; convId: string }) {
+  // Phase 6 / C3 — every code block rendered inside this message can
+  // resolve which conversation + message it belongs to, so "Open in
+  // Canvas" binds the artifact to a persisted version lineage.
+  return (
+    <CanvasSourceProvider
+      conversationId={props.convId}
+      messageId={props.message.id}
+    >
+      <AssistantContentBody {...props} />
+    </CanvasSourceProvider>
+  );
+}
+
+function AssistantContentBody({
+  message,
+  convId,
+}: {
+  message: Message;
+  convId: string;
+}) {
   const hasContent = message.content.length > 0;
   const isStreaming = message.isStreaming;
 
@@ -789,6 +872,9 @@ function areEqual(prev: Props, next: Props): boolean {
     // citation sources arrive (live via message_sources / on reload).
     a.is_searching === b.is_searching &&
     a.search_sources === b.search_sources &&
+    // Phase 8 — re-render when a run_python frame lands (the store
+    // replaces the array on every upsert, so identity is enough).
+    a.code_runs === b.code_runs &&
     // S7 — re-render when the per-turn context_sources array
     // arrives or changes. The first render after a stream
     // finishes carries no sources (they persist async); the next

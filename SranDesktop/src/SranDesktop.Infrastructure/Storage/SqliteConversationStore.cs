@@ -138,6 +138,28 @@ public sealed class SqliteConversationStore : IConversationStore
         """
         ALTER TABLE messages ADD COLUMN file_ids TEXT;
         """,
+
+        // 5 — Phase 9: folders were merged into projects. Mirrors chat-edge
+        // migration 031 on the local mirror: add project_id and carry every
+        // existing local grouping across, so a chat the user filed offline
+        // keeps its section instead of falling back to the time buckets.
+        // folder_id is deliberately KEPT (not dropped, not cleared) for one
+        // release so this is reversible — SQLite cannot drop a column
+        // without a table rebuild anyway.
+        """
+        ALTER TABLE conversations ADD COLUMN project_id TEXT;
+        UPDATE conversations SET project_id = folder_id WHERE folder_id IS NOT NULL;
+        """,
+
+        // 6 — Phase 14: archive. Mirrors chat-edge migration 032 on the local
+        // mirror. Deliberately its OWN flag rather than reusing a delete
+        // marker: archiving hides a chat, deleting destroys it, and a user who
+        // archives must still be able to open and read the conversation. The
+        // constant DEFAULT 0 is what makes this legal as a plain ADD COLUMN
+        // with NOT NULL in SQLite.
+        """
+        ALTER TABLE conversations ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
+        """,
     };
 
     /// <summary>Newest-N notes kept per conversation; older ones pruned on add.</summary>
@@ -165,6 +187,36 @@ public sealed class SqliteConversationStore : IConversationStore
         }.ToString();
     }
 
+    /// <summary>
+    /// Columns the READ PATH depends on, with the DDL that adds them.
+    /// Verified on every init and added when missing.
+    ///
+    /// Why this exists on top of the migration list: PRAGMA user_version is
+    /// a single counter shared by whatever build last touched this file, and
+    /// migration index N in one build is not migration N in another. A user
+    /// who ran a build from an abandoned branch (which had reached
+    /// user_version 10) and then moved to a build whose list has 6 entries
+    /// leaves SqliteMigrator with nothing to do — <c>for (i = 10; i &lt; 6)</c>
+    /// never runs — so every later migration is skipped SILENTLY and the
+    /// first SELECT of a new column dies with "no such column". That is
+    /// exactly how the Phase-9 project_id column went missing.
+    ///
+    /// So the counter stays as the fast path, and this is the safety net:
+    /// idempotent, cheap (one PRAGMA per process), and correct whether the
+    /// database is behind the code, ahead of it, or from a different lineage.
+    /// SQLite has no ADD COLUMN IF NOT EXISTS, hence the table_info probe.
+    /// </summary>
+    private static readonly (string Table, string Column, string Ddl)[] RequiredColumns =
+    {
+        ("conversations", "project_id",
+            "ALTER TABLE conversations ADD COLUMN project_id TEXT;"),
+        // Phase 14 — the read path selects is_archived to filter the sidebar,
+        // so it goes here as well as in the migration list (the rule this
+        // safety net exists for).
+        ("conversations", "is_archived",
+            "ALTER TABLE conversations ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;"),
+    };
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_initialized) return;
@@ -174,12 +226,51 @@ public sealed class SqliteConversationStore : IConversationStore
             if (_initialized) return;
             await using var conn = await OpenAsync(ct);
             await SqliteMigrator.MigrateAsync(conn, Migrations, logger: null, ct);
+            await EnsureRequiredColumnsAsync(conn, ct);
             _initialized = true;
         }
         finally
         {
             _initLock.Release();
         }
+    }
+
+    /// <summary>Adds any RequiredColumns the database is missing. Carries the
+    /// same data-preserving intent as migration 5: a column that has to be
+    /// created here is back-filled from its legacy source so the user's
+    /// existing grouping is not lost.</summary>
+    private static async Task EnsureRequiredColumnsAsync(
+        SqliteConnection conn, CancellationToken ct)
+    {
+        foreach (var (table, column, ddl) in RequiredColumns)
+        {
+            if (await ColumnExistsAsync(conn, table, column, ct))
+                continue;
+
+            await using var add = conn.CreateCommand();
+            add.CommandText = ddl;
+            // Repeat migration 5's back-fill: without it a repaired database
+            // would come back with every chat un-grouped.
+            if (table == "conversations" && column == "project_id"
+                && await ColumnExistsAsync(conn, "conversations", "folder_id", ct))
+            {
+                add.CommandText +=
+                    " UPDATE conversations SET project_id = folder_id WHERE folder_id IS NOT NULL;";
+            }
+            await add.ExecuteNonQueryAsync(ct);
+        }
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection conn, string table, string column, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        // table_info() takes an identifier, not a bindable value; the names
+        // come from the constant above, never from user input.
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $c;";
+        cmd.Parameters.AddWithValue("$c", column);
+        var n = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        return n > 0;
     }
 
     // ---------- Conversations ----------
@@ -190,7 +281,7 @@ public sealed class SqliteConversationStore : IConversationStore
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, title, model_id, created_at, updated_at, is_pinned, folder_id, source, last_synced_at, server_id
+            SELECT id, title, model_id, created_at, updated_at, is_pinned, is_archived, project_id, source, last_synced_at, server_id
             FROM conversations
             ORDER BY is_pinned DESC, updated_at DESC
             """;
@@ -208,7 +299,7 @@ public sealed class SqliteConversationStore : IConversationStore
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, title, model_id, created_at, updated_at, is_pinned, folder_id, source, last_synced_at, server_id
+            SELECT id, title, model_id, created_at, updated_at, is_pinned, is_archived, project_id, source, last_synced_at, server_id
             FROM conversations WHERE id = $id
             """;
         cmd.Parameters.AddWithValue("$id", id);
@@ -228,14 +319,15 @@ public sealed class SqliteConversationStore : IConversationStore
         // or timestamp would re-import everything. server_id changes only via
         // SetConversationServerIdAsync.
         cmd.CommandText = """
-            INSERT INTO conversations (id, title, model_id, created_at, updated_at, is_pinned, folder_id, source, last_synced_at, server_id)
-            VALUES ($id, $title, $model_id, $created_at, $updated_at, $is_pinned, $folder_id, $source, $last_synced_at, $server_id)
+            INSERT INTO conversations (id, title, model_id, created_at, updated_at, is_pinned, is_archived, project_id, source, last_synced_at, server_id)
+            VALUES ($id, $title, $model_id, $created_at, $updated_at, $is_pinned, $is_archived, $project_id, $source, $last_synced_at, $server_id)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 model_id = excluded.model_id,
                 updated_at = excluded.updated_at,
                 is_pinned = excluded.is_pinned,
-                folder_id = excluded.folder_id,
+                is_archived = excluded.is_archived,
+                project_id = excluded.project_id,
                 last_synced_at = COALESCE(excluded.last_synced_at, conversations.last_synced_at)
             """;
         cmd.Parameters.AddWithValue("$id", c.Id);
@@ -244,7 +336,8 @@ public sealed class SqliteConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$created_at", ToIso(c.CreatedAt));
         cmd.Parameters.AddWithValue("$updated_at", ToIso(c.UpdatedAt));
         cmd.Parameters.AddWithValue("$is_pinned", c.IsPinned ? 1 : 0);
-        cmd.Parameters.AddWithValue("$folder_id", (object?)c.FolderId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$is_archived", c.IsArchived ? 1 : 0);
+        cmd.Parameters.AddWithValue("$project_id", (object?)c.ProjectId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$source", c.Source == ConversationSource.Local ? "local" : "server");
         cmd.Parameters.AddWithValue("$last_synced_at", c.LastSyncedAt is { } ts ? ToIso(ts) : DBNull.Value);
         cmd.Parameters.AddWithValue("$server_id", (object?)c.ServerId ?? DBNull.Value);
@@ -752,10 +845,11 @@ public sealed class SqliteConversationStore : IConversationStore
         CreatedAt = FromIso(reader.GetString(3)),
         UpdatedAt = FromIso(reader.GetString(4)),
         IsPinned = !reader.IsDBNull(5) && reader.GetInt32(5) != 0,
-        FolderId = reader.IsDBNull(6) ? null : reader.GetString(6),
-        Source = reader.GetString(7) == "local" ? ConversationSource.Local : ConversationSource.Server,
-        LastSyncedAt = reader.IsDBNull(8) ? null : FromIso(reader.GetString(8)),
-        ServerId = reader.IsDBNull(9) ? null : reader.GetString(9)
+        IsArchived = !reader.IsDBNull(6) && reader.GetInt32(6) != 0,
+        ProjectId = reader.IsDBNull(7) ? null : reader.GetString(7),
+        Source = reader.GetString(8) == "local" ? ConversationSource.Local : ConversationSource.Server,
+        LastSyncedAt = reader.IsDBNull(9) ? null : FromIso(reader.GetString(9)),
+        ServerId = reader.IsDBNull(10) ? null : reader.GetString(10)
     };
 
     private static Message ReadMessage(SqliteDataReader reader) => new()

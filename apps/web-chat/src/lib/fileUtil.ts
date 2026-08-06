@@ -35,7 +35,12 @@ export const ALLOWED_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
   "r", "lua", "vue", "svelte",
 ]);
 
-export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MiB
+// MUST match chat-edge's MAX_FILE_SIZE_BYTES (config.go, default
+// 209715200 = 200 MiB). Phase 7 fix: this was 25 MiB while the server
+// accepted 200 MiB, so the client rejected files the backend would
+// happily take — and the server's 413 text claimed a third number.
+// If the deployment overrides MAX_FILE_SIZE_BYTES, update this too.
+export const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200 MiB
 export const MAX_FILES_PER_MESSAGE = 5;
 
 export function formatBytes(n: number): string {

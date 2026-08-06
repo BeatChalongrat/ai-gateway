@@ -122,6 +122,13 @@ public partial class MessageViewModel : ObservableObject
     [ObservableProperty]
     private string? _metaLine;
 
+    /// <summary>Compact local-time stamp shown in the message meta row (audit
+    /// §3.8): "14:32" today, "6 Aug 14:32" (TH: "6 ส.ค. 14:32") for older
+    /// messages. <see cref="CreatedAt"/> is offset-aware, so this is always the
+    /// machine's local time regardless of the offset it was stored with.</summary>
+    public string TimestampText => Services.MessageTimestampFormatter.Format(
+        CreatedAt, DateTimeOffset.Now, Localization.LocaleService.Instance.Locale);
+
     public string? ModelId { get; set; }
 
     /// <summary>True when <see cref="Id"/> is a SERVER (chat-edge) message id —

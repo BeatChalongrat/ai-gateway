@@ -13,7 +13,6 @@ import type {
   ErrorEnvelope,
   FeedbackResponse,
   FileAttachment,
-  Folder,
   FileListResponse,
   KnowledgeBase,
   KnowledgeBaseDetailResponse,
@@ -29,6 +28,7 @@ import type {
   Message,
   MessageListResponse,
   ModelListResponse,
+  CanvasArtifactRow,
   Project,
   SearchResponse,
   UsageResponse,
@@ -37,6 +37,7 @@ import type {
   ShareLink,
   UserPreferences,
 } from "./types";
+import type { PreviewData } from "./previewData";
 import { redirectToPortalLogin, refreshSession } from "./auth";
 
 const API_BASE =
@@ -251,40 +252,24 @@ class ApiClient {
       body: JSON.stringify({ is_pinned: pinned }),
     });
   }
+  /** Archive / un-archive a conversation (migration 032). NOT a delete:
+   *  the chat stays readable, it just leaves the sidebar list. */
+  setConversationArchived(id: string, archived: boolean) {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_archived: archived }),
+    });
+  }
+  /** The archive view — the same paginated list endpoint with the
+   *  archived filter flipped. */
+  listArchivedConversations() {
+    return this.json<ConversationListResponse>("/conversations?archived=1&limit=100");
+  }
   // -----------------------------------------------------------
-  // Folders (migration 022).
+  // Folders were merged into Projects in Phase 9 (chat-edge migration
+  // 031). The /folders routes are gone from the server, so there is no
+  // folder client here — projects below are the only organiser.
   // -----------------------------------------------------------
-  listFolders() {
-    return this.json<{ folders: Folder[] }>("/folders");
-  }
-  createFolder(name: string) {
-    return this.json<Folder>("/folders", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    });
-  }
-  renameFolder(id: string, name: string) {
-    return this.json<Folder>(`/folders/${id}`, {
-      method: "PUT",
-      body: JSON.stringify({ name }),
-    });
-  }
-  deleteFolder(id: string) {
-    return this.raw(`/folders/${id}`, { method: "DELETE" });
-  }
-  reorderFolders(folderIds: string[]) {
-    return this.json<{ folders: Folder[] }>("/folders/reorder", {
-      method: "PUT",
-      body: JSON.stringify({ folder_ids: folderIds }),
-    });
-  }
-  /** Move a conversation into a folder, or `null` to unfile it. */
-  moveConversationToFolder(id: string, folderId: string | null) {
-    return this.raw(`/conversations/${id}/folder`, {
-      method: "PUT",
-      body: JSON.stringify({ folder_id: folderId }),
-    });
-  }
 
   // -----------------------------------------------------------
   // Projects (Phase 4).
@@ -460,6 +445,35 @@ class ApiClient {
     }
     return URL.createObjectURL(await res.blob());
   }
+  /** The text the extraction pipeline pulled out of a document
+   *  (GET /files/{id}/text). Used by the in-app preview for office /
+   *  text files: it is exactly what the model was given, so the user
+   *  can see what was actually read. A non-"completed" status means
+   *  extraction is still running (or produced nothing). */
+  getFileText(fileId: string) {
+    return this.json<{
+      extraction_status: string;
+      text: string;
+      truncated: boolean;
+      ocr: boolean;
+    }>(`/files/${fileId}/text`);
+  }
+  /** Structured preview data (Phase 16) — a window of one sheet, or a
+   *  document's blocks, or a deck's slides. Throws ApiError 415 when the
+   *  type has no structured view and 503 when the server cannot produce
+   *  one; both mean "fall back to getFileText", which is why this is a
+   *  separate call rather than an extra field on it. */
+  getFilePreviewData(
+    fileId: string,
+    opts: { sheet?: number; offset?: number; limit?: number } = {},
+  ) {
+    const query = new URLSearchParams();
+    if (opts.sheet) query.set("sheet", String(opts.sheet));
+    if (opts.offset) query.set("offset", String(opts.offset));
+    if (opts.limit) query.set("limit", String(opts.limit));
+    const suffix = query.toString() ? `?${query}` : "";
+    return this.json<PreviewData>(`/files/${fileId}/preview-data${suffix}`);
+  }
   /** Authenticated download: fetch the blob through the cookie-authed
    *  client (with its 401 → refresh → retry), then trigger a browser
    *  save via a transient object URL. Replaces the bare <a href
@@ -490,10 +504,13 @@ class ApiClient {
    *  workbook. The server runs the executor on a fresh copy of the
    *  source, validates the output, and persists a new generated
    *  conversation_files row. Returns the new file metadata plus the
-   *  validator report so the result card can render both. */
+   *  validator report so the result card can render both.
+   *
+   *  source_file_id is OPTIONAL (Phase 8): omit it to generate a
+   *  workbook from scratch, the same contract executeDocumentPlan has. */
   executeExcelPlan(
     convId: string,
-    body: { source_file_id: string; output_filename?: string; plan: unknown },
+    body: { source_file_id?: string; output_filename?: string; plan: unknown },
   ) {
     return this.json<import("./types").ExcelExecuteResponse>(
       `/conversations/${convId}/excel/execute`,
@@ -682,6 +699,43 @@ class ApiClient {
       method: "DELETE",
       body: JSON.stringify({ confirm }),
     });
+  }
+
+  // ----- Canvas artifacts (Phase 6 / C3) --------------------
+  /** Newest version of every artifact lineage in a conversation. */
+  listCanvasArtifacts(convId: string) {
+    return this.json<{ artifacts: CanvasArtifactRow[] }>(
+      `/conversations/${convId}/artifacts`,
+    );
+  }
+  /** Appends a new version to a lineage (creates it on first save). */
+  saveCanvasArtifact(
+    convId: string,
+    body: {
+      artifact_key: string;
+      type: string;
+      title?: string;
+      content: string;
+      message_id?: string;
+    },
+  ) {
+    return this.json<{ artifact: CanvasArtifactRow }>(
+      `/conversations/${convId}/artifacts`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  }
+  /** Full history for one lineage, newest version first. */
+  listCanvasVersions(convId: string, key: string) {
+    return this.json<{ versions: CanvasArtifactRow[] }>(
+      `/conversations/${convId}/artifacts/${encodeURIComponent(key)}/versions`,
+    );
+  }
+  /** Re-applies an older version AS A NEW VERSION (history preserved). */
+  revertCanvasArtifact(convId: string, key: string, version: number) {
+    return this.json<{ artifact: CanvasArtifactRow }>(
+      `/conversations/${convId}/artifacts/${encodeURIComponent(key)}/revert`,
+      { method: "POST", body: JSON.stringify({ version }) },
+    );
   }
 
   // ----- Preferences ---------------------------------------

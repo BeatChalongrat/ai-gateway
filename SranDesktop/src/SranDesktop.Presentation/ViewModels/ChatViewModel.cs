@@ -79,6 +79,7 @@ public partial class ChatViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CurrentModelDisplayName))]
     [NotifyPropertyChangedFor(nameof(IsAutoSelected))]
     [NotifyPropertyChangedFor(nameof(HasActiveConversation))]
+    [NotifyPropertyChangedFor(nameof(CanToggleReasoning))]
     private ConversationItemViewModel? _conversation;
 
     /// <summary>Short model label shown in the composer's model pill.</summary>
@@ -156,6 +157,27 @@ public partial class ChatViewModel : ObservableObject
             var m = AvailableModels.FirstOrDefault(x => x.Id == id);
             // Unknown catalog entry → optimistic: the gateway rejects politely.
             return m is null || m.SupportsVision;
+        }
+    }
+
+    /// <summary>
+    /// Phase 14 Task 3 — the composer offers the audio form.
+    ///
+    /// Unlike image/video this is NOT Auto-friendly: audio generation has no
+    /// model-callable tool (chat-edge exposes generate_image / generate_video
+    /// only), so it is a direct dispatch that must name a concrete audio model.
+    /// Auto therefore hides the button rather than offering a request the
+    /// router cannot fulfil.
+    /// </summary>
+    public bool CurrentModelSupportsAudio
+    {
+        get
+        {
+            if (IsAutoSelected) return false;
+            var id = Conversation?.ModelId ?? _pendingModelId;
+            var m = AvailableModels.FirstOrDefault(x => x.Id == id);
+            return m?.SupportsAudio == true
+                || m?.ModelKind is "audio" or "tts";
         }
     }
 
@@ -484,6 +506,8 @@ public partial class ChatViewModel : ObservableObject
         OnPropertyChanged(nameof(IsAutoSelected));
         OnPropertyChanged(nameof(CurrentModelSupportsImage));
         OnPropertyChanged(nameof(CurrentModelSupportsVideo));
+        OnPropertyChanged(nameof(CurrentModelSupportsAudio));
+        OnPropertyChanged(nameof(CanToggleReasoning));
         RebuildModelGroups();
     }
 
@@ -512,6 +536,33 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty]
     private bool _memoryEnabled = true;
 
+    // ── Thinking Mode (Phase 13 Task 1, web parity P11) ────────────────────
+    // Per-CONVERSATION, exactly like the web composer's brain button: the
+    // server column is the state, the toggle just writes it.
+    [ObservableProperty]
+    private bool _isReasoningOn;
+
+    /// <summary>
+    /// Whether the composer shows the Thinking-Mode button at all.
+    ///
+    /// Hidden on Auto on purpose (same rule as web): with Auto the router may
+    /// land on a model that cannot think, and a toggle that silently does
+    /// nothing is worse than no toggle. Also hidden until the catalogue says
+    /// the chosen model supports reasoning — an unknown model is treated as
+    /// "no", because a request for thinking a model can't do is an error, not
+    /// a degraded answer.
+    /// </summary>
+    public bool CanToggleReasoning
+    {
+        get
+        {
+            if (Conversation is null || IsAutoSelected)
+                return false;
+            var id = Conversation.ModelId ?? _pendingModelId;
+            return AvailableModels.FirstOrDefault(m => m.Id == id)?.SupportsThinking == true;
+        }
+    }
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     private string _inputText = string.Empty;
@@ -526,6 +577,8 @@ public partial class ChatViewModel : ObservableObject
 
     partial void OnInputTextChanged(string value)
     {
+        RefreshSlashMenu(value);
+
         if (_suppressDraftSave || Conversation is null)
             return;
         if (_draftTimer is null)
@@ -566,6 +619,108 @@ public partial class ChatViewModel : ObservableObject
         }
     }
 
+    // ── Slash quick actions (Phase 12 — port of the web P10 composer) ───
+    //
+    // Every entry is a shortcut into a flow this app already has: the image /
+    // video mode toggles, New chat, and the shortcuts sheet. The trigger rule
+    // lives in Application.Services.SlashCommands so both clients answer "/"
+    // the same way and it can be unit-tested without a window.
+
+    /// <summary>Candidates for the typed token; empty ⇒ the menu is closed.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<SlashCommandItemViewModel> SlashItems { get; } = new();
+
+    [ObservableProperty]
+    private bool _isSlashMenuOpen;
+
+    /// <summary>Highlighted row; ↑/↓ move it, Enter/Tab run it.</summary>
+    [ObservableProperty]
+    private int _slashSelectedIndex;
+
+    /// <summary>True when the token matched nothing — the menu stays open with
+    /// an empty state rather than vanishing mid-keystroke.</summary>
+    public bool HasNoSlashMatches => IsSlashMenuOpen && SlashItems.Count == 0;
+
+    /// <summary>Raised when a slash action needs the shell (New chat, the
+    /// shortcuts sheet) — the view model owns no windows.</summary>
+    public event EventHandler<SlashActionId>? SlashActionRequested;
+
+    private void RefreshSlashMenu(string? text)
+    {
+        var query = SlashCommands.Query(text);
+        if (query is null)
+        {
+            if (IsSlashMenuOpen)
+            {
+                SlashItems.Clear();
+                IsSlashMenuOpen = false;
+                OnPropertyChanged(nameof(HasNoSlashMatches));
+            }
+            return;
+        }
+
+        SlashItems.Clear();
+        foreach (var cmd in SlashCommands.Filter(query))
+            SlashItems.Add(new SlashCommandItemViewModel(cmd));
+        // Reset the highlight whenever the candidate list changes, so Enter
+        // never runs whatever happened to sit at a stale index.
+        SlashSelectedIndex = 0;
+        IsSlashMenuOpen = true;
+        OnPropertyChanged(nameof(HasNoSlashMatches));
+    }
+
+    /// <summary>↑/↓ with wrap-around. No-op when the menu is empty.</summary>
+    public void MoveSlashSelection(int delta)
+    {
+        if (SlashItems.Count == 0) return;
+        var next = (SlashSelectedIndex + delta) % SlashItems.Count;
+        if (next < 0) next += SlashItems.Count;
+        SlashSelectedIndex = next;
+    }
+
+    /// <summary>Closes the menu by clearing the token (the menu is derived
+    /// from the text, so there is nothing else to reset).</summary>
+    public void DismissSlashMenu() => InputText = string.Empty;
+
+    /// <summary>Runs the highlighted command. Returns false when there was
+    /// nothing to run, so the caller can fall through to normal Enter.</summary>
+    public bool RunSelectedSlashCommand()
+    {
+        if (!IsSlashMenuOpen || SlashItems.Count == 0) return false;
+        var index = Math.Min(SlashSelectedIndex, SlashItems.Count - 1);
+        ExecuteSlash(SlashItems[index].Command);
+        return true;
+    }
+
+    [RelayCommand]
+    private void RunSlash(object? parameter)
+    {
+        // FIX 12 rule: commands reachable from a templated row take object?
+        // and pattern-match, so a wrong-type CanExecute requery can't throw.
+        if (parameter is SlashCommandItemViewModel item)
+            ExecuteSlash(item.Command);
+    }
+
+    private void ExecuteSlash(SlashCommand cmd)
+    {
+        // Always clear the token first: the composer is left empty and ready
+        // for the real message, whatever the action does.
+        InputText = string.Empty;
+        switch (cmd.Id)
+        {
+            case SlashActionId.Image:
+                IsImageModeOn = true;
+                break;
+            case SlashActionId.Video:
+                IsVideoModeOn = true;
+                break;
+            case SlashActionId.NewChat:
+            case SlashActionId.Shortcuts:
+                // Owned by the shell (conversation list / dialog host).
+                SlashActionRequested?.Invoke(this, cmd.Id);
+                break;
+        }
+    }
+
     private void SetInputTextWithoutDraftSave(string text)
     {
         _suppressDraftSave = true;
@@ -586,7 +741,17 @@ public partial class ChatViewModel : ObservableObject
     private bool _isStreaming;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowHistorySkeleton))]
     private bool _isLoadingHistory;
+
+    /// <summary>
+    /// Phase 13 Task 3 — show placeholder bubbles instead of a bare 2px
+    /// progress bar while a transcript loads. Only when there is nothing to
+    /// show yet: paging older messages into an already-populated thread keeps
+    /// the thin bar, because covering read messages with skeletons would look
+    /// like the conversation was lost.
+    /// </summary>
+    public bool ShowHistorySkeleton => IsLoadingHistory && Messages.Count == 0;
 
     [ObservableProperty]
     private string? _errorMessage;
@@ -627,6 +792,9 @@ public partial class ChatViewModel : ObservableObject
         ICompletionNotifier? completionNotifier = null,
         IWindowStateProvider? windowState = null)
     {
+        // The skeleton hides the moment the first bubble lands, so it has to
+        // track the collection, not just the loading flag.
+        Messages.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowHistorySkeleton));
         _api = api;
         _gateway = gateway;
         _store = store;
@@ -1177,6 +1345,16 @@ public partial class ChatViewModel : ObservableObject
                         attachment = new InlineAttachmentViewModel(file.Filename, contentType,
                             () => GetOrDownloadAttachmentBytesAsync(conversationId, file));
                     }
+
+                    // Phase 14: the in-app preview shows office documents as the
+                    // text chat-edge already extracted. Only server-side files
+                    // have an id to ask about, which is exactly this path.
+                    attachment.AttachTextResolver(() => _api.GetFileTextAsync(file.Id));
+                    // Phase 16: and as its STRUCTURE where there is one — a
+                    // workbook opens as a grid, not as a dump of its cells.
+                    attachment.AttachStructuredResolver(
+                        (sheet, offset, limit) =>
+                            _api.GetFilePreviewDataAsync(file.Id, sheet, offset, limit));
 
                     void Add()
                     {
@@ -2858,6 +3036,16 @@ public partial class ChatViewModel : ObservableObject
             - If a tool fails, explain what happened and try an alternative approach
             """;
 
+        // Account-wide custom instructions (Phase 13 Task 1). chat-edge turns
+        // get these from the server's prompt compiler; a desktop agent turn
+        // builds its prompt here, so without this the user's instructions
+        // would apply on the web and be silently ignored on the desktop.
+        // Appended BEFORE the mode hints so an explicit image/video request
+        // still wins over a general style preference.
+        var personal = Application.Services.PersonalInstructionsState.PromptBlock();
+        if (personal.Length > 0)
+            systemPrompt += "\n\n" + personal;
+
         // Working folder (Cowork-style): tell the model where to do file work.
         var workingFolder = _settings.Current.WorkingFolder;
         if (!string.IsNullOrWhiteSpace(workingFolder))
@@ -3344,6 +3532,96 @@ public partial class ChatViewModel : ObservableObject
         }
     }
 
+    /// <summary>Flip Thinking Mode for the open conversation (Phase 13).
+    /// Optimistic like the memory toggle, and reverted on failure so the
+    /// button never claims a state the server didn't accept.</summary>
+    [RelayCommand]
+    private async Task ToggleReasoningAsync()
+    {
+        if (Conversation is null)
+            return;
+        var target = !IsReasoningOn;
+        IsReasoningOn = target; // optimistic
+        try
+        {
+            await _api.SetConversationReasoningAsync(Conversation.Id, target);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            IsReasoningOn = !target; // revert on failure
+            _logger.LogWarning(ex, "Failed to toggle thinking mode");
+            ErrorMessage = "Could not update thinking mode - server unreachable.";
+        }
+    }
+
+    /// <summary>
+    /// Phase 14 Task 3 — open the audio generation form and, on success, put
+    /// the track in the transcript so it lives with the conversation like every
+    /// other generated media (rather than only in a dialog that just closed).
+    /// </summary>
+    [RelayCommand]
+    private void OpenAudioGen()
+    {
+        var modelId = Conversation?.ModelId ?? _pendingModelId;
+        if (string.IsNullOrEmpty(modelId) || modelId == "auto")
+            return;
+
+        var vm = new AudioGenViewModel(_api, _logger, modelId, Conversation?.Id);
+        vm.Completed += (_, result) =>
+        {
+            if (!result.Success || result.Audio is not { Length: > 0 })
+                return;
+            AppendGeneratedAudio(result);
+        };
+        var dialog = new Views.Dialogs.AudioGenDialog(vm)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        dialog.ShowDialog();
+    }
+
+    /// <summary>Adds the finished track as an assistant-side attachment.</summary>
+    internal void AppendGeneratedAudio(Application.Services.AudioGenerationResult result)
+    {
+        var message = new MessageViewModel(
+            Guid.NewGuid().ToString(), Domain.Enums.MessageRole.Assistant,
+            string.Empty, DateTimeOffset.UtcNow);
+        message.InlineAttachments.Add(new InlineAttachmentViewModel(
+            result.Filename ?? "audio.mp3",
+            result.ContentType ?? "audio/mpeg",
+            result.Audio!));
+        Messages.Add(message);
+        MessageActivity?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Phase 15 — open a rendered code block in the Canvas.
+    ///
+    /// Called from the code block's own button (via CanvasLauncher, which
+    /// finds this view model in the visual tree). The conversation id is what
+    /// makes versioning server-backed and therefore shared with the web; a
+    /// local-only agent chat still previews and edits, it just cannot persist.
+    /// </summary>
+    internal void OpenCanvas(string language, string code, string? messageId)
+    {
+        var type = Application.Services.CanvasEligibility.TypeFor(language, code);
+        if (type is null)
+            return;
+
+        var vm = new CanvasViewModel(
+            _api, _logger, type, code,
+            title: Application.Services.CanvasEligibility.DownloadName(type, null),
+            conversationId: Conversation?.Source == Domain.Enums.ConversationSource.Server
+                ? Conversation.Id
+                : null,
+            messageId: messageId);
+        var window = new Views.Dialogs.CanvasWindow(vm)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
     /// <summary>Share the conversation: create the public link and show it (R9 K).</summary>
     [RelayCommand]
     private async Task ShareAsync()
@@ -3439,6 +3717,7 @@ public partial class ChatViewModel : ObservableObject
 
             KnowledgeBaseId = dto.KnowledgeBaseId;
             MemoryEnabled = dto.MemoryEnabled ?? true;
+            IsReasoningOn = dto.ReasoningEnabled ?? false;
             if (!string.IsNullOrEmpty(dto.ModelId))
             {
                 Conversation.ModelId = dto.ModelId;
@@ -3452,7 +3731,58 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogDebug(ex, "Could not load conversation state for {Id}", conversationId);
         }
+
+        // Two Phase-13 side loads, each isolated: neither is needed to show
+        // the conversation, so a failure (or a slow catalogue) must never take
+        // the transcript down with it — the same isolation rule the sidebar
+        // hotfix established.
+        //
+        // Models: the Thinking-Mode button can only be shown once the
+        // catalogue says whether this model can think, and models otherwise
+        // load lazily on popup open.
+        // Preferences: chat-edge turns get the user's custom instructions from
+        // the server prompt compiler, but a desktop agent turn builds its own
+        // prompt, so they are cached here for BuildGatewayMessages.
+        if (AvailableModels.Count == 0)
+            await SafelyAsync(LoadModelsAsync);
+        await SafelyAsync(RefreshPersonalInstructionsAsync);
     }
+
+    /// <summary>Runs an optional enhancement, swallowing anything it throws.</summary>
+    private async Task SafelyAsync(Func<Task> work)
+    {
+        try
+        {
+            await work();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Optional conversation-state load failed");
+        }
+    }
+
+    /// <summary>Pull the account-wide custom instructions into the session
+    /// cache (best effort). Runs at most once per app run unless Settings
+    /// writes newer values — the fields change rarely and a failure here must
+    /// never block opening a chat.</summary>
+    internal async Task RefreshPersonalInstructionsAsync()
+    {
+        if (_personalInstructionsLoaded)
+            return;
+        try
+        {
+            var prefs = await _api.GetPreferencesAsync();
+            Application.Services.PersonalInstructionsState.Set(
+                prefs.CustomInstructionsAbout, prefs.CustomInstructionsRespond);
+            _personalInstructionsLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not load personal instructions");
+        }
+    }
+
+    private bool _personalInstructionsLoaded;
 
     private bool CanCancel() => IsStreaming;
 

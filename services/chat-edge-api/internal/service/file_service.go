@@ -220,6 +220,44 @@ func isTextLikeName(name string) bool {
 	return textLikeExtensions[strings.ToLower(filepath.Ext(name))]
 }
 
+// binaryDocExtensions are BINARY formats we accept by extension when the
+// browser reports a useless content type. Phase 7 fix: the frontend
+// accepts these by extension (fileUtil.ts ALLOWED_FILE_EXTENSIONS), but
+// the server previously fell back to the extension only for TEXT-like
+// names — so a .docx dragged from Explorer/Outlook (empty type, or
+// application/octet-stream) passed client validation and then died with
+// a 415 here. Unlike textLikeExtensions these are NOT read as UTF-8:
+// extraction still routes them to the Python extractor by MIME/ext.
+var binaryDocExtensions = map[string]bool{
+	".pdf": true, ".docx": true, ".xlsx": true, ".pptx": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".mp4": true, ".webm": true, ".mov": true, ".mp3": true, ".wav": true, ".m4a": true,
+}
+
+// isAllowedUploadName reports whether the FILENAME alone is enough to
+// accept an upload (used when the reported content type isn't on the
+// MIME allow-list). Kept in sync with the frontend's extension list.
+func isAllowedUploadName(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return textLikeExtensions[ext] || binaryDocExtensions[ext]
+}
+
+// NewFileServiceForTest builds a knobs-only service. Exported for the
+// handler tests, which need MaxUploadBytes()/MaxConversationBytes() to
+// report a chosen config without wiring repos or storage.
+func NewFileServiceForTest(knobs Knobs) *FileService {
+	return &FileService{knobs: knobs}
+}
+
+// MaxUploadBytes is the per-file HTTP upload cap actually in force.
+// Exposed so the handler's 413 message reports the CONFIGURED value
+// instead of a hard-coded number that drifts (Phase 7).
+func (s *FileService) MaxUploadBytes() int64 { return s.knobs.MaxFileSizeBytes }
+
+// MaxConversationBytes is the per-conversation total-storage cap in
+// force. Same reason as MaxUploadBytes.
+func (s *FileService) MaxConversationBytes() int64 { return s.knobs.MaxConvFileTotal }
+
 // ---------------------------------------------------------------------------
 // Upload
 // ---------------------------------------------------------------------------
@@ -249,10 +287,12 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	if in.Size > s.knobs.MaxFileSizeBytes {
 		return nil, fmt.Errorf("%w: %d > %d", ErrFileTooLarge, in.Size, s.knobs.MaxFileSizeBytes)
 	}
-	// Accept by MIME allow-list, OR by a known text/code extension —
-	// browsers report .py/.md/.json/etc. with inconsistent or empty
-	// content types, so the extension is the reliable signal there.
-	if !allowedContentTypes[strings.ToLower(in.ContentType)] && !isTextLikeName(in.OriginalName) {
+	// Accept by MIME allow-list, OR by a known extension — browsers
+	// report .py/.md/.json AND Office/PDF/image files with inconsistent
+	// or empty content types, so the extension is the reliable signal
+	// there. The extension list mirrors the frontend's, so anything the
+	// client accepts is accepted here (no client-passes/server-415 gap).
+	if !allowedContentTypes[strings.ToLower(in.ContentType)] && !isAllowedUploadName(in.OriginalName) {
 		return nil, fmt.Errorf("%w: %s", ErrFileTypeNotAllowed, in.ContentType)
 	}
 

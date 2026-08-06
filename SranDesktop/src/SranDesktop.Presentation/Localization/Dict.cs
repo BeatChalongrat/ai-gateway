@@ -1,4 +1,4 @@
-﻿namespace SranDesktop.Presentation.Localization;
+namespace SranDesktop.Presentation.Localization;
 
 /// <summary>
 /// EN + TH translation dictionaries (desktop mirror of apps/web-chat's dict.ts).
@@ -11,7 +11,12 @@ public static class Dict
     {
         // Sidebar
         ["sidebar.newChat"] = "New chat",
-        ["sidebar.newFolder"] = "New folder",
+        ["sidebar.newProject"] = "New project",
+        // Phase 14 — archive view
+        ["sidebar.archive"] = "Archived chats",
+        ["sidebar.archiveTitle"] = "Archived chats",
+        ["sidebar.backToChats"] = "Back to chats",
+        ["sidebar.archiveEmpty"] = "No archived chats yet.",
         ["sidebar.searchChats"] = "Search chats",
         ["sidebar.searchPlaceholder"] = "Search chats...",
         ["sidebar.empty"] = "No conversations yet",
@@ -75,16 +80,43 @@ public static class Dict
         ["perm.skipConfirmTitle"] = "Skip all approvals?",
         ["perm.skipConfirmBody"] = "This mode turns off the safety block for system-destroying commands (like wiping a disk) and the AI acts without ever asking first — running commands, changing files, and controlling your screen. You can switch back at any time. Continue?",
 
-        // Conversation / folder context menus
+        // Conversation / project context menus
         ["conv.rename"] = "Rename",
         ["conv.delete"] = "Delete",
+        ["conv.archive"] = "Archive",
+        ["conv.unarchive"] = "Restore from archive",
         ["conv.pin"] = "Pin",
         ["conv.unpin"] = "Unpin",
-        ["conv.moveToFolder"] = "Move to folder",
-        ["conv.removeFromFolder"] = "Remove from folder",
-        ["folder.new"] = "New folder",
-        ["folder.rename"] = "Rename folder",
-        ["folder.delete"] = "Delete folder",
+        ["conv.moveToProject"] = "Move to project",
+        ["conv.removeFromProject"] = "Remove from project",
+        // Phase 9 — folders were merged into projects; a project with no
+        // instructions is the sidebar grouping the folder used to be.
+        // Phase 12 — composer slash quick actions (port of the web P10 menu).
+        ["slash.image"] = "Generate an image",
+        ["slash.image.hint"] = "Describe the image to create",
+        ["slash.video"] = "Generate a video",
+        ["slash.video.hint"] = "Describe the video to create",
+        ["slash.new"] = "New chat",
+        ["slash.new.hint"] = "Start a fresh conversation",
+        ["slash.shortcuts"] = "Keyboard shortcuts",
+        ["slash.shortcuts.hint"] = "Show every shortcut",
+        ["slash.empty"] = "No matching action",
+        // Phase 12 — project settings (instructions + KB), server-backed so
+        // the values match the web Projects page.
+        ["project.settings"] = "Project settings",
+        ["project.settings.subtitle"] = "Shared with every chat in this project — and with the web app.",
+        ["project.instructions"] = "Project instructions",
+        ["project.instructionsHint"] = "The AI follows these in every chat inside this project.",
+        ["project.instructions.tooLong"] = "Instructions are too long (max 8000 characters).",
+        ["project.kb"] = "Knowledge base",
+        ["project.kbHint"] = "Chats in this project can retrieve from this knowledge base.",
+        ["project.kb.none"] = "None",
+        ["project.kb.loadFailed"] = "Could not load knowledge bases.",
+        ["project.saveFailed"] = "Could not save the project - server unreachable",
+        ["project.new"] = "New project",
+        ["project.rename"] = "Rename project",
+        ["project.defaultName"] = "New project",
+        ["project.namePrompt"] = "Project name:",
 
         // Header actions
         ["header.memory"] = "Memory",
@@ -226,6 +258,38 @@ public static class Dict
         ["chat.turnNotSynced"] = "Not synced to the server yet — will retry",
         // FIX 10 — synced non-image attachment chip.
         ["attachment.save"] = "Save file…",
+        // Phase 14 — in-app attachment preview
+        ["attachment.preview"] = "Open preview",
+        // Phase 15 — Canvas
+        ["canvas.open"] = "Open in Canvas",
+        ["canvas.showCode"] = "Code",
+        ["canvas.showPreview"] = "Preview",
+        ["canvas.copy"] = "Copy",
+        ["canvas.download"] = "Download",
+        ["canvas.versions"] = "Versions",
+        ["canvas.saveVersion"] = "Save version",
+        ["canvas.revert"] = "Revert",
+        ["canvas.saved"] = "Version saved.",
+        ["canvas.saveFailed"] = "Could not save this version.",
+        ["canvas.revertFailed"] = "Could not revert to that version.",
+        ["canvas.copied"] = "Copied.",
+        ["canvas.runtimeError"] = "This artifact raised an error while running.",
+        ["canvas.noWebView2"] = "WebView2 Runtime is not installed — Canvas preview is unavailable.",
+        ["preview.showText"] = "Show as text",
+        ["preview.failed"] = "Couldn't open this file.",
+        ["preview.unsupported"] = "This file type has no preview — download it to open.",
+        ["preview.extractPending"] = "Still extracting text from this file — try again in a moment.",
+        ["preview.extractFailed"] = "Text could not be extracted from this file.",
+        ["preview.noText"] = "No text was found in this file.",
+        ["preview.truncated"] = "Showing the first part of this document only.",
+        // Phase 16 — structured preview (spreadsheet grid / document / deck).
+        ["preview.rowCount"] = "Showing {shown} of {total} rows",
+        ["preview.wideSheet"] = "some columns are not shown",
+        ["preview.loadMoreRows"] = "Load more rows",
+        ["preview.loadMoreBlocks"] = "Load more of this document",
+        ["preview.loadMoreSlides"] = "Load more slides",
+        ["preview.slideN"] = "Slide {n} of {total}",
+        ["preview.emptySlide"] = "This slide has no text.",
         // FIX 10b — lazy document fetch failed (offline / file gone).
         ["attachment.downloadFailed"] = "Could not download the file — check your connection and try again",
         ["agent.contextTrimmed"] = "Older messages were trimmed to fit the model's context window.",
@@ -240,8 +304,8 @@ public static class Dict
         ["dialog.delete"] = "Delete",
         ["dialog.confirm"] = "OK",
         ["dialog.error"] = "Error:",
-        ["confirm.deleteFolder"] = "Delete folder \"{0}\"? Chats inside move back to the main list.",
-        ["confirm.deleteFolderTitle"] = "Delete folder",
+        ["confirm.deleteProject"] = "Delete project \"{0}\"? Chats inside move back to the main list.",
+        ["confirm.deleteProjectTitle"] = "Delete project",
         ["confirm.deleteEmpty"] = "Delete {0} empty conversation(s)? This cannot be undone.",
         ["confirm.deleteEmptyTitle"] = "Clean up empty chats",
         ["confirm.deleteChat"] = "Delete \"{0}\"? This cannot be undone.",
@@ -287,22 +351,32 @@ public static class Dict
 
         // R9 — Projects
         ["sidebar.projects"] = "PROJECTS",
-        ["project.create"] = "New project",
-        ["project.name"] = "Project name",
-        ["project.instructions"] = "Custom instructions",
-        ["project.instructionsHint"] = "Instructions the AI follows in every chat of this project",
-        ["project.files"] = "Project files",
-        ["project.addFile"] = "Add file",
-        ["project.noFiles"] = "No files yet",
-        ["project.conversations"] = "Conversations",
-        ["project.noConversations"] = "No conversations yet",
-        ["project.startChat"] = "Start chat",
-        ["project.deleteConfirm"] = "Delete project \"{0}\"? Conversations stay but lose the project context.",
         ["project.delete"] = "Delete project",
 
         // R9 — Web search
         ["input.webSearch"] = "Web search",
         ["tool.searchingWeb"] = "Searching the web...",
+
+        // Phase 13 — Thinking Mode toggle (composer)
+        ["input.reasoning"] = "Thinking mode",
+
+        // Phase 13 — Personal instructions (Settings; same fields as the web)
+        ["settings.personal"] = "Personal instructions",
+        ["settings.personal.subtitle"] = "Applied to every new chat, on this device and on the web.",
+        ["settings.personal.about"] = "About you",
+        ["settings.personal.respond"] = "How the AI should respond",
+        ["settings.personal.saved"] = "Saved.",
+        ["settings.personal.saveFailed"] = "Could not save - server unreachable.",
+        ["settings.personal.loadFailed"] = "Could not load your instructions. Saving now would overwrite them - try again later.",
+        ["settings.personal.tooLong"] = "Each field is limited to 1500 characters.",
+
+        // Phase 13 — run_python card (the card HEADER reuses the shared tool
+        // header: tool.name.run_python + the status dot + duration)
+        ["coderun.code"] = "Code",
+        ["coderun.output"] = "Output",
+        ["coderun.noOutput"] = "(no output was printed)",
+        ["coderun.timedOut"] = "The code timed out and was stopped.",
+        ["coderun.truncated"] = "Output was truncated.",
 
         // R9 — Tool cards
         ["tool.input"] = "Input",
@@ -426,6 +500,24 @@ public static class Dict
         ["msg.branchNext"] = "Next version",
         ["tool.toggleDetails"] = "Show tool details",
         ["media.playPause"] = "Play or pause",
+        // Phase 14 Task 3 — audio generation (direct dispatch; no model tool)
+        ["media.audioTitle"] = "Generate audio",
+        ["media.audioSubtitle"] = "Have a voice read text aloud, or generate a music track.",
+        ["media.modeSpeech"] = "Speech",
+        ["media.modeMusic"] = "Music",
+        ["media.tts.placeholder"] = "Text to read aloud",
+        ["media.music.placeholder"] = "Describe the music to generate",
+        ["media.voice"] = "Voice",
+        ["media.voice.default"] = "Default",
+        ["media.voice.narrator"] = "Narrator",
+        ["media.duration"] = "Length",
+        ["media.generateSpeech"] = "Generate speech",
+        ["media.generateMusic"] = "Generate music",
+        ["media.generatingSpeech"] = "Generating speech…",
+        ["media.generatingMusic"] = "Generating music…",
+        ["media.genFailed"] = "Audio generation failed.",
+        ["media.promptTooLong"] = "That text is too long — shorten it and try again.",
+        ["media.audioReady"] = "Done — the audio was added to the chat.",
 
         // R9 — Connectors
         ["menu.connectors"] = "Connectors",
@@ -646,7 +738,12 @@ public static class Dict
     {
         // Sidebar
         ["sidebar.newChat"] = "แชทใหม่",
-        ["sidebar.newFolder"] = "โฟลเดอร์ใหม่",
+        ["sidebar.newProject"] = "โปรเจกต์ใหม่",
+        // Phase 14 — คลังแชท
+        ["sidebar.archive"] = "คลังแชท",
+        ["sidebar.archiveTitle"] = "คลังแชท",
+        ["sidebar.backToChats"] = "กลับไปหน้าแชท",
+        ["sidebar.archiveEmpty"] = "ยังไม่มีแชทในคลัง",
         ["sidebar.searchChats"] = "ค้นหาแชท",
         ["sidebar.searchPlaceholder"] = "ค้นหาแชท...",
         ["sidebar.empty"] = "ยังไม่มีบทสนทนา",
@@ -713,13 +810,35 @@ public static class Dict
         // Conversation / folder context menus
         ["conv.rename"] = "เปลี่ยนชื่อ",
         ["conv.delete"] = "ลบ",
+        ["conv.archive"] = "เก็บเข้าคลัง",
+        ["conv.unarchive"] = "เอาออกจากคลัง",
         ["conv.pin"] = "ปักหมุด",
         ["conv.unpin"] = "เลิกปักหมุด",
-        ["conv.moveToFolder"] = "ย้ายไปโฟลเดอร์",
-        ["conv.removeFromFolder"] = "นำออกจากโฟลเดอร์",
-        ["folder.new"] = "โฟลเดอร์ใหม่",
-        ["folder.rename"] = "เปลี่ยนชื่อโฟลเดอร์",
-        ["folder.delete"] = "ลบโฟลเดอร์",
+        ["conv.moveToProject"] = "ย้ายไปโปรเจกต์",
+        ["conv.removeFromProject"] = "นำออกจากโปรเจกต์",
+        ["slash.image"] = "สร้างรูปภาพ",
+        ["slash.image.hint"] = "พิมพ์อธิบายรูปที่ต้องการ",
+        ["slash.video"] = "สร้างวิดีโอ",
+        ["slash.video.hint"] = "พิมพ์อธิบายวิดีโอที่ต้องการ",
+        ["slash.new"] = "แชทใหม่",
+        ["slash.new.hint"] = "เริ่มบทสนทนาใหม่",
+        ["slash.shortcuts"] = "ปุ่มลัดคีย์บอร์ด",
+        ["slash.shortcuts.hint"] = "ดูปุ่มลัดทั้งหมด",
+        ["slash.empty"] = "ไม่พบคำสั่งที่ตรง",
+        ["project.settings"] = "ตั้งค่าโปรเจกต์",
+        ["project.settings.subtitle"] = "ใช้ร่วมกับทุกแชทในโปรเจกต์นี้ และซิงก์กับเว็บ",
+        ["project.instructions"] = "คำสั่งประจำโปรเจกต์",
+        ["project.instructionsHint"] = "AI จะทำตามคำสั่งนี้ในทุกแชทของโปรเจกต์นี้",
+        ["project.instructions.tooLong"] = "คำสั่งยาวเกินไป (สูงสุด 8000 ตัวอักษร)",
+        ["project.kb"] = "ฐานความรู้",
+        ["project.kbHint"] = "แชทในโปรเจกต์นี้จะค้นข้อมูลจากฐานความรู้นี้ได้",
+        ["project.kb.none"] = "ไม่ใช้",
+        ["project.kb.loadFailed"] = "โหลดฐานความรู้ไม่สำเร็จ",
+        ["project.saveFailed"] = "บันทึกโปรเจกต์ไม่สำเร็จ - ติดต่อเซิร์ฟเวอร์ไม่ได้",
+        ["project.new"] = "โปรเจกต์ใหม่",
+        ["project.rename"] = "เปลี่ยนชื่อโปรเจกต์",
+        ["project.defaultName"] = "โปรเจกต์ใหม่",
+        ["project.namePrompt"] = "ชื่อโปรเจกต์:",
 
         // Header actions
         ["header.memory"] = "ความจำ",
@@ -861,6 +980,37 @@ public static class Dict
         ["chat.turnNotSynced"] = "ยังไม่ได้ซิงก์ขึ้นเซิร์ฟเวอร์ — จะลองใหม่อีกครั้ง",
         // FIX 10 — synced non-image attachment chip.
         ["attachment.save"] = "บันทึกไฟล์…",
+        // Phase 14 — ดูตัวอย่างไฟล์ในแอป
+        ["attachment.preview"] = "เปิดดูตัวอย่าง",
+        // Phase 15 — Canvas
+        ["canvas.open"] = "เปิดใน Canvas",
+        ["canvas.showCode"] = "โค้ด",
+        ["canvas.showPreview"] = "ตัวอย่าง",
+        ["canvas.copy"] = "คัดลอก",
+        ["canvas.download"] = "ดาวน์โหลด",
+        ["canvas.versions"] = "เวอร์ชัน",
+        ["canvas.saveVersion"] = "บันทึกเวอร์ชัน",
+        ["canvas.revert"] = "ย้อนกลับ",
+        ["canvas.saved"] = "บันทึกเวอร์ชันแล้ว",
+        ["canvas.saveFailed"] = "บันทึกเวอร์ชันไม่สำเร็จ",
+        ["canvas.revertFailed"] = "ย้อนกลับไปเวอร์ชันนั้นไม่สำเร็จ",
+        ["canvas.copied"] = "คัดลอกแล้ว",
+        ["canvas.runtimeError"] = "artifact นี้เกิดข้อผิดพลาดระหว่างทำงาน",
+        ["canvas.noWebView2"] = "ไม่ได้ติดตั้ง WebView2 Runtime — ใช้ Canvas ไม่ได้",
+        ["preview.showText"] = "ดูเป็นข้อความ",
+        ["preview.failed"] = "เปิดไฟล์นี้ไม่สำเร็จ",
+        ["preview.unsupported"] = "ไฟล์ชนิดนี้ดูตัวอย่างไม่ได้ — ดาวน์โหลดเพื่อเปิด",
+        ["preview.extractPending"] = "กำลังดึงข้อความจากไฟล์นี้ — ลองใหม่อีกครั้งในอีกสักครู่",
+        ["preview.extractFailed"] = "ดึงข้อความจากไฟล์นี้ไม่สำเร็จ",
+        ["preview.noText"] = "ไม่พบข้อความในไฟล์นี้",
+        ["preview.truncated"] = "แสดงเฉพาะส่วนต้นของเอกสารนี้",
+        ["preview.rowCount"] = "แสดง {shown} จาก {total} แถว",
+        ["preview.wideSheet"] = "มีบางคอลัมน์ที่ไม่ได้แสดง",
+        ["preview.loadMoreRows"] = "โหลดแถวเพิ่ม",
+        ["preview.loadMoreBlocks"] = "โหลดเนื้อหาเพิ่ม",
+        ["preview.loadMoreSlides"] = "โหลดสไลด์เพิ่ม",
+        ["preview.slideN"] = "สไลด์ {n} จาก {total}",
+        ["preview.emptySlide"] = "สไลด์นี้ไม่มีข้อความ",
         // FIX 10b — lazy document fetch failed (offline / file gone).
         ["attachment.downloadFailed"] = "ดาวน์โหลดไฟล์ไม่สำเร็จ — กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่",
         ["agent.contextTrimmed"] = "ตัดข้อความเก่าบางส่วนออกเพื่อให้พอดีกับหน้าต่างบริบทของโมเดล",
@@ -875,8 +1025,8 @@ public static class Dict
         ["dialog.delete"] = "ลบ",
         ["dialog.confirm"] = "ตกลง",
         ["dialog.error"] = "ข้อผิดพลาด:",
-        ["confirm.deleteFolder"] = "ลบโฟลเดอร์ \"{0}\" หรือไม่? แชทที่อยู่ข้างในจะย้ายกลับไปยังรายการหลัก",
-        ["confirm.deleteFolderTitle"] = "ลบโฟลเดอร์",
+        ["confirm.deleteProject"] = "ลบโปรเจกต์ \"{0}\" หรือไม่? แชทที่อยู่ข้างในจะย้ายกลับไปยังรายการหลัก",
+        ["confirm.deleteProjectTitle"] = "ลบโปรเจกต์",
         ["confirm.deleteEmpty"] = "ลบบทสนทนาที่ว่างเปล่า {0} รายการหรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้",
         ["confirm.deleteEmptyTitle"] = "ล้างแชทที่ว่างเปล่า",
         ["confirm.deleteChat"] = "ลบ \"{0}\" หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้",
@@ -922,22 +1072,31 @@ public static class Dict
 
         // R9 — Projects
         ["sidebar.projects"] = "โปรเจกต์",
-        ["project.create"] = "โปรเจกต์ใหม่",
-        ["project.name"] = "ชื่อโปรเจกต์",
-        ["project.instructions"] = "คำสั่งพิเศษ",
-        ["project.instructionsHint"] = "คำสั่งที่ AI จะทำตามในทุกแชทของโปรเจกต์นี้",
-        ["project.files"] = "ไฟล์โปรเจกต์",
-        ["project.addFile"] = "เพิ่มไฟล์",
-        ["project.noFiles"] = "ยังไม่มีไฟล์",
-        ["project.conversations"] = "บทสนทนา",
-        ["project.noConversations"] = "ยังไม่มีบทสนทนา",
-        ["project.startChat"] = "เริ่มแชท",
-        ["project.deleteConfirm"] = "ลบโปรเจกต์ \"{0}\"? บทสนทนาจะยังอยู่แต่ไม่มี context ของโปรเจกต์",
         ["project.delete"] = "ลบโปรเจกต์",
 
         // R9 — Web search
         ["input.webSearch"] = "ค้นหาเว็บ",
         ["tool.searchingWeb"] = "กำลังค้นหาเว็บ...",
+
+        // Phase 13 — โหมดคิดลึก (composer)
+        ["input.reasoning"] = "โหมดคิดลึก",
+
+        // Phase 13 — คำสั่งส่วนตัว (ตั้งค่า; ใช้ฟิลด์เดียวกับเว็บ)
+        ["settings.personal"] = "คำสั่งส่วนตัว",
+        ["settings.personal.subtitle"] = "ใช้กับทุกแชทใหม่ ทั้งบนเครื่องนี้และบนเว็บ",
+        ["settings.personal.about"] = "เกี่ยวกับคุณ",
+        ["settings.personal.respond"] = "อยากให้ AI ตอบแบบไหน",
+        ["settings.personal.saved"] = "บันทึกแล้ว",
+        ["settings.personal.saveFailed"] = "บันทึกไม่สำเร็จ - ติดต่อเซิร์ฟเวอร์ไม่ได้",
+        ["settings.personal.loadFailed"] = "โหลดคำสั่งส่วนตัวไม่สำเร็จ ถ้าบันทึกตอนนี้ข้อความเดิมจะถูกทับ - ลองใหม่ภายหลัง",
+        ["settings.personal.tooLong"] = "แต่ละช่องยาวได้ไม่เกิน 1500 ตัวอักษร",
+
+        // Phase 13 — การ์ด run_python (หัวการ์ดใช้หัวเครื่องมือร่วมเดิม)
+        ["coderun.code"] = "โค้ด",
+        ["coderun.output"] = "ผลลัพธ์",
+        ["coderun.noOutput"] = "(ไม่มีผลลัพธ์ถูกพิมพ์ออกมา)",
+        ["coderun.timedOut"] = "โค้ดใช้เวลานานเกินไป จึงถูกหยุด",
+        ["coderun.truncated"] = "ผลลัพธ์ถูกตัดให้สั้นลง",
 
         // R9 — Tool cards
         ["tool.input"] = "สิ่งที่ทำ",
@@ -1061,6 +1220,24 @@ public static class Dict
         ["msg.branchNext"] = "เวอร์ชันถัดไป",
         ["tool.toggleDetails"] = "แสดงรายละเอียดเครื่องมือ",
         ["media.playPause"] = "เล่นหรือหยุดชั่วคราว",
+        // Phase 14 Task 3 — สร้างไฟล์เสียง
+        ["media.audioTitle"] = "สร้างไฟล์เสียง",
+        ["media.audioSubtitle"] = "ให้เสียงพูดอ่านข้อความ หรือสร้างเพลงขึ้นมาใหม่",
+        ["media.modeSpeech"] = "เสียงพูด",
+        ["media.modeMusic"] = "เพลง",
+        ["media.tts.placeholder"] = "ข้อความที่ต้องการให้อ่าน",
+        ["media.music.placeholder"] = "อธิบายเพลงที่ต้องการ",
+        ["media.voice"] = "เสียง",
+        ["media.voice.default"] = "ค่าเริ่มต้น",
+        ["media.voice.narrator"] = "ผู้บรรยาย",
+        ["media.duration"] = "ความยาว",
+        ["media.generateSpeech"] = "สร้างเสียงพูด",
+        ["media.generateMusic"] = "สร้างเพลง",
+        ["media.generatingSpeech"] = "กำลังสร้างเสียงพูด…",
+        ["media.generatingMusic"] = "กำลังสร้างเพลง…",
+        ["media.genFailed"] = "สร้างไฟล์เสียงไม่สำเร็จ",
+        ["media.promptTooLong"] = "ข้อความยาวเกินไป กรุณาย่อให้สั้นลงแล้วลองใหม่",
+        ["media.audioReady"] = "เสร็จแล้ว — เพิ่มไฟล์เสียงลงในแชทให้แล้ว",
 
         // R9 — Connectors
         ["menu.connectors"] = "เชื่อมต่อ",

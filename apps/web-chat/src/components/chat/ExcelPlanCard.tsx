@@ -99,10 +99,11 @@ export function ExcelPlanCard({ convId, plan }: Props) {
     setStatus("running");
     setError(null);
     try {
-      const srcId = plan.source_file_id;
-      if (!srcId) throw new Error("plan is missing source_file_id");
+      // No source_file_id → create-from-scratch (Phase 8). The server
+      // forces operation=create_workbook in that mode, so a plan the
+      // model wrote without an attachment executes instead of 404ing.
       const res = await api.executeExcelPlan(convId, {
-        source_file_id: srcId,
+        source_file_id: plan.source_file_id || undefined,
         output_filename: plan.output_filename,
         plan,
       });

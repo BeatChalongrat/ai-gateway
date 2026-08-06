@@ -49,7 +49,7 @@ public class SidebarCommandTypeSafetyTests
     {
         yield return new SidebarGroupHeaderRow("TODAY");
         yield return new SidebarSearchHeaderRow();
-        yield return new FolderConversationRow(Conv("wrapped"));
+        yield return new ProjectConversationRow(Conv("wrapped"));
         yield return "an arbitrary string row";
     }
 
@@ -64,9 +64,9 @@ public class SidebarCommandTypeSafetyTests
             (nameof(vm.RenameCommand), vm.RenameCommand),
             (nameof(vm.DeleteCommand), vm.DeleteCommand),
             (nameof(vm.OpenMessageHitCommand), vm.OpenMessageHitCommand),
-            (nameof(vm.RenameFolderCommand), vm.RenameFolderCommand),
-            (nameof(vm.DeleteFolderCommand), vm.DeleteFolderCommand),
-            (nameof(vm.MoveToNewFolderCommand), vm.MoveToNewFolderCommand),
+            (nameof(vm.RenameProjectCommand), vm.RenameProjectCommand),
+            (nameof(vm.DeleteProjectCommand), vm.DeleteProjectCommand),
+            (nameof(vm.MoveToNewProjectCommand), vm.MoveToNewProjectCommand),
         };
 
         foreach (var (name, command) in commands)

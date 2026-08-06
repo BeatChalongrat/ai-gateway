@@ -396,6 +396,18 @@ public static class AppHostBuilder
                 services.AddTransient<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>();
                 services.AddSingleton<Func<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>>(
                     sp => () => sp.GetRequiredService<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>());
+                // Phase 12 — project settings dialog, built per project row.
+                services.AddSingleton(sp =>
+                {
+                    Func<SranDesktop.Application.Models.ProjectDto,
+                         SranDesktop.Presentation.Views.Dialogs.ProjectSettingsDialog> factory =
+                        project => new SranDesktop.Presentation.Views.Dialogs.ProjectSettingsDialog(
+                            new SranDesktop.Presentation.ViewModels.ProjectSettingsViewModel(
+                                sp.GetRequiredService<SranDesktop.Application.Interfaces.IChatEdgeApiClient>(),
+                                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SranDesktop.Presentation.ViewModels.ProjectSettingsViewModel>>(),
+                                project));
+                    return factory;
+                });
                 services.AddSingleton<MainWindow>();
             })
             .Build();

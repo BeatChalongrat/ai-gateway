@@ -87,6 +87,53 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Personal instructions (Phase 13 Task 1) — account-wide, stored
+                     on the server, so this is the same text the web Projects page
+                     edits. Its own Save because it is a network write. -->
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="{loc:T settings.personal}" Style="{StaticResource SectionHeader}" />
+                        <TextBlock Text="{loc:T settings.personal.subtitle}"
+                                   FontSize="12" Margin="0,-8,0,12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+
+                        <TextBlock Text="{loc:T settings.personal.about}" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding AboutYou, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap"
+                                 MinHeight="64" MaxHeight="120"
+                                 VerticalScrollBarVisibility="Auto" />
+                        <TextBlock HorizontalAlignment="Right" FontSize="10" Margin="0,2,0,10"
+                                   Foreground="{DynamicResource TextTertiaryBrush}">
+                            <Run Text="{Binding AboutYouLength, Mode=OneWay}" />
+                            <Run Text="/" />
+                            <Run Text="{Binding PersonalInstructionsMax, Mode=OneWay}" />
+                        </TextBlock>
+
+                        <TextBlock Text="{loc:T settings.personal.respond}" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding RespondStyle, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap"
+                                 MinHeight="64" MaxHeight="120"
+                                 VerticalScrollBarVisibility="Auto" />
+                        <TextBlock HorizontalAlignment="Right" FontSize="10" Margin="0,2,0,4"
+                                   Foreground="{DynamicResource TextTertiaryBrush}">
+                            <Run Text="{Binding RespondStyleLength, Mode=OneWay}" />
+                            <Run Text="/" />
+                            <Run Text="{Binding PersonalInstructionsMax, Mode=OneWay}" />
+                        </TextBlock>
+
+                        <DockPanel Margin="0,6,0,0">
+                            <Button DockPanel.Dock="Right" MinWidth="90" Padding="10,5"
+                                    Content="{loc:T common.save}"
+                                    Command="{Binding SavePersonalInstructionsCommand}"
+                                    IsEnabled="{Binding CanSavePersonalInstructions}" />
+                            <TextBlock Text="{Binding PersonalInstructionsStatus}"
+                                       FontSize="11" TextWrapping="Wrap"
+                                       VerticalAlignment="Center" Margin="0,0,10,0"
+                                       Foreground="{DynamicResource TextTertiaryBrush}" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
                 <!-- Desktop Integration -->
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>

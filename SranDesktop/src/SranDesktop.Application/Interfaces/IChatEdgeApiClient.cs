@@ -33,6 +33,21 @@ public interface IChatEdgeApiClient
     /// <summary>Toggle long-term memory capture/use for this conversation.</summary>
     Task<ConversationDto> SetConversationMemoryAsync(string id, bool enabled, CancellationToken ct = default);
 
+    /// <summary>Archive or restore a conversation (Phase 14). Archiving hides
+    /// it from the main list without destroying anything — the same PATCH the
+    /// web archive view uses.</summary>
+    Task<ConversationDto> SetConversationArchivedAsync(string id, bool archived, CancellationToken ct = default);
+
+    /// <summary>The archive view: lists ONLY archived conversations
+    /// (<c>GET /conversations?archived=1</c>).</summary>
+    Task<ConversationListResponse> ListArchivedConversationsAsync(
+        string? cursor = null, int limit = 50, CancellationToken ct = default);
+
+    /// <summary>Turn Thinking Mode on/off for this conversation (Phase 13).
+    /// Same PATCH field the web composer's brain button writes, so the state
+    /// follows the conversation across clients.</summary>
+    Task<ConversationDto> SetConversationReasoningAsync(string id, bool enabled, CancellationToken ct = default);
+
     Task DeleteConversationAsync(string id, CancellationToken ct = default);
 
     // ── Desktop agent-conversation backup mirror (Phase 3 push sync) ────────
@@ -49,18 +64,72 @@ public interface IChatEdgeApiClient
         string serverConversationId, IReadOnlyList<ImportMessageItem> messages,
         CancellationToken ct = default);
 
-    /// <summary>The caller's chat folders, ordered by position.</summary>
-    Task<FolderListResponse> ListFoldersAsync(CancellationToken ct = default);
+    /// <summary>The caller's chat projects, ordered by position.</summary>
+    Task<ProjectListResponse> ListProjectsAsync(CancellationToken ct = default);
 
-    Task<FolderDto> CreateFolderAsync(string name, CancellationToken ct = default);
+    Task<ProjectDto> CreateProjectAsync(string name, CancellationToken ct = default);
 
-    Task<FolderDto> RenameFolderAsync(string id, string name, CancellationToken ct = default);
+    Task<ProjectDto> RenameProjectAsync(string id, string name, CancellationToken ct = default);
 
-    /// <summary>Deletes a folder; its conversations become unfiled server-side.</summary>
-    Task DeleteFolderAsync(string id, CancellationToken ct = default);
+    /// <summary>Deletes a project; its conversations become unfiled server-side.</summary>
+    Task DeleteProjectAsync(string id, CancellationToken ct = default);
 
-    /// <summary>Files a conversation into a folder, or unfiles it when <paramref name="folderId"/> is null.</summary>
-    Task MoveConversationToFolderAsync(string conversationId, string? folderId, CancellationToken ct = default);
+    /// <summary>Patch a project's shared instructions (Phase 12). Same
+    /// contract as the web Projects page — the server caps the length and
+    /// every chat in the project inherits the text at prompt-compile time.</summary>
+    Task<ProjectDto> UpdateProjectInstructionsAsync(
+        string id, string instructions, CancellationToken ct = default);
+
+    /// <summary>Attach (or detach, with null) the project's knowledge base.</summary>
+    Task<ProjectDto> SetProjectKnowledgeBaseAsync(
+        string id, string? knowledgeBaseId, CancellationToken ct = default);
+
+    /// <summary>Files a conversation into a project, or unfiles it when <paramref name="projectId"/> is null.</summary>
+    Task MoveConversationToProjectAsync(string conversationId, string? projectId, CancellationToken ct = default);
+
+    /// <summary>Account-wide custom instructions (Phase 13). The same two
+    /// fields the web Projects page edits — read them before showing the
+    /// editor so the desktop never overwrites text set on the web.</summary>
+    Task<UserPreferencesDto> GetPreferencesAsync(CancellationToken ct = default);
+
+    /// <summary>Upserts the account-wide custom instructions. The server
+    /// merges field-by-field, so both are always sent together here.</summary>
+    Task<UserPreferencesDto> UpdatePreferencesAsync(
+        string about, string respond, CancellationToken ct = default);
+
+    // ── Canvas artifacts (Phase 15 — the server C3 surface) ────────────────
+    // The SAME endpoints the web canvas uses, so a version written on the
+    // desktop shows up on the web and vice versa.
+
+    /// <summary>Newest version of every artifact in the conversation.</summary>
+    Task<CanvasArtifactListResponse> ListCanvasArtifactsAsync(
+        string conversationId, CancellationToken ct = default);
+
+    /// <summary>Appends the NEXT version for this artifact key (v1 when new).</summary>
+    Task<CanvasArtifactDto> SaveCanvasArtifactAsync(
+        string conversationId, SaveCanvasArtifactRequest request, CancellationToken ct = default);
+
+    /// <summary>Full version history for one lineage, newest first.</summary>
+    Task<CanvasVersionListResponse> ListCanvasVersionsAsync(
+        string conversationId, string artifactKey, CancellationToken ct = default);
+
+    /// <summary>Reverts by APPENDING the old content as a new version — the
+    /// history is never rewritten.</summary>
+    Task<CanvasArtifactDto> RevertCanvasArtifactAsync(
+        string conversationId, string artifactKey, int version, CancellationToken ct = default);
+
+    // ── Media generation (Phase 14 Task 3) ─────────────────────────────────
+    // Direct dispatch: submit → poll → fetch the artifact bytes. See the
+    // remarks on AudioGenerationRequest for why audio is not a tool.
+
+    Task<MediaGenSubmitResponse> SubmitAudioGenerationAsync(
+        AudioGenerationRequest request, CancellationToken ct = default);
+
+    Task<MediaJobStatus> GetMediaJobAsync(string jobId, CancellationToken ct = default);
+
+    /// <summary>The finished artifact's bytes, through the authed client — the
+    /// job's output_url is gateway-relative and cannot be fetched directly.</summary>
+    Task<byte[]> DownloadMediaJobOutputAsync(string jobId, CancellationToken ct = default);
 
     Task<ModelListResponse> ListModelsAsync(CancellationToken ct = default);
 
@@ -138,6 +207,21 @@ public interface IChatEdgeApiClient
     /// scanned PDF, which only the server-side OCR pipeline can handle. The
     /// status is authoritative: text arrives empty until it reads "completed".</summary>
     Task<FileTextDto> GetFileTextAsync(string fileId, CancellationToken ct = default);
+
+    /// <summary>GET .../files/{id}/preview-data — the STRUCTURE of an office
+    /// attachment (Phase 16): a window of one sheet with every sheet's name,
+    /// Word blocks in document order, or one entry per slide.
+    ///
+    /// <paramref name="sheet"/> only means anything for a workbook;
+    /// <paramref name="offset"/>/<paramref name="limit"/> count rows, blocks or
+    /// slides depending on the file. Throws <see cref="HttpRequestException"/>
+    /// with 415 when the type has no structured view and 503 when the server
+    /// cannot produce one — in both cases the caller falls back to
+    /// <see cref="GetFileTextAsync"/>, which is what every deployment had
+    /// before this route existed.</summary>
+    Task<FilePreviewDataDto> GetFilePreviewDataAsync(
+        string fileId, int sheet = 0, int offset = 0, int limit = 0,
+        CancellationToken ct = default);
 
     // ── Plan execution (R7 Feature C) ───────────────────────────────────────
 

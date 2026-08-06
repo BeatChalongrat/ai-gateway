@@ -52,6 +52,11 @@ type StreamSnapshot struct {
 	VideoStatus    string
 	SearchStatus   string
 	FallbackInfo   map[string]any
+	// CodeExecutions are the run_python cards seen so far, in first-seen
+	// order, each collapsed to its LATEST frame (the "running" frame is
+	// superseded by the terminal one). Replaying them restores the
+	// code+output cards after a mid-stream reconnect.
+	CodeExecutions []CodeExecutionUpdate
 	// Terminal is non-nil when the generation already ended; Events
 	// from Subscribe is nil in that case.
 	Terminal *StreamUpdate
@@ -72,11 +77,22 @@ type brokerEntry struct {
 	search    string
 	fallback  map[string]any
 	terminal  *StreamUpdate
+	// codeRuns keeps the latest frame per run_python call, plus the
+	// order they first appeared, so the snapshot replays them the way
+	// the live stream delivered them.
+	codeRuns  map[string]CodeExecutionUpdate
+	codeOrder []string
 	subs      map[int]*resumeSubscriber
 	nextSub   int
 }
 
 func (e *brokerEntry) snapshotLocked() StreamSnapshot {
+	var runs []CodeExecutionUpdate
+	for _, id := range e.codeOrder {
+		if r, ok := e.codeRuns[id]; ok {
+			runs = append(runs, r)
+		}
+	}
 	return StreamSnapshot{
 		Content:        e.content.String(),
 		Reasoning:      e.reasoning.String(),
@@ -85,6 +101,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		VideoStatus:    e.video,
 		SearchStatus:   e.search,
 		FallbackInfo:   e.fallback,
+		CodeExecutions: runs,
 		Terminal:       e.terminal,
 	}
 }
@@ -165,6 +182,15 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.FallbackInfo != nil {
 		e.fallback = ev.FallbackInfo
+	}
+	if ev.CodeExecution != nil && ev.CodeExecution.ID != "" {
+		if e.codeRuns == nil {
+			e.codeRuns = make(map[string]CodeExecutionUpdate)
+		}
+		if _, seen := e.codeRuns[ev.CodeExecution.ID]; !seen {
+			e.codeOrder = append(e.codeOrder, ev.CodeExecution.ID)
+		}
+		e.codeRuns[ev.CodeExecution.ID] = *ev.CodeExecution
 	}
 	terminal := ev.Done || ev.Err != nil
 	if terminal {
