@@ -7,6 +7,7 @@ gateway's domain exception hierarchy.
 from __future__ import annotations
 
 import asyncio
+import random
 
 import httpx
 
@@ -19,8 +20,45 @@ from app.core.exceptions import (
     UpstreamBadResponseError,
 )
 
-# HTTP status codes that are retryable
-_RETRYABLE_STATUS = {429, 500, 502, 503}
+# HTTP status codes that are retryable. 504 (upstream LB/gateway
+# timeout) is as transient as 502/503 — Batch A added it.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+# Ceiling for any single retry sleep — also caps an honored Retry-After
+# so a provider saying "come back in 120s" can't stall a synchronous
+# request past its own middleware/worker timeouts. Deliberately a
+# constant: nobody tunes this per deployment.
+_MAX_RETRY_SLEEP_SECONDS = 10.0
+
+
+def _backoff_delay(
+    base_delay: float, attempt: int, retry_after: float | None = None
+) -> float:
+    """Exponential backoff with EQUAL JITTER, honoring Retry-After.
+
+    Equal jitter (half deterministic + half random) keeps a floor under
+    the delay while desynchronizing retries — a burst that failed
+    together must not retry together and re-flatten the same box
+    (thundering herd). When the provider sent a parseable Retry-After
+    (429/503 — the box saying "I'm full"), it acts as a FLOOR under the
+    computed delay; the constant ceiling above always wins last.
+    """
+    delay = base_delay * (2 ** attempt)
+    delay = delay / 2 + random.uniform(0.0, delay / 2)
+    if retry_after is not None and retry_after > 0:
+        delay = max(delay, retry_after)
+    return min(delay, _MAX_RETRY_SLEEP_SECONDS)
+
+
+def _parse_retry_after(response: httpx.Response) -> float | None:
+    """Seconds form of Retry-After only; HTTP-date form is ignored."""
+    raw = response.headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 # Context-window-exceeded signatures, matched case-insensitively against a
 # provider 400 body (and ONLY a 400 — a 5xx that mentions tokens is a server
@@ -179,15 +217,20 @@ async def call_with_retry(
         except httpx.HTTPStatusError as exc:
             last_exc = exc
             if exc.response.status_code in _RETRYABLE_STATUS and attempt < attempts - 1:
-                delay = base_delay * (2 ** attempt)
-                await asyncio.sleep(delay)
+                retry_after = (
+                    _parse_retry_after(exc.response)
+                    if exc.response.status_code in (429, 503)
+                    else None
+                )
+                await asyncio.sleep(
+                    _backoff_delay(base_delay, attempt, retry_after)
+                )
                 continue
             raise map_provider_error(exc, provider_name) from exc
         except (httpx.TimeoutException, httpx.ConnectError) as exc:
             last_exc = exc
             if attempt < attempts - 1:
-                delay = base_delay * (2 ** attempt)
-                await asyncio.sleep(delay)
+                await asyncio.sleep(_backoff_delay(base_delay, attempt))
                 continue
             raise map_provider_error(exc, provider_name) from exc
 

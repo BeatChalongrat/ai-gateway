@@ -35,12 +35,31 @@ _DEFAULT_HEADERS = {
 }
 
 # Pool sizing. The gateway talks to <~10 distinct provider base URLs;
-# each gets its own client/pool. These limits are per-client (per
-# base_url), sized for the Phase-1 target (low-hundreds RPS / worker)
-# with headroom; tune via the constants if a provider needs more.
-_MAX_KEEPALIVE_CONNECTIONS = 20
-_MAX_CONNECTIONS = 50
-_KEEPALIVE_EXPIRY = 30.0
+# each gets its own client/pool. Batch A: the limits moved to settings
+# (env PROVIDER_POOL_MAX_CONNECTIONS / _MAX_KEEPALIVE_CONNECTIONS /
+# _KEEPALIVE_EXPIRY_SECONDS, defaults identical to the old constants:
+# 50 / 20 / 30s) plus a per-provider max_connections override map
+# (PROVIDER_POOL_OVERRIDES JSON) so a small self-hosted box isn't
+# granted 50 warm sockets it can't use.
+def _pool_limits_for(provider_name: str | None) -> httpx.Limits:
+    """Resolve pool limits: per-provider override → env default."""
+    from app.core.config import settings
+
+    max_connections = settings.provider_pool_max_connections
+    if provider_name:
+        max_connections = settings.provider_pool_overrides_map.get(
+            provider_name, max_connections
+        )
+    # Keepalive can never usefully exceed the connection cap.
+    max_keepalive = min(
+        settings.provider_pool_max_keepalive_connections, max_connections
+    )
+    return httpx.Limits(
+        max_keepalive_connections=max_keepalive,
+        max_connections=max_connections,
+        keepalive_expiry=settings.provider_pool_keepalive_expiry_seconds,
+    )
+
 
 # One client per base_url, lazily created and reused. Bound to the
 # worker's single event loop (UvicornWorker = one loop per process).
@@ -49,7 +68,10 @@ _lock = asyncio.Lock()
 
 
 def _build_async_client(
-    base_url: str, timeout_connect: float, timeout_read: float
+    base_url: str,
+    timeout_connect: float,
+    timeout_read: float,
+    provider_name: str | None = None,
 ) -> httpx.AsyncClient:
     timeout = httpx.Timeout(
         connect=timeout_connect,
@@ -57,16 +79,11 @@ def _build_async_client(
         write=5.0,
         pool=5.0,
     )
-    limits = httpx.Limits(
-        max_keepalive_connections=_MAX_KEEPALIVE_CONNECTIONS,
-        max_connections=_MAX_CONNECTIONS,
-        keepalive_expiry=_KEEPALIVE_EXPIRY,
-    )
     return httpx.AsyncClient(
         base_url=base_url,
         headers=dict(_DEFAULT_HEADERS),
         timeout=timeout,
-        limits=limits,
+        limits=_pool_limits_for(provider_name),
     )
 
 
@@ -75,6 +92,7 @@ async def get_provider_client(
     base_url: str,
     timeout_connect: float = 5.0,
     timeout_read: float = 30.0,
+    provider_name: str | None = None,
 ) -> httpx.AsyncClient:
     """Return the shared pooled client for ``base_url`` (lazy + cached).
 
@@ -82,10 +100,12 @@ async def get_provider_client(
     client that has been closed (e.g. shutdown raced a late request) is
     transparently rebuilt so callers never get a broken client.
 
-    The timeout is taken from the FIRST creation for a given base_url
-    (all callers pass the same ``settings.provider_timeout_*`` values,
-    so this is uniform); per-request overrides remain possible via the
-    request call's ``timeout=`` argument.
+    The timeout AND pool limits are captured at the FIRST creation for
+    a given base_url (all callers pass the same settings values, and
+    base_url↔provider is 1:1 in practice, so this is uniform);
+    per-request overrides remain possible via the request call's
+    ``timeout=`` argument. ``provider_name`` only selects the pool-size
+    override — omitting it falls back to the global env defaults.
     """
     client = _clients.get(base_url)
     if client is not None and not client.is_closed:
@@ -93,7 +113,9 @@ async def get_provider_client(
     async with _lock:
         client = _clients.get(base_url)
         if client is None or client.is_closed:
-            client = _build_async_client(base_url, timeout_connect, timeout_read)
+            client = _build_async_client(
+                base_url, timeout_connect, timeout_read, provider_name
+            )
             _clients[base_url] = client
         return client
 

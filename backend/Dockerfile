@@ -37,5 +37,9 @@ RUN pip install --no-cache-dir \
 
 COPY . .
 
-# Run migrations then start with gunicorn managing uvicorn workers
-CMD ["sh", "-c", "python -m alembic upgrade head && gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8080 --timeout 60 --graceful-timeout 30 --worker-connections 100"]
+# Run migrations then start with gunicorn managing uvicorn workers.
+# GUNICORN_WORKERS is the single worker-count knob (also read by
+# scripts/start.sh and the loadtest compose) — remember the per-provider
+# concurrency caps are per-worker semaphores, so a provider's effective
+# ceiling is cap × GUNICORN_WORKERS.
+CMD ["sh", "-c", "python -m alembic upgrade head && gunicorn app.main:app -w ${GUNICORN_WORKERS:-4} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8080 --timeout 60 --graceful-timeout 30 --worker-connections 100"]
