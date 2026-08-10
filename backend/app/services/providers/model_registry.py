@@ -46,21 +46,13 @@ if TYPE_CHECKING:
 def _derive_cost_tier(cost_per_input_token: float) -> str:
     """Derive cost_tier from real input token price.
 
-    Thresholds (in $/token):
-      ≤ $0.50 / 1M tokens → "budget"
-      ≤ $3.00 / 1M tokens → "standard"
-      otherwise           → "premium"
-
-    A zero/unknown price returns the neutral "standard" bucket so the
-    rest of the routing path keeps working with a sensible default.
+    Thresholds live in ``providers.cost_tiers`` (shared with the
+    discovery service); this wrapper keeps the historical name for the
+    seed migration and tests.
     """
-    if cost_per_input_token == 0.0:
-        return "standard"
-    if cost_per_input_token <= 0.0000005:   # ≤ $0.50/1M
-        return "budget"
-    if cost_per_input_token <= 0.000003:    # ≤ $3.00/1M
-        return "standard"
-    return "premium"
+    from app.services.providers.cost_tiers import derive_cost_tier
+
+    return derive_cost_tier(cost_per_input_token)
 
 
 # ---------------------------------------------------------------------------
