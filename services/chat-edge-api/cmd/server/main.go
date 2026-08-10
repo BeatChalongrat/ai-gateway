@@ -163,6 +163,9 @@ func main() {
 		cfg.ServiceJWTSecret, cfg.ServiceJWTTTL,
 		cfg.InternalServiceSecret,
 	)
+	if cfg.GatewayClientTimeout > 0 {
+		gateway.SetTotalTimeout(cfg.GatewayClientTimeout)
+	}
 	titles := service.NewTitleService(gateway)
 	titles.SetRepos(conversations, messages)
 
