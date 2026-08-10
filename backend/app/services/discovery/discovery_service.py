@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.models.model_config import ModelConfigORM
 from app.services.discovery.pricing_fetcher import PricingFetcher
 from app.services.discovery.provider_discovery import (
+    DEFAULT_MAX_CONTEXT_TOKENS,
     DiscoveredModel,
     PROVIDER_DISCOVERY,
 )
@@ -100,27 +101,16 @@ def _enrich_with_pricing(
         cost_out = pricing.get("output_cost_per_token")
         if isinstance(cost_out, (int, float)) and cost_out >= 0:
             model.cost_per_output_token = float(cost_out)
-    if model.max_context_tokens == 128000:
+    if model.max_context_tokens == DEFAULT_MAX_CONTEXT_TOKENS:
         max_tokens = pricing.get("max_tokens") or pricing.get("max_input_tokens")
         if isinstance(max_tokens, int) and max_tokens > 0:
             model.max_context_tokens = max_tokens
 
 
-def _derive_cost_tier(price: float) -> str:
-    """Same threshold helper as ``model_registry._derive_cost_tier``.
-
-    Duplicated to avoid an import cycle — the registry module imports
-    from this package indirectly via the lifespan wiring, and pulling
-    the helper from there during sync risks an ImportError on cold
-    startup.
-    """
-    if price == 0.0:
-        return "standard"
-    if price <= 0.0000005:
-        return "budget"
-    if price <= 0.000003:
-        return "standard"
-    return "premium"
+# Thresholds shared with model_registry via the leaf module
+# ``providers.cost_tiers`` (safe from the registry lifespan cycle the
+# old duplicated copy dodged).
+from app.services.providers.cost_tiers import derive_cost_tier as _derive_cost_tier  # noqa: E402
 
 
 class ModelDiscoveryService:
@@ -300,6 +290,12 @@ class ModelDiscoveryService:
         from app.core.config import settings
 
         auto_add = bool(getattr(settings, "model_discovery_auto_add", False))
+        # Per-provider auto-add allowlist (C2 refinement): self-hosted
+        # boxes are the operator's own catalog — auto-adding them is the
+        # whole point of discovery there — while the global flag stays
+        # off so cloud catalogs (e.g. OpenRouter's hundreds of models
+        # with un-vetted pricing) still land as log-only.
+        auto_add_providers = settings.model_discovery_auto_add_providers_set
         inserted = 0
         updated = 0
         skipped_override = 0
@@ -319,7 +315,7 @@ class ModelDiscoveryService:
                 key = (model.provider, model.model)
                 row = existing.get(key)
                 if row is None:
-                    if not auto_add:
+                    if not (auto_add or model.provider in auto_add_providers):
                         # Log-only (C2): surface the new model for admin
                         # review; don't add it to the routable pool.
                         slug = f"{model.provider}/{model.model}"

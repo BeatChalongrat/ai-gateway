@@ -1043,7 +1043,22 @@ async def chat_completions(
             session=session,
             required=_stream_required_caps,
         )
-        if fb_candidate is not None:
+        # A candidate can name a provider with model_configs rows but no
+        # registered adapter (e.g. a seeded custom provider mid-rollout);
+        # a bare ``adapters[...]`` index would KeyError here. Skip the
+        # swap instead — the original route proceeds and the normal
+        # error path handles its failure.
+        _fb_adapter = (
+            orchestrator.provider_dispatcher.adapters.get(fb_candidate["provider"])
+            if fb_candidate is not None
+            else None
+        )
+        if fb_candidate is not None and _fb_adapter is None:
+            log.warning(
+                "streaming_pre_check_swap_skipped_no_adapter",
+                provider=fb_candidate["provider"],
+            )
+        if fb_candidate is not None and _fb_adapter is not None:
             log.info(
                 "streaming_pre_check_swap",
                 original_provider=_stream_original_provider,
@@ -1054,9 +1069,7 @@ async def chat_completions(
             route.provider_name = fb_candidate["provider"]
             route.model_name = fb_candidate["model"]
             provider_api_key = fb_candidate["api_key"]
-            adapter = orchestrator.provider_dispatcher.adapters[
-                fb_candidate["provider"]
-            ]
+            adapter = _fb_adapter
             _stream_fallback_used = True
             _stream_attempt_number = 2
             _stream_fallback_attempts.append(
@@ -2340,11 +2353,28 @@ async def chat_completions(
                         to_provider=fb_candidate["provider"],
                         to_model=fb_candidate["model"],
                     )
+                    # Same defensive guard as the pre-check swap: a
+                    # candidate whose provider has no registered adapter
+                    # must end the stream cleanly, not KeyError mid-SSE.
+                    _fb_stream_adapter = (
+                        orchestrator.provider_dispatcher.adapters.get(
+                            fb_candidate["provider"]
+                        )
+                    )
+                    if _fb_stream_adapter is None:
+                        log.warning(
+                            "stream_in_generator_fallback_no_adapter",
+                            provider=fb_candidate["provider"],
+                        )
+                        yield _emit_error(
+                            code="all_models_failed",
+                            message="Unable to get a response right now",
+                            attempts=list(_stream_fallback_attempts),
+                        )
+                        return
                     route.provider_name = fb_candidate["provider"]
                     route.model_name = fb_candidate["model"]
-                    stream_adapter = orchestrator.provider_dispatcher.adapters[
-                        fb_candidate["provider"]
-                    ]
+                    stream_adapter = _fb_stream_adapter
                     stream_api_key = fb_candidate["api_key"]
                     _stream_fallback_used = True
                     _stream_attempt_number += 1

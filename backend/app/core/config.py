@@ -377,6 +377,11 @@ class Settings(BaseSettings):
     # runs the same probe on demand regardless of this flag.
     model_discovery_auto_add: bool = False
     model_discovery_health_check: bool = False
+    # Per-provider auto-add allowlist (CSV). Providers here get their
+    # discovered models auto-inserted even while the global flag above
+    # stays False. Default: the self-hosted set — the operator's own
+    # box IS the catalog, there is no un-vetted-pricing risk.
+    model_discovery_auto_add_providers: str = "sranai"
 
     # Phase-1 async request-log queue (``app.services.request_log_queue``).
     # The orchestrator's success path enqueues records instead of
@@ -711,6 +716,14 @@ class Settings(BaseSettings):
     @property
     def dlp_disabled_detectors_list(self) -> list[str]:
         return [d.strip() for d in self.dlp_disabled_detectors.split(",") if d.strip()]
+
+    @property
+    def model_discovery_auto_add_providers_set(self) -> frozenset[str]:
+        return frozenset(
+            p.strip().lower()
+            for p in self.model_discovery_auto_add_providers.split(",")
+            if p.strip()
+        )
 
     @property
     def effective_master_key(self) -> str:
