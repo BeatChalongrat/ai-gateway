@@ -25,6 +25,7 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	"strings"
@@ -62,6 +63,34 @@ type GatewayClient struct {
 	http *http.Client
 }
 
+// newGatewayTransport builds the pooled transport for the chat-edge →
+// gateway hop (Batch A). Previously this client used
+// http.DefaultTransport, whose MaxIdleConnsPerHost=2 meant every
+// concurrent request past the 2nd paid a fresh TCP(+TLS) handshake and
+// its connection was discarded on return — measurable TTFB churn on the
+// hottest internal hop. Values mirror the gateway proxy's transport
+// (services/gateway/internal/proxy/proxy.go), which is tuned for the
+// same SSE-heavy traffic.
+func newGatewayTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		// Time to response HEADERS only — the streamed body is
+		// unbounded (an SSE generation may run for many minutes).
+		// The gateway sends SSE headers immediately, so a slow
+		// first-token wait does not trip this.
+		ResponseHeaderTimeout: 120 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
 func NewGatewayClient(
 	baseURL, apiKey, serviceJWTSecret string,
 	serviceJWTTTL time.Duration,
@@ -74,12 +103,27 @@ func NewGatewayClient(
 		ServiceJWTTTL:         serviceJWTTTL,
 		InternalServiceSecret: internalServiceSecret,
 		http: &http.Client{
-			// Long timeout because the LLM completion path can be
-			// slow on cold starts; streaming uses no body timeout
-			// at the transport level (set below per request).
-			Timeout: 5 * time.Minute,
+			Transport: newGatewayTransport(),
+			// No whole-request deadline by default: Client.Timeout
+			// covers the entire body read, so ANY value here severs
+			// streams that outlive it (the old 5-minute value cut
+			// long generations mid-SSE). Failure modes are bounded
+			// instead by the transport's dial/TLS/response-header
+			// timeouts plus per-request context cancellation.
+			// Operators who want a hard ceiling for non-stream
+			// traffic can set GATEWAY_CLIENT_TIMEOUT (see
+			// SetTotalTimeout / config.go).
+			Timeout: 0,
 		},
 	}
+}
+
+// SetTotalTimeout applies a whole-request deadline (headers + full
+// body). 0 keeps the default unbounded behavior. Streaming callers
+// should leave this at 0 — a total deadline severs any SSE generation
+// that outlives it.
+func (g *GatewayClient) SetTotalTimeout(d time.Duration) {
+	g.http.Timeout = d
 }
 
 // ---------------------------------------------------------------------------

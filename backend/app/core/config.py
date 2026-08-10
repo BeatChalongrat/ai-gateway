@@ -285,6 +285,38 @@ class Settings(BaseSettings):
     #                                  "anthropic":"http://localhost:9090"}'
     provider_base_url_overrides: str = ""
 
+    # --- Per-provider concurrency bulkhead (Batch A) ---------------------
+    # JSON dict provider_name → max concurrent in-flight upstream calls
+    # for that provider. Empty (default) = no caps anywhere — cloud
+    # providers keep today's behavior. Intended for small self-hosted
+    # boxes, e.g. PROVIDER_CONCURRENCY_CAPS='{"sranai": 4}'.
+    #
+    # SCOPE: the semaphore is PER WORKER PROCESS (one event loop each),
+    # so the effective ceiling a provider sees is
+    #     cap × GUNICORN_WORKERS   (× pods, if horizontally scaled).
+    # Size the number accordingly: a box that tolerates 16 concurrent
+    # requests behind 4 workers wants cap=4. A global cross-worker cap
+    # is deliberately NOT implemented here — that belongs in the Rust
+    # rate-limiter (Redis-backed), see docs/DEFERRED_WORK.md.
+    provider_concurrency_caps: str = ""
+    # How long a request may wait for a free slot before load is shed
+    # with 503 + Retry-After (non-stream) / fallback (streaming). Short
+    # by design: waiting longer just builds an invisible queue in front
+    # of a saturated box.
+    provider_concurrency_acquire_timeout_seconds: float = 1.0
+
+    # --- Outbound httpx pool sizing (Batch A; were hardcoded) ------------
+    # Per-base_url pool limits. Defaults preserve the previous constants
+    # exactly (50 / 20 / 30s). Per-provider max_connections override via
+    # JSON dict, e.g. PROVIDER_POOL_OVERRIDES='{"sranai": 8}' — a capped
+    # box doesn't need 50 warm sockets. NOTE: limits are captured when a
+    # base_url's client is FIRST built (clients are cached per base_url),
+    # so changing them needs a worker restart to take effect.
+    provider_pool_max_connections: int = 50
+    provider_pool_max_keepalive_connections: int = 20
+    provider_pool_keepalive_expiry_seconds: float = 30.0
+    provider_pool_overrides: str = ""
+
     # DLP
     dlp_enabled: bool = True
     dlp_default_profile: str = "default"
@@ -703,6 +735,48 @@ class Settings(BaseSettings):
             for k, v in data.items()
             if isinstance(v, (str,)) and v
         }
+
+    def _provider_int_map(self, raw: str, env_name: str) -> dict[str, int]:
+        """Decode a JSON provider→positive-int map; malformed = {} + warn."""
+        raw = (raw or "").strip()
+        if not raw:
+            return {}
+        try:
+            import json as _json
+
+            data = _json.loads(raw)
+        except Exception:
+            warnings.warn(
+                f"{env_name} is not valid JSON — ignoring.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        result: dict[str, int] = {}
+        for k, v in data.items():
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                result[str(k)] = n
+        return result
+
+    @property
+    def provider_concurrency_caps_map(self) -> dict[str, int]:
+        """Decoded ``PROVIDER_CONCURRENCY_CAPS`` (fail-open to {})."""
+        return self._provider_int_map(
+            self.provider_concurrency_caps, "PROVIDER_CONCURRENCY_CAPS"
+        )
+
+    @property
+    def provider_pool_overrides_map(self) -> dict[str, int]:
+        """Decoded ``PROVIDER_POOL_OVERRIDES`` (fail-open to {})."""
+        return self._provider_int_map(
+            self.provider_pool_overrides, "PROVIDER_POOL_OVERRIDES"
+        )
 
     @property
     def replicate_delivery_allowed_hosts_list(self) -> list[str]:
