@@ -192,5 +192,16 @@ def set_stored_base_url(session, provider_name: str, url: str) -> str | None:
     else:
         row.value = url
     session.flush()
-    clear_base_url_cache()
+    # PRIME the resolver cache with the new value rather than just
+    # clearing it: the row above is only FLUSHED in the caller's
+    # transaction, and ``_read_db_override`` opens its OWN session — an
+    # uncommitted write is invisible there. Model discovery runs inside
+    # this very request (add-key route) and resolves the endpoint via
+    # the cache, so it must see the value NOW. If the caller's
+    # transaction later rolls back, the stale prime self-heals at TTL
+    # expiry (30s).
+    _db_cache[provider_name] = (
+        time.monotonic() + _DB_CACHE_TTL_S,
+        url.strip().rstrip("/") or None,
+    )
     return previous or None
