@@ -19,10 +19,16 @@ const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
 const providers: NextAuthOptions["providers"] = [];
 
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  // ``hd`` pre-filters Google's account chooser to the workspace domain
+  // (GOOGLE_HOSTED_DOMAIN, e.g. "gbtech.co.th"). UX hint ONLY — a user
+  // can still pick any account; the real domain lock is enforced by the
+  // backend in oauth_service.login_or_create when /oauth/verify runs.
+  const hd = process.env.GOOGLE_HOSTED_DOMAIN;
   providers.push(
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      ...(hd ? { authorization: { params: { hd } } } : {}),
     })
   );
 }
