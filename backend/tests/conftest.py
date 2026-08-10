@@ -149,6 +149,28 @@ def _email_domain_allowlist_open_by_default(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _password_login_enabled_by_default(monkeypatch):
+    """Keep password signup/login usable for every test that doesn't
+    explicitly exercise the kill-switch.
+
+    The Phase 3 cutover ships ``PASSWORD_LOGIN_ENABLED=false`` in the
+    deployment env, but hundreds of pre-SSO fixtures create their users
+    via ``POST /portal/auth/signup`` and would all 403 if the suite
+    inherited that env. Same pattern as the domain-allowlist fixture
+    above: the unit lane forces the flag on; the kill-switch behavior
+    itself is covered by ``test_oauth_domain_lock.py``, which re-pins
+    the flag to ``False`` via monkeypatch (explicit setattr runs after
+    this autouse one).
+    """
+    try:
+        from app.core.config import settings
+    except Exception:
+        return
+    monkeypatch.setattr(settings, "password_login_enabled", True, raising=False)
+    yield
+
+
 from fastapi import Header
 
 from app.api.deps import (
