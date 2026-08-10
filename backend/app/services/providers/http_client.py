@@ -98,6 +98,24 @@ async def get_provider_client(
         return client
 
 
+async def evict_client(base_url: str) -> None:
+    """Close and drop the pooled client for ``base_url``, if any.
+
+    Called when an admin edits a provider's endpoint: without this the
+    old URL's client (and its keepalive pool) would sit in ``_clients``
+    until process shutdown. A next request for the URL would still get
+    a fresh client (cache keyed by URL), so this is hygiene, not
+    correctness.
+    """
+    async with _lock:
+        client = _clients.pop(base_url, None)
+    if client is not None:
+        try:
+            await client.aclose()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def close_all_clients() -> None:
     """Close every pooled client. Wired into the app lifespan shutdown."""
     async with _lock:
