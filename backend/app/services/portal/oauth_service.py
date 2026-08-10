@@ -27,9 +27,84 @@ import uuid
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ValidationError
+from app.core.exceptions import AuthorizationError, ValidationError
 from app.models.portal_user import PortalUserORM
 from app.services.portal import auth_service, credit_service
+
+
+def _find_central_tenant(db: Session, slug: str):
+    """Lookup half of get-or-create — split out so the race test can
+    simulate 'row not visible yet' while the DB already has it."""
+    from app.models.tenant import TenantORM
+
+    return db.execute(
+        select(TenantORM).where(TenantORM.slug == slug)
+    ).scalar_one_or_none()
+
+
+def _get_or_create_central_tenant(db: Session):
+    """Find (or lazily create) the shared internal tenant, by slug.
+
+    Idempotent via the UNIQUE constraint on Tenant.slug. Race-safe
+    (Phase 1, A2): two concurrent first-logins both miss the lookup;
+    the loser's INSERT hits the unique constraint inside a SAVEPOINT
+    (``begin_nested``) — the savepoint rolls back without poisoning
+    the outer transaction, and we re-select the winner's row instead
+    of surfacing a 500.
+    Follows the field shape of tenant_service.create_tenant_with_owner
+    minus the owner semantics — OAuth users all join as 'member'.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.config import settings
+    from app.models.tenant import TenantORM
+
+    slug = (settings.central_tenant_slug or "").strip().lower() or "gbtech"
+    tenant = _find_central_tenant(db, slug)
+    if tenant is not None:
+        return tenant
+    try:
+        with db.begin_nested():
+            tenant = TenantORM(
+                tenant_id=str(uuid.uuid4()),
+                name=(settings.central_tenant_name or "").strip() or slug,
+                slug=slug,
+                status="active",
+                region="global",
+                ner_enabled=False,
+            )
+            db.add(tenant)
+            db.flush()
+        return tenant
+    except IntegrityError:
+        # Lost the create race — the row exists now; use it.
+        tenant = db.execute(
+            select(TenantORM).where(TenantORM.slug == slug)
+        ).scalar_one_or_none()
+        if tenant is None:
+            raise
+        return tenant
+
+
+def check_email_domain_allowed(email_norm: str) -> None:
+    """Enforce the sign-in domain allowlist (server-side, Phase 0).
+
+    Empty allowlist = allow every domain (the "open to gmail later"
+    mode). Shared by OAuth login (here) and password signup
+    (auth_service.signup) so both write paths agree.
+    """
+    from app.core.config import settings
+
+    allowed = settings.allowed_email_domains_list
+    if not allowed:
+        return
+    domain = email_norm.rsplit("@", 1)[-1]
+    if domain not in allowed:
+        raise AuthorizationError(
+            "This email domain is not allowed to sign in.",
+            code="domain_not_allowed",
+            details={"domain": domain},
+        )
 
 
 def login_or_create(
@@ -40,6 +115,7 @@ def login_or_create(
     email: str,
     display_name: str | None,
     avatar_url: str | None,
+    email_verified: bool = False,
 ) -> dict:
     if provider not in ("google", "github"):
         raise ValidationError(
@@ -54,6 +130,23 @@ def login_or_create(
             "Provider did not return a valid email.",
             code="invalid_email",
         )
+
+    # -----------------------------------------------------------------
+    # Phase 0 security gates — deliberately placed BEFORE any account
+    # lookup so they cover ALL branches below: existing-OAuth login,
+    # link-onto-password-account, and create. A gate on the create
+    # branch alone would let a disallowed/unverified identity link onto
+    # an existing account and log in. ``email_verified`` defaults to
+    # False so a caller that forgets to pass the verified claim fails
+    # closed.
+    # -----------------------------------------------------------------
+    if not email_verified:
+        raise AuthorizationError(
+            "The provider has not verified this email address.",
+            code="email_not_verified",
+            details={"provider": provider},
+        )
+    check_email_domain_allowed(email_norm)
 
     # 1. Existing OAuth account?
     user = db.execute(
@@ -99,6 +192,12 @@ def login_or_create(
             except ValueError:
                 free_trial = 0
 
+            # Internal-tool tenancy: every OAuth user joins the single
+            # shared tenant. Also satisfies portal_users.tenant_id
+            # NOT NULL (migration 030) — a personal-tenant-less insert
+            # would fail on a fully migrated database.
+            tenant = _get_or_create_central_tenant(db)
+
             user = PortalUserORM(
                 id=str(uuid.uuid4()),
                 email=email_norm,
@@ -112,10 +211,16 @@ def login_or_create(
                 credit_used=0,
                 plan="free_trial",
                 status="active",
-                email_verified=True,  # the provider has already verified
+                # From the verified provider claim — the gate above
+                # already rejected anything unverified, so this is True
+                # here, but it stays claim-driven rather than hardcoded.
+                email_verified=bool(email_verified),
                 oauth_provider=provider,
                 oauth_id=oauth_id,
                 avatar_url=avatar_url,
+                tenant_id=tenant.tenant_id,
+                tenant_role="member",
+                token_version=1,
             )
             db.add(user)
             db.flush()

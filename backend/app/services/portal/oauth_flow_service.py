@@ -218,8 +218,12 @@ def exchange_code_for_verified_userinfo(
             from authlib.jose import JsonWebToken, JsonWebKey  # noqa: F401
             from authlib.oidc.core import CodeIDToken
 
-            jwks_bytes = client.get(provider_cfg["jwks_url"]).content
-            jwks = JsonWebKey.import_key_set(jwks_bytes)
+            # MUST be .json() (a dict): authlib's import_key_set only
+            # JSON-parses a *str* that endswith('}') — bytes always
+            # fail, and Google's pretty-printed body ends '\n}\n' so
+            # even .text fails ("Invalid key set format").
+            jwks_data = client.get(provider_cfg["jwks_url"]).json()
+            jwks = JsonWebKey.import_key_set(jwks_data)
             claims = JsonWebToken(["RS256"]).decode(
                 token["id_token"],
                 jwks,
@@ -240,21 +244,26 @@ def exchange_code_for_verified_userinfo(
             "sub": claims.get("sub"),
             "name": claims.get("name") or claims.get("given_name"),
             "picture": claims.get("picture"),
+            # Surfaced for the domain-lock gate in login_or_create.
+            # ``hd`` is informational only — enforcement is email domain
+            # + email_verified.
+            "email_verified": bool(claims.get("email_verified")),
+            "hd": claims.get("hd"),
         }
 
     # GitHub — no id_token; use userinfo endpoint and email endpoint.
     try:
         user = client.get(provider_cfg["userinfo_url"]).json()
-        email = user.get("email")
-        if not email:
-            # GitHub may omit email from /user if it's private; fall
-            # back to /user/emails.
-            emails = client.get(provider_cfg["emails_url"]).json()
-            primary = next(
-                (e["email"] for e in emails if e.get("primary") and e.get("verified")),
-                None,
-            )
-            email = primary
+        emails: list = []
+        try:
+            emails = client.get(provider_cfg["emails_url"]).json() or []
+        except Exception:
+            # No email scope / endpoint failure → we cannot prove
+            # verification. Fail closed (email_verified=False) below.
+            emails = []
+        email, email_is_verified = _github_pick_verified_email(
+            user.get("email"), emails
+        )
         if not email:
             raise IdTokenVerificationFailed("GitHub returned no verified email")
         return {
@@ -262,11 +271,42 @@ def exchange_code_for_verified_userinfo(
             "sub": str(user.get("id")),
             "name": user.get("name") or user.get("login"),
             "picture": user.get("avatar_url"),
+            "email_verified": email_is_verified,
+            "hd": None,
         }
     except IdTokenVerificationFailed:
         raise
     except Exception as exc:
         raise IdTokenVerificationFailed(f"userinfo fetch failed: {exc}") from exc
+
+
+def _github_pick_verified_email(
+    public_email: str | None, emails: list
+) -> tuple[str | None, bool]:
+    """Resolve (email, verified?) from GitHub's /user + /user/emails data.
+
+    GitHub has no OIDC ``email_verified`` claim, so verification status
+    must come from the /user/emails list. A public /user email that we
+    can't find in that list counts as UNVERIFIED (fail closed) — the
+    domain-lock gate downstream will reject it.
+    """
+    if public_email:
+        match = next(
+            (
+                e
+                for e in emails
+                if (e.get("email") or "").lower() == public_email.lower()
+            ),
+            None,
+        )
+        return public_email, bool(match and match.get("verified"))
+    primary = next(
+        (e for e in emails if e.get("primary") and e.get("verified")),
+        None,
+    )
+    if primary:
+        return primary["email"], True
+    return None, False
 
 
 def _provider_config(provider: str) -> dict:
@@ -361,8 +401,12 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
         # JWKS round-trip is a fresh HTTP call each verify. Acceptable
         # for the login latency budget (~150ms); a future improvement
         # is an in-process cache keyed by ``kid`` with a 1-hour TTL.
-        jwks_bytes = httpx.get(cfg["jwks_url"], timeout=10.0).content
-        jwks = JsonWebKey.import_key_set(jwks_bytes)
+        # MUST be .json() (a dict): authlib's import_key_set only
+        # JSON-parses a *str* that endswith('}') — bytes always fail,
+        # and Google's pretty-printed body ends '\n}\n' so even .text
+        # fails ("Invalid key set format").
+        jwks_data = httpx.get(cfg["jwks_url"], timeout=10.0).json()
+        jwks = JsonWebKey.import_key_set(jwks_data)
         claims = JsonWebToken(["RS256"]).decode(
             id_token,
             jwks,
@@ -382,6 +426,10 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
         "sub": claims.get("sub"),
         "name": claims.get("name") or claims.get("given_name"),
         "picture": claims.get("picture"),
+        # Surfaced for the domain-lock gate in login_or_create. ``hd``
+        # is informational only — enforcement is email + email_verified.
+        "email_verified": bool(claims.get("email_verified")),
+        "hd": claims.get("hd"),
     }
 
 
@@ -417,22 +465,13 @@ def verify_github_access_token(access_token: str) -> dict[str, Any]:
                     f"GitHub /user returned {resp.status_code}"
                 )
             user = resp.json()
-            email = user.get("email")
-            if not email:
-                emails_resp = client.get(cfg["emails_url"], headers=headers)
-                if emails_resp.status_code != 200:
-                    raise IdTokenVerificationFailed(
-                        f"GitHub /user/emails returned {emails_resp.status_code}"
-                    )
+            emails: list = []
+            emails_resp = client.get(cfg["emails_url"], headers=headers)
+            if emails_resp.status_code == 200:
                 emails = emails_resp.json() or []
-                email = next(
-                    (
-                        e["email"]
-                        for e in emails
-                        if e.get("primary") and e.get("verified")
-                    ),
-                    None,
-                )
+            email, email_is_verified = _github_pick_verified_email(
+                user.get("email"), emails
+            )
             if not email:
                 raise IdTokenVerificationFailed("GitHub returned no verified email")
     except IdTokenVerificationFailed:
@@ -446,4 +485,6 @@ def verify_github_access_token(access_token: str) -> dict[str, Any]:
         "sub": str(user.get("id")),
         "name": user.get("name") or user.get("login"),
         "picture": user.get("avatar_url"),
+        "email_verified": email_is_verified,
+        "hd": None,
     }

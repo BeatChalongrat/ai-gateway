@@ -78,6 +78,23 @@ def _portal_redis_client():
 
 _portal_login_rate_limiter: LoginRateLimiter | None = None
 _portal_signup_rate_limiter: LoginRateLimiter | None = None
+_portal_oauth_verify_rate_limiter: LoginRateLimiter | None = None
+
+
+def _require_password_login_enabled() -> None:
+    """Phase 0 kill-switch for the email+password surface.
+
+    Enforced server-side (hiding the form in the frontend is not a
+    gate). 403 keeps the routes discoverable-but-closed; the code path
+    stays intact for a future re-enable via PASSWORD_LOGIN_ENABLED.
+    """
+    from app.core.config import settings
+
+    if not settings.password_login_enabled:
+        raise AuthorizationError(
+            "Password login is disabled. Sign in with Google instead.",
+            code="password_login_disabled",
+        )
 
 
 def get_portal_login_rate_limiter() -> LoginRateLimiter:
@@ -127,6 +144,31 @@ def get_portal_signup_rate_limiter() -> LoginRateLimiter:
             ip_key_prefix="portal_signup_ip:",
         )
     return _portal_signup_rate_limiter
+
+
+def get_portal_oauth_verify_rate_limiter() -> LoginRateLimiter:
+    """FastAPI dep: lazy singleton limiter for POST /portal/auth/oauth/verify.
+
+    The endpoint is unauthenticated and each call costs a JWKS fetch +
+    signature verify (Google) or two provider round-trips (GitHub), so
+    it needs a brute-force bound. We can't key on email — the email is
+    only known AFTER verification — so both windows are keyed on the
+    client IP (the caller passes email=ip): 20 attempts / 15 min / IP,
+    roomy enough for a whole office behind one NAT re-logging-in, far
+    too slow for token brute-forcing.
+    """
+    global _portal_oauth_verify_rate_limiter
+    if _portal_oauth_verify_rate_limiter is None:
+        _portal_oauth_verify_rate_limiter = LoginRateLimiter(
+            redis_client=_build_redis_client(),
+            per_email_limit=20,
+            per_email_window_seconds=15 * 60,
+            per_ip_limit=20,
+            per_ip_window_seconds=15 * 60,
+            email_key_prefix="portal_oauth_verify:",
+            ip_key_prefix="portal_oauth_verify_ip:",
+        )
+    return _portal_oauth_verify_rate_limiter
 
 
 def _client_ip(request: Request) -> str:
@@ -220,6 +262,7 @@ def signup(
     session: Session = Depends(get_db_session),
     rate_limiter: LoginRateLimiter = Depends(get_portal_signup_rate_limiter),
 ):
+    _require_password_login_enabled()
     # Rate-limit BEFORE any DB/bcrypt work (Phase 13 D) — same order as
     # admin login. Keyed on the normalised email + client IP.
     email_norm = (body.email or "").strip().lower()
@@ -264,6 +307,7 @@ def login(
     session: Session = Depends(get_db_session),
     rate_limiter: LoginRateLimiter = Depends(get_portal_login_rate_limiter),
 ):
+    _require_password_login_enabled()
     # Phase 13 D — mirror of the admin login gate (admin_session.py):
     # check BEFORE bcrypt so attackers can't spend our CPU, record the
     # outcome after. Keyed on the normalised email + client IP.
@@ -530,7 +574,9 @@ class OAuthVerifyRequest(BaseModel):
 @public_portal_route
 def oauth_verify(
     payload: OAuthVerifyRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
+    rate_limiter: LoginRateLimiter = Depends(get_portal_oauth_verify_rate_limiter),
 ):
     """Verify a provider-issued token server-side and mint portal tokens.
 
@@ -543,6 +589,13 @@ def oauth_verify(
     Closes the security hole from the legacy POST callback (P0-8) by
     requiring proof-of-identity from the provider, not from the caller.
     """
+    # Rate limit BEFORE any provider round-trip. Email isn't known yet
+    # (it comes out of the verified token), so both windows key on IP.
+    ip = _client_ip(request)
+    decision = rate_limiter.check(email=ip, ip=ip)
+    if not decision.allowed:
+        _raise_429(decision, code="oauth_verify_rate_limited")
+
     try:
         if payload.provider == "google":
             if not payload.id_token:
@@ -559,10 +612,12 @@ def oauth_verify(
                 )
             claims = verify_github_access_token(payload.access_token)
     except IdTokenVerificationFailed as exc:
+        rate_limiter.record_failure(email=ip, ip=ip)
         raise ValidationError(
             f"OAuth verification failed: {exc}",
             code="oauth_verification_failed",
         )
+    rate_limiter.record_success(email=ip, ip=ip)
 
     return oauth_service.login_or_create(
         session,
@@ -571,6 +626,7 @@ def oauth_verify(
         email=claims.get("email") or "",
         display_name=claims.get("name"),
         avatar_url=claims.get("picture"),
+        email_verified=bool(claims.get("email_verified")),
     )
 
 
@@ -616,20 +672,22 @@ def oauth_start(
     cfg = _provider_config(provider)
     callback_url = str(request.url_for("portal_oauth_callback"))
     from urllib.parse import urlencode
-    authorize_url = (
-        f"{cfg['authorize_url']}?"
-        + urlencode(
-            {
-                "client_id": cfg["client_id"],
-                "redirect_uri": callback_url,
-                "response_type": "code",
-                "scope": cfg["scope"],
-                "state": state,
-                "code_challenge": challenge,
-                "code_challenge_method": "S256",
-            }
-        )
-    )
+    params = {
+        "client_id": cfg["client_id"],
+        "redirect_uri": callback_url,
+        "response_type": "code",
+        "scope": cfg["scope"],
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    # UX hint only: pre-filters Google's account chooser to the
+    # workspace domain. Enforcement stays server-side in
+    # login_or_create (email domain + email_verified) — a client can
+    # strip this param and gains nothing.
+    if provider == "google" and (settings.google_hosted_domain or "").strip():
+        params["hd"] = settings.google_hosted_domain.strip()
+    authorize_url = f"{cfg['authorize_url']}?" + urlencode(params)
     return RedirectResponse(url=authorize_url, status_code=302)
 
 
@@ -673,6 +731,7 @@ def oauth_callback(
         email=claims.get("email") or "",
         display_name=claims.get("name"),
         avatar_url=claims.get("picture"),
+        email_verified=bool(claims.get("email_verified")),
     )
     return result
 
@@ -707,6 +766,10 @@ def public_settings(session: Session = Depends(get_db_session)):
         "free_trial_tokens": free_trial,
         "portal_signup_enabled": signup_enabled,
         "resend_configured": bool((settings.resend_api_key or "").strip()),
+        # Phase 0 — lets the login/signup pages hide the password form
+        # when the server has the surface disabled. The 403 gate on
+        # /login + /signup is the actual enforcement; this is UI truth.
+        "password_login_enabled": bool(settings.password_login_enabled),
     }
 
 
