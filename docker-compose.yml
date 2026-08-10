@@ -461,8 +461,11 @@ services:
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
       # Portal auth cookies (HttpOnly migration). Empty domain = host-only
       # (localhost shares across ports in dev). AUTH_COOKIE_SECURE unset =
-      # auto (off in dev, on in prod). docker-compose.prod.yml sets the
-      # parent domain + Secure=true.
+      # auto (off in dev, on in prod — no configuration needed for Secure).
+      # PROD: set AUTH_COOKIE_DOMAIN (+ AUTH_COOKIE_SAMESITE if you leave
+      # "lax") in .env — docker-compose.prod.yml does NOT set them. On a
+      # subdomain deployment a host-only cookie never reaches the chat /
+      # gateway origins and every authed fetch 401s. See docs/SSO-GO-LIVE.md.
       AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
       AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
       # The portal origin the user browses to. Verification links,
