@@ -138,13 +138,18 @@ public partial class App : System.Windows.Application
         return roots;
     }
 
-    /// <summary>Route a ``sran://`` URI to the OAuth coordinator (Phase 7).
-    /// Validation lives in OAuthDeepLink.TryParse — hostile input is logged
-    /// and dropped there; this never throws.</summary>
+    /// <summary>Route a ``sran://`` URI to the OAuth coordinators (Phase 7
+    /// connectors + SSO Phase 2 login). The two variants are disjoint —
+    /// each coordinator's parser claims only its own shape — so both are
+    /// offered every link. Validation lives in OAuthDeepLink; hostile
+    /// input is logged and dropped there; this never throws.</summary>
     private void DispatchDeepLink(string uri)
     {
         try
         {
+            _host?.Services
+                .GetService<SranDesktop.Application.Services.LoginOAuthCoordinator>()
+                ?.HandleDeepLink(uri);
             _host?.Services
                 .GetService<SranDesktop.Application.Services.ConnectorOAuthCoordinator>()
                 ?.HandleDeepLink(uri);

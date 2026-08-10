@@ -41,8 +41,10 @@ from app.services.portal.oauth_flow_service import (
     IdTokenVerificationFailed,
     InvalidReturnUrl,
     OAuthStateStore,
+    OAuthTicketStore,
     generate_pkce,
     get_oauth_state_store,
+    get_oauth_ticket_store,
     validate_return_to,
     verify_github_access_token,
     verify_google_id_token,
@@ -79,6 +81,7 @@ def _portal_redis_client():
 _portal_login_rate_limiter: LoginRateLimiter | None = None
 _portal_signup_rate_limiter: LoginRateLimiter | None = None
 _portal_oauth_verify_rate_limiter: LoginRateLimiter | None = None
+_portal_oauth_ticket_rate_limiter: LoginRateLimiter | None = None
 
 
 def _require_password_login_enabled() -> None:
@@ -169,6 +172,30 @@ def get_portal_oauth_verify_rate_limiter() -> LoginRateLimiter:
             ip_key_prefix="portal_oauth_verify_ip:",
         )
     return _portal_oauth_verify_rate_limiter
+
+
+def get_portal_oauth_ticket_rate_limiter() -> LoginRateLimiter:
+    """FastAPI dep: lazy singleton limiter for POST /oauth/desktop/exchange.
+
+    Tickets are 128-bit-entropy one-shots with a 60s TTL, so online
+    guessing is already hopeless — the limiter exists to bound abuse
+    of the unauthenticated endpoint itself (Redis churn, log noise).
+    Keyed on IP like the verify limiter (no email until redemption):
+    20 attempts / 15 min / IP, failures only (a successful redeem
+    clears the window).
+    """
+    global _portal_oauth_ticket_rate_limiter
+    if _portal_oauth_ticket_rate_limiter is None:
+        _portal_oauth_ticket_rate_limiter = LoginRateLimiter(
+            redis_client=_build_redis_client(),
+            per_email_limit=20,
+            per_email_window_seconds=15 * 60,
+            per_ip_limit=20,
+            per_ip_window_seconds=15 * 60,
+            email_key_prefix="portal_oauth_ticket:",
+            ip_key_prefix="portal_oauth_ticket_ip:",
+        )
+    return _portal_oauth_ticket_rate_limiter
 
 
 def _client_ip(request: Request) -> str:
@@ -636,6 +663,8 @@ def oauth_start(
     request: Request,
     provider: str = Query(..., pattern="^(google|github)$"),
     return_to: str = Query(default="/"),
+    client: str = Query(default="web", pattern="^(web|desktop)$"),
+    nonce: str | None = Query(default=None, max_length=128),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
 ):
     """Begin the server-driven OAuth flow.
@@ -662,11 +691,33 @@ def oauth_start(
             code="invalid_return_to",
         )
 
+    # SSO Phase 2 (B0): the desktop hand-off ticket is nonce-bound.
+    # ``sran://`` is claimable by any local app, so a hijacked deep
+    # link alone must not be redeemable — the redeeming process has to
+    # present the nonce it minted before opening the browser. Desktop
+    # starts therefore REQUIRE a well-formed nonce; the web path
+    # ignores one entirely (its result never rides a deep link).
+    import re as _re
+
+    if client == "desktop":
+        if not nonce or not _re.fullmatch(r"[A-Za-z0-9_-]{22,128}", nonce):
+            raise ValidationError(
+                "Desktop OAuth requires a nonce of 22-128 URL-safe "
+                "base64 characters.",
+                code="invalid_nonce",
+            )
+    else:
+        nonce = None
+
     verifier, challenge = generate_pkce()
     state = state_store.put(
         provider=provider,
         code_verifier=verifier,
         return_to=return_to,
+        # SSO Phase 2: "desktop" routes the callback result through the
+        # one-time-ticket deep link instead of the web response.
+        client=client,
+        nonce=nonce,
     )
 
     cfg = _provider_config(provider)
@@ -699,6 +750,7 @@ def oauth_callback(
     state: str = Query(default=""),
     session: Session = Depends(get_db_session),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
+    ticket_store: OAuthTicketStore = Depends(get_oauth_ticket_store),
 ):
     """Finish the server-driven flow: validate state, exchange, verify, mint."""
     row = state_store.pop(state)
@@ -733,7 +785,74 @@ def oauth_callback(
         avatar_url=claims.get("picture"),
         email_verified=bool(claims.get("email_verified")),
     )
+
+    # SSO Phase 2 — desktop hand-off. The system browser can't deliver
+    # tokens to the app, so we park the login result under a one-time
+    # 60s ticket and deep-link ONLY the opaque ticket; the app redeems
+    # it via POST /oauth/desktop/exchange. Tokens must never ride the
+    # sran:// URL itself (custom schemes are claimable by any local app
+    # and their URLs persist in shell/browser history).
+    if row.get("client") == "desktop":
+        # B0: bind the ticket to the nonce the desktop app minted at
+        # /oauth/start — redemption requires presenting it again.
+        ticket = ticket_store.put(result, nonce=row.get("nonce") or "")
+        return RedirectResponse(
+            url=f"sran://oauth/callback?ticket={ticket}", status_code=302
+        )
+
     return result
+
+
+class DesktopExchangeRequest(BaseModel):
+    """Body for ``POST /portal/auth/oauth/desktop/exchange``."""
+
+    ticket: str = Field(..., min_length=16, max_length=256)
+    # B0: the nonce the app minted before opening the browser. A
+    # hijacked sran:// link carries only the ticket — without the
+    # nonce it cannot be redeemed.
+    nonce: str = Field(..., min_length=22, max_length=128)
+
+
+@router.post("/oauth/desktop/exchange")
+@public_portal_route
+def oauth_desktop_exchange(
+    payload: DesktopExchangeRequest,
+    request: Request,
+    rate_limiter: LoginRateLimiter = Depends(get_portal_oauth_ticket_rate_limiter),
+    ticket_store: OAuthTicketStore = Depends(get_oauth_ticket_store),
+):
+    """Redeem the one-time desktop OAuth ticket for portal tokens.
+
+    Counterpart of the ``sran://oauth/callback?ticket=...`` deep link:
+    the desktop app re-enters here over HTTPS and swaps the opaque
+    ticket for ``{access_token, refresh_token, user}``. The ticket is
+    a 60s one-shot (atomic GETDEL) — expired, unknown, and replayed
+    tickets are indistinguishable by design (no oracle) and all yield
+    the same 401. Tokens are returned in the BODY, not cookies: the
+    desktop stores them itself (DPAPI), it has no cookie jar.
+    """
+    ip = _client_ip(request)
+    decision = rate_limiter.check(email=ip, ip=ip)
+    if not decision.allowed:
+        _raise_429(decision, code="oauth_ticket_rate_limited")
+
+    entry = ticket_store.pop(payload.ticket)
+    # One 401 for unknown/expired/replayed/nonce-mismatched tickets —
+    # deliberately indistinguishable (no oracle). A wrong-nonce attempt
+    # also BURNS the ticket (pop is one-shot), so a hijacker who races
+    # the real app destroys the login instead of winning it.
+    import hmac as _hmac
+
+    if entry is None or not _hmac.compare_digest(
+        entry.get("nonce") or "", payload.nonce
+    ):
+        rate_limiter.record_failure(email=ip, ip=ip)
+        raise AuthenticationError(
+            "OAuth ticket is invalid, expired, or already used.",
+            code="invalid_ticket",
+        )
+    rate_limiter.record_success(email=ip, ip=ip)
+    return entry["result"]
 
 
 @router.get("/public-settings")

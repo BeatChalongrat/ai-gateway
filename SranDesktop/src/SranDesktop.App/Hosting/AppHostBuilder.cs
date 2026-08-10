@@ -111,6 +111,9 @@ public static class AppHostBuilder
                     .AddHttpMessageHandler<AuthTokenHandler>();
                 services.AddSingleton<IBrowserLauncher, SystemBrowserLauncher>();
                 services.AddSingleton<ConnectorOAuthCoordinator>();
+                // SSO Phase 2: Google sign-in via system browser + one-time
+                // ticket deep link (nonce-bound; see LoginOAuthCoordinator).
+                services.AddSingleton<LoginOAuthCoordinator>();
 
                 // …while completions use the provisioned gw_ API key directly
                 // (the /v1 endpoint rejects portal JWTs).

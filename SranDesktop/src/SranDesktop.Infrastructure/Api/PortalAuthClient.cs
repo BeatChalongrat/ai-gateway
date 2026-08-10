@@ -40,6 +40,28 @@ public sealed class PortalAuthClient : IPortalAuthClient
         return await ReadSessionAsync(response, ct);
     }
 
+    public async Task<AuthTokenResponse> ExchangeTicketAsync(
+        string ticket, string nonce, CancellationToken ct = default)
+    {
+        // SSO Phase 2: redeem the one-time deep-link ticket. The server
+        // returns the tokens in the BODY (no cookies for this endpoint);
+        // ReadSessionAsync's body fallback picks them up. Never log the
+        // ticket or nonce — the ticket is a short-lived bearer and the
+        // nonce is what makes a hijacked deep link worthless.
+        using var response = await _http.PostAsJsonAsync(
+            "portal/auth/oauth/desktop/exchange",
+            new DesktopTicketExchangeRequest(ticket, nonce), JsonOptions, ct);
+        return await ReadSessionAsync(response, ct);
+    }
+
+    public async Task<PortalPublicSettings> GetPublicSettingsAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.GetAsync("portal/auth/public-settings", ct);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<PortalPublicSettings>(JsonOptions, ct);
+        return body ?? new PortalPublicSettings();
+    }
+
     private static async Task<AuthTokenResponse> ReadSessionAsync(
         HttpResponseMessage response, CancellationToken ct)
     {
@@ -52,21 +74,37 @@ public sealed class PortalAuthClient : IPortalAuthClient
                 response.StatusCode);
         }
 
-        // The stack can return 200 with an error envelope in the body (and no
-        // cookies) for auth failures — treat "no token cookies" as a failure
-        // and surface the envelope's message as a 401.
+        // Token sources, in order: Set-Cookie headers (login/refresh),
+        // then the JSON body (refresh body-fallback + the desktop OAuth
+        // exchange, which is cookie-less by design — SSO Phase 2 B3).
         var cookies = ParseSetCookies(response);
         var hasAccess = cookies.TryGetValue(AccessCookieName, out var accessToken) && accessToken.Length > 0;
         var hasRefresh = cookies.TryGetValue(RefreshCookieName, out var refreshToken) && refreshToken.Length > 0;
 
+        var rawBody = await response.Content.ReadAsStringAsync(ct);
+        var body = TryDeserialize<PortalSessionBody>(rawBody);
+
+        if (!hasAccess && !string.IsNullOrEmpty(body?.AccessToken))
+        {
+            accessToken = body!.AccessToken;
+            hasAccess = true;
+        }
+        if (!hasRefresh && !string.IsNullOrEmpty(body?.RefreshToken))
+        {
+            refreshToken = body!.RefreshToken;
+            hasRefresh = true;
+        }
+
+        // The stack can return 200 with an error envelope in the body (and
+        // neither cookies nor body tokens) for auth failures — treat "no
+        // tokens anywhere" as a failure and surface the envelope's message
+        // as a 401.
         if (!hasAccess || !hasRefresh)
         {
-            var rawBody = await response.Content.ReadAsStringAsync(ct);
-            var message = TryReadErrorMessage(rawBody) ?? "Portal auth response did not include token cookies";
+            var message = TryReadErrorMessage(rawBody) ?? "Portal auth response did not include tokens";
             throw new HttpRequestException(message, null, HttpStatusCode.Unauthorized);
         }
 
-        var body = TryDeserialize<PortalSessionBody>(await response.Content.ReadAsStringAsync(ct));
         return new AuthTokenResponse(accessToken!, refreshToken!, body?.User);
     }
 
