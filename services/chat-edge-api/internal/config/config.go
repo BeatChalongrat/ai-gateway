@@ -42,6 +42,14 @@ type Config struct {
 	// Upstream Gateway API base URL (no trailing slash).
 	GatewayAPIURL string `env:"GATEWAY_API_URL,required"`
 
+	// Optional whole-request deadline for the gateway client (Batch A).
+	// Default 0 = unbounded: Client.Timeout covers the entire streamed
+	// body, so any non-zero value severs SSE generations that outlive
+	// it (the old hardcoded 5m did exactly that). Dial/TLS/header waits
+	// are bounded by the client's transport regardless. Set e.g. "90s"
+	// only for deployments that never stream.
+	GatewayClientTimeout time.Duration `env:"GATEWAY_CLIENT_TIMEOUT" envDefault:"0"`
+
 	// JWT signing secrets. Required — the service refuses to start
 	// with the dev defaults in production.
 	//
