@@ -933,13 +933,12 @@
         <Border Background="{DynamicResource BgPrimaryBrush}"
                 Visibility="{Binding IsInitializing, Converter={StaticResource BoolToVisibility}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <Border Width="56" Height="56" CornerRadius="14"
-                        Background="{DynamicResource AccentBrush}"
-                        HorizontalAlignment="Center" Margin="0,0,0,16">
-                    <TextBlock Text="S" FontSize="26" FontWeight="Bold"
-                               Foreground="{DynamicResource OnAccentBrush}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
+                <!-- Brand cat logo (same theme-aware asset as the login
+                     screen / app icon) instead of the old "S" tile. -->
+                <Image Source="{DynamicResource LogoSource}"
+                       Width="96" Height="96"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       HorizontalAlignment="Center" Margin="0,0,0,16" />
                 <TextBlock Text="SRAN Desktop" FontSize="18" FontWeight="SemiBold"
                            Foreground="{DynamicResource TextPrimaryBrush}"
                            HorizontalAlignment="Center" />

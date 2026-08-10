@@ -291,9 +291,19 @@ public partial class MainWindow : Window
             // RestoreBounds is the pre-maximize rectangle; Left/Top/Width/Height
             // read as the MAXIMIZED screen rect while maximized, which would
             // make un-maximizing after a restart fill the screen too.
+            // While MINIMIZED (close-to-tray fires Closing in that state too)
+            // the live metrics are junk — Win32 parks minimized windows at
+            // -32000 — so the last NORMAL rectangle in RestoreBounds is the
+            // only trustworthy source there as well.
             var maximized = WindowState == WindowState.Maximized;
-            var r = maximized ? RestoreBounds : new Rect(Left, Top, Width, Height);
+            var r = WindowState == WindowState.Normal
+                ? new Rect(Left, Top, Width, Height)
+                : RestoreBounds;
             if (r.Width <= 0 || r.Height <= 0)
+                return;
+            // Belt-and-braces: never persist off-world coordinates — keep
+            // the previous good save instead.
+            if (r.Left <= -30000 || r.Top <= -30000)
                 return;
 
             var next = _settings.Current.Clone();
