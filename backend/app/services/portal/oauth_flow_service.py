@@ -72,12 +72,21 @@ class OAuthStateStore:
         provider: str,
         code_verifier: str,
         return_to: str,
+        client: str = "web",
+        nonce: str | None = None,
     ) -> str:
         state = uuid.uuid4().hex
         payload = {
             "provider": provider,
             "code_verifier": code_verifier,
             "return_to": return_to,
+            # SSO Phase 2: which surface started the flow. "desktop"
+            # makes the callback hand the result over via a one-time
+            # ticket on the sran:// deep link instead of the web path.
+            "client": client,
+            # B0: desktop starts carry the app-minted nonce; the ticket
+            # is bound to it so a hijacked deep link can't be redeemed.
+            "nonce": nonce,
         }
         self._redis.set(
             f"{_KEY_PREFIX}{state}",
@@ -133,6 +142,92 @@ def get_oauth_state_store():
 
 
 _STATE_STORE: OAuthStateStore | None = None
+
+
+_TICKET_KEY_PREFIX = "oauth_ticket:"
+
+
+class OAuthTicketStore:
+    """TTL'd one-shot ``ticket → login result`` for the desktop hop.
+
+    SSO Phase 2 (server-side PKCE, way B): the browser finishes OAuth
+    on the backend, but the portal tokens must reach the desktop app.
+    The deep link (``sran://oauth/callback?ticket=...``) carries ONLY
+    this opaque ticket — never the tokens themselves — because custom
+    URI schemes can be registered by any local app and their URLs leak
+    into shell/browser history. The desktop then redeems the ticket
+    over plain HTTPS (POST /oauth/desktop/exchange) within the short
+    TTL; ``pop`` is atomic GETDEL so a replayed ticket gets nothing.
+    """
+
+    def __init__(self, *, redis_client, ttl_seconds: int = 60) -> None:
+        self._redis = redis_client
+        self._ttl = ttl_seconds
+
+    def put(self, result: dict, *, nonce: str) -> str:
+        # login_or_create's user payload carries datetimes; normalize
+        # exactly like the HTTP layer would (FastAPI's encoder) so the
+        # redeemed body matches what the web path returns. The nonce
+        # rides OUTSIDE the result so redemption can require it without
+        # it ever appearing in the response body.
+        from fastapi.encoders import jsonable_encoder
+
+        ticket = uuid.uuid4().hex + uuid.uuid4().hex  # 64 hex chars
+        self._redis.set(
+            f"{_TICKET_KEY_PREFIX}{ticket}",
+            json.dumps(
+                {"nonce": nonce, "result": jsonable_encoder(result)},
+                ensure_ascii=False,
+            ),
+            ex=self._ttl,
+        )
+        return ticket
+
+    def pop(self, ticket: str) -> dict | None:
+        """Atomic GET+DEL — first call wins, replays get None."""
+        if not ticket:
+            return None
+        key = f"{_TICKET_KEY_PREFIX}{ticket}"
+        raw = None
+        try:
+            raw = self._redis.getdel(key)
+        except Exception:
+            with self._redis.pipeline() as pipe:
+                pipe.get(key)
+                pipe.delete(key)
+                results = pipe.execute()
+                raw = results[0] if results else None
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+
+
+def get_oauth_ticket_store():
+    """FastAPI dep: lazy singleton wired to the real Redis client.
+
+    Tests override via ``app.dependency_overrides``.
+    """
+    from app.core.config import settings
+    import redis as redis_lib
+
+    global _TICKET_STORE
+    if _TICKET_STORE is None:
+        _TICKET_STORE = OAuthTicketStore(
+            redis_client=redis_lib.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_timeout=2,
+                socket_connect_timeout=2,
+            ),
+            ttl_seconds=60,  # short one-shot: browser→desktop hop only
+        )
+    return _TICKET_STORE
+
+
+_TICKET_STORE: OAuthTicketStore | None = None
 
 
 # ---------------------------------------------------------------------------

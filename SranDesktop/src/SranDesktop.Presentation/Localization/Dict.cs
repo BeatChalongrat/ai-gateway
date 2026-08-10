@@ -660,6 +660,12 @@ public static class Dict
         ["login.errorUnreachable"] = "Cannot reach the server. Check that the gateway is running and the server URL is correct.",
         ["login.errorTimeout"] = "The server took too long to respond. Please try again.",
         ["login.serverSettings"] = "Server settings",
+        // SSO Phase 2 — Google sign-in via system browser
+        ["login.googleSignIn"] = "Sign in with Google",
+        ["login.googleWaiting"] = "Finish signing in from your browser...",
+        ["login.orDivider"] = "or",
+        ["login.errorBrowser"] = "Could not open your browser. Please try again.",
+        ["login.errorGoogle"] = "Google sign-in failed. Please try again.",
 
         // R9 — Writing style
         ["style.learn"] = "Learn my style",
@@ -1380,6 +1386,12 @@ public static class Dict
         ["login.errorUnreachable"] = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่า gateway ทำงานอยู่และ URL เซิร์ฟเวอร์ถูกต้อง",
         ["login.errorTimeout"] = "เซิร์ฟเวอร์ตอบสนองช้าเกินไป กรุณาลองใหม่อีกครั้ง",
         ["login.serverSettings"] = "ตั้งค่าเซิร์ฟเวอร์",
+        // SSO Phase 2 — Google sign-in via system browser
+        ["login.googleSignIn"] = "เข้าสู่ระบบด้วย Google",
+        ["login.googleWaiting"] = "ทำการเข้าสู่ระบบต่อในเบราว์เซอร์...",
+        ["login.orDivider"] = "หรือ",
+        ["login.errorBrowser"] = "เปิดเบราว์เซอร์ไม่ได้ กรุณาลองใหม่อีกครั้ง",
+        ["login.errorGoogle"] = "เข้าสู่ระบบด้วย Google ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
 
         // R9 — Writing style
         ["style.learn"] = "เรียนรู้สไตล์เขียน",

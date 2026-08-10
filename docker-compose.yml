@@ -475,6 +475,10 @@ services:
       # Google OAuth client the portal uses (single ${GOOGLE_CLIENT_ID}
       # env var feeds both services).
       OAUTH_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # SSO Phase 2 (desktop server-side PKCE): the backend exchanges
+      # the auth code with Google itself, which needs the client secret
+      # — it lives ONLY here, never in the desktop app.
+      OAUTH_GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       # Sign-in domain lock (Phase 0) — comma-separated; empty = allow
       # every domain. Enforced server-side in login_or_create + signup.
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-gbtech.co.th}
