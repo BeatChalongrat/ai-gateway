@@ -22,11 +22,15 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { logoutSession } from "@/lib/auth";
 import { useI18nStore, useT } from "@/lib/i18n";
-import type { Conversation, Folder } from "@/lib/types";
+import type {
+  Conversation,
+  ConversationSearchHit,
+  Project,
+} from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
-import { Brain, ChevronRight, Folder as FolderIcon, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import { Archive, Brain, ChevronRight, FolderKanban, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 
@@ -46,8 +50,10 @@ interface Props {
 
 type Row =
   | { kind: "header"; label: string; key: string }
-  | { kind: "folder"; folder: Folder; collapsed: boolean; key: string }
-  | { kind: "conv"; conv: Conversation; key: string };
+  | { kind: "project"; project: Project; collapsed: boolean; key: string }
+  | { kind: "conv"; conv: Conversation; key: string }
+  // Full-text content match (message bodies) — search mode only.
+  | { kind: "hit"; hit: ConversationSearchHit; key: string };
 
 export function Sidebar({
   activeId,
@@ -65,6 +71,7 @@ export function Sidebar({
   const hasMoreConversations = useChatStore((s) => s.hasMoreConversations);
   const loadingMoreConversations = useChatStore((s) => s.loadingMoreConversations);
   const searchResults = useChatStore((s) => s.conversationsSearchResults);
+  const searchHits = useChatStore((s) => s.conversationsSearchHits);
   const searchActive = useChatStore((s) => s.conversationsSearchActive);
   const searchLoading = useChatStore((s) => s.conversationsSearchLoading);
   const runSearch = useChatStore((s) => s.searchConversations);
@@ -72,26 +79,33 @@ export function Sidebar({
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
   const togglePinConversation = useChatStore((s) => s.togglePinConversation);
-  const folders = useChatStore((s) => s.folders);
-  const foldersLoaded = useChatStore((s) => s.foldersLoaded);
-  const loadFolders = useChatStore((s) => s.loadFolders);
-  const createFolder = useChatStore((s) => s.createFolder);
-  const renameFolder = useChatStore((s) => s.renameFolder);
-  const deleteFolder = useChatStore((s) => s.deleteFolder);
-  const moveConversationToFolder = useChatStore((s) => s.moveConversationToFolder);
+  const createProject = useChatStore((s) => s.createProject);
+  const updateProject = useChatStore((s) => s.updateProject);
+  const deleteProject = useChatStore((s) => s.deleteProject);
+  const projects = useChatStore((s) => s.projects);
+  const projectsLoaded = useChatStore((s) => s.projectsLoaded);
+  const loadProjects = useChatStore((s) => s.loadProjects);
+  const moveConversationToProject = useChatStore((s) => s.moveConversationToProject);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const messagesByConv = useChatStore((s) => s.messages);
+  const setError = useChatStore((s) => s.setError);
+  const setConversationArchived = useChatStore((s) => s.setConversationArchived);
   const newChat = useNewChatHandler();
 
   const [search, setSearch] = useState("");
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
-  // Per-folder collapse state, persisted so a folder the user closed stays
-  // closed across reloads. Keyed by folder id → true when collapsed.
-  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>(
+  // Per-project collapse state, persisted so a project the user closed
+  // stays closed across reloads. Keyed by project id → true when
+  // collapsed. Falls back to the pre-Phase-9 folder key on first load:
+  // migration 031 gave each project its folder's id, so the old collapse
+  // map still addresses the right rows and the layout survives the merge.
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(
     () => {
       if (typeof window === "undefined") return {};
       try {
+        const current = localStorage.getItem("sidebar.projects.collapsed");
+        if (current) return JSON.parse(current);
         return JSON.parse(localStorage.getItem("sidebar.folders.collapsed") || "{}");
       } catch {
         return {};
@@ -106,14 +120,14 @@ export function Sidebar({
   }, [conversationsLoaded, loadConversations]);
 
   useEffect(() => {
-    if (!foldersLoaded) void loadFolders();
-  }, [foldersLoaded, loadFolders]);
+    if (!projectsLoaded) void loadProjects();
+  }, [projectsLoaded, loadProjects]);
 
-  function toggleFolderCollapsed(id: string) {
-    setCollapsedFolders((prev) => {
+  function toggleProjectCollapsed(id: string) {
+    setCollapsedProjects((prev) => {
       const next = { ...prev, [id]: !prev[id] };
       try {
-        localStorage.setItem("sidebar.folders.collapsed", JSON.stringify(next));
+        localStorage.setItem("sidebar.projects.collapsed", JSON.stringify(next));
       } catch {
         /* ignore quota / privacy-mode failures */
       }
@@ -121,17 +135,43 @@ export function Sidebar({
     });
   }
 
-  async function handleCreateFolder() {
-    const f = await createFolder(t("folder.defaultName"));
-    if (f) {
-      // Expand the new (empty) folder so the user sees it appear.
-      setCollapsedFolders((prev) => ({ ...prev, [f.id]: false }));
+  // A project created from the sidebar is a plain grouping container: no
+  // instructions, no knowledge base — exactly what a folder was. The user
+  // can add instructions later from the Projects page.
+  async function newEmptyProject(): Promise<Project | null> {
+    try {
+      return await createProject(t("project.defaultName"), "");
+    } catch {
+      setError(t("projects.toast.createFailed"));
+      return null;
     }
   }
 
-  async function handleCreateFolderForMove(convId: string) {
-    const f = await createFolder(t("folder.defaultName"));
-    if (f) await moveConversationToFolder(convId, f.id);
+  async function handleCreateProject() {
+    const p = await newEmptyProject();
+    // Expand the new (empty) project so the user sees it appear.
+    if (p) setCollapsedProjects((prev) => ({ ...prev, [p.id]: false }));
+  }
+
+  async function handleCreateProjectForMove(convId: string) {
+    const p = await newEmptyProject();
+    if (p) await moveConversationToProject(convId, p.id);
+  }
+
+  async function handleDeleteProject(id: string) {
+    try {
+      await deleteProject(id);
+    } catch {
+      setError(t("projects.toast.deleteFailed"));
+    }
+  }
+
+  async function handleRenameProject(id: string, name: string) {
+    try {
+      await updateProject(id, { name });
+    } catch {
+      setError(t("projects.toast.saveFailed"));
+    }
   }
 
   useEffect(() => {
@@ -145,11 +185,24 @@ export function Sidebar({
 
   const rows = useMemo<Row[]>(() => {
     if (searchActive) {
-      return searchResults.map((c) => ({
+      const out: Row[] = searchResults.map((c) => ({
         kind: "conv" as const,
         conv: c,
         key: c.id,
       }));
+      // Content matches (message bodies via the S6 full-text engine)
+      // render under their own section, below the title matches.
+      if (searchHits.length > 0) {
+        out.push({
+          kind: "header",
+          label: "sidebar.searchMessages",
+          key: "h-search-messages",
+        });
+        for (const h of searchHits) {
+          out.push({ kind: "hit", hit: h, key: `hit-${h.conversation_id}` });
+        }
+      }
+      return out;
     }
     // Hide conversations with no messages — they're either legacy
     // empties from before the lazy-create rollout or transient rows
@@ -167,29 +220,32 @@ export function Sidebar({
 
     const out: Row[] = [];
 
-    // Folders come FIRST, above PINNED + the time buckets (migration 022).
-    // Each folder is a collapsible section; only its own conversations
-    // (folder_id === folder.id) render under it. A filed conversation does
-    // NOT appear in the PINNED / time buckets below.
-    const filedByFolder = new Map<string, Conversation[]>();
+    // Projects come FIRST, above PINNED + the time buckets. Each project is
+    // a collapsible section; only its own conversations (project_id ===
+    // project.id) render under it, and a conversation inside a project does
+    // NOT also appear in the PINNED / time buckets below. This is the
+    // Phase-9 merge: folders used to occupy this slot (migration 022) and
+    // are now projects (migration 031) — a project with no instructions
+    // behaves exactly like the old folder.
+    const byProject = new Map<string, Conversation[]>();
     for (const c of filtered) {
-      if (!c.folder_id) continue;
-      const list = filedByFolder.get(c.folder_id) ?? [];
+      if (!c.project_id) continue;
+      const list = byProject.get(c.project_id) ?? [];
       list.push(c);
-      filedByFolder.set(c.folder_id, list);
+      byProject.set(c.project_id, list);
     }
-    for (const folder of folders) {
-      const collapsed = collapsedFolders[folder.id] ?? false;
-      out.push({ kind: "folder", folder, collapsed, key: `folder-${folder.id}` });
+    for (const project of projects) {
+      const collapsed = collapsedProjects[project.id] ?? false;
+      out.push({ kind: "project", project, collapsed, key: `project-${project.id}` });
       if (collapsed) continue;
-      const inFolder = (filedByFolder.get(folder.id) ?? []).sort(byRecency);
-      for (const c of inFolder) {
+      const inProject = (byProject.get(project.id) ?? []).sort(byRecency);
+      for (const c of inProject) {
         out.push({ kind: "conv", conv: c, key: c.id });
       }
     }
 
-    // Only UNFILED conversations flow through PINNED + the time buckets.
-    const unfiled = filtered.filter((c) => !c.folder_id);
+    // Only UNASSIGNED conversations flow through PINNED + the time buckets.
+    const unfiled = filtered.filter((c) => !c.project_id);
     // Pinned conversations get their own "PINNED" section, independent of
     // the time buckets, sorted by updated_at within the section.
     const pinned = unfiled.filter((c) => c.is_pinned).sort(byRecency);
@@ -214,7 +270,7 @@ export function Sidebar({
       }
     }
     return out;
-  }, [searchActive, searchResults, conversations, activeConversationId, messagesByConv, folders, collapsedFolders]);
+  }, [searchActive, searchResults, searchHits, conversations, activeConversationId, messagesByConv, projects, collapsedProjects]);
 
   function handleNew() {
     newChat();
@@ -317,11 +373,19 @@ export function Sidebar({
 
           <button
             type="button"
-            onClick={() => void handleCreateFolder()}
+            onClick={() => void handleCreateProject()}
             className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            <FolderPlus width={16} height={16} aria-hidden />
-            <span>{t("folder.new")}</span>
+            <span className="relative flex h-4 w-4 items-center justify-center" aria-hidden>
+              <FolderKanban width={16} height={16} />
+              <Plus
+                width={9}
+                height={9}
+                strokeWidth={3}
+                className="absolute -bottom-0.5 -right-1 rounded-full bg-bg-sidebar"
+              />
+            </span>
+            <span>{t("project.new")}</span>
           </button>
 
           {searchExpanded || search ? (
@@ -413,12 +477,18 @@ export function Sidebar({
             if (id === activeId) router.replace("/chat");
           }}
           onTogglePin={(id) => togglePinConversation(id)}
-          folders={folders}
-          onMoveToFolder={(id, folderId) => moveConversationToFolder(id, folderId)}
-          onCreateFolderForMove={(id) => handleCreateFolderForMove(id)}
-          onToggleFolder={toggleFolderCollapsed}
-          onRenameFolder={(id, name) => renameFolder(id, name)}
-          onDeleteFolder={(id) => deleteFolder(id)}
+          onToggleArchive={async (id) => {
+            await setConversationArchived(id, true);
+            // Archiving the OPEN chat would leave the user staring at a
+            // thread that is no longer in the list — send them home.
+            if (id === activeId) router.replace("/chat");
+          }}
+          projects={projects}
+          onMoveToProject={(id, projectId) => moveConversationToProject(id, projectId)}
+          onCreateProjectForMove={(id) => handleCreateProjectForMove(id)}
+          onToggleProject={toggleProjectCollapsed}
+          onRenameProject={(id, name) => handleRenameProject(id, name)}
+          onDeleteProject={(id) => handleDeleteProject(id)}
         />
 
         {/* Footer — single user row that opens the popup menu. */}
@@ -426,6 +496,8 @@ export function Sidebar({
           userDisplay={userDisplay}
           userInitial={userInitial}
           onKnowledgeBase={() => router.push("/chat/knowledge")}
+          onProjects={() => router.push("/chat/projects")}
+          onArchive={() => router.push("/chat/archive")}
           onVoiceSettings={() => setVoiceSettingsOpen(true)}
           onMemory={handleOpenMemory}
           onLogout={handleLogout}
@@ -449,6 +521,8 @@ function UserMenu({
   userDisplay,
   userInitial,
   onKnowledgeBase,
+  onProjects,
+  onArchive,
   onVoiceSettings,
   onMemory,
   onLogout,
@@ -456,6 +530,8 @@ function UserMenu({
   userDisplay: string;
   userInitial: string;
   onKnowledgeBase: () => void;
+  onProjects: () => void;
+  onArchive: () => void;
   onVoiceSettings: () => void;
   onMemory: () => void;
   onLogout: () => void;
@@ -513,6 +589,20 @@ function UserMenu({
             onClick={onKnowledgeBase}
             icon={<BookIcon />}
             label={t("menu.knowledgeBase")}
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onProjects}
+            icon={<FolderKanban width={14} height={14} aria-hidden />}
+            label={t("menu.projects")}
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
+          <MenuItem
+            onClick={onArchive}
+            icon={<Archive width={14} height={14} aria-hidden />}
+            label={t("archive.open")}
             trailing={<ArrowIcon />}
             setOpen={setOpen}
           />
@@ -794,6 +884,14 @@ function LogoutIcon() {
 
 // ─── Conversations area (virtualized + lazy-load) ─────────────
 
+/** Conversation id a row navigates to, or null for non-navigable rows.
+ *  Lets conv AND content-hit rows share the active-highlight logic. */
+function rowActiveId(row: Row): string | null {
+  if (row.kind === "conv") return row.conv.id;
+  if (row.kind === "hit") return row.hit.conversation_id;
+  return null;
+}
+
 interface AreaProps {
   rows: Row[];
   conversationsLoaded: boolean;
@@ -807,12 +905,13 @@ interface AreaProps {
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
-  folders: Folder[];
-  onMoveToFolder: (id: string, folderId: string | null) => Promise<void> | void;
-  onCreateFolderForMove: (id: string) => Promise<void> | void;
-  onToggleFolder: (id: string) => void;
-  onRenameFolder: (id: string, name: string) => Promise<void> | void;
-  onDeleteFolder: (id: string) => Promise<void> | void;
+  onToggleArchive: (id: string) => Promise<void> | void;
+  projects: Project[];
+  onMoveToProject: (id: string, projectId: string | null) => Promise<void> | void;
+  onCreateProjectForMove: (id: string) => Promise<void> | void;
+  onToggleProject: (id: string) => void;
+  onRenameProject: (id: string, name: string) => Promise<void> | void;
+  onDeleteProject: (id: string) => Promise<void> | void;
 }
 
 function ConversationsArea({
@@ -828,22 +927,24 @@ function ConversationsArea({
   onRename,
   onDelete,
   onTogglePin,
-  folders,
-  onMoveToFolder,
-  onCreateFolderForMove,
-  onToggleFolder,
-  onRenameFolder,
-  onDeleteFolder,
+  onToggleArchive,
+  projects,
+  onMoveToProject,
+  onCreateProjectForMove,
+  onToggleProject,
+  onRenameProject,
+  onDeleteProject,
 }: AreaProps) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const useVirtual = rows.length >= VIRTUALIZE_THRESHOLD;
-  const folderCtx: FolderCtx = {
-    folders,
-    onMoveToFolder,
-    onCreateFolderForMove,
-    onToggleFolder,
-    onRenameFolder,
-    onDeleteFolder,
+  const projectCtx: ProjectCtx = {
+    projects,
+    onMoveToProject,
+    onCreateProjectForMove,
+    onToggleProject,
+    onRenameProject,
+    onDeleteProject,
   };
 
   const virtualizer = useVirtualizer({
@@ -879,9 +980,9 @@ function ConversationsArea({
         <div className="px-3 py-4 text-xs text-text-muted">
           {searchActive
             ? searchLoading
-              ? "Searching…"
-              : "No conversations found"
-            : "No conversations yet"}
+              ? t("sidebar.searching")
+              : t("sidebar.noResults")
+            : t("sidebar.empty")}
         </div>
       </nav>
     );
@@ -918,12 +1019,13 @@ function ConversationsArea({
               >
                 <SidebarRow
                   row={row}
-                  active={row.kind === "conv" ? row.conv.id === activeId : false}
+                  active={rowActiveId(row) === activeId && activeId !== null}
                   onSelect={onSelect}
                   onRename={onRename}
                   onDelete={onDelete}
                   onTogglePin={onTogglePin}
-                  folderCtx={folderCtx}
+                  onToggleArchive={onToggleArchive}
+                  projectCtx={projectCtx}
                 />
               </div>
             );
@@ -935,12 +1037,13 @@ function ConversationsArea({
             <SidebarRow
               key={row.key}
               row={row}
-              active={row.kind === "conv" ? row.conv.id === activeId : false}
+              active={rowActiveId(row) === activeId && activeId !== null}
               onSelect={onSelect}
               onRename={onRename}
               onDelete={onDelete}
               onTogglePin={onTogglePin}
-              folderCtx={folderCtx}
+                  onToggleArchive={onToggleArchive}
+              projectCtx={projectCtx}
             />
           ))}
         </div>
@@ -950,7 +1053,7 @@ function ConversationsArea({
           {loadingMore ? (
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
-              Loading more…
+              {t("sidebar.loadingMore")}
             </span>
           ) : (
             <button
@@ -958,7 +1061,7 @@ function ConversationsArea({
               onClick={onLoadMore}
               className="focus-ring rounded px-2 py-1 hover:text-text-primary"
             >
-              Load more
+              {t("sidebar.loadMore")}
             </button>
           )}
         </div>
@@ -967,15 +1070,15 @@ function ConversationsArea({
   );
 }
 
-// FolderCtx bundles the folder data + handlers so SidebarRow gets one prop
+// ProjectCtx bundles the project data + handlers so SidebarRow gets one prop
 // instead of six. Built once in ConversationsArea.
-interface FolderCtx {
-  folders: Folder[];
-  onMoveToFolder: (id: string, folderId: string | null) => Promise<void> | void;
-  onCreateFolderForMove: (id: string) => Promise<void> | void;
-  onToggleFolder: (id: string) => void;
-  onRenameFolder: (id: string, name: string) => Promise<void> | void;
-  onDeleteFolder: (id: string) => Promise<void> | void;
+interface ProjectCtx {
+  projects: Project[];
+  onMoveToProject: (id: string, projectId: string | null) => Promise<void> | void;
+  onCreateProjectForMove: (id: string) => Promise<void> | void;
+  onToggleProject: (id: string) => void;
+  onRenameProject: (id: string, name: string) => Promise<void> | void;
+  onDeleteProject: (id: string) => Promise<void> | void;
 }
 
 function SidebarRow({
@@ -985,7 +1088,8 @@ function SidebarRow({
   onRename,
   onDelete,
   onTogglePin,
-  folderCtx,
+  onToggleArchive,
+  projectCtx,
 }: {
   row: Row;
   active: boolean;
@@ -993,7 +1097,8 @@ function SidebarRow({
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
-  folderCtx: FolderCtx;
+  onToggleArchive: (id: string) => Promise<void> | void;
+  projectCtx: ProjectCtx;
 }) {
   const t = useT();
   if (row.kind === "header") {
@@ -1005,15 +1110,36 @@ function SidebarRow({
       </div>
     );
   }
-  if (row.kind === "folder") {
+  if (row.kind === "project") {
     return (
-      <FolderHeader
-        folder={row.folder}
+      <ProjectHeader
+        project={row.project}
         collapsed={row.collapsed}
-        onToggle={() => folderCtx.onToggleFolder(row.folder.id)}
-        onRename={(name) => folderCtx.onRenameFolder(row.folder.id, name)}
-        onDelete={() => folderCtx.onDeleteFolder(row.folder.id)}
+        onToggle={() => projectCtx.onToggleProject(row.project.id)}
+        onRename={(name) => projectCtx.onRenameProject(row.project.id, name)}
+        onDelete={() => projectCtx.onDeleteProject(row.project.id)}
       />
+    );
+  }
+  if (row.kind === "hit") {
+    // Content match — click navigates to the conversation. Kept as a
+    // plain button (no rename/delete menu): the same conversation may
+    // also appear above as a title match with the full menu.
+    return (
+      <button
+        type="button"
+        onClick={() => onSelect(row.hit.conversation_id)}
+        className={`focus-ring flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors ${
+          active
+            ? "bg-bg-elevated text-text-primary"
+            : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+        }`}
+      >
+        <span className="w-full truncate">{row.hit.conversation_title}</span>
+        <span className="line-clamp-2 w-full text-[11px] leading-snug text-text-muted">
+          {row.hit.snippet}
+        </span>
+      </button>
     );
   }
   return (
@@ -1024,24 +1150,28 @@ function SidebarRow({
       onRename={(title) => onRename(row.conv.id, title)}
       onDelete={() => onDelete(row.conv.id)}
       onTogglePin={() => onTogglePin(row.conv.id)}
-      folders={folderCtx.folders}
-      onMoveToFolder={(folderId) => folderCtx.onMoveToFolder(row.conv.id, folderId)}
-      onCreateFolderForMove={() => folderCtx.onCreateFolderForMove(row.conv.id)}
+      onToggleArchive={() => onToggleArchive(row.conv.id)}
+      projects={projectCtx.projects}
+      onMoveToProject={(projectId) => projectCtx.onMoveToProject(row.conv.id, projectId)}
+      onCreateProjectForMove={() => projectCtx.onCreateProjectForMove(row.conv.id)}
     />
   );
 }
 
-// FolderHeader — collapsible folder section header with a ··· menu
+// ProjectHeader — collapsible project section header with a ··· menu
 // (inline rename + delete-with-confirm). Mirrors ConversationItem's menu
-// idiom so the two read consistently.
-function FolderHeader({
-  folder,
+// idiom so the two read consistently. Renders identically whether or not
+// the project carries instructions / a knowledge base: an empty project
+// is just a grouping container (the Phase-9 replacement for a folder),
+// and the Projects page is where the extra context is edited.
+function ProjectHeader({
+  project,
   collapsed,
   onToggle,
   onRename,
   onDelete,
 }: {
-  folder: Folder;
+  project: Project;
   collapsed: boolean;
   onToggle: () => void;
   onRename: (name: string) => Promise<void> | void;
@@ -1051,16 +1181,16 @@ function FolderHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [draft, setDraft] = useState(folder.name);
+  const [draft, setDraft] = useState(project.name);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (renaming) {
-      setDraft(folder.name);
+      setDraft(project.name);
       inputRef.current?.select();
     }
-  }, [renaming, folder.name]);
+  }, [renaming, project.name]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -1086,7 +1216,7 @@ function FolderHeader({
             aria-hidden
             className={`shrink-0 text-text-muted transition-transform ${collapsed ? "" : "rotate-90"}`}
           />
-          <FolderIcon width={14} height={14} aria-hidden className="shrink-0" />
+          <FolderKanban width={14} height={14} aria-hidden className="shrink-0" />
           {renaming ? (
             <input
               ref={inputRef}
@@ -1095,13 +1225,13 @@ function FolderHeader({
               onClick={(e) => e.stopPropagation()}
               onBlur={() => {
                 const n = draft.trim();
-                if (n && n !== folder.name) void onRename(n);
+                if (n && n !== project.name) void onRename(n);
                 setRenaming(false);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.currentTarget.blur();
                 else if (e.key === "Escape") {
-                  setDraft(folder.name);
+                  setDraft(project.name);
                   setRenaming(false);
                 }
               }}
@@ -1109,16 +1239,16 @@ function FolderHeader({
             />
           ) : (
             <>
-              <span className="truncate font-medium">{folder.name}</span>
+              <span className="truncate font-medium">{project.name}</span>
               <span className="shrink-0 text-text-muted">
-                ({folder.conversation_count})
+                ({project.conversation_count})
               </span>
             </>
           )}
         </button>
         <button
           type="button"
-          aria-label="Folder actions"
+          aria-label="Project actions"
           onClick={() => setMenuOpen((v) => !v)}
           className={`focus-ring tap-44 rounded p-1 text-text-muted transition-opacity hover:bg-bg-secondary hover:text-text-primary md:opacity-0 md:group-hover:opacity-100 ${
             menuOpen ? "md:opacity-100" : ""
@@ -1144,7 +1274,7 @@ function FolderHeader({
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
             >
               <Pencil width={14} height={14} aria-hidden />
-              {t("folder.rename")}
+              {t("project.rename")}
             </button>
             <button
               type="button"
@@ -1155,14 +1285,14 @@ function FolderHeader({
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-status-danger hover:bg-status-danger/15"
             >
               <Trash2 width={14} height={14} aria-hidden />
-              {t("folder.delete")}
+              {t("project.delete")}
             </button>
           </div>
         ) : null}
       </div>
       {confirmingDelete ? (
         <div className="border-t border-border/60 px-3 py-2 text-[11px]">
-          <p className="text-text-secondary">{t("folder.deleteConfirm")}</p>
+          <p className="text-text-secondary">{t("project.deleteConfirm")}</p>
           <div className="mt-1.5 flex gap-2">
             <button
               type="button"
@@ -1172,7 +1302,7 @@ function FolderHeader({
               }}
               className="focus-ring rounded bg-status-danger/85 px-2 py-1 font-medium text-white hover:bg-status-danger"
             >
-              {t("folder.delete")}
+              {t("project.delete")}
             </button>
             <button
               type="button"

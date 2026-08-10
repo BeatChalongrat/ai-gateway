@@ -144,6 +144,48 @@ A genuine **air-gapped / offline-desktop requirement** where **nothing** may
 reach the server — at which point pure-local execution stops being redundant
 with the server sandbox and becomes the only option.
 
+## Google SSO cutover (Phase 3, 2026-08-10) — known items / follow-ups
+
+- **M3 (Phase 0 review) — RESOLVED BY CUTOVER**: "a password user on a
+  domain outside the allowlist can still log in" was a password-path
+  hole; with `PASSWORD_LOGIN_ENABLED=false` the whole surface (login /
+  signup / password-reset) answers 403, so the hole is closed as long
+  as the flag stays off. If passwords are ever re-enabled, M3 must be
+  re-examined (add the domain gate to password LOGIN, not just signup).
+- chat-edge validates portal JWTs statelessly → a revoked user
+  (token_version bump) stays valid on chat-edge until the access token
+  expires (≤60 min lag). Acceptable for the internal tool; revisit for
+  SaaS.
+- Redis outage during refresh fails open on the rate-limit side
+  (outage-conservative limiter) — the refresh itself still requires a
+  valid signed token; documented, not a hole.
+- CSRF double-submit on /portal/** mutations: still the deliberate,
+  ATOMIC 5-client deferral documented in services/portal/cookies.py.
+- Desktop OAuth callback error (403 domain_not_allowed etc.) renders
+  raw JSON in the system browser — cosmetic; make a small HTML page.
+
+### RESEND_API_KEY is mandatory in production even with email features off
+
+`Settings.validate_secrets()` (`backend/app/core/config.py`, "Phase 3.5 —
+Resend is mandatory in production") requires a non-empty `RESEND_API_KEY`
+whenever `APP_ENV` is not dev/test. The check is unconditional, so after
+the Phase 3 cutover — `PASSWORD_LOGIN_ENABLED=false`, meaning no
+verification or password-reset mail can be sent at all — a deployment
+that legitimately has no email provider still gets `STARTUP BLOCKED`.
+
+Not a blocker (set a real key, or a throwaway one on a domain you own),
+and deliberately NOT changed as part of the cutover: relaxing a
+fail-closed startup check is a security-posture change that deserves its
+own review rather than riding along in a docs/flag commit.
+
+Possible follow-up: make the requirement conditional on the features
+that actually send mail — roughly "required unless
+`password_login_enabled` is false AND email verification is off" — with
+a startup WARNING (not a hard failure) in that case so the operator
+still knows outbound mail is unavailable. Whoever picks this up should
+also check `request_verification_email` and the invite-link flow, which
+send mail independently of the password surface.
+
 ---
 
 ## Global cross-worker/pod provider concurrency cap → Rust rate-limiter

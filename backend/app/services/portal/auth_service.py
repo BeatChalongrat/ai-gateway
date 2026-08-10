@@ -210,6 +210,11 @@ def signup(
     email_norm = (email or "").strip().lower()
     if not email_norm or "@" not in email_norm:
         raise ValidationError("A valid email is required.", code="invalid_email")
+    # Domain allowlist (Phase 0) — same gate as OAuth login_or_create so
+    # a disallowed domain can't register via the password path either.
+    from app.services.portal.oauth_service import check_email_domain_allowed
+
+    check_email_domain_allowed(email_norm)
     if not password or len(password) < 8:
         raise ValidationError(
             "Password must be at least 8 characters.",
@@ -248,6 +253,25 @@ def signup(
     except ValueError:
         free_trial = 0
 
+    # Tenant resolution BEFORE the user INSERT (SSO Phase 1, A1):
+    # portal_users.tenant_id is NOT NULL (migration 030 + ORM), so the
+    # user row must be born with its tenant. Same transaction — if any
+    # later step raises, the tenant row rolls back with the user.
+    from app.services.portal import tenant_service
+
+    if invite_code:
+        invite = tenant_service.get_valid_invite(db, code=invite_code)
+        pending_tenant_id = invite.tenant_id
+        pending_role = invite.role or "member"
+    else:
+        effective_name = (
+            (tenant_name or "").strip()
+            or _default_tenant_name_for_email(email_norm)
+        )
+        tenant = tenant_service.create_tenant(db, tenant_name=effective_name)
+        pending_tenant_id = tenant.tenant_id
+        pending_role = "owner"
+
     user = PortalUserORM(
         id=str(uuid.uuid4()),
         email=email_norm,
@@ -257,27 +281,20 @@ def signup(
         credit_used=0,
         plan="free_trial",
         status="active",
+        tenant_id=pending_tenant_id,
+        tenant_role=pending_role,
         # Initial token_version so a freshly-minted JWT matches the DB.
         token_version=1,
     )
     db.add(user)
     db.flush()
 
-    # Tenant assignment — happens inside the same transaction. If this
-    # raises, the user row is rolled back too.
-    from app.services.portal import tenant_service
-
     if invite_code:
+        # Re-validates + stamps used_at/used_by and bumps token_version.
+        # The user already carries the invite's tenant, so the
+        # different-tenant guard inside passes.
         tenant_service.redeem_invite(
             db, code=invite_code, redeeming_user_id=user.id
-        )
-    else:
-        effective_name = (
-            (tenant_name or "").strip()
-            or _default_tenant_name_for_email(email_norm)
-        )
-        tenant_service.create_tenant_with_owner(
-            db, tenant_name=effective_name, owner_user_id=user.id
         )
     db.refresh(user)
 

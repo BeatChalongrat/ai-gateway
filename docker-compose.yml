@@ -461,14 +461,39 @@ services:
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
       # Portal auth cookies (HttpOnly migration). Empty domain = host-only
       # (localhost shares across ports in dev). AUTH_COOKIE_SECURE unset =
-      # auto (off in dev, on in prod). docker-compose.prod.yml sets the
-      # parent domain + Secure=true.
+      # auto (off in dev, on in prod — no configuration needed for Secure).
+      # PROD: set AUTH_COOKIE_DOMAIN (+ AUTH_COOKIE_SAMESITE if you leave
+      # "lax") in .env — docker-compose.prod.yml does NOT set them. On a
+      # subdomain deployment a host-only cookie never reaches the chat /
+      # gateway origins and every authed fetch 401s. See docs/SSO-GO-LIVE.md.
       AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
       AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
       # The portal origin the user browses to. Verification links,
       # password-reset links, and invite-link emails are stamped with
       # this host — mismatched value = dead links in email.
       PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-http://localhost:3001}
+      # Google SSO (Phase 1). The portal's NextAuth flow forwards the
+      # Google id_token to /portal/auth/oauth/verify; the backend pins
+      # the token's ``aud`` to this client id, so it MUST be the same
+      # Google OAuth client the portal uses (single ${GOOGLE_CLIENT_ID}
+      # env var feeds both services).
+      OAUTH_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # SSO Phase 2 (desktop server-side PKCE): the backend exchanges
+      # the auth code with Google itself, which needs the client secret
+      # — it lives ONLY here, never in the desktop app.
+      OAUTH_GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Sign-in domain lock (Phase 0) — comma-separated; empty = allow
+      # every domain. Enforced server-side in login_or_create + signup.
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-gbtech.co.th}
+      # ``hd`` account-chooser hint on the server-driven /oauth/start
+      # path (UX only, never enforcement).
+      GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
+      # Phase 3 cutover: false = email+password surface answers 403
+      # (login / signup / password-reset) while the code stays in
+      # place; the login UIs hide the form off the same flag via
+      # /portal/auth/public-settings. Default true so a bare checkout
+      # still boots in the pre-cutover shape.
+      PASSWORD_LOGIN_ENABLED: ${PASSWORD_LOGIN_ENABLED:-true}
       # Empty by default → adapters hit real provider URLs. Uncomment
       # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
       # anthropic/openrouter at the in-cluster mock-provider service.
@@ -589,6 +614,9 @@ services:
       BACKEND_URL: http://backend:8080
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Google account-chooser ``hd`` hint (UX only; the backend's
+      # ALLOWED_EMAIL_DOMAINS check is the enforcement).
+      GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     ports:

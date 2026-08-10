@@ -1,5 +1,7 @@
 // Shared helpers for file UI components.
 
+import { tOutside } from "@/lib/i18n";
+
 export const ALLOWED_FILE_MIMES: ReadonlySet<string> = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -33,7 +35,12 @@ export const ALLOWED_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
   "r", "lua", "vue", "svelte",
 ]);
 
-export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MiB
+// MUST match chat-edge's MAX_FILE_SIZE_BYTES (config.go, default
+// 209715200 = 200 MiB). Phase 7 fix: this was 25 MiB while the server
+// accepted 200 MiB, so the client rejected files the backend would
+// happily take — and the server's 413 text claimed a third number.
+// If the deployment overrides MAX_FILE_SIZE_BYTES, update this too.
+export const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200 MiB
 export const MAX_FILES_PER_MESSAGE = 5;
 
 export function formatBytes(n: number): string {
@@ -55,15 +62,15 @@ export function isImageMime(contentType: string): boolean {
 export function validateFile(
   file: File,
 ): { ok: true } | { ok: false; reason: string } {
-  if (file.size === 0) return { ok: false, reason: "Empty file" };
+  if (file.size === 0) return { ok: false, reason: tOutside("file.err.empty") };
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    return { ok: false, reason: "File is larger than 25 MB" };
+    return { ok: false, reason: tOutside("file.err.tooLarge") };
   }
   const ext = fileExtension(file.name);
   const typeOk = file.type && ALLOWED_FILE_MIMES.has(file.type);
   const extOk = ext && ALLOWED_FILE_EXTENSIONS.has(ext);
   if (!typeOk && !extOk) {
-    return { ok: false, reason: "Unsupported file type" };
+    return { ok: false, reason: tOutside("file.err.unsupported") };
   }
   return { ok: true };
 }

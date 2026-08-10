@@ -30,6 +30,28 @@ public partial class InlineAttachmentViewModel : ObservableObject
     /// local-first → filecache → authed download. Null for eager media.</summary>
     private readonly Func<Task<byte[]?>>? _bytesResolver;
 
+    /// <summary>Phase 14 — fetches the text chat-edge extracted from this
+    /// attachment (<c>GET /files/{id}/text</c>). Null when the attachment has
+    /// no server file id (a locally generated file), which is what makes an
+    /// office document fall back to "download it".</summary>
+    private Func<Task<Application.Models.FileTextDto>>? _textResolver;
+
+    /// <summary>Phase 16 — fetches the STRUCTURE of an office attachment
+    /// (<c>GET /files/{id}/preview-data</c>): (sheet, offset, limit). Null for
+    /// the same reason the text resolver is: no server file id, nothing to
+    /// ask about.</summary>
+    private Func<int, int, int, Task<Application.Models.FilePreviewDataDto>>? _structuredResolver;
+
+    /// <summary>Supplies the extracted-text resolver after construction —
+    /// only the hydration path knows the server file id.</summary>
+    internal void AttachTextResolver(Func<Task<Application.Models.FileTextDto>> resolver) =>
+        _textResolver = resolver;
+
+    /// <summary>Supplies the structured-preview resolver, same reasoning.</summary>
+    internal void AttachStructuredResolver(
+        Func<int, int, int, Task<Application.Models.FilePreviewDataDto>> resolver) =>
+        _structuredResolver = resolver;
+
     /// <summary>Decoded bitmap for image/*; null otherwise.</summary>
     public BitmapSource? ImageSource { get; }
 
@@ -119,6 +141,30 @@ public partial class InlineAttachmentViewModel : ObservableObject
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Phase 14 — open the in-app preview. Every attachment opens it,
+    /// including the ones that can't be rendered: the dialog then says so and
+    /// offers Download, which is more useful than a click that does nothing.
+    /// </summary>
+    [RelayCommand]
+    private void Preview()
+    {
+        var vm = new FilePreviewViewModel(
+            Filename, ContentType,
+            ResolveBytesAsync,
+            _textResolver,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            _structuredResolver);
+        var dialog = new Views.Dialogs.FilePreviewDialog(vm)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow,
+            // Save-As reuses this attachment's own resolver rather than a
+            // second download implementation inside the dialog.
+            DownloadRequested = () => SaveAsCommand.ExecuteAsync(null),
+        };
+        dialog.ShowDialog();
     }
 
     [RelayCommand]

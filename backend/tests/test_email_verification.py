@@ -53,6 +53,10 @@ def seeded_user():
             plan="free_trial",
             status="active",
             email_verified=False,
+            # tenant_id is NOT NULL after SSO Phase 1 A1 (matches
+            # migration 030); SQLite doesn't enforce the FK so a bare
+            # id string is enough for this fixture.
+            tenant_id="t-fixture",
         )
         db.add(u)
         db.commit()

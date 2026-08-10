@@ -28,6 +28,17 @@ public sealed class AuthService : IAuthService
         _logger.LogInformation("Logged in as {Email}", response.User?.Email ?? email);
     }
 
+    public async Task SignInWithTicketAsync(string ticket, string nonce, CancellationToken ct = default)
+    {
+        var response = await _apiClient.ExchangeTicketAsync(ticket, nonce, ct);
+        _session.SetSession(response.AccessToken, response.RefreshToken, response.User);
+        // Never log the ticket/nonce — the email is enough to correlate.
+        _logger.LogInformation("Signed in via Google as {Email}", response.User?.Email ?? "(unknown)");
+    }
+
+    public Task<PortalPublicSettings> GetPublicSettingsAsync(CancellationToken ct = default) =>
+        _apiClient.GetPublicSettingsAsync(ct);
+
     public async Task<bool> TryRestoreSessionAsync(CancellationToken ct = default)
     {
         var refreshToken = _session.RefreshToken;

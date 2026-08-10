@@ -976,6 +976,29 @@
     </Style>
 
     <!-- ================================================================
+         Skeleton placeholder (Phase 13 Task 3) — a rounded grey bar standing
+         in for content that hasn't arrived, so a slow load reads as "this is
+         a conversation, still loading" instead of a blank panel.
+
+         Deliberately STATIC. The "shimmer" a web skeleton uses is a forever
+         storyboard, and under reduced motion our durations collapse to zero —
+         a zero-length forever animation is a busy loop, not a still image.
+         The existing indeterminate ProgressBar already carries the motion;
+         these bars only carry the shape.
+
+         Purely decorative: not hit-testable and unnamed, so screen readers
+         announce the real content only.
+         ================================================================ -->
+
+    <Style x:Key="SkeletonBar" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Height" Value="12" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Opacity" Value="0.6" />
+    </Style>
+
+    <!-- ================================================================
          Expander (Phase 8 Task 4) — themed header with a chevron that
          rotates within the motion budget (snaps when reduced motion is
          on: MotionSettings durations collapse to zero). Used by the

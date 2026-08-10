@@ -6,16 +6,18 @@
 // .shimmer-text sweep so it matches the thinking/image indicators.
 
 import { Search } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 export function SearchingIndicator() {
+  const t = useT();
   return (
     <div
       className="flex items-center gap-2.5 py-1"
       role="status"
-      aria-label="กำลังค้นหาข้อมูล"
+      aria-label={t("gen.searching")}
     >
       <Search className="h-4 w-4 animate-pulse text-text-tertiary" aria-hidden />
-      <p className="shimmer-text text-sm font-medium">กำลังค้นหาข้อมูล...</p>
+      <p className="shimmer-text text-sm font-medium">{t("gen.searching")}</p>
     </div>
   );
 }

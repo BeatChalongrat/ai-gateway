@@ -12,7 +12,10 @@ public sealed class UserSettings
     public string GatewayBaseUrl { get; set; } = "http://localhost:8080";
 
     [JsonPropertyName("default_model")]
-    public string DefaultModel { get; set; } = "gpt-4o-mini";
+    // "auto" = let the gateway's per-request resolver pick (UX polish #3:
+    // the out-of-the-box default). Only fresh installs see this — an
+    // existing settings.json carries whatever the user had persisted.
+    public string DefaultModel { get; set; } = "auto";
 
     /// <summary>"Dark" or "Light".</summary>
     [JsonPropertyName("theme")]
@@ -120,6 +123,24 @@ public sealed class UserSettings
     /// nothing.</summary>
     [JsonPropertyName("scanned_upload_notice_shown")]
     public bool ScannedUploadNoticeShown { get; set; }
+
+    /// <summary>Main-window placement (Phase 11). Null width/height = never
+    /// saved, so the window opens at the XAML default, centred. Stored here
+    /// rather than in a new file so there is one settings surface.</summary>
+    [JsonPropertyName("window_left")]
+    public double? WindowLeft { get; set; }
+
+    [JsonPropertyName("window_top")]
+    public double? WindowTop { get; set; }
+
+    [JsonPropertyName("window_width")]
+    public double? WindowWidth { get; set; }
+
+    [JsonPropertyName("window_height")]
+    public double? WindowHeight { get; set; }
+
+    [JsonPropertyName("window_maximized")]
+    public bool WindowMaximized { get; set; }
 
     public UserSettings Clone()
     {

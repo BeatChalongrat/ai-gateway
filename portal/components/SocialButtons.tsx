@@ -1,28 +1,27 @@
 "use client";
 
-import { Github, Sparkles } from "lucide-react";
 import { signIn } from "next-auth/react";
 
-// Env-gated: when NEXT_PUBLIC_OAUTH_ENABLED !== "true" we render a
-// lightweight "coming soon" banner instead of the buttons. This
-// mirrors the backend — the OAuth app credentials have to be set on
-// the SERVER too, and there's no signal the client can see for those,
-// so the public flag is the source of truth for visibility.
+// Env-gated: when NEXT_PUBLIC_OAUTH_ENABLED !== "true" we render
+// nothing (Phase 1 dropped the old "coming soon" banner — the email
+// form is the whole story until the flag flips). The flag is baked at
+// BUILD time; flipping it requires an image rebuild.
+//
+// Google-only (Phase 1, finding L2): the GitHub button is intentionally
+// not rendered and its OAuth app credentials must stay unset — user
+// login is Google Workspace SSO only. The signIn("github") plumbing
+// still exists in git history if that decision is ever reversed.
 
 const enabled = process.env.NEXT_PUBLIC_OAUTH_ENABLED === "true";
 
-// callbackUrl routes to the OAuth-complete page, which reads the
-// NextAuth session and writes portal tokens to localStorage + cookie.
+// callbackUrl routes to the OAuth-complete page, which POSTs to the
+// server-side cookie bridge to turn the NextAuth session into the
+// portal's HttpOnly cookies.
 const CALLBACK = "/oauth-complete";
 
 export function SocialButtons() {
   if (!enabled) {
-    return (
-      <div className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-sm text-gray-600 text-center">
-        <Sparkles size={14} className="shrink-0" />
-        Social login coming soon. Sign up with email for now.
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -34,14 +33,6 @@ export function SocialButtons() {
       >
         <GoogleIcon className="w-5 h-5" />
         Continue with Google
-      </button>
-      <button
-        type="button"
-        onClick={() => signIn("github", { callbackUrl: CALLBACK })}
-        className="w-full inline-flex items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 py-2.5 px-4 text-sm font-medium text-gray-800"
-      >
-        <Github size={18} strokeWidth={1.75} />
-        Continue with GitHub
       </button>
     </div>
   );

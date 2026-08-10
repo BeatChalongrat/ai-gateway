@@ -150,7 +150,10 @@ async def _seed_job(async_db, *, job_type, provider="fake", ext_id=None):
     tid = f"t-{uuid.uuid4().hex[:8]}"
     uid = f"u-{uuid.uuid4().hex[:8]}"
     async_db.add(TenantORM(tenant_id=tid, name="T", slug=tid))
-    async_db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x"))
+    # tenant_id NOT NULL since SSO Phase 1 A1
+    async_db.add(
+        PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x", tenant_id=tid)
+    )
     await async_db.flush()
     job_id = str(uuid.uuid4())
     async_db.add(

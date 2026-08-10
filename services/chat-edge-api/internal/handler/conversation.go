@@ -130,6 +130,13 @@ type conversationResponse struct {
 	// IsPinned surfaces the sidebar pin flag (migration 021) so the
 	// frontend can render the "PINNED" section + the pin/unpin toggle.
 	IsPinned bool `json:"is_pinned"`
+	// IsArchived surfaces the archive flag (migration 032). The sidebar
+	// hides archived chats; the archive view lists only these. Archiving
+	// is reversible and does NOT delete anything.
+	IsArchived bool `json:"is_archived"`
+	// ProjectID is the project membership (migration 029). null when the
+	// conversation is not in a project.
+	ProjectID *string `json:"project_id"`
 	// FolderID is the sidebar-folder membership (migration 022). null when
 	// the conversation is unfiled; the frontend groups by this id.
 	FolderID *string `json:"folder_id"`
@@ -148,6 +155,7 @@ func toResponse(c *model.Conversation) conversationResponse {
 		ReasoningMode:        c.ReasoningMode,
 		ShowReasoningSummary: c.ShowReasoningSummary,
 		IsPinned:             c.IsPinned,
+		IsArchived:           c.IsArchived,
 	}
 	if c.KnowledgeBaseID != nil {
 		s := c.KnowledgeBaseID.String()
@@ -156,6 +164,10 @@ func toResponse(c *model.Conversation) conversationResponse {
 	if c.FolderID != nil {
 		s := c.FolderID.String()
 		r.FolderID = &s
+	}
+	if c.ProjectID != nil {
+		s := c.ProjectID.String()
+		r.ProjectID = &s
 	}
 	return r
 }
@@ -197,6 +209,14 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	cursor := parseUUID(r.URL.Query().Get("cursor"))
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	// ?archived=1 switches this to the archive view. Anything else
+	// (absent, "0", garbage) is the normal sidebar list, so a
+	// malformed value can never accidentally hide the user's chats.
+	archived := r.URL.Query().Get("archived") == "1"
+
+	// Title search deliberately spans BOTH lists: a user searching for a
+	// chat they archived should still find it. The archive view's own
+	// filtering happens in the paginated branch below.
 
 	// Search and cursor pagination are mutually exclusive: ?q=
 	// returns the top N matches in one shot (no cursor) so the
@@ -223,7 +243,7 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	convs, next, err := h.conversations.List(r.Context(), caller.TenantUUID, caller.UserID, limit, cursor)
+	convs, next, err := h.conversations.List(r.Context(), caller.TenantUUID, caller.UserID, limit, cursor, archived)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
@@ -295,6 +315,9 @@ type updateRequest struct {
 	ReasoningEnabled     *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningMode        *string `json:"reasoning_mode,omitempty"`
 	ShowReasoningSummary *bool   `json:"show_reasoning_summary,omitempty"`
+	// IsArchived files the conversation away from the sidebar
+	// (migration 032). Pointer so the field is patchable independently.
+	IsArchived *bool `json:"is_archived,omitempty"`
 	// IsPinned toggles the sidebar pin (migration 021). Pointer so the
 	// handler can distinguish "field omitted" from "set to false".
 	IsPinned *bool `json:"is_pinned,omitempty"`
@@ -326,7 +349,7 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 &&
 		req.MemoryEnabled == nil && req.ReasoningEnabled == nil &&
 		req.ReasoningMode == nil && req.ShowReasoningSummary == nil &&
-		req.IsPinned == nil {
+		req.IsPinned == nil && req.IsArchived == nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
 	}
@@ -387,6 +410,12 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 			r.Context(), caller.TenantUUID, caller.UserID, convID,
 			req.ReasoningEnabled, req.ReasoningMode, req.ShowReasoningSummary,
 		); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if req.IsArchived != nil {
+		if err := h.conversations.SetArchived(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.IsArchived); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}

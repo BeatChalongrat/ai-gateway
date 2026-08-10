@@ -34,16 +34,21 @@ import (
 type Handlers struct {
 	Auth         *handler.AuthHandler
 	Conversation *handler.ConversationHandler
-	// Folder owns the chat-folders surface (migration 022): folder CRUD +
-	// reorder, plus the conversation→folder move route.
-	Folder       *handler.FolderHandler
-	Message      *handler.MessageHandler
-	Model        *handler.ModelHandler
-	Feedback     *handler.FeedbackHandler
-	File         *handler.FileHandler
-	Preferences  *handler.PreferencesHandler
-	Share        *handler.ShareHandler
-	Admin        *handler.AdminHandler
+	// Project owns the projects surface (migration 029): project CRUD +
+	// KB binding + the conversation→project move route. Since Phase 9
+	// this is the ONLY organiser — folders were merged into projects by
+	// migration 031 and their routes are gone.
+	Project *handler.ProjectHandler
+	// CanvasArtifact owns the Phase 6/C3 canvas-artifact surface
+	// (migration 030): versioned inline artifacts per conversation.
+	CanvasArtifact *handler.CanvasArtifactHandler
+	Message        *handler.MessageHandler
+	Model          *handler.ModelHandler
+	Feedback       *handler.FeedbackHandler
+	File           *handler.FileHandler
+	Preferences    *handler.PreferencesHandler
+	Share          *handler.ShareHandler
+	Admin          *handler.AdminHandler
 	// Knowledge is optional — left nil when RAG isn't compiled in
 	// (it always is in the current build but the handler keeps a
 	// guard so omitting it doesn't crash the router setup).
@@ -144,19 +149,36 @@ func New(
 			r.Patch("/conversations/{id}", h.Conversation.Update)
 			r.Delete("/conversations/{id}", h.Conversation.Delete)
 
-			// Folders (migration 022). Optional — only wired when the
-			// handler is present so router-construction tests stay green.
-			// ``/folders/reorder`` is registered alongside ``/folders/{id}``;
-			// chi matches the static segment first, so PUT on the literal
-			// path never collides with the {id} rename route.
-			if h.Folder != nil {
-				r.Get("/folders", h.Folder.List)
-				r.Post("/folders", h.Folder.Create)
-				r.Put("/folders/reorder", h.Folder.Reorder)
-				r.Put("/folders/{id}", h.Folder.Rename)
-				r.Delete("/folders/{id}", h.Folder.Delete)
-				// Conversation → folder membership.
-				r.Put("/conversations/{id}/folder", h.Folder.MoveConversation)
+			// Folders (migration 022) are RETIRED as of Phase 9 — every
+			// folder became a project (migration 031) and the routes are
+			// no longer registered. The table, the folder_id column, and
+			// the repo/service/handler code all remain for one release so
+			// the migration stays reversible; nothing serves them.
+			// See migrations/031_merge_folders_into_projects.sql.
+
+			// Projects (migration 029) — the single organiser: grouping,
+			// plus optional shared instructions + KB. A project with
+			// empty instructions and no KB is exactly what a folder was.
+			if h.Project != nil {
+				r.Get("/projects", h.Project.List)
+				r.Post("/projects", h.Project.Create)
+				r.Get("/projects/{id}", h.Project.Get)
+				r.Put("/projects/{id}", h.Project.Update)
+				r.Put("/projects/{id}/knowledge-base", h.Project.SetKnowledgeBase)
+				r.Delete("/projects/{id}", h.Project.Delete)
+				// Conversation → project membership.
+				r.Put("/conversations/{id}/project", h.Project.MoveConversation)
+			}
+
+			// Phase 6/C3 — Canvas artifacts: versioned inline artifacts
+			// (html/react/mermaid/svg/markdown) per conversation. Every
+			// save appends a version; revert appends a copy of an older
+			// one (history is never mutated).
+			if h.CanvasArtifact != nil {
+				r.Get("/conversations/{id}/artifacts", h.CanvasArtifact.List)
+				r.Post("/conversations/{id}/artifacts", h.CanvasArtifact.Save)
+				r.Get("/conversations/{id}/artifacts/{key}/versions", h.CanvasArtifact.Versions)
+				r.Post("/conversations/{id}/artifacts/{key}/revert", h.CanvasArtifact.Revert)
 			}
 
 			// Desktop import — idempotent backup mirror of agent-mode
@@ -177,6 +199,8 @@ func New(
 
 			// Messages.
 			r.Get("/conversations/{id}/messages", h.Message.List)
+			// Phase 5 — reattach to an in-flight generation (SSE).
+			r.Get("/conversations/{id}/messages/{messageID}/stream", h.Message.ResumeStream)
 
 			// Send + Regenerate go through the rate-limit middleware
 			// — both kick off an expensive Gateway round-trip.
@@ -225,6 +249,12 @@ func New(
 			// read_document tool reads it for scanned PDFs, which only
 			// the server-side OCR pipeline can handle.
 			r.Get("/files/{fileID}/text", h.File.Text)
+			// Structured preview data (Phase 16) — the same bytes as
+			// /text, shaped: sheets/rows for a spreadsheet, ordered
+			// blocks for Word, one entry per slide. 415 when the type
+			// has no structured view, so a client can ask first and
+			// fall back to /text.
+			r.Get("/files/{fileID}/preview-data", h.File.PreviewData)
 			r.Delete("/files/{fileID}", h.File.Delete)
 
 			// User preferences (custom instructions).

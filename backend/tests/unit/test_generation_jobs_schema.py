@@ -27,7 +27,10 @@ def _ttl():
 def _make_parents(session):
     session.add(TenantORM(tenant_id="t-1", name="T1", slug="t-1"))
     session.add(
-        PortalUserORM(id="u-1", email="u1@example.com", password_hash="x")
+        PortalUserORM(
+            id="u-1", email="u1@example.com", password_hash="x",
+            tenant_id="t-1",  # NOT NULL since SSO Phase 1 A1
+        )
     )
     session.flush()
 

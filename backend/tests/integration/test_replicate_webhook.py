@@ -63,7 +63,13 @@ async def _insert_job(
     async_db, *, ext, status="processing", estimate="0.35", provider="mock"
 ):
     uid = f"u-{uuid.uuid4().hex[:8]}"
-    async_db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x"))
+    # tenant_id NOT NULL since SSO Phase 1 A1 (conftest seed).
+    async_db.add(
+        PortalUserORM(
+            id=uid, email=f"{uid}@e.com", password_hash="x",
+            tenant_id="test-tenant",
+        )
+    )
     jid = str(uuid.uuid4())
     async_db.add(
         GenerationJobORM(

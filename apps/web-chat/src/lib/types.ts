@@ -96,27 +96,90 @@ export interface Conversation {
    *  above the time buckets. Defaults false server-side; older
    *  payloads flow through as `undefined` (treated as unpinned). */
   is_pinned?: boolean;
-  /** Sidebar folder membership (migration 022). `null`/`undefined` means
-   *  unfiled — the conversation shows in the PINNED / time buckets. A UUID
-   *  files it under that folder; the sidebar groups by this value. */
+  /** Archived (migration 032). An archived chat leaves the sidebar list
+   *  but is NOT deleted: it stays openable, searchable and sendable, and
+   *  the archive view lists it. Older payloads flow through as
+   *  `undefined`, treated as not archived. */
+  is_archived?: boolean;
+  /** Legacy folder membership (migration 022). RETIRED in Phase 9:
+   *  folders became projects (migration 031) and nothing in the UI reads
+   *  this any more. The server still returns it while the column exists
+   *  for rollback, so the field stays declared — do not group by it. */
   folder_id?: UUID | null;
+  /** Project membership — the ONE organiser since Phase 9.
+   *  `null`/`undefined` means the conversation is unassigned and shows in
+   *  the PINNED / time buckets; a UUID groups it under that project in
+   *  the sidebar (and the server injects the project's instructions + KB
+   *  into the prompt when the project carries them). */
+  project_id?: UUID | null;
 }
 
-/** A user-defined sidebar folder (migration 022). Flat (no nesting). */
-export interface Folder {
+/** A project — the single sidebar organiser (Phase 9). Groups
+ *  conversations, and OPTIONALLY carries shared instructions + a
+ *  knowledge base the server injects into every chat inside it. A
+ *  project with empty instructions and no KB is pure grouping: exactly
+ *  what a folder was before migration 031 merged the two. */
+export interface Project {
   id: UUID;
   name: string;
-  position: number;
-  /** Live count of non-deleted conversations filed in this folder. */
+  instructions: string;
+  knowledge_base_id: UUID | null;
+  /** Live count of non-deleted conversations assigned to this project. */
   conversation_count: number;
   created_at: string;
   updated_at: string;
+}
+
+/** One saved version of a canvas artifact (migration 030). Rows sharing
+ *  (conversation_id, artifact_key) form the lineage; the highest
+ *  ``version`` is current. A revert appends a new version rather than
+ *  mutating history — same model as the Phase-4 file workspace. */
+export interface CanvasArtifactRow {
+  id: UUID;
+  conversation_id: UUID;
+  message_id: UUID | null;
+  artifact_key: string;
+  type: "html" | "svg" | "markdown" | "mermaid" | "react";
+  title: string | null;
+  content: string;
+  version: number;
+  created_at: string;
 }
 
 export interface ConversationListResponse {
   conversations: Conversation[];
   has_more: boolean;
   next_cursor: string | null;
+}
+
+/** One hit from GET /search — the S6 full-text engine (ts_rank over
+ *  message bodies / titles / memories). Mirrors the Go
+ *  PastContextResult wire shape. */
+export interface PastContextSearchResult {
+  type: string; // "message" | "conversation" | "memory"
+  conversation_id?: string;
+  conversation_title?: string;
+  content: string;
+  role?: string;
+  date: string;
+  relevance: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  scope: string;
+  results: PastContextSearchResult[];
+  total: number;
+}
+
+/** Sidebar-friendly content match: one row per conversation whose
+ *  MESSAGE BODIES matched the search (title matches render as normal
+ *  conversation rows instead). */
+export interface ConversationSearchHit {
+  conversation_id: string;
+  conversation_title: string;
+  snippet: string;
+  date: string;
 }
 
 export type MessageRole = "user" | "assistant" | "system";
@@ -341,6 +404,12 @@ export interface Message {
    *  the backend is searching the web. MessageBubble shows the
    *  SearchingIndicator until content streams / sources land. */
   is_searching?: boolean;
+  /** local-only (Phase 8) — the sandboxed run_python calls this turn
+   *  made, delivered by the ``code_execution`` SSE event and keyed by
+   *  tool-call id. Renders the code + stdout card. NOT persisted: a
+   *  reload after the turn keeps the produced files but drops the
+   *  cards (see the SSE handler comment in chat-edge). */
+  code_runs?: CodeRun[];
   /** local-only — wall-clock duration of the streaming turn (send →
    *  message_complete). Shown in the per-message metadata line; absent
    *  after a page reload (not persisted). */
@@ -624,6 +693,30 @@ export interface SSEMessageSources {
   message_id: UUID;
   sources: SearchSource[];
 }
+
+/** One sandboxed python run (Phase 8 Task 2). The backend emits this
+ *  twice per call — `running` when the sandbox job starts, then the
+ *  terminal frame — both under the same `id`, so the card updates in
+ *  place instead of stacking. */
+export interface CodeRun {
+  id: string;
+  status: "running" | "completed" | "error";
+  code: string;
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number;
+  timed_out?: boolean;
+  duration_ms?: number;
+  /** Files the run wrote to /job/out and that were attached to the
+   *  message (they also arrive as normal attachments). */
+  artifacts?: string[];
+  /** Output was clipped for display; the model still saw all of it. */
+  truncated?: boolean;
+}
+
+/** SSE payload for a run_python progress frame — identical shape to
+ *  CodeRun (the backend serialises CodeExecutionUpdate directly). */
+export type SSECodeExecution = CodeRun;
 
 /** One attempted model in a fallback chain (B2/B3). */
 export interface FallbackAttempt {

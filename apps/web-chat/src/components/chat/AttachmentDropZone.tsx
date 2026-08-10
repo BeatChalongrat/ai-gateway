@@ -7,6 +7,8 @@
 
 import { useCallback, useRef, useState } from "react";
 
+import { useT } from "@/lib/i18n";
+
 interface Props {
   onFiles: (files: File[]) => void;
   enabled?: boolean;
@@ -20,6 +22,7 @@ export function AttachmentDropZone({
   className,
   children,
 }: Props) {
+  const t = useT();
   const [over, setOver] = useState(false);
   // Counts entered children so child-element transitions don't trip
   // the overlay off mid-hover.
@@ -96,7 +99,7 @@ export function AttachmentDropZone({
               strokeLinejoin="round"
             />
           </svg>
-          <div className="mt-2 text-sm font-medium">Drop files here</div>
+          <div className="mt-2 text-sm font-medium">{t("drop.title")}</div>
           <div className="mt-0.5 text-[11px] text-text-muted">
             PDF · DOCX · XLSX · CSV · TXT · PNG · JPG
           </div>

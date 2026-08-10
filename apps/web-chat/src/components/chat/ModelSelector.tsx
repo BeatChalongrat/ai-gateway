@@ -393,6 +393,7 @@ function ModelPicker({
                 reasoning={Boolean(m.reasoning?.supported)}
                 imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
                 mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
+                description={m.description}
               />
             ))}
           </Section>
@@ -410,6 +411,7 @@ function ModelPicker({
                 reasoning={Boolean(m.reasoning?.supported)}
                 imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
                 mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
+                description={m.description}
               />
             ))}
           </Section>
@@ -437,6 +439,7 @@ function ModelPicker({
                     onClick={() => onPickModel(m)}
                     mediaKind={kind}
                     tier={m.cost_tier}
+                    description={m.description}
                   />
                 ))
               ) : (
@@ -467,6 +470,7 @@ function ModelPicker({
                   reasoning={Boolean(m.reasoning?.supported)}
                   imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
                   mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
+                  description={m.description}
                 />
               ))}
               {hiddenCount > 0 ? (
@@ -529,6 +533,15 @@ interface RowProps {
   mediaKind?: "video" | "audio" | "tts";
   /** Sprint 3 — coarse cost-tier badge. Dormant until the catalog serves it. */
   tier?: "free" | "low" | "medium" | "high";
+  /** Phase 11 — the catalog has served this since day one but nothing
+   *  rendered it, so users picked models blind. Second line under the name:
+   *  what the model is good at.
+   *
+   *  Phase 13.1 removed the context/pricing line that used to sit under this
+   *  one. SRAN is an internal tool on a shared account — nobody picking a
+   *  model here is making a purchase decision, so token economics was noise.
+   *  The catalog still serves those fields; we just don't render them. */
+  description?: string;
 }
 
 const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
@@ -544,7 +557,10 @@ const TIER_LABEL: Record<"free" | "low" | "medium" | "high", string> = {
   high: "Premium+",
 };
 
-function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen, mediaKind, tier }: RowProps) {
+function ModelRow({
+  label, sub, selected, onClick, leading, reasoning, imageGen, mediaKind, tier,
+  description,
+}: RowProps) {
   const t = useT();
   return (
     <div
@@ -559,8 +575,15 @@ function ModelRow({ label, sub, selected, onClick, leading, reasoning, imageGen,
         <span className="inline-flex shrink-0 items-center">{leading}</span>
       ) : null}
       <div className="min-w-0 flex-1">
-        <span className="text-sm font-medium text-text-primary">{label}</span>
-        {sub ? <span className="ml-1.5 text-[11px] text-text-muted">{sub}</span> : null}
+        <div>
+          <span className="text-sm font-medium text-text-primary">{label}</span>
+          {sub ? <span className="ml-1.5 text-[11px] text-text-muted">{sub}</span> : null}
+        </div>
+        {description ? (
+          <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-text-muted">
+            {description}
+          </p>
+        ) : null}
       </div>
       {reasoning ? (
         <span

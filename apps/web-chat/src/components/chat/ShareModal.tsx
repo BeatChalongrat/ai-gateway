@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
+import { tOutside } from "@/lib/i18n";
 import { api, ApiError } from "@/lib/api";
 import type { ShareExpiry, ShareLink } from "@/lib/types";
 
@@ -51,7 +52,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
         if (err instanceof ApiError && err.status === 404) {
           // no existing share — that's fine
         } else if (!cancelled) {
-          toast("Couldn't load share status.");
+          toast(tOutside("share.toast.loadFailed"));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -68,9 +69,9 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
     try {
       const fresh = await api.createShare(conversationId, expiry);
       setLink(fresh);
-      toast("Share link created.");
+      toast(tOutside("share.toast.created"));
     } catch {
-      toast("Couldn't create share link.");
+      toast(tOutside("share.toast.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -83,9 +84,9 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
       await api.revokeShare(conversationId);
       setLink(null);
       setConfirmRevoke(false);
-      toast("Share link revoked.");
+      toast(tOutside("share.toast.revoked"));
     } catch {
-      toast("Couldn't revoke share link.");
+      toast(tOutside("share.toast.revokeFailed"));
     } finally {
       setBusy(false);
     }
@@ -94,9 +95,9 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
   async function copy(url: string) {
     try {
       await navigator.clipboard?.writeText(url);
-      toast("Link copied.");
+      toast(tOutside("share.toast.linkCopied"));
     } catch {
-      toast("Couldn't copy.");
+      toast(tOutside("toast.copyFailed"));
     }
   }
 

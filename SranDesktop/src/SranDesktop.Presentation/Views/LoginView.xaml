@@ -112,6 +112,86 @@
                    RenderOptions.BitmapScalingMode="HighQuality"
                    HorizontalAlignment="Center" Margin="0,0,0,32" />
 
+            <!-- ═══ Google sign-in (SSO Phase 2, system browser + ticket) ═══ -->
+            <Button Style="{DynamicResource AccentButton}"
+                    controls:ButtonHelper.CornerRadius="8"
+                    Command="{Binding SignInWithGoogleCommand}"
+                    Height="42" FontSize="14"
+                    Visibility="{Binding IsGoogleSignInAvailable, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <!-- Official multicolor Google "G" (same vector geometry
+                         as the portal's SocialButtons SVG). Per the branding
+                         guide the mark sits on a white tile when the button
+                         itself is colored — this also keeps it correct in
+                         both app themes. Embedded vector: no network, no
+                         bitmap asset. -->
+                    <Border Width="24" Height="24" CornerRadius="4"
+                            Background="White" Margin="0,0,10,0"
+                            VerticalAlignment="Center">
+                        <Viewbox Width="18" Height="18">
+                            <Canvas Width="24" Height="24">
+                                <!-- Same geometry as the web SVG; arc flags
+                                     re-spaced because WPF's parser (unlike
+                                     SVG) rejects the run-together "01" form. -->
+                                <Path Fill="#4285F4"
+                                      Data="M22.5 12.27c0-.78-.07-1.53-.2-2.27H12v4.51h5.92a5.06,5.06 0 0 1 -2.2,3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.32z" />
+                                <Path Fill="#34A853"
+                                      Data="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.99.66-2.25 1.05-3.72 1.05-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A10.99,10.99 0 0 0 12,23z" />
+                                <Path Fill="#FBBC05"
+                                      Data="M5.84 14.1a6.6,6.6 0 0 1 0,-4.2V7.06H2.18a11,11 0 0 0 0,9.88l3.66-2.84z" />
+                                <Path Fill="#EA4335"
+                                      Data="M12 5.38c1.62 0 3.07.56 4.22 1.65l3.15-3.15C17.46 2.09 14.97 1 12 1A10.99,10.99 0 0 0 2.18,7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" />
+                            </Canvas>
+                        </Viewbox>
+                    </Border>
+                    <TextBlock Text="{loc:T login.googleSignIn}"
+                               FontSize="14" FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <TextBlock Text="{loc:T login.googleWaiting}"
+                       FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       Margin="0,10,0,0"
+                       Visibility="{Binding IsOAuthWaiting, Converter={StaticResource BoolToVisibility}}" />
+
+            <!-- Error card (shared by Google + password flows, so it lives
+                 OUTSIDE the collapsible password section) -->
+            <Border CornerRadius="8" Padding="12,10" Margin="0,16,0,0"
+                    Background="{DynamicResource DangerHoverBgBrush}"
+                    Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel Orientation="Horizontal">
+                    <controls:IconView Width="14" Height="14"
+                                       Geometry="{StaticResource Geo_AlertCircle}"
+                                       Stroke="{DynamicResource AccentRedBrush}"
+                                       VerticalAlignment="Top" Margin="0,1,8,0" />
+                    <TextBlock Text="{Binding ErrorMessage}" FontSize="12.5"
+                               Foreground="{DynamicResource AccentRedBrush}"
+                               TextWrapping="Wrap" MaxWidth="300" />
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Email+password (collapsible: server flag
+                 password_login_enabled — kept intact for Phase 3) ═══ -->
+            <StackPanel Visibility="{Binding IsPasswordLoginVisible, Converter={StaticResource BoolToVisibility}}">
+
+            <!-- "or" divider between Google and the password form -->
+            <Grid Margin="0,16,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Height="1" VerticalAlignment="Center"
+                        Background="{DynamicResource BorderBrush}" />
+                <TextBlock Grid.Column="1" Text="{loc:T login.orDivider}"
+                           FontSize="11" Margin="10,0"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
+                <Border Grid.Column="2" Height="1" VerticalAlignment="Center"
+                        Background="{DynamicResource BorderBrush}" />
+            </Grid>
+
             <!-- ═══ Email ═══ -->
             <TextBlock Text="{loc:T login.email}" FontSize="12"
                        Foreground="{DynamicResource TextSecondaryBrush}"
@@ -197,21 +277,6 @@
                 </Grid>
             </Border>
 
-            <!-- Error card -->
-            <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,16"
-                    Background="{DynamicResource DangerHoverBgBrush}"
-                    Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
-                <StackPanel Orientation="Horizontal">
-                    <controls:IconView Width="14" Height="14"
-                                       Geometry="{StaticResource Geo_AlertCircle}"
-                                       Stroke="{DynamicResource AccentRedBrush}"
-                                       VerticalAlignment="Top" Margin="0,1,8,0" />
-                    <TextBlock Text="{Binding ErrorMessage}" FontSize="12.5"
-                               Foreground="{DynamicResource AccentRedBrush}"
-                               TextWrapping="Wrap" MaxWidth="300" />
-                </StackPanel>
-            </Border>
-
             <!-- Sign in -->
             <Button Style="{DynamicResource AccentButton}"
                     controls:ButtonHelper.CornerRadius="8"
@@ -266,6 +331,9 @@
                     <Run Text="{loc:T login.forgotPassword}" FontSize="12" />
                 </Hyperlink>
             </TextBlock>
+
+            </StackPanel>
+            <!-- ═══ end collapsible email+password section ═══ -->
 
             <!-- Server settings escape hatch (FIX-A): reachable BEFORE login so
                  a wrong server URL is never a dead-end. -->

@@ -76,14 +76,59 @@ public sealed class ConversationSyncService : IConversationSyncService
         return true;
     }
 
+    /// <summary>
+    /// Fetches BOTH server lists: the active conversations and the archived
+    /// ones (Phase 14). Two calls because chat-edge treats the archive as a
+    /// separate view — <c>GET /conversations</c> excludes archived rows.
+    ///
+    /// Both are needed even though only the active ones show in the sidebar.
+    /// The caller's deletion reconcile removes any local server-sourced row it
+    /// did not see, so fetching only the active list would DELETE the local
+    /// copy of every archived chat the moment the user archived it — the exact
+    /// opposite of "archive is not delete", and it would empty the archive
+    /// view offline.
+    ///
+    /// The ACTIVE list is required — losing it is a real sync failure. The
+    /// ARCHIVE list is best-effort: an older server without the route, or a
+    /// blip, must not stop the user's live chats from syncing. When it fails,
+    /// the fetch is reported INCOMPLETE, which makes the caller skip the
+    /// deletion sweep — so rows we merely failed to see are never deleted.
+    /// </summary>
     private async Task<(List<ConversationDto> Items, bool Complete)> FetchAllAsync(CancellationToken ct)
+    {
+        var (active, activeComplete) = await FetchPagesAsync(
+            (cursor, token) => _api.ListConversationsAsync(cursor, PageSize, token), "active", ct);
+
+        List<ConversationDto> archived;
+        bool archivedComplete;
+        try
+        {
+            (archived, archivedComplete) = await FetchPagesAsync(
+                (cursor, token) => _api.ListArchivedConversationsAsync(cursor, PageSize, token),
+                "archived", ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Archived conversations could not be fetched; skipping the delete sweep");
+            archived = new List<ConversationDto>();
+            archivedComplete = false;
+        }
+
+        active.AddRange(archived);
+        return (active, activeComplete && archivedComplete);
+    }
+
+    private async Task<(List<ConversationDto> Items, bool Complete)> FetchPagesAsync(
+        Func<string?, CancellationToken, Task<ConversationListResponse>> fetch,
+        string label,
+        CancellationToken ct)
     {
         var items = new List<ConversationDto>();
         string? cursor = null;
 
         for (var page = 0; page < MaxPages; page++)
         {
-            var response = await _api.ListConversationsAsync(cursor, PageSize, ct);
+            var response = await fetch(cursor, ct);
             items.AddRange(response.Conversations);
 
             if (!response.HasMore || string.IsNullOrEmpty(response.NextCursor))
@@ -92,7 +137,9 @@ public sealed class ConversationSyncService : IConversationSyncService
             cursor = response.NextCursor;
         }
 
-        _logger.LogWarning("Conversation sync stopped after {Max} pages; list truncated", MaxPages);
+        _logger.LogWarning(
+            "Conversation sync stopped after {Max} pages of the {Label} list; truncated",
+            MaxPages, label);
         return (items, false);
     }
 
@@ -104,7 +151,8 @@ public sealed class ConversationSyncService : IConversationSyncService
         CreatedAt = dto.CreatedAt,
         UpdatedAt = dto.UpdatedAt,
         IsPinned = dto.IsPinned,
-        FolderId = dto.FolderId,
+        IsArchived = dto.IsArchived,
+        ProjectId = dto.ProjectId,
         Source = ConversationSource.Server,
         LastSyncedAt = syncedAt
     };

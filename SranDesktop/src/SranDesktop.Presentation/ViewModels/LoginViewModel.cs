@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Services;
 using SranDesktop.Presentation.Localization;
 using SranDesktop.Presentation.Services;
 
@@ -13,6 +15,8 @@ public partial class LoginViewModel : ObservableObject
 {
     private readonly IAuthService _authService;
     private readonly ISettingsService _settings;
+    private readonly LoginOAuthCoordinator? _oauth;
+    private readonly SynchronizationContext? _uiContext;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(LoginCommand))]
@@ -71,10 +75,84 @@ public partial class LoginViewModel : ObservableObject
     private void OpenServerSettings() =>
         ServerSettingsRequested?.Invoke(this, EventArgs.Empty);
 
-    public LoginViewModel(IAuthService authService, ISettingsService settings)
+    public LoginViewModel(
+        IAuthService authService,
+        ISettingsService settings,
+        LoginOAuthCoordinator? oauthCoordinator = null)
     {
         _authService = authService;
         _settings = settings;
+        _oauth = oauthCoordinator;
+        // Created on the UI thread by DI; coordinator events arrive on
+        // background threads and must be marshalled back before touching
+        // bound state. Null in unit tests → handlers run inline.
+        _uiContext = SynchronizationContext.Current;
+
+        if (_oauth is not null)
+        {
+            _oauth.SignInSucceeded += (_, _) => OnUi(() =>
+            {
+                IsOAuthWaiting = false;
+                LoginSucceeded?.Invoke(this, EventArgs.Empty);
+            });
+            _oauth.SignInFailed += (_, reason) => OnUi(() =>
+            {
+                IsOAuthWaiting = false;
+                ErrorMessage = LocaleService.Instance.T(
+                    reason == "browser_failed" ? "login.errorBrowser" : "login.errorGoogle");
+            });
+        }
+
+        // Server UI truth for the password form (Phase 3 cutover hides it
+        // without a desktop release). Fire-and-forget; unreachable server
+        // keeps the fail-open default (form visible).
+        _ = LoadPublicSettingsAsync();
+    }
+
+    // ── Google sign-in (SSO Phase 2) ────────────────────────────────────────
+
+    /// <summary>True from "browser opened" until the deep link resolves —
+    /// shows the "finish in your browser" hint. The button stays enabled
+    /// so an abandoned browser tab never dead-ends the login screen.</summary>
+    [ObservableProperty]
+    private bool _isOAuthWaiting;
+
+    /// <summary>Whether the email+password form renders. UI truth from
+    /// /portal/auth/public-settings; the 403 on /login is the enforcement.</summary>
+    [ObservableProperty]
+    private bool _isPasswordLoginVisible = true;
+
+    public bool IsGoogleSignInAvailable => _oauth is not null;
+
+    [RelayCommand]
+    private void SignInWithGoogle()
+    {
+        if (_oauth is null)
+            return;
+        ErrorMessage = null;
+        IsOAuthWaiting = _oauth.StartSignIn();
+    }
+
+    internal async Task LoadPublicSettingsAsync()
+    {
+        try
+        {
+            var publicSettings = await _authService.GetPublicSettingsAsync();
+            OnUi(() => IsPasswordLoginVisible = publicSettings.PasswordLoginEnabled);
+        }
+        catch (Exception)
+        {
+            // Offline / server down: keep the default (form visible) so
+            // password login still works when the flag is on.
+        }
+    }
+
+    private void OnUi(Action action)
+    {
+        if (_uiContext is not null)
+            _uiContext.Post(_ => action(), null);
+        else
+            action();
     }
 
     private bool CanLogin() =>

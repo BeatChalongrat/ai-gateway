@@ -270,74 +270,20 @@ public partial class MainViewModel : ObservableObject
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";
 
-    // ── Projects (R9 Feature B) ─────────────────────────────────────────────
-
-    public System.Collections.ObjectModel.ObservableCollection<Project> Projects { get; } = new();
-
-    public async Task LoadProjectsAsync()
-    {
-        try
-        {
-            Projects.Clear();
-            foreach (var project in await _projects.GetAllAsync())
-                Projects.Add(project);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not load projects");
-        }
-    }
-
-    [RelayCommand]
-    private async Task CreateProjectAsync()
-    {
-        var name = Views.Dialogs.InputDialog.Show(
-            System.Windows.Application.Current.MainWindow,
-            Localization.LocaleService.Instance.T("project.create"),
-            Localization.LocaleService.Instance.T("project.name"));
-        if (string.IsNullOrWhiteSpace(name))
-            return;
-
-        var project = new Project { Name = name.Trim() };
-        await _projects.UpsertAsync(project);
-        Projects.Add(project);
-        OpenProject(project);
-    }
-
-    [RelayCommand]
-    private void OpenProject(Project? project)
-    {
-        if (project is null)
-            return;
-
-        var detail = new ProjectDetailViewModel(_projects, project, _logger, _dialogs);
-        detail.StartChatRequested = async p =>
-        {
-            await Conversations.CreateNewConversationAsync();
-            if (ActiveConversation is { } conversation)
-            {
-                p.ConversationIds.Add(conversation.Id);
-                await _projects.UpsertAsync(p);
-                await ApplyProjectContextAsync(conversation.Id);
-            }
-        };
-        detail.ProjectDeleted += (_, _) => _ = LoadProjectsAsync();
-
-        // Show titles of the project's conversations.
-        foreach (var id in project.ConversationIds)
-        {
-            var item = Conversations.Conversations.FirstOrDefault(c => c.Id == id);
-            if (item is not null)
-                detail.Conversations.Add(item);
-        }
-
-        var view = new Views.ProjectView(detail)
-        {
-            Owner = System.Windows.Application.Current.MainWindow
-        };
-        view.ShowDialog();
-        _ = LoadProjectsAsync(); // name may have changed
-    }
+    // ── Local project context (R9 Feature B — sidebar surface retired) ──────
+    //
+    // Phase 11: the desktop showed TWO project lists backed by two different
+    // stores — this one (local %APPDATA%\SRAN Desktop\projects.json, invisible
+    // to web) and the server-backed list inside SidebarView (chat.projects,
+    // shared with web-chat, groups the conversation list, supports
+    // rename/delete/drag-drop). The server-backed one is the organiser Phase 9
+    // standardised on, so it is the only one the sidebar shows now.
+    //
+    // What stays here: the per-conversation CONTEXT lookup. A conversation
+    // that is already inside a local project keeps having that project's
+    // instructions + files applied to its chat, so nothing an existing user
+    // set up silently stops working. Nothing creates new local projects any
+    // more; migrating the leftovers into server projects is backlog.
 
     /// <summary>Feed the owning project's instructions/files into the chat context.</summary>
     private async Task ApplyProjectContextAsync(string? conversationId)
@@ -420,7 +366,6 @@ public partial class MainViewModel : ObservableObject
 
         _ = LoadConversationsSafeAsync();
         _ = RefreshUsageAsync(force: true);
-        _ = LoadProjectsAsync();
         Chat.StartMemoryPolling();
         _scheduler.Start(); // scheduled tasks tick once signed in (R9 G)
         _connectors.StartHealthChecks(); // dial installed MCP servers (R10 1E)

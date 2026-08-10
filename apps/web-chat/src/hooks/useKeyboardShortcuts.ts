@@ -7,6 +7,7 @@
 //   Cmd/Ctrl + Shift + S  → toggle sidebar
 //   Cmd/Ctrl + Shift + N  → new chat
 //   Cmd/Ctrl + K          → focus sidebar search
+//   Cmd/Ctrl + /  or  ?   → keyboard-shortcuts cheatsheet
 //
 // Each shortcut is opt-in via a handler in the options bag so a
 // caller that doesn't supply ``onToggleSidebar`` simply doesn't
@@ -22,6 +23,8 @@ import { useChatStore } from "@/stores/chatStore";
 
 interface Options {
   onToggleSidebar?: () => void;
+  /** Phase 10 — open the cheatsheet (Cmd/Ctrl+/ or a bare "?"). */
+  onShowShortcuts?: () => void;
 }
 
 const TEXT_INPUT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
@@ -34,12 +37,35 @@ export function useKeyboardShortcuts(opts: Options) {
   // into a leak machine.
   const toggleRef = useRef(opts.onToggleSidebar);
   toggleRef.current = opts.onToggleSidebar;
+  const shortcutsRef = useRef(opts.onShowShortcuts);
+  shortcutsRef.current = opts.onShowShortcuts;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey;
+
+      // "?" with no modifier opens the cheatsheet — but only when the
+      // user is NOT typing, otherwise a question mark in a message
+      // would pop a dialog mid-sentence.
+      if (!meta && e.key === "?" && shortcutsRef.current) {
+        const target = e.target as HTMLElement | null;
+        if (target && (TEXT_INPUT_TAGS.has(target.tagName) || target.isContentEditable)) {
+          return;
+        }
+        e.preventDefault();
+        shortcutsRef.current();
+        return;
+      }
+
       if (!meta) return;
+
+      // Cmd/Ctrl+/ works everywhere, including from inside the composer.
+      if (e.key === "/" && shortcutsRef.current) {
+        e.preventDefault();
+        shortcutsRef.current();
+        return;
+      }
 
       if (!e.shiftKey && (e.key === "k" || e.key === "K")) {
         const el = document.querySelector<HTMLInputElement>(

@@ -245,7 +245,7 @@ public sealed class MarkdownRenderer
             HorizontalAlignment = HorizontalAlignment.Right,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
-            ToolTip = "Copy code"
+            ToolTip = Localization.LocaleService.Instance.T("artifact.copyCode")
         };
         copyButton.Click += (_, _) =>
         {
@@ -274,6 +274,36 @@ public sealed class MarkdownRenderer
 
         DockPanel.SetDock(copyButton, Dock.Right);
         header.Children.Add(copyButton);
+
+        // Phase 15 — "Open in Canvas" for blocks that can actually render.
+        // The inline code block stays the default view; this is an extra
+        // affordance next to Copy, exactly as on the web.
+        if (Application.Services.CanvasEligibility.CanOpen(language, code))
+        {
+            var canvasButton = new Button
+            {
+                Content = new TextBlock
+                {
+                    Text = Localization.LocaleService.Instance.T("canvas.open"),
+                    FontSize = 11,
+                },
+                Padding = new Thickness(8, 3, 8, 3),
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                ToolTip = Localization.LocaleService.Instance.T("canvas.open"),
+            };
+            ((TextBlock)canvasButton.Content).SetResourceReference(
+                TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            var capturedCode = code;
+            var capturedLang = language;
+            canvasButton.Click += (sender, _) =>
+                Services.CanvasLauncher.Open(sender as FrameworkElement, capturedLang, capturedCode);
+            DockPanel.SetDock(canvasButton, Dock.Right);
+            header.Children.Add(canvasButton);
+        }
+
         header.Children.Add(langLabel);
 
         // Header strip (language + copy) carries its own theme-aware bg,

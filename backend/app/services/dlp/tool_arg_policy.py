@@ -78,6 +78,13 @@ TOOL_ARG_POLICY: dict[str, str] = {
     "list_memories": PLACEHOLDER_SAFE,
     "search_past_conversations": PLACEHOLDER_SAFE,
     "update_conversation_state": PLACEHOLDER_SAFE,
+    # Canvas artifact update (chat-edge Phase 8) — writes the new source
+    # of an artifact that already lives in chat.canvas_artifacts, i.e.
+    # the same DLP-governed conversation store the message content uses.
+    # Nothing egresses to a third party, so a masked placeholder in the
+    # content is a fidelity loss (a token visible in the rendered
+    # artifact), never a leak — blocking the edit would be worse.
+    "update_canvas_artifact": PLACEHOLDER_SAFE,
     # Image generation already runs on a DLP-masked prompt elsewhere in
     # the gateway, so masked placeholders in the prompt are consistent.
     "generate_image": PLACEHOLDER_SAFE,

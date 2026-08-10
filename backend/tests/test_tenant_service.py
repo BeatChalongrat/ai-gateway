@@ -69,6 +69,19 @@ def _make_user(
     tenant_role: str = "member",
     token_version: int = 1,
 ) -> PortalUserORM:
+    # tenant_id is NOT NULL since SSO Phase 1 A1 (matching migration
+    # 030): a caller that doesn't pin a tenant gets a fresh solo tenant,
+    # mirroring what signup produces in production.
+    if tenant_id is None:
+        solo = TenantORM(
+            tenant_id=str(uuid.uuid4()),
+            name="Solo",
+            slug=f"solo-{uuid.uuid4().hex[:10]}",
+            status="active",
+        )
+        db.add(solo)
+        db.flush()
+        tenant_id = solo.tenant_id
     user = PortalUserORM(
         id=user_id or str(uuid.uuid4()),
         email=email or f"{uuid.uuid4().hex[:8]}@example.com",
@@ -273,18 +286,39 @@ class TestRedeemInvite:
                 db, code="nonexistent-code", redeeming_user_id=newcomer.id
             )
 
-    def test_user_already_in_a_different_tenant_rejected(self, db):
+    def test_user_in_a_multi_member_tenant_rejected(self, db):
+        """SSO Phase 1: the cross-tenant guard now keys on 'does the
+        current tenant still have other members'. A sole-member (solo)
+        tenant may be folded into the invite's team (see the test
+        below); a tenant with other members may not be abandoned."""
         _, _, invite, newcomer = self._setup(db)
-        # Put them in a different tenant first.
-        other_owner = _make_user(db, email="other-owner@example.com")
+        # Put them in a different tenant that ALSO has another member.
         tenant_service.create_tenant_with_owner(
             db, tenant_name="Other", owner_user_id=newcomer.id
         )
         db.refresh(newcomer)
+        _make_user(db, email="other-member@example.com", tenant_id=newcomer.tenant_id)
         with pytest.raises(ConflictError, match="different tenant"):
             tenant_service.redeem_invite(
                 db, code=invite.code, redeeming_user_id=newcomer.id
             )
+
+    def test_sole_member_of_solo_tenant_can_move(self, db):
+        """The displaced-member rejoin flow: a user who is the only
+        member of their tenant (remove_member parks removed users in
+        exactly such a tenant) may redeem an invite into a new team."""
+        _, tenant, invite, newcomer = self._setup(db)
+        tenant_service.create_tenant_with_owner(
+            db, tenant_name="Solo Own", owner_user_id=newcomer.id
+        )
+        db.refresh(newcomer)
+        assert newcomer.tenant_id != tenant.tenant_id
+        tenant_service.redeem_invite(
+            db, code=invite.code, redeeming_user_id=newcomer.id
+        )
+        db.refresh(newcomer)
+        assert newcomer.tenant_id == tenant.tenant_id
+        assert newcomer.tenant_role == "member"
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +355,11 @@ class TestListAndRemoveMembers:
             target_user_id=m1.id,
         )
         db.refresh(m1)
-        assert m1.tenant_id is None
+        # SSO Phase 1: tenant_id is NOT NULL, so removal displaces the
+        # member into a fresh solo tenant instead of orphaning them.
+        assert m1.tenant_id is not None
+        assert m1.tenant_id != tenant.tenant_id
+        assert m1.tenant_role == "owner"
         # Token version bumped to invalidate their session.
         assert m1.token_version >= 2
 
@@ -344,7 +382,9 @@ class TestListAndRemoveMembers:
             target_user_id=m1.id,
         )
         db.refresh(m1)
-        assert m1.tenant_id is None
+        # Displaced into a fresh solo tenant (see test_owner_can_remove).
+        assert m1.tenant_id is not None
+        assert m1.tenant_id != tenant.tenant_id
 
     def test_last_owner_cannot_be_removed(self, db):
         owner, tenant, _, _ = self._tenant_with_members(db)

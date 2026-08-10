@@ -13,37 +13,22 @@ public partial class ModelItemViewModel : ObservableObject
     private bool _isSelected;
 
     public string DisplayName => Model.DisplayName;
-    public string? Provider => Model.Provider;
     public bool SupportsImage => Model.SupportsImage;
     public bool SupportsThinking => Model.SupportsThinking;
     public bool SupportsVideo => Model.SupportsVideo;
     public bool SupportsAudio => Model.SupportsAudio;
 
-    // Phase C PART 4: surface per-model info that already exists in the data but
-    // wasn't rendered — the provider + context window, and a one-line description.
+    // Phase C PART 4: surface the one-line description the catalogue already
+    // sends but nothing rendered.
+    //
+    // Phase 13.1 removed the meta line that used to sit above it (provider ·
+    // context window · price per 1M). SRAN is an internal tool on a shared
+    // account — nobody picking a model here is making a purchase decision, so
+    // token economics was noise. The provider is still visible as the picker's
+    // section header, and the catalogue still serves the numbers on ModelInfo;
+    // they are simply not rendered.
     public string? Description => Model.Description;
     public bool HasDescription => !string.IsNullOrWhiteSpace(Model.Description);
-
-    /// <summary>"Provider · 128K context" — whichever parts are present.</summary>
-    public string? MetaLine
-    {
-        get
-        {
-            var parts = new List<string>();
-            if (!string.IsNullOrEmpty(Provider)) parts.Add(Provider!);
-            if (Model.ContextWindow is > 0) parts.Add(FormatContext(Model.ContextWindow!.Value));
-            return parts.Count > 0 ? string.Join(" · ", parts) : null;
-        }
-    }
-
-    public bool HasMetaLine => MetaLine is not null;
-
-    private static string FormatContext(int tokens) => tokens switch
-    {
-        >= 1_000_000 => $"{tokens / 1_000_000}M context",
-        >= 1_000 => $"{tokens / 1_000}K context",
-        _ => $"{tokens} context",
-    };
 
     public ModelItemViewModel(ModelInfo model, bool isSelected)
     {

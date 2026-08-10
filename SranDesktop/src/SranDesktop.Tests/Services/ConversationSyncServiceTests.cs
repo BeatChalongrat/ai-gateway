@@ -24,7 +24,7 @@ public class ConversationSyncServiceTests : IDisposable
     private static ConversationDto Dto(string id, string title = "t") => new(
         id, title, "gpt-4o-mini", 0,
         DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow,
-        IsPinned: false, FolderId: null);
+        IsPinned: false, ProjectId: null);
 
     [Fact]
     public async Task Sync_Upserts_Server_Conversations_And_Reconciles_Deletions()
@@ -40,6 +40,12 @@ public class ConversationSyncServiceTests : IDisposable
             .ReturnsAsync(new ConversationListResponse(
                 new List<ConversationDto> { Dto("c1", "new title"), Dto("c2") },
                 HasMore: false, NextCursor: null));
+        // Phase 14: the sync reads the archive list too, and only sweeps
+        // deletions when it saw BOTH lists in full — otherwise an unreachable
+        // archive would delete every archived chat locally. Stub it empty so
+        // this test still exercises the sweep it is about.
+        api.Setup(a => a.ListArchivedConversationsAsync(null, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ConversationListResponse(new List<ConversationDto>(), false, null));
 
         var sync = new ConversationSyncService(api.Object, _store, NullLogger<ConversationSyncService>.Instance);
         var ok = await sync.SyncFromServerAsync();

@@ -22,6 +22,10 @@ type Conversation struct {
 	MessageCount int
 	IsDeleted    bool
 	DeletedAt    *time.Time
+	// IsArchived (migration 032) hides the conversation from the SIDEBAR
+	// LIST only. Unlike IsDeleted it does not affect Get / Search / send /
+	// export — an archived chat is fully readable, it is just filed away.
+	IsArchived bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	// KnowledgeBaseID is the per-conversation RAG binding. Nullable
@@ -78,4 +82,9 @@ type Conversation struct {
 	// NULL means "unfiled" (the conversation shows in the PINNED / time
 	// buckets). The frontend groups conversations under folders by this id.
 	FolderID *uuid.UUID
+
+	// ProjectID is the project membership (migration 029). Nullable — NULL
+	// means "no project". A project-assigned conversation inherits the
+	// project's instructions + knowledge base at prompt-compile time.
+	ProjectID *uuid.UUID
 }

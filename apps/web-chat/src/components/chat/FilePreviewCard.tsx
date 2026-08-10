@@ -48,6 +48,7 @@ function CardShell({
   size,
   status,
   extracting,
+  progress,
   errorMsg,
   onRemove,
   onRetry,
@@ -61,6 +62,11 @@ function CardShell({
    *  state does NOT block sending, so it gets a quiet inline label
    *  rather than the blocking dim-and-spin overlay. */
   extracting?: boolean;
+  /** 0..100 from the XHR upload-progress event. Phase 7: this was
+   *  already being measured and stored per pending file but never
+   *  surfaced — the card showed a bare spinner, so a large upload
+   *  looked identical to a stuck one. */
+  progress?: number;
   errorMsg?: string;
   onRemove: () => void;
   onRetry?: () => void;
@@ -68,6 +74,7 @@ function CardShell({
   const t = useT();
   const isError = status === "error";
   const isUploading = status === "uploading";
+  const pct = Math.max(0, Math.min(100, Math.round(progress ?? 0)));
   const isExtracting = Boolean(extracting) && !isUploading && !isError;
   return (
     <div
@@ -109,10 +116,24 @@ function CardShell({
 
       {isUploading ? (
         <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 backdrop-blur-[1px]"
-          aria-label="Uploading"
+          className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/35 backdrop-blur-[1px]"
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={t("file.uploading")}
+          data-testid="upload-progress"
         >
           <Loader2 className="h-5 w-5 animate-spin text-white" aria-hidden />
+          <span className="text-xs font-medium tabular-nums text-white">
+            {pct}%
+          </span>
+          <div className="h-1 w-20 overflow-hidden rounded-full bg-white/30">
+            <div
+              className="h-full rounded-full bg-white transition-[width] duration-200"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
         </div>
       ) : null}
 
@@ -128,7 +149,7 @@ function CardShell({
           dark image thumbnail. */}
       <button
         type="button"
-        aria-label="Remove file"
+        aria-label={t("file.remove")}
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
@@ -141,7 +162,7 @@ function CardShell({
       {isError && onRetry ? (
         <button
           type="button"
-          aria-label="Retry upload"
+          aria-label={t("file.retryUpload")}
           onClick={(e) => {
             e.stopPropagation();
             onRetry();
@@ -172,6 +193,7 @@ function ImagePreviewCard({ pending, onRemove, onRetry }: Props) {
       name={pending.file.name}
       size={pending.file.size}
       status={pending.status}
+      progress={pending.progress}
       extracting={isExtracting(pending.extractionStatus)}
       errorMsg={pending.error}
       onRemove={onRemove}
@@ -206,6 +228,7 @@ function DocumentPreviewCard({ pending, onRemove, onRetry }: Props) {
       name={pending.file.name}
       size={pending.file.size}
       status={pending.status}
+      progress={pending.progress}
       extracting={isExtracting(pending.extractionStatus)}
       errorMsg={pending.error}
       onRemove={onRemove}

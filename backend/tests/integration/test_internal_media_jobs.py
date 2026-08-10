@@ -73,7 +73,10 @@ async def _seed(async_db, *, balance=5_000_000):
     uid = f"u-{uuid.uuid4().hex[:8]}"
     async_db.add(
         PortalUserORM(
-            id=uid, email=f"{uid}@e.com", password_hash="x", credit_balance=balance
+            id=uid, email=f"{uid}@e.com", password_hash="x",
+            credit_balance=balance,
+            # tenant_id NOT NULL since SSO Phase 1 A1 (conftest seed).
+            tenant_id="test-tenant",
         )
     )
     await _ensure_video_model(async_db)
@@ -107,7 +110,12 @@ async def test_feature_disabled_403(async_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_non_video_model_400(async_db, monkeypatch):
     uid = f"u-{uuid.uuid4().hex[:8]}"
-    async_db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x", credit_balance=5_000_000))
+    async_db.add(
+        PortalUserORM(
+            id=uid, email=f"{uid}@e.com", password_hash="x",
+            credit_balance=5_000_000, tenant_id="test-tenant",
+        )
+    )
     async_db.add(ModelConfigORM(provider="openai", model="gpt-4o-novideo", supports_video_gen=False))
     await async_db.commit()
     monkeypatch.setattr(settings, "video_gen_enabled", True)

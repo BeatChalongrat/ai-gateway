@@ -173,6 +173,31 @@ class Settings(BaseSettings):
     oauth_github_client_id: str = ""
     oauth_github_client_secret: str = ""
 
+    # Google Workspace SSO — domain lock (Phase 0). Comma-separated email
+    # domains allowed to sign in / sign up. Enforced SERVER-SIDE in
+    # oauth_service.login_or_create (covers every OAuth entry point,
+    # including the link-existing-account branch) and auth_service.signup.
+    # Empty string = allow every domain, so opening up to gmail later is
+    # an env edit, not a code change. Never rely on the frontend or on
+    # Google's ``hd`` claim for this — the check is email-domain +
+    # email_verified on the server-verified claims.
+    allowed_email_domains: str = "gbtech.co.th"
+    # Kill-switch for the email+password surface ("ปิด ไม่ลบ"). False =
+    # POST /portal/auth/login and /signup return 403 password_login_disabled
+    # while the code stays in place for a future re-enable.
+    password_login_enabled: bool = True
+    # Optional UX hint only: forwarded as the ``hd`` param on the Google
+    # authorize URL so the account chooser pre-filters to the workspace
+    # domain. NOT a security control — a forged ``hd`` never bypasses the
+    # allowed_email_domains check above.
+    google_hosted_domain: str = ""
+    # Internal-tool tenancy: every OAuth-created portal user joins this
+    # single shared tenant instead of getting a personal tenant. The slug
+    # is the idempotency key (Tenant.slug is UNIQUE); the name is only
+    # used when the row is first created.
+    central_tenant_slug: str = "gbtech"
+    central_tenant_name: str = "GB Tech"
+
     # Connector OAuth broker (Desktop Phase 7). SEPARATE OAuth apps from
     # the login flow above: login only proves identity; connectors ask
     # for data scopes (Gmail/Drive/Calendar/Slack/GitHub). Empty values
@@ -675,6 +700,20 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def allowed_email_domains_list(self) -> list[str]:
+        """Parsed sign-in domain allowlist, lowercased. Empty = allow all.
+
+        Accepts entries with or without a leading ``@`` so an operator
+        writing ``@gbtech.co.th`` in the env doesn't silently lock
+        everyone out.
+        """
+        return [
+            d.strip().lower().lstrip("@")
+            for d in self.allowed_email_domains.split(",")
+            if d.strip().lstrip("@")
+        ]
 
     @property
     def schema_drift_mode_effective(self) -> str:

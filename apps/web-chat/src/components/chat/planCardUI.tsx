@@ -27,6 +27,7 @@ import {
 
 import { StatusBadge } from "@/components/ui/FileTypeBadge";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 interface CardShellProps {
   headerIcon: ReactNode;
@@ -171,12 +172,13 @@ export function SecondaryButton({ onClick, disabled, icon, children }: ButtonPro
 export function DownloadButton({
   fileId,
   filename,
-  label = "Download",
+  label,
 }: {
   fileId: string;
   filename: string;
   label?: string;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -184,7 +186,7 @@ export function DownloadButton({
       className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface"
     >
       <Download className="h-4 w-4" />
-      <span>{label}</span>
+      <span>{label ?? t("common.download")}</span>
     </button>
   );
 }
@@ -213,14 +215,15 @@ export function ValidationBadge({
   valid,
   warnings = [],
   errors = [],
-  okMessage = "File is valid.",
+  okMessage,
 }: ValidationBadgeProps) {
+  const t = useT();
   if (!valid) {
     return (
       <div className="flex gap-2 rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-xs text-status-danger">
         <XCircle className="h-4 w-4 flex-shrink-0" />
         <div className="min-w-0">
-          <div className="font-medium">Validation failed</div>
+          <div className="font-medium">{t("plan.validation.failed")}</div>
           {errors.length > 0 ? (
             <ul className="mt-1 space-y-0.5 pl-4 list-disc">
               {errors.map((m, i) => (
@@ -237,7 +240,7 @@ export function ValidationBadge({
       <div className="flex gap-2 rounded-md border border-border-subtle bg-bg-base px-3 py-2 text-xs text-text-secondary">
         <AlertTriangle className="h-4 w-4 flex-shrink-0 text-status-warning" />
         <div className="min-w-0">
-          <div className="font-medium text-text-primary">Validation passed with warnings</div>
+          <div className="font-medium text-text-primary">{t("plan.validation.warnings")}</div>
           <ul className="mt-1 space-y-0.5 pl-4 list-disc">
             {warnings.map((w, i) => (
               <li key={i}>{w}</li>
@@ -250,7 +253,7 @@ export function ValidationBadge({
   return (
     <div className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-base px-3 py-2 text-xs text-text-secondary">
       <StatusBadge status="success" size="sm" />
-      <span>{okMessage}</span>
+      <span>{okMessage ?? t("plan.validation.ok")}</span>
     </div>
   );
 }

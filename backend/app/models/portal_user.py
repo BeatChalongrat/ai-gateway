@@ -40,15 +40,17 @@ class PortalUserORM(Base):
     oauth_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Phase 3 — portal tenancy. Every portal user belongs to exactly
-    # one tenant in production; migration 030 enforces this via a DB
-    # NOT NULL constraint. The ORM leaves it nullable so pre-Phase-3
-    # test fixtures (which bypass migrations via metadata.create_all)
-    # can still seed users — application code in auth_service.signup
-    # is the gatekeeper that guarantees tenant assignment in practice.
-    tenant_id: Mapped[str | None] = mapped_column(
+    # one tenant; migration 030 enforces this via a DB NOT NULL
+    # constraint and (SSO Phase 1, A1) the ORM now matches it so
+    # metadata.create_all-based test databases enforce the same rule
+    # instead of silently allowing tenant-less users that would crash
+    # on a real migrated database. Creation paths that guarantee the
+    # assignment: auth_service.signup (tenant resolved BEFORE the user
+    # INSERT) and oauth_service.login_or_create (central tenant).
+    tenant_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("tenants.tenant_id", name="fk_portal_users_tenant_id"),
-        nullable=True,
+        nullable=False,
     )
     tenant_role: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="member"
