@@ -3,10 +3,12 @@
 Route-level tests for the way-B desktop branch:
 
 * ``GET /oauth/start?client=desktop`` records the surface in the state.
-* ``GET /oauth/callback`` with a desktop state 302s to
-  ``sran://oauth/callback?ticket=<opaque>`` — NO token material in the
-  Location header — after running the SAME login_or_create gates as
-  web (unverified / off-domain identities are rejected, not ticketed).
+* ``GET /oauth/callback`` with a desktop state answers a 200 HTML
+  landing page whose script/button fire
+  ``sran://oauth/callback?ticket=<opaque>`` — NO token material
+  anywhere in the page — after running the SAME login_or_create gates
+  as web (unverified / off-domain identities get a branded error page,
+  never a ticket).
 * ``POST /oauth/desktop/exchange`` redeems the ticket exactly once
   WITH the nonce the app minted at /oauth/start (B0 binding - a
   hijacked sran:// link alone is worthless); replayed, unknown,
@@ -18,6 +20,7 @@ stubbed — state store, ticket store, gates, and routes are real.
 
 from __future__ import annotations
 
+import re
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -212,31 +215,30 @@ class TestStartRecordsClient:
 
 
 class TestDesktopCallbackTicketRedirect:
-    def test_allowed_claims_redirect_with_opaque_ticket_only(
+    def test_allowed_claims_render_landing_page_with_opaque_ticket_only(
         self, harness, monkeypatch
     ):
         client, state_store, ticket_store = harness
         r = _desktop_callback(client, state_store, monkeypatch, GOOD_CLAIMS)
-        assert r.status_code == 302
-        loc = r.headers["location"]
-        assert loc.startswith("sran://oauth/callback?ticket=")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/html")
+        html = r.text
 
-        # The deep link must carry NOTHING but the opaque ticket.
-        query = parse_qs(urlparse(loc).query)
-        assert set(query.keys()) == {"ticket"}
-        ticket = query["ticket"][0]
-        assert "access_token" not in loc and "refresh_token" not in loc
-        # Portal JWTs are JWS compact ("ey..."); none may leak into the URL.
-        assert "ey" not in loc.replace("sran://oauth/callback?ticket=", "")[
-            len(ticket):
-        ]
+        # The page fires the deep link itself and offers a fallback button.
+        links = re.findall(r"sran://oauth/callback\?ticket=([0-9a-f]+)", html)
+        assert links, "landing page must carry the sran:// deep link"
+        assert len(set(links)) == 1  # script + button use the SAME ticket
+        ticket = links[0]
+        assert "ปิดแท็บนี้" in html  # tells the user the tab is done
+
+        # NOTHING but the opaque ticket: no tokens, no nonce, anywhere.
         entry = ticket_store.pop(ticket)
         assert entry["nonce"] == TEST_NONCE
         stored = entry["result"]
         assert stored["access_token"] and stored["refresh_token"]
-        assert stored["access_token"] not in loc
-        assert stored["refresh_token"] not in loc
-        assert TEST_NONCE not in loc  # nonce never rides the deep link
+        assert stored["access_token"] not in html
+        assert stored["refresh_token"] not in html
+        assert TEST_NONCE not in html
         assert stored["user"]["email"] == GOOD_CLAIMS["email"]
 
     def test_unverified_claims_rejected_no_ticket(self, harness, monkeypatch):
@@ -244,7 +246,9 @@ class TestDesktopCallbackTicketRedirect:
         claims = dict(GOOD_CLAIMS, email_verified=False)
         r = _desktop_callback(client, state_store, monkeypatch, claims)
         assert r.status_code == 403
-        assert r.json()["error"]["code"] == "email_not_verified"
+        assert r.headers["content-type"].startswith("text/html")
+        assert "sran://" not in r.text  # no ticket for a rejected identity
+        assert "ลงชื่อเข้าใช้ไม่สำเร็จ" in r.text
 
     def test_offdomain_claims_rejected_no_ticket(self, harness, monkeypatch):
         client, state_store, ticket_store = harness
@@ -253,7 +257,9 @@ class TestDesktopCallbackTicketRedirect:
         )
         r = _desktop_callback(client, state_store, monkeypatch, claims)
         assert r.status_code == 403
-        assert r.json()["error"]["code"] == "domain_not_allowed"
+        assert r.headers["content-type"].startswith("text/html")
+        assert "sran://" not in r.text
+        assert "domain" in r.text  # gate message surfaces on the page
 
     def test_web_state_still_returns_json(self, harness, monkeypatch):
         """Phase 1 behaviour untouched: a web state gets the JSON body
@@ -278,7 +284,7 @@ class TestDesktopCallbackTicketRedirect:
 class TestDesktopExchange:
     def _mint_ticket(self, client, state_store, monkeypatch):
         r = _desktop_callback(client, state_store, monkeypatch, GOOD_CLAIMS)
-        return parse_qs(urlparse(r.headers["location"]).query)["ticket"][0]
+        return re.findall(r"sran://oauth/callback\?ticket=([0-9a-f]+)", r.text)[0]
 
     def test_valid_ticket_redeems_once(self, harness, monkeypatch):
         client, state_store, _ = harness
