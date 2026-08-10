@@ -512,6 +512,9 @@ def password_reset_request(
     no user-existence oracle. Dev/test mode echoes the token so
     integration tests don't need a mail server.
     """
+    # Phase 3 cutover: resetting a password is meaningless (and an
+    # attack surface) once password login itself is disabled.
+    _require_password_login_enabled()
     return password_reset_service.request_reset(
         session, redis_client, email=body.email
     )
@@ -529,6 +532,7 @@ def password_reset_confirm(
     On success, every live portal JWT for the user is invalidated
     via the token_version bump (Phase 3 Concern 1).
     """
+    _require_password_login_enabled()
     return password_reset_service.confirm_reset(
         session,
         redis_client,

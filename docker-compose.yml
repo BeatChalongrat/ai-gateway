@@ -485,6 +485,12 @@ services:
       # ``hd`` account-chooser hint on the server-driven /oauth/start
       # path (UX only, never enforcement).
       GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
+      # Phase 3 cutover: false = email+password surface answers 403
+      # (login / signup / password-reset) while the code stays in
+      # place; the login UIs hide the form off the same flag via
+      # /portal/auth/public-settings. Default true so a bare checkout
+      # still boots in the pre-cutover shape.
+      PASSWORD_LOGIN_ENABLED: ${PASSWORD_LOGIN_ENABLED:-true}
       # Empty by default → adapters hit real provider URLs. Uncomment
       # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
       # anthropic/openrouter at the in-cluster mock-provider service.
