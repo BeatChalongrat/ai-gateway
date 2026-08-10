@@ -52,7 +52,12 @@ async def _ensure_model(async_db, model, **attrs):
 async def _seed_user(async_db, balance=5_000_000):
     uid = f"u-{uuid.uuid4().hex[:8]}"
     async_db.add(
-        PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x", credit_balance=balance)
+        PortalUserORM(
+            id=uid, email=f"{uid}@e.com", password_hash="x",
+            credit_balance=balance,
+            # NOT NULL since SSO Phase 1 A1 — conftest integration seed.
+            tenant_id="test-tenant",
+        )
     )
     await async_db.flush()
     return uid

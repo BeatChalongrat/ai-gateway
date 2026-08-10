@@ -127,11 +127,14 @@ def broker_env():
     app.include_router(connectors_router, prefix="/portal/connectors")
 
     s = Session()
+    # tenant_id is NOT NULL after SSO Phase 1 A1 (matches migration 030).
     user_a = PortalUserORM(
-        id=str(uuid.uuid4()), email="a@example.com", password_hash="x"
+        id=str(uuid.uuid4()), email="a@example.com", password_hash="x",
+        tenant_id="t-fixture",
     )
     user_b = PortalUserORM(
-        id=str(uuid.uuid4()), email="b@example.com", password_hash="x"
+        id=str(uuid.uuid4()), email="b@example.com", password_hash="x",
+        tenant_id="t-fixture",
     )
     s.add_all([user_a, user_b])
     s.commit()

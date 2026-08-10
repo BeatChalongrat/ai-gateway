@@ -31,7 +31,10 @@ async def test_mock_video_job_reaches_done(async_db, tmp_path, monkeypatch):
     tid = f"t-{uuid.uuid4().hex[:8]}"
     uid = f"u-{uuid.uuid4().hex[:8]}"
     async_db.add(TenantORM(tenant_id=tid, name="T", slug=tid))
-    async_db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x"))
+    # tenant_id NOT NULL since SSO Phase 1 A1
+    async_db.add(
+        PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x", tenant_id=tid)
+    )
     await async_db.flush()
 
     estimated = credit_service.credits_for_cost(0.07 * 5, 1.0)  # 1,050,000
@@ -80,7 +83,10 @@ async def test_unknown_provider_marks_no_adapter(async_db, monkeypatch):
     tid = f"t-{uuid.uuid4().hex[:8]}"
     uid = f"u-{uuid.uuid4().hex[:8]}"
     async_db.add(TenantORM(tenant_id=tid, name="T", slug=tid))
-    async_db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x"))
+    # tenant_id NOT NULL since SSO Phase 1 A1
+    async_db.add(
+        PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x", tenant_id=tid)
+    )
     await async_db.flush()
     job_id = str(uuid.uuid4())
     async_db.add(
