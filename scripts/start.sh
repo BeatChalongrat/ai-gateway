@@ -44,10 +44,13 @@ cd "$ROOT"
 echo "[*] Starting backend on port 8080..."
 mkdir -p logs
 cd backend
+# Same GUNICORN_WORKERS knob as backend/Dockerfile (was a hardcoded 8
+# here vs 4 there — one env, one default, no drift). Per-provider
+# concurrency caps are per-worker: effective ceiling = cap × workers.
 nohup python -m uvicorn app.main:app \
   --host 0.0.0.0 \
   --port 8080 \
-  --workers 8 \
+  --workers "${GUNICORN_WORKERS:-4}" \
   --timeout-keep-alive 10 \
   > "$ROOT/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
