@@ -1954,10 +1954,28 @@ async def chat_completions(
         try:
             while True:
                 try:
-                    async for chunk in stream_adapter.stream_chat(
-                        payload, messages_to_send,
-                        resolved_model=route.model_name,
-                        api_key=stream_api_key,
+                    # Per-provider bulkhead (Batch A): the slot is held
+                    # for the whole stream (that IS the in-flight
+                    # window) and released by guarded_stream on
+                    # completion, upstream error, or client disconnect.
+                    # Re-evaluated per while-iteration so a fallback
+                    # swap acquires the NEW provider's slot (the failed
+                    # attempt's slot is already released — the async-for
+                    # below has exited by the time the except-handler
+                    # swaps adapters). A capped-out provider raises
+                    # ProviderAtCapacityError, which is
+                    # fallback-eligible like any provider failure.
+                    from app.services.providers.concurrency import (
+                        guarded_stream as _guarded_stream,
+                    )
+
+                    async for chunk in _guarded_stream(
+                        route.provider_name,
+                        lambda: stream_adapter.stream_chat(
+                            payload, messages_to_send,
+                            resolved_model=route.model_name,
+                            api_key=stream_api_key,
+                        ),
                     ):
                         # Reasoning / thinking branch (T2). Runs before the
                         # content / tool_calls branches because Anthropic

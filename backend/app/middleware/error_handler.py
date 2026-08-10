@@ -27,6 +27,7 @@ from app.core.exceptions import (
     ProviderTimeoutError,
     ProviderNotImplementedError,
     ProviderUnavailableError,
+    ProviderAtCapacityError,
     QuotaExceededError,
     RateLimitExceededError,
     RawEgressBlockedError,
@@ -59,6 +60,10 @@ _STATUS_MAP: dict[type[GatewayError], int] = {
     RawEgressBlockedError: 403,
     ProviderTimeoutError: 504,
     ProviderUnavailableError: 503,
+    # Exact-class entry beats the ProviderError→502 MRO fallback: a full
+    # bulkhead is retryable-later, which is 503 semantics (+ Retry-After
+    # via exc.headers).
+    ProviderAtCapacityError: 503,
     ProviderNotImplementedError: 501,
     ProviderError: 502,
     UpstreamBadResponseError: 502,
