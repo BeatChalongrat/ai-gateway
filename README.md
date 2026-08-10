@@ -207,9 +207,14 @@ hides the password form off `GET /portal/auth/public-settings`. The code path
 is intact — flip the flag back to `true` and recreate the backend to
 re-enable it.
 
-Key environment variables (see `.env.example` for the full block and the
-**production go-live checklist** — redirect URIs, secret rotation, cookie
-domain; residual follow-ups are in `docs/DEFERRED_WORK.md`):
+> **Deploying this to production?** Follow
+> [`docs/SSO-GO-LIVE.md`](./docs/SSO-GO-LIVE.md) — Google client setup,
+> the secrets that block startup, cookie scope, deploy order (the portal
+> and web-chat images must be **rebuilt**, not restarted), smoke tests,
+> and rollback.
+
+Key environment variables (see `.env.example` for the same block in env
+form; residual follow-ups are in `docs/DEFERRED_WORK.md`):
 
 | Var | Default | Meaning |
 |---|---|---|
