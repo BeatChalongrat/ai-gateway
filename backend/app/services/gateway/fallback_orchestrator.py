@@ -571,6 +571,9 @@ FALLBACK_ELIGIBLE_ERRORS: set[str] = {
     "provider_5xx",
     "provider_error",
     "provider_rate_limited",
+    # Bulkhead full (per-provider concurrency cap) — shed to the next
+    # candidate instead of queuing on a saturated box.
+    "provider_at_capacity",
     "rate_limit_exceeded",
     "provider_model_not_found",
     "provider_unavailable",
