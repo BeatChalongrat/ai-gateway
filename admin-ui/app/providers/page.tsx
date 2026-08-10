@@ -55,7 +55,13 @@ const BRAND: Record<string, { color: string; initial: string; display: string; n
   zai:        { color: "#8b5cf6", initial: "Z", display: "Z.AI" },
   replicate:  { color: "#000000", initial: "R", display: "Replicate", noteKey: "infra.providers.note.replicate" },
   elevenlabs: { color: "#000000", initial: "E", display: "ElevenLabs", noteKey: "infra.providers.note.elevenlabs" },
+  sranai:     { color: "#1F48A9", initial: "S", display: "Sran AI", noteKey: "infra.providers.note.sranai" },
 };
+
+// Providers whose endpoint is operator-supplied (self-hosted box): the
+// keys panel shows an extra Endpoint URL field and sends `base_url` with
+// the add-key payload. Mirrors backend base_urls.SELF_HOSTED_PROVIDERS.
+const SELF_HOSTED = new Set(["sranai"]);
 
 function brandFor(name: string) {
   return BRAND[name] ?? { color: "#64748b", initial: name.charAt(0).toUpperCase(), display: name, noteKey: undefined };
@@ -134,10 +140,12 @@ function ProviderLogo({ name, size = 28 }: { name: string; size?: number }) {
 function KeysPanel({
   providerName,
   envConfigured,
+  currentEndpoint,
   onClose,
 }: {
   providerName: string;
   envConfigured: boolean;
+  currentEndpoint?: string;
   onClose: () => void;
 }) {
   const [keys, setKeys] = useState<ProviderKey[]>([]);
@@ -145,10 +153,21 @@ function KeysPanel({
   const [keysError, setKeysError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [keyInput, setKeyInput] = useState("");
+  const [endpoint, setEndpoint] = useState(currentEndpoint ?? "");
+  const [endpointTouched, setEndpointTouched] = useState(false);
   const [adding, setAdding] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const { toast } = useToast();
   const t = useT();
+  const selfHosted = SELF_HOSTED.has(providerName);
+
+  // key/status resolves asynchronously — prefill the endpoint once it
+  // arrives, unless the admin already started typing.
+  useEffect(() => {
+    if (!endpointTouched && currentEndpoint) setEndpoint(currentEndpoint);
+  }, [currentEndpoint, endpointTouched]);
+
+  const endpointOk = /^https?:\/\/\S+$/.test(endpoint.trim());
 
   const loadKeys = useCallback(async () => {
     setKeysError(null);
@@ -167,11 +186,13 @@ function KeysPanel({
 
   async function handleAdd() {
     if (!keyInput.trim()) return;
+    if (selfHosted && !endpointOk) return;
     setAdding(true);
     try {
       const result = await api.post(`/admin/providers/${providerName}/keys`, {
         api_key: keyInput.trim(),
         label: label.trim() || undefined,
+        base_url: selfHosted ? endpoint.trim() : undefined,
       });
       toast(t("infra.providers.toastKeySaved", { ms: result.latency_ms }));
       setKeyInput("");
@@ -304,6 +325,40 @@ function KeysPanel({
         </div>
       )}
 
+      {selfHosted && (
+        <div style={{ marginBottom: "0.75rem" }}>
+          {!currentEndpoint && !endpoint.trim() && (
+            <div
+              style={{
+                padding: "0.625rem 0.75rem",
+                marginBottom: "0.625rem",
+                color: "var(--color-text-secondary)",
+                fontSize: "var(--font-size-sm)",
+                background: "color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 25%, transparent)",
+                borderRadius: "var(--radius-md)",
+              }}
+            >
+              {t("infra.providers.endpointMissing")}
+            </div>
+          )}
+          <label className="sran-label">{t("infra.providers.endpointLabel")}</label>
+          <input
+            className="sran-input"
+            value={endpoint}
+            onChange={(e) => {
+              setEndpointTouched(true);
+              setEndpoint(e.target.value);
+            }}
+            placeholder="http://host.docker.internal:8000/v1"
+            style={{ fontSize: "var(--font-size-sm)" }}
+          />
+          <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
+            {t("infra.providers.endpointHint")}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap" }}>
         <div style={{ flex: "0 0 140px" }}>
           <label className="sran-label">{t("infra.providers.colLabel")}</label>
@@ -343,7 +398,7 @@ function KeysPanel({
         <button
           className="sran-btn sran-btn-primary"
           onClick={handleAdd}
-          disabled={adding || !keyInput.trim()}
+          disabled={adding || !keyInput.trim() || (selfHosted && !endpointOk)}
           style={{ whiteSpace: "nowrap" }}
         >
           {adding ? t("infra.providers.validating") : t("infra.providers.addValidate")}
@@ -500,6 +555,9 @@ function ProviderCard({
           <Badge variant="success">{t("infra.providers.keySet")}</Badge>
         ) : (
           <Badge variant="neutral">{t("infra.providers.noKey")}</Badge>
+        )}
+        {SELF_HOSTED.has(p.provider_name) && keyStatus !== undefined && !keyStatus?.base_url && (
+          <Badge variant="warning">{t("infra.providers.endpointNotSet")}</Badge>
         )}
         <span
           style={{
@@ -736,6 +794,7 @@ export default function ProvidersPage() {
                   <KeysPanel
                     providerName={p.provider_name}
                     envConfigured={keyStatuses[p.provider_name]?.source === "environment"}
+                    currentEndpoint={keyStatuses[p.provider_name]?.base_url || undefined}
                     onClose={() => handleClosePanel(p.provider_name)}
                   />
                 )}

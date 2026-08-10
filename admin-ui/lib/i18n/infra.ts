@@ -77,6 +77,13 @@ export const en = {
   "infra.providers.note.openrouter": "Unified billing across 300+ models",
   "infra.providers.note.replicate": "Video generation (Kling, Wan)",
   "infra.providers.note.elevenlabs": "Text-to-speech voices",
+  "infra.providers.note.sranai": "Self-hosted · OpenAI-compatible",
+  "infra.providers.endpointLabel": "Endpoint URL *",
+  "infra.providers.endpointHint":
+    "OpenAI-compatible base URL of the box. Use http://host.docker.internal:PORT/v1 when it runs on the same machine as Docker.",
+  "infra.providers.endpointMissing":
+    "Endpoint not configured yet — enter the box's URL below; it is validated and saved together with the key.",
+  "infra.providers.endpointNotSet": "no endpoint",
 
   // ── Model registry ────────────────────────────────────────
   "infra.models.title": "Model registry",
@@ -378,6 +385,13 @@ export const th: Record<keyof typeof en, string> = {
   "infra.providers.note.openrouter": "รวมค่าใช้จ่ายของโมเดลกว่า 300 ตัวไว้ในบิลเดียว",
   "infra.providers.note.replicate": "สร้างวิดีโอ (Kling, Wan)",
   "infra.providers.note.elevenlabs": "เสียงพูดจากข้อความ (TTS)",
+  "infra.providers.note.sranai": "โฮสต์เอง · รองรับ OpenAI-compatible",
+  "infra.providers.endpointLabel": "Endpoint URL *",
+  "infra.providers.endpointHint":
+    "base URL แบบ OpenAI-compatible ของเครื่อง — ถ้าเครื่องอยู่บนโฮสต์เดียวกับ Docker ให้ใช้ http://host.docker.internal:PORT/v1",
+  "infra.providers.endpointMissing":
+    "ยังไม่ได้ตั้งค่า endpoint — กรอก URL ของเครื่องด้านล่าง ระบบจะตรวจสอบและบันทึกพร้อมกับคีย์",
+  "infra.providers.endpointNotSet": "ยังไม่มี endpoint",
 
   // ── Model registry ────────────────────────────────────────
   "infra.models.title": "ทะเบียนโมเดล",

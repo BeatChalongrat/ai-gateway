@@ -244,11 +244,20 @@ def providers(
 ):
     from app.services.providers.model_registry import get_all_candidates
     from app.services.provider_key_service import ProviderKeyService
+    from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
     from collections import defaultdict
 
     by_provider: dict[str, list[str]] = defaultdict(list)
     for c in get_all_candidates():
         by_provider[c.provider].append(c.model)
+
+    # Self-hosted providers must keep their card even with ZERO model
+    # rows (their catalog arrives via discovery only after the admin
+    # saves an endpoint + key — which happens on this very page). The
+    # registry-derived list would otherwise drop them and the endpoint
+    # form would become unreachable.
+    for p in SELF_HOSTED_PROVIDERS:
+        by_provider.setdefault(p, [])
 
     svc = ProviderKeyService()
     items = []
@@ -313,19 +322,39 @@ async def add_provider_key(
     body: dict,
     session: Session = Depends(get_db_session),
 ):
-    """Add a new API key — validates against the real API before saving."""
+    """Add a new API key — validates against the real API before saving.
+
+    Self-hosted providers (``base_urls.SELF_HOSTED_PROVIDERS``) may send
+    a ``base_url`` alongside the key: it is SSRF-gated, used for the
+    validation probe, and persisted to ``system_settings`` only after
+    the probe succeeds (so a typo'd endpoint is never stored).
+    """
     from app.services.provider_key_service import ProviderKeyService
+    from app.services.providers.base_urls import (
+        SELF_HOSTED_PROVIDERS,
+        set_stored_base_url,
+        validate_provider_base_url,
+    )
 
     api_key = body.get("api_key", "").strip()
     label = body.get("label", "").strip() or None
+    base_url = (body.get("base_url") or "").strip()
     if not api_key:
         from app.core.exceptions import ValidationError
         raise ValidationError("api_key is required")
+    if base_url and provider_name not in SELF_HOSTED_PROVIDERS:
+        from app.core.exceptions import ValidationError
+        raise ValidationError(
+            f"base_url is not configurable for provider '{provider_name}'"
+        )
+    if base_url:
+        base_url = validate_provider_base_url(base_url)
 
     svc = ProviderKeyService()
 
-    # Validate key against real API
-    test_result = await svc.test_key(provider_name, api_key)
+    # Validate key against real API (self-hosted: against the payload's
+    # base_url so nothing persists on failure)
+    test_result = await svc.test_key(provider_name, api_key, base_url=base_url or None)
     if not test_result["valid"]:
         from fastapi.responses import JSONResponse
         return JSONResponse(
@@ -338,6 +367,14 @@ async def add_provider_key(
                 "test_result": test_result,
             },
         )
+
+    if base_url:
+        previous_url = set_stored_base_url(session, provider_name, base_url)
+        if previous_url and previous_url != base_url:
+            # The old endpoint's pooled httpx client would otherwise idle
+            # in the process-global cache until shutdown.
+            from app.services.providers.http_client import evict_client
+            await evict_client(previous_url)
 
     row = svc.add_key(session, provider_name, api_key, label=label)
     svc.update_test_result(session, row.id, "valid", test_result["latency_ms"])

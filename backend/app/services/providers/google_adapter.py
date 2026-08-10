@@ -287,6 +287,7 @@ class GoogleAIAdapter(BaseProviderAdapter):
             base_url=resolve_base_url(self.provider_name, GOOGLE_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
+            provider_name=self.provider_name,
         )
 
     async def chat(

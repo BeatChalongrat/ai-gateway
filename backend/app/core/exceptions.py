@@ -172,6 +172,21 @@ class ProviderError(GatewayError):
     message = "The upstream provider returned an error."
 
 
+class ProviderAtCapacityError(ProviderError):
+    """The provider's configured concurrency bulkhead is full.
+
+    Raised by ``providers.concurrency.provider_slot`` when a slot can't
+    be acquired within the timeout — load is shed instead of queued.
+    Subclasses ProviderError so the dispatcher's fallback except-filter
+    catches it (a full self-hosted box routes to a cloud candidate when
+    one is configured); with no candidate it surfaces as 503 +
+    Retry-After via the ``headers`` kwarg.
+    """
+
+    code = "provider_at_capacity"
+    message = "Provider is at its configured concurrency limit. Retry shortly."
+
+
 class ProviderTimeoutError(ProviderError):
     code = "provider_timeout"
     message = "The upstream provider did not respond in time."
