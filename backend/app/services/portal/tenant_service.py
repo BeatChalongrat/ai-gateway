@@ -54,17 +54,14 @@ _DEFAULT_INVITE_TTL = timedelta(days=7)
 # ---------------------------------------------------------------------------
 
 
-def create_tenant_with_owner(
-    db: Session,
-    *,
-    tenant_name: str,
-    owner_user_id: str,
-) -> TenantORM:
-    """Create a new tenant and mark the given user as its owner.
+def create_tenant(db: Session, *, tenant_name: str) -> TenantORM:
+    """Create a bare tenant row (no membership side-effects).
 
-    Caller is responsible for ``db.commit()`` — this function flushes
-    but does not commit, mirroring the pattern in
-    ``auth_service.signup``.
+    Split out of ``create_tenant_with_owner`` (SSO Phase 1, A1) so
+    ``auth_service.signup`` can resolve the tenant BEFORE inserting the
+    user row — portal_users.tenant_id is NOT NULL (migration 030 + the
+    ORM), so the user INSERT must already carry a tenant id.
+    Caller is responsible for ``db.commit()``; this flushes only.
     """
     name = (tenant_name or "").strip()
     if not name:
@@ -77,12 +74,6 @@ def create_tenant_with_owner(
             code="invalid_tenant_name",
         )
 
-    user = db.get(PortalUserORM, owner_user_id)
-    if user is None:
-        raise NotFoundError(
-            "Owner user not found.", code="owner_user_not_found"
-        )
-
     tenant = TenantORM(
         tenant_id=str(uuid.uuid4()),
         name=name,
@@ -93,6 +84,28 @@ def create_tenant_with_owner(
     )
     db.add(tenant)
     db.flush()
+    return tenant
+
+
+def create_tenant_with_owner(
+    db: Session,
+    *,
+    tenant_name: str,
+    owner_user_id: str,
+) -> TenantORM:
+    """Create a new tenant and mark the given user as its owner.
+
+    Caller is responsible for ``db.commit()`` — this function flushes
+    but does not commit, mirroring the pattern in
+    ``auth_service.signup``.
+    """
+    user = db.get(PortalUserORM, owner_user_id)
+    if user is None:
+        raise NotFoundError(
+            "Owner user not found.", code="owner_user_not_found"
+        )
+
+    tenant = create_tenant(db, tenant_name=tenant_name)
 
     user.tenant_id = tenant.tenant_id
     user.tenant_role = "owner"
@@ -247,24 +260,13 @@ def revoke_invite_by_code(
     return inv
 
 
-def redeem_invite(
-    db: Session,
-    *,
-    code: str,
-    redeeming_user_id: str,
-) -> TenantInviteORM:
-    """Redeem an invite code and add the user to the invite's tenant.
+def get_valid_invite(db: Session, *, code: str) -> TenantInviteORM:
+    """Load an invite and raise the standard errors unless it's live.
 
-    Post-redesign (2026-04-24): multi-use. A code is valid if it
-    exists, is not revoked, and has not expired — re-redemption does
-    not kill it (that's how shareable-link invites work). We still
-    stamp ``used_at`` / ``used_by`` on every redemption so the last
-    redeemer is recoverable for audit, but future redemptions simply
-    overwrite those fields — they don't fail.
-
-    The redeeming user inherits ``invite.role`` (today always
-    'member'; the ``admin`` tier is wired end-to-end on the backend
-    but hidden in the UI until RBAC work lands).
+    Extracted from ``redeem_invite`` (SSO Phase 1, A1) so
+    ``auth_service.signup`` can resolve the invite's tenant BEFORE the
+    user INSERT (tenant_id is NOT NULL) while keeping the exact same
+    error codes for invalid/revoked/expired codes.
     """
     invite = db.execute(
         select(TenantInviteORM).where(TenantInviteORM.code == code)
@@ -288,6 +290,30 @@ def redeem_invite(
         raise ConflictError(
             "Invite link has expired.", code="invite_expired"
         )
+    return invite
+
+
+def redeem_invite(
+    db: Session,
+    *,
+    code: str,
+    redeeming_user_id: str,
+) -> TenantInviteORM:
+    """Redeem an invite code and add the user to the invite's tenant.
+
+    Post-redesign (2026-04-24): multi-use. A code is valid if it
+    exists, is not revoked, and has not expired — re-redemption does
+    not kill it (that's how shareable-link invites work). We still
+    stamp ``used_at`` / ``used_by`` on every redemption so the last
+    redeemer is recoverable for audit, but future redemptions simply
+    overwrite those fields — they don't fail.
+
+    The redeeming user inherits ``invite.role`` (today always
+    'member'; the ``admin`` tier is wired end-to-end on the backend
+    but hidden in the UI until RBAC work lands).
+    """
+    invite = get_valid_invite(db, code=code)
+    now = datetime.now(timezone.utc)
 
     user = db.get(PortalUserORM, redeeming_user_id)
     if user is None:
@@ -295,10 +321,24 @@ def redeem_invite(
             "Redeeming user not found.", code="redeeming_user_not_found"
         )
     if user.tenant_id and user.tenant_id != invite.tenant_id:
-        raise ConflictError(
-            "User already belongs to a different tenant.",
-            code="user_has_tenant",
-        )
+        # Moving tenants is allowed only when the user is the SOLE
+        # member of their current tenant — i.e. the solo tenant that
+        # remove_member displaced them into, or their own fresh signup
+        # tenant. (tenant_id is NOT NULL since migration 030, so
+        # "orphaned" is represented as a solo tenant, not NULL.) A user
+        # in a tenant with other members must be removed there first —
+        # that guard is unchanged.
+        others = db.execute(
+            select(func.count(PortalUserORM.id)).where(
+                PortalUserORM.tenant_id == user.tenant_id,
+                PortalUserORM.id != user.id,
+            )
+        ).scalar_one()
+        if others > 0:
+            raise ConflictError(
+                "User already belongs to a different tenant.",
+                code="user_has_tenant",
+            )
 
     user.tenant_id = invite.tenant_id
     user.tenant_role = invite.role or "member"
@@ -402,10 +442,19 @@ def remove_member(
                 code="last_owner_remaining",
             )
 
-    # Orphan the user — clear tenant assignment and bump token_version
-    # so their active sessions invalidate. Application-level signup is
-    # the path by which they'd rejoin or get reassigned.
-    target.tenant_id = None
-    target.tenant_role = "member"
+    # A portal user must ALWAYS belong to a tenant — migration 030 made
+    # tenant_id NOT NULL, so the pre-SSO-Phase-1 ``tenant_id = None``
+    # write here violated the constraint on a migrated database and
+    # remove-member 500'd. Removal now DISPLACES the target into a
+    # fresh solo tenant of their own; redeem_invite lets a sole-member
+    # user fold that solo tenant into a new team, which preserves the
+    # "removed → re-invited → rejoins" flow end-to-end.
+    from app.services.portal.auth_service import _default_tenant_name_for_email
+
+    displaced = create_tenant(
+        db, tenant_name=_default_tenant_name_for_email(target.email)
+    )
+    target.tenant_id = displaced.tenant_id
+    target.tenant_role = "owner"
     target.token_version = (target.token_version or 1) + 1
     db.flush()
