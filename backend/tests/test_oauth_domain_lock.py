@@ -385,6 +385,54 @@ class TestPasswordKillSwitch:
         assert r.status_code == 403
         assert r.json()["error"]["code"] == "password_login_disabled"
 
+    def test_password_reset_request_403_when_disabled(self, client, monkeypatch):
+        """Phase 3 cutover: resetting a password is meaningless (and an
+        attack surface) once password login is off — same 403 gate."""
+        c, _ = client
+        monkeypatch.setattr(settings, "password_login_enabled", False)
+        r = c.post(
+            "/portal/auth/password-reset/request",
+            json={"email": "user@gbtech.co.th"},
+        )
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "password_login_disabled"
+
+    def test_password_reset_confirm_403_when_disabled(self, client, monkeypatch):
+        c, _ = client
+        monkeypatch.setattr(settings, "password_login_enabled", False)
+        r = c.post(
+            "/portal/auth/password-reset/confirm",
+            json={"token": "x" * 20, "new_password": "longenough1"},
+        )
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "password_login_disabled"
+
+    def test_oauth_surface_unaffected_when_password_disabled(
+        self, client, monkeypatch
+    ):
+        """The cutover must not touch the Google path: with the flag off,
+        /oauth/verify still fails on the TOKEN (not with a 403 gate)."""
+        c, _ = client
+        monkeypatch.setattr(settings, "password_login_enabled", False)
+        from app.api.routes import portal_auth as pa
+        from app.services.portal.oauth_flow_service import (
+            IdTokenVerificationFailed,
+        )
+
+        monkeypatch.setattr(
+            pa,
+            "verify_google_id_token",
+            lambda _t: (_ for _ in ()).throw(
+                IdTokenVerificationFailed("bad token")
+            ),
+        )
+        r = c.post(
+            "/portal/auth/oauth/verify",
+            json={"provider": "google", "id_token": "y" * 32},
+        )
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "oauth_verification_failed"
+
     def test_login_open_when_enabled(self, client, monkeypatch):
         """Gate off → unknown creds fall through to a normal 401."""
         c, _ = client

@@ -143,3 +143,23 @@ already leaving the machine under the current design.
 A genuine **air-gapped / offline-desktop requirement** where **nothing** may
 reach the server — at which point pure-local execution stops being redundant
 with the server sandbox and becomes the only option.
+
+## Google SSO cutover (Phase 3, 2026-08-10) — known items / follow-ups
+
+- **M3 (Phase 0 review) — RESOLVED BY CUTOVER**: "a password user on a
+  domain outside the allowlist can still log in" was a password-path
+  hole; with `PASSWORD_LOGIN_ENABLED=false` the whole surface (login /
+  signup / password-reset) answers 403, so the hole is closed as long
+  as the flag stays off. If passwords are ever re-enabled, M3 must be
+  re-examined (add the domain gate to password LOGIN, not just signup).
+- chat-edge validates portal JWTs statelessly → a revoked user
+  (token_version bump) stays valid on chat-edge until the access token
+  expires (≤60 min lag). Acceptable for the internal tool; revisit for
+  SaaS.
+- Redis outage during refresh fails open on the rate-limit side
+  (outage-conservative limiter) — the refresh itself still requires a
+  valid signed token; documented, not a hole.
+- CSRF double-submit on /portal/** mutations: still the deliberate,
+  ATOMIC 5-client deferral documented in services/portal/cookies.py.
+- Desktop OAuth callback error (403 domain_not_allowed etc.) renders
+  raw JSON in the system browser — cosmetic; make a small HTML page.
