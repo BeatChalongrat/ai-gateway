@@ -148,6 +148,7 @@ async def generate_image(
         base_url=resolve_base_url("openai", OPENAI_BASE_URL),
         timeout_connect=settings.provider_timeout_connect,
         timeout_read=settings.provider_timeout_read,
+        provider_name="openai",
     )
     headers = {"Authorization": f"Bearer {key}"}
     timeout = httpx.Timeout(
