@@ -1176,6 +1176,12 @@ public partial class ConversationListViewModel : ObservableObject
 
     private async Task ResolveDefaultModelAsync()
     {
+        // "auto" (or empty) is the routing sentinel, not a catalog entry —
+        // it is always valid and must never be "corrected" to a concrete
+        // model (UX polish #3: Auto is the fresh-install default).
+        if (string.IsNullOrEmpty(DefaultModelId) || DefaultModelId == "auto")
+            return;
+
         try
         {
             var response = await _api.ListModelsAsync();

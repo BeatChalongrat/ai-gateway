@@ -12,7 +12,10 @@ public sealed class UserSettings
     public string GatewayBaseUrl { get; set; } = "http://localhost:8080";
 
     [JsonPropertyName("default_model")]
-    public string DefaultModel { get; set; } = "gpt-4o-mini";
+    // "auto" = let the gateway's per-request resolver pick (UX polish #3:
+    // the out-of-the-box default). Only fresh installs see this — an
+    // existing settings.json carries whatever the user had persisted.
+    public string DefaultModel { get; set; } = "auto";
 
     /// <summary>"Dark" or "Light".</summary>
     [JsonPropertyName("theme")]
