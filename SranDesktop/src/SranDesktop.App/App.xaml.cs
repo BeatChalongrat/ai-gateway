@@ -296,6 +296,19 @@ public partial class App : System.Windows.Application
 
     // ---------- window show / hide ----------
 
+    /// <summary>True when the window was MAXIMIZED at the moment it was
+    /// hidden to the tray. WPF re-shows a hidden maximized window in its
+    /// normal rect while WindowState still claims Maximized — this flag +
+    /// TrayWindowRestore.AfterShow resync property and visual on Show.</summary>
+    private bool _wasMaximizedBeforeHide;
+
+    private void HideMainWindow()
+    {
+        if (_mainWindow is null) return;
+        _wasMaximizedBeforeHide = _mainWindow.WindowState == WindowState.Maximized;
+        _mainWindow.Hide();
+    }
+
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         // "Minimize to tray on close" (unless the user chose Exit, or turned it off).
@@ -303,7 +316,7 @@ public partial class App : System.Windows.Application
             return;
 
         e.Cancel = true;
-        _mainWindow?.Hide();
+        HideMainWindow();
 
         if (!_trayTipShown)
         {
@@ -318,9 +331,22 @@ public partial class App : System.Windows.Application
     private void ShowMainWindow()
     {
         if (_mainWindow is null) return;
+        var wasHidden = !_mainWindow.IsVisible;
         _mainWindow.Show();
-        if (_mainWindow.WindowState == WindowState.Minimized)
+
+        var plan = SranDesktop.Application.Services.TrayWindowRestore.AfterShow(
+            wasHidden,
+            _wasMaximizedBeforeHide,
+            _mainWindow.WindowState == WindowState.Minimized);
+        // Order matters: Normal first makes the (possibly stale) property
+        // truthful — that alone fixes the "maximize needs two clicks"
+        // desync — then Maximized re-applies what the user had. Both are
+        // applied AFTER Show() so WPF acts on a visible window.
+        if (plan.ForceNormalFirst)
             _mainWindow.WindowState = WindowState.Normal;
+        if (plan.ThenMaximize)
+            _mainWindow.WindowState = WindowState.Maximized;
+
         _mainWindow.Activate();
         _mainWindow.Topmost = true;
         _mainWindow.Topmost = false;
@@ -329,7 +355,7 @@ public partial class App : System.Windows.Application
     private void ToggleMainWindow()
     {
         if (_mainWindow is not null && _mainWindow.IsVisible && _mainWindow.IsActive)
-            _mainWindow.Hide();
+            HideMainWindow();
         else
             ShowMainWindow();
     }
