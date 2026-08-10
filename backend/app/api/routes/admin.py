@@ -244,11 +244,20 @@ def providers(
 ):
     from app.services.providers.model_registry import get_all_candidates
     from app.services.provider_key_service import ProviderKeyService
+    from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
     from collections import defaultdict
 
     by_provider: dict[str, list[str]] = defaultdict(list)
     for c in get_all_candidates():
         by_provider[c.provider].append(c.model)
+
+    # Self-hosted providers must keep their card even with ZERO model
+    # rows (their catalog arrives via discovery only after the admin
+    # saves an endpoint + key — which happens on this very page). The
+    # registry-derived list would otherwise drop them and the endpoint
+    # form would become unreachable.
+    for p in SELF_HOSTED_PROVIDERS:
+        by_provider.setdefault(p, [])
 
     svc = ProviderKeyService()
     items = []
