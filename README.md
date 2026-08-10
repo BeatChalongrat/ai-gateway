@@ -92,8 +92,8 @@ seeds the admin and portal users. `make help` lists every target. Raw steps:
 | http://localhost:8080/health | Gateway health (public entry) | — |
 | http://localhost:8081/docs | Backend OpenAPI (debug direct) | — |
 | http://localhost:3000 | Admin UI | `admin` / `admin1234` |
-| http://localhost:3001 | Customer portal | `somchai@acme.ai.gateway` / `P@ssword` |
-| http://localhost:3002 | Web chat | portal credentials (webchat overlay) |
+| http://localhost:3001 | Customer portal | Google account on an allowed domain (see **User Sign-in** below — password login is disabled) |
+| http://localhost:3002 | Web chat | inherits the portal's Google session (cookie) |
 | http://localhost:8001/health | NER service | — |
 | http://localhost:9090/health | Mock LLM provider | — |
 | http://localhost:9091 · :3100 | Prometheus · Grafana | — · `admin`/`admin` |
@@ -182,6 +182,46 @@ Packs, Portal Users, Settings.
 
 ---
 
+## User Sign-in (Google SSO)
+
+Portal / web-chat / desktop users sign in with **Google only**, restricted to
+the Workspace domain allowlist (`ALLOWED_EMAIL_DOMAINS`, default
+`gbtech.co.th`). Every gate is enforced **server-side** in
+`oauth_service.login_or_create` — the email domain and Google's
+`email_verified` claim are checked before any account lookup, so they cover
+login, first-time creation, *and* linking onto an existing account. All OAuth
+users join one central tenant ("GB Tech"). Admin UI auth (above) is separate.
+
+Three surfaces, one enforcement point:
+
+| Surface | Flow |
+|---|---|
+| **Portal** (`:3001`) | NextAuth → Google → the id_token is re-verified by the backend (`POST /portal/auth/oauth/verify`, JWKS + `aud` pin) → HttpOnly cookies |
+| **Web chat** (`:3002`) | No sign-in of its own — rides the portal's HttpOnly cookie session |
+| **Desktop** (WPF) | System browser → server-side PKCE (`GET /portal/auth/oauth/start?client=desktop`) → backend exchanges the code (client secret never ships in the app) → one-time **nonce-bound ticket** via the `sran://` deep link → `POST /portal/auth/oauth/desktop/exchange` returns the token pair (stored via DPAPI) |
+
+**Email+password is disabled system-wide** by `PASSWORD_LOGIN_ENABLED=false`
+(Phase 3 cutover): `POST /portal/auth/login`, `/signup`, and
+`/password-reset/*` answer `403 password_login_disabled`, and every login UI
+hides the password form off `GET /portal/auth/public-settings`. The code path
+is intact — flip the flag back to `true` and recreate the backend to
+re-enable it.
+
+Key environment variables (see `.env.example` for the full block and the
+**production go-live checklist** — redirect URIs, secret rotation, cookie
+domain; residual follow-ups are in `docs/DEFERRED_WORK.md`):
+
+| Var | Default | Meaning |
+|---|---|---|
+| `ALLOWED_EMAIL_DOMAINS` | `gbtech.co.th` | Comma-separated sign-in allowlist; **empty = allow every domain** (e.g. to open up to gmail later) |
+| `PASSWORD_LOGIN_ENABLED` | `true` (code) / `false` (this deploy) | Kill-switch for the whole email+password surface |
+| `GOOGLE_CLIENT_ID` | — | One Google OAuth client feeds portal (NextAuth) **and** backend (`aud` pin) |
+| `GOOGLE_CLIENT_SECRET` | — | **Backend only** — never in the desktop app or browser bundle |
+| `NEXT_PUBLIC_OAUTH_ENABLED` | `false` | Build/runtime flag that renders the Google sign-in button on the portal |
+| `NEXTAUTH_URL` / `NEXTAUTH_SECRET` | dev defaults | NextAuth origin + JWT encryption (real values required in prod) |
+
+---
+
 ## Testing
 
 ```bash
@@ -227,7 +267,9 @@ Selected optional flags (full list in `backend/app/core/config.py` and
 | `SANDBOX_ENABLED` | `false` | Enables the code interpreter (see sandbox overlay) |
 | `VIDEO_GEN_ENABLED` | `false` | Surfaces video-gen models + routes |
 | `NER_SERVICE_URL` | `http://ner-service:8001` | NER sidecar location (fails open) |
-| `NEXT_PUBLIC_OAUTH_ENABLED` | `false` | Portal OAuth connectors (GitHub/Slack/Google) |
+| `NEXT_PUBLIC_OAUTH_ENABLED` | `false` | Renders the portal's Google sign-in button (see **User Sign-in**) |
+| `ALLOWED_EMAIL_DOMAINS` | `gbtech.co.th` | Server-side sign-in domain allowlist (empty = all) |
+| `PASSWORD_LOGIN_ENABLED` | `true` | `false` = email+password surface answers 403 (Google-only) |
 
 ---
 
