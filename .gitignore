@@ -3,6 +3,10 @@ __pycache__/
 .env
 .env.*
 !.env.example
+# Example/template env files carry no secrets and MUST be tracked —
+# without this negation portal/.env.local.example was silently ignored.
+!*.env*.example
+!.env.*.example
 !scripts/uat/.env.uat.template
 .venv/
 venv/
