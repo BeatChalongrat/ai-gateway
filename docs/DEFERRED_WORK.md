@@ -185,3 +185,40 @@ a startup WARNING (not a hard failure) in that case so the operator
 still knows outbound mail is unavailable. Whoever picks this up should
 also check `request_verification_email` and the invite-link flow, which
 send mail independently of the password surface.
+
+---
+
+## Global cross-worker/pod provider concurrency cap → Rust rate-limiter
+
+**Deferred from:** Batch A provider-resilience (feat/provider-resilience, 2026-08-10)
+
+### What shipped instead
+
+`PROVIDER_CONCURRENCY_CAPS` — a per-provider `asyncio.Semaphore` bulkhead in
+`app/services/providers/concurrency.py`, held per gunicorn worker process.
+Effective ceiling a provider sees = **cap × GUNICORN_WORKERS (× pods)**; the
+`.env.example` entry documents the sizing formula and operators size the cap
+accordingly.
+
+### What is deferred
+
+A cluster-true cap (one number regardless of workers/pods) needs shared
+state — a Redis token/lease keyed `provider:{name}` with TTL'd slots to
+survive worker crashes without leaking permits. The natural home is the
+Rust rate-limiter sidecar (it already owns the Redis sliding windows), by
+adding a provider dimension to its proto + engine.
+
+### Why deferred (per the configurability audit, artifact 642d0557)
+
+- The per-process cap covers the actual motivating case (one small
+  self-hosted box behind a known worker count on one host).
+- Cross-worker leasing brings real failure modes (leaked slots on
+  worker death, added RTT on the hot path, fail-open semantics to
+  design) that are not worth carrying before evidence the simple cap is
+  insufficient.
+
+### Revisit-condition
+
+Horizontal scaling of the backend (multiple pods) in front of capacity-
+sensitive self-hosted boxes, or measured cap overshoot causing box
+degradation despite correctly-sized per-worker caps.

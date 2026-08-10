@@ -35,6 +35,18 @@ logger = structlog.get_logger(__name__)
 
 _PROVIDER_TIMEOUT_SECONDS = 15.0
 
+# Sentinel default for "the provider's /models payload didn't say".
+# discovery_service compares against this to decide whether litellm
+# pricing may fill in a real context size — keep the two in sync by
+# importing THIS constant, never re-typing the number.
+DEFAULT_MAX_CONTEXT_TOKENS = 128000
+
+# Self-hosted boxes (llama.cpp / vLLM class) rarely report context via
+# /models and rarely serve 128k — default them conservatively instead
+# of the cloud sentinel. Admins can correct per model via
+# PATCH /admin/models/{id}.
+SELF_HOSTED_DEFAULT_CONTEXT_TOKENS = 32768
+
 
 @dataclass
 class DiscoveredModel:
@@ -43,7 +55,7 @@ class DiscoveredModel:
     supports_streaming: bool = True
     supports_tools: bool = False
     supports_vision: bool = False
-    max_context_tokens: int = 128000
+    max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS
     cost_per_input_token: float = 0.0
     cost_per_output_token: float = 0.0
     # ``True`` when the cost came directly from the provider API
@@ -199,7 +211,7 @@ async def _discover_openai_compatible(
                 max_context_tokens=int(
                     item.get("context_length")
                     or item.get("max_tokens")
-                    or 128000
+                    or DEFAULT_MAX_CONTEXT_TOKENS
                 ),
                 supports_reasoning=supports_reasoning,
                 reasoning_strategy=reasoning_strategy,
@@ -316,9 +328,9 @@ async def discover_openrouter(api_key: str | None) -> list[DiscoveredModel]:
         except (TypeError, ValueError):
             cost_out = 0.0
         try:
-            context = int(item.get("context_length") or 128000)
+            context = int(item.get("context_length") or DEFAULT_MAX_CONTEXT_TOKENS)
         except (TypeError, ValueError):
-            context = 128000
+            context = DEFAULT_MAX_CONTEXT_TOKENS
         results.append(
             DiscoveredModel(
                 provider="openrouter",
@@ -431,6 +443,40 @@ async def discover_google(api_key: str | None) -> list[DiscoveredModel]:
     return _discover_static("google")
 
 
+async def discover_sranai(api_key: str | None) -> list[DiscoveredModel]:
+    """Self-hosted Sran AI box — endpoint is operator-configured.
+
+    The URL comes from the DB-first resolver (admin UI setting → env
+    override) at call time, so the daily sweep and the add-key trigger
+    both follow whatever the admin last saved. No endpoint yet → skip
+    quietly (the box simply isn't wired up).
+    """
+    from app.services.providers.base_urls import resolve_base_url
+
+    base = resolve_base_url("sranai", "")
+    if not base:
+        logger.info("discovery_skipped_no_endpoint", provider="sranai")
+        return []
+
+    models = await _discover_openai_compatible(
+        provider="sranai",
+        url=f"{base}/models",
+        api_key=api_key,
+    )
+    for m in models:
+        # The payload said nothing about context → use the self-hosted
+        # default rather than the 128k cloud sentinel. (A box that
+        # genuinely reports 128000 via context_length keeps it — the
+        # raw check distinguishes "reported" from "defaulted".)
+        if m.max_context_tokens == DEFAULT_MAX_CONTEXT_TOKENS and not (
+            m.raw.get("context_length") or m.raw.get("max_tokens")
+        ):
+            m.max_context_tokens = SELF_HOSTED_DEFAULT_CONTEXT_TOKENS
+        # cost stays 0.0 — the box is self-hosted, per-token price is
+        # genuinely zero (and 0.0 maps to the neutral "standard" tier).
+    return models
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
@@ -452,4 +498,5 @@ PROVIDER_DISCOVERY = {
     "qwen": discover_qwen,
     "xai": discover_xai,
     "zai": discover_zai,
+    "sranai": discover_sranai,
 }
