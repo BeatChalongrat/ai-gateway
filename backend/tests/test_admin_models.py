@@ -18,10 +18,18 @@ class TestAdminProviders:
         assert "anthropic" in providers
 
     def test_provider_has_models(self):
+        # Self-hosted providers (base_urls.SELF_HOSTED_PROVIDERS) keep
+        # their card with ZERO models until discovery populates the
+        # catalog from the operator's box — an empty list there is the
+        # truthful pre-configuration state, not a data bug. Every other
+        # provider must still ship a non-empty model list.
+        from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
+
         items = client.get("/admin/providers", headers=_H).json()["items"]
         for item in items:
             assert isinstance(item["models"], list)
-            assert len(item["models"]) > 0
+            if item["provider_name"] not in SELF_HOSTED_PROVIDERS:
+                assert len(item["models"]) > 0
 
 
 class TestAdminModels:
