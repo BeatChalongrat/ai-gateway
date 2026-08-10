@@ -224,6 +224,7 @@ class FallbackOrchestrator:
         messages: list["Message"],
         session: "Session | None",
         ctx: "RequestContext",
+        original_error: Exception | None = None,
     ) -> FallbackResult:
         """Run the fallback chain. Raises the last error if every try fails.
 
@@ -244,6 +245,17 @@ class FallbackOrchestrator:
         chain = get_fallback_chain(original_model, original_provider)
         if not chain:
             log.info("fallback_no_chain")
+            # Batch A: a shed request (bulkhead full) must keep its
+            # 503 + Retry-After semantics for the client. Wrapping it
+            # in the generic no-chain 502 here would tell the caller
+            # "provider broken" when the truthful signal is "provider
+            # busy, retry shortly" — found live on a chain-less
+            # self-hosted model.
+            if (
+                original_error is not None
+                and getattr(original_error, "code", None) == "provider_at_capacity"
+            ):
+                raise original_error
             raise ProviderError(
                 f"No fallback chain registered for model '{original_model}'.",
                 details={
