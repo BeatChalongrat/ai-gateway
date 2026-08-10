@@ -10,7 +10,7 @@ response is constant.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -746,6 +746,70 @@ def oauth_start(
     return RedirectResponse(url=authorize_url, status_code=302)
 
 
+# ---------------------------------------------------------------------------
+# Desktop OAuth landing pages. After the server-side PKCE dance the ONLY
+# thing left in the user's browser is a leftover tab — a bare 302 to
+# sran:// left it stranded on the callback URL (which re-runs as
+# invalid_state on reload and LOOKS like a failed login even though the
+# app signed in fine). Serve a small self-contained page instead: it
+# fires the deep link itself, offers a button as fallback, and tells the
+# user the tab is safe to close. The opaque ticket appears ONLY inside
+# the sran:// link (script + button href) — never in a URL/query that
+# persists in history — and tokens never appear anywhere.
+# ---------------------------------------------------------------------------
+
+_DESKTOP_PAGE_SHELL = """<!doctype html>
+<html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRAN Desktop</title>
+<style>
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center;
+        justify-content:center; background:#0f1115; color:#e6e8ee;
+        font-family:'Segoe UI',system-ui,sans-serif; }}
+  .card {{ background:#171a21; border:1px solid #262b36; border-radius:16px;
+          padding:40px 48px; max-width:420px; text-align:center;
+          box-shadow:0 20px 60px rgba(0,0,0,.5); }}
+  .mark {{ font-size:44px; line-height:1; margin-bottom:16px; }}
+  h1 {{ font-size:19px; margin:0 0 8px; font-weight:600; }}
+  p {{ font-size:14px; color:#9aa3b2; margin:0 0 24px; line-height:1.6; }}
+  a.btn {{ display:inline-block; background:#3b6ef5; color:#fff;
+          text-decoration:none; padding:11px 22px; border-radius:9px;
+          font-size:14px; font-weight:600; }}
+  .ok {{ color:#4ade80; }} .err {{ color:#f87171; }}
+</style></head><body><div class="card">{body}</div>{script}</body></html>"""
+
+
+def _desktop_success_page(ticket: str) -> HTMLResponse:
+    deep_link = f"sran://oauth/callback?ticket={ticket}"
+    body = (
+        '<div class="mark ok">&#10003;</div>'
+        "<h1>ลงชื่อเข้าใช้สำเร็จ</h1>"
+        "<p>กำลังกลับไปที่แอป SRAN Desktop — ปิดแท็บนี้ได้เลย<br>"
+        "Signed in — returning to the SRAN Desktop app. "
+        "You can close this tab.</p>"
+        f'<a class="btn" href="{deep_link}">เปิด SranDesktop</a>'
+    )
+    script = f'<script>location.href="{deep_link}";</script>'
+    return HTMLResponse(
+        _DESKTOP_PAGE_SHELL.format(body=body, script=script), status_code=200
+    )
+
+
+def _desktop_error_page(message: str, status_code: int) -> HTMLResponse:
+    import html as _html
+
+    body = (
+        '<div class="mark err">&#10007;</div>'
+        "<h1>ลงชื่อเข้าใช้ไม่สำเร็จ</h1>"
+        f"<p>{_html.escape(message)}<br>"
+        "ปิดแท็บนี้แล้วลองใหม่จากแอป SRAN Desktop ได้เลย</p>"
+    )
+    return HTMLResponse(
+        _DESKTOP_PAGE_SHELL.format(body=body, script=""),
+        status_code=status_code,
+    )
+
+
 @router.get("/oauth/callback", name="portal_oauth_callback")
 @public_portal_route
 def oauth_callback(
@@ -766,6 +830,8 @@ def oauth_callback(
     if not code:
         raise ValidationError("Missing auth code.", code="missing_code")
 
+    is_desktop = row.get("client") == "desktop"
+
     callback_url = str(request.url_for("portal_oauth_callback"))
     try:
         claims = oauth_flow_service.exchange_code_for_verified_userinfo(
@@ -775,34 +841,51 @@ def oauth_callback(
             redirect_uri=callback_url,
         )
     except IdTokenVerificationFailed as exc:
+        if is_desktop:
+            # The desktop flow ends in a real browser tab — answer with
+            # the branded error page, not a JSON envelope.
+            return _desktop_error_page(
+                f"OAuth verification failed: {exc}", status_code=422
+            )
         raise ValidationError(
             f"OAuth verification failed: {exc}",
             code="oauth_verification_failed",
         )
 
-    result = oauth_service.login_or_create(
-        session,
-        provider=row["provider"],
-        oauth_id=claims["sub"],
-        email=claims.get("email") or "",
-        display_name=claims.get("name"),
-        avatar_url=claims.get("picture"),
-        email_verified=bool(claims.get("email_verified")),
-    )
+    try:
+        result = oauth_service.login_or_create(
+            session,
+            provider=row["provider"],
+            oauth_id=claims["sub"],
+            email=claims.get("email") or "",
+            display_name=claims.get("name"),
+            avatar_url=claims.get("picture"),
+            email_verified=bool(claims.get("email_verified")),
+        )
+    except (AuthorizationError, ValidationError) as exc:
+        # login_or_create's gates (email_not_verified / domain_not_allowed
+        # / invalid provider input). Same enforcement, browser-friendly
+        # rendering for the desktop tab; the web path keeps its envelope.
+        if is_desktop:
+            status = 403 if isinstance(exc, AuthorizationError) else 422
+            return _desktop_error_page(exc.message, status_code=status)
+        raise
 
     # SSO Phase 2 — desktop hand-off. The system browser can't deliver
     # tokens to the app, so we park the login result under a one-time
-    # 60s ticket and deep-link ONLY the opaque ticket; the app redeems
-    # it via POST /oauth/desktop/exchange. Tokens must never ride the
-    # sran:// URL itself (custom schemes are claimable by any local app
-    # and their URLs persist in shell/browser history).
-    if row.get("client") == "desktop":
+    # 60s ticket and hand over ONLY the opaque ticket via the sran://
+    # deep link; the app redeems it via POST /oauth/desktop/exchange.
+    # Tokens must never ride the sran:// URL itself (custom schemes are
+    # claimable by any local app and their URLs persist in history).
+    # The landing PAGE (not a bare 302) fires the deep link and tells
+    # the user the tab is done — a raw redirect stranded the tab on the
+    # callback URL, which replayed as invalid_state on reload and read
+    # as a failed login.
+    if is_desktop:
         # B0: bind the ticket to the nonce the desktop app minted at
         # /oauth/start — redemption requires presenting it again.
         ticket = ticket_store.put(result, nonce=row.get("nonce") or "")
-        return RedirectResponse(
-            url=f"sran://oauth/callback?ticket={ticket}", status_code=302
-        )
+        return _desktop_success_page(ticket)
 
     return result
 
