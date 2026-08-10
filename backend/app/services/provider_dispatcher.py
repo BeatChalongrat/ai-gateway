@@ -30,6 +30,7 @@ from app.services.providers.google_adapter import GoogleAIAdapter
 from app.services.providers.groq_adapter import GroqAdapter
 from app.services.providers.deepseek_adapter import DeepSeekAdapter
 from app.services.providers.xai_adapter import XAIAdapter
+from app.services.providers.sranai_adapter import SranAIAdapter
 # Pending providers — adapter stubs at ``providers/_pending/`` raise
 # ``ProviderNotImplementedError``. Kept on disk for future use but
 # deliberately NOT imported here so the dispatcher cannot accidentally
@@ -69,6 +70,7 @@ class ProviderDispatcher:
             "groq": GroqAdapter(),
             "deepseek": DeepSeekAdapter(),
             "xai": XAIAdapter(),
+            "sranai": SranAIAdapter(),
             # mistral / cohere / perplexity intentionally absent — see
             # the import block comment above. A request that routes to
             # any of these will raise KeyError in ``dispatch`` and the
