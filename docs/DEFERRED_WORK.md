@@ -163,3 +163,25 @@ with the server sandbox and becomes the only option.
   ATOMIC 5-client deferral documented in services/portal/cookies.py.
 - Desktop OAuth callback error (403 domain_not_allowed etc.) renders
   raw JSON in the system browser — cosmetic; make a small HTML page.
+
+### RESEND_API_KEY is mandatory in production even with email features off
+
+`Settings.validate_secrets()` (`backend/app/core/config.py`, "Phase 3.5 —
+Resend is mandatory in production") requires a non-empty `RESEND_API_KEY`
+whenever `APP_ENV` is not dev/test. The check is unconditional, so after
+the Phase 3 cutover — `PASSWORD_LOGIN_ENABLED=false`, meaning no
+verification or password-reset mail can be sent at all — a deployment
+that legitimately has no email provider still gets `STARTUP BLOCKED`.
+
+Not a blocker (set a real key, or a throwaway one on a domain you own),
+and deliberately NOT changed as part of the cutover: relaxing a
+fail-closed startup check is a security-posture change that deserves its
+own review rather than riding along in a docs/flag commit.
+
+Possible follow-up: make the requirement conditional on the features
+that actually send mail — roughly "required unless
+`password_login_enabled` is false AND email verification is off" — with
+a startup WARNING (not a hard failure) in that case so the operator
+still knows outbound mail is unavailable. Whoever picks this up should
+also check `request_verification_email` and the invite-link flow, which
+send mail independently of the password surface.
