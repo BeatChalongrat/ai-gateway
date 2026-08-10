@@ -121,6 +121,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             base_url=effective_base_url,
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
+            provider_name=self.provider_name,
         )
 
     # ------------------------------------------------------------------
