@@ -1227,6 +1227,7 @@ class GatewayOrchestrator:
                         messages=messages_to_send,
                         session=session,
                         ctx=ctx,
+                        original_error=exc,
                     )
                 provider_response = fallback_result.response
                 # Rewrite the route so DLP scan, request_log row, and
