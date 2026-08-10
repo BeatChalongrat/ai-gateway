@@ -55,11 +55,23 @@ def _validate_bool(value: str) -> str:
     raise ValidationError("Value must be true or false.", code="invalid_value")
 
 
+def _validate_provider_base_url_setting(value: str) -> str:
+    """Provider endpoint rows: empty clears the override, otherwise the
+    URL passes the same lenient SSRF gate the add-key route uses."""
+    from app.services.providers.base_urls import validate_provider_base_url
+
+    v = (value or "").strip()
+    if not v:
+        return ""
+    return validate_provider_base_url(v)
+
+
 _VALIDATORS: dict[str, Callable[[str], str]] = {
     "free_trial_tokens": _validate_positive_int,
     "trial_model_tier": _validate_model_tier,
     "portal_signup_enabled": _validate_bool,
     "credit_low_threshold": _validate_positive_int,
+    "provider_base_url:sranai": _validate_provider_base_url_setting,
 }
 
 
@@ -104,6 +116,13 @@ def update_setting(
 
     row.value = validator(body.value)
     session.flush()
+    if key.startswith("provider_base_url:"):
+        # Propagate an endpoint edit without waiting out the 30s TTL.
+        # (Pool eviction of the old URL is skipped on this sync route —
+        # the stale client only idles; the add-key route does full evict.)
+        from app.services.providers.base_urls import clear_base_url_cache
+
+        clear_base_url_cache()
     return {
         "key": row.key,
         "value": row.value,

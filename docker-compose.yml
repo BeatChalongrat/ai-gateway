@@ -498,6 +498,16 @@ services:
       # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
       # anthropic/openrouter at the in-cluster mock-provider service.
       PROVIDER_BASE_URL_OVERRIDES: ${PROVIDER_BASE_URL_OVERRIDES:-}
+      # Batch A provider-resilience knobs — all default to previous
+      # behavior when unset (no caps, pool 50/20/30s, 4 workers). See
+      # .env.example for the cap x GUNICORN_WORKERS sizing formula.
+      PROVIDER_CONCURRENCY_CAPS: ${PROVIDER_CONCURRENCY_CAPS:-}
+      PROVIDER_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS: ${PROVIDER_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS:-1.0}
+      PROVIDER_POOL_MAX_CONNECTIONS: ${PROVIDER_POOL_MAX_CONNECTIONS:-50}
+      PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS: ${PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS:-20}
+      PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS: ${PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS:-30.0}
+      PROVIDER_POOL_OVERRIDES: ${PROVIDER_POOL_OVERRIDES:-}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-4}
       # Phase-3 log-worker engine selector. ``python`` keeps the
       # legacy in-process queue; ``go`` dispatches to the Go sidecar
       # over gRPC. Falls back to the legacy path automatically when

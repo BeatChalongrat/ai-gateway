@@ -432,11 +432,21 @@ class ProviderKeyService:
     # Key validation (calls real API)
     # ------------------------------------------------------------------
 
-    async def test_key(self, provider_name: str, api_key: str) -> dict:
+    async def test_key(
+        self, provider_name: str, api_key: str, *, base_url: str | None = None
+    ) -> dict:
         """Validate an API key by making a minimal real API call.
+
+        ``base_url`` applies only to self-hosted OpenAI-compatible
+        providers (``base_urls.SELF_HOSTED_PROVIDERS``): the add-key
+        route passes the operator-entered endpoint so it can be probed
+        BEFORE anything is persisted; the re-test route omits it and the
+        stored/env endpoint is resolved instead.
 
         Returns: { valid: bool, latency_ms: int, error: str | None }
         """
+        from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
+
         try:
             if provider_name == "openai":
                 return await self._test_openai(api_key)
@@ -448,6 +458,10 @@ class ProviderKeyService:
                 return await self._test_replicate(api_key)
             elif provider_name == "elevenlabs":
                 return await self._test_elevenlabs(api_key)
+            elif provider_name in SELF_HOSTED_PROVIDERS:
+                return await self._test_openai_compatible(
+                    provider_name, api_key, base_url=base_url
+                )
             else:
                 return {"valid": False, "latency_ms": 0, "error": f"Unknown provider: {provider_name}"}
         except Exception as e:
@@ -576,6 +590,55 @@ class ProviderKeyService:
                 "error": "connection error",
             }
 
+    async def _test_openai_compatible(
+        self, provider_name: str, api_key: str, *, base_url: str | None = None
+    ) -> dict:
+        """Probe a self-hosted OpenAI-compatible box via ``GET {base}/models``.
+
+        Same dict shape as the other ``_test_*`` probes; error strings
+        are static labels only (token-isolation rule). Note: some local
+        OpenAI-compatible servers serve ``/models`` without checking the
+        Authorization header, so a 200 proves reachability more than
+        key validity — acceptable for an operator-owned box.
+        """
+        from app.services.providers.base_urls import resolve_base_url
+
+        url = (base_url or "").strip().rstrip("/")
+        if not url:
+            url = resolve_base_url(provider_name, "")
+        if not url:
+            return {
+                "valid": False,
+                "latency_ms": 0,
+                "error": "endpoint not configured — set the provider base URL first",
+            }
+
+        t0 = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{url}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            ms = round((time.perf_counter() - t0) * 1000)
+            if resp.status_code == 200:
+                return {"valid": True, "latency_ms": ms, "error": None}
+            if resp.status_code in (401, 403):
+                return {"valid": False, "latency_ms": ms, "error": f"invalid key (HTTP {resp.status_code})"}
+            return {"valid": False, "latency_ms": ms, "error": f"HTTP {resp.status_code}"}
+        except httpx.TimeoutException:
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "timeout — endpoint unreachable",
+            }
+        except Exception:  # noqa: BLE001 — never surface raw exception text
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "connection error — endpoint unreachable",
+            }
+
     # ------------------------------------------------------------------
     # Legacy compat — key status summary
     # ------------------------------------------------------------------
@@ -596,13 +659,25 @@ class ProviderKeyService:
 
         total = len(active_keys) + (1 if legacy_db else 0) + (1 if env_configured and not active_keys and not legacy_db else 0)
 
-        return {
+        result = {
             "provider_name": provider_name,
             "configured": total > 0,
             "total_keys": len(active_keys),
             "valid_keys": len(valid_keys),
             "source": "provider_keys" if active_keys else ("database" if legacy_db else ("environment" if env_configured else "none")),
         }
+
+        # Self-hosted providers expose their operator-set endpoint so the
+        # admin UI can prefill the form and show an "endpoint not set"
+        # state. Effective value (DB → env → "") — never a secret.
+        from app.services.providers.base_urls import (
+            SELF_HOSTED_PROVIDERS,
+            resolve_base_url,
+        )
+
+        if provider_name in SELF_HOSTED_PROVIDERS:
+            result["base_url"] = resolve_base_url(provider_name, "")
+        return result
 
     # Legacy compat
     def set_api_key(self, session: Session, provider_name: str, api_key: str) -> ProviderORM:
