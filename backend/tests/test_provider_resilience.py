@@ -360,3 +360,50 @@ async def test_call_with_retry_honors_retry_after_header(monkeypatch):
         )
     assert resp.status_code == 200
     assert sleeps == [4.0]  # header floor beat the sub-second backoff
+
+
+# ---------------------------------------------------------------------------
+# Integration fix: at-capacity must survive the no-chain fallback path
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_no_chain_fallback_preserves_at_capacity_503():
+    # Found live: a shed request on a chain-less model was wrapped by the
+    # generic "No fallback chain" 502, losing 503 + Retry-After. The
+    # orchestrator passes the primary error in; the no-chain branch must
+    # re-raise it unchanged.
+    from app.services.gateway.fallback_orchestrator import FallbackOrchestrator
+    from app.core.exceptions import ProviderError
+
+    class _Ctx:
+        tenant_id = "t"
+        project_id = "p"
+        request_id = "r"
+
+    runner = FallbackOrchestrator(dispatcher=None, key_service=None)
+    original = ProviderAtCapacityError(headers={"Retry-After": "1"})
+
+    with pytest.raises(ProviderAtCapacityError) as excinfo:
+        await runner.run(
+            original_provider="boxprov",
+            original_model="model-with-no-chain",
+            request=None,
+            messages=[],
+            session=None,
+            ctx=_Ctx(),
+            original_error=original,
+        )
+    assert excinfo.value is original  # same object — headers intact
+
+    # A NON-capacity error still gets the explanatory no-chain wrapper.
+    with pytest.raises(ProviderError) as generic:
+        await runner.run(
+            original_provider="boxprov",
+            original_model="model-with-no-chain",
+            request=None,
+            messages=[],
+            session=None,
+            ctx=_Ctx(),
+            original_error=ProviderError("upstream 500"),
+        )
+    assert "No fallback chain" in generic.value.message
