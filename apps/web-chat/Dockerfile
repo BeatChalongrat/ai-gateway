@@ -15,6 +15,15 @@ COPY . .
 # every non-localhost deploy talks to the wrong host.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Same build-time rule for the auth endpoints (SSO Phase 1, D1):
+# lib/auth.ts reads NEXT_PUBLIC_GATEWAY_URL (session lookup /portal/me,
+# silent refresh, logout) and NEXT_PUBLIC_PORTAL_URL (login/signup
+# redirect). Neither was ever passed, so every non-localhost image baked
+# in http://localhost:8080 / :3001 and auth broke off-box.
+ARG NEXT_PUBLIC_GATEWAY_URL
+ENV NEXT_PUBLIC_GATEWAY_URL=$NEXT_PUBLIC_GATEWAY_URL
+ARG NEXT_PUBLIC_PORTAL_URL
+ENV NEXT_PUBLIC_PORTAL_URL=$NEXT_PUBLIC_PORTAL_URL
 RUN npm run build
 
 # --- runner --------------------------------------------------

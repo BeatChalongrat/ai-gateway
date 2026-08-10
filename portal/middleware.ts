@@ -17,11 +17,32 @@ const ACCESS_COOKIE = "portal_access_token";
 
 // Routes that should render the same way for everyone — authed users
 // still see the landing page, they just get a different nav.
-const PUBLIC_PATHS = ["/", "/docs", "/pricing", "/security", "/privacy", "/terms"];
+// /forgot-password + /reset-password are here (not AUTH_PATHS) so a
+// signed-in user clicking a reset email link still reaches the form —
+// and an unauthenticated user isn't bounced to /login before it loads
+// (pre-Phase-1 both were unlisted, which made password reset
+// unreachable: the email link redirected straight to /login).
+const PUBLIC_PATHS = [
+  "/",
+  "/docs",
+  "/pricing",
+  "/security",
+  "/privacy",
+  "/terms",
+  "/forgot-password",
+  "/reset-password",
+];
 
 // Routes that should *redirect away* if the user is already logged in
 // (so signed-in users don't land back on /login or /signup).
-const AUTH_PATHS = ["/login", "/signup", "/invite"];
+// /oauth-complete: mid-OAuth the browser holds only the NextAuth cookie
+// (portal cookies come AFTER the cookie-bridge POST), so signedIn is
+// false — unlisted, this page was bounced to /login and the OAuth flow
+// could never finish. As an AUTH_PATH the unauthenticated load falls
+// through to next(); once the bridge sets the portal cookies, a reload
+// redirects to the ?redirect= target / dashboard, which is the same
+// place the page itself forwards to.
+const AUTH_PATHS = ["/login", "/signup", "/invite", "/oauth-complete"];
 
 const WEB_CHAT_ORIGIN = (
   process.env.NEXT_PUBLIC_WEB_CHAT_URL || "http://localhost:3002"

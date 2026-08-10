@@ -469,6 +469,18 @@ services:
       # password-reset links, and invite-link emails are stamped with
       # this host — mismatched value = dead links in email.
       PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-http://localhost:3001}
+      # Google SSO (Phase 1). The portal's NextAuth flow forwards the
+      # Google id_token to /portal/auth/oauth/verify; the backend pins
+      # the token's ``aud`` to this client id, so it MUST be the same
+      # Google OAuth client the portal uses (single ${GOOGLE_CLIENT_ID}
+      # env var feeds both services).
+      OAUTH_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # Sign-in domain lock (Phase 0) — comma-separated; empty = allow
+      # every domain. Enforced server-side in login_or_create + signup.
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-gbtech.co.th}
+      # ``hd`` account-chooser hint on the server-driven /oauth/start
+      # path (UX only, never enforcement).
+      GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
       # Empty by default → adapters hit real provider URLs. Uncomment
       # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
       # anthropic/openrouter at the in-cluster mock-provider service.
@@ -579,6 +591,9 @@ services:
       BACKEND_URL: http://backend:8080
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Google account-chooser ``hd`` hint (UX only; the backend's
+      # ALLOWED_EMAIL_DOMAINS check is the enforcement).
+      GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     ports:

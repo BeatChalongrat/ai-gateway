@@ -16,6 +16,14 @@ ENV NEXT_PUBLIC_OAUTH_ENABLED=$NEXT_PUBLIC_OAUTH_ENABLED
 # any real hostname. Must be an ARG, not just runtime env.
 ARG NEXT_PUBLIC_WEB_CHAT_URL
 ENV NEXT_PUBLIC_WEB_CHAT_URL=$NEXT_PUBLIC_WEB_CHAT_URL
+# NEXTAUTH_SECRET is a RUNTIME server-side secret (getToken() reads
+# process.env when a request comes in) — compose `environment:` is the
+# authoritative source and overrides this ENV. The ARG/ENV pair exists
+# only so a bare `docker run` without compose can still inject it at
+# build; DO NOT pass a real secret as a build arg in CI/prod — build
+# args persist in image history. Leave it unset here.
+ARG NEXTAUTH_SECRET
+ENV NEXTAUTH_SECRET=$NEXTAUTH_SECRET
 RUN npm run build
 
 FROM node:20-alpine AS runner

@@ -11,8 +11,15 @@ const nextConfig = {
   async rewrites() {
     return [
       {
-        source: "/api/:path*",
-        destination: `${BACKEND_URL}/:path*`,
+        // Exclude /api/auth/* from the backend proxy: NextAuth's
+        // /api/auth/[...nextauth] is a DYNAMIC app route, and Next
+        // resolves afterFiles rewrites BEFORE dynamic routes — the
+        // bare /api/:path* pattern shadowed it and every NextAuth
+        // endpoint 404'd off the backend. (/api/oauth/cookie-bridge
+        // is a static route, matched in the filesystem phase, so it
+        // never needed the exclusion.)
+        source: "/api/:path((?!auth).*)",
+        destination: `${BACKEND_URL}/:path`,
       },
       {
         source: "/static/:path*",
