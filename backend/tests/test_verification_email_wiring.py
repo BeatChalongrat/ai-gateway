@@ -59,6 +59,9 @@ class TestVerificationEmailDispatched:
             user = PortalUserORM(
                 id="u-wire-1",
                 email="wire@example.com",
+                # NOT NULL since SSO Phase 1 A1 — use the tenant the
+                # conftest seeds on this shared integration engine.
+                tenant_id="test-tenant",
                 password_hash="hash",
                 plan="free_trial",
                 status="active",
@@ -131,6 +134,7 @@ class TestVerificationEmailDispatched:
             user = PortalUserORM(
                 id="u-verified",
                 email="done@example.com",
+                tenant_id="test-tenant",
                 password_hash="hash",
                 plan="free_trial",
                 status="active",
@@ -168,6 +172,7 @@ class TestVerificationEmailDispatched:
             user = PortalUserORM(
                 id="u-fail-send",
                 email="fail@example.com",
+                tenant_id="test-tenant",
                 password_hash="hash",
                 plan="free_trial",
                 status="active",

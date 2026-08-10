@@ -303,8 +303,10 @@ class TestRemoveMember:
 
 class TestRedeemEndpoint:
     def test_authenticated_user_with_no_tenant_can_redeem(self, client):
-        """After being removed from a tenant, a user is orphaned —
-        they can use /portal/team/redeem to join a new one."""
+        """After being removed from a tenant, a user is displaced into a
+        fresh solo tenant (tenant_id is NOT NULL since SSO Phase 1) —
+        as its sole member they can use /portal/team/redeem to fold it
+        into a new team, so the removed→re-invited flow still works."""
         owner = _signup(client, "owner@t.com")
         inv1 = client.post(
             "/portal/team/invites",
