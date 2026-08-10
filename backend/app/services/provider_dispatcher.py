@@ -92,12 +92,21 @@ class ProviderDispatcher:
                 f"in the dispatcher (adapter pending or removed).",
                 details={"provider": route.provider_name},
             )
-        return await adapter.chat(
-            payload=payload,
-            messages=messages,
-            resolved_model=route.model_name,
-            api_key=api_key,
-        )
+        # Per-provider bulkhead (Batch A): every non-stream egress path
+        # funnels through this method (Layer-1 hops via _dispatch_one,
+        # the Layer-2 chain, health probes), so one wrap covers them
+        # all. No-op for uncapped providers. Raises
+        # ProviderAtCapacityError (fallback-eligible) when the slot
+        # can't be acquired in time.
+        from app.services.providers.concurrency import provider_slot
+
+        async with provider_slot(route.provider_name):
+            return await adapter.chat(
+                payload=payload,
+                messages=messages,
+                resolved_model=route.model_name,
+                api_key=api_key,
+            )
 
     @staticmethod
     def _is_auth_error(exc: Exception) -> bool:

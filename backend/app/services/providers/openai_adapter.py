@@ -217,6 +217,7 @@ class OpenAIAdapter(BaseProviderAdapter):
             base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
+            provider_name=self.provider_name,
         )
         headers = {"Authorization": f"Bearer {key}"}
 
@@ -257,6 +258,7 @@ class OpenAIAdapter(BaseProviderAdapter):
             base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
+            provider_name=self.provider_name,
         )
         headers = {"Authorization": f"Bearer {key}"}
 
