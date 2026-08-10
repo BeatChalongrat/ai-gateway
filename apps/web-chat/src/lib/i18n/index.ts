@@ -99,6 +99,24 @@ export function useT(): (key: DictKey, vars?: Record<string, string>) => string 
   };
 }
 
+// tOutside — non-hook translation for stores / plain modules (toasts
+// fired from zustand actions, error-code mapping). Reads the CURRENT
+// locale at call time; unlike useT it does not subscribe, so use it
+// only for fire-and-forget strings (toasts, one-shot error text that
+// is captured onto a message), never for rendered UI that must
+// re-label live on locale switch.
+export function tOutside(
+  key: DictKey,
+  vars?: Record<string, string>,
+): string {
+  const dict = dictionaries[useI18nStore.getState().locale];
+  const raw = dict[key] ?? dictionaries.en[key] ?? key;
+  if (!vars) return raw;
+  return raw.replace(/\{(\w+)\}/g, (_, name: string) =>
+    vars[name] !== undefined ? vars[name] : `{${name}}`,
+  );
+}
+
 // Convenience hook used by AppProviders. Runs once on mount so the
 // stored locale takes effect before the user interacts.
 export function useHydrateI18n() {

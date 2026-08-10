@@ -72,6 +72,42 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _restartRequired;
 
+    // ── Personal instructions (Phase 13 Task 1) ────────────────────────────
+    // Account-wide custom instructions, stored SERVER-side, so this edits the
+    // very same text as the web Projects page. Given its own Save (mirroring
+    // the web section) because it is a network write, not a local setting —
+    // the main Save must stay instant and offline-safe.
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AboutYouLength))]
+    [NotifyPropertyChangedFor(nameof(IsPersonalTooLong))]
+    private string _aboutYou = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RespondStyleLength))]
+    [NotifyPropertyChangedFor(nameof(IsPersonalTooLong))]
+    private string _respondStyle = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSavePersonalInstructions))]
+    private bool _isSavingPersonalInstructions;
+
+    /// <summary>Localized status under the editors (load failure / saved /
+    /// save failure). Null hides the line.</summary>
+    [ObservableProperty]
+    private string? _personalInstructionsStatus;
+
+    public int AboutYouLength => AboutYou?.Length ?? 0;
+
+    public int RespondStyleLength => RespondStyle?.Length ?? 0;
+
+    public int PersonalInstructionsMax => Application.Services.PersonalInstructions.MaxChars;
+
+    public bool IsPersonalTooLong =>
+        Application.Services.PersonalInstructions.IsTooLong(AboutYou, RespondStyle);
+
+    public bool CanSavePersonalInstructions => !IsSavingPersonalInstructions;
+
     // ── Browser bridge (Chrome extension) ──────────────────────────────────
 
     [ObservableProperty]
@@ -157,6 +193,30 @@ public partial class SettingsViewModel : ObservableObject
         {
             _logger.LogWarning(ex, "Could not load models for settings");
         }
+
+        await LoadPersonalInstructionsAsync();
+    }
+
+    /// <summary>Reads the account-wide instructions from the server. On a
+    /// failure the editors stay EMPTY and disabled-looking via the status
+    /// line rather than showing stale text — saving a blank form over
+    /// instructions the user set on the web would be data loss.</summary>
+    public async Task LoadPersonalInstructionsAsync()
+    {
+        PersonalInstructionsStatus = null;
+        try
+        {
+            var prefs = await _api.GetPreferencesAsync();
+            AboutYou = prefs.CustomInstructionsAbout ?? string.Empty;
+            RespondStyle = prefs.CustomInstructionsRespond ?? string.Empty;
+            Application.Services.PersonalInstructionsState.Set(AboutYou, RespondStyle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not load personal instructions");
+            PersonalInstructionsStatus =
+                Localization.LocaleService.Instance.T("settings.personal.loadFailed");
+        }
     }
 
     partial void OnSelectedThemeChanged(string value) => ThemeManager.Apply(value);
@@ -197,6 +257,43 @@ public partial class SettingsViewModel : ObservableObject
 
     /// <summary>Revert a live theme preview if the dialog is dismissed without saving.</summary>
     public void RevertTheme() => ThemeManager.Apply(_settings.Current.Theme);
+
+    /// <summary>Writes the account-wide instructions back. The local cache is
+    /// only updated AFTER the server accepts, so a failed save can never make
+    /// the desktop shape replies with text the account doesn't hold.</summary>
+    [RelayCommand]
+    private async Task SavePersonalInstructionsAsync()
+    {
+        if (IsSavingPersonalInstructions)
+            return;
+        if (IsPersonalTooLong)
+        {
+            PersonalInstructionsStatus =
+                Localization.LocaleService.Instance.T("settings.personal.tooLong");
+            return;
+        }
+
+        IsSavingPersonalInstructions = true;
+        PersonalInstructionsStatus = null;
+        try
+        {
+            var saved = await _api.UpdatePreferencesAsync(AboutYou ?? "", RespondStyle ?? "");
+            Application.Services.PersonalInstructionsState.Set(
+                saved.CustomInstructionsAbout, saved.CustomInstructionsRespond);
+            PersonalInstructionsStatus =
+                Localization.LocaleService.Instance.T("settings.personal.saved");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not save personal instructions");
+            PersonalInstructionsStatus =
+                Localization.LocaleService.Instance.T("settings.personal.saveFailed");
+        }
+        finally
+        {
+            IsSavingPersonalInstructions = false;
+        }
+    }
 
     // ── Folder access (Phase 6 Task 1) ─────────────────────────────────────
 

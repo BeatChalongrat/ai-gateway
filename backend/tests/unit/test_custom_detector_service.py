@@ -12,7 +12,14 @@ from app.services.dlp.custom_detector_service import CustomDetectorService
 
 async def _seed_user(db) -> str:
     uid = f"u-{uuid.uuid4().hex[:8]}"
-    db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x"))
+    # tenant_id NOT NULL since SSO Phase 1 A1 — "test-tenant" is the
+    # conftest seed on the shared integration engine.
+    db.add(
+        PortalUserORM(
+            id=uid, email=f"{uid}@e.com", password_hash="x",
+            tenant_id="test-tenant",
+        )
+    )
     await db.flush()
     return uid
 

@@ -230,11 +230,15 @@ class TestOAuthCallback:
         from app.services.portal import oauth_flow_service
 
         def _fake_exchange(**kwargs):
+            # Phase 0: claims must carry a verified email on an allowed
+            # domain or login_or_create rejects them before minting.
             return {
-                "email": "newuser@example.com",
+                "email": "newuser@gbtech.co.th",
                 "sub": "provider-sub-123",
                 "name": "New User",
                 "picture": None,
+                "email_verified": True,
+                "hd": "gbtech.co.th",
             }
 
         monkeypatch.setattr(

@@ -54,7 +54,7 @@ public partial class SidebarView : UserControl
 
     // ---------- inline rename (web parity R5) ----------
 
-    /// <summary>Focus + select-all when the editor appears with the row (fresh folder).</summary>
+    /// <summary>Focus + select-all when the editor appears with the row (fresh project).</summary>
     private void InlineRename_Loaded(object sender, RoutedEventArgs e)
     {
         if (sender is TextBox { IsVisible: true } tb)
@@ -103,8 +103,8 @@ public partial class SidebarView : UserControl
             // is a no-op because IsRenaming is already false.
             if (tb.DataContext is ConversationItemViewModel conv)
                 conv.IsRenaming = false;
-            else if (tb.DataContext is FolderItemViewModel folder)
-                folder.IsRenaming = false;
+            else if (tb.DataContext is ProjectItemViewModel project)
+                project.IsRenaming = false;
         }
     }
 
@@ -132,12 +132,12 @@ public partial class SidebarView : UserControl
             return;
         if (tb.DataContext is ConversationItemViewModel conv)
             await vm.CommitInlineRenameAsync(conv);
-        else if (tb.DataContext is FolderItemViewModel folder)
-            await vm.CommitFolderInlineRenameAsync(folder);
+        else if (tb.DataContext is ProjectItemViewModel project)
+            await vm.CommitProjectInlineRenameAsync(project);
     }
 
     /// <summary>
-    /// "..." on a conversation or folder row: open the row's ContextMenu below it.
+    /// "..." on a conversation or project row: open the row's ContextMenu below it.
     /// The menu lives on the nearest ancestor that owns one (the row Button, which
     /// also carries the list-VM Tag the menu bindings rely on).
     /// </summary>
@@ -158,7 +158,7 @@ public partial class SidebarView : UserControl
         e.Handled = true;
     }
 
-    // ---------- drag-drop to folders (Phase 8 Task 2) ----------
+    // ---------- drag-drop to projects (Phase 8 Task 2) ----------
 
     private const string ConversationDragFormat = "SranDesktop.Conversation";
 
@@ -170,7 +170,7 @@ public partial class SidebarView : UserControl
         dataContext switch
         {
             ConversationItemViewModel c => c,
-            FolderConversationRow row => row.Conversation,
+            ProjectConversationRow row => row.Conversation,
             _ => null
         };
 
@@ -230,20 +230,20 @@ public partial class SidebarView : UserControl
             ? data.GetData(ConversationDragFormat) as ConversationItemViewModel
             : null;
 
-    private void FolderRow_DragEnter(object sender, DragEventArgs e)
+    private void ProjectRow_DragEnter(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: FolderItemViewModel folder }
+        if (sender is FrameworkElement { DataContext: ProjectItemViewModel project }
             && DraggedConversation(e.Data) is not null)
-            folder.IsDropTarget = true;
+            project.IsDropTarget = true;
     }
 
-    private void FolderRow_DragLeave(object sender, DragEventArgs e)
+    private void ProjectRow_DragLeave(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: FolderItemViewModel folder })
-            folder.IsDropTarget = false;
+        if (sender is FrameworkElement { DataContext: ProjectItemViewModel project })
+            project.IsDropTarget = false;
     }
 
-    private void FolderRow_DragOver(object sender, DragEventArgs e)
+    private void ProjectRow_DragOver(object sender, DragEventArgs e)
     {
         e.Effects = DraggedConversation(e.Data) is not null
             ? DragDropEffects.Move
@@ -251,28 +251,28 @@ public partial class SidebarView : UserControl
         e.Handled = true;
     }
 
-    private async void FolderRow_Drop(object sender, DragEventArgs e)
+    private async void ProjectRow_Drop(object sender, DragEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: FolderItemViewModel folder })
+        if (sender is not FrameworkElement { DataContext: ProjectItemViewModel project })
             return;
-        folder.IsDropTarget = false;
+        project.IsDropTarget = false;
         var conversation = DraggedConversation(e.Data);
         if (conversation is null || DataContext is not ConversationListViewModel vm)
             return;
         e.Handled = true;
 
         var decision = SidebarDropDecision.Decide(
-            conversation.Id, conversation.FolderId,
-            SidebarDropTargetKind.Folder, folder.Id);
+            conversation.Id, conversation.ProjectId,
+            SidebarDropTargetKind.Project, project.Id);
         if (decision.ShouldMove)
-            await vm.MoveToFolderCommand.ExecuteAsync(
-                new MoveToFolderRequest(conversation, decision.TargetFolderId));
+            await vm.MoveToProjectCommand.ExecuteAsync(
+                new MoveToProjectRequest(conversation, decision.TargetProjectId));
     }
 
     private void HeaderDropZone_DragEnter(object sender, DragEventArgs e)
     {
         var conversation = DraggedConversation(e.Data);
-        if (conversation?.FolderId is not null)
+        if (conversation?.ProjectId is not null)
             HeaderDropZone.Background =
                 (System.Windows.Media.Brush?)TryFindResource("BgSecondaryBrush")
                 ?? System.Windows.Media.Brushes.Transparent;
@@ -283,7 +283,7 @@ public partial class SidebarView : UserControl
 
     private void HeaderDropZone_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = DraggedConversation(e.Data)?.FolderId is not null
+        e.Effects = DraggedConversation(e.Data)?.ProjectId is not null
             ? DragDropEffects.Move
             : DragDropEffects.None;
         e.Handled = true;
@@ -298,11 +298,11 @@ public partial class SidebarView : UserControl
         e.Handled = true;
 
         var decision = SidebarDropDecision.Decide(
-            conversation.Id, conversation.FolderId,
-            SidebarDropTargetKind.Unfile, targetFolderId: null);
+            conversation.Id, conversation.ProjectId,
+            SidebarDropTargetKind.Unfile, targetProjectId: null);
         if (decision.ShouldMove)
-            await vm.MoveToFolderCommand.ExecuteAsync(
-                new MoveToFolderRequest(conversation, decision.TargetFolderId));
+            await vm.MoveToProjectCommand.ExecuteAsync(
+                new MoveToProjectRequest(conversation, decision.TargetProjectId));
     }
 
     private void ClearDropHighlights()
@@ -310,8 +310,8 @@ public partial class SidebarView : UserControl
         HeaderDropZone.Background = System.Windows.Media.Brushes.Transparent;
         if (DataContext is ConversationListViewModel vm)
         {
-            foreach (var folder in vm.Folders)
-                folder.IsDropTarget = false;
+            foreach (var project in vm.Projects)
+                project.IsDropTarget = false;
         }
     }
 
@@ -327,9 +327,9 @@ public partial class SidebarView : UserControl
     }
 
     /// <summary>
-    /// Fills the "Move to folder" sub-menu each time a conversation menu opens:
-    /// every folder (current one checked + disabled), "New folder…", and
-    /// "Remove from folder" when the chat is filed somewhere.
+    /// Fills the "Move to project" sub-menu each time a conversation menu opens:
+    /// every project (current one checked + disabled), "New project…", and
+    /// "Remove from project" when the chat is filed somewhere.
     /// </summary>
     private void ConversationMenu_Opened(object sender, RoutedEventArgs e)
     {
@@ -344,33 +344,33 @@ public partial class SidebarView : UserControl
             return;
 
         moveRoot.Items.Clear();
-        foreach (var folder in vm.Folders)
+        foreach (var project in vm.Projects)
         {
-            var isCurrent = conv.FolderId == folder.Id;
+            var isCurrent = conv.ProjectId == project.Id;
             moveRoot.Items.Add(new MenuItem
             {
-                Header = folder.Name,
+                Header = project.Name,
                 IsChecked = isCurrent,
                 IsEnabled = !isCurrent,
-                Command = vm.MoveToFolderCommand,
-                CommandParameter = new MoveToFolderRequest(conv, folder.Id)
+                Command = vm.MoveToProjectCommand,
+                CommandParameter = new MoveToProjectRequest(conv, project.Id)
             });
         }
-        if (vm.Folders.Count > 0)
+        if (vm.Projects.Count > 0)
             moveRoot.Items.Add(new Separator());
         moveRoot.Items.Add(new MenuItem
         {
-            Header = "New folder…",
-            Command = vm.MoveToNewFolderCommand,
+            Header = Localization.LocaleService.Instance.T("project.new"),
+            Command = vm.MoveToNewProjectCommand,
             CommandParameter = conv
         });
-        if (conv.FolderId is not null)
+        if (conv.ProjectId is not null)
         {
             moveRoot.Items.Add(new MenuItem
             {
-                Header = "Remove from folder",
-                Command = vm.MoveToFolderCommand,
-                CommandParameter = new MoveToFolderRequest(conv, null)
+                Header = Localization.LocaleService.Instance.T("conv.removeFromProject"),
+                Command = vm.MoveToProjectCommand,
+                CommandParameter = new MoveToProjectRequest(conv, null)
             });
         }
     }

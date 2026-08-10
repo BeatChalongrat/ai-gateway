@@ -19,6 +19,8 @@
 
 "use client";
 
+import { tOutside } from "@/lib/i18n";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -98,7 +100,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
   const start = useCallback(() => {
     const Ctor = getRecognition();
     if (!Ctor) {
-      setError("Voice input not supported in this browser.");
+      setError(tOutside("voice.err.notSupported"));
       return;
     }
     // Reset every ref + store state so a second recording doesn't
@@ -137,7 +139,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
       if (e.error === "no-speech" || e.error === "aborted") return;
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setError(
-          "Microphone access denied. Allow access in your browser settings to use voice input.",
+          tOutside("voice.err.micDenied"),
         );
         stop();
         return;
@@ -160,7 +162,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
       rec.start();
       recRef.current = rec;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't start recording.");
+      setError(err instanceof Error ? err.message : tOutside("voice.err.startFailed"));
       stopRecording();
     }
   }, [inputLang, startRecording, stopRecording, setError, setTranscript, stop]);

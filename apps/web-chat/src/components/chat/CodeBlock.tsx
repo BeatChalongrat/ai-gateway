@@ -16,6 +16,15 @@
 import { Children, isValidElement, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import {
+  artifactKeyFor,
+  useCanvasSource,
+} from "@/components/canvas/CanvasSourceContext";
+import { canvasTypeForBlock } from "@/components/canvas/canvasUtil";
+import { useT } from "@/lib/i18n";
+import { useCanvasStore } from "@/stores/canvasStore";
+import type { CanvasArtifactType } from "@/stores/canvasStore";
+
 interface CodeChildProps {
   className?: string;
   children?: ReactNode;
@@ -35,6 +44,7 @@ const COLLAPSE_THRESHOLD_LINES = 30;
 const COLLAPSE_VISIBLE_LINES = 20;
 
 export function CodeBlock({ children }: PreProps) {
+  const t = useT();
   const codeChild = findCodeChild(children);
   const className = codeChild?.props.className ?? "";
   const langMatch = LANG_RE.exec(className);
@@ -48,12 +58,25 @@ export function CodeBlock({ children }: PreProps) {
   const [expanded, setExpanded] = useState(false);
   const collapsed = canCollapse && !expanded;
 
+  // Phase 6 / C1 — previewable blocks (html/svg/markdown) get an
+  // "Open in Canvas" button NEXT TO copy, never replacing it. The
+  // inline code block stays the default render; the canvas is opt-in.
+  const canvasType = canvasTypeForBlock(lang, codeText);
+  const filename = label !== "Code" && label.includes(".") ? label : undefined;
+
   return (
     <div className={`code-block not-prose${collapsed ? " is-collapsed" : ""}`}>
       <div className="code-block-header">
         <span className="code-block-lang" title={lang || undefined}>
           {label}
         </span>
+        {canvasType ? (
+          <OpenCanvasButton
+            type={canvasType}
+            content={codeText}
+            title={filename}
+          />
+        ) : null}
         <CopyButton text={codeText} />
       </div>
       <div className="code-block-body scrollbar-thin">
@@ -69,15 +92,70 @@ export function CodeBlock({ children }: PreProps) {
           aria-expanded={expanded}
         >
           {expanded
-            ? "Show less"
-            : `Show more (${lineCount - COLLAPSE_VISIBLE_LINES} more lines)`}
+            ? t("code.showLess")
+            : t("code.showMore", { n: String(lineCount - COLLAPSE_VISIBLE_LINES) })}
         </button>
       ) : null}
     </div>
   );
 }
 
+// Phase 6 / C1 — opens the read-only Canvas panel with this block's
+// content. Only rendered for canvas-eligible types.
+function OpenCanvasButton({
+  type,
+  content,
+  title,
+}: {
+  type: CanvasArtifactType;
+  content: string;
+  title?: string;
+}) {
+  const t = useT();
+  const openCanvas = useCanvasStore((s) => s.openCanvas);
+  // C3 — bind the artifact to its conversation/message so edits can be
+  // saved as versions. Outside a chat message (public shared view) the
+  // source is null and the canvas opens in session-only mode.
+  const source = useCanvasSource();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        openCanvas({
+          type,
+          content,
+          title,
+          conversationId: source?.conversationId,
+          messageId: source?.messageId,
+          artifactKey: source
+            ? artifactKeyFor(source.messageId, content)
+            : undefined,
+        })
+      }
+      className="code-block-copy focus-ring"
+      aria-label={t("canvas.open")}
+    >
+      <svg
+        width={14}
+        height={14}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M15 3v18" />
+      </svg>
+      {t("canvas.open")}
+    </button>
+  );
+}
+
 function CopyButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -106,7 +184,7 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       onClick={copy}
       className={`code-block-copy focus-ring ${copied ? "is-copied" : ""}`}
-      aria-label={copied ? "Copied" : "Copy code"}
+      aria-label={copied ? t("code.copied") : t("code.copyAria")}
     >
       {copied ? (
         <>
@@ -123,7 +201,7 @@ function CopyButton({ text }: { text: string }) {
           >
             <path d="M5 13l4 4L19 7" />
           </svg>
-          Copied!
+          {t("code.copied")}
         </>
       ) : (
         <>
@@ -141,7 +219,7 @@ function CopyButton({ text }: { text: string }) {
             <rect x="9" y="9" width="11" height="11" rx="2" />
             <path d="M5 15V6a2 2 0 0 1 2-2h9" />
           </svg>
-          Copy
+          {t("code.copy")}
         </>
       )}
     </button>

@@ -81,8 +81,8 @@
                           Margin="0,0,0,4">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:InlineAttachmentViewModel}">
-                        <Button Command="{Binding SaveAsCommand}"
-                                ToolTip="{loc:T attachment.save}"
+                        <Button Command="{Binding PreviewCommand}"
+                                ToolTip="{loc:T attachment.preview}"
                                 Cursor="Hand" Margin="4,0,0,4"
                                 HorizontalAlignment="Right"
                                 Background="{DynamicResource BgSecondaryBrush}"
@@ -90,6 +90,12 @@
                                 BorderThickness="1" Padding="10,8"
                                 controls:ButtonHelper.CornerRadius="10"
                                 Visibility="{Binding IsDocument, Converter={StaticResource BoolToVisibility}}">
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="{loc:T attachment.save}"
+                                              Command="{Binding SaveAsCommand}" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M6,2 H13 L18,7 V21 A1,1 0 0 1 17,22 H6 A1,1 0 0 1 5,21 V3 A1,1 0 0 1 6,2 Z M13,2 V7 H18"
                                       Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5"
@@ -173,9 +179,13 @@
                 </Button>
             </StackPanel>
 
-            <!-- user hover actions: copy, edit-in-place -->
+            <!-- user hover actions: timestamp, copy, edit-in-place -->
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,3,2,0"
                         Visibility="{Binding IsMouseOver, ElementName=Root, Converter={StaticResource BoolToVisibility}}">
+                <!-- local-time stamp (audit §3.8) -->
+                <TextBlock Text="{Binding TimestampText}" FontSize="11" VerticalAlignment="Center"
+                           Margin="0,0,6,0"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
                 <Button Style="{StaticResource ActionIconButton}" ToolTip="{loc:T msg.copy}" Margin="0,0,2,0"
                         AutomationProperties.Name="{loc:T msg.copy}"
                         Click="CopyButton_Click">
@@ -409,9 +419,69 @@
                                     </ScrollViewer>
                                 </Border>
 
+                                <!-- Phase 13 Task 2: run_python gets a code-shaped body
+                                     (code above, stdout/stderr below) instead of the
+                                     generic Input/Output JSON panes — web CodeRunCard
+                                     parity. Same header, status and retry as every
+                                     other card; only the expanded body differs. -->
+                                <StackPanel Margin="0,8,0,0"
+                                            Visibility="{Binding ShowCodeDetails, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="{loc:T coderun.code}" FontSize="11"
+                                               Visibility="{Binding HasCodeText, Converter={StaticResource BoolToVisibility}}"
+                                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
+                                            Padding="8" Margin="0,4,0,8"
+                                            Visibility="{Binding HasCodeText, Converter={StaticResource BoolToVisibility}}">
+                                        <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Auto">
+                                            <TextBox Text="{Binding CodeText, Mode=OneWay}"
+                                                     IsReadOnly="True" BorderThickness="0"
+                                                     Background="Transparent"
+                                                     FontFamily="Consolas" FontSize="11.5"
+                                                     TextWrapping="NoWrap"
+                                                     Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        </ScrollViewer>
+                                    </Border>
+
+                                    <TextBlock Text="{loc:T coderun.output}" FontSize="11"
+                                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    <TextBlock Text="{Binding CodeNotice}" FontSize="11" Margin="0,4,0,0"
+                                               TextWrapping="Wrap"
+                                               Visibility="{Binding HasCodeNotice, Converter={StaticResource BoolToVisibility}}"
+                                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                                    <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
+                                            Padding="8" Margin="0,4,0,0"
+                                            Visibility="{Binding HasCodeStdout, Converter={StaticResource BoolToVisibility}}">
+                                        <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto">
+                                            <TextBlock Text="{Binding CodeStdout}" FontFamily="Consolas" FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        </ScrollViewer>
+                                    </Border>
+                                    <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
+                                            Padding="8" Margin="0,4,0,0"
+                                            Visibility="{Binding HasCodeStderr, Converter={StaticResource BoolToVisibility}}">
+                                        <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                            <TextBlock Text="{Binding CodeStderr}" FontFamily="Consolas" FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource AccentRedBrush}" />
+                                        </ScrollViewer>
+                                    </Border>
+                                    <Image Source="{Binding ScreenshotPreview}" MaxWidth="400" MaxHeight="300"
+                                           Margin="0,8,0,0" Stretch="Uniform" HorizontalAlignment="Left"
+                                           Visibility="{Binding HasScreenshot, Converter={StaticResource BoolToVisibility}}" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
+                                                Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibility}}">
+                                        <Button Style="{DynamicResource PillButton}" Padding="10,3"
+                                                Command="{Binding DataContext.RegenerateCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}">
+                                            <TextBlock Text="{loc:T tool.retry}" FontSize="11.5" />
+                                        </Button>
+                                    </StackPanel>
+                                </StackPanel>
+
                                 <!-- expanded: input + output + screenshot + error -->
                                 <StackPanel Margin="0,8,0,0"
-                                            Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">
+                                            Visibility="{Binding ShowGenericDetails, Converter={StaticResource BoolToVisibility}}">
                                     <TextBlock Text="{loc:T tool.input}" FontSize="11"
                                                Foreground="{DynamicResource TextTertiaryBrush}" />
                                     <Border Background="{DynamicResource BgPrimaryBrush}" CornerRadius="6"
@@ -644,10 +714,16 @@
                                     Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}">
                                 <Border.ContextMenu>
                                     <ContextMenu>
+                                        <MenuItem Header="{loc:T attachment.preview}"
+                                                  Command="{Binding PreviewCommand}" />
                                         <MenuItem Header="{loc:T gen.saveImage}"
                                                   Command="{Binding SaveAsCommand}" />
                                     </ContextMenu>
                                 </Border.ContextMenu>
+                                <!-- Phase 14: click opens the full-size viewer (web lightbox parity). -->
+                                <Border.InputBindings>
+                                    <MouseBinding MouseAction="LeftClick" Command="{Binding PreviewCommand}" />
+                                </Border.InputBindings>
                                 <Image Source="{Binding ImageSource}"
                                        Stretch="Uniform" StretchDirection="DownOnly"
                                        RenderOptions.BitmapScalingMode="HighQuality" />
@@ -697,9 +773,12 @@
                             </Grid>
 
                             <!-- Non-media attachment (FIX 10): synced PDF/doc/
-                                 spreadsheet renders as a save-able file chip. -->
-                            <Button Command="{Binding SaveAsCommand}"
-                                    ToolTip="{loc:T attachment.save}"
+                                 spreadsheet renders as a file chip.
+                                 Phase 14: clicking it PREVIEWS in-app; Save-As
+                                 moved to the context menu (and lives in the
+                                 preview window's footer too). -->
+                            <Button Command="{Binding PreviewCommand}"
+                                    ToolTip="{loc:T attachment.preview}"
                                     Cursor="Hand" Margin="0,4"
                                     HorizontalAlignment="Left"
                                     Background="{DynamicResource BgSecondaryBrush}"
@@ -707,6 +786,12 @@
                                     BorderThickness="1" Padding="10,8"
                                     controls:ButtonHelper.CornerRadius="10"
                                     Visibility="{Binding IsDocument, Converter={StaticResource BoolToVisibility}}">
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="{loc:T attachment.save}"
+                                                  Command="{Binding SaveAsCommand}" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
                                 <StackPanel Orientation="Horizontal">
                                     <Path Data="M6,2 H13 L18,7 V21 A1,1 0 0 1 17,22 H6 A1,1 0 0 1 5,21 V3 A1,1 0 0 1 6,2 Z M13,2 V7 H18"
                                           Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5"
@@ -852,6 +937,45 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+
+                <!-- local-time stamp, beside the meta line (audit §3.8) -->
+                <TextBlock Text="{Binding TimestampText}" FontSize="11" VerticalAlignment="Center"
+                           Margin="6,0,0,0"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
+            </StackPanel>
+
+            <!-- Retry: an errored turn hides the hover action row (thumbs/copy make
+                 no sense on a failure), which used to leave NO affordance at all —
+                 the user had to retype. This standalone pill restores one: visible
+                 only on the LAST assistant message when it errored, wired to
+                 Regenerate, which forks the failed reply off as a branch and
+                 re-asks the same user message. -->
+            <StackPanel Orientation="Horizontal" Margin="-4,8,0,0">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsError}" Value="True" />
+                                    <Condition Binding="{Binding IsLastAssistantMessage}" Value="True" />
+                                    <Condition Binding="{Binding IsStreaming}" Value="False" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <Button Style="{DynamicResource PillButton}" Padding="12,4"
+                        AutomationProperties.Name="{loc:T common.retry}"
+                        Command="{Binding DataContext.RegenerateCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}">
+                    <StackPanel Orientation="Horizontal">
+                        <controls:IconView Geometry="{StaticResource Geo_Regenerate}"
+                                           Stroke="{DynamicResource TextSecondaryBrush}"
+                                           Width="15" Height="15" Margin="0,0,6,0" />
+                        <TextBlock Text="{loc:T common.retry}" FontSize="12.5" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
 
             <!-- Continue: resume a turn paused at its step/time budget (PART 1/6).

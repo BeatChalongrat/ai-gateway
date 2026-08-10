@@ -27,6 +27,7 @@ import {
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
+import { tOutside, useT } from "@/lib/i18n";
 import type { ExcelExecuteResponse } from "@/lib/types";
 
 import {
@@ -88,6 +89,7 @@ interface Props {
 }
 
 export function ExcelPlanCard({ convId, plan }: Props) {
+  const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExcelExecuteResponse | null>(null);
@@ -97,10 +99,11 @@ export function ExcelPlanCard({ convId, plan }: Props) {
     setStatus("running");
     setError(null);
     try {
-      const srcId = plan.source_file_id;
-      if (!srcId) throw new Error("plan is missing source_file_id");
+      // No source_file_id → create-from-scratch (Phase 8). The server
+      // forces operation=create_workbook in that mode, so a plan the
+      // model wrote without an attachment executes instead of 404ing.
       const res = await api.executeExcelPlan(convId, {
-        source_file_id: srcId,
+        source_file_id: plan.source_file_id || undefined,
         output_filename: plan.output_filename,
         plan,
       });
@@ -108,7 +111,7 @@ export function ExcelPlanCard({ convId, plan }: Props) {
       setStatus("done");
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : (err as Error).message;
-      setError(msg || "Could not execute plan.");
+      setError(msg || tOutside("plan.excel.execFailed"));
       setStatus("error");
     }
   }
@@ -122,12 +125,12 @@ export function ExcelPlanCard({ convId, plan }: Props) {
   return (
     <CardShell
       headerIcon={<FileTypeBadge extension=".xlsx" size="sm" />}
-      headerTitle="Excel Edit Plan"
-      metadata={`${actions.length} action${actions.length === 1 ? "" : "s"}`}
+      headerTitle={t("plan.excel.title")}
+      metadata={`${actions.length} ${t(actions.length === 1 ? "unit.action" : "unit.actions")}`}
       footer={
         <>
           <PrimaryButton onClick={execute} loading={status === "running"}>
-            {status === "running" ? "Processing…" : "Execute Plan"}
+            {status === "running" ? t("plan.processing") : t("plan.execute")}
           </PrimaryButton>
           {error ? <ErrorLine message={error} /> : null}
         </>
@@ -139,7 +142,7 @@ export function ExcelPlanCard({ convId, plan }: Props) {
         </p>
       ) : null}
       {actions.length > 0 ? (
-        <PlanList title="Changes">
+        <PlanList title={t("plan.changes")}>
           {actions.map((a, i) => (
             <PlanListItem key={i} icon={actionIcon(a.type)}>
               {summarizeExcelAction(a)}
@@ -152,6 +155,7 @@ export function ExcelPlanCard({ convId, plan }: Props) {
 }
 
 export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
+  const t = useT();
   const { file, validation, changes } = result;
   const sheets = validation?.stats?.sheets;
   const charts = validation?.stats?.charts;
@@ -170,14 +174,14 @@ export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
         <span>Excel</span>
         <span>{humanSize(file.file_size_bytes)}</span>
         {sheets != null ? (
-          <span>{sheets} sheet{sheets === 1 ? "" : "s"}</span>
+          <span>{sheets} {t(sheets === 1 ? "unit.sheet" : "unit.sheets")}</span>
         ) : null}
         {charts != null ? (
-          <span>{charts} chart{charts === 1 ? "" : "s"}</span>
+          <span>{charts} {t(charts === 1 ? "unit.chart" : "unit.charts")}</span>
         ) : null}
       </MetadataRow>
       {changes && changes.length > 0 ? (
-        <PlanList title={`Changes made (${changes.length})`}>
+        <PlanList title={t("plan.changesMade", { n: String(changes.length) })}>
           {changes.map((line, i) => (
             <PlanListItem
               key={i}
@@ -200,8 +204,8 @@ export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
         errors={validation?.issues ?? []}
         okMessage={
           brokenCount === 0
-            ? "File is valid, no broken formulas."
-            : "File is valid."
+            ? t("plan.validation.okNoFormulas")
+            : t("plan.validation.ok")
         }
       />
     </CardShell>
@@ -212,34 +216,42 @@ function summarizeExcelAction(a: ExcelPlanAction): string {
   const sheet = typeof a.sheet_name === "string" ? a.sheet_name : "?";
   switch (a.type) {
     case "create_sheet":
-      return `Create sheet "${sheet}"`;
+      return tOutside("plan.excel.createSheet", { sheet });
     case "delete_sheet":
-      return `Delete sheet "${sheet}"`;
+      return tOutside("plan.excel.deleteSheet", { sheet });
     case "rename_sheet":
-      return `Rename "${sheet}" → "${(a as { new_name?: string }).new_name ?? "?"}"`;
+      return tOutside("plan.excel.renameSheet", {
+        sheet,
+        name: (a as { new_name?: string }).new_name ?? "?",
+      });
     case "write_cells": {
       const cells = (a as { cells?: unknown[] }).cells;
       const n = Array.isArray(cells) ? cells.length : 0;
-      return `Write ${n} cell${n === 1 ? "" : "s"} in "${sheet}"`;
+      return n === 1
+        ? tOutside("plan.excel.writeCells.one", { sheet })
+        : tOutside("plan.excel.writeCells.other", { sheet, n: String(n) });
     }
     case "write_table":
-      return `Write table in "${sheet}"`;
+      return tOutside("plan.excel.writeTable", { sheet });
     case "create_chart": {
       const title = (a as { title?: string }).title || "chart";
       const kind = (a as { chart_type?: string }).chart_type || "bar";
-      return `Create ${kind} chart "${title}" in "${sheet}"`;
+      return tOutside("plan.excel.createChart", { sheet, title, kind });
     }
     case "format_range":
-      return `Format range in "${sheet}"`;
+      return tOutside("plan.excel.formatRange", { sheet });
     case "set_column_width":
-      return `Set column widths in "${sheet}"`;
+      return tOutside("plan.excel.setColumnWidth", { sheet });
     case "merge_cells":
-      return `Merge cells in "${sheet}"`;
+      return tOutside("plan.excel.mergeCells", { sheet });
     case "auto_filter":
-      return `Add filter in "${sheet}"`;
+      return tOutside("plan.excel.autoFilter", { sheet });
     case "freeze_panes":
-      return `Freeze panes in "${sheet}"`;
+      return tOutside("plan.excel.freezePanes", { sheet });
     default:
-      return `${a.type || "action"} in "${sheet}"`;
+      return tOutside("plan.excel.genericAction", {
+        type: a.type || tOutside("plan.doc.action"),
+        sheet,
+      });
   }
 }

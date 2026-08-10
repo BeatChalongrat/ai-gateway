@@ -20,6 +20,7 @@ import type { FileAttachment } from "@/lib/types";
 import { openLightbox } from "@/components/ui/ImageLightbox";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { AuthedImage } from "./AuthedImage";
+import { FilePreviewModal } from "./FilePreviewModal";
 import { VideoPlayer } from "./VideoPlayer";
 
 interface Props {
@@ -29,6 +30,11 @@ interface Props {
 const isVideoMime = (ct?: string) => Boolean(ct?.startsWith("video/"));
 
 export function MessageAttachments({ files }: Props) {
+  // Phase 10 — one preview overlay for the whole attachment group, so
+  // only one file can be open at a time and the modal state does not
+  // live inside each card.
+  const [previewing, setPreviewing] = useState<FileAttachment | null>(null);
+
   if (!files || files.length === 0) return null;
   const videos = files.filter((f) => isVideoMime(f.content_type));
   const images = files.filter((f) => isImageMime(f.content_type));
@@ -54,9 +60,16 @@ export function MessageAttachments({ files }: Props) {
       {others.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           {others.map((f) => (
-            <FileCard key={f.id} file={f} />
+            <FileCard key={f.id} file={f} onPreview={() => setPreviewing(f)} />
           ))}
         </div>
+      ) : null}
+
+      {previewing ? (
+        <FilePreviewModal
+          file={previewing}
+          onClose={() => setPreviewing(null)}
+        />
       ) : null}
     </div>
   );
@@ -91,38 +104,55 @@ function ImageThumb({ file }: { file: FileAttachment }) {
 // download affordance). Download rides the cookie-authed blob fetch
 // (api.downloadFile), whose 401 → refresh → retry survives
 // portal_access_token expiry where a bare <a download> could not.
-function FileCard({ file }: { file: FileAttachment }) {
+function FileCard({
+  file,
+  onPreview,
+}: {
+  file: FileAttachment;
+  onPreview: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          await api.downloadFile(file.id, file.filename);
-        } finally {
-          setBusy(false);
-        }
-      }}
-      className="focus-ring flex w-full max-w-[300px] items-center gap-3 rounded-lg border border-border bg-bg-secondary p-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated disabled:opacity-60"
-      title={`Download ${file.filename}`}
-    >
-      <FileTypeBadge
-        filename={file.filename}
-        contentType={file.content_type}
-        size="md"
-        className="shrink-0"
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-text-primary">
-          {file.filename}
+    <div className="flex w-full max-w-[300px] items-center gap-1 rounded-lg border border-border bg-bg-secondary pr-1 transition-colors hover:border-border-strong hover:bg-bg-elevated">
+      <button
+        type="button"
+        onClick={onPreview}
+        data-testid="file-card-preview"
+        className="focus-ring flex min-w-0 flex-1 items-center gap-3 p-3 text-left"
+        title={file.filename}
+      >
+        <FileTypeBadge
+          filename={file.filename}
+          contentType={file.content_type}
+          size="md"
+          className="shrink-0"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-text-primary">
+            {file.filename}
+          </span>
+          <span className="block text-xs text-text-muted">
+            {formatBytes(file.file_size_bytes)}
+          </span>
         </span>
-        <span className="block text-xs text-text-muted">
-          {formatBytes(file.file_size_bytes)}
-        </span>
-      </span>
-      <Download className="h-4 w-4 shrink-0 text-text-muted" aria-hidden />
-    </button>
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        aria-label={`Download ${file.filename}`}
+        data-testid="file-card-download"
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await api.downloadFile(file.id, file.filename);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="focus-ring shrink-0 rounded-md p-2 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary disabled:opacity-60"
+      >
+        <Download className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
   );
 }

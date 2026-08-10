@@ -33,6 +33,23 @@ public static class SqliteMigrator
             version = Convert.ToInt32(await read.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
         }
 
+        // A database AHEAD of this build's list was written by a different
+        // lineage (e.g. a build from an abandoned branch that reached a
+        // higher user_version). Migration index N there is NOT index N here,
+        // so re-running is wrong — but so is pretending everything is
+        // applied: every future migration in this build silently becomes a
+        // no-op. Say so loudly; the store's schema self-repair
+        // (EnsureRequiredColumnsAsync) is what actually keeps the read path
+        // working in that state.
+        if (version > migrations.Count)
+        {
+            logger?.LogWarning(
+                "SQLite user_version {Version} is AHEAD of this build's {Total} migrations — "
+                + "migrations from this build will NOT run. The database was written by a "
+                + "different build lineage; schema checks must not rely on the version counter.",
+                version, migrations.Count);
+        }
+
         for (var i = version; i < migrations.Count; i++)
         {
             await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);

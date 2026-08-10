@@ -71,6 +71,9 @@ def _seed_user(
             credit_used=0,
             preferred_language="en",
             token_version=5,
+            # NOT NULL since SSO Phase 1 A1 (matches migration 030);
+            # SQLite doesn't enforce the FK so a bare id is enough.
+            tenant_id="t-fixture",
         )
         db.add(user)
         db.commit()

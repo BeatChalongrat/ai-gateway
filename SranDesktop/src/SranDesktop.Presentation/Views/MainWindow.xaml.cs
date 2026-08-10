@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
+using SranDesktop.Application.Interfaces;
+using SranDesktop.Application.Services;
 using SranDesktop.Presentation.ViewModels;
 using SranDesktop.Presentation.Views.Dialogs;
 
@@ -21,10 +23,13 @@ public partial class MainWindow : Window
     private readonly Func<ConnectorMarketplaceView> _connectorsViewFactory;
     private readonly Func<WritingStyleView> _writingStyleViewFactory;
     private readonly Func<Dialogs.VoiceSettingsDialog> _voiceSettingsFactory;
+    private readonly Func<Application.Models.ProjectDto, Dialogs.ProjectSettingsDialog> _projectSettingsFactory;
     private bool _sidebarCollapsed;
+    private readonly ISettingsService _settings;
 
     public MainWindow(
         MainViewModel viewModel,
+        ISettingsService settings,
         Func<SettingsView> settingsViewFactory,
         Func<KnowledgeBaseView> knowledgeBaseViewFactory,
         Func<MemoryView> memoryViewFactory,
@@ -32,10 +37,12 @@ public partial class MainWindow : Window
         Func<SkillsView> skillsViewFactory,
         Func<ConnectorMarketplaceView> connectorsViewFactory,
         Func<WritingStyleView> writingStyleViewFactory,
-        Func<Dialogs.VoiceSettingsDialog> voiceSettingsFactory)
+        Func<Dialogs.VoiceSettingsDialog> voiceSettingsFactory,
+        Func<Application.Models.ProjectDto, Dialogs.ProjectSettingsDialog> projectSettingsFactory)
     {
         InitializeComponent();
         _viewModel = viewModel;
+        _settings = settings;
         _settingsViewFactory = settingsViewFactory;
         _knowledgeBaseViewFactory = knowledgeBaseViewFactory;
         _memoryViewFactory = memoryViewFactory;
@@ -44,9 +51,43 @@ public partial class MainWindow : Window
         _connectorsViewFactory = connectorsViewFactory;
         _writingStyleViewFactory = writingStyleViewFactory;
         _voiceSettingsFactory = voiceSettingsFactory;
+        _projectSettingsFactory = projectSettingsFactory;
         DataContext = viewModel;
+
+        // Phase 12 — slash actions the composer cannot perform itself: New
+        // chat lives on the conversation list, the shortcuts sheet is a
+        // window. The view model raises, the shell acts.
+        viewModel.Chat.SlashActionRequested += (_, action) =>
+        {
+            switch (action)
+            {
+                case SlashActionId.NewChat:
+                    if (viewModel.Conversations.NewChatCommand.CanExecute(null))
+                        viewModel.Conversations.NewChatCommand.Execute(null);
+                    break;
+                case SlashActionId.Shortcuts:
+                    new ShortcutsDialog { Owner = this }.ShowDialog();
+                    break;
+            }
+        };
+
+        // Phase 12 — project settings (instructions + KB). Server-backed, so
+        // what is edited here is what web shows.
+        viewModel.Conversations.ProjectSettingsRequested += async (_, project) =>
+        {
+            var dialog = _projectSettingsFactory(project.Dto);
+            dialog.Owner = this;
+            dialog.ShowDialog();
+            if (dialog.Saved)
+                await viewModel.Conversations.RefreshProjectsAfterSettingsAsync();
+        };
+
+        // Phase 11 — restore size/position BEFORE the window is shown, so it
+        // never appears at the default spot and jumps.
+        RestoreWindowPlacement();
         Loaded += MainWindow_Loaded;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
+        Closing += MainWindow_SavePlacement;
 
         // FIX-A escape hatch: the login overlay's "Server settings" link opens
         // the same Settings dialog as the in-app button — works pre-login.
@@ -107,6 +148,16 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
 
+    private delegate bool MonitorEnumProc(
+        IntPtr hMonitor, IntPtr hdc, ref RECT rect, IntPtr data);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumDisplayMonitors(
+        IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr data);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForSystem();
+
     [DllImport("user32.dll")]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
@@ -156,7 +207,7 @@ public partial class MainWindow : Window
                 || _viewModel.Chat.IsKnowledgePopupOpen
                 || _viewModel.Conversations.IsSearchExpanded
                 || _viewModel.Conversations.Conversations.Any(c => c.IsRenaming)
-                || _viewModel.Conversations.Folders.Any(f => f.IsRenaming)
+                || _viewModel.Conversations.Projects.Any(p => p.IsRenaming)
                 || _viewModel.Chat.Messages.Any(m => m.IsEditing);
             if (!somethingElseClaimsEsc
                 && _viewModel.Chat.CancelStreamingCommand.CanExecute(null))
@@ -200,6 +251,122 @@ public partial class MainWindow : Window
             e.Handled = true;
             if (_viewModel.Conversations.NewChatCommand.CanExecute(null))
                 _viewModel.Conversations.NewChatCommand.Execute(null);
+        }
+    }
+
+    // ── Window placement (Phase 11 Task 2) ──────────────────────────────
+    //
+    // Size/position/maximized survive a restart. The decision of WHERE to
+    // open lives in WindowPlacement (pure, unit-tested); this half only
+    // supplies the monitors and applies the answer, because a saved position
+    // on a monitor that is no longer attached must not leave the window
+    // somewhere the user cannot reach.
+
+    private void RestoreWindowPlacement()
+    {
+        var s = _settings.Current;
+        if (s.WindowWidth is not { } w || s.WindowHeight is not { } h)
+            return; // never saved — keep the XAML default + CenterScreen
+
+        var saved = new WindowBounds(
+            s.WindowLeft ?? 0, s.WindowTop ?? 0, w, h, s.WindowMaximized);
+
+        var restored = WindowPlacement.Restore(saved, CurrentScreens(), MinWidth, MinHeight);
+        if (restored is not { } b)
+            return;
+
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = b.Left;
+        Top = b.Top;
+        Width = b.Width;
+        Height = b.Height;
+        if (b.IsMaximized)
+            WindowState = WindowState.Maximized;
+    }
+
+    private void MainWindow_SavePlacement(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        try
+        {
+            // RestoreBounds is the pre-maximize rectangle; Left/Top/Width/Height
+            // read as the MAXIMIZED screen rect while maximized, which would
+            // make un-maximizing after a restart fill the screen too.
+            // While MINIMIZED (close-to-tray fires Closing in that state too)
+            // the live metrics are junk — Win32 parks minimized windows at
+            // -32000 — so the last NORMAL rectangle in RestoreBounds is the
+            // only trustworthy source there as well.
+            var maximized = WindowState == WindowState.Maximized;
+            var r = WindowState == WindowState.Normal
+                ? new Rect(Left, Top, Width, Height)
+                : RestoreBounds;
+            if (r.Width <= 0 || r.Height <= 0)
+                return;
+            // Belt-and-braces: never persist off-world coordinates — keep
+            // the previous good save instead.
+            if (r.Left <= -30000 || r.Top <= -30000)
+                return;
+
+            var next = _settings.Current.Clone();
+            next.WindowLeft = r.Left;
+            next.WindowTop = r.Top;
+            next.WindowWidth = r.Width;
+            next.WindowHeight = r.Height;
+            next.WindowMaximized = maximized;
+            _settings.Save(next);
+        }
+        catch
+        {
+            // Never block the app from closing over a settings write.
+        }
+    }
+
+    /// <summary>Working areas of every attached monitor, in WPF units.
+    /// Uses the same user32 interop as the maximize fix rather than pulling
+    /// WinForms into a WPF project just to read screen bounds.</summary>
+    private IReadOnlyList<ScreenArea> CurrentScreens()
+    {
+        var list = new List<ScreenArea>();
+
+        // Device pixels → WPF units. Restore runs from the constructor, before
+        // this window has an HwndSource, so fall back to the system DPI.
+        var source = PresentationSource.FromVisual(this);
+        var scaleX = source?.CompositionTarget?.TransformFromDevice.M11
+                     ?? (96.0 / GetSystemDpiSafe());
+        var scaleY = scaleX;
+
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMonitor, IntPtr _, ref RECT _, IntPtr _) =>
+        {
+            var info = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+            if (GetMonitorInfo(hMonitor, ref info))
+            {
+                var w = info.rcWork;
+                list.Add(new ScreenArea(
+                    w.Left * scaleX, w.Top * scaleY,
+                    (w.Right - w.Left) * scaleX, (w.Bottom - w.Top) * scaleY));
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        if (list.Count == 0)
+        {
+            // Single-monitor fallback: SystemParameters is already in WPF units.
+            list.Add(new ScreenArea(
+                SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Top,
+                SystemParameters.WorkArea.Width, SystemParameters.WorkArea.Height));
+        }
+        return list;
+    }
+
+    private static double GetSystemDpiSafe()
+    {
+        try
+        {
+            var dpi = GetDpiForSystem();
+            return dpi > 0 ? dpi : 96.0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return 96.0; // pre-1607 Windows
         }
     }
 

@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { BrainCircuit, Folder as FolderIcon, FolderPlus, Pin, PinOff } from "lucide-react";
+import { Archive, ArchiveRestore, BrainCircuit, FolderKanban, FolderPlus, Pin, PinOff } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
-import type { Conversation, Folder } from "@/lib/types";
+import type { Conversation, Project } from "@/lib/types";
 
 interface Props {
   conv: Conversation;
@@ -14,12 +14,17 @@ interface Props {
   onRename: (title: string) => void | Promise<void>;
   onDelete: () => void | Promise<void>;
   onTogglePin: () => void | Promise<void>;
-  /** Folders available as move targets (migration 022). */
-  folders?: Folder[];
-  /** File this conversation into a folder, or `null` to unfile it. */
-  onMoveToFolder?: (folderId: string | null) => void | Promise<void>;
-  /** Create a brand-new folder and move this conversation into it. */
-  onCreateFolderForMove?: () => void | Promise<void>;
+  /** Archive / un-archive (Phase 10). Omitted where the action makes no
+   *  sense (e.g. a search-result row); the menu item hides with it. */
+  onToggleArchive?: () => void | Promise<void>;
+  /** Projects available as assignment targets. Since Phase 9 this is the
+   *  ONLY organiser — folders were merged into projects (migration 031). */
+  projects?: Project[];
+  /** Assign this conversation to a project, or `null` to un-assign. */
+  onMoveToProject?: (projectId: string | null) => void | Promise<void>;
+  /** Create an empty project and move this conversation into it — the
+   *  "file it somewhere new" shortcut the folder submenu used to own. */
+  onCreateProjectForMove?: () => void | Promise<void>;
 }
 
 export function ConversationItem({
@@ -29,13 +34,14 @@ export function ConversationItem({
   onRename,
   onDelete,
   onTogglePin,
-  folders = [],
-  onMoveToFolder,
-  onCreateFolderForMove,
+  onToggleArchive,
+  projects = [],
+  onMoveToProject,
+  onCreateProjectForMove,
 }: Props) {
   const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveProjectOpen, setMoveProjectOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(conv.title);
@@ -54,7 +60,7 @@ export function ConversationItem({
     const off = (e: MouseEvent) => {
       if (!menuRef.current?.contains(e.target as Node)) {
         setMenuOpen(false);
-        setMoveOpen(false);
+        setMoveProjectOpen(false);
       }
     };
     document.addEventListener("mousedown", off);
@@ -172,6 +178,23 @@ export function ConversationItem({
               )}
               {conv.is_pinned ? t("conv.unpin") : t("conv.pin")}
             </button>
+            {onToggleArchive ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void onToggleArchive();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+              >
+                {conv.is_archived ? (
+                  <ArchiveRestore width={14} height={14} aria-hidden />
+                ) : (
+                  <Archive width={14} height={14} aria-hidden />
+                )}
+                {conv.is_archived ? t("conv.unarchive") : t("conv.archive")}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {
@@ -195,71 +218,71 @@ export function ConversationItem({
               </svg>
               {t("conv.rename")}
             </button>
-            {onMoveToFolder ? (
+            {onMoveToProject ? (
               <>
                 <button
                   type="button"
-                  onClick={() => setMoveOpen((v) => !v)}
-                  aria-expanded={moveOpen}
+                  onClick={() => setMoveProjectOpen((v) => !v)}
+                  aria-expanded={moveProjectOpen}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                 >
-                  <FolderIcon width={14} height={14} aria-hidden />
-                  <span className="flex-1">{t("conv.moveToFolder")}</span>
+                  <FolderKanban width={14} height={14} aria-hidden />
+                  <span className="flex-1">{t("conv.moveToProject")}</span>
                   <span aria-hidden className="text-text-muted">
-                    {moveOpen ? "▾" : "▸"}
+                    {moveProjectOpen ? "▾" : "▸"}
                   </span>
                 </button>
-                {moveOpen ? (
+                {moveProjectOpen ? (
                   <div className="max-h-48 overflow-y-auto border-t border-border/60 bg-bg-base/40">
-                    {folders.map((f) => (
+                    {projects.map((p) => (
                       <button
-                        key={f.id}
+                        key={p.id}
                         type="button"
-                        disabled={f.id === conv.folder_id}
+                        disabled={p.id === conv.project_id}
                         onClick={() => {
                           setMenuOpen(false);
-                          setMoveOpen(false);
-                          void onMoveToFolder(f.id);
+                          setMoveProjectOpen(false);
+                          void onMoveToProject(p.id);
                         }}
                         className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
-                          f.id === conv.folder_id
+                          p.id === conv.project_id
                             ? "text-text-muted"
                             : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                         }`}
                       >
-                        <FolderIcon width={12} height={12} aria-hidden className="shrink-0" />
-                        <span className="truncate">{f.name}</span>
-                        {f.id === conv.folder_id ? (
+                        <FolderKanban width={12} height={12} aria-hidden className="shrink-0" />
+                        <span className="truncate">{p.name}</span>
+                        {p.id === conv.project_id ? (
                           <span aria-hidden className="ml-auto text-[10px]">✓</span>
                         ) : null}
                       </button>
                     ))}
-                    {onCreateFolderForMove ? (
+                    {onCreateProjectForMove ? (
                       <button
                         type="button"
                         onClick={() => {
                           setMenuOpen(false);
-                          setMoveOpen(false);
-                          void onCreateFolderForMove();
+                          setMoveProjectOpen(false);
+                          void onCreateProjectForMove();
                         }}
                         className="flex w-full items-center gap-2 border-t border-border/60 px-3 py-1.5 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                       >
                         <FolderPlus width={12} height={12} aria-hidden className="shrink-0" />
-                        <span className="truncate">{t("folder.new")}</span>
+                        <span className="truncate">{t("project.new")}</span>
                       </button>
                     ) : null}
-                    {conv.folder_id ? (
+                    {conv.project_id ? (
                       <button
                         type="button"
                         onClick={() => {
                           setMenuOpen(false);
-                          setMoveOpen(false);
-                          void onMoveToFolder(null);
+                          setMoveProjectOpen(false);
+                          void onMoveToProject(null);
                         }}
                         className="flex w-full items-center gap-2 border-t border-border/60 px-3 py-1.5 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                       >
                         <span aria-hidden className="shrink-0 text-[12px]">✕</span>
-                        <span className="truncate">{t("conv.removeFromFolder")}</span>
+                        <span className="truncate">{t("conv.removeFromProject")}</span>
                       </button>
                     ) : null}
                   </div>

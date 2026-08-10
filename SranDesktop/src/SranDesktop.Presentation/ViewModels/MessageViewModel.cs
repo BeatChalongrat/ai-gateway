@@ -97,8 +97,8 @@ public partial class MessageViewModel : ObservableObject
 
     /// <summary>"Thinking..." while reasoning streams; "Thought for X.Xs" once done (web parity A2).</summary>
     public string ReasoningHeader => IsReasoningComplete && _reasoningElapsed is { } d
-        ? $"Thought for {d.TotalSeconds:F1}s"
-        : "Thinking...";
+        ? Localization.LocaleService.Instance.T("msg.thoughtFor", d.TotalSeconds)
+        : Localization.LocaleService.Instance.T("msg.thinking");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowTypingIndicator))]
@@ -121,6 +121,13 @@ public partial class MessageViewModel : ObservableObject
     /// <summary>"model · N tokens" line shown under completed assistant messages.</summary>
     [ObservableProperty]
     private string? _metaLine;
+
+    /// <summary>Compact local-time stamp shown in the message meta row (audit
+    /// §3.8): "14:32" today, "6 Aug 14:32" (TH: "6 ส.ค. 14:32") for older
+    /// messages. <see cref="CreatedAt"/> is offset-aware, so this is always the
+    /// machine's local time regardless of the offset it was stored with.</summary>
+    public string TimestampText => Services.MessageTimestampFormatter.Format(
+        CreatedAt, DateTimeOffset.Now, Localization.LocaleService.Instance.Locale);
 
     public string? ModelId { get; set; }
 
@@ -240,7 +247,7 @@ public partial class MessageViewModel : ObservableObject
         var parts = new List<string>();
         if (FallbackNotice is not null) parts.Add(FallbackNotice);
         if (!string.IsNullOrEmpty(ModelId)) parts.Add(ModelId!);
-        if (usage is not null) parts.Add($"{usage.TotalTokens} tokens");
+        if (usage is not null) parts.Add(Localization.LocaleService.Instance.T("msg.tokens", usage.TotalTokens));
         if (parts.Count > 0)
             MetaLine = string.Join("  ·  ", parts);
     }
@@ -254,10 +261,50 @@ public partial class MessageViewModel : ObservableObject
         {
             _contentBuffer.Append(message);
             Content = message;
+            _errorInContent = true;
         }
         else
         {
             MetaLine = message;
         }
+    }
+
+    /// <summary>True when <see cref="SetError"/> injected the error text as the
+    /// bubble's only content — a resume must remove it before streaming again.</summary>
+    private bool _errorInContent;
+
+    /// <summary>Phase 5 Task 3 (D3): a Continue after a connection drop resumes
+    /// this bubble's turn — drop the error styling, and when the error text was
+    /// injected as the bubble's only content, remove it so resumed output never
+    /// appends after an error sentence.</summary>
+    public void ClearError()
+    {
+        if (!IsError)
+            return;
+        IsError = false;
+        MetaLine = null;
+        if (_errorInContent)
+        {
+            _errorInContent = false;
+            _contentBuffer.Clear();
+            Content = string.Empty;
+            OnPropertyChanged(nameof(ShowTypingIndicator));
+        }
+    }
+
+    /// <summary>Phase 5 Task 3 (D2): empties the bubble before a reattach
+    /// attempt. Every attempt re-delivers the full already-generated prefix as
+    /// one delta, so a retry that didn't reset would duplicate text.</summary>
+    public void ResetStreamedContent()
+    {
+        _contentBuffer.Clear();
+        Content = string.Empty;
+        _reasoningBuffer.Clear();
+        Reasoning = string.Empty;
+        _reasoningStart = null;
+        _reasoningElapsed = null;
+        IsReasoningComplete = false;
+        _errorInContent = false;
+        OnPropertyChanged(nameof(ShowTypingIndicator));
     }
 }

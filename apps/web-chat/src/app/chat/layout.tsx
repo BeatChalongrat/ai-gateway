@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
 import { CreditBadge } from "@/components/chat/CreditBadge";
+import { ShortcutsDialog } from "@/components/chat/ShortcutsDialog";
 import { Sidebar } from "@/components/chat/Sidebar";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -88,10 +89,16 @@ export default function ChatLayout({
   // mount per chat session via the layout.
   useMemoryPendingPoll();
 
+  // Phase 10 — the cheatsheet is mounted here (layout level) so the
+  // global ? / Cmd+/ binding works on every chat route, including ones
+  // with no composer.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
   // Global keyboard shortcuts: Cmd/Ctrl+Shift+S toggles sidebar,
   // Cmd/Ctrl+K focuses the sidebar search, Cmd/Ctrl+Shift+N starts
-  // a new chat.
+  // a new chat, ? / Cmd+/ shows the shortcuts sheet.
   useKeyboardShortcuts({
+    onShowShortcuts: () => setShortcutsOpen(true),
     onToggleSidebar: () => {
       if (typeof window !== "undefined" && window.innerWidth < 768) {
         setSidebarOpen((v) => !v);
@@ -160,6 +167,11 @@ export default function ChatLayout({
             upward from the pill. */}
         <CreditBadge />
       </main>
+
+      <ShortcutsDialog
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
     </div>
   );
 }

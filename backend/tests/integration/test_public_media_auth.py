@@ -45,7 +45,12 @@ def _auth(portal_user_id, tenant_id="test-tenant"):
 async def _seed_user(async_db, balance=5_000_000):
     uid = f"u-{uuid.uuid4().hex[:8]}"
     async_db.add(
-        PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x", credit_balance=balance)
+        PortalUserORM(
+            id=uid, email=f"{uid}@e.com", password_hash="x",
+            credit_balance=balance,
+            # tenant_id NOT NULL since SSO Phase 1 A1 (conftest seed).
+            tenant_id="test-tenant",
+        )
     )
     await async_db.flush()
     return uid

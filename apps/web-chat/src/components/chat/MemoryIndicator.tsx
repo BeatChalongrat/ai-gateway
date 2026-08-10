@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { Brain, BrainCircuit } from "lucide-react";
 
 import { toast } from "@/components/ui/Toast";
+import { tOutside } from "@/lib/i18n";
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { useChatStore } from "@/stores/chatStore";
 
@@ -73,7 +74,7 @@ export function MemoryIndicator({ conversationId }: Props) {
           : "Memory turned off for this chat.",
       );
     } catch {
-      toast("Couldn't change memory setting.");
+      toast(tOutside("memory.toast.toggleFailed"));
     }
   }
 

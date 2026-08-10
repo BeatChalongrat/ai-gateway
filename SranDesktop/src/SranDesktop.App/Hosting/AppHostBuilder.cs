@@ -111,6 +111,9 @@ public static class AppHostBuilder
                     .AddHttpMessageHandler<AuthTokenHandler>();
                 services.AddSingleton<IBrowserLauncher, SystemBrowserLauncher>();
                 services.AddSingleton<ConnectorOAuthCoordinator>();
+                // SSO Phase 2: Google sign-in via system browser + one-time
+                // ticket deep link (nonce-bound; see LoginOAuthCoordinator).
+                services.AddSingleton<LoginOAuthCoordinator>();
 
                 // …while completions use the provisioned gw_ API key directly
                 // (the /v1 endpoint rejects portal JWTs).
@@ -355,6 +358,16 @@ public static class AppHostBuilder
                         context.Configuration["Sran:McpCatalogUrl"],
                         sp.GetRequiredService<ITokenSession>()));
 
+                // OS-level completion notification (tray balloon): one concrete
+                // instance backs both interfaces — ChatViewModel gates on
+                // IWindowStateProvider and fires ICompletionNotifier; the tray
+                // icon + main window are attached in App.OnStartup.
+                services.AddSingleton<SranDesktop.App.Services.TrayCompletionNotifier>();
+                services.AddSingleton<ICompletionNotifier>(sp =>
+                    sp.GetRequiredService<SranDesktop.App.Services.TrayCompletionNotifier>());
+                services.AddSingleton<IWindowStateProvider>(sp =>
+                    sp.GetRequiredService<SranDesktop.App.Services.TrayCompletionNotifier>());
+
                 // ViewModels
                 services.AddSingleton<LoginViewModel>();
                 services.AddSingleton<ConversationListViewModel>();
@@ -386,6 +399,18 @@ public static class AppHostBuilder
                 services.AddTransient<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>();
                 services.AddSingleton<Func<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>>(
                     sp => () => sp.GetRequiredService<SranDesktop.Presentation.Views.Dialogs.VoiceSettingsDialog>());
+                // Phase 12 — project settings dialog, built per project row.
+                services.AddSingleton(sp =>
+                {
+                    Func<SranDesktop.Application.Models.ProjectDto,
+                         SranDesktop.Presentation.Views.Dialogs.ProjectSettingsDialog> factory =
+                        project => new SranDesktop.Presentation.Views.Dialogs.ProjectSettingsDialog(
+                            new SranDesktop.Presentation.ViewModels.ProjectSettingsViewModel(
+                                sp.GetRequiredService<SranDesktop.Application.Interfaces.IChatEdgeApiClient>(),
+                                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SranDesktop.Presentation.ViewModels.ProjectSettingsViewModel>>(),
+                                project));
+                    return factory;
+                });
                 services.AddSingleton<MainWindow>();
             })
             .Build();

@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { FolderOpen } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   conversationId: string;
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export function WorkspaceButton({ conversationId, onOpen }: Props) {
+  const t = useT();
   const [count, setCount] = useState(0);
 
   useEffect(() => {
@@ -43,12 +45,20 @@ export function WorkspaceButton({ conversationId, onOpen }: Props) {
       type="button"
       onClick={onOpen}
       className="focus-ring inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-      aria-label={`Workspace (${count} generated)`}
-      title={`Workspace (${count} generated file${count === 1 ? "" : "s"})`}
+      aria-label={
+        count === 1
+          ? t("ws.buttonTitle.one")
+          : t("ws.buttonTitle.other", { n: String(count) })
+      }
+      title={
+        count === 1
+          ? t("ws.buttonTitle.one")
+          : t("ws.buttonTitle.other", { n: String(count) })
+      }
     >
       <FolderOpen className="h-3.5 w-3.5" />
       <span>
-        {count} generated
+        {t("ws.generated", { n: String(count) })}
       </span>
     </button>
   );

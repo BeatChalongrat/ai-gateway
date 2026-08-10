@@ -45,7 +45,60 @@ public partial class ToolExecutionItemViewModel : ObservableObject
     /// <summary>Full output for the expanded Output section.</summary>
     [ObservableProperty] private string? _fullResult;
 
-    [ObservableProperty] private bool _isExpanded;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowGenericDetails))]
+    [NotifyPropertyChangedFor(nameof(ShowCodeDetails))]
+    private bool _isExpanded;
+
+    // ── run_python card (Phase 13 Task 2) ───────────────────────────────────
+    // A python run is the one tool whose INPUT is the interesting artefact
+    // (the code the model wrote) rather than a path or a query, so it gets a
+    // card shaped like the web's CodeRunCard — code above, output below —
+    // instead of the generic "Input / Output" JSON panes. Everything else
+    // about the card (header, status dot, duration, retry) is unchanged: this
+    // is a different BODY, not a different card.
+
+    public bool IsCodeRun => ToolName == "run_python";
+
+    /// <summary>The Python source, verbatim. Empty when the arguments were
+    /// malformed — the card then shows only the output half.</summary>
+    public string CodeText { get; }
+
+    public bool HasCodeText => CodeText.Length > 0;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCodeStdout))]
+    [NotifyPropertyChangedFor(nameof(HasCodeStderr))]
+    [NotifyPropertyChangedFor(nameof(HasCodeNotice))]
+    [NotifyPropertyChangedFor(nameof(CodeNotice))]
+    private Application.Services.CodeRunOutput? _codeOutput;
+
+    public string CodeStdout => CodeOutput?.Stdout ?? string.Empty;
+    public string CodeStderr => CodeOutput?.Stderr ?? string.Empty;
+    public bool HasCodeStdout => CodeOutput?.HasStdout == true;
+    public bool HasCodeStderr => CodeOutput?.HasStderr == true;
+
+    /// <summary>The one line a person must be told explicitly: timed out,
+    /// truncated, or "it ran but printed nothing". Null when there is none.</summary>
+    public string? CodeNotice
+    {
+        get
+        {
+            if (CodeOutput is not { } o) return null;
+            if (o.TimedOut) return Localization.LocaleService.Instance.T("coderun.timedOut");
+            if (o.IsSilent) return Localization.LocaleService.Instance.T("coderun.noOutput");
+            if (o.Truncated) return Localization.LocaleService.Instance.T("coderun.truncated");
+            return null;
+        }
+    }
+
+    public bool HasCodeNotice => CodeNotice is not null;
+
+    /// <summary>Generic Input/Output panes — everything except run_python.</summary>
+    public bool ShowGenericDetails => IsExpanded && !IsCodeRun;
+
+    /// <summary>Code + output panes — run_python only.</summary>
+    public bool ShowCodeDetails => IsExpanded && IsCodeRun;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasScreenshot))]
@@ -129,6 +182,33 @@ public partial class ToolExecutionItemViewModel : ObservableObject
         InputJson = Pretty(argumentsJson);
         InputDisplay = BuildInputDisplay(argumentsJson);
         IconGeometry = System.Windows.Application.Current?.TryFindResource(ToolIcon(toolName)) as Geometry;
+        CodeText = IsCodeRun ? ExtractCode(argumentsJson) : string.Empty;
+        // Open while the code runs — that is exactly when someone wants to see
+        // what it is doing (web CodeRunCard does the same); Complete() folds
+        // it back to the one-line summary.
+        if (IsCodeRun)
+            _isExpanded = true;
+    }
+
+    /// <summary>The verbatim "code" argument, or "" if the arguments aren't
+    /// the expected object (never the pretty-printed JSON — showing JSON in a
+    /// code pane would be worse than showing nothing).</summary>
+    internal static string ExtractCode(string argumentsJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(
+                string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("code", out var code)
+                && code.ValueKind == JsonValueKind.String)
+                return code.GetString() ?? string.Empty;
+        }
+        catch (JsonException)
+        {
+            // fall through
+        }
+        return string.Empty;
     }
 
     public void Complete(AgentToolResultEvent result)
@@ -146,6 +226,14 @@ public partial class ToolExecutionItemViewModel : ObservableObject
             Truncate(result.FullResult ?? result.ResultPreview, 4000));
         if (result.ImageDataUri is { Length: > 0 } dataUri)
             ScreenshotPreview = TryDecodeDataUri(dataUri);
+        if (IsCodeRun)
+        {
+            // Parse the FULL result, not the preview: a truncated preview
+            // would cut stdout mid-line and lose the stderr section entirely.
+            CodeOutput = Application.Services.CodeRunParser.Parse(
+                result.FullResult ?? result.ResultPreview);
+            IsExpanded = false; // fold to the summary line, same as web
+        }
     }
 
     /// <summary>Icon key per tool (R9 E3).</summary>

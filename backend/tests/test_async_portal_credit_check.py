@@ -30,6 +30,9 @@ async def _seed_user(async_db, *, status="active", balance=1000):
         status=status,
         credit_balance=balance,
         credit_used=0,
+        # NOT NULL since SSO Phase 1 A1 — the conftest seeds this
+        # tenant on the shared integration engine async_db points at.
+        tenant_id="test-tenant",
     )
     async_db.add(user)
     await async_db.flush()

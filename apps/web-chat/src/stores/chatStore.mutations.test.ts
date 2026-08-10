@@ -1,11 +1,11 @@
 // chatStore mutation tests — optimistic updates + server-error
 // rollback for the sidebar operations (create / rename / delete /
-// pin / model switch / folder move). The api module is mocked;
+// pin / model switch / project move). The api module is mocked;
 // these tests assert store-state transitions only.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Conversation, Folder, Message } from "@/lib/types";
+import type { Conversation, Message, Project } from "@/lib/types";
 
 const { mockApi } = vi.hoisted(() => ({
   mockApi: {
@@ -15,7 +15,7 @@ const { mockApi } = vi.hoisted(() => ({
     setConversationPinned: vi.fn(),
     setConversationModel: vi.fn(),
     setConversationMemory: vi.fn(),
-    moveConversationToFolder: vi.fn(),
+    moveConversationToProject: vi.fn(),
   },
 }));
 
@@ -52,11 +52,12 @@ function conv(id: string, extra?: Partial<Conversation>): Conversation {
   };
 }
 
-function folder(id: string, count: number): Folder {
+function project(id: string, count: number): Project {
   return {
     id,
-    name: `Folder ${id}`,
-    position: 1,
+    name: `Project ${id}`,
+    instructions: "",
+    knowledge_base_id: null,
     conversation_count: count,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -129,12 +130,12 @@ describe("renameConversation", () => {
 });
 
 describe("deleteConversation", () => {
-  it("removes the row, its message slots, deactivates it, and decrements the folder count", async () => {
+  it("removes the row, its message slots, deactivates it, and decrements the project count", async () => {
     useChatStore.setState({
-      conversations: [conv("c1", { folder_id: "f1" }), conv("c2")],
+      conversations: [conv("c1", { project_id: "p1" }), conv("c2")],
       messages: { c1: [msg("m1")], c2: [msg("m2")] },
       messagesLoaded: { c1: true, c2: true },
-      folders: [folder("f1", 3)],
+      projects: [project("p1", 3)],
       activeConversationId: "c1",
     });
     mockApi.deleteConversation.mockResolvedValue(new Response(null, { status: 204 }));
@@ -145,7 +146,7 @@ describe("deleteConversation", () => {
     expect(state().messages["c1"]).toBeUndefined();
     expect(state().messagesLoaded["c1"]).toBeUndefined();
     expect(state().activeConversationId).toBeNull();
-    expect(state().folders[0].conversation_count).toBe(2);
+    expect(state().projects[0].conversation_count).toBe(2);
     // Untouched sibling survives.
     expect(state().messages["c2"]).toHaveLength(1);
   });
@@ -224,45 +225,60 @@ describe("setConversationModel", () => {
   });
 });
 
-describe("moveConversationToFolder", () => {
-  it("re-files optimistically, adjusting both folder counts", async () => {
+describe("moveConversationToProject", () => {
+  it("re-assigns optimistically, adjusting both project counts", async () => {
     useChatStore.setState({
-      conversations: [conv("c1", { folder_id: "f1" })],
-      folders: [folder("f1", 2), folder("f2", 0)],
+      conversations: [conv("c1", { project_id: "p1" })],
+      projects: [project("p1", 2), project("p2", 0)],
     });
-    mockApi.moveConversationToFolder.mockResolvedValue(
+    mockApi.moveConversationToProject.mockResolvedValue(
       new Response(null, { status: 204 }),
     );
 
-    await state().moveConversationToFolder("c1", "f2");
+    await state().moveConversationToProject("c1", "p2");
 
-    expect(findConv("c1")?.folder_id).toBe("f2");
-    expect(state().folders.find((f) => f.id === "f1")?.conversation_count).toBe(1);
-    expect(state().folders.find((f) => f.id === "f2")?.conversation_count).toBe(1);
+    expect(findConv("c1")?.project_id).toBe("p2");
+    expect(state().projects.find((p) => p.id === "p1")?.conversation_count).toBe(1);
+    expect(state().projects.find((p) => p.id === "p2")?.conversation_count).toBe(1);
   });
 
   it("rolls back membership AND counts on failure, raising the banner", async () => {
     useChatStore.setState({
-      conversations: [conv("c1", { folder_id: "f1" })],
-      folders: [folder("f1", 2), folder("f2", 0)],
+      conversations: [conv("c1", { project_id: "p1" })],
+      projects: [project("p1", 2), project("p2", 0)],
     });
-    mockApi.moveConversationToFolder.mockRejectedValue(new Error("500"));
+    mockApi.moveConversationToProject.mockRejectedValue(new Error("500"));
 
-    await state().moveConversationToFolder("c1", "f2");
+    await state().moveConversationToProject("c1", "p2");
 
-    expect(findConv("c1")?.folder_id).toBe("f1");
-    expect(state().folders.find((f) => f.id === "f1")?.conversation_count).toBe(2);
-    expect(state().folders.find((f) => f.id === "f2")?.conversation_count).toBe(0);
-    expect(state().errorBanner).toBe("Couldn't move conversation. Please try again.");
+    expect(findConv("c1")?.project_id).toBe("p1");
+    expect(state().projects.find((p) => p.id === "p1")?.conversation_count).toBe(2);
+    expect(state().projects.find((p) => p.id === "p2")?.conversation_count).toBe(0);
+    expect(state().errorBanner).toBeTruthy();
   });
 
-  it("no-ops when the target folder equals the current one", async () => {
+  it("no-ops when the target project equals the current one", async () => {
     useChatStore.setState({
-      conversations: [conv("c1", { folder_id: "f1" })],
-      folders: [folder("f1", 2)],
+      conversations: [conv("c1", { project_id: "p1" })],
+      projects: [project("p1", 2)],
     });
 
-    await state().moveConversationToFolder("c1", "f1");
-    expect(mockApi.moveConversationToFolder).not.toHaveBeenCalled();
+    await state().moveConversationToProject("c1", "p1");
+    expect(mockApi.moveConversationToProject).not.toHaveBeenCalled();
+  });
+
+  it("un-assigns with null and only decrements the source project", async () => {
+    useChatStore.setState({
+      conversations: [conv("c1", { project_id: "p1" })],
+      projects: [project("p1", 2)],
+    });
+    mockApi.moveConversationToProject.mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+
+    await state().moveConversationToProject("c1", null);
+
+    expect(findConv("c1")?.project_id).toBeNull();
+    expect(state().projects[0].conversation_count).toBe(1);
   });
 });

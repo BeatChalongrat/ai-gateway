@@ -121,7 +121,13 @@ def test_semantic_detector_skipped_at_runtime():
 @pytest.mark.asyncio
 async def test_three_timeouts_auto_disable(async_db):
     uid = f"u-{uuid.uuid4().hex[:8]}"
-    async_db.add(PortalUserORM(id=uid, email=f"{uid}@e.com", password_hash="x"))
+    # tenant_id NOT NULL since SSO Phase 1 A1 (conftest seed).
+    async_db.add(
+        PortalUserORM(
+            id=uid, email=f"{uid}@e.com", password_hash="x",
+            tenant_id="test-tenant",
+        )
+    )
     await async_db.flush()
     svc = CustomDetectorService(async_db, redis_client=None)
     det = await svc.create(

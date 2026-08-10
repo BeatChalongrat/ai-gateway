@@ -67,11 +67,17 @@ type MessageService struct {
 	// Optional. Queries the knowledge base bound to the conversation
 	// and returns a retrieved-context block for the system prompt.
 	ragSvc RAGReader
+	// projectReader — Phase 4. Optional; nil keeps every conversation on
+	// the pre-Phase-4 prompt path.
+	projectReader ProjectReader
 	// Optional. Reads conversation files (with their cached
 	// inspection_json) so the Phase 4 Excel context block can
 	// inject the workbook structure + action catalog into the
 	// system prompt. Wired via SetExcelLookup.
 	excelLookup ExcelLookup
+	// Optional. Builds the "## Canvas Artifacts" system-prompt block
+	// (Phase 8 Task 3). Wired via SetCanvasLookup.
+	canvasLookup CanvasLookup
 	// Optional. Builds the <saved_user_memory> system-prompt block
 	// (S1 — Personal Memory Core). Gated by conv.MemoryEnabled.
 	memorySvc MemoryReader
@@ -161,6 +167,14 @@ type MessageService struct {
 	// conversation_id (one in-flight generation per conversation in
 	// Phase 1; the second concurrent send would race the first).
 	activeStreams sync.Map // map[uuid.UUID]*streamRegistration
+
+	// Phase 5 — stream resume. Mirrors every in-flight generation's
+	// events (keyed by assistant message id) so a disconnected client
+	// can reattach via GET .../messages/{id}/stream. In-process only;
+	// see stream_broker.go for the single-instance caveat. Nil in unit
+	// tests that construct MessageService directly — teeStream and
+	// ResumeAttach are nil-safe.
+	broker *StreamBroker
 }
 
 // FileLinker is the slice of FileService the message flow needs.
@@ -268,7 +282,18 @@ func NewMessageService(
 		models:                 models,
 		maxContext:             maxContext,
 		imageGenerationTimeout: 180 * time.Second,
+		broker:                 NewStreamBroker(),
 	}
+}
+
+// teeStream mirrors the pump channel into the resume broker keyed by
+// the assistant message id. Nil broker (direct-constructed tests) ⇒
+// pass-through unchanged.
+func (s *MessageService) teeStream(msgID uuid.UUID, ch chan StreamUpdate) <-chan StreamUpdate {
+	if s.broker == nil {
+		return ch
+	}
+	return s.broker.Tee(msgID, ch)
 }
 
 func (s *MessageService) SetImageGenerationTimeout(timeout time.Duration) {
@@ -428,6 +453,34 @@ func (s *MessageService) SetExcelLookup(e ExcelLookup) {
 	s.excelLookup = e
 }
 
+// CanvasLookup returns the latest version of every canvas artifact in a
+// conversation (Phase 8 Task 3). Satisfied by
+// *repository.CanvasArtifactRepo — the repo, not the service, because
+// ownership of the conversation is already established by the message
+// flow before the system prompt is built.
+type CanvasLookup interface {
+	ListLatest(ctx context.Context, tenantID, convID uuid.UUID) ([]model.CanvasArtifact, error)
+}
+
+// SetCanvasLookup wires the canvas system-prompt block. Optional —
+// without it the block never renders and the model keeps the C1–C3
+// behaviour of emitting a fresh code block per revision.
+func (s *MessageService) SetCanvasLookup(c CanvasLookup) {
+	s.canvasLookup = c
+}
+
+// ProjectReader supplies the project context (instructions + KB) a
+// conversation inherits (Phase 4). Satisfied by *repository.ProjectRepo.
+type ProjectReader interface {
+	GetForConversation(ctx context.Context, tenantID, convID uuid.UUID) (*model.Project, error)
+}
+
+// SetProjectReader wires the Phase-4 project-context lookup. Optional —
+// nil keeps every conversation on the pre-Phase-4 prompt path.
+func (s *MessageService) SetProjectReader(r ProjectReader) {
+	s.projectReader = r
+}
+
 // SetRAGReader wires the knowledge-base retrieval service. Same
 // lazy-wire pattern — kept out of the constructor so the service
 // boots fine when RAG isn't configured.
@@ -500,6 +553,15 @@ func (s *MessageService) SetWebSearch(searcher webSearcher, saver searchSourcesS
 	}
 }
 
+// SetWebFetch wires the Phase-3 web_fetch tool (SSRF-guarded page
+// reader). Shares the citation saver with web_search so fetched pages
+// render as the same source chips.
+func (s *MessageService) SetWebFetch(fetcher webPageFetcher, saver searchSourcesSaver) {
+	if s.toolExec != nil {
+		s.toolExec.SetWebFetch(fetcher, saver)
+	}
+}
+
 // SetCodeInterpreter wires the Phase-13-B run_python tool onto the
 // ToolExecutor: the sandbox-backed interpreter, the ownership-checked file
 // resolver, and the artifact saver. Optional — when unset, run_python is
@@ -508,6 +570,15 @@ func (s *MessageService) SetWebSearch(searcher webSearcher, saver searchSourcesS
 func (s *MessageService) SetCodeInterpreter(ci *CodeInterpreter, files codeFileResolver, saver generatedFileSaver) {
 	if s.toolExec != nil {
 		s.toolExec.SetCodeInterpreter(ci, files, saver)
+	}
+}
+
+// SetCanvasArtifactTool exposes update_canvas_artifact to the model
+// (Phase 8 Task 3). Optional — without it the tool is hidden and canvas
+// artifacts stay user-edited only, exactly as in C3.
+func (s *MessageService) SetCanvasArtifactTool(c canvasArtifactUpdater) {
+	if s.toolExec != nil {
+		s.toolExec.SetCanvasArtifacts(c)
 	}
 }
 
@@ -773,7 +844,7 @@ type StreamHandle struct {
 	AssistantID    uuid.UUID // pre-allocated; sent on message_start
 	ConversationID uuid.UUID
 
-	Events chan StreamUpdate
+	Events <-chan StreamUpdate
 	finish func(content string, reasoning string, finishReason string, usage *GatewayChatUsage)
 	cancel func()
 }
@@ -826,6 +897,13 @@ type StreamUpdate struct {
 	// (the answer is streaming) or message_sources / message_complete.
 	SearchStatus string
 
+	// Phase 8 Task 2 — run_python progress. Emitted twice per call:
+	// once with Status="running" the moment the sandbox job starts (so
+	// the user sees the code and a spinner instead of a silent 60s
+	// pause), once with the terminal status + stdout/stderr. Nil on
+	// every other event.
+	CodeExecution *CodeExecutionUpdate
+
 	// B1 — a provider error frame forwarded from the Gateway. The
 	// handler emits it as an ``error`` SSE event (distinct styling on
 	// the frontend) instead of letting the stream end blank.
@@ -833,6 +911,34 @@ type StreamUpdate struct {
 	// B2 — a fallback notice forwarded from the Gateway. The handler
 	// emits it as a ``fallback_info`` SSE event.
 	FallbackInfo map[string]any
+}
+
+// CodeExecutionUpdate is one run_python invocation as the UI sees it
+// (Phase 8 Task 2). It carries the SOURCE the model wrote plus the
+// captured output, so the client can render a ChatGPT-style
+// code+output card instead of only the produced files.
+//
+// Field notes:
+//   - ID is the gateway tool_call id. The client keys on it, so the
+//     "running" frame and the terminal frame collapse into ONE card.
+//   - Stdout/Stderr are TRUNCATED for display (truncateForDisplay);
+//     the model still receives the full text in the tool result.
+//   - Nothing here is persisted — see the SSE handler comment. A
+//     reload after the turn completes keeps the produced files but
+//     drops the card.
+type CodeExecutionUpdate struct {
+	ID         string   `json:"id"`
+	Status     string   `json:"status"` // "running" | "completed" | "error"
+	Code       string   `json:"code"`
+	Stdout     string   `json:"stdout,omitempty"`
+	Stderr     string   `json:"stderr,omitempty"`
+	ExitCode   int      `json:"exit_code"`
+	TimedOut   bool     `json:"timed_out,omitempty"`
+	DurationMS int64    `json:"duration_ms,omitempty"`
+	Artifacts  []string `json:"artifacts,omitempty"`
+	// Truncated reports that Stdout/Stderr were clipped for display so
+	// the card can say so instead of quietly showing a partial result.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // Cancel terminates the upstream gateway connection. Used by the
@@ -1040,7 +1146,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}, nil
@@ -1293,7 +1399,7 @@ func (s *MessageService) openAssistantStream(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}, nil
@@ -1546,7 +1652,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}, nil
@@ -1633,8 +1739,18 @@ func (s *MessageService) fileContext(ctx context.Context, tenantID, convID uuid.
 // isn't configured, or retrieval came back empty. Errors are
 // swallowed for the same reason file_context does — never block the
 // reply because retrieval stuttered.
-func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv *model.Conversation, query string) string {
-	if s.ragSvc == nil || conv == nil || conv.KnowledgeBaseID == nil {
+// fallbackKB (Phase 4) is the project-inherited KB, consulted only when
+// the conversation has no explicit binding of its own — an explicit
+// per-conversation KB always wins over the inherited one.
+func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv *model.Conversation, query string, fallbackKB *uuid.UUID) string {
+	if s.ragSvc == nil || conv == nil {
+		return ""
+	}
+	kb := conv.KnowledgeBaseID
+	if kb == nil {
+		kb = fallbackKB
+	}
+	if kb == nil {
 		return ""
 	}
 	q := strings.TrimSpace(query)
@@ -1643,7 +1759,7 @@ func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv 
 	}
 	// FIX 2 — forward the end-user so the query-embedding egress (through
 	// the gateway) is attributed/audited to them.
-	return s.ragSvc.BuildContext(ctx, conv.TenantID, userID, *conv.KnowledgeBaseID, q)
+	return s.ragSvc.BuildContext(ctx, conv.TenantID, userID, *kb, q)
 }
 
 // buildSystemPrefix concatenates the user's custom instructions, the
@@ -1696,14 +1812,28 @@ func (s *MessageService) buildSystemPrefixWithSources(
 		CurrentTime: time.Now(),
 		ActiveTools: s.activeToolNames(conv),
 	}
+	// Phase 4 — project context. Loaded once per compile when the
+	// conversation belongs to a project; feeds BOTH the Layer-10
+	// instructions block and the RAG KB fallback below. A load failure
+	// degrades to no-project behavior — never blocks the reply. When
+	// conv.ProjectID is nil this branch is skipped entirely, so the
+	// non-project prompt stays byte-identical to pre-Phase-4.
+	var projectKB *uuid.UUID
+	if conv != nil && conv.ProjectID != nil && s.projectReader != nil {
+		if p, err := s.projectReader.GetForConversation(ctx, tenantID, conv.ID); err == nil && p != nil {
+			in.ProjectInstructions = p.Instructions
+			projectKB = p.KnowledgeBaseID
+		}
+	}
 	// Layer 13 inputs — built with the file/KB repos and gated exactly
 	// as before (each returns "" when its precondition isn't met).
 	if conv != nil {
-		in.RAGContext = s.ragContext(ctx, userID, conv, ragQuery)
+		in.RAGContext = s.ragContext(ctx, userID, conv, ragQuery, projectKB)
 		in.FileContext = s.fileContext(ctx, tenantID, conv.ID)
 		in.ExcelContext = s.excelContext(ctx, tenantID, conv.ID)
 		in.DocContext = s.docContext(ctx, tenantID, conv.ID)
 		in.PptxContext = s.pptxContext(ctx, tenantID, conv.ID)
+		in.CanvasContext = s.canvasContext(ctx, tenantID, conv.ID)
 	}
 	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc)
 	return pc.Build(ctx, in)
@@ -1744,7 +1874,11 @@ func (s *MessageService) excelContext(
 	}
 	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
 	if err != nil || len(files) == 0 {
-		return ""
+		// Phase 8 Task 1: no attachments no longer suppresses the
+		// contract. ExcelService.ExecutePlan now runs create-from-scratch
+		// when source_file_id is omitted, so "สร้างตาราง Excel สรุปยอดขาย"
+		// in a brand-new chat yields a plan card that actually executes.
+		return excelCapabilitiesPromptHeaderless
 	}
 	// Newest-first — pick the first xlsx with a cached inspection.
 	var latest *model.ConversationFile
@@ -1760,7 +1894,9 @@ func (s *MessageService) excelContext(
 		break
 	}
 	if latest == nil {
-		return ""
+		// Files exist but none is an inspected workbook — same as the
+		// zero-file case from the model's point of view.
+		return excelCapabilitiesPromptHeaderless
 	}
 	return renderExcelSystemBlock(latest)
 }
@@ -1850,6 +1986,19 @@ Same format as EDIT but with "operation": "create_workbook".
 - freeze_panes { sheet_name, cell }
 `
 
+// excelCapabilitiesPromptHeaderless is what we ship when the
+// conversation has no inspected workbook: there is no structure block
+// and no file_id, so the model is told explicitly to OMIT
+// source_file_id and use "create_workbook". Mirrors the doc / pptx
+// headerless prompts (Phase 1) — Phase 8 Task 1 unblocked it by adding
+// create-mode to ExcelService.ExecutePlan.
+const excelCapabilitiesPromptHeaderless = "## Excel File Context\n\n" +
+	"No workbook is currently uploaded, but if the user asks you to create a spreadsheet " +
+	"you should still emit an :::excel-plan block: use \"operation\": \"create_workbook\", " +
+	"OMIT source_file_id entirely, and build every sheet with create_sheet / write_table / " +
+	"write_cells actions. The executor runs in create mode and returns a real .xlsx file.\n\n" +
+	excelCapabilitiesPrompt
+
 // docContext renders the Phase-4 Session 2 doc system block when the
 // conversation has at least one docx or pdf file with a cached
 // inspection. Same shape as excelContext: the model gets the
@@ -1863,7 +2012,12 @@ func (s *MessageService) docContext(
 	}
 	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
 	if err != nil || len(files) == 0 {
-		return ""
+		// Zero attachments (or a failed lookup) must NOT suppress the
+		// contract: "create a PDF report about X" in a brand-new
+		// conversation should still yield a :::doc-plan card. The
+		// generator runs in create mode when source_file_id is omitted,
+		// so the headerless prompt is safe without any uploaded file.
+		return docCapabilitiesPromptHeaderless
 	}
 	// docx + pdf only — pptx is owned by pptxContext below so the
 	// two capabilities prompts stay orthogonal (the AI gets a
@@ -1978,7 +2132,10 @@ func (s *MessageService) pptxContext(
 	}
 	files, err := s.excelLookup.ListByConversation(ctx, tenantID, convID)
 	if err != nil || len(files) == 0 {
-		return ""
+		// Same rationale as docContext: a brand-new conversation with
+		// no files must still get the :::pptx-plan contract so
+		// create-from-scratch deck requests produce a plan card.
+		return pptxCapabilitiesPromptHeaderless
 	}
 	var latest *model.ConversationFile
 	for i := len(files) - 1; i >= 0; i-- {
@@ -2077,6 +2234,93 @@ When the user asks you to create, edit, or summarize a PowerPoint presentation /
 `
 
 const pptxCapabilitiesPromptHeaderless = "## Presentation Generation Capabilities\n\nNo presentation is currently uploaded, but if the user asks you to create a slide deck you should still emit a :::pptx-plan block (omit source_file_id; the generator runs in create mode).\n\n" + pptxCapabilitiesPrompt
+
+// ---------------------------------------------------------------------------
+// Canvas artifacts (Phase 8 Task 3)
+// ---------------------------------------------------------------------------
+
+const (
+	// maxCanvasPromptArtifacts bounds how many artifacts are listed. A
+	// long conversation can accumulate many; the model only ever needs
+	// the recent ones to answer "change the button colour".
+	maxCanvasPromptArtifacts = 5
+	// maxCanvasPromptSource bounds the SOURCE embedded for the newest
+	// artifact. Beyond this the model is told the source is too large to
+	// inline — better than silently truncating it into a half file the
+	// model would then "complete" with invented markup.
+	maxCanvasPromptSource = 12000
+)
+
+// canvasContext renders the "## Canvas Artifacts" block: the artifacts
+// this conversation has, and — for the most recent one — its current
+// source, so the model can revise it with update_canvas_artifact rather
+// than emitting a brand-new code block the user has to re-open.
+//
+// Only artifacts that EXIST server-side appear. A code block the user
+// never opened in the canvas has no lineage yet and is invisible here;
+// opening it adopts version 1 (client side), which is what makes it
+// updatable. That keeps the model from trying to "update" blocks that
+// were never adopted.
+func (s *MessageService) canvasContext(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) string {
+	if s.canvasLookup == nil {
+		return ""
+	}
+	artifacts, err := s.canvasLookup.ListLatest(ctx, tenantID, convID)
+	if err != nil || len(artifacts) == 0 {
+		// No artifacts ⇒ no block at all. Advertising the tool with an
+		// empty list would only invite invented keys.
+		return ""
+	}
+	return renderCanvasSystemBlock(artifacts)
+}
+
+// renderCanvasSystemBlock builds the literal injected text. Free
+// function so the snapshot is unit-testable without a MessageService.
+// Input is newest-first (ListLatest orders by created_at DESC).
+func renderCanvasSystemBlock(artifacts []model.CanvasArtifact) string {
+	if len(artifacts) > maxCanvasPromptArtifacts {
+		artifacts = artifacts[:maxCanvasPromptArtifacts]
+	}
+	var b strings.Builder
+	b.WriteString("## Canvas Artifacts\n\n")
+	b.WriteString("These artifacts are open to this conversation's canvas panel. " +
+		"When the user asks to CHANGE one of them, call update_canvas_artifact with its " +
+		"artifact_key and the complete new source — do NOT write a new code block, which " +
+		"would create a second, unrelated artifact.\n\n")
+	for i := range artifacts {
+		a := &artifacts[i]
+		title := ""
+		if a.Title != nil {
+			title = *a.Title
+		}
+		fmt.Fprintf(&b, "- artifact_key: %s | type: %s | version: %d",
+			a.ArtifactKey, a.Type, a.Version)
+		if title != "" {
+			fmt.Fprintf(&b, " | title: %s", title)
+		}
+		b.WriteString("\n")
+	}
+	// Current source of the NEWEST artifact only — the one the user is
+	// almost certainly looking at. Same "most recent only" budget rule
+	// the Excel/Doc blocks use.
+	newest := &artifacts[0]
+	b.WriteString("\nCurrent source of ")
+	b.WriteString(newest.ArtifactKey)
+	b.WriteString(":\n\n")
+	if len(newest.Content) > maxCanvasPromptSource {
+		b.WriteString("(too large to include here — ask the user to paste the part they " +
+			"want changed, or to describe the change precisely; do not guess the full source)\n")
+		return b.String()
+	}
+	b.WriteString("```")
+	b.WriteString(newest.Type)
+	b.WriteString("\n")
+	b.WriteString(newest.Content)
+	b.WriteString("\n```\n")
+	return b.String()
+}
 
 // keep “time“ import referenced even when no other code in this
 // file uses it directly (the GatewayChatUsage struct references
@@ -3112,7 +3356,7 @@ func (s *MessageService) directImageStream(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}
@@ -3427,7 +3671,7 @@ func (s *MessageService) rejectImageStream(
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         ch,
+		Events:         s.teeStream(asstMsg.ID, ch),
 		finish:         finish,
 		cancel:         cancel,
 	}
@@ -3495,6 +3739,15 @@ type streamPumpInput struct {
 // feeds the events channel and closes it when no more streams.
 func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	defer close(in.out)
+
+	// Phase 8 Task 2 — let a long-running tool report progress on the
+	// SAME channel the pump owns (run_python's code+output card). Wired
+	// here rather than at the three SendStream call sites so the emitter
+	// can never be bound to a different channel than `out`, and so it is
+	// nil on the non-streaming path (where no SSE consumer exists).
+	// Safe to send: `out` is only closed by the deferred close above,
+	// which runs after every tool call has returned.
+	in.toolExecCtx.Emit = func(u StreamUpdate) { in.out <- u }
 
 	current := in.initialStream
 	req := in.initialReq
@@ -3600,6 +3853,10 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			case "generate_video":
 				in.out <- StreamUpdate{VideoStatus: "started"}
 			case "web_search":
+				in.out <- StreamUpdate{SearchStatus: "searching"}
+			case "web_fetch":
+				// Reuses the web-search indicator — same "reading the
+				// web" affordance, no new SSE event type needed.
 				in.out <- StreamUpdate{SearchStatus: "searching"}
 			}
 		}

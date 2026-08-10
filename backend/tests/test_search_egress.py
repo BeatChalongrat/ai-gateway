@@ -85,6 +85,7 @@ async def _seed(async_db, *, search_pii_egress="allow"):
     async_db.add(PortalUserORM(
         id=uid, email=f"{uid}@e.com", password_hash="x",
         credit_balance=10_000, credit_used=0,
+        tenant_id=tid,  # NOT NULL since SSO Phase 1 A1
     ))
     await async_db.commit()
     return tid, uid

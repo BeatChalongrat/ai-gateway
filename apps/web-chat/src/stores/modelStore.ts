@@ -95,13 +95,25 @@ function readCachedModels(): ModelEntry[] {
   return [];
 }
 
+// readAutoMode — whether the picker should be in Auto mode. Two ways in:
+// the user chose Auto (AUTO_KEY === "1"), or this browser has NEVER made
+// a choice at all (neither flag nor an explicit model stored) — Auto is
+// the out-of-the-box default (UX polish #3). A user who explicitly
+// picked a model has AUTO_KEY === "0" + SELECTED_KEY set, so their
+// choice is never overridden.
+function readAutoMode(): boolean {
+  const auto = readLocal(AUTO_KEY);
+  if (auto !== null) return auto === "1";
+  return readLocal(SELECTED_KEY) === null;
+}
+
 // readInitialSelection — reads the persisted selected id at module
 // init time. Used so the store boots with the user's last pick (or
 // AUTO_MODEL_ID if they were last in auto mode) before the catalog
 // fetch completes. Without this the model pill flashes "Select
 // model" on every reload.
 function readInitialSelection(): string | null {
-  if (readLocal(AUTO_KEY) === "1") return AUTO_MODEL_ID;
+  if (readAutoMode()) return AUTO_MODEL_ID;
   return readLocal(SELECTED_KEY);
 }
 
@@ -111,7 +123,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
   recentModelIds: [],
   loaded: false,
   loading: false,
-  autoMode: readLocal(AUTO_KEY) === "1",
+  autoMode: readAutoMode(),
 
   async loadModels() {
     if (get().loading) return;
@@ -120,7 +132,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
       const res = await api.models();
       const allowed = res.models.filter((m) => m.allowed);
       const stored = readLocal(SELECTED_KEY);
-      const auto = readLocal(AUTO_KEY) === "1";
+      const auto = readAutoMode();
       const recents = readRecents();
       const pick = auto
         ? AUTO_MODEL_ID
@@ -146,7 +158,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
       }
       const cached = readCachedModels();
       const stored = readLocal(SELECTED_KEY);
-      const auto = readLocal(AUTO_KEY) === "1";
+      const auto = readAutoMode();
       const pick = auto
         ? AUTO_MODEL_ID
         : stored && cached.some((m) => m.id === stored)

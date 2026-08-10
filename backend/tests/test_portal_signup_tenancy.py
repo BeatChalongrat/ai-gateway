@@ -74,8 +74,12 @@ class TestSignupAutoTenant:
         assert payload["tenant_id"] == result["user"]["id"] and False \
             or payload["tenant_id"] is not None
         assert payload["tenant_role"] == "owner"
-        # token_version bumped by create_tenant_with_owner (1 → 2).
-        assert payload["token_version"] >= 2
+        # SSO Phase 1 A1: signup resolves the tenant BEFORE the user
+        # INSERT (tenant_id NOT NULL), so there is no post-create
+        # token_version bump anymore. The invariant that matters is
+        # that the minted JWT matches the DB row's current version.
+        user = db.get(PortalUserORM, result["user"]["id"])
+        assert payload["token_version"] == user.token_version
 
 
 class TestSignupExplicitTenantName:

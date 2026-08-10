@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Clapperboard, ImagePlus } from "lucide-react";
+import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import type { ExtractionStatus } from "@/lib/fileExtraction";
@@ -12,7 +12,13 @@ import {
   MAX_FILES_PER_MESSAGE,
   validateFile,
 } from "@/lib/fileUtil";
-import { useT } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
+import { shouldSendOnEnter } from "@/lib/keyboard";
+import {
+  filterSlashCommands,
+  slashQuery,
+  type SlashCommand,
+} from "@/lib/slashCommands";
 import { toast } from "@/components/ui/Toast";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useWhisperInput } from "@/hooks/useWhisperInput";
@@ -24,6 +30,8 @@ import { FilePreviewCard } from "./FilePreviewCard";
 import { KBSelector } from "./KBSelector";
 import { ModelSelector } from "./ModelSelector";
 import { RecordingBar } from "./RecordingBar";
+import { ShortcutsDialog } from "./ShortcutsDialog";
+import { SlashMenu } from "./SlashMenu";
 import { AudioGenForm } from "../media/AudioGenForm";
 import { MediaModeIndicator } from "../media/MediaModeIndicator";
 import { VideoGenForm } from "../media/VideoGenForm";
@@ -92,6 +100,19 @@ export function ChatInput({
 }: Props) {
   const t = useT();
   const [text, setText] = useState("");
+  // Phase 10 — slash quick actions. The menu is derived from `text`
+  // (single source of truth): no separate "is open" flag to fall out of
+  // sync with what the user actually typed.
+  const slashToken = slashQuery(text);
+  const slashCommands = slashToken === null ? [] : filterSlashCommands(slashToken);
+  const slashOpen = slashToken !== null;
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Reset the highlight whenever the candidate list changes, so Enter
+  // never runs the action that happened to sit at a stale index.
+  useEffect(() => {
+    setSlashIndex(0);
+  }, [slashToken]);
   // Phase C — 🎨 image mode. Gated on the selected model's capability:
   // visible for image_generation_via_tools models + Auto, hidden otherwise.
   const [imageMode, setImageMode] = useState(false);
@@ -125,6 +146,18 @@ export function ChatInput({
   // the chat composer (modelKind defaults to "chat" when the model is the
   // Auto sentinel, unknown, or a payload without model_kind).
   const modelKind = activeModel?.model_kind ?? "chat";
+  // Phase 11 — Thinking Mode toggle. The store action + server columns have
+  // existed since T4; nothing ever called them, so a reasoning-capable model
+  // could never actually be told to think. Shown only when the selected model
+  // advertises the capability (Auto is excluded: the router may land on a
+  // non-reasoning model, and a toggle that silently does nothing is worse
+  // than no toggle).
+  const canReason = Boolean(activeModel?.reasoning?.supported);
+  const conversation = useChatStore((s) =>
+    conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined,
+  );
+  const reasoningOn = Boolean(conversation?.reasoning_enabled);
+  const setConversationReasoning = useChatStore((s) => s.setConversationReasoning);
   const [isMobile, setIsMobile] = useState(false);
   // Distance (px) the on-screen keyboard is occluding the bottom of
   // the layout viewport. Updated from visualViewport.resize so the
@@ -369,8 +402,77 @@ export function ChatInput({
     }
   }
 
+  // Every slash action is a shortcut into a flow that already exists —
+  // see lib/slashCommands.ts. Running one always clears the token so the
+  // composer is left empty and ready for the real message.
+  function runSlashCommand(cmd: SlashCommand) {
+    setText("");
+    switch (cmd.id) {
+      case "image":
+        // Mirrors the toolbar button: the mode only exists when the
+        // selected model can generate images, so this is a no-op
+        // otherwise rather than a mode the send path would drop.
+        if (canGenerateImages) setImageMode(true);
+        break;
+      case "video":
+        if (canGenerateVideos) setVideoMode(true);
+        break;
+      case "new":
+        // Same handler the sidebar button and Cmd+Shift+N use.
+        useChatStore.getState().setActive(null);
+        window.location.assign("/chat");
+        break;
+      case "shortcuts":
+        setShortcutsOpen(true);
+        break;
+    }
+    taRef.current?.focus();
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Slash menu owns the arrow keys + Enter while it is open, so the
+    // user can drive it without leaving the keyboard. Esc closes it by
+    // clearing the token (the menu is derived from the text).
+    if (slashOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => (slashCommands.length ? (i + 1) % slashCommands.length : 0));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) =>
+          slashCommands.length ? (i - 1 + slashCommands.length) % slashCommands.length : 0,
+        );
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setText("");
+        return;
+      }
+      if ((e.key === "Enter" || e.key === "Tab") && slashCommands.length > 0) {
+        const native = e.nativeEvent as KeyboardEvent;
+        // Still respect the IME guard (Phase 7): during composition
+        // Enter commits a candidate and must not run a command.
+        if (e.key === "Enter" && (native.isComposing || native.keyCode === 229)) return;
+        e.preventDefault();
+        runSlashCommand(slashCommands[Math.min(slashIndex, slashCommands.length - 1)]);
+        return;
+      }
+    }
+
+    // Phase 7 — the IME composition guard lives in shouldSendOnEnter:
+    // during composition Enter commits the candidate and must NOT send.
+    const native = e.nativeEvent as KeyboardEvent;
+    if (
+      shouldSendOnEnter({
+        key: e.key,
+        shiftKey: e.shiftKey,
+        isComposing: native.isComposing,
+        keyCode: native.keyCode,
+      })
+    ) {
       e.preventDefault();
       submit();
     }
@@ -406,7 +508,7 @@ export function ChatInput({
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("ChatInput.ensureConvId: onRequestConversation threw", err);
-      toast("Couldn't prepare the conversation. Please try again.");
+      toast(tOutside("chat.toast.prepareFailed"));
       return null;
     }
   }
@@ -438,7 +540,7 @@ export function ChatInput({
       );
     } catch (err) {
       const msg =
-        err instanceof ApiError ? err.message : "Upload failed. Try again.";
+        err instanceof ApiError ? err.message : tOutside("file.err.uploadFailed");
       markFileError(chipBucket, pendingId, msg);
       toast(msg);
     }
@@ -452,14 +554,14 @@ export function ChatInput({
     const existing = pendingFiles.filter((p) => p.status !== "error").length;
     const slots = Math.max(0, MAX_FILES_PER_MESSAGE - existing);
     if (slots === 0) {
-      toast(`At most ${MAX_FILES_PER_MESSAGE} files per message.`);
+      toast(tOutside("input.toast.maxFiles", { max: String(MAX_FILES_PER_MESSAGE) }));
       return;
     }
 
     const accepted: File[] = [];
     for (const f of filesRaw) {
       if (accepted.length === slots) {
-        toast(`Only ${slots} more file(s) can attach to this message.`);
+        toast(tOutside("input.toast.slotsLeft", { n: String(slots) }));
         break;
       }
       const v = validateFile(f);
@@ -633,13 +735,22 @@ export function ChatInput({
             and only competes with the model pill for vertical
             alignment. */}
         <div
-          className="flex flex-col border border-border bg-bg-surface transition-colors focus-within:border-border-strong"
+          className="relative flex flex-col border border-border bg-bg-surface transition-colors focus-within:border-border-strong"
           style={{
             borderRadius: 24,
             boxShadow: "0 2px 12px rgba(0, 0, 0, 0.18)",
             display: isRecording || whisper.isTranscribing ? "none" : undefined,
           }}
         >
+          {/* Phase 10 — slash quick actions, floating above the pill. */}
+          {slashOpen ? (
+            <SlashMenu
+              commands={slashCommands}
+              activeIndex={slashIndex}
+              onPick={runSlashCommand}
+            />
+          ) : null}
+
           <input
             ref={fileInputRef}
             type="file"
@@ -768,6 +879,27 @@ export function ChatInput({
                   <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
                 </button>
               ) : null}
+              {canReason && conversationId && !streaming ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void setConversationReasoning(conversationId, {
+                      reasoning_enabled: !reasoningOn,
+                    })
+                  }
+                  aria-label={t("input.reasoning")}
+                  title={t(reasoningOn ? "input.reasoning.on" : "input.reasoning.off")}
+                  aria-pressed={reasoningOn}
+                  disabled={disabled}
+                  className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    reasoningOn
+                      ? "bg-blue-500/15 text-blue-400"
+                      : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
+                  }`}
+                >
+                  <BrainCircuit className="h-[18px] w-[18px]" aria-hidden />
+                </button>
+              ) : null}
               {canGenerateVideos && !streaming ? (
                 <button
                   type="button"
@@ -877,6 +1009,14 @@ export function ChatInput({
           {t("input.footer")}
         </p>
       </div>
+
+      {/* Phase 10 — the cheatsheet the /shortcuts action opens. The
+          global ? / Cmd+/ binding opens the copy mounted by the chat
+          layout; this one keeps the composer self-contained. */}
+      <ShortcutsDialog
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
     </div>
   );
 }

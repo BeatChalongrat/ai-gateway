@@ -386,7 +386,7 @@ export const th: Record<keyof typeof en, string> = {
   "infra.providers.note.replicate": "สร้างวิดีโอ (Kling, Wan)",
   "infra.providers.note.elevenlabs": "เสียงพูดจากข้อความ (TTS)",
   "infra.providers.note.sranai": "โฮสต์เอง · รองรับ OpenAI-compatible",
-  "infra.providers.endpointLabel": "Endpoint URL *",
+  "infra.providers.endpointLabel": "URL ปลายทาง (Endpoint) *",
   "infra.providers.endpointHint":
     "base URL แบบ OpenAI-compatible ของเครื่อง — ถ้าเครื่องอยู่บนโฮสต์เดียวกับ Docker ให้ใช้ http://host.docker.internal:PORT/v1",
   "infra.providers.endpointMissing":

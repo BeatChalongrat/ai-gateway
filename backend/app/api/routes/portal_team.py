@@ -263,9 +263,11 @@ def redeem_invite(
 ):
     """Redeem an invite code as an already-authenticated user.
 
-    Intended for users whose current tenant is None (e.g., they were
-    removed from a previous tenant) — joining a second tenant while
-    still in one is rejected by the service layer.
+    Intended for users sitting in a solo tenant (e.g. the displaced
+    tenant remove_member parks them in, or their own signup tenant) —
+    the service layer folds a sole-member tenant into the invite's
+    team, but rejects the move while the user's current tenant still
+    has other members.
     """
     invite = tenant_service.redeem_invite(
         session, code=body.code, redeeming_user_id=user.id

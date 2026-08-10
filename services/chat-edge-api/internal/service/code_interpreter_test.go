@@ -83,7 +83,7 @@ func TestExecRunPython_DeniesForeignFileBeforeSandbox(t *testing.T) {
 	e := newCodeExecutor(runner, resolver, saver)
 
 	foreign := uuid.New().String()
-	out := e.execRunPython(context.Background(),
+	out := e.execRunPython(context.Background(), "call-1",
 		`{"code":"print(1)","files":["`+foreign+`"]}`, baseExecCtx())
 
 	if runner.calls != 0 {
@@ -114,7 +114,7 @@ func TestExecRunPython_RunsAndSavesArtifacts(t *testing.T) {
 	e := newCodeExecutor(runner, &fakeCodeResolver{}, saver)
 	ec := baseExecCtx()
 
-	out := e.execRunPython(context.Background(),
+	out := e.execRunPython(context.Background(), "call-1",
 		`{"code":"import pandas; print(pandas.__version__)"}`, ec)
 
 	if runner.calls != 1 {
@@ -152,7 +152,7 @@ func TestExecRunPython_EmptyCodeNoRun(t *testing.T) {
 	runner := &fakeSandboxRunner{res: &sandbox.Result{}}
 	e := newCodeExecutor(runner, &fakeCodeResolver{}, &fakeGeneratedFileSaver{})
 
-	out := e.execRunPython(context.Background(), `{"code":"   "}`, baseExecCtx())
+	out := e.execRunPython(context.Background(), "call-1", `{"code":"   "}`, baseExecCtx())
 
 	if runner.calls != 0 {
 		t.Fatalf("sandbox ran on empty code")
@@ -177,7 +177,7 @@ func TestExecRunPython_NonStreamSkipsArtifactSave(t *testing.T) {
 	ec := baseExecCtx()
 	ec.MessageID = uuid.Nil // non-stream
 
-	out := e.execRunPython(context.Background(), `{"code":"print('ok')"}`, ec)
+	out := e.execRunPython(context.Background(), "call-1", `{"code":"print('ok')"}`, ec)
 
 	if runner.calls != 1 {
 		t.Fatalf("expected the run to execute, calls=%d", runner.calls)

@@ -53,6 +53,42 @@ public static class OAuthDeepLink
         return true;
     }
 
+    private static readonly Regex LoginTicketRegex =
+        new("^[a-f0-9]{32,128}$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// SSO Phase 2: parse the LOGIN variant of the callback —
+    /// ``sran://oauth/callback?ticket=&lt;hex&gt;``. Same strict shape rules as
+    /// <see cref="TryParse"/>; the two variants are disjoint (a login link
+    /// has ``ticket`` and no ``connector``), so both dispatchers can be
+    /// offered every deep link and exactly one will claim it. The ticket
+    /// is an opaque one-shot handle — the tokens never ride the URI.
+    /// </summary>
+    public static bool TryParseLoginTicket(string? uri, out string? ticket)
+    {
+        ticket = null;
+        if (string.IsNullOrWhiteSpace(uri) || uri.Length > MaxUriLength)
+            return false;
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
+            return false;
+        if (!parsed.Scheme.Equals("sran", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!parsed.Authority.Equals("oauth", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!parsed.AbsolutePath.Equals("/callback", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var query = ParseQuery(parsed.Query);
+        if (query.ContainsKey("connector"))
+            return false; // connector variant — not ours
+        if (!query.TryGetValue("ticket", out var raw)
+            || !LoginTicketRegex.IsMatch(raw))
+            return false;
+
+        ticket = raw;
+        return true;
+    }
+
     private static Dictionary<string, string> ParseQuery(string query)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);

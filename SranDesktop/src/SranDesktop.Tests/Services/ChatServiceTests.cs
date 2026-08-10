@@ -109,6 +109,31 @@ public class ChatServiceTests
     }
 
     [Fact]
+    public async Task ResumeMessageAsync_Maps_The_Same_Event_Shape_As_Send()
+    {
+        // Phase 5 Task 3: the reattach stream (prefix as one big delta, then
+        // live deltas) maps through the identical event vocabulary.
+        var api = new Mock<IChatEdgeApiClient>();
+        api.Setup(a => a.ResumeMessageStreamAsync("c1", "m1", It.IsAny<CancellationToken>()))
+            .Returns(Frames(
+                new SseFrame("message_start", """{"message_id":"m1","conversation_id":"c1"}"""),
+                new SseFrame("content_delta", """{"delta":"the whole already-generated prefix"}"""),
+                new SseFrame("content_delta", """{"delta":" and a live tail"}"""),
+                new SseFrame("message_complete", """{"message_id":"m1","token_usage":{"input":7,"output":3}}""")));
+
+        var service = new ChatService(api.Object, NullLogger<ChatService>.Instance);
+        var events = new List<ChatStreamEvent>();
+        await foreach (var evt in service.ResumeMessageAsync("c1", "m1"))
+            events.Add(evt);
+
+        events.Should().Equal(
+            new StreamStartedEvent("m1"),
+            new ContentDeltaEvent("the whole already-generated prefix"),
+            new ContentDeltaEvent(" and a live tail"),
+            new StreamCompletedEvent(new TokenUsage(7, 3, 10)));
+    }
+
+    [Fact]
     public async Task Maps_Image_And_Video_Status_Events()
     {
         var events = await RunAsync(

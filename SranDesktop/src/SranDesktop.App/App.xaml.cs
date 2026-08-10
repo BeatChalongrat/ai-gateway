@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SranDesktop.App.Hosting;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Presentation.Localization;
 using SranDesktop.Presentation.ViewModels;
 using SranDesktop.Presentation.Views;
 using SranDesktop.Presentation.Views.Dialogs;
@@ -23,6 +24,7 @@ public partial class App : System.Windows.Application
     private GlobalHotkey? _hotkey;
     private MainWindow? _mainWindow;
     private ISettingsService? _settings;
+    private Services.TrayCompletionNotifier? _completionNotifier;
     private bool _shuttingDown;
     private bool _trayTipShown;
 
@@ -88,6 +90,13 @@ public partial class App : System.Windows.Application
 
         _trayIcon = CreateTrayIcon();
 
+        // OS-level completion notification: the DI singleton needs the live
+        // tray icon + window; clicking the balloon restores the window and
+        // opens the notified conversation.
+        _completionNotifier = _host.Services
+            .GetRequiredService<Services.TrayCompletionNotifier>();
+        _completionNotifier.Attach(_trayIcon, _mainWindow, OpenConversationFromNotification);
+
         _mainWindow.Closing += MainWindow_Closing;
 
         // Register the global hotkey; EnsureHandle works before the window shows.
@@ -129,13 +138,18 @@ public partial class App : System.Windows.Application
         return roots;
     }
 
-    /// <summary>Route a ``sran://`` URI to the OAuth coordinator (Phase 7).
-    /// Validation lives in OAuthDeepLink.TryParse — hostile input is logged
-    /// and dropped there; this never throws.</summary>
+    /// <summary>Route a ``sran://`` URI to the OAuth coordinators (Phase 7
+    /// connectors + SSO Phase 2 login). The two variants are disjoint —
+    /// each coordinator's parser claims only its own shape — so both are
+    /// offered every link. Validation lives in OAuthDeepLink; hostile
+    /// input is logged and dropped there; this never throws.</summary>
     private void DispatchDeepLink(string uri)
     {
         try
         {
+            _host?.Services
+                .GetService<SranDesktop.Application.Services.LoginOAuthCoordinator>()
+                ?.HandleDeepLink(uri);
             _host?.Services
                 .GetService<SranDesktop.Application.Services.ConnectorOAuthCoordinator>()
                 ?.HandleDeepLink(uri);
@@ -220,6 +234,7 @@ public partial class App : System.Windows.Application
             _logger?.LogDebug(ex, "Draft flush on exit failed");
         }
 
+        _completionNotifier?.MarkShuttingDown();
         _hotkey?.Dispose();
         _trayIcon?.Dispose();
         SingleInstance.Release();
@@ -253,11 +268,12 @@ public partial class App : System.Windows.Application
     {
         var menu = new ContextMenu();
 
-        var show = new MenuItem { Header = "Show SRAN Desktop" };
+        // Localized at menu-creation time; a locale switch relabels after restart.
+        var show = new MenuItem { Header = LocaleService.Instance.T("tray.show") };
         show.Click += (_, _) => ShowMainWindow();
         menu.Items.Add(show);
 
-        var newChat = new MenuItem { Header = "New Chat" };
+        var newChat = new MenuItem { Header = LocaleService.Instance.T("tray.newChat") };
         newChat.Click += (_, _) =>
         {
             ShowMainWindow();
@@ -271,7 +287,7 @@ public partial class App : System.Windows.Application
 
         menu.Items.Add(new Separator());
 
-        var exit = new MenuItem { Header = "Exit" };
+        var exit = new MenuItem { Header = LocaleService.Instance.T("tray.exit") };
         exit.Click += (_, _) => ExitApplication();
         menu.Items.Add(exit);
 
@@ -280,6 +296,19 @@ public partial class App : System.Windows.Application
 
     // ---------- window show / hide ----------
 
+    /// <summary>True when the window was MAXIMIZED at the moment it was
+    /// hidden to the tray. WPF re-shows a hidden maximized window in its
+    /// normal rect while WindowState still claims Maximized — this flag +
+    /// TrayWindowRestore.AfterShow resync property and visual on Show.</summary>
+    private bool _wasMaximizedBeforeHide;
+
+    private void HideMainWindow()
+    {
+        if (_mainWindow is null) return;
+        _wasMaximizedBeforeHide = _mainWindow.WindowState == WindowState.Maximized;
+        _mainWindow.Hide();
+    }
+
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         // "Minimize to tray on close" (unless the user chose Exit, or turned it off).
@@ -287,14 +316,14 @@ public partial class App : System.Windows.Application
             return;
 
         e.Cancel = true;
-        _mainWindow?.Hide();
+        HideMainWindow();
 
         if (!_trayTipShown)
         {
             _trayTipShown = true;
             _trayIcon?.ShowNotification(
                 title: "SRAN Desktop",
-                message: "Still running in the background - click the tray icon to reopen.",
+                message: LocaleService.Instance.T("tray.stillRunning"),
                 icon: NotificationIcon.Info);
         }
     }
@@ -302,9 +331,22 @@ public partial class App : System.Windows.Application
     private void ShowMainWindow()
     {
         if (_mainWindow is null) return;
+        var wasHidden = !_mainWindow.IsVisible;
         _mainWindow.Show();
-        if (_mainWindow.WindowState == WindowState.Minimized)
+
+        var plan = SranDesktop.Application.Services.TrayWindowRestore.AfterShow(
+            wasHidden,
+            _wasMaximizedBeforeHide,
+            _mainWindow.WindowState == WindowState.Minimized);
+        // Order matters: Normal first makes the (possibly stale) property
+        // truthful — that alone fixes the "maximize needs two clicks"
+        // desync — then Maximized re-applies what the user had. Both are
+        // applied AFTER Show() so WPF acts on a visible window.
+        if (plan.ForceNormalFirst)
             _mainWindow.WindowState = WindowState.Normal;
+        if (plan.ThenMaximize)
+            _mainWindow.WindowState = WindowState.Maximized;
+
         _mainWindow.Activate();
         _mainWindow.Topmost = true;
         _mainWindow.Topmost = false;
@@ -313,7 +355,7 @@ public partial class App : System.Windows.Application
     private void ToggleMainWindow()
     {
         if (_mainWindow is not null && _mainWindow.IsVisible && _mainWindow.IsActive)
-            _mainWindow.Hide();
+            HideMainWindow();
         else
             ShowMainWindow();
     }
@@ -321,9 +363,24 @@ public partial class App : System.Windows.Application
     private void ExitApplication()
     {
         _shuttingDown = true;
+        _completionNotifier?.MarkShuttingDown();
         _trayIcon?.Dispose();
         _trayIcon = null;
         Shutdown();
+    }
+
+    /// <summary>Completion-balloon click: bring the app forward and open the
+    /// conversation the finished turn belongs to. A conversation that has
+    /// since been deleted (or not yet loaded) degrades to just restoring
+    /// the window.</summary>
+    private void OpenConversationFromNotification(string conversationId)
+    {
+        ShowMainWindow();
+        if (MainWindow?.DataContext is not MainViewModel vm)
+            return;
+        var item = vm.Conversations.Conversations.FirstOrDefault(c => c.Id == conversationId);
+        if (item is not null)
+            vm.Conversations.SelectedConversation = item;
     }
 
     // ---------- global exception handling ----------

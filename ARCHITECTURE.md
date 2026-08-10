@@ -123,8 +123,15 @@ comments for the exact flags.
   not that they degrade. `make webchat-up` builds the required per-run image
   first; chat-edge fail-LOUDs (exit 1) if enabled-but-unavailable. The
   base/desktop stack keeps the opt-in overlay. See §5 for the trust boundary.
+- **User sign-in (Google SSO)** — Google-only, domain-allowlisted
+  (`ALLOWED_EMAIL_DOMAINS`), enforced server-side in
+  `oauth_service.login_or_create`; portal uses NextAuth + backend id_token
+  re-verification, desktop uses server-side PKCE with a nonce-bound one-time
+  ticket over `sran://`. Email+password is disabled by
+  `PASSWORD_LOGIN_ENABLED=false` (code retained). See README **User Sign-in**.
 - **OAuth connectors** — per-user GitHub / Slack / Google, tokens stored
   AES-256-GCM in `connector_tokens` (migration 063), brokered to mcp-gateway.
+  Separate OAuth apps from the sign-in client above (identity vs data scopes).
 - **MCP per-user workspaces** — `mcp-gateway` hosts stdio MCP servers behind a
   JWT-verified per-user proxy.
 - **Web search** — `/v1/search` → Tavily/Brave/SerpAPI/Google/Bing (raw-egress;

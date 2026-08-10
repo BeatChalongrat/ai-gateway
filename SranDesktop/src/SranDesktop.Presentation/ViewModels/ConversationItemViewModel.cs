@@ -31,10 +31,15 @@ public partial class ConversationItemViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(GroupRank))]
     private DateTimeOffset _updatedAt;
 
-    /// <summary>Folder membership (server-side chat.folders). Foldered chats render
-    /// inside their folder section instead of the time buckets.</summary>
+    /// <summary>Project membership (server-side chat.projects). Projected chats render
+    /// inside their project section instead of the time buckets.</summary>
     [ObservableProperty]
-    private string? _folderId;
+    private string? _projectId;
+
+    /// <summary>Phase 14 — archived chats leave the main sidebar and appear
+    /// only in the archive view. Not a delete: the chat still opens.</summary>
+    [ObservableProperty]
+    private bool _isArchived;
 
     /// <summary>Selection is VM-authoritative (maintained by ConversationListViewModel)
     /// because rows live in several ItemsControls, not one Selector.</summary>
@@ -66,7 +71,8 @@ public partial class ConversationItemViewModel : ObservableObject
         _title = entity.Title;
         _isPinned = entity.IsPinned;
         _updatedAt = entity.UpdatedAt;
-        _folderId = entity.FolderId;
+        _projectId = entity.ProjectId;
+        _isArchived = entity.IsArchived;
     }
 
     public Conversation ToEntity() => new()
@@ -77,7 +83,8 @@ public partial class ConversationItemViewModel : ObservableObject
         CreatedAt = CreatedAt,
         UpdatedAt = UpdatedAt,
         IsPinned = IsPinned,
-        FolderId = FolderId,
+        IsArchived = IsArchived,
+        ProjectId = ProjectId,
         Source = Source,
         ServerId = ServerId
     };

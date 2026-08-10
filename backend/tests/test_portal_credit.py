@@ -52,6 +52,9 @@ def _make_user(db, email="u@test.com", balance=1000) -> PortalUserORM:
         credit_used=0,
         plan="free_trial",
         status="active",
+        # NOT NULL since SSO Phase 1 A1 — conftest seeds this tenant
+        # on the shared integration engine.
+        tenant_id="test-tenant",
     )
     db.add(user)
     db.flush()

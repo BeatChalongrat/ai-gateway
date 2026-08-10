@@ -19,6 +19,7 @@ import {
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
+import { tOutside, useT } from "@/lib/i18n";
 import type {
   DocExecuteResponse,
   PptxGenerationReport,
@@ -95,6 +96,7 @@ interface Props {
 }
 
 export function PptxPlanCard({ convId, plan }: Props) {
+  const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">(
     "idle",
   );
@@ -116,7 +118,7 @@ export function PptxPlanCard({ convId, plan }: Props) {
       setStatus("done");
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : (err as Error).message;
-      setError(msg || "Could not generate presentation.");
+      setError(msg || tOutside("plan.pptx.execFailed"));
       setStatus("error");
     }
   }
@@ -133,12 +135,12 @@ export function PptxPlanCard({ convId, plan }: Props) {
   return (
     <CardShell
       headerIcon={<FileTypeBadge extension=".pptx" size="sm" />}
-      headerTitle="Presentation Plan"
-      metadata={`${layout} · ${language} · ${slides.length} slide${slides.length === 1 ? "" : "s"}`}
+      headerTitle={t("plan.pptx.title")}
+      metadata={`${layout} · ${language} · ${slides.length} ${t(slides.length === 1 ? "unit.slide" : "unit.slides")}`}
       footer={
         <>
           <PrimaryButton onClick={execute} loading={status === "running"}>
-            {status === "running" ? "Generating…" : "Generate Presentation"}
+            {status === "running" ? t("plan.generating") : t("plan.pptx.generate")}
           </PrimaryButton>
           {error ? <ErrorLine message={error} /> : null}
         </>
@@ -150,7 +152,7 @@ export function PptxPlanCard({ convId, plan }: Props) {
         </p>
       ) : null}
       {slides.length > 0 ? (
-        <PlanList title="Slides">
+        <PlanList title={t("plan.slides")}>
           {slides.map((slide, i) => (
             <PlanListItem key={i} icon={slideIcon(slide.type)} index={i + 1}>
               {summarizeSlide(slide)}
@@ -163,6 +165,7 @@ export function PptxPlanCard({ convId, plan }: Props) {
 }
 
 export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
+  const t = useT();
   const { file, validation, generation, changes } = result;
   const pptxGen = generation as unknown as PptxGenerationReport | undefined;
   const slideCount = pptxGen?.slide_count ?? validation?.stats?.page_count;
@@ -180,16 +183,16 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
         <span>PPTX</span>
         <span>{humanSize(file.file_size_bytes)}</span>
         {slideCount != null ? (
-          <span>{slideCount} slide{slideCount === 1 ? "" : "s"}</span>
+          <span>{slideCount} {t(slideCount === 1 ? "unit.slide" : "unit.slides")}</span>
         ) : null}
         {wordCount != null ? (
-          <span>{wordCount} word{wordCount === 1 ? "" : "s"}</span>
+          <span>{wordCount} {t(wordCount === 1 ? "unit.word" : "unit.words")}</span>
         ) : null}
       </MetadataRow>
       {slideLog && slideLog.length > 0 ? (
         <details open={slideLog.length <= 8}>
           <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-text-tertiary">
-            Slide log ({slideLog.length})
+            {t("plan.slideLog", { n: String(slideLog.length) })}
           </summary>
           <ul className="mt-2 space-y-1 text-sm text-text-primary">
             {slideLog.map((entry, i) => (
@@ -204,7 +207,10 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
                   {entry.status === "error" ? "✗" : "✓"}
                 </span>
                 <span>
-                  Slide {entry.slide}: {entry.type}
+                  {t("plan.slideEntry", {
+                    n: String(entry.slide),
+                    type: entry.type,
+                  })}
                   {entry.detail ? ` — ${entry.detail}` : ""}
                 </span>
               </li>
@@ -214,7 +220,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
       ) : changes && changes.length > 0 ? (
         <details>
           <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-text-tertiary">
-            Change log ({changes.length})
+            {t("plan.changeLog", { n: String(changes.length) })}
           </summary>
           <ul className="mt-2 space-y-1 text-sm text-text-primary">
             {changes.map((line, i) => {
@@ -239,7 +245,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
         valid={validation?.valid ?? false}
         warnings={validation?.warnings ?? []}
         errors={validation?.errors ?? []}
-        okMessage="Presentation is valid."
+        okMessage={t("plan.validation.okPresentation")}
       />
     </CardShell>
   );
@@ -250,34 +256,50 @@ function summarizeSlide(slide: PptxSlide): string {
   const title = (slide.title as string) || "";
   switch (t) {
     case "title":
-      return `Title — "${truncate(title, 60)}"`;
+      return tOutside("plan.pptx.slideTitle", { title: truncate(title, 60) });
     case "section_divider":
-      return `Section — "${truncate(title, 60)}"`;
+      return tOutside("plan.pptx.section", { title: truncate(title, 60) });
     case "two_column":
-      return `Two-column — "${truncate(title, 50)}"`;
+      return tOutside("plan.pptx.twoColumn", { title: truncate(title, 50) });
     case "stats": {
       const n = Array.isArray(slide.stats) ? slide.stats.length : 0;
-      return `Stats — ${n} KPI${n === 1 ? "" : "s"}`;
+      return n === 1
+        ? tOutside("plan.pptx.stats.one")
+        : tOutside("plan.pptx.stats.other", { n: String(n) });
     }
     case "table": {
       const cols = Array.isArray(slide.headers) ? slide.headers.length : 0;
       const rows = Array.isArray(slide.rows) ? slide.rows.length : 0;
-      return `Table — "${truncate(title, 40)}" (${cols} cols × ${rows} rows)`;
+      return tOutside("plan.pptx.table", {
+        title: truncate(title, 40),
+        cols: String(cols),
+        rows: String(rows),
+      });
     }
     case "chart": {
       const cats = slide.data?.categories?.length ?? 0;
       const series = slide.data?.series?.length ?? 0;
       const kind = slide.chart_type || "bar";
-      return `Chart — "${truncate(title, 40)}" (${kind}, ${cats} cats × ${series} series)`;
+      return tOutside("plan.pptx.chart", {
+        title: truncate(title, 40),
+        kind,
+        cats: String(cats),
+        series: String(series),
+      });
     }
     case "closing":
-      return `Closing — "${truncate(title || "Thank You", 60)}"`;
+      return tOutside("plan.pptx.closing", {
+        title: truncate(title || tOutside("plan.pptx.thankYou"), 60),
+      });
     case "content_with_image":
     case "content":
     default: {
       const n = Array.isArray(slide.bullets) ? slide.bullets.length : 0;
-      const tag = n > 0 ? ` (${n} bullet${n === 1 ? "" : "s"})` : "";
-      return `Content — "${truncate(title, 50)}"${tag}`;
+      const vars = { title: truncate(title, 50), n: String(n) };
+      if (n === 0) return tOutside("plan.pptx.content.none", vars);
+      return n === 1
+        ? tOutside("plan.pptx.content.one", vars)
+        : tOutside("plan.pptx.content.other", vars);
     }
   }
 }

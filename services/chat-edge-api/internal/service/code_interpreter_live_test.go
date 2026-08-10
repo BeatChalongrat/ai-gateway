@@ -74,7 +74,7 @@ func TestRunPython_Live_PandasAndMatplotlibArtifact(t *testing.T) {
 		MessageID:      uuid.New(),
 	}
 	argsJSON, _ := json.Marshal(map[string]any{"code": code})
-	out := e.execRunPython(context.Background(), string(argsJSON), ec)
+	out := e.execRunPython(context.Background(), "call-1", string(argsJSON), ec)
 
 	if !strings.Contains(out, "PANDAS") {
 		t.Fatalf("expected pandas version in stdout, got:\n%s", out)

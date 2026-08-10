@@ -104,7 +104,8 @@ func main() {
 	refreshTokens := repository.NewRefreshTokenRepo(pool)
 	invitations := repository.NewInvitationTokenRepo(pool)
 	conversations := repository.NewConversationRepo(pool)
-	folders := repository.NewFolderRepo(pool)
+	projects := repository.NewProjectRepo(pool)
+	canvasArtifacts := repository.NewCanvasArtifactRepo(pool)
 	messages := repository.NewMessageRepo(pool)
 	// H4 — only read canonical columns when the feature is enabled (and
 	// migration 024 is therefore applied), so a pre-migration binary with
@@ -175,11 +176,16 @@ func main() {
 		cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry,
 	)
 	conversationSvc := service.NewConversationService(conversations, cfg)
-	folderSvc := service.NewFolderService(folders, conversations)
+	projectSvc := service.NewProjectService(projects, conversations)
 	messageSvc := service.NewMessageService(
 		conversations, messages, gateway, titles, cfg, cfg.MaxContextMessages,
 	)
 	messageSvc.SetImageGenerationTimeout(time.Duration(cfg.ChatEdgeImageTimeoutSeconds) * time.Second)
+	// Phase 5 — stream resume uses an IN-PROCESS broker: reattach works
+	// only against the instance that owns the generation. Correct for the
+	// current single-instance deployment (compose pins one container); a
+	// multi-replica rollout needs a shared broker (e.g. Redis pub/sub).
+	slog.Info("stream-resume broker: in-process (single-instance only; cross-instance reattach falls back to persisted row)")
 	// Phase 4A.2.2 — DLP canonical history rollout (default off/shadow).
 	messageSvc.SetCanonicalHistory(cfg.DLPCanonicalHistoryEnabled, cfg.DLPCanonicalHistoryShadow)
 	// Phase 4A.2.4 — display lifecycle rollout (default off/shadow). The
@@ -256,7 +262,7 @@ func main() {
 	// before the file service's auto-inspect hook so an upload
 	// that lands the instant the server starts up still gets
 	// inspected.
-	excelSvc := service.NewExcelService(filesRepo, storageBackend, cfg.ExtractPythonBinary, "scripts")
+	excelSvc := service.NewExcelService(filesRepo, conversations, storageBackend, cfg.ExtractPythonBinary, "scripts")
 	docSvc := service.NewDocService(filesRepo, conversations, storageBackend, cfg.ExtractPythonBinary, "scripts")
 	// Session 5 — workspace (rollback + compare). Tenant + user
 	// scoping happens inside the service via the conversations repo
@@ -346,6 +352,10 @@ func main() {
 	// the gateway reports the tenant enabled search + has a provider.
 	messageSvc.SetWebSearch(gateway, messageSvc)
 	messageSvc.SetSearchConfigChecker(gateway)
+	// Phase 3 — web_fetch. SSRF-guarded direct page reader; no provider
+	// dependency, so no per-tenant gate. Shares the citation saver with
+	// web_search so fetched pages render as the same source chips.
+	messageSvc.SetWebFetch(service.NewWebFetcher(), messageSvc)
 	// Phase 13 Part B — run_python code interpreter. Wired ONLY when the
 	// hardened sandbox is available: run_python must never execute
 	// model-authored code in this secret-bearing process. The interpreter
@@ -398,12 +408,25 @@ func main() {
 	)
 	ragSvc := service.NewRAGService(knowledgeRepo, embeddingSvc)
 	messageSvc.SetRAGReader(ragSvc)
+	// Phase 4 — project context (shared instructions + KB) inherited by
+	// member conversations at prompt-compile time.
+	messageSvc.SetProjectReader(projects)
 
 	conversationHandler := handler.NewConversationHandler(conversationSvc)
 	conversationHandler.SetExportSources(conversations, messages, filesRepo, cfg)
 	conversationHandler.SetKnowledgeService(knowledgeSvc)
 
-	folderHandler := handler.NewFolderHandler(folderSvc)
+	projectHandler := handler.NewProjectHandler(projectSvc)
+	// Phase 6/C3 — canvas artifacts. messageSvc supplies the canonical
+	// conversation-ownership check (AssertConversationAccess).
+	canvasArtifactSvc := service.NewCanvasArtifactService(canvasArtifacts, messageSvc)
+	canvasArtifactHandler := handler.NewCanvasArtifactHandler(canvasArtifactSvc)
+	// Phase 8 Task 3 — model-driven canvas updates. The lookup feeds the
+	// "## Canvas Artifacts" system block (repo: ownership is already
+	// settled by the message flow); the tool goes through the SERVICE so
+	// every write re-asserts conversation ownership.
+	messageSvc.SetCanvasLookup(canvasArtifacts)
+	messageSvc.SetCanvasArtifactTool(canvasArtifactSvc)
 	conversationHandler.SetTitleService(titles)
 	conversationHandler.SetConversationStateService(stateSvc)
 	conversationHandler.SetMessageService(messageSvc)
@@ -459,25 +482,26 @@ func main() {
 	messageSvc.SetVisionCapabilityChecker(modelHandler.SupportsVision)
 
 	handlers := router.Handlers{
-		Auth:         handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
-		Usage:        handler.NewUsageHandler(cfg.GatewayAPIURL),
-		Conversation: conversationHandler,
-		Folder:       folderHandler,
-		Message:      messageHandler,
-		Model:        modelHandler,
-		Feedback:     handler.NewFeedbackHandler(feedbackSvc),
-		File:         handler.NewFileHandler(fileSvc),
-		Preferences:  handler.NewPreferencesHandler(prefsRepo),
-		Share:        shareHandler,
-		Admin:        adminHandler,
-		Knowledge:    handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
-		Voice:        handler.NewVoiceHandler(gateway),
-		Excel:        handler.NewExcelHandler(excelSvc, filesRepo),
-		Document:     handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
-		Workspace:    handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
-		Memory:       handler.NewMemoryHandler(memorySvc),
-		Search:       handler.NewSearchHandler(searchSvc),
-		Account:      handler.NewAccountHandler(exportSvc, purgeSvc),
+		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
+		Usage:          handler.NewUsageHandler(cfg.GatewayAPIURL),
+		Conversation:   conversationHandler,
+		Project:        projectHandler,
+		CanvasArtifact: canvasArtifactHandler,
+		Message:        messageHandler,
+		Model:          modelHandler,
+		Feedback:       handler.NewFeedbackHandler(feedbackSvc),
+		File:           handler.NewFileHandler(fileSvc),
+		Preferences:    handler.NewPreferencesHandler(prefsRepo),
+		Share:          shareHandler,
+		Admin:          adminHandler,
+		Knowledge:      handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
+		Voice:          handler.NewVoiceHandler(gateway),
+		Excel:          handler.NewExcelHandler(excelSvc, filesRepo),
+		Document:       handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
+		Workspace:      handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
+		Memory:         handler.NewMemoryHandler(memorySvc),
+		Search:         handler.NewSearchHandler(searchSvc),
+		Account:        handler.NewAccountHandler(exportSvc, purgeSvc),
 		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
 		// GatewayClient (and its internal-trust headers) as the video tool.
 		MediaProxy: handler.NewMediaProxyHandler(gateway),

@@ -18,6 +18,8 @@ import { ImageOff } from "lucide-react";
 
 import { api } from "@/lib/api";
 
+import { useT } from "@/lib/i18n";
+
 interface Props {
   fileId: string;
   alt: string;
@@ -28,6 +30,7 @@ interface Props {
 }
 
 export function AuthedImage({ fileId, alt, className, onReady }: Props) {
+  const t = useT();
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const onReadyRef = useRef(onReady);
@@ -73,7 +76,7 @@ export function AuthedImage({ fileId, alt, className, onReady }: Props) {
     return (
       <div
         className={`animate-pulse bg-bg-elevated ${className ?? ""}`}
-        aria-label={`Loading ${alt}`}
+        aria-label={t("a11y.loadingImage", { name: alt })}
       />
     );
   }

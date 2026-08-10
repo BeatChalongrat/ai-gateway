@@ -7,7 +7,13 @@ import { ArrowRight } from "lucide-react";
 
 import { api, PortalApiError } from "@/lib/api";
 import type { AuthResponse } from "@/lib/types";
-import { SocialButtons, OrDivider } from "@/components/SocialButtons";
+import { SocialButtons } from "@/components/SocialButtons";
+
+// Phase 1 — Google-first signup. Flag on = Google is the only visible
+// path and the email+password form is HIDDEN (not removed; the server's
+// PASSWORD_LOGIN_ENABLED gate is the real enforcement, flipped in
+// Phase 3). Baked at BUILD time — flipping requires an image rebuild.
+const OAUTH_ENABLED = process.env.NEXT_PUBLIC_OAUTH_ENABLED === "true";
 
 type Strength = 0 | 1 | 2 | 3;
 
@@ -127,11 +133,25 @@ export default function SignupForm({
             <>
               <div className="sv-form-eyebrow">Free forever tier</div>
               <h1>Create your account</h1>
-              <p>No credit card. 5 minutes to first API call.</p>
+              <p>
+                {OAUTH_ENABLED
+                  ? "Continue with your company Google account — no password needed."
+                  : "No credit card. 5 minutes to first API call."}
+              </p>
             </>
           )}
         </div>
 
+        {OAUTH_ENABLED ? (
+          <div className="anim d2">
+            <SocialButtons />
+          </div>
+        ) : null}
+
+        {/* Email+password signup — HIDDEN (not removed) while Google SSO
+            is on; the server-side PASSWORD_LOGIN_ENABLED gate (403) is
+            the actual enforcement. */}
+        {OAUTH_ENABLED ? null : (
         <form className="sv-form anim d2" onSubmit={handleSubmit} noValidate>
           <div className="sv-field">
             <label className="sv-label" htmlFor="su-name">Display name</label>
@@ -289,15 +309,7 @@ export default function SignupForm({
             {!loading ? <span className="sv-arrow" aria-hidden="true"><ArrowRight size={16} /></span> : null}
           </button>
         </form>
-
-        {/* Shared env-gated OAuth block (mirrors the login surface). When
-            NEXT_PUBLIC_OAUTH_ENABLED !== "true" it renders a "coming soon"
-            notice instead of dead disabled buttons; when enabled it wires
-            real next-auth signIn handlers. */}
-        <div className="anim d3">
-          <OrDivider label="or continue with" />
-          <SocialButtons />
-        </div>
+        )}
 
         <p className="sv-bottom-link anim d3">
           Already have an account? <Link href="/login">Sign in</Link>

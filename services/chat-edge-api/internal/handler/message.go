@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -406,21 +407,37 @@ type streamDrainResult struct {
 // loops were byte-identical.
 //
 // “done“ is the request context's Done channel. When it fires
-// (client disconnected) the loop cancels the upstream call ONCE and
+// (client disconnected) the loop invokes ``onDisconnect`` ONCE and
 // then sets “done“ to nil: a cancelled context's Done channel is
 // permanently ready in select, so continuing to select on it would
-// busy-spin at 100% CPU (calling cancel every iteration) until the
-// service pump emits its terminal event — one full upstream
-// round-trip. A nil channel blocks forever in select, so after the
-// first cancel only “events“ drives the drain. The drain always
+// busy-spin at 100% CPU until the service pump emits its terminal
+// event. A nil channel blocks forever in select, so after the first
+// firing only “events“ drives the drain. The drain always
 // terminates: pumpStreamWithTools sends a terminal update (Err or
 // Done) and defer-closes the channel on every exit path.
+//
+// Phase 5 — what ``onDisconnect`` should be:
+//   - primary streams (Send/Regenerate/Edit): ``detachOnDisconnect``.
+//     The generation KEEPS RUNNING server-side (writes to the dead
+//     ResponseWriter fail silently), the drain still accumulates the
+//     full content, and Finish persists it — so a refreshed client
+//     can reattach via GET .../messages/{id}/stream and receive the
+//     rest. The user-initiated Stop path is unaffected: it goes
+//     through POST /cancel → CancelStream, never through this hook.
+//   - resume streams: the broker unsubscribe — detaching a viewer
+//     must never touch the generation itself.
+// detachOnDisconnect is the Phase 5 disconnect hook for primary
+// streams: do nothing — let the generation finish server-side so the
+// client can resume. (Pre-Phase-5 behaviour was stream.Cancel here,
+// which killed the generation on every refresh/network blip.)
+func detachOnDisconnect() {}
+
 func drainStreamEvents(
 	w http.ResponseWriter,
 	flusher http.Flusher,
 	done <-chan struct{},
 	events <-chan service.StreamUpdate,
-	cancel func(),
+	onDisconnect func(),
 ) streamDrainResult {
 	var (
 		content   strings.Builder
@@ -431,11 +448,10 @@ Loop:
 	for {
 		select {
 		case <-done:
-			// Client disconnected — tell the service to cancel the
-			// upstream call, drain any pending event, then persist
-			// what we have. Stop watching ``done`` after the first
-			// cancel (see doc comment: nil channel = no busy-spin).
-			cancel()
+			// Client disconnected — fire the disconnect hook once,
+			// keep draining until the pump's terminal event (see doc
+			// comment: nil channel = no busy-spin).
+			onDisconnect()
 			done = nil
 		case ev, ok := <-events:
 			if !ok {
@@ -488,6 +504,17 @@ Loop:
 				writeSSEEvent(w, flusher, "search_status", map[string]any{
 					"status": ev.SearchStatus,
 				})
+			}
+			// Phase 8 Task 2 — run_python progress: the code the model
+			// wrote, then its stdout/stderr + exit status. Rendered as a
+			// code+output card. Deliberately NOT persisted on the message
+			// row: chat-edge stores DLP-masked content only and has no
+			// masking path of its own, so writing raw sandbox stdout at
+			// rest would open a new plaintext surface. It survives a
+			// mid-stream reconnect via the resume snapshot below; after
+			// the turn completes only the produced files remain.
+			if ev.CodeExecution != nil {
+				writeSSEEvent(w, flusher, "code_execution", ev.CodeExecution)
 			}
 			// B1: a provider error frame from the Gateway. Forward it as
 			// an ``error`` event so the client renders an error bubble
@@ -549,7 +576,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 		"conversation_id": stream.ConversationID.String(),
 	})
 
-	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, stream.Cancel)
+	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
 	// Persist via the handle's finish callback. Uses
 	// context.Background() internally so the write completes even
@@ -715,6 +742,175 @@ func (h *MessageHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Resume (Phase 5 — stream resume)
+// ---------------------------------------------------------------------------
+
+// ResumeStream reattaches a client to an in-flight generation and
+// replays what it missed. Emits the SAME SSE event vocabulary as Send
+// (message_start / content_delta / … / message_complete) so the
+// frontend consumes it with the identical pipeline — the prefix simply
+// arrives as one large content_delta.
+//
+//	GET /api/v1/conversations/{id}/messages/{messageID}/stream
+//	→ SSE stream
+//	→ 409 RESUME_UNAVAILABLE when the generation isn't attachable yet
+//	  (client retries with backoff)
+//
+// This endpoint NEVER calls StreamHandle.Finish — persistence belongs
+// to the primary drain (which keeps running detached after the
+// original client disconnected). Disconnecting from a resume stream
+// only unsubscribes the viewer; the generation is untouched.
+func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	msgID, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message id")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
+
+	att, err := h.messages.ResumeAttach(
+		r.Context(), caller.TenantUUID, caller.UserID, convID, msgID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrResumeUnavailable):
+			WriteError(w, http.StatusConflict, "RESUME_UNAVAILABLE",
+				"generation not attachable yet")
+		case errors.Is(err, service.ErrMessageConversationNotFound),
+			errors.Is(err, service.ErrMessageNotFound):
+			WriteError(w, http.StatusNotFound, CodeNotFound, "message not found")
+		case errors.Is(err, service.ErrMessageNotAssistant):
+			WriteError(w, http.StatusBadRequest, CodeBadRequest,
+				"only assistant messages can be resumed")
+		default:
+			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		}
+		return
+	}
+	defer att.Cancel()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeSSEEvent(w, flusher, "message_start", map[string]any{
+		"message_id":      msgID.String(),
+		"conversation_id": convID.String(),
+	})
+	h.writeResumeSnapshot(w, flusher, att.Snapshot)
+
+	if att.Events != nil {
+		// Live tail — same drain as the primary stream; disconnect
+		// only unsubscribes this viewer.
+		res := drainStreamEvents(w, flusher, r.Context().Done(), att.Events, att.Cancel)
+		if att.Lagged() {
+			// This subscriber fell behind and was cut loose mid-stream.
+			// Tell the client to reattach fresh instead of pretending
+			// the message completed.
+			writeSSEEvent(w, flusher, "error", map[string]any{
+				"code":    "RESUME_LAGGED",
+				"message": "resume stream fell behind; reattach",
+			})
+			return
+		}
+		// The primary drain persists files/sources in its Finish
+		// callback, which runs just after the same terminal event we
+		// saw — give it a beat before reading them back.
+		if r.Context().Err() == nil {
+			time.Sleep(250 * time.Millisecond)
+		}
+		h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, msgID)
+		h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, msgID)
+		completeData := map[string]any{"message_id": msgID.String()}
+		if res.usage != nil {
+			tokenUsage := map[string]int{
+				"input":  res.usage.PromptTokens,
+				"output": res.usage.CompletionTokens,
+			}
+			if res.usage.ReasoningTokens > 0 {
+				tokenUsage["reasoning"] = res.usage.ReasoningTokens
+			}
+			completeData["token_usage"] = tokenUsage
+		}
+		writeSSEEvent(w, flusher, "message_complete", completeData)
+		return
+	}
+
+	// Terminal replay — the generation already ended; the snapshot
+	// carries the persisted row.
+	if t := att.Snapshot.Terminal; t != nil && t.Err != nil {
+		writeSSEEvent(w, flusher, "error", map[string]any{
+			"code":    "GENERATION_INTERRUPTED",
+			"message": "generation was interrupted",
+		})
+	}
+	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, msgID)
+	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, msgID)
+	completeData := map[string]any{"message_id": msgID.String()}
+	if t := att.Snapshot.Terminal; t != nil && t.Usage != nil {
+		tokenUsage := map[string]int{
+			"input":  t.Usage.PromptTokens,
+			"output": t.Usage.CompletionTokens,
+		}
+		if t.Usage.ReasoningTokens > 0 {
+			tokenUsage["reasoning"] = t.Usage.ReasoningTokens
+		}
+		completeData["token_usage"] = tokenUsage
+	}
+	writeSSEEvent(w, flusher, "message_complete", completeData)
+}
+
+// writeResumeSnapshot replays the already-generated prefix in the same
+// event order a live stream would have produced it: phase markers →
+// reasoning → content, so the client's ThinkingBlock/placeholder logic
+// behaves identically to a live stream.
+func (h *MessageHandler) writeResumeSnapshot(
+	w http.ResponseWriter, flusher http.Flusher, snap service.StreamSnapshot,
+) {
+	if snap.AnalysisStatus != "" {
+		writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": "started"})
+	}
+	if snap.Reasoning != "" {
+		writeSSEEvent(w, flusher, "reasoning_delta", map[string]any{"delta": snap.Reasoning})
+	}
+	if snap.AnalysisStatus == "completed" {
+		writeSSEEvent(w, flusher, "analysis_status", map[string]any{"status": "completed"})
+	}
+	if snap.ImageStatus != "" {
+		writeSSEEvent(w, flusher, "image_generating", map[string]any{"status": snap.ImageStatus})
+	}
+	if snap.VideoStatus != "" {
+		writeSSEEvent(w, flusher, "video_generating", map[string]any{"status": snap.VideoStatus})
+	}
+	if snap.SearchStatus != "" {
+		writeSSEEvent(w, flusher, "search_status", map[string]any{"status": snap.SearchStatus})
+	}
+	if snap.FallbackInfo != nil {
+		writeSSEEvent(w, flusher, "fallback_info", snap.FallbackInfo)
+	}
+	// run_python cards, latest frame each — a refresh in the middle of a
+	// 60s sandbox run must not lose the code the model is running.
+	for i := range snap.CodeExecutions {
+		writeSSEEvent(w, flusher, "code_execution", snap.CodeExecutions[i])
+	}
+	if snap.Content != "" {
+		writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": snap.Content})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Regenerate
 // ---------------------------------------------------------------------------
 
@@ -768,7 +964,7 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 		"conversation_id": stream.ConversationID.String(),
 	})
 
-	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, stream.Cancel)
+	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
 	persistFinishReason := res.finishReason
 	if res.err != nil && persistFinishReason == "" {
@@ -851,7 +1047,7 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		"user_message_id": stream.UserMessage.ID.String(),
 	})
 
-	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, stream.Cancel)
+	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
 	persistFinishReason := res.finishReason
 	if res.err != nil && persistFinishReason == "" {

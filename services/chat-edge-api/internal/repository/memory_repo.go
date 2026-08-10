@@ -586,17 +586,26 @@ func (r *MemoryRepo) SearchByContent(
 	if limit > 50 {
 		limit = 50
 	}
+	// Hybrid engine (migration 028) — see MessageRepo.SearchUserMessages.
+	rankExpr := `ts_rank(search_vector, plainto_tsquery('simple', $3))`
+	matchExpr := `search_vector @@ plainto_tsquery('simple', $3)`
+	args := []any{userID, tenantID, q, limit}
+	if NeedsTrigramSearch(q) {
+		rankExpr = `similarity(content, $3)`
+		matchExpr = `content ILIKE $5`
+		args = append(args, TrigramPattern(q))
+	}
 	sql := `SELECT ` + memoryColumns + `
 	        FROM chat.user_memories
 	        WHERE user_id = $1
 	          AND tenant_id = $2
 	          AND status = 'active'
-	          AND search_vector @@ plainto_tsquery('simple', $3)
-	        ORDER BY ts_rank(search_vector, plainto_tsquery('simple', $3)) DESC,
+	          AND ` + matchExpr + `
+	        ORDER BY ` + rankExpr + ` DESC,
 	                 importance_score DESC,
 	                 updated_at DESC
 	        LIMIT $4`
-	rows, err := r.db.Query(ctx, sql, userID, tenantID, q, limit)
+	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search memories by content: %w", err)
 	}

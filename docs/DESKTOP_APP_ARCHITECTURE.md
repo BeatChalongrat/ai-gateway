@@ -157,7 +157,7 @@ SRAN Desktop เป็น native Windows application (C#/.NET 8/WPF) ที่�
 | `AgentPanel` | Tool execution log: what AI is doing, permission prompts |
 | `ToolConsentDialog` | "AI wants to read C:\Users\..." — Allow / Deny / Always Allow |
 | `FilePreview` | Image thumbnail, PDF preview, code preview |
-| `SidebarView` | Conversation list, folders, search, new chat |
+| `SidebarView` | Conversation list, projects, search, new chat |
 | `SystemTrayIcon` | Minimize to tray, quick chat hotkey |
 | `SettingsView` | Server URL, auth, MCP tool toggles, theme |
 
@@ -939,8 +939,9 @@ SranDesktop/
 | POST | `/api/v1/conversations/:id/messages/:mid/regenerate` | Regenerate (SSE) |
 | POST | `/api/v1/conversations/:id/files` | Upload file |
 | GET | `/api/v1/models` | List available models |
-| GET | `/api/v1/folders` | List folders |
-| POST | `/api/v1/folders` | Create folder |
+| GET | `/api/v1/projects` | List projects (the one organiser — folders were merged in, chat-edge migration 031) |
+| POST | `/api/v1/projects` | Create project |
+| PUT | `/api/v1/conversations/:id/project` | Assign / un-assign a chat |
 
 ### From Gateway (Agent Mode)
 

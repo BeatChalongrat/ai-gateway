@@ -10,7 +10,7 @@ response is constant.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -41,8 +41,10 @@ from app.services.portal.oauth_flow_service import (
     IdTokenVerificationFailed,
     InvalidReturnUrl,
     OAuthStateStore,
+    OAuthTicketStore,
     generate_pkce,
     get_oauth_state_store,
+    get_oauth_ticket_store,
     validate_return_to,
     verify_github_access_token,
     verify_google_id_token,
@@ -78,6 +80,24 @@ def _portal_redis_client():
 
 _portal_login_rate_limiter: LoginRateLimiter | None = None
 _portal_signup_rate_limiter: LoginRateLimiter | None = None
+_portal_oauth_verify_rate_limiter: LoginRateLimiter | None = None
+_portal_oauth_ticket_rate_limiter: LoginRateLimiter | None = None
+
+
+def _require_password_login_enabled() -> None:
+    """Phase 0 kill-switch for the email+password surface.
+
+    Enforced server-side (hiding the form in the frontend is not a
+    gate). 403 keeps the routes discoverable-but-closed; the code path
+    stays intact for a future re-enable via PASSWORD_LOGIN_ENABLED.
+    """
+    from app.core.config import settings
+
+    if not settings.password_login_enabled:
+        raise AuthorizationError(
+            "Password login is disabled. Sign in with Google instead.",
+            code="password_login_disabled",
+        )
 
 
 def get_portal_login_rate_limiter() -> LoginRateLimiter:
@@ -127,6 +147,55 @@ def get_portal_signup_rate_limiter() -> LoginRateLimiter:
             ip_key_prefix="portal_signup_ip:",
         )
     return _portal_signup_rate_limiter
+
+
+def get_portal_oauth_verify_rate_limiter() -> LoginRateLimiter:
+    """FastAPI dep: lazy singleton limiter for POST /portal/auth/oauth/verify.
+
+    The endpoint is unauthenticated and each call costs a JWKS fetch +
+    signature verify (Google) or two provider round-trips (GitHub), so
+    it needs a brute-force bound. We can't key on email — the email is
+    only known AFTER verification — so both windows are keyed on the
+    client IP (the caller passes email=ip): 20 attempts / 15 min / IP,
+    roomy enough for a whole office behind one NAT re-logging-in, far
+    too slow for token brute-forcing.
+    """
+    global _portal_oauth_verify_rate_limiter
+    if _portal_oauth_verify_rate_limiter is None:
+        _portal_oauth_verify_rate_limiter = LoginRateLimiter(
+            redis_client=_build_redis_client(),
+            per_email_limit=20,
+            per_email_window_seconds=15 * 60,
+            per_ip_limit=20,
+            per_ip_window_seconds=15 * 60,
+            email_key_prefix="portal_oauth_verify:",
+            ip_key_prefix="portal_oauth_verify_ip:",
+        )
+    return _portal_oauth_verify_rate_limiter
+
+
+def get_portal_oauth_ticket_rate_limiter() -> LoginRateLimiter:
+    """FastAPI dep: lazy singleton limiter for POST /oauth/desktop/exchange.
+
+    Tickets are 128-bit-entropy one-shots with a 60s TTL, so online
+    guessing is already hopeless — the limiter exists to bound abuse
+    of the unauthenticated endpoint itself (Redis churn, log noise).
+    Keyed on IP like the verify limiter (no email until redemption):
+    20 attempts / 15 min / IP, failures only (a successful redeem
+    clears the window).
+    """
+    global _portal_oauth_ticket_rate_limiter
+    if _portal_oauth_ticket_rate_limiter is None:
+        _portal_oauth_ticket_rate_limiter = LoginRateLimiter(
+            redis_client=_build_redis_client(),
+            per_email_limit=20,
+            per_email_window_seconds=15 * 60,
+            per_ip_limit=20,
+            per_ip_window_seconds=15 * 60,
+            email_key_prefix="portal_oauth_ticket:",
+            ip_key_prefix="portal_oauth_ticket_ip:",
+        )
+    return _portal_oauth_ticket_rate_limiter
 
 
 def _client_ip(request: Request) -> str:
@@ -220,6 +289,7 @@ def signup(
     session: Session = Depends(get_db_session),
     rate_limiter: LoginRateLimiter = Depends(get_portal_signup_rate_limiter),
 ):
+    _require_password_login_enabled()
     # Rate-limit BEFORE any DB/bcrypt work (Phase 13 D) — same order as
     # admin login. Keyed on the normalised email + client IP.
     email_norm = (body.email or "").strip().lower()
@@ -264,6 +334,7 @@ def login(
     session: Session = Depends(get_db_session),
     rate_limiter: LoginRateLimiter = Depends(get_portal_login_rate_limiter),
 ):
+    _require_password_login_enabled()
     # Phase 13 D — mirror of the admin login gate (admin_session.py):
     # check BEFORE bcrypt so attackers can't spend our CPU, record the
     # outcome after. Keyed on the normalised email + client IP.
@@ -441,6 +512,9 @@ def password_reset_request(
     no user-existence oracle. Dev/test mode echoes the token so
     integration tests don't need a mail server.
     """
+    # Phase 3 cutover: resetting a password is meaningless (and an
+    # attack surface) once password login itself is disabled.
+    _require_password_login_enabled()
     return password_reset_service.request_reset(
         session, redis_client, email=body.email
     )
@@ -458,6 +532,7 @@ def password_reset_confirm(
     On success, every live portal JWT for the user is invalidated
     via the token_version bump (Phase 3 Concern 1).
     """
+    _require_password_login_enabled()
     return password_reset_service.confirm_reset(
         session,
         redis_client,
@@ -530,7 +605,9 @@ class OAuthVerifyRequest(BaseModel):
 @public_portal_route
 def oauth_verify(
     payload: OAuthVerifyRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
+    rate_limiter: LoginRateLimiter = Depends(get_portal_oauth_verify_rate_limiter),
 ):
     """Verify a provider-issued token server-side and mint portal tokens.
 
@@ -543,6 +620,13 @@ def oauth_verify(
     Closes the security hole from the legacy POST callback (P0-8) by
     requiring proof-of-identity from the provider, not from the caller.
     """
+    # Rate limit BEFORE any provider round-trip. Email isn't known yet
+    # (it comes out of the verified token), so both windows key on IP.
+    ip = _client_ip(request)
+    decision = rate_limiter.check(email=ip, ip=ip)
+    if not decision.allowed:
+        _raise_429(decision, code="oauth_verify_rate_limited")
+
     try:
         if payload.provider == "google":
             if not payload.id_token:
@@ -559,10 +643,12 @@ def oauth_verify(
                 )
             claims = verify_github_access_token(payload.access_token)
     except IdTokenVerificationFailed as exc:
+        rate_limiter.record_failure(email=ip, ip=ip)
         raise ValidationError(
             f"OAuth verification failed: {exc}",
             code="oauth_verification_failed",
         )
+    rate_limiter.record_success(email=ip, ip=ip)
 
     return oauth_service.login_or_create(
         session,
@@ -571,6 +657,7 @@ def oauth_verify(
         email=claims.get("email") or "",
         display_name=claims.get("name"),
         avatar_url=claims.get("picture"),
+        email_verified=bool(claims.get("email_verified")),
     )
 
 
@@ -580,6 +667,8 @@ def oauth_start(
     request: Request,
     provider: str = Query(..., pattern="^(google|github)$"),
     return_to: str = Query(default="/"),
+    client: str = Query(default="web", pattern="^(web|desktop)$"),
+    nonce: str | None = Query(default=None, max_length=128),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
 ):
     """Begin the server-driven OAuth flow.
@@ -606,31 +695,119 @@ def oauth_start(
             code="invalid_return_to",
         )
 
+    # SSO Phase 2 (B0): the desktop hand-off ticket is nonce-bound.
+    # ``sran://`` is claimable by any local app, so a hijacked deep
+    # link alone must not be redeemable — the redeeming process has to
+    # present the nonce it minted before opening the browser. Desktop
+    # starts therefore REQUIRE a well-formed nonce; the web path
+    # ignores one entirely (its result never rides a deep link).
+    import re as _re
+
+    if client == "desktop":
+        if not nonce or not _re.fullmatch(r"[A-Za-z0-9_-]{22,128}", nonce):
+            raise ValidationError(
+                "Desktop OAuth requires a nonce of 22-128 URL-safe "
+                "base64 characters.",
+                code="invalid_nonce",
+            )
+    else:
+        nonce = None
+
     verifier, challenge = generate_pkce()
     state = state_store.put(
         provider=provider,
         code_verifier=verifier,
         return_to=return_to,
+        # SSO Phase 2: "desktop" routes the callback result through the
+        # one-time-ticket deep link instead of the web response.
+        client=client,
+        nonce=nonce,
     )
 
     cfg = _provider_config(provider)
     callback_url = str(request.url_for("portal_oauth_callback"))
     from urllib.parse import urlencode
-    authorize_url = (
-        f"{cfg['authorize_url']}?"
-        + urlencode(
-            {
-                "client_id": cfg["client_id"],
-                "redirect_uri": callback_url,
-                "response_type": "code",
-                "scope": cfg["scope"],
-                "state": state,
-                "code_challenge": challenge,
-                "code_challenge_method": "S256",
-            }
-        )
-    )
+    params = {
+        "client_id": cfg["client_id"],
+        "redirect_uri": callback_url,
+        "response_type": "code",
+        "scope": cfg["scope"],
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    # UX hint only: pre-filters Google's account chooser to the
+    # workspace domain. Enforcement stays server-side in
+    # login_or_create (email domain + email_verified) — a client can
+    # strip this param and gains nothing.
+    if provider == "google" and (settings.google_hosted_domain or "").strip():
+        params["hd"] = settings.google_hosted_domain.strip()
+    authorize_url = f"{cfg['authorize_url']}?" + urlencode(params)
     return RedirectResponse(url=authorize_url, status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Desktop OAuth landing pages. After the server-side PKCE dance the ONLY
+# thing left in the user's browser is a leftover tab — a bare 302 to
+# sran:// left it stranded on the callback URL (which re-runs as
+# invalid_state on reload and LOOKS like a failed login even though the
+# app signed in fine). Serve a small self-contained page instead: it
+# fires the deep link itself, offers a button as fallback, and tells the
+# user the tab is safe to close. The opaque ticket appears ONLY inside
+# the sran:// link (script + button href) — never in a URL/query that
+# persists in history — and tokens never appear anywhere.
+# ---------------------------------------------------------------------------
+
+_DESKTOP_PAGE_SHELL = """<!doctype html>
+<html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRAN Desktop</title>
+<style>
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center;
+        justify-content:center; background:#0f1115; color:#e6e8ee;
+        font-family:'Segoe UI',system-ui,sans-serif; }}
+  .card {{ background:#171a21; border:1px solid #262b36; border-radius:16px;
+          padding:40px 48px; max-width:420px; text-align:center;
+          box-shadow:0 20px 60px rgba(0,0,0,.5); }}
+  .mark {{ font-size:44px; line-height:1; margin-bottom:16px; }}
+  h1 {{ font-size:19px; margin:0 0 8px; font-weight:600; }}
+  p {{ font-size:14px; color:#9aa3b2; margin:0 0 24px; line-height:1.6; }}
+  a.btn {{ display:inline-block; background:#3b6ef5; color:#fff;
+          text-decoration:none; padding:11px 22px; border-radius:9px;
+          font-size:14px; font-weight:600; }}
+  .ok {{ color:#4ade80; }} .err {{ color:#f87171; }}
+</style></head><body><div class="card">{body}</div>{script}</body></html>"""
+
+
+def _desktop_success_page(ticket: str) -> HTMLResponse:
+    deep_link = f"sran://oauth/callback?ticket={ticket}"
+    body = (
+        '<div class="mark ok">&#10003;</div>'
+        "<h1>ลงชื่อเข้าใช้สำเร็จ</h1>"
+        "<p>กำลังกลับไปที่แอป SRAN Desktop — ปิดแท็บนี้ได้เลย<br>"
+        "Signed in — returning to the SRAN Desktop app. "
+        "You can close this tab.</p>"
+        f'<a class="btn" href="{deep_link}">เปิด SranDesktop</a>'
+    )
+    script = f'<script>location.href="{deep_link}";</script>'
+    return HTMLResponse(
+        _DESKTOP_PAGE_SHELL.format(body=body, script=script), status_code=200
+    )
+
+
+def _desktop_error_page(message: str, status_code: int) -> HTMLResponse:
+    import html as _html
+
+    body = (
+        '<div class="mark err">&#10007;</div>'
+        "<h1>ลงชื่อเข้าใช้ไม่สำเร็จ</h1>"
+        f"<p>{_html.escape(message)}<br>"
+        "ปิดแท็บนี้แล้วลองใหม่จากแอป SRAN Desktop ได้เลย</p>"
+    )
+    return HTMLResponse(
+        _DESKTOP_PAGE_SHELL.format(body=body, script=""),
+        status_code=status_code,
+    )
 
 
 @router.get("/oauth/callback", name="portal_oauth_callback")
@@ -641,6 +818,7 @@ def oauth_callback(
     state: str = Query(default=""),
     session: Session = Depends(get_db_session),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
+    ticket_store: OAuthTicketStore = Depends(get_oauth_ticket_store),
 ):
     """Finish the server-driven flow: validate state, exchange, verify, mint."""
     row = state_store.pop(state)
@@ -652,6 +830,8 @@ def oauth_callback(
     if not code:
         raise ValidationError("Missing auth code.", code="missing_code")
 
+    is_desktop = row.get("client") == "desktop"
+
     callback_url = str(request.url_for("portal_oauth_callback"))
     try:
         claims = oauth_flow_service.exchange_code_for_verified_userinfo(
@@ -661,20 +841,105 @@ def oauth_callback(
             redirect_uri=callback_url,
         )
     except IdTokenVerificationFailed as exc:
+        if is_desktop:
+            # The desktop flow ends in a real browser tab — answer with
+            # the branded error page, not a JSON envelope.
+            return _desktop_error_page(
+                f"OAuth verification failed: {exc}", status_code=422
+            )
         raise ValidationError(
             f"OAuth verification failed: {exc}",
             code="oauth_verification_failed",
         )
 
-    result = oauth_service.login_or_create(
-        session,
-        provider=row["provider"],
-        oauth_id=claims["sub"],
-        email=claims.get("email") or "",
-        display_name=claims.get("name"),
-        avatar_url=claims.get("picture"),
-    )
+    try:
+        result = oauth_service.login_or_create(
+            session,
+            provider=row["provider"],
+            oauth_id=claims["sub"],
+            email=claims.get("email") or "",
+            display_name=claims.get("name"),
+            avatar_url=claims.get("picture"),
+            email_verified=bool(claims.get("email_verified")),
+        )
+    except (AuthorizationError, ValidationError) as exc:
+        # login_or_create's gates (email_not_verified / domain_not_allowed
+        # / invalid provider input). Same enforcement, browser-friendly
+        # rendering for the desktop tab; the web path keeps its envelope.
+        if is_desktop:
+            status = 403 if isinstance(exc, AuthorizationError) else 422
+            return _desktop_error_page(exc.message, status_code=status)
+        raise
+
+    # SSO Phase 2 — desktop hand-off. The system browser can't deliver
+    # tokens to the app, so we park the login result under a one-time
+    # 60s ticket and hand over ONLY the opaque ticket via the sran://
+    # deep link; the app redeems it via POST /oauth/desktop/exchange.
+    # Tokens must never ride the sran:// URL itself (custom schemes are
+    # claimable by any local app and their URLs persist in history).
+    # The landing PAGE (not a bare 302) fires the deep link and tells
+    # the user the tab is done — a raw redirect stranded the tab on the
+    # callback URL, which replayed as invalid_state on reload and read
+    # as a failed login.
+    if is_desktop:
+        # B0: bind the ticket to the nonce the desktop app minted at
+        # /oauth/start — redemption requires presenting it again.
+        ticket = ticket_store.put(result, nonce=row.get("nonce") or "")
+        return _desktop_success_page(ticket)
+
     return result
+
+
+class DesktopExchangeRequest(BaseModel):
+    """Body for ``POST /portal/auth/oauth/desktop/exchange``."""
+
+    ticket: str = Field(..., min_length=16, max_length=256)
+    # B0: the nonce the app minted before opening the browser. A
+    # hijacked sran:// link carries only the ticket — without the
+    # nonce it cannot be redeemed.
+    nonce: str = Field(..., min_length=22, max_length=128)
+
+
+@router.post("/oauth/desktop/exchange")
+@public_portal_route
+def oauth_desktop_exchange(
+    payload: DesktopExchangeRequest,
+    request: Request,
+    rate_limiter: LoginRateLimiter = Depends(get_portal_oauth_ticket_rate_limiter),
+    ticket_store: OAuthTicketStore = Depends(get_oauth_ticket_store),
+):
+    """Redeem the one-time desktop OAuth ticket for portal tokens.
+
+    Counterpart of the ``sran://oauth/callback?ticket=...`` deep link:
+    the desktop app re-enters here over HTTPS and swaps the opaque
+    ticket for ``{access_token, refresh_token, user}``. The ticket is
+    a 60s one-shot (atomic GETDEL) — expired, unknown, and replayed
+    tickets are indistinguishable by design (no oracle) and all yield
+    the same 401. Tokens are returned in the BODY, not cookies: the
+    desktop stores them itself (DPAPI), it has no cookie jar.
+    """
+    ip = _client_ip(request)
+    decision = rate_limiter.check(email=ip, ip=ip)
+    if not decision.allowed:
+        _raise_429(decision, code="oauth_ticket_rate_limited")
+
+    entry = ticket_store.pop(payload.ticket)
+    # One 401 for unknown/expired/replayed/nonce-mismatched tickets —
+    # deliberately indistinguishable (no oracle). A wrong-nonce attempt
+    # also BURNS the ticket (pop is one-shot), so a hijacker who races
+    # the real app destroys the login instead of winning it.
+    import hmac as _hmac
+
+    if entry is None or not _hmac.compare_digest(
+        entry.get("nonce") or "", payload.nonce
+    ):
+        rate_limiter.record_failure(email=ip, ip=ip)
+        raise AuthenticationError(
+            "OAuth ticket is invalid, expired, or already used.",
+            code="invalid_ticket",
+        )
+    rate_limiter.record_success(email=ip, ip=ip)
+    return entry["result"]
 
 
 @router.get("/public-settings")
@@ -707,6 +972,10 @@ def public_settings(session: Session = Depends(get_db_session)):
         "free_trial_tokens": free_trial,
         "portal_signup_enabled": signup_enabled,
         "resend_configured": bool((settings.resend_api_key or "").strip()),
+        # Phase 0 — lets the login/signup pages hide the password form
+        # when the server has the surface disabled. The 403 gate on
+        # /login + /signup is the actual enforcement; this is UI truth.
+        "password_login_enabled": bool(settings.password_login_enabled),
     }
 
 

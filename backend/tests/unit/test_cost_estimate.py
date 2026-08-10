@@ -30,7 +30,9 @@ async def _seed(session, tenant_id, markup, balance):
     uid = f"u-{tenant_id}"
     session.add(
         PortalUserORM(
-            id=uid, email=f"{tenant_id}@e.com", password_hash="x", credit_balance=balance
+            id=uid, email=f"{tenant_id}@e.com", password_hash="x",
+            credit_balance=balance,
+            tenant_id=tenant_id,  # NOT NULL since SSO Phase 1 A1
         )
     )
     await session.flush()

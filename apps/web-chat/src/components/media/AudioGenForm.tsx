@@ -9,6 +9,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { tOutside, useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import type { MediaJobStatus, ModelEntry } from "@/lib/types";
 
 import { CostPreview } from "./CostPreview";
@@ -28,12 +30,13 @@ interface Props {
 type Phase = "form" | "submitting" | "polling" | "done" | "failed";
 
 // Placeholder voices until model capability_metadata exposes a real list.
-const FALLBACK_VOICES = [
-  { id: "default", label: "Default" },
-  { id: "narrator", label: "Narrator" },
+const FALLBACK_VOICES: { id: string; labelKey: DictKey }[] = [
+  { id: "default", labelKey: "media.voice.default" },
+  { id: "narrator", labelKey: "media.voice.narrator" },
 ];
 
 export function AudioGenForm({ model, mode, conversationId }: Props) {
+  const t = useT();
   const [prompt, setPrompt] = useState("");
   const [voiceId, setVoiceId] = useState(FALLBACK_VOICES[0].id);
   const [duration, setDuration] = useState(30);
@@ -113,7 +116,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
           setPhase("done");
         } else if (j.status === "failed") {
           stopPolling();
-          setError(j.error_message || "Generation failed.");
+          setError(j.error_message || tOutside("media.genFailed"));
           setPhase("failed");
         }
       } catch {
@@ -148,7 +151,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
         setError(err.message);
         setErrorCode(mediaErrorCodeFromStatus(err.status, err.code));
       } else {
-        setError("Failed to submit audio job.");
+        setError(tOutside("media.submitAudioFailed"));
         setErrorCode("unknown");
       }
       setPhase("failed");
@@ -167,13 +170,13 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder={
-              isTts ? "Text to speak…" : "Describe the music to generate…"
+              isTts ? t("media.tts.placeholder") : t("media.music.placeholder")
             }
             className="w-full resize-none rounded-lg border border-border bg-bg-base px-3 py-2 text-[15px] text-text-primary placeholder:text-text-placeholder focus:border-border-strong focus:outline-none"
           />
           {isTts ? (
             <label className="flex items-center gap-2 text-sm text-text-secondary">
-              <span>Voice</span>
+              <span>{t("media.voice")}</span>
               <select
                 value={voiceId}
                 onChange={(e) => setVoiceId(e.target.value)}
@@ -181,14 +184,14 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
               >
                 {FALLBACK_VOICES.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.label}
+                    {t(v.labelKey)}
                   </option>
                 ))}
               </select>
             </label>
           ) : (
             <label className="flex items-center gap-2 text-sm text-text-secondary">
-              <span>Duration</span>
+              <span>{t("media.duration")}</span>
               <input
                 type="range"
                 min={10}
@@ -221,7 +224,11 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
             disabled={!prompt.trim()}
             className="self-end rounded-full bg-emerald-500 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {phase === "failed" ? "Retry" : isTts ? "Generate speech" : "Generate music"}
+            {phase === "failed"
+              ? t("common.retry")
+              : isTts
+                ? t("media.generateSpeech")
+                : t("media.generateMusic")}
           </button>
         </>
       ) : null}
@@ -229,7 +236,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
       {busy ? (
         <div className="flex items-center gap-3 text-sm text-text-secondary">
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
-          {isTts ? "Generating speech…" : "Generating music…"}
+          {isTts ? t("media.generatingSpeech") : t("media.generatingMusic")}
           {job?.progress_pct != null ? <span>{job.progress_pct}%</span> : null}
         </div>
       ) : null}
@@ -250,12 +257,12 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
             <audio src={outputUrl} controls className="w-full max-w-[480px]" />
           ) : outputFailed ? (
             <p className="text-sm text-status-danger">
-              Couldn&apos;t load the generated audio. Try again.
+              {t("media.loadAudioFailed")}
             </p>
           ) : (
             <div
               className="h-12 w-full max-w-[480px] animate-pulse rounded-lg bg-bg-elevated"
-              aria-label="Loading generated audio"
+              aria-label={t("media.loadingAudio")}
             />
           )}
           {outputUrl && job.provenance ? <ProvenanceBadge provenance={job.provenance} /> : null}
@@ -264,7 +271,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
             onClick={reset}
             className="rounded-full border border-border px-4 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Generate another
+            {t("media.generateAnother")}
           </button>
         </div>
       ) : null}
