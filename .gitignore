@@ -112,3 +112,10 @@ test-results/
 
 # Local pre-fix backup snapshots (multi-GB) - never commit
 _retired-*/
+
+# AI-workflow scratch files - keep out of the repo (2026-08-12 hygiene pass)
+PROMPT*.md
+*_sandbox_*
+scratchpad/
+*.patch
+!reports/**/*.patch
