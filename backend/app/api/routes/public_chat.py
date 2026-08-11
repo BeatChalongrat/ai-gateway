@@ -1168,6 +1168,15 @@ async def chat_completions(
             headers={"Cache-Control": "no-cache", "X-Request-Id": ctx.request_id or ""},
         )
 
+    # Billing-safety hook — ``event_generator`` registers its
+    # ``_finalize_stream`` closure here once the provider stream is
+    # about to start (i.e. once there can be something to bill), so the
+    # ``_billing_safe_stream`` wrapper below can settle the ledger on
+    # exit paths that never reach the generator's own finalize call.
+    # Empty list = stream never got to the provider loop = nothing to
+    # bill.
+    _finalize_hook: list = []
+
     async def event_generator():
         # ``nonlocal`` so the in-generator fallback can rebind the
         # flags captured by the StreamingResponse headers and the
@@ -1708,7 +1717,14 @@ async def chat_completions(
             yield _emit_fallback_info()
             _fallback_notice_emitted = True
 
-        def _finalize_stream(client_disconnected: bool):
+        def _finalize_stream(
+            client_disconnected: bool, reason: str = "completed"
+        ):
+            # MUST stay fully synchronous (sync DB sessions, no awaits):
+            # it is called from the disconnect/cancel exit paths of the
+            # billing-safe wrapper, where an await point would let the
+            # task's pending cancellation interrupt the ledger write.
+            # Sync code inside a cancelled task runs to completion.
             nonlocal _stream_finalized, ai_to_service_masked, full_text
             if _stream_finalized:
                 return
@@ -1718,6 +1734,14 @@ async def chat_completions(
                     log.info(
                         "stream_client_disconnected",
                         request_id=ctx.request_id or "",
+                    )
+                elif reason != "completed":
+                    # Fallback-exhausted / unexpected error after the
+                    # stream started — bill whatever reached the wire.
+                    log.warning(
+                        "stream_partial_fail",
+                        request_id=ctx.request_id or "",
+                        reason=reason,
                     )
                 # Capture DLP trace + build the response-enforcement summary
                 # from the per-chunk match actions we accumulated. overall_action
@@ -1828,6 +1852,17 @@ async def chat_completions(
                         cost_display=_cost_info["display"],
                         reasoning_tokens=_stream_reasoning_tok or None,
                     )
+                elif (
+                    client_disconnected or reason != "completed"
+                ) and not full_text:
+                    # Aborted / failed before ANY content reached the
+                    # wire, and the provider never reported usage:
+                    # nothing billable. Mirrors the non-stream failure
+                    # posture (failed request = no charge). The
+                    # request_log row still lands below (0 tokens) so
+                    # the audit trail records the attempt;
+                    # deduct_portal_credit no-ops on zero cost+tokens.
+                    usage = UsageInfo()
                 else:
                     usage = orchestrator.usage_service.estimate(
                         payload=payload,
@@ -1864,7 +1899,16 @@ async def chat_completions(
                             # resolves the OpenRouter fallback "auto" sentinel
                             # so usage aggregation never shows "auto" rows.
                             model=resolved_log_model(route.model_name, final_model),
-                            status=RequestStatus.SUCCESS,
+                            # Partial-fail exits (fallback chain exhausted /
+                            # unexpected error mid-stream) log as
+                            # provider_error; a client disconnect still logs
+                            # success — the content up to the cut WAS
+                            # delivered and billed.
+                            status=(
+                                RequestStatus.PROVIDER_ERROR
+                                if reason == "stream_partial_fail"
+                                else RequestStatus.SUCCESS
+                            ),
                             policy_action=overall_action.name.lower(),
                             policy_profile_id=profile.profile_id,
                             latency_ms=latency_ms,
@@ -1963,6 +2007,13 @@ async def chat_completions(
                     "stream_finalize_failed",
                     **_safe_exc(exc, "stream_finalize"),
                 )
+
+        # From here the provider stream starts consuming (billable)
+        # tokens — register the finalize closure so the billing-safe
+        # wrapper can settle on ANY exit. The ``_stream_finalized``
+        # guard keeps the call idempotent, so the normal path's own
+        # finalize below never double-charges.
+        _finalize_hook.append(_finalize_stream)
 
         try:
             while True:
@@ -2792,6 +2843,44 @@ async def chat_completions(
     # fallback (when pre-check misses and the first chunk fails) will
     # serve the right body but leave these headers describing the
     # primary — accept as a documented limitation; the body never lies.
+    async def _billing_safe_stream():
+        # Billing-safety wrapper. The generator's own finalize call
+        # covers the normal completion path, but three exit shapes used
+        # to skip billing entirely (no ledger write, no request_log, no
+        # log line — the tokens the provider already produced went
+        # unbilled):
+        #
+        #   1. Real client disconnect under uvicorn/starlette cancels
+        #      the response task with ``asyncio.CancelledError`` at the
+        #      generator's current await point — the generator's
+        #      ``except GeneratorExit`` never sees it.
+        #   2. ``GeneratorExit`` delivered while suspended at a yield
+        #      OUTSIDE the provider loop's try block (tail flush,
+        #      tool-call emit, final frames).
+        #   3. The fallback-exhausted paths ``return`` after emitting
+        #      an error frame, without finalizing.
+        #
+        # ``_finalize_stream`` is fully synchronous, so calling it here
+        # runs to DB commit even inside a cancelled task (cancellation
+        # can only interrupt at an await point) — no asyncio.shield
+        # needed. Cancellation is re-raised, never swallowed, so task
+        # teardown proceeds normally.
+        _gen = event_generator()
+        try:
+            async for _frame in _gen:
+                yield _frame
+        except (GeneratorExit, asyncio.CancelledError):
+            for _fin in _finalize_hook:
+                _fin(client_disconnected=True)
+            raise
+        finally:
+            # Safety net for exit shape 3 and any unexpected error:
+            # idempotent (``_stream_finalized`` guard), so this no-ops
+            # when the stream already finalized normally or via the
+            # disconnect handler above.
+            for _fin in _finalize_hook:
+                _fin(client_disconnected=False, reason="stream_partial_fail")
+
     _stream_headers = {
         "Cache-Control": "no-cache",
         "X-Request-Id": ctx.request_id or "",
@@ -2802,7 +2891,7 @@ async def chat_completions(
     if _stream_fallback_used:
         _stream_headers["X-Gateway-Fallback"] = "true"
     return StreamingResponse(
-        event_generator(),
+        _billing_safe_stream(),
         media_type="text/event-stream",
         headers=_stream_headers,
     )

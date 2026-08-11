@@ -238,15 +238,13 @@ class Settings(BaseSettings):
     openai_whisper_model: str = "whisper-1"
     openai_tts_model: str = "tts-1"
 
-    # Usage-display credit conversion (USAGE_CREDITS_PER_USD env).
-    # The portal's per-model usage breakdown converts each model's real
-    # logged cost (request_logs.estimated_cost_usd) into display
-    # credits: credits = cost_usd * this rate. 3,000,000/USD anchors
-    # 1 credit ≈ 1 blended gpt-4o-mini token, so budget models burn
-    # ~1 credit/token and premium models the ~10–30x their pricing
-    # implies. DISPLAY ONLY — the credit_balance debit stays 1
-    # credit = 1 token (see credit_service.debit) until that change
-    # is explicitly approved.
+    # USD→credit conversion rate (USAGE_CREDITS_PER_USD env). THE rate
+    # behind both the balance DEDUCTION and the usage display — see
+    # ``credit_service.credits_for_cost``, the single conversion:
+    #     credits = ceil(cost_usd * tenant_markup * this rate), min 1
+    # per billable request. 3,000,000/USD anchors 1 credit ≈ 1 blended
+    # gpt-4o-mini token, so budget models burn ~1 credit/token and
+    # premium models the ~10–30x their pricing implies.
     usage_credits_per_usd: int = 3_000_000
 
     # Video generation (Sprint 2A). Feature-flagged OFF by default; the
