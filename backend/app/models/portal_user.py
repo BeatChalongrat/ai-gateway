@@ -17,12 +17,16 @@ class PortalUserORM(Base):
     #   credits = prepaid balance (the thing the user buys / holds)
     #            — shown as "Available Credits", sidebar "N credits",
     #              Billing "Current Balance".
-    #   tokens  = LLM metering unit (the thing consumed per request)
-    #            — shown as "Tokens Used", Usage page totals.
-    # One credit debits one token. credit_used is the lifetime sum of
-    # debits and must stay in lockstep with SUM(request_logs.total_tokens)
-    # for the same user; credit_service.debit() writes both in one
-    # transaction to preserve that invariant.
+    #   tokens  = LLM metering unit (the raw provider counts, kept on
+    #             request_logs for analytics) — shown as "Tokens Used",
+    #             Usage page totals.
+    # Deduction is COST-BASED, not token-lockstep: each billable
+    # request debits ceil(cost_usd × tenant_markup ×
+    # settings.usage_credits_per_usd), min 1 — see
+    # ``credit_service.credits_for_cost`` +
+    # ``portal_credit_check.deduct_portal_credit``. credit_used is the
+    # lifetime sum of those debits (after clamp-at-zero), written in
+    # the same transaction as the credit_transactions ledger row.
     credit_balance: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default="0"
     )

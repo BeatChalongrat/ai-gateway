@@ -11,10 +11,14 @@ package handler
 // responses into one usage payload. No usage data is duplicated in
 // chat-edge.
 //
-// Credit semantics (portal convention): 1 credit = 1 token.
-// credit_balance is the REMAINING prepaid balance, credit_used the
-// lifetime debit sum, total allotment = balance + used. Credits are a
-// lifetime pool — there is no reset date.
+// Credit semantics (portal convention): deduction is cost-based —
+// each billable request debits ceil(cost_usd × tenant_markup ×
+// USAGE_CREDITS_PER_USD), min 1 (see the gateway's
+// credit_service.credits_for_cost; 3,000,000/USD anchors 1 credit ≈ 1
+// blended budget-tier token). credit_balance is the REMAINING prepaid
+// balance, credit_used the lifetime debit sum, total allotment =
+// balance + used. Credits are a lifetime pool — there is no reset
+// date.
 
 import (
 	"context"
