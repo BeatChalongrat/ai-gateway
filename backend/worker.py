@@ -4,7 +4,7 @@ replicas.
 
 INERT by default: this module is never imported by the web app. It runs only
 as the `worker` container under the compose "scaling" profile. See
-SCALING_ACTIVATION_RUNBOOK.md for activation (and removing the equivalent jobs
+docs/SCALING_ACTIVATION_RUNBOOK.md for activation (and removing the equivalent jobs
 from the web lifespan so they don't double-run).
 
 Why a SYNC worker on a DIRECT Postgres connection:
