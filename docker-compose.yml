@@ -679,7 +679,7 @@ services:
   # Adding them here wires up NOTHING on its own. Full ACTIVATION (repoint
   # backend -> pgbouncer, disable prepared statements, bypass migrations,
   # remove the equivalent lifespan jobs, rebuild admin-ui base URL) is in
-  # SCALING_ACTIVATION_RUNBOOK.md.
+  # docs/SCALING_ACTIVATION_RUNBOOK.md.
   pgbouncer:
     profiles: ["scaling"]
     image: edoburu/pgbouncer:1.22.0
