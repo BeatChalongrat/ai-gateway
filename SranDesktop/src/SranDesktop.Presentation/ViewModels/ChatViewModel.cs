@@ -764,6 +764,15 @@ public partial class ChatViewModel : ObservableObject
     /// Incoming/remote rows never raise this, so they never move the view.</summary>
     public event EventHandler? UserTurnStarted;
 
+    /// <summary>P3 diagnostics — the anchor lives in ChatView (no logger of
+    /// its own), so the view routes its trace through this VM's existing
+    /// Serilog pipeline. Debug level: on in the shipped config
+    /// (AppHostBuilder MinimumLevel.Debug), filterable out in stricter ones.
+    /// Every stage logs inputs AND outputs so one log file pinpoints the
+    /// failing step without a live repro.</summary>
+    internal void TraceAnchor(string stage, string detail)
+        => _logger.LogDebug("[anchor] {Stage}: {Detail}", stage, detail);
+
     /// <summary>Raised to ask the view to focus the composer (e.g. after a suggestion chip).</summary>
     public event EventHandler? ComposerFocusRequested;
 
@@ -1733,6 +1742,7 @@ public partial class ChatViewModel : ObservableObject
         // otherwise ScrollToEnd. Edit-resend and regenerate funnel through
         // SendAsync too (ForkAndResendAsync), so one raise site covers all
         // of the user's own sends — and nothing else.
+        TraceAnchor("raise", $"UserTurnStarted messages={Messages.Count} subscribers={(UserTurnStarted is null ? "NONE" : "yes")}");
         UserTurnStarted?.Invoke(this, EventArgs.Empty);
         MessageActivity?.Invoke(this, EventArgs.Empty);
 

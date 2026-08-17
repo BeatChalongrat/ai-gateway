@@ -91,4 +91,52 @@ public class TurnAnchorMathTests
         TurnAnchorMath.ShouldResumeFollow(contentHeight: 2536, offset: 1936, Viewport)
             .Should().BeTrue();
     }
+
+    // ── IsExtentReady (offset-coercion guard — the P3-desktop bug) ──────────
+
+    [Fact]
+    public void ExtentNotReady_WhenTheSpacerHasNotEnteredLayoutYet()
+    {
+        // The original failure: extent still 2100 while the anchor needs
+        // 1936+600 — a ScrollToVerticalOffset(1936) would be coerced short.
+        TurnAnchorMath.IsExtentReady(extentHeight: 2100, target: 1936, Viewport)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ExtentReady_OnceTheSpacerIsMeasuredIn()
+    {
+        TurnAnchorMath.IsExtentReady(extentHeight: 2536, target: 1936, Viewport)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void ExtentReady_ForATargetDeepInsideALongThread()
+    {
+        TurnAnchorMath.IsExtentReady(extentHeight: 10000, target: 5000, Viewport)
+            .Should().BeTrue();
+    }
+
+    // ── IsRecentTick (programmatic-vs-user ScrollChanged) ───────────────────
+
+    [Fact]
+    public void ScrollInsideTheGraceWindow_IsOurs()
+    {
+        TurnAnchorMath.IsRecentTick(nowTick: 1_000_100, issuedTick: 1_000_000, graceMs: 150)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void ScrollAfterTheGraceWindow_IsTheUsers()
+    {
+        TurnAnchorMath.IsRecentTick(nowTick: 1_000_200, issuedTick: 1_000_000, graceMs: 150)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void NoIssuedScroll_IsAlwaysTheUsers()
+    {
+        TurnAnchorMath.IsRecentTick(nowTick: 42, issuedTick: 0, graceMs: 150)
+            .Should().BeFalse();
+    }
 }

@@ -118,6 +118,17 @@ public partial class MessageViewModel : ObservableObject
     [ObservableProperty]
     private string? _statusText;
 
+    /// <summary>P3 — trailing turn-anchor spacer, in pixels. Non-zero ONLY on
+    /// the last message of an anchored turn: the ChatView template renders it
+    /// as an empty Border below the bubble, so the space is part of the
+    /// VirtualizingStackPanel's SCROLLABLE EXTENT (unlike ListBox.Padding,
+    /// which template-binds to the inner ScrollViewer's viewport chrome and
+    /// never scrolls — the P3 desktop bug). Pure geometry, never content;
+    /// lives on the VM so container recycling can't reset it. ChatView owns
+    /// the value (assign / shrink / clear).</summary>
+    [ObservableProperty]
+    private double _turnSpacerHeight;
+
     // ── Long user-message collapse (P2) ─────────────────────────────────────
     // The threshold decision and expansion state live on the VIEW MODEL, not
     // the visual tree: MessageList containers recycle, so visual-only state

@@ -37,4 +37,23 @@ public static class TurnAnchorMath
     /// </summary>
     public static bool ShouldResumeFollow(double contentHeight, double offset, double viewportHeight)
         => contentHeight >= offset + viewportHeight - 0.5;
+
+    /// <summary>
+    /// Whether the layout has caught up with the spacer: the extent must
+    /// reach at least <paramref name="target"/> + viewport, or a
+    /// ScrollToVerticalOffset(target) would be silently coerced short by the
+    /// panel — the failure mode behind the "view does not move at all" bug.
+    /// Checked after UpdateLayout; a false answer means retry next pass.
+    /// </summary>
+    public static bool IsExtentReady(double extentHeight, double target, double viewportHeight)
+        => extentHeight >= target + viewportHeight - 0.5;
+
+    /// <summary>
+    /// Whether a ScrollChanged was (very probably) caused by our own
+    /// programmatic offset write rather than the user: the write stamped
+    /// <paramref name="issuedTick"/>, and anything inside the grace window is
+    /// treated as ours. User scrolls outside the window always win.
+    /// </summary>
+    public static bool IsRecentTick(long nowTick, long issuedTick, int graceMs)
+        => issuedTick != 0 && nowTick - issuedTick < graceMs;
 }
