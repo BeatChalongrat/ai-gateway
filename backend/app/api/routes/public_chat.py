@@ -2336,6 +2336,21 @@ async def chat_completions(
                     if not isinstance(stream_exc, _GwErr) or not _is_fallback_eligible(
                         stream_exc
                     ):
+                        # Log the REAL upstream error (status/provider/body from
+                        # exc.details — the same detail already shipped in the
+                        # SSE frame). Until now the only server-side trace of
+                        # this terminal class was the finalize hook's bare
+                        # "stream_partial_fail", which made e.g. the GPT-5
+                        # ``max_tokens`` 400 invisible in production logs.
+                        log.warning(
+                            "stream_terminal_provider_error",
+                            request_id=ctx.request_id or "",
+                            provider=route.provider_name,
+                            model=route.model_name,
+                            error_code=getattr(stream_exc, "code", "provider_error"),
+                            error=str(stream_exc)[:300],
+                            details=dict(getattr(stream_exc, "details", None) or {}),
+                        )
                         yield _emit_error(
                             code=getattr(stream_exc, "code", "provider_error"),
                             message="Model unavailable, please try again",
