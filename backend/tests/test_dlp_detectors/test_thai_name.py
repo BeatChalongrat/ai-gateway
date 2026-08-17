@@ -52,3 +52,53 @@ class TestThaiNameNegative:
 
     def test_common_noun(self):
         assert "thai_name" not in detector_names_for("ธนาคาร")
+
+
+class TestKhunPlusVerbNotAName:
+    """``คุณ`` fused to a verb/function word is a sentence, not a name.
+
+    Regression for the live bug where "คุณทำอะไรได้บ้าง" was masked
+    whole as ``<<PERSON_A>>`` and the model echoed the placeholder
+    back ("คุณ คุณทำอะไรได้บ้าง ต้องการความช่วยเหลืออะไรครับ?").
+    """
+
+    def test_khun_tham(self):
+        assert "thai_name" not in detector_names_for("คุณทำอะไรได้บ้าง")
+
+    def test_khun_pen(self):
+        assert "thai_name" not in detector_names_for("คุณเป็นใคร")
+
+    def test_khun_mee(self):
+        assert "thai_name" not in detector_names_for("คุณมีความสามารถอะไร")
+
+    def test_khun_chuay(self):
+        assert "thai_name" not in detector_names_for("คุณช่วยอะไรได้บ้าง")
+
+    def test_khun_keu(self):
+        assert "thai_name" not in detector_names_for("คุณคือใคร")
+
+    def test_khun_jam_dai(self):
+        assert "thai_name" not in detector_names_for("คุณจำได้มั้ยว่าฉันชื่ออะไร")
+
+    def test_khun_in_longer_sentence(self):
+        assert "thai_name" not in detector_names_for(
+            "สวัสดีครับ คุณต้องการความช่วยเหลืออะไร"
+        )
+
+
+class TestKhunPlusRealNameStillMasks:
+    """The verb guard must not under-mask genuine ``คุณ + ชื่อ``."""
+
+    def test_khun_somchai_no_surname(self):
+        assert "thai_name" in detector_names_for("คุณสมชาย")
+
+    def test_khun_somying_with_surname(self):
+        assert "thai_name" in detector_names_for("คุณสมหญิง ใจดี")
+
+    def test_khun_meechai_gated_word_is_still_a_name(self):
+        # มี begins real given names — the ``มี`` guard only fires on
+        # a following function word, so มีชัย must still mask.
+        assert "thai_name" in detector_names_for("คุณมีชัย")
+
+    def test_khun_jamlong_gated_word_is_still_a_name(self):
+        assert "thai_name" in detector_names_for("คุณจำลอง")

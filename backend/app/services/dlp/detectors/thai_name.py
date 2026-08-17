@@ -75,7 +75,23 @@ _FALSE_POSITIVE_RE = re.compile(
     r"นายจ้าง|นายพราน|นายอำเภอ|นายด่าน|นายทุน|นายประกัน|นายท้าย|"
     r"นางแบบ|นางงาม|นางฟ้า|นางเอก|นางพยาบาล|นางรำ|นางสนม|"
     rf"คุณ(?:ภาพ|ค่า|สมบัติ|ธรรม|ประโยชน์|วุฒิ|ลักษณะ){_THAI_CHAR}*|"
-    r"คุณ(?:พ่อ|แม่|หมอ|ครู|นาย|ยาย|ตา|ป้า|น้า|อา|ลุง|พี่|น้อง|หนู)"
+    r"คุณ(?:พ่อ|แม่|หมอ|ครู|นาย|ยาย|ตา|ป้า|น้า|อา|ลุง|พี่|น้อง|หนู)|"
+    # ``คุณ`` fused directly to a verb / function word (no space) is a
+    # sentence addressed at the listener ("คุณทำอะไรได้บ้าง"), not a
+    # name. Only words that never begin a Thai given name are listed
+    # bare; ``มี`` and ``จำ`` DO begin real names (มีชัย, มีนา,
+    # จำลอง, จำเนียร) so they are gated on a following function word
+    # to keep ``คุณมีชัย`` / ``คุณจำลอง`` masked.
+    # SARA AM caveat: the scan runs on NFKC-normalized text where
+    # ``ำ`` (U+0E33) decomposes to ``ํ``+``า`` (U+0E4D U+0E32), so every
+    # word containing ำ must accept both spellings or the guard never
+    # fires through the real pipeline.
+    r"คุณ(?:ท(?:ำ|ํา)|เป็น|จะ|ช่วย|อยาก|คือ|ชอบ|คิด|พูด|รู้|เข้าใจ|ได้|"
+    r"ต้องการ|ต้อง|ควร|ก(?:ำ|ํา)ลัง|ไม่|อยู่|ใช้|เคย|สามารถ|ให้|บอก|ถาม|"
+    r"ลอง|กรุณา|โปรด|เห็น|"
+    r"ว่า(?:ยังไง|อย่างไร|ไง|อะไร|จะ|มัน|เรา|ผม|ฉัน|ดี)|"
+    r"มี(?:ความ|อะไร|ใคร|กี่|ข้อ|ค(?:ำ|ํา)|วิธี|เวลา|ปัญหา|หน้าที่)|"
+    r"จ(?:ำ|ํา)(?:ได้|ไม่|อะไร|ฉัน|ผม|เรา|ชื่อ))"
 )
 
 # Words that can trail a name but are NOT surnames — when the optional
