@@ -15,6 +15,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Message } from "@/lib/types";
 import { useT } from "@/lib/i18n";
 import { recallScroll, rememberScroll } from "@/lib/scrollMemory";
+import {
+  ANCHOR_PREVIOUS_PEEK_PX,
+  anchorTarget,
+  shouldResumeFollow,
+  spacerNeeded,
+} from "@/lib/turnAnchor";
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
 import { toolActivityLabelKey } from "./ToolActivityIndicator";
@@ -59,10 +65,83 @@ export function ChatThread({
   const lastLastContent = useRef("");
   const autoScrolling = useRef(false);
 
+  // ── P3 — send-time turn anchoring ────────────────────────────
+  // On the user's own send, the new turn scrolls near the viewport top
+  // (ANCHOR_PREVIOUS_PEEK_PX of the previous message peeking above it)
+  // and a dynamic bottom spacer makes that reachable in short threads.
+  // `active` is the hold phase: while true, streaming does NOT drag the
+  // view; once the reply fills the viewport (shouldResumeFollow) the
+  // pre-existing stick-to-bottom takes over. Any real user scroll
+  // cancels the hold (see onScroll).
+  const anchorActive = useRef(false);
+  const lastUserMsgId = useRef<string | null>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
+
+  const spacerPx = () =>
+    spacerRef.current ? parseFloat(spacerRef.current.style.height) || 0 : 0;
+  const setSpacerPx = (px: number) => {
+    // Imperative on purpose: sizing the spacer must land in the same
+    // layout pass as the scrollTop write, and a React state round-trip
+    // per streamed token would be wasted renders.
+    if (spacerRef.current) spacerRef.current.style.height = `${Math.round(px)}px`;
+  };
+
+  /** Content offset of a row's top (getBoundingClientRect so the
+   *  virtualizer's translateY positioning is included). */
+  const rowTopOf = (row: HTMLElement, el: HTMLElement) =>
+    row.getBoundingClientRect().top -
+    el.getBoundingClientRect().top +
+    el.scrollTop;
+
+  /** Scroll the sent message to the anchor position and size the spacer
+   *  so the position is reachable. `tolerance` lets the late-measure
+   *  re-pass skip when the first pass already landed close enough.
+   *  In a virtualized thread the appended row may not be realized yet
+   *  (user was scrolled far up) — jump to the tail first so the
+   *  virtualizer renders it, then retry for a few frames. */
+  function applyAnchor(userIdx: number, tolerance = 0, retries = 5) {
+    const el = scrollerRef.current;
+    if (!el) return false;
+    const row = el.querySelector<HTMLElement>(`[data-msg-index="${userIdx}"]`);
+    if (!row) {
+      if (retries <= 0) return false;
+      autoScrolling.current = true;
+      el.scrollTop = el.scrollHeight;
+      requestAnimationFrame(() => {
+        autoScrolling.current = false;
+        if (anchorActive.current) applyAnchor(userIdx, 8, retries - 1);
+      });
+      return true;
+    }
+    const prevRow = el.querySelector<HTMLElement>(
+      `[data-msg-index="${userIdx - 1}"]`,
+    );
+    const target = anchorTarget(
+      rowTopOf(row, el),
+      prevRow ? rowTopOf(prevRow, el) : null,
+      ANCHOR_PREVIOUS_PEEK_PX,
+    );
+    if (Math.abs(el.scrollTop - target) <= tolerance) return true;
+    const contentH = el.scrollHeight - spacerPx();
+    setSpacerPx(spacerNeeded(target, el.clientHeight, contentH));
+    autoScrolling.current = true;
+    // Instant assignment — same idiom as every other effect-driven snap
+    // in this file, so prefers-reduced-motion needs no special-casing.
+    el.scrollTop = target;
+    requestAnimationFrame(() => {
+      autoScrolling.current = false;
+    });
+    return true;
+  }
+
   // Phase 7 — pending scroll restore for the conversation just opened.
   // null = no saved position (keep the default bottom-anchored view).
   const pendingRestore = useRef<number | null>(null);
   useLayoutEffect(() => {
+    // P3 — a turn anchor never crosses conversations.
+    anchorActive.current = false;
+    lastUserMsgId.current = null;
+    if (spacerRef.current) spacerRef.current.style.height = "0px";
     pendingRestore.current = recallScroll(convId);
     // Force the message effect below to treat this as a fresh render so
     // the restore (or the default scroll-to-bottom) actually fires.
@@ -103,11 +182,31 @@ export function ChatThread({
     const el = scrollerRef.current;
     if (!el) return;
     const last = messages[messages.length - 1];
-    const lengthGrew = messages.length !== lastLen.current;
+    const prevLen = lastLen.current;
+    const lengthGrew = messages.length !== prevLen;
     const contentGrew = last?.content !== lastLastContent.current;
     if (!lengthGrew && !contentGrew) return;
     lastLen.current = messages.length;
     lastLastContent.current = last?.content ?? "";
+
+    // P3 — detect the user's OWN send: the last user message carries a
+    // new id AND the list grew during this conversation's lifetime.
+    // A remote/incoming message never satisfies this (no new local user
+    // row), a load-earlier prepend keeps the last user id, and the
+    // special second arm covers the very first turn of a just-created
+    // conversation, where the thread mounts already mid-stream with
+    // nothing to restore.
+    const userIdx = lastUserIndex(messages);
+    const userMsg = userIdx >= 0 ? messages[userIdx] : null;
+    const seenUserId = lastUserMsgId.current;
+    lastUserMsgId.current = userMsg?.id ?? null;
+    const isOwnSend =
+      userMsg !== null &&
+      userMsg.id !== seenUserId &&
+      ((lengthGrew && prevLen > 0) ||
+        (prevLen === -1 &&
+          Boolean(last?.isStreaming) &&
+          pendingRestore.current === null));
 
     // Phase 7 — scroll memory. On the first render after switching to a
     // conversation we've seen before, restore where the user was
@@ -124,6 +223,44 @@ export function ChatThread({
       requestAnimationFrame(() => {
         autoScrolling.current = false;
       });
+      return;
+    }
+
+    // P3 — anchor the user's own turn near the top, unconditionally:
+    // it fires pinned-to-bottom, scrolled-up, or position-restored
+    // alike (deliberately overriding "the reading position wins" for
+    // one's own send only).
+    if (isOwnSend) {
+      anchorActive.current = true;
+      if (applyAnchor(userIdx)) {
+        setAutoStick(false); // follow is suspended while the hold lasts
+        setPendingNew(false); // one's own send never raises the pill
+        // Late-measure re-pass: virtualized rows start at the 200px
+        // estimate; re-derive the target next frame once real
+        // measurements land so the anchor sits where it should.
+        requestAnimationFrame(() => {
+          if (anchorActive.current) applyAnchor(userIdx, 8);
+        });
+        return;
+      }
+      anchorActive.current = false; // row unreachable — old behaviour
+    }
+
+    if (anchorActive.current) {
+      // ── Phase 1: HOLD. The reply streams into the space below the
+      // anchor; the view does not move. The spacer shrinks as real
+      // content replaces it (never below what the current scroll
+      // position needs, so nothing ever clamps or jumps).
+      const contentH = el.scrollHeight - spacerPx();
+      const needed = spacerNeeded(el.scrollTop, el.clientHeight, contentH);
+      if (needed < spacerPx()) setSpacerPx(needed);
+      // ── Phase 2 handover: content reached the viewport bottom →
+      // drop the hold and let the pre-existing stick-to-bottom follow
+      // from here (shouldResumeFollow is THE policy line to tune).
+      if (shouldResumeFollow(contentH, el.scrollTop, el.clientHeight)) {
+        anchorActive.current = false;
+        setAutoStick(true);
+      }
       return;
     }
 
@@ -191,6 +328,16 @@ export function ChatThread({
     if (anyStreaming) return;
     const el = scrollerRef.current;
     if (!el) return;
+    // P3 — the turn ended while still anchored (short reply): keep the
+    // view exactly where it is, drop the hold, and trim the spacer to
+    // the minimum the current position needs. Never bottom-snap an
+    // anchored turn.
+    if (anchorActive.current) {
+      anchorActive.current = false;
+      const contentH = el.scrollHeight - spacerPx();
+      setSpacerPx(spacerNeeded(el.scrollTop, el.clientHeight, contentH));
+      return;
+    }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distance < NEAR_BOTTOM_PX) {
       autoScrolling.current = true;
@@ -203,6 +350,10 @@ export function ChatThread({
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     if (autoScrolling.current) return;
+    // P3 — the user always wins: any real scroll cancels the anchor
+    // hold for this turn (the existing autoStick logic below then
+    // decides whether to follow, exactly as before).
+    anchorActive.current = false;
     const el = e.currentTarget;
     // Phase 7 — remember where the user is, per conversation.
     rememberScroll(convId, el.scrollTop);
@@ -288,6 +439,18 @@ export function ChatThread({
             </>
           )}
         </div>
+        {/* P3 — turn-anchor spacer. Pure geometry, never content: it is
+            aria-hidden, carries no text (copy/export read the store),
+            sits OUTSIDE the virtualizer's container so row indices and
+            measurements are untouched, and its height is driven
+            imperatively by the anchor logic (0 outside an anchored
+            turn, shrinking to 0 as the reply streams in). */}
+        <div
+          ref={spacerRef}
+          aria-hidden="true"
+          data-testid="turn-spacer"
+          style={{ height: 0 }}
+        />
       </div>
 
       {pendingNew && !autoStick ? (
@@ -412,7 +575,10 @@ function renderRow(m: Message, i: number, props: InnerProps) {
   const prev = messages[i - 1];
   const extraGap = prev && prev.role !== m.role ? "mt-2" : "";
   return (
-    <div className={extraGap}>
+    // data-msg-index — the P3 anchor locates rows by index in BOTH
+    // render modes (getBoundingClientRect, so the virtualizer's
+    // translateY is included).
+    <div className={extraGap} data-msg-index={i}>
       <MessageBubble
         convId={convId}
         message={m}
@@ -482,6 +648,13 @@ function LoadEarlierBar({
 function lastAssistantIndex(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant") return i;
+  }
+  return -1;
+}
+
+function lastUserIndex(messages: Message[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return i;
   }
   return -1;
 }
