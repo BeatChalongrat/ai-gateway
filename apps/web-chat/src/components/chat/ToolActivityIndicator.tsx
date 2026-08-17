@@ -48,7 +48,7 @@ export function ToolActivityIndicator({
           const key = toolActivityLabelKey(a.tool);
           const label = key ? t(key) : t("tool.generic", { tool: a.tool });
           return (
-            <CatIndicator key={a.id} labelKey="reasoning.thinking" label={label} />
+            <CatIndicator key={a.id} labelKey="gen.working" label={label} />
           );
         }
         const doneKey = toolActivityDoneKey(a.tool);

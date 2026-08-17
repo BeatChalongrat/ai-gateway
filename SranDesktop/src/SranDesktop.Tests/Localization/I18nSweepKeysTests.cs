@@ -16,6 +16,7 @@ public class I18nSweepKeysTests
     [InlineData("agent.waitingPermission")]
     [InlineData("voice.unavailable")]
     [InlineData("msg.thinking")]
+    [InlineData("msg.working")]
     [InlineData("msg.thoughtFor")]
     [InlineData("msg.tokens")]
     [InlineData("settings.title")]

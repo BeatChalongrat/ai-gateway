@@ -716,10 +716,12 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
-                <!-- fallback before any phase marker: default to "Thinking…"
-                     (web parity — CatIndicator's reasoning.thinking default) -->
+                <!-- fallback before any phase marker: neutral "Working…"
+                     (web parity — CatIndicator's gen.working default).
+                     "Thinking…" is reserved for the real analysis phase
+                     (StatusText) and the reasoning Expander. -->
                 <TextBlock x:Name="CatStatusFallback"
-                           Text="{loc:T msg.thinking}"
+                           Text="{loc:T msg.working}"
                            VerticalAlignment="Center" FontStyle="Italic">
                     <TextBlock.Foreground>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,0" SpreadMethod="Repeat">

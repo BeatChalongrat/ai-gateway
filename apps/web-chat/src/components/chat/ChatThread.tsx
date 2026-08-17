@@ -299,7 +299,7 @@ export function ChatThread({
       ? (`tool:${runningTool.tool}` as const)
       : streamingMsg.is_searching
         ? ("gen.searching" as const)
-        : ("reasoning.thinking" as const)
+        : ("gen.working" as const)
     : null;
   const [announcement, setAnnouncement] = useState("");
   const prevPhaseRef = useRef<string | null>(null);
@@ -314,7 +314,7 @@ export function ChatThread({
           const key = toolActivityLabelKey(tool);
           setAnnouncement(key ? t(key) : t("tool.generic", { tool }));
         } else {
-          setAnnouncement(t(phaseKey as "gen.searching" | "reasoning.thinking"));
+          setAnnouncement(t(phaseKey as "gen.searching" | "gen.working"));
         }
       }
     } else if (wasStreamingRef.current) {

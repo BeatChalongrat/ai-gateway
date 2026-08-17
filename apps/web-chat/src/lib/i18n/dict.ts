@@ -521,6 +521,11 @@ export const en = {
   "error.serviceUnavailable": "AI service is temporarily unavailable.",
 
   // ── Phase-2 i18n sweep — progress indicators ────────────────
+  // First-token wait label. Deliberately NOT "Thinking…": that word is
+  // reserved for real reasoning (reasoning.thinking, ThinkingBlock) —
+  // this state is just "stream open, nothing visible yet" and fires
+  // for every model, reasoning or not.
+  "gen.working": "Working…",
   "gen.searching": "Searching the web...",
   "gen.image": "Generating image...",
   "gen.video": "Generating video...",
@@ -1366,6 +1371,7 @@ const th: Record<DictKey, string> = {
   "error.serviceUnavailable": "บริการ AI ไม่พร้อมใช้งานชั่วคราว",
 
   // ── Phase-2 i18n sweep — progress indicators ────────────────
+  "gen.working": "กำลังประมวลผล…",
   "gen.searching": "กำลังค้นหาข้อมูล...",
   "gen.image": "กำลังสร้างรูปภาพ...",
   "gen.video": "กำลังสร้างวิดีโอ...",
