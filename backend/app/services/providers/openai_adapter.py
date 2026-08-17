@@ -10,6 +10,7 @@ import json
 from typing import TYPE_CHECKING, AsyncIterator
 
 import httpx
+import structlog
 
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk, ProviderUsage
@@ -22,7 +23,40 @@ from app.services.providers.parsers import parse_openai_response
 if TYPE_CHECKING:
     from app.schemas.common import Message
 
+log = structlog.get_logger(__name__)
+
 OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+
+def _responses_failure_fields(exc: Exception) -> dict:
+    """Loggable detail for a Responses-API failure that triggers fallback.
+
+    The non-stream path raises domain exceptions from ``call_with_retry``
+    whose ``details`` already carry the upstream status + body; the stream
+    path raises a mapped error the same way. A raw ``httpx.HTTPStatusError``
+    (possible on future call sites) is read directly; its body may be
+    unavailable when the response was streamed and never read.
+    """
+    fields: dict = {
+        "error_type": type(exc).__name__,
+        "error": str(exc)[:500],
+    }
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        if "status" in details:
+            fields["status"] = details["status"]
+        if "body" in details:
+            fields["body"] = details["body"]
+    elif isinstance(exc, httpx.HTTPStatusError):
+        fields["status"] = exc.response.status_code
+        try:
+            fields["body"] = exc.response.json()
+        except Exception:
+            try:
+                fields["body"] = exc.response.text[:500]
+            except Exception:
+                fields["body"] = "<body not read>"
+    return fields
 
 # Public reasoning mode → OpenAI ``reasoning_effort`` value.
 # ``auto`` resolves to ``medium`` (same posture the audit recommended).
@@ -311,11 +345,17 @@ class OpenAIAdapter(BaseProviderAdapter):
                     resolved_model=resolved_model, key=key,
                     client=client, headers=headers,
                 )
-            except Exception:
-                import structlog
-                structlog.get_logger(__name__).warning(
+            except Exception as exc:
+                # Permanent silent degradation is not a debug detail:
+                # log WHY the Responses path failed (status + provider
+                # body when it was an HTTP error) so a 100%-fallback
+                # situation is diagnosable from the logs alone. The
+                # fallback itself is unchanged — the user still gets a
+                # /chat/completions answer.
+                log.warning(
                     "openai_responses_fallback_to_chat",
                     model=resolved_model or payload.model,
+                    **_responses_failure_fields(exc),
                 )
 
         body = self._build_body(payload, messages, resolved_model=resolved_model)
@@ -356,20 +396,31 @@ class OpenAIAdapter(BaseProviderAdapter):
                 async with client.stream(
                     "POST", _RESPONSES_PATH, json=r_body, headers=headers
                 ) as resp:
-                    resp.raise_for_status()
+                    # Same pattern as the /chat/completions stream branch
+                    # below: read the error body BEFORE raising so the
+                    # fallback handler can log the provider's actual
+                    # message instead of an unread-stream placeholder.
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        try:
+                            resp.raise_for_status()
+                        except httpx.HTTPStatusError as status_exc:
+                            raise map_provider_error(
+                                status_exc, self.provider_name
+                            ) from status_exc
                     async for line in resp.aiter_lines():
                         chunk = _parse_responses_sse_line(line)
                         if chunk is not None:
                             yielded = True
                             yield chunk
                 return
-            except Exception:
+            except Exception as exc:
                 if yielded:
                     raise
-                import structlog
-                structlog.get_logger(__name__).warning(
+                log.warning(
                     "openai_responses_stream_fallback_to_chat",
                     model=resolved_model or payload.model,
+                    **_responses_failure_fields(exc),
                 )
 
         body = self._build_body(payload, messages, stream=True, resolved_model=resolved_model)
