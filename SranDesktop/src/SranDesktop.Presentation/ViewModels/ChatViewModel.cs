@@ -763,6 +763,26 @@ public partial class ChatViewModel : ObservableObject
 
     public void RequestComposerFocus() => ComposerFocusRequested?.Invoke(this, EventArgs.Empty);
 
+    /// <summary>Turn-completion refocus (P1 focus fix). Unlike
+    /// <see cref="RequestComposerFocus"/> (edit / suggestion chips / new chat),
+    /// which always focuses, this asks the view to focus the composer ONLY when
+    /// the user's focus is not already somewhere useful — the view owns that
+    /// check (ComposerControl.OnComposerFocusRequested), because only it can
+    /// reach the visual tree. A turn's finally block can run on a stream
+    /// continuation thread and the handler reads dependency properties, so the
+    /// raise is marshalled to the UI thread (same idiom as OnNestedProgress).</summary>
+    public void RequestComposerFocusIfIdle()
+    {
+        void Raise() =>
+            ComposerFocusRequested?.Invoke(this, ComposerFocusRequestedEventArgs.OnlyWhenIdle);
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+            Raise();
+        else
+            dispatcher.InvokeAsync(Raise);
+    }
+
     /// <summary>
     /// Set by MainViewModel: creates and opens a new conversation when the user
     /// sends from the empty state (no conversation is active yet).
@@ -1196,6 +1216,10 @@ public partial class ChatViewModel : ObservableObject
                 _reattachCts = null;
             cts.Dispose();
             MessageActivity?.Invoke(this, EventArgs.Empty);
+
+            // A reattached turn ends like a live one — same completion
+            // refocus, same only-if-idle guard (P1 focus fix).
+            RequestComposerFocusIfIdle();
         }
     }
 
@@ -1750,6 +1774,11 @@ public partial class ChatViewModel : ObservableObject
             // OS-level "response ready" balloon when the window is unfocused.
             NotifyTurnFinishedIfUnfocused(conversation, assistantMessage);
 
+            // Give the caret back to the composer now that the turn settled
+            // (complete, stopped or errored) — only if focus was lost or is
+            // nowhere useful; the view owns that check.
+            RequestComposerFocusIfIdle();
+
             // Auto-read the reply when enabled in Voice Settings (R9 J).
             if (_settings.Current.VoiceAutoRead
                 && !assistantMessage.IsError && assistantMessage.Content.Length > 0)
@@ -2199,6 +2228,9 @@ public partial class ChatViewModel : ObservableObject
 
             // OS-level "response ready" balloon when the window is unfocused.
             NotifyTurnFinishedIfUnfocused(resume.Conversation, assistant);
+
+            // Same completion refocus as the send path (P1 focus fix).
+            RequestComposerFocusIfIdle();
 
             // The user row was saved on the first pass; re-persist the chain +
             // (now-complete) answer by their stable ids (upsert), then land
