@@ -693,6 +693,7 @@ public static class Dict
         // this state fires for every model while no token has arrived.
         ["msg.working"] = "Working…",
         ["msg.thoughtFor"] = "Thought for {0:F1}s",
+        ["msg.analyzed"] = "Analyzed",
         ["msg.tokens"] = "{0} tokens",
 
         // i18n sweep — Settings window
@@ -1423,6 +1424,7 @@ public static class Dict
         ["msg.thinking"] = "กำลังคิด...",
         ["msg.working"] = "กำลังประมวลผล…",
         ["msg.thoughtFor"] = "ใช้เวลาคิด {0:F1} วินาที",
+        ["msg.analyzed"] = "วิเคราะห์แล้ว",
         ["msg.tokens"] = "{0} โทเคน",
 
         // i18n sweep — หน้าต่างตั้งค่า

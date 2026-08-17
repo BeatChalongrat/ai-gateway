@@ -95,9 +95,14 @@ public partial class MessageViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ReasoningHeader))]
     private bool _isReasoningComplete;
 
-    /// <summary>"Thinking..." while reasoning streams; "Thought for X.Xs" once done (web parity A2).</summary>
-    public string ReasoningHeader => IsReasoningComplete && _reasoningElapsed is { } d
-        ? Localization.LocaleService.Instance.T("msg.thoughtFor", d.TotalSeconds)
+    /// <summary>"Thinking..." while reasoning streams; "Thought for X.Xs" once
+    /// done; "Analyzed" for a reopened conversation, where the duration was not
+    /// persisted (web parity - ThinkingBlock's reload state). Without the
+    /// completed-but-no-elapsed branch a hydrated bubble would lie "Thinking...".</summary>
+    public string ReasoningHeader => IsReasoningComplete
+        ? _reasoningElapsed is { } d
+            ? Localization.LocaleService.Instance.T("msg.thoughtFor", d.TotalSeconds)
+            : Localization.LocaleService.Instance.T("msg.analyzed")
         : Localization.LocaleService.Instance.T("msg.thinking");
 
     [ObservableProperty]
@@ -299,6 +304,18 @@ public partial class MessageViewModel : ObservableObject
         _reasoningStart ??= DateTimeOffset.UtcNow;
         _reasoningBuffer.Append(delta);
         Reasoning = _reasoningBuffer.ToString();
+    }
+
+    /// <summary>Hydrate persisted reasoning on conversation reopen: the text
+    /// is final (Expander shows it collapsed under an "Analyzed" header) and
+    /// no duration exists - deliberately does NOT set _reasoningStart, so
+    /// FinishReasoning never fabricates an elapsed time for it.</summary>
+    public void SetPersistedReasoning(string text)
+    {
+        _reasoningBuffer.Clear();
+        _reasoningBuffer.Append(text);
+        Reasoning = text;
+        IsReasoningComplete = true;
     }
 
     private void FinishReasoning()

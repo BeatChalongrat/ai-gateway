@@ -60,6 +60,18 @@ public sealed class ProjectMergeMigrationTests : IDisposable
                     last_synced_at  TEXT,
                     server_id       TEXT
                 );
+                -- A real 0..4-applied database also carries the messages
+                -- table (migration 0's base schema) - later migrations may
+                -- ALTER it, so the fixture must model it or it simulates a
+                -- lineage that cannot exist.
+                CREATE TABLE messages (
+                    id              TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    role            TEXT NOT NULL,
+                    content         TEXT,
+                    created_at      TEXT NOT NULL,
+                    sort_order      INTEGER NOT NULL DEFAULT 0
+                );
                 -- Pre-Phase-9 database. user_version is the index of the NEXT
                 -- migration to run, so 5 means 0..4 are applied and opening
                 -- the store runs migration 5 (the folder→project carry-over)

@@ -152,7 +152,14 @@ public sealed class ChatOrchestrator : IChatOrchestrator
                 Messages = messages,
                 Tools = tools.Count > 0 ? tools.ToList() : null,
                 ToolChoice = tools.Count > 0 ? "auto" : null,
-                MaxTokens = DefaultMaxOutputTokens
+                MaxTokens = DefaultMaxOutputTokens,
+                // Web parity: chat-edge attaches {mode:"auto",
+                // show_summary:true} on every turn and lets the gateway
+                // decide (it no-ops for models that can't reason, so
+                // gpt-4o behaves exactly as before). The desktop toggle's
+                // bool cannot express explicit-off tri-state yet — same
+                // limitation web has for untouched conversations.
+                Reasoning = new GatewayReasoningConfig()
             };
 
             var parser = new GatewayChunkParser();
@@ -178,6 +185,14 @@ public sealed class ChatOrchestrator : IChatOrchestrator
                         case AgentStreamDoneEvent:
                             // Finish signal only — whether this turn is final is
                             // decided below by pendingToolCalls.
+                            break;
+
+                        case AgentReasoningDeltaEvent reasoning:
+                            yield return reasoning;
+                            break;
+
+                        case AgentAnalysisStatusEvent analysis:
+                            yield return analysis;
                             break;
 
                         case AgentErrorEvent err:

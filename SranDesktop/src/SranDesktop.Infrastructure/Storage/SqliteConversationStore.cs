@@ -160,6 +160,13 @@ public sealed class SqliteConversationStore : IConversationStore
         """
         ALTER TABLE conversations ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
         """,
+
+        // 7 — reasoning parity: persist the reasoning summary with its
+        // assistant row (mirror of chat-edge migration 019's
+        // reasoning_content) so the thinking Expander survives reopen.
+        """
+        ALTER TABLE messages ADD COLUMN reasoning TEXT;
+        """,
     };
 
     /// <summary>Newest-N notes kept per conversation; older ones pruned on add.</summary>
@@ -215,6 +222,10 @@ public sealed class SqliteConversationStore : IConversationStore
         // safety net exists for).
         ("conversations", "is_archived",
             "ALTER TABLE conversations ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;"),
+        // Reasoning parity — the read path selects it, so it rides the
+        // safety net as well as migration 7 (stale-user_version rule).
+        ("messages", "reasoning",
+            "ALTER TABLE messages ADD COLUMN reasoning TEXT;"),
     };
 
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -247,6 +258,14 @@ public sealed class SqliteConversationStore : IConversationStore
             if (await ColumnExistsAsync(conn, table, column, ct))
                 continue;
 
+            // Repairing a COLUMN presupposes its table. A database from a
+            // different lineage (or a minimal test fixture) may lack the
+            // table entirely — creating tables is the migration list's
+            // job, not this safety net's; ALTERing a missing table would
+            // throw "no such table" and abort initialization.
+            if (!await TableExistsAsync(conn, table, ct))
+                continue;
+
             await using var add = conn.CreateCommand();
             add.CommandText = ddl;
             // Repeat migration 5's back-fill: without it a repaired database
@@ -259,6 +278,16 @@ public sealed class SqliteConversationStore : IConversationStore
             }
             await add.ExecuteNonQueryAsync(ct);
         }
+    }
+
+    private static async Task<bool> TableExistsAsync(
+        SqliteConnection conn, string table, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $t LIMIT 1";
+        cmd.Parameters.AddWithValue("$t", table);
+        return await cmd.ExecuteScalarAsync(ct) is not null;
     }
 
     private static async Task<bool> ColumnExistsAsync(
@@ -384,7 +413,7 @@ public sealed class SqliteConversationStore : IConversationStore
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids
+            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids, reasoning
             FROM messages WHERE conversation_id = $cid
             ORDER BY sort_order
             """;
@@ -404,7 +433,7 @@ public sealed class SqliteConversationStore : IConversationStore
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids
+            SELECT id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids, reasoning
             FROM messages WHERE conversation_id = $cid AND server_id IS NULL
             ORDER BY created_at, sort_order
             """;
@@ -470,14 +499,15 @@ public sealed class SqliteConversationStore : IConversationStore
     private static void BindMessageUpsert(SqliteCommand cmd, Message m)
     {
         cmd.CommandText = """
-            INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids)
-            VALUES ($id, $cid, $role, $content, $tool_calls, $tool_call_id, $name, $model_id, $token_usage, $created_at, $sort_order, $server_id, $file_ids)
+            INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_call_id, name, model_id, token_usage, created_at, sort_order, server_id, file_ids, reasoning)
+            VALUES ($id, $cid, $role, $content, $tool_calls, $tool_call_id, $name, $model_id, $token_usage, $created_at, $sort_order, $server_id, $file_ids, $reasoning)
             ON CONFLICT(id) DO UPDATE SET
                 content = excluded.content,
                 tool_calls = excluded.tool_calls,
                 model_id = excluded.model_id,
                 token_usage = excluded.token_usage,
-                file_ids = COALESCE(excluded.file_ids, messages.file_ids)
+                file_ids = COALESCE(excluded.file_ids, messages.file_ids),
+                reasoning = COALESCE(excluded.reasoning, messages.reasoning)
             """;
         cmd.Parameters.AddWithValue("$id", m.Id);
         cmd.Parameters.AddWithValue("$cid", m.ConversationId);
@@ -493,6 +523,7 @@ public sealed class SqliteConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$sort_order", m.SortOrder);
         cmd.Parameters.AddWithValue("$server_id", (object?)m.ServerId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$file_ids", (object?)m.FileIdsJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$reasoning", (object?)m.Reasoning ?? DBNull.Value);
     }
 
     public async Task<int> GetNextSortOrderAsync(string conversationId, CancellationToken ct = default)
@@ -868,7 +899,8 @@ public sealed class SqliteConversationStore : IConversationStore
         CreatedAt = FromIso(reader.GetString(9)),
         SortOrder = reader.GetInt32(10),
         ServerId = reader.IsDBNull(11) ? null : reader.GetString(11),
-        FileIdsJson = reader.IsDBNull(12) ? null : reader.GetString(12)
+        FileIdsJson = reader.IsDBNull(12) ? null : reader.GetString(12),
+        Reasoning = reader.IsDBNull(13) ? null : reader.GetString(13)
     };
 
     private static string RoleToString(MessageRole role) => role switch

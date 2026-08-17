@@ -33,4 +33,10 @@ public sealed class Message
     /// (FIX 10). The push sync sends them as file_ids on import so the
     /// attachment shows under this message's bubble on web. Null = none.</summary>
     public string? FileIdsJson { get; set; }
+
+    /// <summary>Reasoning summary text streamed for this (assistant) turn —
+    /// the desktop mirror of chat-edge's messages_masked.reasoning_content,
+    /// so thinking survives app restart the way it survives a web reload.
+    /// Null = the turn produced no reasoning.</summary>
+    public string? Reasoning { get; set; }
 }
