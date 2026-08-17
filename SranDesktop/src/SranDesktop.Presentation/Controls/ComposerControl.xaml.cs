@@ -82,11 +82,35 @@ public partial class ComposerControl : UserControl
     {
         // Only the visible composer should take focus.
         if (!IsVisible) return;
+        var onlyIfIdle = e is ComposerFocusRequestedEventArgs { OnlyIfIdle: true };
         Dispatcher.InvokeAsync(() =>
         {
+            if (onlyIfIdle && !ShouldStealFocusWhenIdle())
+                return;
             InputBox.Focus();
             InputBox.CaretIndex = InputBox.Text.Length;
         }, System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    /// <summary>
+    /// The turn-completion refocus (OnlyIfIdle) must never yank focus the user
+    /// placed somewhere deliberate. Steal only when: the app window is active
+    /// (an inactive window also covers "a modal dialog owns focus" — ShowDialog
+    /// deactivates the main window), the composer doesn't already have keyboard
+    /// focus (re-focusing would reset the caret), and the focused element is
+    /// not another editable control. Focus parked on a plain button (the
+    /// persistent send/stop circle after a mouse click) is fair game — that is
+    /// the case this exists for.
+    /// </summary>
+    private bool ShouldStealFocusWhenIdle()
+    {
+        if (Window.GetWindow(this) is not { IsActive: true })
+            return false;
+        if (InputBox.IsKeyboardFocusWithin)
+            return false;
+        return Keyboard.FocusedElement
+            is not System.Windows.Controls.Primitives.TextBoxBase
+            and not PasswordBox;
     }
 
     private void AttachButton_Click(object sender, RoutedEventArgs e)
