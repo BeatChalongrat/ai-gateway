@@ -32,6 +32,15 @@ public sealed record AgentToolResultEvent(
 /// <summary>Stream finished (final answer, no more tool calls).</summary>
 public sealed record AgentStreamDoneEvent : AgentStreamEvent;
 
+/// <summary>One fragment of the model's reasoning summary (the gateway's
+/// typed ``reasoning_summary_delta`` SSE frame; field ``text``).</summary>
+public sealed record AgentReasoningDeltaEvent(string Text) : AgentStreamEvent;
+
+/// <summary>Brackets the reasoning stream (gateway ``analysis_status``
+/// frame): "started" on the first reasoning fragment, "completed" when
+/// visible output begins (or the stream ends).</summary>
+public sealed record AgentAnalysisStatusEvent(string Status) : AgentStreamEvent;
+
 /// <summary>Error from the gateway or during tool execution. <paramref name="Code"/>
 /// is the gateway's machine-readable error code when the envelope carried one
 /// (e.g. "context_length_exceeded").</summary>

@@ -159,8 +159,11 @@ public class GatewayChunkParserTests
     [Fact]
     public void Other_Typed_Frames_Still_Yield_Nothing()
     {
-        _parser.Parse("""{"type":"analysis_status","status":"started"}""").Should().BeEmpty();
+        // analysis_status graduated from "ignored" to a typed event in the
+        // reasoning-parity work (ReasoningParityTests pins the new shape);
+        // genuinely unknown frames keep being ignored.
         _parser.Parse("""{"type":"unknown_future_frame","data":{}}""").Should().BeEmpty();
+        _parser.Parse("""{"type":"reasoning_notice","reason":"x"}""").Should().BeEmpty();
     }
 
     [Fact]

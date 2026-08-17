@@ -17,6 +17,7 @@ public class I18nSweepKeysTests
     [InlineData("voice.unavailable")]
     [InlineData("msg.thinking")]
     [InlineData("msg.working")]
+    [InlineData("msg.analyzed")]
     [InlineData("msg.thoughtFor")]
     [InlineData("msg.tokens")]
     [InlineData("settings.title")]

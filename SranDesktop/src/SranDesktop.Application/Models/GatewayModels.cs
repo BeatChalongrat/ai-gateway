@@ -27,6 +27,23 @@ public sealed class GatewayCompletionRequest
     [JsonPropertyName("tool_choice")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ToolChoice { get; init; }
+
+    /// <summary>Reasoning request (web parity — chat-edge attaches
+    /// {mode:"auto", show_summary:true} on every turn and the gateway
+    /// no-ops it for models that can't reason). Null = field omitted.</summary>
+    [JsonPropertyName("reasoning")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GatewayReasoningConfig? Reasoning { get; init; }
+}
+
+/// <summary>Mirror of the gateway's ReasoningConfig request block.</summary>
+public sealed class GatewayReasoningConfig
+{
+    [JsonPropertyName("mode")]
+    public string Mode { get; init; } = "auto";
+
+    [JsonPropertyName("show_summary")]
+    public bool ShowSummary { get; init; } = true;
 }
 
 public sealed class GatewayMessage

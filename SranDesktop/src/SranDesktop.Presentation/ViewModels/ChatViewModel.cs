@@ -1069,6 +1069,12 @@ public partial class ChatViewModel : ObservableObject
                 return;
 
             Messages.Clear();
+            // Reasoning parity: local rows are the only store that carries
+            // the persisted thinking text (the server DTO has no slot on
+            // this path) - key by message id for the assistant bubbles.
+            var reasoningMap = localRows
+                .Where(r => !string.IsNullOrEmpty(r.Reasoning))
+                .ToDictionary(r => r.Id, r => r.Reasoning!);
             var hydration = new List<(MessageViewModel Vm, List<FileAttachmentDto> Files)>();
             foreach (var entry in entries.OrderBy(e => e.CreatedAt))
             {
@@ -1080,6 +1086,8 @@ public partial class ChatViewModel : ObservableObject
                 };
                 if (vm.IsAssistant)
                 {
+                    if (reasoningMap.TryGetValue(vm.Id, out var persistedReasoning))
+                        vm.SetPersistedReasoning(persistedReasoning);
                     if (chainMap.TryGetValue(vm.Id, out var chain))
                     {
                         vm.AgentToolChain = chain;
@@ -1877,7 +1885,8 @@ public partial class ChatViewModel : ObservableObject
         SortOrder = sortOrder,
         FileIdsJson = vm.AttachedFileIds is { Count: > 0 } ids
             ? JsonSerializer.Serialize(ids)
-            : null
+            : null,
+        Reasoning = vm.Reasoning.Length > 0 ? vm.Reasoning : null
     };
 
     /// <summary>
@@ -2034,6 +2043,25 @@ public partial class ChatViewModel : ObservableObject
                         assistantMessage.StatusText = null;
                         assistantMessage.AppendContent(delta.Text);
                         RaiseThrottledActivity();
+                        break;
+
+                    // Reasoning parity with the chat-edge path: summary
+                    // fragments fill the honest Expander; analysis_status
+                    // drives the same "Thinking..." phase label the
+                    // reattach path uses. The waiting-cat fallback label
+                    // (msg.working) is untouched - it covers the
+                    // no-marker state only.
+                    case AgentReasoningDeltaEvent reasoning:
+                        assistantMessage.AppendReasoning(reasoning.Text);
+                        RaiseThrottledActivity();
+                        break;
+
+                    case AgentAnalysisStatusEvent analysis:
+                        if (assistantMessage.Content.Length == 0)
+                            assistantMessage.StatusText =
+                                analysis.Status is not ("completed" or "failed" or "error")
+                                    ? Localization.LocaleService.Instance.T("msg.thinking")
+                                    : null;
                         break;
 
                     case AgentStatusEvent status:

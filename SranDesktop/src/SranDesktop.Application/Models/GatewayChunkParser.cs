@@ -77,16 +77,35 @@ public sealed class GatewayChunkParser
                 //  "actual_model","reason","attempts":[...]}}. Any other type
                 // keeps being ignored, exactly as before.
                 if (root.TryGetProperty("type", out var typeEl)
-                    && typeEl.ValueKind == JsonValueKind.String
-                    && typeEl.GetString() == "fallback_info"
-                    && root.TryGetProperty("fallback_info", out var fallback)
-                    && fallback.ValueKind == JsonValueKind.Object)
+                    && typeEl.ValueKind == JsonValueKind.String)
                 {
-                    var requested = GetStringProperty(fallback, "requested_model");
-                    var actual = GetStringProperty(fallback, "actual_model");
-                    if (!string.IsNullOrEmpty(requested) && !string.IsNullOrEmpty(actual))
-                        events.Add(new AgentFallbackEvent(
-                            requested!, actual!, GetStringProperty(fallback, "reason")));
+                    switch (typeEl.GetString())
+                    {
+                        case "fallback_info"
+                            when root.TryGetProperty("fallback_info", out var fallback)
+                                 && fallback.ValueKind == JsonValueKind.Object:
+                        {
+                            var requested = GetStringProperty(fallback, "requested_model");
+                            var actual = GetStringProperty(fallback, "actual_model");
+                            if (!string.IsNullOrEmpty(requested) && !string.IsNullOrEmpty(actual))
+                                events.Add(new AgentFallbackEvent(
+                                    requested!, actual!, GetStringProperty(fallback, "reason")));
+                            break;
+                        }
+                        // Reasoning parity: the gateway's provider-neutral
+                        // reasoning frames. Field names per public_chat.py —
+                        // the summary fragment rides in "text", the bracket
+                        // in "status".
+                        case "reasoning_summary_delta"
+                            when GetStringProperty(root, "text") is { Length: > 0 } text:
+                            events.Add(new AgentReasoningDeltaEvent(text));
+                            break;
+                        case "analysis_status"
+                            when GetStringProperty(root, "status") is { Length: > 0 } status:
+                            events.Add(new AgentAnalysisStatusEvent(status));
+                            break;
+                        // Any other type keeps being ignored, exactly as before.
+                    }
                 }
                 return events;
             }
