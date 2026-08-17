@@ -52,6 +52,18 @@ public partial class ChatView : UserControl
     /// satisfy the handover check instantly and kill the anchor).</summary>
     private bool _anchorPending;
     private bool _anchorActive;
+    /// <summary>Last real input gesture on the message list (wheel / mouse /
+    /// key / touch). While a hold is armed, only a ScrollChanged inside this
+    /// grace window counts as "the user scrolled" — anything else is system
+    /// drift (our own writes' follow-ups, panel corrections) and must neither
+    /// cancel the hold nor flip the follow state. This is what let the hold
+    /// self-cancel before: the anchor's own event flipped _autoScroll to true
+    /// (the anchored offset IS max-scroll thanks to the spacer), the next
+    /// delta re-pinned, and the re-pin's follow-up event read as a user
+    /// scroll and killed the hold — leaving the spacer stuck at full size.</summary>
+    private long _userInputTick;
+    private const int UserInputGraceMs = 500;
+    private long _holdTraceTick;
     /// <summary>Follow state as it was BEFORE the send armed the anchor —
     /// restored when the anchor cannot be applied, so a failed anchor
     /// degrades to the old ScrollToEnd behaviour instead of a dead turn.</summary>
@@ -70,6 +82,22 @@ public partial class ChatView : UserControl
         MessageList.AddHandler(
             Controls.MessageBubble.CollapseToggledEvent,
             new RoutedEventHandler((_, _) => _collapseToggleTick = Environment.TickCount64));
+        // P3 — "the user always wins" needs to know what a USER scroll is.
+        // On WPF, ScrollChanged fires for everything (our own offset writes,
+        // the extent re-pin's follow-up, VSP corrections), so during a hold
+        // we classify by actual input: any of these stamps the tick, and a
+        // hold is only cancelled inside its grace window. PreviewMouseMove
+        // with a pressed button keeps a scrollbar-thumb drag stamped for its
+        // whole duration.
+        MessageList.PreviewMouseWheel += (_, _) => _userInputTick = Environment.TickCount64;
+        MessageList.PreviewMouseDown += (_, _) => _userInputTick = Environment.TickCount64;
+        MessageList.PreviewKeyDown += (_, _) => _userInputTick = Environment.TickCount64;
+        MessageList.PreviewMouseMove += (_, e) =>
+        {
+            if (e.LeftButton == MouseButtonState.Pressed)
+                _userInputTick = Environment.TickCount64;
+        };
+        MessageList.PreviewTouchMove += (_, _) => _userInputTick = Environment.TickCount64;
         DataContextChanged += (_, e) =>
         {
             if (e.OldValue is ChatViewModel oldVm)
@@ -129,8 +157,33 @@ public partial class ChatView : UserControl
             HoldAnchor();
             return;
         }
+        // P3 — web-parity end-trim, hold state irrelevant: if a turn left a
+        // spacer behind (e.g. the user genuinely cancelled the hold
+        // mid-stream) it is trimmed to what the CURRENT position needs the
+        // moment the stream is over — the view never moves, the unused gap
+        // goes. Derived, never adjusted, so it cannot stick or accumulate.
+        if (_spacerPx > 0 && DataContext is ChatViewModel { IsStreaming: false } restVm)
+            TrimSpacerAtRest(restVm);
         if (_autoScroll)
             MessageScroll?.ScrollToEnd();
+    }
+
+    /// <summary>Recompute the leftover spacer from current geometry once the
+    /// turn is over: the minimum that keeps the current offset valid —
+    /// zero whenever the reply content already fills the viewport.</summary>
+    private void TrimSpacerAtRest(ChatViewModel vm)
+    {
+        var scroll = MessageScroll;
+        if (scroll is null) return;
+        var contentH = scroll.ExtentHeight - _spacerPx;
+        var needed = SranDesktop.Application.Services.TurnAnchorMath.SpacerNeeded(
+            scroll.VerticalOffset, scroll.ViewportHeight, contentH);
+        if (needed < _spacerPx)
+        {
+            SetSpacer(vm, needed);
+            vm.TraceAnchor("trim",
+                $"post-turn spacer={needed:F0} (offset={scroll.VerticalOffset:F0} contentH={contentH:F0})");
+        }
     }
 
     // ── P3 — turn anchoring ─────────────────────────────────────────────────
@@ -256,7 +309,19 @@ public partial class ChatView : UserControl
         var needed = SranDesktop.Application.Services.TurnAnchorMath.SpacerNeeded(
             scroll.VerticalOffset, scroll.ViewportHeight, contentH);
         if (needed < _spacerPx)
+        {
             SetSpacer(vm, needed);
+            // Shrink-path trace (≤1/s): without this line the whole hold
+            // phase was invisible in the log — a stage that never logs
+            // cannot be diagnosed remotely.
+            if (!SranDesktop.Application.Services.TurnAnchorMath.IsRecentTick(
+                    Environment.TickCount64, _holdTraceTick, 1000))
+            {
+                _holdTraceTick = Environment.TickCount64;
+                vm.TraceAnchor("hold",
+                    $"spacer={needed:F0} contentH={contentH:F0} offset={scroll.VerticalOffset:F0} extent={scroll.ExtentHeight:F0}");
+            }
+        }
         if (!vm.IsStreaming)
         {
             _anchorActive = false; // turn over — view stays put
@@ -326,13 +391,24 @@ public partial class ChatView : UserControl
         // bottom pauses auto-scroll, returning to the bottom resumes it.
         if (e.ExtentHeightChange == 0)
         {
-            // P3 — the user always wins: a real scroll (not the anchor's
-            // own programmatic jump) cancels the hold for this turn.
-            if (!WasAnchorScrollJustIssued())
+            // P3 — while a hold is armed, this branch runs ONLY for real user
+            // input. Everything else (the anchor's own follow-up, a re-pin's
+            // follow-up, panel corrections) is system drift: it must not
+            // cancel the hold, must not recompute _autoScroll (the anchored
+            // offset IS max-scroll, so the old recompute flipped it true and
+            // started the self-cancel loop), and must not pollute scroll
+            // memory with offsets nobody chose.
+            if (_anchorPending || _anchorActive)
             {
-                if (_anchorPending || _anchorActive)
-                    (DataContext as ChatViewModel)?.TraceAnchor("user-cancel",
-                        $"offset={scroll.VerticalOffset:F0} pending={_anchorPending} active={_anchorActive}");
+                if (WasAnchorScrollJustIssued() ||
+                    !SranDesktop.Application.Services.TurnAnchorMath.IsRecentTick(
+                        Environment.TickCount64, _userInputTick, UserInputGraceMs))
+                {
+                    UpdateJumpToLatest(scroll);
+                    return; // drift — the hold stands, follow state untouched
+                }
+                (DataContext as ChatViewModel)?.TraceAnchor("user-cancel",
+                    $"offset={scroll.VerticalOffset:F0} pending={_anchorPending} active={_anchorActive}");
                 _anchorPending = false;
                 _anchorActive = false;
             }

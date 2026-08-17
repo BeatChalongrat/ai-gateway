@@ -76,6 +76,37 @@ public class TurnAnchorMathTests
             .Should().Be(0);
     }
 
+    // ── Mid-stream / end-of-turn spacer contract (the "stuck gap" bug) ─────
+
+    [Fact]
+    public void MidStream_SpacerIsDerivedFreshAndOnlyShrinks_AsContentGrows()
+    {
+        // Anchored at 394 with viewport 747 (real geometry from the failing
+        // trace). The spacer must be a pure function of current geometry:
+        // re-deriving it for every content height gives a non-increasing
+        // sequence that ends at zero — it can never stick or accumulate.
+        const double offset = 394;
+        const double viewport = 747;
+        double? previous = null;
+        foreach (var contentH in new[] { 763.0, 900, 1000, 1141, 1300 })
+        {
+            var spacer = TurnAnchorMath.SpacerNeeded(offset, viewport, contentH);
+            if (previous is { } p)
+                spacer.Should().BeLessThanOrEqualTo(p);
+            previous = spacer;
+        }
+        previous.Should().Be(0, "content passed offset+viewport (1141) — nothing left to reserve");
+    }
+
+    [Fact]
+    public void AtStreamEnd_SpacerIsZero_WhenTheReplyFilledTheViewport()
+    {
+        // The end-trim recomputes from geometry: a long completed answer
+        // (content ≥ offset+viewport) must leave NO gap.
+        TurnAnchorMath.SpacerNeeded(target: 394, viewportHeight: 747, contentHeight: 2000)
+            .Should().Be(0);
+    }
+
     // ── ShouldResumeFollow (phase handover) ─────────────────────────────────
 
     [Fact]
