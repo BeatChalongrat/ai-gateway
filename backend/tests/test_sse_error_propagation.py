@@ -196,3 +196,93 @@ def test_successful_fallback_emits_fallback_info_metadata(monkeypatch):
     info = fb[0]["fallback_info"]
     assert info["actual_model"] == "claude-sonnet-4"
     assert info["requested_model"] == "gpt-4o-mini"
+
+
+def test_pre_stream_non_eligible_failure_logs_upstream_detail(monkeypatch):
+    """The terminal (non-fallback-eligible) branch must LOG the real
+    upstream error — status, provider and response body from exc.details,
+    the same detail already shipped in the SSE frame. Until this log line
+    existed, the only server-side trace was the finalize hook's bare
+    ``stream_partial_fail``, which made e.g. the GPT-5 ``max_tokens`` 400
+    invisible in production logs.
+
+    Asserted by patching the route module's ``logger`` (which the endpoint
+    ``.bind()``s into its per-request ``log``) rather than
+    ``structlog.testing.capture_logs`` — the cached module logger makes
+    capture_logs order-dependent under the full suite."""
+    from app.core.exceptions import UpstreamBadResponseError
+
+    class _CapturingLogger:
+        def __init__(self):
+            self.records: list[dict] = []
+
+        def bind(self, **kw):
+            return self
+
+        def _rec(self, level, event, **kw):
+            self.records.append({"log_level": level, "event": event, **kw})
+
+        def debug(self, event, **kw):
+            self._rec("debug", event, **kw)
+
+        def info(self, event, **kw):
+            self._rec("info", event, **kw)
+
+        def warning(self, event, **kw):
+            self._rec("warning", event, **kw)
+
+        def error(self, event, **kw):
+            self._rec("error", event, **kw)
+
+        def exception(self, event, **kw):
+            self._rec("error", event, **kw)
+
+    upstream_body = {
+        "error": {
+            "message": (
+                "Unsupported parameter: 'max_tokens' is not supported with "
+                "this model. Use 'max_completion_tokens' instead."
+            ),
+            "type": "invalid_request_error",
+            "param": "max_tokens",
+            "code": "unsupported_parameter",
+        }
+    }
+
+    async def _raise_400(
+        self, payload, messages, *, resolved_model=None, api_key=None
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        raise UpstreamBadResponseError(
+            "Provider 'openai' rejected request (400).",
+            details={"provider": "openai", "status": 400, "body": upstream_body},
+        )
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(OpenAIAdapter, "stream_chat", _raise_400)
+    cap = _CapturingLogger()
+    monkeypatch.setattr("app.api.routes.public_chat.logger", cap)
+
+    resp = _chat_stream()
+    events = _parse_sse(resp.content)
+
+    # The client-facing frame is unchanged…
+    errors = [e for e in events if "error" in e]
+    assert errors, f"expected an error frame, got {events}"
+    assert errors[0]["error"]["code"] == "upstream_bad_response"
+
+    # …and the REAL error is now in the server log.
+    records = [
+        rec
+        for rec in cap.records
+        if rec.get("event") == "stream_terminal_provider_error"
+    ]
+    assert records, (
+        "terminal provider error was not logged; events seen: "
+        f"{[rec.get('event') for rec in cap.records]}"
+    )
+    rec = records[0]
+    assert rec["error_code"] == "upstream_bad_response"
+    assert rec["details"]["status"] == 400
+    assert rec["details"]["provider"] == "openai"
+    assert "max_completion_tokens" in str(rec["details"]["body"])
+    assert rec["model"]
