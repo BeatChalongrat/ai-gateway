@@ -316,6 +316,41 @@ export function ChatInput({
     });
   }, [isRecording, voiceTranscript, resetVoiceTranscript]);
 
+  // When a stream ends (completed / stopped / errored / regenerate
+  // finished), give the caret back to the composer so the user can keep
+  // typing without a click — but ONLY when focus was actually lost:
+  // activeElement is body/null or a node no longer in the document (an
+  // unmounted button). Focus the user deliberately moved into another
+  // field, dialog, or control stays where they put it, and the composer
+  // itself is never re-focused (that would scroll / reset the caret).
+  // Touch devices are excluded so the soft keyboard doesn't pop over the
+  // finished reply — same (pointer: fine) guard as the model picker's
+  // search autofocus. Fires on the streaming true→false edge only, never
+  // on mount.
+  const wasStreamingRef = useRef(streaming);
+  useEffect(() => {
+    const wasStreaming = wasStreamingRef.current;
+    wasStreamingRef.current = streaming;
+    if (!wasStreaming || streaming) return;
+    if (typeof window === "undefined") return;
+    if (!window.matchMedia("(pointer: fine)").matches) return;
+    // One frame so the stop→send state swap has committed before we
+    // inspect activeElement (no arbitrary timeout).
+    const raf = requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      const active = document.activeElement;
+      if (active === ta) return;
+      const focusLost =
+        active === null ||
+        active === document.body ||
+        !document.contains(active);
+      if (!focusLost) return;
+      ta.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [streaming]);
+
   const startVoice = () => {
     // Optional haptic on mobile — supported on Android Chrome.
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
@@ -941,39 +976,38 @@ export function ChatInput({
                   </svg>
                 </button>
               ) : null}
-              {streaming ? (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  aria-label={t("input.stop")}
-                  className="focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-status-danger/85 text-white transition-colors duration-150 hover:bg-status-danger"
-                >
-                  <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
-                  </svg>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={!canSend}
-                  aria-label={t("input.send")}
-                  // ChatGPT-style send button: when something is typed,
-                  // the circle inverts to the foreground colour (white
-                  // in dark mode, near-black in light mode) so the icon
-                  // pops without using the accent green. The disabled
-                  // state stays muted on the same neutral surface as
-                  // the rest of the composer chrome.
-                  //
-                  // Inline styles reference the RAW CSS variables that
-                  // ``globals.css`` defines under [data-theme="dark"]
-                  // and the light-mode root. ``--bg-base`` /
-                  // ``--bg-elevated`` only exist as Tailwind aliases
-                  // (see tailwind.config.js), so we use ``--bg-primary``
-                  // and ``--bg-surface-hover`` here.
-                  className="focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 disabled:cursor-not-allowed"
-                  style={
-                    canSend
+              {/* Send/stop is ONE persistent button whose command, label
+                  and icon swap on ``streaming`` — never two sibling
+                  elements that mount/unmount. Swapping elements dropped
+                  keyboard focus to <body> for mouse-click senders when
+                  the stream started or ended (the focused element left
+                  the DOM), which is exactly the DataTrigger-on-IsStreaming
+                  shape the desktop composer uses on its single Button.
+                  ChatGPT-style send state: when something is typed, the
+                  circle inverts to the foreground colour so the icon pops
+                  without using the accent green; the disabled state stays
+                  muted on the same neutral surface as the composer chrome.
+
+                  Inline styles reference the RAW CSS variables that
+                  ``globals.css`` defines under [data-theme="dark"] and
+                  the light-mode root. ``--bg-base`` / ``--bg-elevated``
+                  only exist as Tailwind aliases (see tailwind.config.js),
+                  so we use ``--bg-primary`` and ``--bg-surface-hover``
+                  here. */}
+              <button
+                type="button"
+                onClick={streaming ? onStop : submit}
+                disabled={!streaming && !canSend}
+                aria-label={streaming ? t("input.stop") : t("input.send")}
+                className={`focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${
+                  streaming
+                    ? "bg-status-danger/85 text-white hover:bg-status-danger"
+                    : "disabled:cursor-not-allowed"
+                }`}
+                style={
+                  streaming
+                    ? undefined
+                    : canSend
                       ? {
                           background: "var(--text-primary)",
                           color: "var(--bg-primary)",
@@ -982,8 +1016,13 @@ export function ChatInput({
                           background: "var(--bg-surface-hover)",
                           color: "var(--text-tertiary)",
                         }
-                  }
-                >
+                }
+              >
+                {streaming ? (
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                ) : (
                   <svg
                     width={16}
                     height={16}
@@ -999,8 +1038,8 @@ export function ChatInput({
                       strokeLinejoin="round"
                     />
                   </svg>
-                </button>
-              )}
+                )}
+              </button>
             </div>
           </div>
         </div>
