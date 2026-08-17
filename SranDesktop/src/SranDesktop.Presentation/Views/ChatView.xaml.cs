@@ -30,9 +30,36 @@ public partial class ChatView : UserControl
     private long _collapseToggleTick;
     private const int CollapseToggleGraceMs = 300;
 
+    // ── P3 — send-time turn anchoring ───────────────────────────────────────
+    // On the user's own send (UserTurnStarted), the new turn scrolls near the
+    // viewport top with AnchorPreviousPeekPx of the previous message peeking
+    // above it, and a dynamic spacer (extra bottom padding on MessageList —
+    // a CONTROL property, so container recycling can't reset it) makes that
+    // reachable in short threads. While _anchorActive, streaming does NOT
+    // drag the view; once the reply fills the viewport the pre-existing
+    // ScrollToEnd follow takes over. Any real user scroll cancels the hold.
+
+    /// <summary>Sliver of the PREVIOUS message kept visible above the anchored
+    /// turn — THE one tuning knob (QA: try e.g. viewport/3 here).</summary>
+    private const double AnchorPreviousPeekPx = 64;
+
+    private const int AnchorRetryPasses = 5;
+    private const int AnchorScrollGraceMs = 150;
+    /// <summary>Send happened; the anchor jump is queued behind layout but
+    /// has not been applied yet. Distinct from <see cref="_anchorActive"/> so
+    /// the MessageActivity that fires immediately after the send cannot run
+    /// the hold logic against pre-anchor geometry (an at-bottom send would
+    /// satisfy the handover check instantly and kill the anchor).</summary>
+    private bool _anchorPending;
+    private bool _anchorActive;
+    private long _anchorScrollTick;
+    private double _spacerPx;
+    private Thickness _baseListPadding;
+
     public ChatView()
     {
         InitializeComponent();
+        _baseListPadding = MessageList.Padding;
         MessageList.AddHandler(
             Controls.MessageBubble.CollapseToggledEvent,
             new RoutedEventHandler((_, _) => _collapseToggleTick = Environment.TickCount64));
@@ -41,11 +68,13 @@ public partial class ChatView : UserControl
             if (e.OldValue is ChatViewModel oldVm)
             {
                 oldVm.MessageActivity -= OnMessageActivity;
+                oldVm.UserTurnStarted -= OnUserTurnStarted;
                 oldVm.PropertyChanged -= OnViewModelPropertyChanged;
             }
             if (e.NewValue is ChatViewModel newVm)
             {
                 newVm.MessageActivity += OnMessageActivity;
+                newVm.UserTurnStarted += OnUserTurnStarted;
                 newVm.PropertyChanged += OnViewModelPropertyChanged;
                 OnConversationChanged(newVm);
             }
@@ -70,6 +99,10 @@ public partial class ChatView : UserControl
         _trackedConversationId = next;
         _autoScroll = true;                     // new chats start at the newest message
         _restorePending = next is not null && _scrollMemory.Recall(next) is not null;
+        // P3 — a turn anchor never crosses conversations.
+        _anchorPending = false;
+        _anchorActive = false;
+        SetSpacer(0);
     }
 
     /// <summary>The ListBox's internal ScrollViewer (materialized after the template applies).</summary>
@@ -78,8 +111,134 @@ public partial class ChatView : UserControl
 
     private void OnMessageActivity(object? sender, EventArgs e)
     {
+        // P3 — while the anchor jump is still queued, do nothing (the old
+        // ScrollToEnd here is exactly what the anchor replaces).
+        if (_anchorPending)
+            return;
+        // P3 phase 1 — while a turn is anchored, activity (streamed
+        // deltas) shrinks the spacer instead of dragging the view.
+        if (_anchorActive)
+        {
+            HoldAnchor();
+            return;
+        }
         if (_autoScroll)
             MessageScroll?.ScrollToEnd();
+    }
+
+    // ── P3 — turn anchoring ─────────────────────────────────────────────────
+
+    private void OnUserTurnStarted(object? sender, EventArgs e)
+    {
+        _anchorPending = true;
+        _anchorActive = false;
+        _autoScroll = false; // extent growth must not re-pin during the hold
+        // Anchor after the new containers exist and have a size.
+        Dispatcher.InvokeAsync(() => ApplyAnchor(AnchorRetryPasses),
+            System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private void ApplyAnchor(int retries)
+    {
+        if (!_anchorPending) return;
+        var scroll = MessageScroll;
+        if (scroll is null || DataContext is not ChatViewModel vm)
+        {
+            _anchorPending = false;
+            return;
+        }
+        var userVm = vm.Messages.LastOrDefault(m => m.IsUser);
+        if (userVm is null)
+        {
+            _anchorPending = false;
+            return;
+        }
+        var gen = MessageList.ItemContainerGenerator;
+        if (gen.ContainerFromItem(userVm) is not FrameworkElement container
+            || container.ActualHeight <= 0)
+        {
+            // Virtualized + scrolled far up: the appended row has no
+            // container yet. Realize it, then retry next layout pass.
+            if (retries <= 0) { _anchorPending = false; return; }
+            _anchorScrollTick = Environment.TickCount64;
+            MessageList.ScrollIntoView(userVm);
+            Dispatcher.InvokeAsync(() => ApplyAnchor(retries - 1),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+            return;
+        }
+
+        var userTop = ContentTopOf(container, scroll);
+        double? prevTop = null;
+        var idx = vm.Messages.IndexOf(userVm);
+        if (idx > 0 && gen.ContainerFromIndex(idx - 1) is FrameworkElement prev)
+            prevTop = ContentTopOf(prev, scroll);
+
+        var target = SranDesktop.Application.Services.TurnAnchorMath.AnchorTarget(
+            userTop, prevTop, AnchorPreviousPeekPx);
+        SetSpacer(SranDesktop.Application.Services.TurnAnchorMath.SpacerNeeded(
+            target, scroll.ViewportHeight, scroll.ExtentHeight - _spacerPx));
+        _anchorScrollTick = Environment.TickCount64;
+        // Instant offset set — the idiom every non-button scroll in this
+        // file already uses (AnimatedScroller stays button-only).
+        scroll.ScrollToVerticalOffset(target);
+        _anchorPending = false;
+        _anchorActive = true;
+    }
+
+    /// <summary>Phase 1 tick: shrink the spacer as real content replaces it
+    /// (never below what the current offset needs, so nothing clamps), and
+    /// hand over to the regular follow once the reply fills the viewport —
+    /// or the turn ended while still anchored (short reply): keep the view
+    /// where it is and just trim the leftover spacer.</summary>
+    private void HoldAnchor()
+    {
+        var scroll = MessageScroll;
+        if (scroll is null) return;
+        var contentH = scroll.ExtentHeight - _spacerPx;
+        var needed = SranDesktop.Application.Services.TurnAnchorMath.SpacerNeeded(
+            scroll.VerticalOffset, scroll.ViewportHeight, contentH);
+        if (needed < _spacerPx)
+            SetSpacer(needed);
+        if (DataContext is ChatViewModel { IsStreaming: false })
+        {
+            _anchorActive = false; // turn over — view stays put
+            return;
+        }
+        // Phase 2 handover — THE policy line to tune.
+        if (SranDesktop.Application.Services.TurnAnchorMath.ShouldResumeFollow(
+                contentH, scroll.VerticalOffset, scroll.ViewportHeight))
+        {
+            _anchorActive = false;
+            _autoScroll = true;
+        }
+    }
+
+    /// <summary>A programmatic anchor scroll just happened — its follow-up
+    /// ScrollChanged must not be mistaken for the user cancelling the hold.
+    /// Same tick-window idiom as the P2 collapse grace.</summary>
+    private bool WasAnchorScrollJustIssued() =>
+        _anchorScrollTick != 0
+        && Environment.TickCount64 - _anchorScrollTick < AnchorScrollGraceMs;
+
+    /// <summary>Content-coordinate top of a realized container (viewport
+    /// position + current offset; ScrollUnit is Pixel on this list).</summary>
+    private static double ContentTopOf(FrameworkElement container, ScrollViewer scroll)
+        => container.TransformToAncestor(scroll).Transform(new Point(0, 0)).Y
+           + scroll.VerticalOffset;
+
+    /// <summary>The dynamic bottom spacer = extra bottom padding on the
+    /// ListBox itself. A control-level property survives container
+    /// recycling, is pure geometry (never content: nothing to copy, export,
+    /// announce, or virtualize), and collapses back to the XAML baseline
+    /// when the anchor releases it.</summary>
+    private void SetSpacer(double px)
+    {
+        px = Math.Max(0, Math.Round(px));
+        if (Math.Abs(px - _spacerPx) < 1) return;
+        _spacerPx = px;
+        MessageList.Padding = new Thickness(
+            _baseListPadding.Left, _baseListPadding.Top,
+            _baseListPadding.Right, _baseListPadding.Bottom + px);
     }
 
     private void MessageList_ScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -91,6 +250,13 @@ public partial class ChatView : UserControl
         // bottom pauses auto-scroll, returning to the bottom resumes it.
         if (e.ExtentHeightChange == 0)
         {
+            // P3 — the user always wins: a real scroll (not the anchor's
+            // own programmatic jump) cancels the hold for this turn.
+            if (!WasAnchorScrollJustIssued())
+            {
+                _anchorPending = false;
+                _anchorActive = false;
+            }
             _autoScroll = scroll.VerticalOffset >= scroll.ScrollableHeight - Services.ScrollStateHelper.BottomThreshold;
             // Remember where the user left this chat. Recorded on the user's
             // own scrolls only — content growth during a stream must not
