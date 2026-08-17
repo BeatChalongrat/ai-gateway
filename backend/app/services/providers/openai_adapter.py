@@ -51,6 +51,38 @@ _RESPONSES_SUMMARY_MAP: dict[str, str] = {
 # when the caller wants the visible summary.
 _RESPONSES_PATH = "/responses"
 
+# Model families that use the post-2024 /chat/completions sampling
+# contract: ``max_completion_tokens`` instead of ``max_tokens``, and only
+# default ``temperature`` / ``top_p``. THE single place the rule lives —
+# adding the next family (e.g. "gpt-6") is a one-entry change here.
+#
+# Deliberately NAME-based, not catalog-based: the catalog's capability
+# flags for these rows are known-wrong today (every gpt-5.* row carries
+# ``supports_reasoning=false``, which is exactly why the old
+# reasoning-gated rename never fired), and correcting them shifts
+# auto-router/capability-guard behaviour — a separate change. The
+# accepted trade-off: a family whose name doesn't start with one of
+# these prefixes needs a new entry; in exchange the rule is correct for
+# every current row (including the oddly-named ``gpt-5.6-luna`` /
+# ``-sol`` / ``-terra``, which all share the ``gpt-5`` prefix) and
+# depends on no data we know to be wrong.
+_COMPLETION_TOKEN_FAMILIES: tuple[str, ...] = ("gpt-5", "o1", "o3", "o4")
+
+
+def _uses_completion_token_contract(model: str) -> bool:
+    """True for OpenAI families that reject legacy ``max_tokens``.
+
+    Prefix match with a boundary check so ``gpt-5`` matches ``gpt-5``,
+    ``gpt-5.4-mini`` and ``gpt-5.6-luna`` but a hypothetical ``gpt-50``
+    or ``o1000x`` would not silently inherit the contract.
+    """
+    for family in _COMPLETION_TOKEN_FAMILIES:
+        if model == family:
+            return True
+        if model.startswith(family) and len(model) > len(family) and model[len(family)] in ".-":
+            return True
+    return False
+
 
 class OpenAIAdapter(BaseProviderAdapter):
     provider_name = "openai"
@@ -96,6 +128,25 @@ class OpenAIAdapter(BaseProviderAdapter):
             val = getattr(payload, param, None) or payload.metadata.get(param)
             if val is not None:
                 body[param] = val
+
+        # Post-2024 OpenAI families (GPT-5.x and the o-series) use a
+        # different sampling contract on /chat/completions: ``max_tokens``
+        # is rejected outright ("Use 'max_completion_tokens' instead",
+        # 400 unsupported_parameter — the live failure behind "Model
+        # unavailable, please try again"), and non-default ``temperature``
+        # / ``top_p`` are rejected the same way. Shape by MODEL FAMILY,
+        # not by reasoning mode: the old rename below only fired when the
+        # caller asked for reasoning AND the catalog flagged the model
+        # ``supports_reasoning`` — the GPT-5 rows are seeded with that
+        # flag false, and the desktop never sends a reasoning config, so
+        # plain requests went out with ``max_tokens`` and died. gpt-4-era
+        # models skip this block entirely and keep today's body
+        # byte-for-byte.
+        if _uses_completion_token_contract(model):
+            if "max_tokens" in body:
+                body["max_completion_tokens"] = body.pop("max_tokens")
+            body.pop("temperature", None)
+            body.pop("top_p", None)
 
         # Function-calling passthrough. Forward only when set so a
         # plain chat request doesn't gain empty tool fields.
