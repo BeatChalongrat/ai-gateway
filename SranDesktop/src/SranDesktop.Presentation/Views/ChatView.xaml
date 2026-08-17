@@ -78,8 +78,22 @@
                          user bubbles right-align at the edge and assistant
                          text left-aligns — matching the web layout exactly. -->
                     <Grid HorizontalAlignment="Stretch">
-                        <controls:MessageBubble Width="768" HorizontalAlignment="Center"
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <controls:MessageBubble Grid.Row="0" Width="768" HorizontalAlignment="Center"
                                                 Margin="24,0" />
+                        <!-- P3 turn-anchor spacer: empty, hit-test-invisible
+                             geometry BELOW the last bubble of an anchored
+                             turn. Being item content, the virtualizing panel
+                             measures it into the scrollable extent — which
+                             ListBox.Padding (the old, broken spacer) never
+                             was. Height is 0 on every other message. -->
+                        <Border Grid.Row="1"
+                                Height="{Binding TurnSpacerHeight}"
+                                IsHitTestVisible="False"
+                                Focusable="False" />
                     </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
