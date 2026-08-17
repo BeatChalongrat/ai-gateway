@@ -118,6 +118,66 @@ public partial class MessageViewModel : ObservableObject
     [ObservableProperty]
     private string? _statusText;
 
+    // ── Long user-message collapse (P2) ─────────────────────────────────────
+    // The threshold decision and expansion state live on the VIEW MODEL, not
+    // the visual tree: MessageList containers recycle, so visual-only state
+    // resets when a row scrolls out and back. The view owns layout, measures
+    // the rendered text (wrapped line-boxes — never a "\n" count; Thai wraps),
+    // and reports through ReportUserTextMetrics; everything downstream is
+    // plain VM state.
+
+    /// <summary>A user pill taller than this many rendered line-boxes starts collapsed.</summary>
+    public const int CollapseThresholdLines = 12;
+
+    /// <summary>The collapsed pill shows this many line-boxes.</summary>
+    public const int CollapseVisibleLines = 8;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UserTextMaxHeight))]
+    private bool _canCollapse;
+
+    /// <summary>Ephemeral per-message expansion — deliberately not persisted
+    /// (every load starts collapsed).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UserTextMaxHeight))]
+    private bool _isExpanded;
+
+    private double _collapseCapHeight;
+
+    /// <summary>What the user pill's TextBlock binds MaxHeight to: the
+    /// 8-line cap while collapsed, unbounded otherwise (and before the first
+    /// measurement, so nothing ever clips ahead of a real decision).</summary>
+    public double UserTextMaxHeight =>
+        CanCollapse && !IsExpanded && _collapseCapHeight > 0
+            ? _collapseCapHeight
+            : double.PositiveInfinity;
+
+    /// <summary>Called by the view with the RENDERED height of the full text
+    /// at the current wrap width, plus the effective line height. Re-fired on
+    /// width changes so a window resize re-decides the threshold; idempotent
+    /// otherwise.</summary>
+    public void ReportUserTextMetrics(double fullTextHeight, double lineHeight)
+    {
+        if (!IsUser || lineHeight <= 0)
+            return;
+        _collapseCapHeight = lineHeight * CollapseVisibleLines;
+        // Half-line tolerance: an exactly-threshold-height message must not
+        // collapse, and sub-pixel layout noise must not flip the decision.
+        CanCollapse = fullTextHeight > lineHeight * CollapseThresholdLines + lineHeight / 2;
+        OnPropertyChanged(nameof(UserTextMaxHeight));
+    }
+
+    /// <summary>Jump-to-message entry point: navigation landing on a collapsed
+    /// message must reveal it. Sidebar search currently opens only the
+    /// conversation (ConversationListViewModel.OpenMessageHitAsync — the
+    /// server sends no message id), so nothing calls this yet; it is the
+    /// tested seam for when per-message navigation lands.</summary>
+    public void ExpandForSearchHit()
+    {
+        if (CanCollapse)
+            IsExpanded = true;
+    }
+
     /// <summary>"model · N tokens" line shown under completed assistant messages.</summary>
     [ObservableProperty]
     private string? _metaLine;

@@ -17,6 +17,78 @@ public partial class MessageBubble : UserControl
         // DataContextChanged covers RECYCLED ones (Loaded doesn't re-fire).
         Loaded += (_, _) => TryAnimateEntrance();
         DataContextChanged += (_, _) => TryAnimateEntrance();
+        // P2 — a recycled container can keep the same pixel size for new
+        // content, in which case SizeChanged never fires; re-measure after
+        // the layout pass so ActualWidth reflects the NEW text.
+        DataContextChanged += (_, _) =>
+            Dispatcher.InvokeAsync(ReportUserTextMetrics, DispatcherPriority.Loaded);
+    }
+
+    // ── Long user-message collapse (P2) ─────────────────────────────────────
+
+    /// <summary>Bubbles up when the user clicks Show more / Show less, so
+    /// ChatView can tell this height change apart from stream growth and skip
+    /// one auto-scroll re-pin (expanding near the bottom must not yank the
+    /// viewport). Raised from Click only — binding churn on recycled
+    /// containers never fires it.</summary>
+    public static readonly RoutedEvent CollapseToggledEvent = EventManager.RegisterRoutedEvent(
+        nameof(CollapseToggled), RoutingStrategy.Bubble,
+        typeof(RoutedEventHandler), typeof(MessageBubble));
+
+    public event RoutedEventHandler CollapseToggled
+    {
+        add => AddHandler(CollapseToggledEvent, value);
+        remove => RemoveHandler(CollapseToggledEvent, value);
+    }
+
+    private void CollapseToggle_Click(object sender, RoutedEventArgs e)
+        => RaiseEvent(new RoutedEventArgs(CollapseToggledEvent, this));
+
+    private void UserMessageText_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // Width drives wrapping; height changes include our own MaxHeight cap
+        // taking effect, so reacting to them would loop.
+        if (e.WidthChanged)
+            ReportUserTextMetrics();
+    }
+
+    /// <summary>Decide the collapse threshold from the RENDERED height of the
+    /// full text at the current wrap width. Measured with FormattedText (off
+    /// the visual tree) because the TextBlock's own bound MaxHeight clamps its
+    /// ActualHeight while collapsed. Never counts "\n" — Thai text wraps, so
+    /// one logical line can occupy many line-boxes.</summary>
+    private void ReportUserTextMetrics()
+    {
+        if (DataContext is not MessageViewModel { IsUser: true } vm)
+            return;
+        var tb = UserMessageText;
+        var width = tb.ActualWidth;
+        if (width <= 0 || string.IsNullOrEmpty(tb.Text))
+            return;
+        // Derived from the TextBlock so a template font/line-height change
+        // keeps the threshold correct without touching this code.
+        var lineHeight = double.IsNaN(tb.LineHeight) || tb.LineHeight <= 0
+            ? tb.FontSize * 1.5
+            : tb.LineHeight;
+        vm.ReportUserTextMetrics(FullTextHeight(tb, width, lineHeight), lineHeight);
+    }
+
+    private static double FullTextHeight(TextBlock tb, double width, double lineHeight)
+    {
+        var formatted = new FormattedText(
+            tb.Text,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            tb.FlowDirection,
+            new Typeface(tb.FontFamily, tb.FontStyle, tb.FontWeight, tb.FontStretch),
+            tb.FontSize,
+            Brushes.Black, // measurement only — never rendered
+            VisualTreeHelper.GetDpi(tb).PixelsPerDip)
+        {
+            MaxTextWidth = Math.Max(1, width),
+            LineHeight = lineHeight,
+            Trimming = TextTrimming.None,
+        };
+        return formatted.Height;
     }
 
     /// <summary>Breathing animation for the cat status mark (was: pulsing

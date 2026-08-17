@@ -570,6 +570,30 @@ input {
   background: var(--bg-surface-hover);
 }
 
+/* P2 — long USER message collapse. Whether a message collapses is
+   decided in MessageBubble from its RENDERED height (Thai text wraps,
+   so "\n" counting under-collapses); this only caps the collapsed view
+   to 8 line-boxes. The bubble uses leading-relaxed (line-height 1.625),
+   so 8 lines = 8 × 1.625em — em-based so a font-size change scales the
+   cap with the text. Assistant replies never get this class. */
+.user-msg-text {
+  display: block;
+}
+.user-msg-text.is-collapsed {
+  max-height: calc(8 * 1.625em);
+  overflow: hidden;
+}
+.user-msg-toggle {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  transition: color 120ms ease;
+}
+.user-msg-toggle:hover {
+  color: var(--text-secondary);
+}
+
 /* Streaming cursor + indicators. */
 .streaming-cursor-block {
   display: inline-block;

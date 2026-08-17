@@ -15,7 +15,7 @@
 // shared component imports the CSS in its own module so only markdown-
 // rendering routes pay for it — see Markdown.tsx for the rationale.)
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useRouter } from "next/navigation";
 
@@ -230,9 +230,7 @@ function MessageBubbleImpl({
                   </div>
                 </div>
               ) : (
-                <span className="whitespace-pre-wrap break-words">
-                  {message.content}
-                </span>
+                <CollapsibleUserText content={message.content} />
               )}
             </div>
           ) : null}
@@ -425,6 +423,88 @@ function MessageBubbleImpl({
         ) : null}
       </div>
     </div>
+  );
+}
+
+// P2 — long USER message collapse. A user message taller than
+// USER_COLLAPSE_THRESHOLD_LINES rendered line-boxes starts collapsed to
+// USER_COLLAPSE_VISIBLE_LINES with a Show more / Show less toggle; at or
+// under the threshold it renders exactly as before, with no toggle.
+// Decided from the RENDERED height (scrollHeight vs. line-height), never
+// from "\n" count — Thai text wraps, so one logical line can occupy many
+// line-boxes. Assistant replies never collapse (this component is only
+// reachable from the user branch), and edit mode replaces it with the
+// full-text textarea. Display-only: copy/export read message.content
+// from the store, untouched by the cap.
+const USER_COLLAPSE_THRESHOLD_LINES = 12;
+const USER_COLLAPSE_VISIBLE_LINES = 8; // must match globals.css .user-msg-text.is-collapsed
+
+function CollapsibleUserText({ content }: { content: string }) {
+  const t = useT();
+  const [expanded, setExpanded] = useState(false);
+  const [canCollapse, setCanCollapse] = useState(false);
+  const textRef = useRef<HTMLSpanElement>(null);
+
+  // Measure before paint so a long message never flashes full-height,
+  // then re-measure on reflow (window/sidebar width changes) via
+  // ResizeObserver — no polling. scrollHeight reports the full content
+  // height even while the CSS cap is applied, so one measurement path
+  // serves both states.
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const measure = () => {
+      const lineHeight = parseFloat(window.getComputedStyle(el).lineHeight);
+      if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+      // Half-line tolerance: an exactly-threshold-height message must
+      // NOT collapse, and integer scrollHeight rounding must not flip it.
+      setCanCollapse(
+        el.scrollHeight >
+          lineHeight * USER_COLLAPSE_THRESHOLD_LINES + lineHeight / 2,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [content]);
+
+  const collapsed = canCollapse && !expanded;
+  return (
+    <>
+      <span
+        ref={textRef}
+        className={`user-msg-text whitespace-pre-wrap break-words${
+          collapsed ? " is-collapsed" : ""
+        }`}
+      >
+        {content}
+      </span>
+      {canCollapse ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={(e) => {
+            const btn = e.currentTarget;
+            const willCollapse = expanded;
+            setExpanded(!expanded);
+            // Collapsing a very long message pulls the toggle up — keep
+            // it (and the message tail the user was at) in view with the
+            // minimal scroll. Never fired on expand, so reading position
+            // is preserved there.
+            if (willCollapse) {
+              requestAnimationFrame(() =>
+                btn.scrollIntoView?.({ block: "nearest" }),
+              );
+            }
+          }}
+          className="user-msg-toggle focus-ring"
+        >
+          {expanded ? t("msg.showLess") : t("msg.showMore")}
+        </button>
+      ) : null}
+    </>
   );
 }
 

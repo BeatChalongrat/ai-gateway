@@ -118,11 +118,49 @@
                 <Border.Effect>
                     <DropShadowEffect ShadowDepth="1" BlurRadius="3" Opacity="0.08" Color="Black" />
                 </Border.Effect>
-                <TextBlock Text="{Binding Content}"
-                           TextWrapping="Wrap"
-                           FontSize="15" LineHeight="24"
-                           LineStackingStrategy="BlockLineHeight"
-                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <StackPanel>
+                    <!-- P2 — long-message collapse. MaxHeight binds to the VM
+                         (8 line-boxes while collapsed, unbounded otherwise);
+                         WPF's layout clip hides the overflow. The threshold is
+                         decided from the RENDERED height, measured in
+                         code-behind (UserMessageText_SizeChanged) — never a
+                         "\n" count, because Thai wraps. State lives on the VM
+                         so recycled containers keep it. -->
+                    <TextBlock x:Name="UserMessageText"
+                               Text="{Binding Content}"
+                               TextWrapping="Wrap"
+                               FontSize="15" LineHeight="24"
+                               LineStackingStrategy="BlockLineHeight"
+                               MaxHeight="{Binding UserTextMaxHeight}"
+                               SizeChanged="UserMessageText_SizeChanged"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <!-- Show more / Show less. Click (user gesture only, never
+                         binding churn) also tells ChatView to skip one
+                         auto-scroll re-pin so expanding near the bottom does
+                         not yank the viewport. -->
+                    <ToggleButton HorizontalAlignment="Left"
+                                  Margin="0,6,0,0"
+                                  Background="Transparent" BorderThickness="0"
+                                  Cursor="Hand"
+                                  FontSize="12"
+                                  Foreground="{DynamicResource TextSecondaryBrush}"
+                                  IsChecked="{Binding IsExpanded}"
+                                  Click="CollapseToggle_Click"
+                                  Visibility="{Binding CanCollapse, Converter={StaticResource BoolToVisibility}}">
+                        <ToggleButton.Style>
+                            <Style TargetType="ToggleButton">
+                                <Setter Property="Content" Value="{loc:T msg.showMore}" />
+                                <Setter Property="AutomationProperties.Name" Value="{loc:T msg.showMore}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                        <Setter Property="Content" Value="{loc:T msg.showLess}" />
+                                        <Setter Property="AutomationProperties.Name" Value="{loc:T msg.showLess}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ToggleButton.Style>
+                    </ToggleButton>
+                </StackPanel>
             </Border>
 
             <!-- inline edit mode (R9 F4): editing forks a new branch -->
