@@ -20,6 +20,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { FallbackAttempt, Message } from "@/lib/types";
+import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
 import { useI18nStore, useT } from "@/lib/i18n";
 import { fallbackNotice } from "@/lib/errorMessages";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
@@ -27,6 +28,7 @@ import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
 import { BranchNavigator } from "./BranchNavigator";
+import { CatIndicator } from "./CatIndicator";
 import { DocPlanCard } from "./DocPlanCard";
 import type { DocPlan } from "./DocPlanCard";
 import { ExcelPlanCard } from "./ExcelPlanCard";
@@ -45,6 +47,7 @@ import { MessageAttachments } from "./MessageAttachments";
 import { PptxPlanCard } from "./PptxPlanCard";
 import type { PptxPlan } from "./PptxPlanCard";
 import { ThinkingBlock } from "./ThinkingBlock";
+import { ToolActivityIndicator } from "./ToolActivityIndicator";
 
 interface Props {
   message: Message;
@@ -242,7 +245,7 @@ function MessageBubbleImpl({
             <div className="message-actions flex items-center gap-0.5">
               {hasText ? (
                 <ActionButton
-                  ariaLabel={copied ? "Copied" : "Copy message"}
+                  ariaLabel={copied ? t("a11y.copied") : t("a11y.copyMessage")}
                   onClick={copyMessageContent}
                   tone={copied ? "success" : "muted"}
                 >
@@ -251,7 +254,7 @@ function MessageBubbleImpl({
               ) : null}
               {onEdit && !message.isStreaming ? (
                 <ActionButton
-                  ariaLabel="Edit message"
+                  ariaLabel={t("a11y.editMessage")}
                   onClick={() => setEditing(true)}
                 >
                   <EditIcon />
@@ -301,6 +304,14 @@ function MessageBubbleImpl({
       {message.code_runs?.map((run) => (
         <CodeRunCard key={run.id} run={run} />
       ))}
+
+      {/* A2 — generic activity for tools without a dedicated indicator
+          (memory/state/past-search/canvas + unknown/MCP tools). Same
+          zone as the code cards: the tool runs first, the explanation
+          streams after. Rows exist only while a call is in flight. */}
+      {message.tool_activities?.length ? (
+        <ToolActivityIndicator activities={message.tool_activities} />
+      ) : null}
 
       {/* Body */}
       <div className="prose-chat w-full text-text-primary">
@@ -381,7 +392,7 @@ function MessageBubbleImpl({
           }`}
         >
           <ActionButton
-            ariaLabel={copied ? "Copied" : "Copy message"}
+            ariaLabel={copied ? t("a11y.copied") : t("a11y.copyMessage")}
             onClick={copyMessageContent}
             tone={copied ? "success" : "muted"}
           >
@@ -395,7 +406,7 @@ function MessageBubbleImpl({
             />
           ) : null}
           {showRegenerate && onRegenerate ? (
-            <ActionButton ariaLabel="Regenerate" onClick={onRegenerate}>
+            <ActionButton ariaLabel={t("a11y.regenerate")} onClick={onRegenerate}>
               <RegenerateIcon />
             </ActionButton>
           ) : null}
@@ -687,6 +698,17 @@ function RegenerateIcon() {
 // streaming — they only mount on the terminal "complete" event so the
 // user doesn't see a half-parsed plan flicker into a card; until then the
 // fence shows as text.
+//
+// Per-block memoization (BlockDiff port): the content is split into
+// top-level blocks (fence/math aware — see lib/markdownBlocks.ts) and each
+// block parses through its own memoized <Markdown>. Appending a token only
+// changes the last block's text, so every earlier block skips the
+// react-markdown + rehype re-parse instead of the whole message re-parsing
+// once per rAF flush.
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+  return <Markdown citations>{text}</Markdown>;
+});
+
 const StreamingMarkdown = memo(function StreamingMarkdown({
   content,
 }: {
@@ -694,7 +716,9 @@ const StreamingMarkdown = memo(function StreamingMarkdown({
 }) {
   return (
     <div className="streaming-body">
-      <Markdown citations>{content}</Markdown>
+      {splitMarkdownBlocks(content).map((b) => (
+        <MarkdownBlock key={b.key} text={b.text} />
+      ))}
       <span className="streaming-cursor-block" aria-hidden />
     </div>
   );
@@ -734,13 +758,7 @@ function AssistantContentBody({
     // While searching the web, show the searching indicator in place of
     // the typing dots. It self-hides once the answer streams in.
     if (message.is_searching) return <SearchingIndicator />;
-    return (
-      <span className="typing-indicator" aria-label="Thinking">
-        <span />
-        <span />
-        <span />
-      </span>
-    );
+    return <CatIndicator labelKey="reasoning.thinking" />;
   }
 
   if (isStreaming) {
@@ -875,6 +893,7 @@ function areEqual(prev: Props, next: Props): boolean {
     // Phase 8 — re-render when a run_python frame lands (the store
     // replaces the array on every upsert, so identity is enough).
     a.code_runs === b.code_runs &&
+    a.tool_activities === b.tool_activities &&
     // S7 — re-render when the per-turn context_sources array
     // arrives or changes. The first render after a stream
     // finishes carries no sources (they persist async); the next

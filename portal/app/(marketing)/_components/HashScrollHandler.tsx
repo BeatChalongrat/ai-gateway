@@ -27,7 +27,7 @@ function smoothScrollTo(targetY: number, duration = SCROLL_DURATION) {
   requestAnimationFrame(step);
 }
 
-// Cross-page nav (e.g. /pricing → /#features) updates the URL hash but
+// Cross-page nav (e.g. /privacy → /#security) updates the URL hash but
 // Next's App Router doesn't trigger the browser's native anchor scroll
 // after client-side navigation. This effect runs once on mount and
 // scrolls to the hash target if there is one.

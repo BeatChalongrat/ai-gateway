@@ -5,7 +5,7 @@ import {
   useRouter,
   useSelectedLayoutSegments,
 } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
 import { CreditBadge } from "@/components/chat/CreditBadge";
@@ -18,6 +18,7 @@ import {
 } from "@/hooks/useKeyboardShortcuts";
 import { useMemoryPendingPoll } from "@/hooks/useMemoryPendingCount";
 import { redirectToPortalLogin } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 import { useAuthStore } from "@/stores/authStore";
 import { useModelStore } from "@/stores/modelStore";
 import { useSidebarStore } from "@/stores/sidebarStore";
@@ -38,6 +39,33 @@ export default function ChatLayout({
   const collapsed = useSidebarStore((s) => s.collapsed);
   const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed);
   const newChat = useNewChatHandler();
+  const t = useT();
+
+  // Route-change focus management (WCAG 2.4.3): a client-side
+  // navigation leaves focus wherever the click happened (usually a
+  // sidebar button), so screen-reader/keyboard users get no signal
+  // the page changed. Moving focus to the labelled <main> both
+  // repositions the reading cursor and announces the page name.
+  // Skipped on first mount — stealing initial page focus is worse.
+  const pathname = usePathname();
+  const mainRef = useRef<HTMLElement>(null);
+  const firstRouteRef = useRef(true);
+  useEffect(() => {
+    if (firstRouteRef.current) {
+      firstRouteRef.current = false;
+      return;
+    }
+    mainRef.current?.focus();
+  }, [pathname]);
+  const pageLabel = pathname?.startsWith("/chat/knowledge")
+    ? t("menu.knowledgeBase")
+    : pathname?.startsWith("/chat/projects")
+      ? t("menu.projects")
+      : pathname?.startsWith("/chat/memory")
+        ? t("a11y.memorySettings")
+        : pathname?.startsWith("/chat/archive")
+          ? t("archive.open")
+          : t("a11y.pageChat");
 
   const [isReady, setIsReady] = useState(false);
 
@@ -126,7 +154,12 @@ export default function ChatLayout({
         onToggleCollapsed={toggleCollapsed}
       />
 
-      <main className="relative flex h-full flex-1 flex-col overflow-hidden">
+      <main
+        ref={mainRef}
+        tabIndex={-1}
+        aria-label={pageLabel}
+        className="relative flex h-full flex-1 flex-col overflow-hidden outline-none"
+      >
         {/* Top bar. Three modes:
             • mobile: hamburger to open the slide-over
             • desktop expanded: just the offline pill on the right
@@ -135,7 +168,7 @@ export default function ChatLayout({
         <div className="safe-top relative flex shrink-0 items-center gap-2 px-3 py-2 md:px-4">
           <button
             type="button"
-            aria-label="Open sidebar"
+            aria-label={t("a11y.openSidebar")}
             onClick={() => setSidebarOpen(true)}
             className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary md:hidden"
           >
@@ -191,11 +224,12 @@ function CollapsedRail({
   onExpand: () => void;
   onNewChat: () => void;
 }) {
+  const t = useT();
   return (
     <div className="hidden items-center gap-1 md:flex">
       <button
         type="button"
-        aria-label="Expand sidebar"
+        aria-label={t("a11y.expandSidebar")}
         title="Expand sidebar (⌘⇧S)"
         onClick={onExpand}
         className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
@@ -204,7 +238,7 @@ function CollapsedRail({
       </button>
       <button
         type="button"
-        aria-label="New chat"
+        aria-label={t("sidebar.newChat")}
         title="New chat (⌘⇧N)"
         onClick={onNewChat}
         className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
@@ -241,6 +275,7 @@ const MORE_MENU_ITEMS: { label: string; Icon: typeof Brain; href: string }[] = [
 function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Dismiss the menu on any navigation so it never lingers over a new
@@ -253,7 +288,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
     <div className="relative ml-auto flex items-center gap-1 md:hidden">
       <button
         type="button"
-        aria-label="New chat"
+        aria-label={t("sidebar.newChat")}
         title="New chat"
         onClick={onNewChat}
         className={SUBTLE_TOPBAR_BTN}
@@ -263,7 +298,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
 
       <button
         type="button"
-        aria-label="More options"
+        aria-label={t("a11y.moreOptions")}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen((v) => !v)}
@@ -282,7 +317,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
           />
           <div
             role="menu"
-            aria-label="More options"
+            aria-label={t("a11y.moreOptions")}
             className="absolute right-0 top-12 z-50 w-48 overflow-hidden rounded-xl border border-border bg-bg-surface py-1 shadow-xl"
           >
             {MORE_MENU_ITEMS.map(({ label, Icon, href }) => (

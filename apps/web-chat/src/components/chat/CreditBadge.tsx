@@ -16,6 +16,7 @@ import { ChevronUp, ExternalLink } from "lucide-react";
 
 import { useUsage } from "@/hooks/useUsage";
 import { PORTAL_URL } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 import type { ModelUsage } from "@/lib/types";
 import { useModelStore } from "@/stores/modelStore";
 
@@ -57,6 +58,7 @@ function levelColor(pctRemaining: number): string {
 }
 
 export function CreditBadge() {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const { data } = useUsage();
 
@@ -91,7 +93,7 @@ export function CreditBadge() {
 
         <button
           type="button"
-          aria-label="Usage and credits"
+          aria-label={t("a11y.usageAndCredits")}
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
@@ -149,6 +151,7 @@ function MiniRing({ pct, color }: { pct: number; color: string }) {
 }
 
 function UsagePanel({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const { data, refetch, isStale } = useUsage();
   const models = useModelStore((s) => s.models);
 
@@ -173,7 +176,7 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
   return (
     <div
       role="dialog"
-      aria-label="Usage"
+      aria-label={t("a11y.usage")}
       className="usage-panel-enter absolute bottom-[calc(100%+8px)] right-0 z-50 max-h-[70vh] w-80 max-w-[calc(100vw-32px)] overflow-y-auto rounded-xl border border-border bg-bg-surface shadow-xl"
     >
       {/* Header */}

@@ -353,11 +353,16 @@ func detectLanguage(message string) string {
 // reasoningEnabled is the conversation's user-facing reasoning toggle;
 // it OR's with the inferred complexity so an explicit "think harder"
 // request always sets needs_reasoning even on a short prompt.
+//
+// numTools is how many tool definitions this turn will attach. It is a
+// hint the gateway treats as a hard capability filter: a turn carrying
+// tools must not be routed to a model that can't call them.
 func BuildRoutingHints(
 	message string,
 	hasFiles, hasImages bool,
 	conversationMessageCount int,
 	reasoningEnabled bool,
+	numTools int,
 ) RoutingHints {
 	hasCode := hasCodeMarkers(message)
 	complex := isComplexQuery(message, hasFiles, hasImages, conversationMessageCount)
@@ -373,6 +378,8 @@ func BuildRoutingHints(
 	return RoutingHints{
 		NeedsVision:    hasImages,
 		NeedsReasoning: reasoningEnabled || complex,
+		HasTools:       numTools > 0,
+		ToolCount:      numTools,
 		HasCode:        hasCode,
 		HasFiles:       hasFiles,
 		Complexity:     complexity,

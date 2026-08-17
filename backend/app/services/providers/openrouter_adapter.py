@@ -18,6 +18,9 @@ from app.services.providers.base_urls import resolve_base_url
 from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.openai_adapter import _parse_sse_line
+from app.services.providers.openai_compatible_adapter import (
+    serialize_openai_wire_message,
+)
 from app.services.providers.parsers import parse_openai_response
 
 if TYPE_CHECKING:
@@ -45,7 +48,7 @@ class OpenRouterAdapter(BaseProviderAdapter):
         model = resolved_model or payload.model
         body: dict = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [serialize_openai_wire_message(m) for m in messages],
         }
         # P1 Item 4 — prompt caching for Anthropic models routed via
         # OpenRouter. OpenRouter passes ``cache_control`` through to
@@ -77,6 +80,25 @@ class OpenRouterAdapter(BaseProviderAdapter):
             val = getattr(payload, param, None) or payload.metadata.get(param)
             if val is not None:
                 body[param] = val
+
+        # Function-calling passthrough, gated on the registry capability
+        # flag: silently stripping ``tools`` would leave the model unable
+        # to call tools while the caller believes they were sent, so a
+        # tools request against a non-tool model fails loudly instead.
+        tools = getattr(payload, "tools", None)
+        if tools:
+            from app.core.exceptions import ValidationError
+            from app.services.providers.model_registry import get_candidate
+
+            cand = get_candidate(model)
+            if cand is None or not cand.supports_tools:
+                raise ValidationError(
+                    f"Model '{model}' does not support tool/function calling"
+                )
+            body["tools"] = tools
+            tool_choice = getattr(payload, "tool_choice", None)
+            if tool_choice is not None:
+                body["tool_choice"] = tool_choice
 
         # T3: OpenRouter reasoning. The OR API accepts both the legacy
         # ``include_reasoning: true`` flag AND the newer

@@ -384,19 +384,22 @@ func (pc *PromptCompiler) safetyRules(in CompileContext) string {
 // layer also subsumes the old standalone MemoryPolicyBlock — the
 // save_memory paragraph carries the proactive-save directive.
 var toolDescriptions = map[string]string{
-	"save_memory": "- save_memory: Save important facts about the user (name, role, " +
-		"location, team, preferences, standing instructions, ongoing projects). " +
-		"Save proactively the moment you notice these — do NOT wait for the user " +
-		"to say \"remember\" or \"จำไว้\", and do not ask permission. Save silently; " +
-		"do not announce the save. Skip transient info (weather, mood, one-off " +
-		"tasks) and never save secrets (passwords, API keys, IDs).",
-	"list_memories": "- list_memories: Check what you already know about the user. " +
-		"Use it before asking something you might already have on file.",
+	"save_memory": "- save_memory: Save a durable fact about the user ONLY when they " +
+		"explicitly ask you to remember (\"remember…\", \"จำไว้…\", \"ต่อไปนี้…\") or state " +
+		"a clear lasting fact about themselves (name, role, standing instruction). " +
+		"Never save because of a one-off task request, and never let saving delay the " +
+		"answer. Save silently; do not announce the save. Skip transient info and never " +
+		"save secrets (passwords, API keys, IDs). Inferred preferences are collected " +
+		"automatically in the background — you do not need to capture them.",
+	"list_memories": "- list_memories: Check what you already know about the user, " +
+		"when they ask what you remember. Your saved-memory context is already in this " +
+		"prompt — do not call this before answering ordinary questions.",
 	"search_past_conversations": "- search_past_conversations: Search the user's chat " +
 		"history. Use it when they reference earlier conversations (\"เมื่อวานเราคุยอะไร\", " +
 		"\"remember when we discussed...\").",
-	"update_conversation_state": "- update_conversation_state: Track the goal and " +
-		"progress of the current conversation as it evolves.",
+	"update_conversation_state": "- update_conversation_state: Track progress of " +
+		"genuine multi-turn work only (projects, iterated documents). Not for one-shot " +
+		"requests or topic changes — background extraction keeps state fresh on its own.",
 	"web_search": "- web_search: Search the web when the user asks about current " +
 		"events, recent releases, prices, or anything likely past your knowledge " +
 		"cutoff. Cite results as [N] per the tool's result format.",
@@ -441,8 +444,8 @@ func (pc *PromptCompiler) toolPolicy(in CompileContext) string {
 	}
 	var b strings.Builder
 	b.WriteString("<tool_policy>\n")
-	b.WriteString("You have access to the following tools. Use them proactively when " +
-		"appropriate — do not wait for the user to ask:\n\n")
+	b.WriteString("You have access to the following tools. Use each according to its " +
+		"own guidance below — answering the user's actual question always comes first:\n\n")
 	b.WriteString(strings.Join(body, "\n"))
 	b.WriteString("\n\nDo NOT mention tool names to the user. Just use them naturally.\n")
 	b.WriteString("If a tool call fails, continue the conversation gracefully.\n")

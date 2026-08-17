@@ -36,6 +36,8 @@ import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 
+import { tOutside } from "@/lib/i18n";
+
 import { CodeBlock } from "./CodeBlock";
 
 // Citation marker — RAG context tells the model to cite sources using
@@ -113,7 +115,7 @@ const markdownComponents = {
     <div
       className="md-table-wrap scrollbar-thin"
       role="region"
-      aria-label="Table"
+      aria-label={tOutside("a11y.table")}
       tabIndex={0}
     >
       <table {...props} />

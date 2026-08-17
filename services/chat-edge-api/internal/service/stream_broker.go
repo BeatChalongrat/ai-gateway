@@ -57,6 +57,11 @@ type StreamSnapshot struct {
 	// superseded by the terminal one). Replaying them restores the
 	// code+output cards after a mid-stream reconnect.
 	CodeExecutions []CodeExecutionUpdate
+	// ToolActivities mirrors CodeExecutions for the generic tool_activity
+	// frames: latest frame per tool_call id, first-seen order, so a
+	// reconnect mid-tool restores the "using <tool>…" indicator (and a
+	// finished frame supersedes the started one).
+	ToolActivities []ToolActivityUpdate
 	// Terminal is non-nil when the generation already ended; Events
 	// from Subscribe is nil in that case.
 	Terminal *StreamUpdate
@@ -82,6 +87,9 @@ type brokerEntry struct {
 	// the live stream delivered them.
 	codeRuns  map[string]CodeExecutionUpdate
 	codeOrder []string
+	// toolActs mirrors codeRuns for generic tool_activity frames.
+	toolActs  map[string]ToolActivityUpdate
+	toolOrder []string
 	subs      map[int]*resumeSubscriber
 	nextSub   int
 }
@@ -93,6 +101,12 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 			runs = append(runs, r)
 		}
 	}
+	var acts []ToolActivityUpdate
+	for _, id := range e.toolOrder {
+		if a, ok := e.toolActs[id]; ok {
+			acts = append(acts, a)
+		}
+	}
 	return StreamSnapshot{
 		Content:        e.content.String(),
 		Reasoning:      e.reasoning.String(),
@@ -102,6 +116,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		SearchStatus:   e.search,
 		FallbackInfo:   e.fallback,
 		CodeExecutions: runs,
+		ToolActivities: acts,
 		Terminal:       e.terminal,
 	}
 }
@@ -191,6 +206,15 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 			e.codeOrder = append(e.codeOrder, ev.CodeExecution.ID)
 		}
 		e.codeRuns[ev.CodeExecution.ID] = *ev.CodeExecution
+	}
+	if ev.ToolActivity != nil && ev.ToolActivity.ID != "" {
+		if e.toolActs == nil {
+			e.toolActs = make(map[string]ToolActivityUpdate)
+		}
+		if _, seen := e.toolActs[ev.ToolActivity.ID]; !seen {
+			e.toolOrder = append(e.toolOrder, ev.ToolActivity.ID)
+		}
+		e.toolActs[ev.ToolActivity.ID] = *ev.ToolActivity
 	}
 	terminal := ev.Done || ev.Err != nil
 	if terminal {

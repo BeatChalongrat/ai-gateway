@@ -410,6 +410,13 @@ export interface Message {
    *  reload after the turn keeps the produced files but drops the
    *  cards (see the SSE handler comment in chat-edge). */
   code_runs?: CodeRun[];
+  /** local-only (A2) — generic activity rows for tools WITHOUT a
+   *  dedicated indicator (save_memory, list_memories, conversation
+   *  state, past-conversation search, canvas update — plus any
+   *  unknown/MCP tool). Delivered by the ``tool_activity`` SSE event,
+   *  keyed by tool-call id. Ephemeral like code_runs and additionally
+   *  cleared at message_complete. */
+  tool_activities?: ToolActivity[];
   /** local-only — wall-clock duration of the streaming turn (send →
    *  message_complete). Shown in the per-message metadata line; absent
    *  after a page reload (not persisted). */
@@ -717,6 +724,18 @@ export interface CodeRun {
 /** SSE payload for a run_python progress frame — identical shape to
  *  CodeRun (the backend serialises CodeExecutionUpdate directly). */
 export type SSECodeExecution = CodeRun;
+
+/** One generic tool-activity frame (the ``tool_activity`` SSE event).
+ *  Two frames per call share an id: "started" then "finished" — the
+ *  client upserts by id so they collapse into one indicator row. */
+export interface ToolActivity {
+  id: string;
+  tool: string;
+  phase: "started" | "finished";
+}
+
+/** SSE payload — the backend serialises ToolActivityUpdate directly. */
+export type SSEToolActivity = ToolActivity;
 
 /** One attempted model in a fallback chain (B2/B3). */
 export interface FallbackAttempt {

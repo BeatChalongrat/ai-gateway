@@ -24,7 +24,14 @@ ARG NEXT_PUBLIC_GATEWAY_URL
 ENV NEXT_PUBLIC_GATEWAY_URL=$NEXT_PUBLIC_GATEWAY_URL
 ARG NEXT_PUBLIC_PORTAL_URL
 ENV NEXT_PUBLIC_PORTAL_URL=$NEXT_PUBLIC_PORTAL_URL
-RUN npm run build
+# Build stamp for the update-available prompt. `next build` loads
+# next.config.js more than once, so the stamp must be computed ONCE here
+# and handed to the build via env — that guarantees the client bundle and
+# the /api/version route inline the SAME id for one image. Overridable
+# with --build-arg NEXT_PUBLIC_BUILD_ID=<git-sha> from CI; defaults to
+# the epoch second the build started.
+ARG NEXT_PUBLIC_BUILD_ID
+RUN NEXT_PUBLIC_BUILD_ID="${NEXT_PUBLIC_BUILD_ID:-$(date +%s)}" npm run build
 
 # --- runner --------------------------------------------------
 FROM node:20-alpine

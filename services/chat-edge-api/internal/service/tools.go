@@ -104,13 +104,15 @@ func updateConversationStateToolDef() GatewayTool {
 		Function: GatewayToolFunction{
 			Name: "update_conversation_state",
 			Description: "Update the structured state of this conversation. " +
-				"Call this when:\n" +
-				"- The user states or changes the goal of the conversation\n" +
-				"- A significant decision is made or confirmed\n" +
-				"- A task is completed or a new task is identified\n" +
-				"- An approach is rejected\n" +
+				"ONLY for genuine multi-turn work with real progress to track " +
+				"(a project being built step by step, a document being iterated on). Call when:\n" +
+				"- A significant decision is made or confirmed in ongoing multi-turn work\n" +
+				"- A tracked task is completed or a new sub-task is identified\n" +
+				"- An approach is rejected after discussion\n" +
 				"- An important file/artifact is created or modified\n" +
-				"Do NOT call for casual chat, greetings, or minor clarifications.",
+				"Do NOT call for casual chat, greetings, minor clarifications, one-shot requests " +
+				"('write X for me'), or simple topic changes — answering the question is always the priority; " +
+				"background extraction keeps the state fresh without this tool.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -165,15 +167,19 @@ func MemoryToolDefs() []GatewayTool {
 			Function: GatewayToolFunction{
 				Name: "save_memory",
 				Description: "Save a fact, preference, or instruction to memory so it persists across conversations.\n\n" +
-					"Call this tool PROACTIVELY — do NOT wait for the user to say 'remember' or 'จำไว้'. " +
-					"You SHOULD call save_memory when the user:\n" +
-					"- shares personal info: name, occupation, location, team, company\n" +
-					"- states a preference: language, response style, level of detail\n" +
-					"- gives a standing instruction: 'always…', 'never…', 'from now on…', 'ต่อไปนี้…'\n" +
-					"- corrects you about themselves: 'actually I prefer…', 'no, my name is…'\n" +
-					"- mentions an ongoing project or interest they are working on\n\n" +
-					"Save silently — do NOT announce that you are saving; just save and continue the conversation. " +
-					"Example: user says 'ผมชื่อ Beat' → save 'User's name is Beat' as explicit_fact, then respond naturally.\n\n" +
+					"Save ONLY when one of these clearly applies:\n" +
+					"- the user explicitly asks you to remember: 'remember…', 'จำไว้…', 'from now on…', 'ต่อไปนี้…'\n" +
+					"- the user states a clear, durable personal fact: their name, occupation, team, company\n" +
+					"- the user gives a standing instruction: 'always…', 'never…'\n" +
+					"- the user corrects a stored fact: 'no, my name is…'\n\n" +
+					"Do NOT save just because the user asked you to do a one-off task " +
+					"('เขียนเรียงความเรื่อง X ให้หน่อย' is a request, not a fact about the user) and " +
+					"do NOT infer preferences or projects from a single request — background extraction " +
+					"handles inferred preferences separately. When in doubt, don't save; answer the user first.\n\n" +
+					"Set 'source' honestly: 'user_requested' ONLY when the user explicitly asked to remember " +
+					"or stated the fact about themselves; otherwise 'inferred' (goes to a review queue).\n\n" +
+					"Save silently — do NOT announce that you are saving. " +
+					"Example: user says 'จำไว้นะ ผมชื่อ Beat' → save 'User's name is Beat' as explicit_fact, source user_requested.\n\n" +
 					"Do NOT save: passwords, API keys, tokens, ID numbers, credit card numbers, bank accounts, salary amounts, " +
 					"or one-time contextual facts (weather, mood, one-off tasks).",
 				Parameters: map[string]any{
@@ -198,8 +204,14 @@ func MemoryToolDefs() []GatewayTool {
 							"type":        "string",
 							"description": "Optional grouping: identity, language, coding, work, style, etc.",
 						},
+						"source": map[string]any{
+							"type": "string",
+							"enum": []string{"user_requested", "inferred"},
+							"description": "user_requested = the user explicitly asked to remember this or stated it as a fact about themselves (saved immediately). " +
+								"inferred = you deduced it yourself (goes to the user's review queue). Defaults to inferred.",
+						},
 					},
-					"required": []string{"content", "memory_type"},
+					"required": []string{"content", "memory_type", "source"},
 				},
 			},
 		},
@@ -807,6 +819,14 @@ type saveMemoryArgs struct {
 	Content    string `json:"content"`
 	MemoryType string `json:"memory_type"`
 	Category   string `json:"category"`
+	// Source separates trust tiers: "user_requested" (explicit ask /
+	// self-stated fact → active immediately, the classic "จำไว้ว่า…"
+	// flow) vs "inferred" (AI-initiated → pending_confirmation, the
+	// user approves it on the Memory page). Anything else, including
+	// omitted, is treated as inferred — the LOW-trust default, so a
+	// model that forgets the field can never silently plant an
+	// always-injected memory.
+	Source string `json:"source"`
 }
 
 func (e *ToolExecutor) execSaveMemory(
@@ -826,6 +846,16 @@ func (e *ToolExecutor) execSaveMemory(
 		args.MemoryType = model.MemoryTypeExplicitFact
 	}
 
+	// Trust mapping (see saveMemoryArgs.Source): only an explicit
+	// user request keeps the user_explicit/active tier; AI-initiated
+	// saves go to the pending review queue like the S8 extractor's.
+	sourceType := model.MemorySourceAssistantInferred
+	statusOverride := model.MemoryStatusPendingConfirmation
+	if args.Source == "user_requested" {
+		sourceType = model.MemorySourceUserExplicit
+		statusOverride = ""
+	}
+
 	in := CreateMemoryInput{
 		TenantID:             ec.TenantID,
 		UserID:               ec.UserID,
@@ -833,7 +863,8 @@ func (e *ToolExecutor) execSaveMemory(
 		MemoryType:           args.MemoryType,
 		Category:             args.Category,
 		Content:              args.Content,
-		SourceType:           model.MemorySourceUserExplicit,
+		SourceType:           sourceType,
+		StatusOverride:       statusOverride,
 		SourceConversationID: nilOrUUID(ec.ConversationID),
 		SourceMessageID:      nilOrUUID(ec.MessageID),
 		ActorType:            "assistant",
@@ -855,6 +886,9 @@ func (e *ToolExecutor) execSaveMemory(
 		default:
 			return "I couldn't save that right now. Please try again in a moment."
 		}
+	}
+	if out.Status == model.MemoryStatusPendingConfirmation {
+		return fmt.Sprintf("Noted %q — queued for the user's review in Memory settings (not active yet).", out.Content)
 	}
 	return fmt.Sprintf("Saved: %q", out.Content)
 }

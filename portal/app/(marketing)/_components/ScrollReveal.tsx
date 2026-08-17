@@ -11,7 +11,7 @@ import { usePathname } from "next/navigation";
 // The effect re-runs on every pathname change so client-side
 // navigations within the (marketing) route group re-observe the
 // fresh page's .reveal nodes. Without this, returning to / after
-// visiting /pricing (or any sibling route) leaves the new DOM's
+// visiting /privacy (or any sibling route) leaves the new DOM's
 // .reveal elements stuck at opacity:0 — the layout persists,
 // ScrollReveal doesn't remount, and the stale observer only holds
 // references to nodes that were unmounted during navigation. The

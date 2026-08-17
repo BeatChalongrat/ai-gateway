@@ -12,7 +12,10 @@
 // mode at mount so SSR doesn't have to guess. Closes on Escape
 // + backdrop tap in both modes.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -33,7 +36,12 @@ export function Modal({
   maxWidth = 480,
   children,
 }: Props) {
+  const t = useT();
   const [isMobile, setIsMobile] = useState(false);
+  // Focus trap + restore-on-close (WCAG 2.4.3/2.1.2) — the ref points at
+  // the dialog card in whichever viewport mode rendered.
+  const cardRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(cardRef, open);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -74,7 +82,7 @@ export function Modal({
       </div>
       <button
         type="button"
-        aria-label="Close"
+        aria-label={t("a11y.close")}
         onClick={onClose}
         className="focus-ring tap-44 -mr-1 rounded p-1 text-text-muted hover:bg-bg-elevated hover:text-text-primary"
       >
@@ -100,6 +108,7 @@ export function Modal({
         className="fixed inset-0 z-40 flex items-end justify-center bg-black/65 backdrop-blur-sm"
       >
         <div
+          ref={cardRef}
           onClick={(e) => e.stopPropagation()}
           className="sheet-up safe-bottom flex w-full max-h-[90vh] flex-col overflow-hidden rounded-t-2xl border-x border-t border-border bg-bg-surface text-text-primary shadow-2xl"
         >
@@ -129,6 +138,7 @@ export function Modal({
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm"
     >
       <div
+        ref={cardRef}
         onClick={(e) => e.stopPropagation()}
         className="popover-appear flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-bg-surface text-text-primary shadow-2xl"
         style={{ maxWidth }}

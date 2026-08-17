@@ -29,7 +29,10 @@
   /* === Text === */
   --text-primary: #ECECEC;
   --text-secondary: #A0A0A0;
-  --text-tertiary: #6B6B6B;
+  /* WCAG AA — was #6B6B6B (3.0:1 on bg-primary, the app's default
+     small-text colour). #8F8F8F = 4.98:1 on bg-primary while keeping
+     clear separation from --text-secondary (#A0A0A0). */
+  --text-tertiary: #8F8F8F;
   --text-placeholder: #8E8E8E;
 
   /* === Borders === */
@@ -54,7 +57,7 @@
   /* === Sidebar === */
   --sidebar-item-hover: #1F1F1F;
   --sidebar-item-active: #2A2A2A;
-  --sidebar-section-text: #6B6B6B;
+  --sidebar-section-text: #8F8F8F; /* AA fix, tracks --text-tertiary */
 
   /* === Code blocks === */
   --code-bg: #1E1E1E;
@@ -92,7 +95,9 @@
 
   --text-primary: #0D0D0D;
   --text-secondary: #5B5B5B;
-  --text-tertiary: #8A8A8A;
+  /* WCAG AA — was #8A8A8A (3.45:1 on white). #6D6D6D = 5.17:1 on
+     white / 4.54:1 on bg-surface, still lighter than secondary #5B5B5B. */
+  --text-tertiary: #6D6D6D;
   --text-placeholder: #9B9B9B;
 
   --border-subtle: rgba(0, 0, 0, 0.06);
@@ -110,7 +115,7 @@
 
   --sidebar-item-hover: #EEEEEE;
   --sidebar-item-active: #E5E5E5;
-  --sidebar-section-text: #9B9B9B;
+  --sidebar-section-text: #6D6D6D; /* AA fix, tracks --text-tertiary */
 
   --code-bg: #F7F7F8;
   --code-header-bg: #EEEEEE;
@@ -566,16 +571,6 @@ input {
 }
 
 /* Streaming cursor + indicators. */
-.streaming-cursor {
-  display: inline-block;
-  width: 8px;
-  height: 1.05em;
-  background: var(--accent);
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  border-radius: 1px;
-  animation: blink 1s infinite;
-}
 .streaming-cursor-block {
   display: inline-block;
   width: 0.55em;
@@ -586,7 +581,6 @@ input {
   border-radius: 2px;
   animation: cursor-blink 530ms steps(2, end) infinite;
 }
-@keyframes blink         { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 @keyframes cursor-blink  { 0%,49% { opacity: 0.85; } 50%,100% { opacity: 0; } }
 
 .streaming-body { line-height: 1.75; word-wrap: break-word; }
@@ -619,41 +613,10 @@ input {
   color: inherit;
 }
 
-/* Typing indicator (pre-first-token). */
-.typing-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0.5rem 0.1rem;
-}
-.typing-indicator > span {
-  width: 7px;
-  height: 7px;
-  background: var(--text-tertiary);
-  border-radius: 50%;
-  animation: typingDot 1.1s infinite ease-in-out;
-}
-.typing-indicator > span:nth-child(2) { animation-delay: 0.15s; }
-.typing-indicator > span:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typingDot {
-  0%,60%,100% { transform: translateY(0); opacity: 0.45; }
-  30%         { transform: translateY(-4px); opacity: 1; }
-}
-.thinking-dots { display: inline-flex; gap: 4px; align-items: center; }
-.thinking-dots > span {
-  width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
-  animation: pulseDot 1.2s infinite ease-in-out;
-}
-.thinking-dots > span:nth-child(2) { animation-delay: 0.15s; }
-.thinking-dots > span:nth-child(3) { animation-delay: 0.3s; }
-@keyframes pulseDot { 0%,80%,100% { transform: scale(0.6); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
-
 /* Entrance + polish animations. */
 .fade-in-up      { animation: fadeInUp 240ms ease-out; }
-.message-appear  { animation: messageSlideIn 200ms ease-out; }
 .message-enter   { animation: messageSlideIn 200ms ease-out; }
 .popover-appear  { animation: popoverIn 150ms ease-out; transform-origin: top right; }
-.popover-enter   { animation: popoverIn 150ms ease-out; transform-origin: top right; }
 /* Toast-specific entrance: opacity only. The toast centers itself with
    ``-translate-x-1/2`` (a transform), so it must NOT borrow .popover-appear —
    that keyframe animates ``transform: scale()`` which overrides the centering
@@ -729,14 +692,43 @@ input {
 }
 @keyframes shimmerText { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-/* Respect reduced-motion: drop the sweep and render static, readable
-   text (no transparent fill, no animation). */
+/* Breathing cat status mark (CatIndicator). scale() from a low origin so
+   the cat "inhales" upward from its paws instead of ballooning from the
+   center; currentColor fill keeps it theme-correct for free. */
+@keyframes catBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+.cat-indicator svg {
+  transform-origin: 50% 86%;
+  animation: catBreathe 2.2s ease-in-out infinite;
+}
+
+/* Respect reduced-motion. Infinite loops stop at a legible rest state;
+   one-shot entrances are dropped (content just appears). Tailwind's
+   animate-spin spinners are included — a frozen spinner still reads as
+   "busy" from its surrounding text/label. */
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {
     animation: none;
     background: none;
     -webkit-text-fill-color: var(--text-secondary);
     color: var(--text-secondary);
+  }
+  .cat-indicator svg,
+  .streaming-cursor-block,
+  .skeleton,
+  .rec-dot,
+  .audio-bar-css,
+  .animate-spin,
+  .fade-in-up,
+  .message-enter,
+  .popover-appear,
+  .toast-appear,
+  .img-fade-in,
+  .usage-panel-enter,
+  .sheet-up {
+    animation: none;
   }
 }
 
@@ -776,12 +768,3 @@ input {
   animation: audioBar 800ms ease-in-out infinite;
 }
 
-/* Speaker-icon pulse used on the assistant message action row while
-   TTS is actively playing. */
-@keyframes speakerPulse {
-  0%, 100% { opacity: 0.7; }
-  50%      { opacity: 1; }
-}
-.speaker-playing {
-  animation: speakerPulse 1.2s ease-in-out infinite;
-}

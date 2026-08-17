@@ -20,6 +20,7 @@ namespace SranDesktop.Tests.Mcp;
 ///   tools/call stdio_crash→ exits WITHOUT replying (pending-call crash path)
 ///   tools/call stdio_bye  → replies, sleeps 300ms, then exits (idle-exit path)
 ///   debug/env             → returns %SRAN_STDIO_TEST_ENV%
+///   debug/hang            → NEVER replies but stays alive (request-timeout path)
 ///   any other request     → JSON-RPC method-not-found error
 /// </summary>
 internal static class StdioEchoServer
@@ -48,6 +49,8 @@ internal static class StdioEchoServer
             }
             $reply = [ordered]@{ jsonrpc = '2.0'; id = $id; result = [ordered]@{ content = @(,[ordered]@{ type = 'text'; text = [string]$msg.params.arguments.text }); isError = $false } }
             $out.WriteLine((ConvertTo-Json -InputObject $reply -Depth 6 -Compress))
+          } elseif ($msg.method -eq 'debug/hang') {
+            continue
           } elseif ($msg.method -eq 'debug/env') {
             $out.WriteLine('{"jsonrpc":"2.0","id":' + $id + ',"result":{"value":"' + $env:SRAN_STDIO_TEST_ENV + '"}}')
           } else {

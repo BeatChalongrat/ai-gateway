@@ -147,3 +147,103 @@ def test_cheap_tier_ranks_as_cheapest():
     ]
     sel = smart_router.select_model(RoutingHints(complexity="low"), pool)
     assert sel.candidate.model == "cheap-model"
+
+
+# ---------------------------------------------------------------------------
+# Admin Auto preference + tool capability (B — "Auto uses a capable model")
+#
+# Regression context: "auto" resolved to gpt-3.5-turbo (budget, but
+# supports_tools=True), which called save_memory on turns that were not
+# memory requests. supports_tools alone can't fix that — the preference
+# list is what keeps a budget model off tool-bearing turns.
+# ---------------------------------------------------------------------------
+
+# Mirrors the live catalog shape: a budget model that DOES support tools,
+# plus a tools-blind one, plus the strong defaults.
+TOOL_POOL = [
+    _c("openai", "gpt-3.5-turbo", cost="budget", lat="fast"),
+    _c("openai", "gpt-4o-mini", cost="budget", lat="fast"),
+    _c("openai", "gpt-4.1", cost="standard"),
+    _c("openai", "gpt-4o", cost="standard", vision=True),
+    _c("openai", "text-only-model", cost="budget", lat="fast", tools=False),
+]
+
+
+def test_auto_with_tools_uses_admin_default_not_cheapest():
+    sel = smart_router.select_model(
+        RoutingHints(complexity="low", has_tools=True, tool_count=8),
+        TOOL_POOL,
+        preferred_models=("gpt-4o", "gpt-4.1", "gpt-4o-mini"),
+    )
+    assert sel.candidate.model == "gpt-4o"
+    assert "admin default" in sel.reason
+
+
+def test_auto_without_tools_still_uses_admin_default():
+    sel = smart_router.select_model(
+        RoutingHints(complexity="low"),
+        TOOL_POOL,
+        preferred_models=("gpt-4o", "gpt-4.1"),
+    )
+    assert sel.candidate.model == "gpt-4o"
+
+
+def test_default_unavailable_falls_through_the_chain():
+    """Default's provider holds no usable key → it isn't in the pool."""
+    pool = [c for c in TOOL_POOL if c.model != "gpt-4o"]
+    sel = smart_router.select_model(
+        RoutingHints(complexity="low", has_tools=True),
+        pool,
+        preferred_models=("gpt-4o", "gpt-4.1", "gpt-4o-mini"),
+    )
+    assert sel.candidate.model == "gpt-4.1"
+
+
+def test_whole_chain_unavailable_keeps_legacy_behaviour():
+    pool = [_c("groq", "llama-3.3-70b", cost="budget", lat="fast")]
+    sel = smart_router.select_model(
+        RoutingHints(complexity="low", has_tools=True),
+        pool,
+        preferred_models=("gpt-4o", "gpt-4.1"),
+    )
+    assert sel.candidate.model == "llama-3.3-70b"
+
+
+def test_has_tools_filters_out_tools_blind_models():
+    """No preference configured: the capability filter still applies."""
+    pool = [
+        _c("openai", "text-only-model", cost="budget", lat="fast", tools=False),
+        _c("openai", "gpt-4.1", cost="standard"),
+    ]
+    sel = smart_router.select_model(
+        RoutingHints(complexity="low", has_tools=True), pool
+    )
+    assert sel.candidate.model == "gpt-4.1"
+    assert "tool-capable" in sel.reason
+
+
+def test_tools_filter_relaxes_rather_than_emptying_the_pool():
+    pool = [_c("openai", "text-only-model", cost="budget", tools=False)]
+    sel = smart_router.select_model(
+        RoutingHints(complexity="low", has_tools=True), pool
+    )
+    assert sel.candidate.model == "text-only-model"
+
+
+def test_preference_yields_to_a_needed_capability():
+    """A default that can't serve THIS turn steps aside (vision turn)."""
+    pool = [
+        _c("openai", "gpt-4.1", cost="standard", vision=False),
+        _c("openai", "gpt-4o", cost="standard", vision=True),
+    ]
+    sel = smart_router.select_model(
+        RoutingHints(complexity="high", needs_vision=True),
+        pool,
+        preferred_models=("gpt-4.1",),
+    )
+    assert sel.candidate.model == "gpt-4o"
+
+
+def test_no_preference_is_the_old_cheapest_capable_behaviour():
+    sel = smart_router.select_model(RoutingHints(complexity="low"), TOOL_POOL)
+    assert sel.candidate.cost_tier == "budget"

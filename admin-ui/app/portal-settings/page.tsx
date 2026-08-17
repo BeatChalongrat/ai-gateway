@@ -23,7 +23,9 @@ type SettingKey =
   | "free_trial_tokens"
   | "trial_model_tier"
   | "portal_signup_enabled"
-  | "credit_low_threshold";
+  | "credit_low_threshold"
+  | "auto_default_model"
+  | "auto_default_fallbacks";
 
 interface Setting {
   key: string;
@@ -273,12 +275,19 @@ export default function PortalSettingsPage() {
                 />
               )}
               {tab === "trial" && (
-                <TrialTab
-                  freeTrial={byKey.free_trial_tokens}
-                  tier={byKey.trial_model_tier}
-                  threshold={byKey.credit_low_threshold}
-                  onSaved={refetch}
-                />
+                <>
+                  <TrialTab
+                    freeTrial={byKey.free_trial_tokens}
+                    tier={byKey.trial_model_tier}
+                    threshold={byKey.credit_low_threshold}
+                    onSaved={refetch}
+                  />
+                  <AutoRoutingSection
+                    defaultModel={byKey.auto_default_model}
+                    fallbacks={byKey.auto_default_fallbacks}
+                    onSaved={refetch}
+                  />
+                </>
               )}
               {tab === "security" && <SecurityTab />}
             </div>
@@ -650,6 +659,188 @@ function TrialTab({
       </div>
 
       {/* Save button area */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.875rem", marginTop: "0.25rem" }}>
+        <button
+          onClick={save}
+          disabled={!dirty || saving}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.5rem",
+            padding: "0.625rem 1.5rem",
+            fontSize: "0.8125rem", fontWeight: 600, fontFamily: "inherit",
+            borderRadius: 8, border: "none", cursor: dirty && !saving ? "pointer" : "not-allowed",
+            background: dirty ? "var(--accent-primary)" : "var(--bg-elevated)",
+            color: dirty ? "#ffffff" : "var(--text-muted)",
+            transition: "background 150ms, opacity 150ms",
+            opacity: dirty ? 1 : 0.6,
+          }}
+        >
+          {saving && <IconLoader />}
+          {saving ? t("action.saving") : t("padmin.saveChanges")}
+        </button>
+        {dirty && !saving && (
+          <span style={{
+            fontSize: "0.6875rem", fontWeight: 500, color: "var(--accent-warning)",
+            display: "inline-flex", alignItems: "center", gap: "0.25rem",
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent-warning)" }} />
+            {t("padmin.settings.unsavedChanges")}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Auto model routing
+//
+// "auto" used to resolve to whatever was cheapest and capable, which in
+// this catalog is a budget model — and a budget model handed the memory
+// tool set calls it on turns that are not memory requests. The default
+// picked here is what Auto reaches for first; the fallback chain covers
+// the case where its provider key isn't usable.
+// ---------------------------------------------------------------------------
+
+interface ToolModelRow {
+  model: string;
+  provider: string;
+  supports_tools: boolean;
+  cost_tier: string;
+}
+
+function AutoRoutingSection({
+  defaultModel,
+  fallbacks,
+  onSaved,
+}: {
+  defaultModel?: Setting;
+  fallbacks?: Setting;
+  onSaved: () => void;
+}) {
+  const t = useT();
+  const { toast } = useToast();
+  const formatError = useSaveError();
+  const { data: modelData, loading: modelsLoading } = useApi<{ items: ToolModelRow[] }>(
+    "/admin/models?is_active=true&limit=500",
+  );
+
+  const [model, setModel] = useState(defaultModel?.value ?? "");
+  const [chain, setChain] = useState(fallbacks?.value ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setModel(defaultModel?.value ?? "");
+    setChain(fallbacks?.value ?? "");
+  }, [defaultModel?.value, fallbacks?.value]);
+
+  // Only tool-capable models may be elected — the backend validator
+  // enforces the same rule, this just keeps invalid picks off the menu.
+  const options = useMemo(() => {
+    const rows = (modelData?.items ?? []).filter((m) => m.supports_tools);
+    rows.sort((a, b) => a.model.localeCompare(b.model));
+    return rows;
+  }, [modelData]);
+
+  const dirty =
+    model !== (defaultModel?.value ?? "") || chain !== (fallbacks?.value ?? "");
+
+  async function save() {
+    setSaving(true);
+    let failed: string | null = null;
+    try {
+      if (model !== defaultModel?.value) {
+        await patchSetting("auto_default_model", model);
+      }
+      if (chain !== fallbacks?.value) {
+        await patchSetting("auto_default_fallbacks", chain);
+      }
+    } catch (e) {
+      failed = formatError(e);
+    }
+    setSaving(false);
+    if (failed) toast(failed, "error");
+    else toast(t("padmin.settings.settingsSaved"));
+    onSaved();
+  }
+
+  const cardStyle: React.CSSProperties = {
+    padding: "1rem 1.25rem",
+    border: "1px solid var(--border-default)",
+    borderRadius: 10,
+    background: "var(--bg-surface)",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: "0.8125rem",
+    fontWeight: 600,
+    color: "var(--text-primary)",
+    marginBottom: 4,
+  };
+  const descStyle: React.CSSProperties = {
+    fontSize: "0.75rem",
+    color: "var(--text-tertiary)",
+    marginBottom: 10,
+  };
+  const fieldStyle: React.CSSProperties = {
+    border: "1px solid var(--border-default)",
+    borderRadius: 8,
+    background: "var(--bg-base)",
+    padding: "0.5rem 0.75rem",
+    fontSize: "0.875rem",
+    fontFamily: "inherit",
+    color: "var(--text-primary)",
+    width: "100%",
+    maxWidth: 340,
+  };
+
+  return (
+    <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: "1.25rem", marginTop: "2rem" }}>
+      <h2 style={{ fontSize: "1.0625rem", fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
+        {t("padmin.settings.autoHeading")}
+      </h2>
+
+      <div className="ps-setting-card" style={cardStyle}>
+        <label htmlFor="auto-default-model" style={labelStyle}>
+          {t("padmin.settings.autoDefaultModel")}
+        </label>
+        <div style={descStyle}>{t("padmin.settings.autoDefaultModelDesc")}</div>
+        <select
+          id="auto-default-model"
+          value={model}
+          disabled={modelsLoading}
+          onChange={(e) => setModel(e.target.value)}
+          style={fieldStyle}
+        >
+          {modelsLoading && <option value="">{t("padmin.settings.autoLoadingModels")}</option>}
+          {/* The saved value may sit outside the list (row deactivated
+              since it was chosen) — keep it selectable so opening the
+              page doesn't silently rewrite the setting. */}
+          {!modelsLoading && model && !options.some((o) => o.model === model) && (
+            <option value={model}>{model}</option>
+          )}
+          {options.map((o) => (
+            <option key={o.model} value={o.model}>
+              {o.model} — {o.provider} ({o.cost_tier})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="ps-setting-card" style={cardStyle}>
+        <label htmlFor="auto-fallbacks" style={labelStyle}>
+          {t("padmin.settings.autoFallbacks")}
+        </label>
+        <div style={descStyle}>{t("padmin.settings.autoFallbacksDesc")}</div>
+        <input
+          id="auto-fallbacks"
+          type="text"
+          value={chain}
+          onChange={(e) => setChain(e.target.value)}
+          placeholder="gpt-4.1,gpt-4o-mini"
+          style={fieldStyle}
+        />
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", gap: "0.875rem", marginTop: "0.25rem" }}>
         <button
           onClick={save}

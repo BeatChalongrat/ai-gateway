@@ -5,9 +5,17 @@ import { Check, Copy } from "lucide-react";
 
 export type CodeTab = { label: string; code: string };
 
-// Tabbed code block with copy-to-clipboard — used by the docs quickstart.
-// Dark navy surface matches the existing docs <pre> treatment.
-export default function CodeTabs({ tabs }: { tabs: CodeTab[] }) {
+// Tabbed code block with copy-to-clipboard — used by the docs
+// quickstart and the landing deployment section. Dark navy surface.
+export default function CodeTabs({
+  tabs,
+  copyLabel = "Copy",
+  copiedLabel = "Copied",
+}: {
+  tabs: CodeTab[];
+  copyLabel?: string;
+  copiedLabel?: string;
+}) {
   const [active, setActive] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -44,10 +52,10 @@ export default function CodeTabs({ tabs }: { tabs: CodeTab[] }) {
           type="button"
           className="code-copy"
           onClick={copy}
-          aria-label="Copy code"
+          aria-label={copyLabel}
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? copiedLabel : copyLabel}
         </button>
       </div>
       <pre className="code-tabs-pre">

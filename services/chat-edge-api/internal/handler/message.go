@@ -516,6 +516,12 @@ Loop:
 			if ev.CodeExecution != nil {
 				writeSSEEvent(w, flusher, "code_execution", ev.CodeExecution)
 			}
+			// Generic per-tool activity (tools without a dedicated
+			// event). Ephemeral like code_execution: not persisted,
+			// survives mid-stream reconnects via the resume snapshot.
+			if ev.ToolActivity != nil {
+				writeSSEEvent(w, flusher, "tool_activity", ev.ToolActivity)
+			}
 			// B1: a provider error frame from the Gateway. Forward it as
 			// an ``error`` event so the client renders an error bubble
 			// rather than ending blank. Not a ``break`` — the Gateway
@@ -904,6 +910,11 @@ func (h *MessageHandler) writeResumeSnapshot(
 	// 60s sandbox run must not lose the code the model is running.
 	for i := range snap.CodeExecutions {
 		writeSSEEvent(w, flusher, "code_execution", snap.CodeExecutions[i])
+	}
+	// Generic tool activity, latest frame each — a reconnect mid-tool
+	// restores the "using <tool>…" indicator.
+	for i := range snap.ToolActivities {
+		writeSSEEvent(w, flusher, "tool_activity", snap.ToolActivities[i])
 	}
 	if snap.Content != "" {
 		writeSSEEvent(w, flusher, "content_delta", map[string]any{"delta": snap.Content})

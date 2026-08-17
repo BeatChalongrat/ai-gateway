@@ -1201,8 +1201,9 @@ public partial class ChatViewModel : ObservableObject
 
     /// <summary>Maps reattach stream events onto the bubble — the SAME handling
     /// the chat-edge send flow uses (RunChatEdgeTurnAsync), so reattached
-    /// replies render identically to live ones.</summary>
-    private async Task OnReattachEventAsync(
+    /// replies render identically to live ones. Internal (not private) as the
+    /// test seam for the stream-status wiring.</summary>
+    internal async Task OnReattachEventAsync(
         ConversationItemViewModel conversation, MessageViewModel bubble,
         ChatStreamEvent evt, CancellationToken ct)
     {
@@ -1226,6 +1227,26 @@ public partial class ChatViewModel : ObservableObject
             case StreamStatusEvent { Kind: "video" } status:
                 bubble.IsGeneratingVideo =
                     status.Status is not ("completed" or "failed" or "error");
+                MessageActivity?.Invoke(this, EventArgs.Empty);
+                break;
+
+            // "analysis" (thinking) and "search" were parsed by ChatService but
+            // dropped here — the user saw an anonymous waiting mark while the
+            // server was reasoning / web-searching. StatusText self-clears on
+            // the first content delta (MessageViewModel.AppendContent).
+            case StreamStatusEvent { Kind: "analysis" } status:
+                bubble.StatusText =
+                    status.Status is not ("completed" or "failed" or "error")
+                        ? Localization.LocaleService.Instance.T("msg.thinking")
+                        : null;
+                MessageActivity?.Invoke(this, EventArgs.Empty);
+                break;
+
+            case StreamStatusEvent { Kind: "search" } status:
+                bubble.StatusText =
+                    status.Status is not ("completed" or "failed" or "error")
+                        ? Localization.LocaleService.Instance.T("tool.searchingWeb")
+                        : null;
                 MessageActivity?.Invoke(this, EventArgs.Empty);
                 break;
 
@@ -2287,6 +2308,24 @@ public partial class ChatViewModel : ObservableObject
                         MessageActivity?.Invoke(this, EventArgs.Empty);
                         break;
 
+                    // Same analysis/search wiring as the reattach path — the
+                    // two phase markers were previously dropped by this switch.
+                    case StreamStatusEvent { Kind: "analysis" } status:
+                        assistantMessage.StatusText =
+                            status.Status is not ("completed" or "failed" or "error")
+                                ? Localization.LocaleService.Instance.T("msg.thinking")
+                                : null;
+                        MessageActivity?.Invoke(this, EventArgs.Empty);
+                        break;
+
+                    case StreamStatusEvent { Kind: "search" } status:
+                        assistantMessage.StatusText =
+                            status.Status is not ("completed" or "failed" or "error")
+                                ? Localization.LocaleService.Instance.T("tool.searchingWeb")
+                                : null;
+                        MessageActivity?.Invoke(this, EventArgs.Empty);
+                        break;
+
                     case MessageFilesEvent files:
                         await AttachGeneratedFilesAsync(assistantMessage, files, ct);
                         break;
@@ -2558,7 +2597,14 @@ public partial class ChatViewModel : ObservableObject
     /// PART 3) from the durable agent notes. Global notes render even for a
     /// brand-new conversation — that's the whole point of Global Memory.
     /// Size-bounded by the formatter; a store hiccup just omits the block,
-    /// never throws.</summary>
+    /// never throws.
+    ///
+    /// Unified memory (read slice): a desktop turn builds its own prompt and
+    /// goes straight to the gateway, so chat-edge's server-side
+    /// `&lt;saved_user_memory&gt;` block never reaches it. We therefore READ the
+    /// user's active server memories here and merge them into the same global
+    /// section, so a fact saved on the web ("จำไว้ว่าฉันชื่อ X") is known on the
+    /// desktop. Read-only: the desktop still writes local notes as before.</summary>
     private async Task AppendNotesAsync(System.Text.StringBuilder sb)
     {
         var conversationId = Conversation?.Id;
@@ -2568,7 +2614,8 @@ public partial class ChatViewModel : ObservableObject
                 ? await _store.GetNotesAsync(conversationId)
                 : Array.Empty<Domain.Entities.AgentNote>();
             var globalNotes = await _store.GetGlobalNotesAsync();
-            var block = Application.Services.AgentNotesFormatter.BuildBlock(notes, globalNotes);
+            var merged = MergeGlobalMemories(globalNotes, await GetServerMemoriesAsync());
+            var block = Application.Services.AgentNotesFormatter.BuildBlock(notes, merged);
             if (block is not null)
                 sb.Append(block);
         }
@@ -2576,6 +2623,69 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogDebug(ex, "Could not build notes block for {Id}", conversationId);
         }
+    }
+
+    // Server memories are re-read at most this often — a turn must not pay a
+    // round-trip every time, and memories change rarely.
+    private static readonly TimeSpan ServerMemoryTtl = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan ServerMemoryTimeout = TimeSpan.FromSeconds(4);
+    private IReadOnlyList<Domain.Entities.AgentNote> _serverMemories =
+        Array.Empty<Domain.Entities.AgentNote>();
+    private DateTimeOffset _serverMemoriesAt = DateTimeOffset.MinValue;
+
+    /// <summary>Active, user-scoped memories from chat-edge (the same rows the
+    /// web surface saves and the Memory dialog already lists). Offline-safe by
+    /// construction: any failure returns the last good snapshot — empty on a
+    /// cold start — so the turn falls back to local notes and never breaks.
+    /// Only `status=active` is read; pending_confirmation stays out of the
+    /// prompt exactly like on the web.</summary>
+    private async Task<IReadOnlyList<Domain.Entities.AgentNote>> GetServerMemoriesAsync()
+    {
+        // Respect the per-conversation memory toggle, same as the web.
+        if (!MemoryEnabled)
+            return Array.Empty<Domain.Entities.AgentNote>();
+        if (DateTimeOffset.UtcNow - _serverMemoriesAt < ServerMemoryTtl)
+            return _serverMemories;
+        try
+        {
+            using var cts = new CancellationTokenSource(ServerMemoryTimeout);
+            var response = await _api.ListMemoriesAsync(
+                scopeType: "global_user", status: "active", limit: 100, ct: cts.Token);
+            _serverMemories = response.Memories
+                .Where(m => !string.IsNullOrWhiteSpace(m.Content))
+                .Select(m => new Domain.Entities.AgentNote
+                {
+                    Id = "server:" + m.Id,
+                    ConversationId = IConversationStore.GlobalNotesId,
+                    Content = m.Content,
+                    CreatedAt = m.CreatedAt
+                })
+                .ToList();
+            _serverMemoriesAt = DateTimeOffset.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            // Offline / unauthenticated / server down — keep the last snapshot.
+            _logger.LogDebug(ex, "Could not read server memories; using local notes only");
+        }
+        return _serverMemories;
+    }
+
+    /// <summary>Folds server memories into the local global notes for one
+    /// `## Memory (global)` section: deduped by content and ordered
+    /// oldest→newest, which is the order the formatter expects (it renders
+    /// newest first and caps from there).</summary>
+    private static IReadOnlyList<Domain.Entities.AgentNote> MergeGlobalMemories(
+        IReadOnlyList<Domain.Entities.AgentNote> local,
+        IReadOnlyList<Domain.Entities.AgentNote> server)
+    {
+        if (server.Count == 0)
+            return local;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return local.Concat(server)
+            .Where(n => seen.Add(n.Content.Trim()))
+            .OrderBy(n => n.CreatedAt)
+            .ToList();
     }
 
     private static string FormatSize(long bytes)

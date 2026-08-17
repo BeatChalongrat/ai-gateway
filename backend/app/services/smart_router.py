@@ -13,13 +13,19 @@ Design properties (see AUTO_ROUTING_AUDIT.md, Fix Priority #1/#2):
     (DB-backed, all 14 providers) filtered to key-valid providers, so
     adding a provider key makes its models eligible with NO code change.
   * **Capability-driven** — hard filters on the registry's
-    ``supports_vision`` / ``supports_reasoning`` flags, with graceful
-    relaxation: if a hard filter empties the pool we fall back to the
-    unfiltered pool rather than failing.
-  * **Cost-aware** — among capable models, the cheapest wins
-    (``cost_tier`` budget < standard < premium), tie-broken by latency
-    then model id for deterministic selection. A high-complexity or
-    code turn prefers a flagship (non-budget) tier first.
+    ``supports_vision`` / ``supports_reasoning`` / ``supports_tools``
+    flags, with graceful relaxation: if a hard filter empties the pool
+    we fall back to the unfiltered pool rather than failing.
+  * **Admin-steerable** — ``preferred_models`` (from the
+    ``auto_default_model`` / ``auto_default_fallbacks`` settings) wins
+    over cost when one of its entries survives the capability filters.
+    Without it, "cheapest capable" elects a budget model for tool-
+    bearing turns, which is how the memory over-trigger happened.
+  * **Cost-aware** — among capable models with no admin preference
+    available, the cheapest wins (``cost_tier`` budget < standard <
+    premium), tie-broken by latency then model id for deterministic
+    selection. A high-complexity or code turn prefers a flagship
+    (non-budget) tier first.
 
 This function is pure (no I/O) so it is unit-testable in isolation; the
 orchestrator owns the key-validity lookup and feeds the filtered pool in.
@@ -28,7 +34,7 @@ orchestrator owns the key-validity lookup and feeds the filtered pool in.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Sequence
 
 if TYPE_CHECKING:
     from app.domain.routing import ModelCandidate
@@ -64,6 +70,7 @@ def select_model(
     hints: "Optional[RoutingHints]",
     candidates: "list[ModelCandidate]",
     proven_providers: "frozenset[str]" = frozenset(),
+    preferred_models: "Sequence[str]" = (),
 ) -> "Optional[SmartSelection]":
     """Pick the best model for ``hints`` from ``candidates``.
 
@@ -75,6 +82,14 @@ def select_model(
     ``None`` only when ``candidates`` is empty — the caller treats that as
     "no usable provider" and raises a clear error rather than emitting an
     empty response.
+
+    ``preferred_models`` is the admin's Auto preference, best-first (see
+    ``routing_settings``). The first entry that survives this turn's
+    capability filters wins outright — that is what stops "cheapest
+    capable" from electing a budget model for a turn carrying tools. It
+    is a preference, not a constraint: when none of the preferred ids are
+    in the filtered pool (no key, deactivated, lacks a needed capability)
+    selection falls through to the cost-ordered rules unchanged.
     """
     total = len(candidates)
     if total == 0:
@@ -84,6 +99,7 @@ def select_model(
 
     needs_reasoning = bool(getattr(hints, "needs_reasoning", False)) if hints else False
     needs_vision = bool(getattr(hints, "needs_vision", False)) if hints else False
+    needs_tools = bool(getattr(hints, "has_tools", False)) if hints else False
     has_code = bool(getattr(hints, "has_code", False)) if hints else False
     complexity = (getattr(hints, "complexity", None) or "medium") if hints else "medium"
 
@@ -97,8 +113,33 @@ def select_model(
         narrowed = [c for c in pool if getattr(c, "supports_vision", False)]
         if narrowed:
             pool = narrowed
+    # A turn that ships tool definitions must land on a model that can
+    # actually call them — routing it to a tools-blind model turns the
+    # whole turn into plain prose with the tools silently dropped.
+    if needs_tools:
+        narrowed = [c for c in pool if getattr(c, "supports_tools", False)]
+        if narrowed:
+            pool = narrowed
 
     filtered = len(pool)
+
+    # Step 3b — admin preference. Checked against the post-capability
+    # pool so a preferred model that can't serve THIS turn (no vision,
+    # say) steps aside instead of breaking it.
+    if preferred_models:
+        by_id = {c.model: c for c in pool}
+        for want in preferred_models:
+            chosen = by_id.get(want)
+            if chosen is not None:
+                bits = [f"admin default ({want})"]
+                if needs_tools:
+                    bits.append("tool-capable")
+                return SmartSelection(
+                    candidate=chosen,
+                    reason=", ".join(bits),
+                    candidates_count=total,
+                    filtered_count=filtered,
+                )
 
     # Step 4 — tier preference. A high-complexity or code-bearing turn
     # prefers a flagship (non-budget) model; relax to the whole pool when
@@ -137,6 +178,8 @@ def select_model(
         bits.append("reasoning")
     if needs_vision:
         bits.append("vision")
+    if needs_tools:
+        bits.append("tool-capable")
     if want_flagship:
         bits.append("flagship tier")
     bits.append("cheapest capable")

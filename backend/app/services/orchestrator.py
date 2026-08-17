@@ -2553,8 +2553,17 @@ class GatewayOrchestrator:
             for c in get_all_candidates()
             if c.provider in usable and getattr(c, "supports_streaming", True)
         ]
+        # Admin-configured Auto preference (system_settings, cached).
+        # Falls back to the shipped default when unset/unreadable, so
+        # "cheapest capable" never silently owns Auto again.
+        from app.services import routing_settings
+
+        preferred = routing_settings.get_auto_preference(session)
         return smart_router.select_model(
-            payload.routing_hints, candidates, proven_providers=proven
+            payload.routing_hints,
+            candidates,
+            proven_providers=proven,
+            preferred_models=preferred,
         )
 
     async def _apply_router_chain(
@@ -2749,6 +2758,11 @@ class GatewayOrchestrator:
                     router_used = "keyword"
                     payload.model = hinted_model
 
+        # Legacy chain has no capability hints, so a keyword/semantic rule
+        # can hand a tool-bearing request to a tools-blind model. Enforce
+        # the one capability the request itself proves it needs.
+        self._enforce_tool_capable_model(payload, session, log)
+
         log.info(
             "routing_decision",
             router=router_used,
@@ -2759,6 +2773,37 @@ class GatewayOrchestrator:
         )
 
         return router_used, matched_rule
+
+    def _enforce_tool_capable_model(self, payload, session, log) -> None:
+        """Swap a tools-blind pick for the Auto preference, in place.
+
+        Only ever runs on the ``auto`` path (the caller returns early for
+        an explicit model, so a user's own pick is never rewritten) and
+        only when the request actually carries tool definitions. A model
+        the registry doesn't know is left alone — the registry is a
+        cache, not the authority on what exists.
+        """
+        if not getattr(payload, "tools", None):
+            return
+        from app.services import routing_settings
+        from app.services.providers.model_registry import get_candidate
+
+        current = get_candidate(payload.model)
+        if current is None or getattr(current, "supports_tools", False):
+            return
+        for want in routing_settings.get_auto_preference(session):
+            cand = get_candidate(want)
+            if cand is not None and getattr(cand, "supports_tools", False):
+                log.info(
+                    "routing_tool_capability_override",
+                    was=payload.model,
+                    model=want,
+                )
+                payload.model = want
+                return
+        log.warning(
+            "routing_tool_capability_unmet", model=payload.model
+        )
 
     async def resolve_streaming_context(
         self,

@@ -142,7 +142,7 @@ export function ConversationItem({
         )}
         <button
           type="button"
-          aria-label="Conversation actions"
+          aria-label={t("a11y.conversationActions")}
           onClick={(e) => {
             e.stopPropagation();
             setMenuOpen((v) => !v);

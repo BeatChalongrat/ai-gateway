@@ -37,6 +37,14 @@ def _seed_settings():
                 key="trial_model_tier", value="budget",
                 description="tier",
             ),
+            SystemSettingORM(
+                key="auto_default_model", value="gpt-4o-mini",
+                description="auto default",
+            ),
+            SystemSettingORM(
+                key="auto_default_fallbacks", value="",
+                description="auto fallbacks",
+            ),
         ])
         db.commit()
         yield
@@ -119,3 +127,101 @@ def test_unknown_setting_not_editable(client):
     )
     assert r.status_code in (400, 422)
     assert r.json()["error"]["code"] == "setting_not_editable"
+
+
+# ---------------------------------------------------------------------------
+# Auto-routing defaults (B)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_default_model_accepts_tool_capable_model(client):
+    r = client.patch(
+        "/admin/system-settings/auto_default_model",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "gpt-4o-mini"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["value"] == "gpt-4o-mini"
+
+
+def test_auto_default_model_rejects_unknown_model(client):
+    r = client.patch(
+        "/admin/system-settings/auto_default_model",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "gpt-9-imaginary"},
+    )
+    assert r.status_code in (400, 422)
+    assert r.json()["error"]["code"] == "invalid_value"
+
+
+def test_auto_default_model_rejects_tools_blind_model(client):
+    """A model that can't call tools would silently drop memory/search."""
+    r = client.patch(
+        "/admin/system-settings/auto_default_model",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "abab5.5-chat"},
+    )
+    assert r.status_code in (400, 422)
+    assert r.json()["error"]["code"] == "invalid_value"
+
+
+def test_auto_fallbacks_normalized_and_validated(client):
+    r = client.patch(
+        "/admin/system-settings/auto_default_fallbacks",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": " gpt-4o , gpt-4o-mini ,gpt-4o "},
+    )
+    assert r.status_code == 200, r.text
+    # Trimmed + deduped, order preserved.
+    assert r.json()["value"] == "gpt-4o,gpt-4o-mini"
+
+    r = client.patch(
+        "/admin/system-settings/auto_default_fallbacks",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "gpt-4o,nope-9000"},
+    )
+    assert r.status_code in (400, 422)
+
+
+def test_auto_default_may_not_exceed_max_tier(client):
+    """min <= max: a standard-tier default under a budget ceiling is
+    rejected, and naming the ceiling tells the admin what to fix."""
+    r = client.patch(
+        "/admin/system-settings/auto_default_model",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "gpt-4o"},          # standard, ceiling is budget
+    )
+    assert r.status_code in (400, 422), r.text
+    assert r.json()["error"]["code"] == "invalid_value"
+
+    # Raise the ceiling first, then the same value is accepted.
+    assert client.patch(
+        "/admin/system-settings/trial_model_tier",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "standard"},
+    ).status_code == 200
+    assert client.patch(
+        "/admin/system-settings/auto_default_model",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "gpt-4o"},
+    ).status_code == 200
+
+
+def test_max_tier_cannot_drop_below_the_auto_default(client):
+    assert client.patch(
+        "/admin/system-settings/trial_model_tier",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "standard"},
+    ).status_code == 200
+    assert client.patch(
+        "/admin/system-settings/auto_default_model",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "gpt-4o"},
+    ).status_code == 200
+
+    r = client.patch(
+        "/admin/system-settings/trial_model_tier",
+        headers={"Authorization": "Bearer admin-test"},
+        json={"value": "budget"},
+    )
+    assert r.status_code in (400, 422)

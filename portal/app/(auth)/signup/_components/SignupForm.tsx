@@ -118,8 +118,6 @@ export default function SignupForm({
         <div className="sv-form-header anim d1">
           {inviteContext ? (
             <>
-              {/* Default white-on-gradient pill — a custom light-lavender
-                  override read low-contrast on the violet→cyan background. */}
               <div className="sv-form-eyebrow">Team invite</div>
               <h1>Join {inviteContext.tenantName}</h1>
               <p>
@@ -131,12 +129,12 @@ export default function SignupForm({
             </>
           ) : (
             <>
-              <div className="sv-form-eyebrow">Free forever tier</div>
+              <div className="sv-form-eyebrow">Company accounts only</div>
               <h1>Create your account</h1>
               <p>
                 {OAUTH_ENABLED
                   ? "Continue with your company Google account — no password needed."
-                  : "No credit card. 5 minutes to first API call."}
+                  : "Use the work email your organisation provided."}
               </p>
             </>
           )}

@@ -30,6 +30,7 @@ import type {
   Project,
   SSEAnalysisStatus,
   SSECodeExecution,
+  SSEToolActivity,
   SSEContentDelta,
   SSEError,
   SSEFallbackInfo,
@@ -245,6 +246,11 @@ interface ChatState {
   setNextConversationProjectId: (v: string | null) => void;
 
   // ── message ops ──────────────────────────────────────────
+  /** A 404/410 on a conversation means it was deleted elsewhere
+   *  (desktop delete propagation, another tab). Drop it from the
+   *  sidebar + clear active/message state and surface a specific
+   *  "deleted" banner instead of a generic AI-service error. */
+  handleConversationGone: (convId: string) => void;
   loadMessages: (convId: string) => Promise<void>;
   loadOlderMessages: (convId: string) => Promise<void>;
   sendMessage: (convId: string, content: string, fileIds?: string[], imageMode?: boolean, videoMode?: boolean) => Promise<void>;
@@ -933,6 +939,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // ────────────────────────────────────────────────────────
+  handleConversationGone(convId) {
+    set((s) => {
+      const nextMessages = { ...s.messages };
+      delete nextMessages[convId];
+      const nextLoaded = { ...s.messagesLoaded };
+      delete nextLoaded[convId];
+      const nextHasMore = { ...s.hasMoreMessages };
+      delete nextHasMore[convId];
+      // Keep the project "(N)" count accurate, same as deleteConversation.
+      const goneProjectId =
+        s.conversations.find((c) => c.id === convId)?.project_id ?? null;
+      return {
+        conversations: s.conversations.filter((c) => c.id !== convId),
+        projects: goneProjectId
+          ? s.projects.map((p) =>
+              p.id === goneProjectId
+                ? { ...p, conversation_count: Math.max(0, p.conversation_count - 1) }
+                : p,
+            )
+          : s.projects,
+        messages: nextMessages,
+        messagesLoaded: nextLoaded,
+        hasMoreMessages: nextHasMore,
+        activeConversationId:
+          s.activeConversationId === convId ? null : s.activeConversationId,
+        errorBanner: tOutside("error.conversationDeleted"),
+      };
+    });
+  },
+
   async loadMessages(convId) {
     try {
       const res = await api.listMessages(convId, { limit: 50 });
@@ -954,14 +990,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         void get().resumeStream(convId, last.id);
       }
     } catch (err) {
-      // Mark the slot loaded so the skeleton clears, but populate
-      // the array based on the failure shape so the page UI
-      // distinguishes the three states cleanly:
-      //   - 404 → conversation truly gone, show empty + banner
-      //   - other error → leave any previously-loaded array intact,
-      //                   surface a retry-able banner
-      // 401s never reach this catch — ApiClient bounces to portal-
-      // login first.
+      // 404/410 → the conversation was deleted elsewhere: drop it from
+      // the sidebar, clear active/message state, and show the specific
+      // "deleted" banner. 401s never reach this catch — ApiClient
+      // bounces to portal-login first.
+      if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
+        get().handleConversationGone(convId);
+        return;
+      }
+      // Other errors: mark the slot loaded so the skeleton clears, keep
+      // any previously-loaded array intact, surface a retry-able banner.
       set((s) => ({
         messages: { ...s.messages, [convId]: s.messages[convId] ?? [] },
         messagesLoaded: { ...s.messagesLoaded, [convId]: true },
@@ -969,12 +1007,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...s.hasMoreMessages,
           [convId]: s.hasMoreMessages[convId] ?? false,
         },
-        errorBanner:
-          err instanceof ApiError && err.status === 404
-            ? "Conversation not found."
-            : err instanceof ApiError
-              ? `Couldn't load messages (${err.code}).`
-              : "Couldn't load messages.",
+        errorBanner: tOutside("error.conversationLoadFailed"),
       }));
     }
   },
@@ -1212,6 +1245,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
         finalizeMessage(set, get, convId, streamingId, "cancelled");
+        return;
+      }
+      // The conversation was deleted elsewhere (desktop propagation /
+      // another tab): finalize the optimistic rows, then drop the
+      // conversation + show the specific "deleted" banner instead of
+      // the generic stream-error toast. Checked BEFORE the reattach
+      // branch — a gone conversation must never try to resume.
+      if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
+        finalizeMessage(set, get, convId, streamingId, "error");
+        get().handleConversationGone(convId);
         return;
       }
       // Phase 5 — a mid-stream network drop no longer kills the
@@ -1837,6 +1880,36 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "tool_activity") {
+        // A2 — generic activity for tools WITHOUT a dedicated
+        // indicator (memory/state/past-search/canvas + unknown/MCP
+        // tools). Upsert by tool-call id mirroring code_execution;
+        // not rAF-batched for the same reason (two frames per call,
+        // the "started" frame must paint immediately). Ephemeral —
+        // also cleared at message_complete so no stale "started" row
+        // survives an error path that skipped the finished frame.
+        const data = evt.data as SSEToolActivity;
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) => {
+                if (m.id !== id) return m;
+                const acts = m.tool_activities ?? [];
+                const at = acts.findIndex((a) => a.id === data.id);
+                return {
+                  ...m,
+                  tool_activities:
+                    at === -1
+                      ? [...acts, data]
+                      : acts.map((a, i) => (i === at ? data : a)),
+                };
+              }),
+            },
+          };
+        });
       } else if (evt.event === "message_sources") {
         const data = evt.data as SSEMessageSources;
         set((s) => {
@@ -1879,6 +1952,7 @@ async function consumeStream(
                       is_generating_image: false,
                       is_generating_video: false,
                       is_searching: false,
+                      tool_activities: undefined,
                       token_usage: data.token_usage ?? null,
                       response_time_ms: Date.now() - streamStartedAt,
                     }
@@ -1987,6 +2061,15 @@ async function handleStreamPreError(
     code = env.error?.code;
   } catch {
     /* ignore */
+  }
+  if (res.status === 404 || res.status === 410) {
+    // The conversation was deleted elsewhere (desktop propagation /
+    // another tab): finalize the optimistic rows, then drop the
+    // conversation and surface the specific "deleted" banner instead
+    // of echoing the server's raw 404 envelope message.
+    finalizeMessage(set, get, convId, tempAsstId, "error");
+    get().handleConversationGone(convId);
+    return;
   }
   if (res.status === 402 || code === "INSUFFICIENT_CREDITS") {
     // Credit balance exhausted — chat-edge already localized the

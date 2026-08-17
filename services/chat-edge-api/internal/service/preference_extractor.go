@@ -241,45 +241,40 @@ func (e *PreferenceExtractor) maybeAutoPromote(
 		return
 	}
 
-	// Sort by created_at DESC and promote the newest.
+	// Sort by created_at DESC; the newest becomes the canonical row.
+	// It STAYS pending_confirmation — repeated observation makes the
+	// suggestion stronger, but activation is the user's call on the
+	// Memory page (ChatGPT-style review). Older duplicates are
+	// superseded so the Settings page shows one canonical row.
 	sort.Slice(similar, func(i, j int) bool {
 		return similar[i].CreatedAt.After(similar[j].CreatedAt)
 	})
 	newest := &similar[0]
-	if newest.Status != model.MemoryStatusActive {
-		if err := e.memoryRepo.SetStatus(ctx, newest.ID, userID, tenantID, model.MemoryStatusActive); err != nil {
-			slog.Warn("preference auto-promote: set active failed",
-				"id", newest.ID.String(), "err", err)
-			return
-		}
-	}
-	// Supersede the rest so the Settings page shows one canonical
-	// row per pattern.
 	for i := 1; i < len(similar); i++ {
 		older := &similar[i]
 		if older.Status == model.MemoryStatusSuperseded {
 			continue
 		}
 		if err := e.memoryRepo.SetStatus(ctx, older.ID, userID, tenantID, model.MemoryStatusSuperseded); err != nil {
-			slog.Warn("preference auto-promote: supersede failed",
+			slog.Warn("preference auto-consolidate: supersede failed",
 				"id", older.ID.String(), "err", err)
 		}
 	}
-	// Audit log — drives the future "why did this activate?"
-	// surface in the memory event timeline.
+	// Audit log — drives the "why is this suggested?" surface in the
+	// memory event timeline.
 	_ = e.memoryRepo.LogEvent(ctx, &model.MemoryEvent{
 		MemoryID:  &newest.ID,
 		TenantID:  tenantID,
 		UserID:    userID,
-		Action:    "auto_promoted",
+		Action:    "auto_consolidated",
 		ActorType: "system",
-		Reason:    fmt.Sprintf("Observed in %d conversations", len(seen)),
+		Reason:    fmt.Sprintf("Observed in %d conversations — awaiting user confirmation", len(seen)),
 		Metadata: map[string]any{
 			"observations": len(seen),
 			"superseded":   len(similar) - 1,
 		},
 	})
-	slog.Info("preference auto-promoted",
+	slog.Info("preference auto-consolidated (kept pending)",
 		"id", newest.ID.String(),
 		"observations", len(seen),
 		"superseded", len(similar)-1)

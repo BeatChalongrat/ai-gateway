@@ -6,6 +6,8 @@
 
 import { AlertTriangle, KeyRound, RefreshCw, X } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
+
 export type MediaGenErrorCode =
   | "provider_unavailable"
   | "budget_exceeded"
@@ -63,6 +65,7 @@ export function MediaGenError({
   onRetry,
   onDismiss,
 }: Props) {
+  const t = useT();
   const showAddKey = errorCode === "provider_unavailable" && isAdmin;
   // Budget + provider issues aren't fixed by an immediate retry; content/timeout/
   // unknown are transient enough to offer one.
@@ -92,7 +95,7 @@ export function MediaGenError({
         </div>
         <button
           type="button"
-          aria-label="Dismiss"
+          aria-label={t("a11y.dismiss")}
           onClick={onDismiss}
           className="focus-ring -mr-1 rounded p-1 text-text-muted hover:bg-bg-elevated hover:text-text-primary"
         >
