@@ -526,3 +526,122 @@ class TestGpt56ToolsEffortPin:
             assert "reasoning_effort" not in body, model
             assert body["tools"] == _TOOLS
         assert not _uses_completion_token_contract("chat-latest")
+
+
+# ---------------------------------------------------------------------------
+# Responses-API fallback logging (visibility fix)
+# ---------------------------------------------------------------------------
+# The fallback used to swallow the exception, which hid a 100% failure rate
+# (org not verified for reasoning summaries) for months. These tests pin the
+# contract: the fallback STILL answers the user, and the warning record now
+# carries the exception type, upstream status, and provider body. The module
+# logger is patched directly — structlog.testing.capture_logs proved
+# order-dependent under the full suite.
+
+from unittest.mock import Mock
+
+from app.services.providers import openai_adapter as openai_adapter_module
+from app.services.providers import model_registry as model_registry_module
+
+
+class _ReasoningCandidate:
+    supports_reasoning = True
+    reasoning_strategy = "openai_responses_reasoning"
+
+
+# Captured at import time — BEFORE the conftest autouse fixture
+# ``_mock_adapter_stream_chat`` replaces the class attribute — so the
+# streaming test below can restore and exercise the real generator.
+_REAL_STREAM_CHAT = OpenAIAdapter.stream_chat
+
+
+_ORG_UNVERIFIED_BODY = {
+    "error": {
+        "message": "Your organization must be verified to generate reasoning summaries.",
+        "type": "invalid_request_error",
+        "param": "reasoning.summary",
+        "code": "unsupported_value",
+    }
+}
+
+
+def _reasoning_payload(model="o4-mini"):
+    return ChatCompletionsRequest(
+        model=model,
+        messages=[Message(role="user", content="Hi")],
+        reasoning={"mode": "medium", "show_summary": True},
+        metadata={},
+    )
+
+
+class TestResponsesFallbackLogging:
+    def _arm(self, monkeypatch):
+        monkeypatch.setattr(
+            model_registry_module, "get_candidate", lambda m: _ReasoningCandidate()
+        )
+        mock_log = Mock()
+        monkeypatch.setattr(openai_adapter_module, "log", mock_log)
+        return mock_log
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_nonstream_fallback_logs_status_and_body(self, monkeypatch):
+        mock_log = self._arm(monkeypatch)
+        respx.post(f"{OPENAI_BASE_URL}/responses").mock(
+            return_value=httpx.Response(400, json=_ORG_UNVERIFIED_BODY)
+        )
+        respx.post(f"{OPENAI_BASE_URL}/chat/completions").mock(
+            return_value=httpx.Response(200, json=_openai_response())
+        )
+
+        result = await OpenAIAdapter().chat(
+            _reasoning_payload(), [Message(role="user", content="Hi")]
+        )
+
+        # Fallback behaviour unchanged: the user still gets an answer.
+        assert result.content == "Hello!"
+
+        assert mock_log.warning.call_count == 1
+        event = mock_log.warning.call_args[0][0]
+        kwargs = mock_log.warning.call_args[1]
+        assert event == "openai_responses_fallback_to_chat"
+        assert kwargs["model"] == "o4-mini"
+        assert kwargs["error_type"] == "UpstreamBadResponseError"
+        assert kwargs["status"] == 400
+        assert "must be verified" in str(kwargs["body"])
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_stream_fallback_logs_status_and_body(self, monkeypatch):
+        # Undo the conftest autouse stream stub for this test only.
+        monkeypatch.setattr(OpenAIAdapter, "stream_chat", _REAL_STREAM_CHAT)
+        mock_log = self._arm(monkeypatch)
+        respx.post(f"{OPENAI_BASE_URL}/responses").mock(
+            return_value=httpx.Response(400, json=_ORG_UNVERIFIED_BODY)
+        )
+        sse = (
+            'data: {"id":"c","object":"chat.completion.chunk","model":"o4-mini",'
+            '"choices":[{"index":0,"delta":{"content":"Yes"},"finish_reason":null}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{OPENAI_BASE_URL}/chat/completions").mock(
+            return_value=httpx.Response(200, text=sse)
+        )
+
+        chunks = [
+            c
+            async for c in OpenAIAdapter().stream_chat(
+                _reasoning_payload(), [Message(role="user", content="Hi")]
+            )
+        ]
+
+        # Fallback behaviour unchanged: chunks still flow from /chat/completions.
+        assert any(c.delta == "Yes" for c in chunks)
+
+        assert mock_log.warning.call_count == 1
+        event = mock_log.warning.call_args[0][0]
+        kwargs = mock_log.warning.call_args[1]
+        assert event == "openai_responses_stream_fallback_to_chat"
+        assert kwargs["error_type"] == "UpstreamBadResponseError"
+        assert kwargs["status"] == 400
+        assert "must be verified" in str(kwargs["body"])
