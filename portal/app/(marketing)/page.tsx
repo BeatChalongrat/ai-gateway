@@ -1,16 +1,23 @@
 import type { Metadata } from "next";
 
-import { CTASection } from "./_components/CTASection";
-import { Features } from "./_components/Features";
+import { About } from "./_components/About";
+import { Contact } from "./_components/Contact";
+import { Deploy } from "./_components/Deploy";
+import { Ecosystem } from "./_components/Ecosystem";
+import { Featured } from "./_components/Featured";
 import HashScrollHandler from "./_components/HashScrollHandler";
 import { Hero } from "./_components/Hero";
 import { HowItWorks } from "./_components/HowItWorks";
-import { SocialProof } from "./_components/SocialProof";
+import { Security } from "./_components/Security";
+import { Solutions } from "./_components/Solutions";
+import { Stats } from "./_components/Stats";
+import { Surfaces } from "./_components/Surfaces";
+import { UseCases } from "./_components/UseCases";
 
 export const metadata: Metadata = {
-  title: "SRAN AI Gateway — AI infrastructure, simplified",
+  title: "SRAN AI Gateway — ใช้ AI ในองค์กรโดยข้อมูลไม่ออกไปข้างนอก",
   description:
-    "One endpoint for every AI model. Automatic cost savings, built-in data protection, and analytics that make sense.",
+    "SRAN AI Gateway ปิดบังข้อมูลอ่อนไหวก่อนคำขอไปถึงโมเดล AI ภายนอก และคืนค่าเมื่อคำตอบกลับมา — ติดตั้งบนโครงสร้างพื้นฐานขององค์กรเอง รองรับ PDPA",
 };
 
 export default function LandingPage() {
@@ -18,10 +25,17 @@ export default function LandingPage() {
     <>
       <HashScrollHandler />
       <Hero />
-      <SocialProof />
-      <Features />
+      <Solutions />
+      <Stats />
+      <Featured />
+      <UseCases />
       <HowItWorks />
-      <CTASection />
+      <Surfaces />
+      <Security />
+      <Ecosystem />
+      <Deploy />
+      <About />
+      <Contact />
     </>
   );
 }

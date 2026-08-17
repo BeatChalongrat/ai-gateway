@@ -13,41 +13,32 @@ import SignupForm from "./_components/SignupForm";
 export const metadata: Metadata = {
   title: "Create account — SRAN",
   description:
-    "Create your free SRAN account — 200,000 tokens, no card required.",
+    "Create your SRAN account with your company Google account.",
 };
 
+// Same verified-facts slides as /login — every figure must be checkable
+// against the running system (no bonuses, prices, or made-up metrics).
 const signupSlides: Slide[] = [
   {
-    headlineTop: "Build with AI,",
-    headlineBottom: "without the overhead.",
+    headlineTop: "Data protection,",
+    headlineBottom: "built in.",
     subtext:
-      "Drop in one endpoint and get security, routing, and observability out of the box.",
+      "30+ detectors with Thai named-entity recognition mask sensitive values before a request leaves, and restore them in the reply.",
     stats: [
-      { value: "200K", label: "Signup bonus" },
-      { value: "14", label: "Providers" },
-      { value: "5 min", label: "Setup" },
+      { value: "30+", label: "Detectors" },
+      { value: "PDPA", label: "Aware detection" },
+      { value: "AES-256", label: "GCM at rest" },
     ],
   },
   {
-    headlineTop: "One endpoint,",
-    headlineBottom: "every AI model.",
+    headlineTop: "Your AI infrastructure,",
+    headlineBottom: "running smoothly.",
     subtext:
-      "Route automatically to the best model for each request — based on cost, latency, or quality.",
+      "Fifteen model providers behind one OpenAI-compatible endpoint — self-hosted on infrastructure your team runs.",
     stats: [
-      { value: "14", label: "Providers" },
-      { value: "30", label: "Detectors" },
-      { value: "No expiry", label: "Tokens" },
-    ],
-  },
-  {
-    headlineTop: "Pay as you go,",
-    headlineBottom: "never subscribe.",
-    subtext:
-      "Buy tokens once, use them forever. No monthly fees. No surprise bills.",
-    stats: [
-      { value: "$10", label: "Starter pack" },
-      { value: "1M–20M", label: "Per pack" },
-      { value: "0", label: "Subscriptions" },
+      { value: "15", label: "Providers" },
+      { value: "OpenAI", label: "Compatible API" },
+      { value: "On-prem", label: "Self-hosted" },
     ],
   },
 ];

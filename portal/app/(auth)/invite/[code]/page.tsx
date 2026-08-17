@@ -59,16 +59,28 @@ async function fetchPreview(code: string): Promise<InvitePreview> {
   }
 }
 
+// Same verified-facts slides as /login and /signup — no made-up metrics.
 const inviteSlides: Slide[] = [
   {
-    headlineTop: "Join your team,",
-    headlineBottom: "start shipping.",
+    headlineTop: "Data protection,",
+    headlineBottom: "built in.",
     subtext:
-      "Sign up to share your team's credits, projects, and usage dashboard.",
+      "30+ detectors with Thai named-entity recognition mask sensitive values before a request leaves, and restore them in the reply.",
     stats: [
-      { value: "1 link", label: "Onboarding" },
-      { value: "Shared", label: "Credits" },
-      { value: "Instant", label: "Access" },
+      { value: "30+", label: "Detectors" },
+      { value: "PDPA", label: "Aware detection" },
+      { value: "AES-256", label: "GCM at rest" },
+    ],
+  },
+  {
+    headlineTop: "Your AI infrastructure,",
+    headlineBottom: "running smoothly.",
+    subtext:
+      "Fifteen model providers behind one OpenAI-compatible endpoint — self-hosted on infrastructure your team runs.",
+    stats: [
+      { value: "15", label: "Providers" },
+      { value: "OpenAI", label: "Compatible API" },
+      { value: "On-prem", label: "Self-hosted" },
     ],
   },
 ];
@@ -98,8 +110,8 @@ export default async function InviteLandingPage({
                 className="sv-form-header anim d1"
                 style={{ marginBottom: 24 }}
               >
-                {/* Error eyebrow: red-tint background instead of the brand
-                    violet→cyan gradient, so the red text reads cleanly. */}
+                {/* Error eyebrow: red-tint background instead of the navy
+                    pill, so the red text reads cleanly. */}
                 <div
                   className="sv-form-eyebrow"
                   style={{ background: "rgba(248,113,113,0.15)", color: "#F87171" }}

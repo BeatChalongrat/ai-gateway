@@ -11,59 +11,29 @@ export const metadata: Metadata = {
   description: "Sign in to your SRAN AI Gateway dashboard.",
 };
 
+// Every figure here must be verifiable against the running system —
+// no throughput, latency, uptime, or certification claims.
 const loginSlides: Slide[] = [
-  {
-    headlineTop: "Your AI infrastructure,",
-    headlineBottom: "running smoothly.",
-    subtext:
-      "Secure, smart, and efficient inference for every AI application.",
-    stats: [
-      {
-        value: (
-          <>
-            <span className="av-pulse-dot" aria-hidden="true" />847
-          </>
-        ),
-        label: "req/sec",
-      },
-      { value: "14", label: "Providers" },
-      {
-        value: (
-          <>
-            187<span className="av-ms">ms</span>
-          </>
-        ),
-        label: "p50 latency",
-      },
-    ],
-  },
   {
     headlineTop: "Data protection,",
     headlineBottom: "built in.",
     subtext:
-      "30 detectors scan every request for credentials, PII, and sensitive data — before it leaves your app.",
+      "30+ detectors with Thai named-entity recognition mask sensitive values before a request leaves, and restore them in the reply.",
     stats: [
-      { value: "30", label: "Detectors" },
-      { value: "SOC 2", label: "Compliant" },
-      { value: "0", label: "Data retained" },
+      { value: "30+", label: "Detectors" },
+      { value: "PDPA", label: "Aware detection" },
+      { value: "AES-256", label: "GCM at rest" },
     ],
   },
   {
-    headlineTop: "Every request,",
-    headlineBottom: "fully tracked.",
+    headlineTop: "Your AI infrastructure,",
+    headlineBottom: "running smoothly.",
     subtext:
-      "Real-time logs, cost breakdown by model, latency percentiles, and alerts — all in one dashboard.",
+      "Fifteen model providers behind one OpenAI-compatible endpoint — self-hosted on infrastructure your team runs.",
     stats: [
-      { value: "Real-time", label: "Alerts" },
-      { value: "90-day", label: "Logs" },
-      {
-        value: (
-          <>
-            99.98<span className="av-ms">%</span>
-          </>
-        ),
-        label: "Uptime",
-      },
+      { value: "15", label: "Providers" },
+      { value: "OpenAI", label: "Compatible API" },
+      { value: "On-prem", label: "Self-hosted" },
     ],
   },
 ];

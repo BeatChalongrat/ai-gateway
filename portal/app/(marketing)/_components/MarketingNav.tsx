@@ -1,13 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { MouseEvent, useEffect, useState } from "react";
-import { ArrowRight } from "lucide-react";
 
-import LogoTile from "@/app/_shared/LogoTile";
+import { GET_STARTED_HREF, SIGN_IN_HREF } from "./auth-links";
+import { useLang, type Lang } from "./LanguageProvider";
 
-const NAV_OFFSET = 80; // matches scroll-padding-top in globals.css
+const NAV_OFFSET = 80; // matches scroll-padding-top in marketing.css
 const SCROLL_DURATION = 600; // ms
 
 // Manual rAF scroll with ease-in-out cubic. We avoid both
@@ -34,20 +35,39 @@ function smoothScrollTo(targetY: number, duration = SCROLL_DURATION) {
   requestAnimationFrame(step);
 }
 
+const NAV_LINKS = [
+  { id: "solutions", th: "สิ่งที่เราช่วย", en: "What we do" },
+  { id: "how", th: "การทำงาน", en: "How it works" },
+  { id: "products", th: "ผลิตภัณฑ์", en: "Products" },
+  { id: "security", th: "ความปลอดภัย", en: "Security" },
+  { id: "deploy", th: "การติดตั้ง", en: "Deployment" },
+] as const;
+
+const copy = {
+  th: {
+    signIn: "เข้าสู่ระบบ",
+    getStarted: "เริ่มต้นใช้งาน",
+    openMenu: "เปิดเมนู",
+    closeMenu: "ปิดเมนู",
+    langLabel: "เลือกภาษา",
+  },
+  en: {
+    signIn: "Sign in",
+    getStarted: "Get started",
+    openMenu: "Open menu",
+    closeMenu: "Close menu",
+    langLabel: "Language",
+  },
+} as const;
+
 export function MarketingNav() {
-  const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const pathname = usePathname();
+  const { lang, setLang } = useLang();
+  const t = copy[lang];
 
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  // Close the mobile menu whenever the route changes (covers link taps that
-  // navigate to a different marketing page).
+  // Close the mobile menu whenever the route changes (covers link taps
+  // that navigate to a different marketing page).
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname]);
@@ -62,75 +82,78 @@ export function MarketingNav() {
     };
   }, [menuOpen]);
 
-  // On landing: animate scroll to #features manually so re-clicks fire
-  // and don't get cancelled. On other pages: let the default <a>
-  // navigation to /#features happen and the browser will jump to the
-  // anchor on landing page load.
-  function handleProductClick(e: MouseEvent<HTMLAnchorElement>) {
+  // On the landing page: animate scroll to the section manually so
+  // re-clicks fire and don't get cancelled. On other pages: let the
+  // default <a href="/#id"> navigation happen — HashScrollHandler
+  // scrolls after the landing page loads.
+  function handleAnchorClick(e: MouseEvent<HTMLAnchorElement>, id: string) {
+    setMenuOpen(false);
     if (pathname !== "/") return;
     e.preventDefault();
-    const el = document.getElementById("features");
+    const el = document.getElementById(id);
     if (!el) return;
     const targetY = el.getBoundingClientRect().top + window.scrollY - NAV_OFFSET;
     smoothScrollTo(targetY);
   }
 
-  const closeMenu = () => setMenuOpen(false);
+  const links = (extraClass?: string) =>
+    NAV_LINKS.map((l) => (
+      <a
+        key={l.id}
+        href={`/#${l.id}`}
+        className={extraClass}
+        onClick={(e) => handleAnchorClick(e, l.id)}
+      >
+        {l[lang]}
+      </a>
+    ));
+
+  const langSwitch = (
+    <div className="lang-switch" role="group" aria-label={t.langLabel}>
+      {(["th", "en"] as Lang[]).map((l) => (
+        <button
+          key={l}
+          type="button"
+          aria-pressed={lang === l}
+          onClick={() => setLang(l)}
+        >
+          {l === "th" ? "ไทย" : "EN"}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
-    <nav className={`marketing-nav${scrolled ? " scrolled" : ""}`} aria-label="Primary">
-      <div className="container nav-inner">
-        <Link href="/" className="brand" aria-label="SRAN — AI Gateway home">
-          <LogoTile size={36} radius={8} />
+    <header className="marketing-nav">
+      <div className="wrap nav-inner">
+        <Link href="/" className="brand" aria-label="SRAN AI Gateway">
+          <span className="brand-tile">
+            <Image src="/sran-icon-white.png" alt="" width={23} height={25} />
+          </span>
           <span className="brand-text">
             <span className="brand-name">SRAN</span>
-            <span className="brand-tag">AI GATEWAY</span>
+            <span className="brand-tag">AI Gateway</span>
           </span>
         </Link>
-        <div className="nav-links">
-          <a
-            href="/#features"
-            onClick={handleProductClick}
-            className={pathname === "/" ? "is-active" : undefined}
-          >
-            Product
-          </a>
-          <a
-            href="/security"
-            className={pathname.startsWith("/security") ? "is-active" : undefined}
-          >
-            Security
-          </a>
-          <a
-            href="/pricing"
-            className={pathname.startsWith("/pricing") ? "is-active" : undefined}
-          >
-            Pricing
-          </a>
-          <a
-            href="/docs"
-            className={pathname.startsWith("/docs") ? "is-active" : undefined}
-          >
-            Docs
-          </a>
-        </div>
-        <div className="nav-cta">
-          <Link href="/login" className="btn btn-ghost">
-            Sign in
+
+        <nav className="nav-links" aria-label={lang === "th" ? "เมนูหลัก" : "Main menu"}>
+          {links()}
+        </nav>
+
+        <div className="nav-actions">
+          {langSwitch}
+          <Link href={SIGN_IN_HREF} className="nav-signin">
+            {t.signIn}
           </Link>
-          <Link
-            href="/signup"
-            className="btn brand-cta"
-            style={{ fontWeight: 500, color: "#ffffff" }}
-          >
-            Get started <span className="arrow" aria-hidden="true"><ArrowRight size={16} /></span>
+          <Link href={GET_STARTED_HREF} className="btn btn-small">
+            {t.getStarted}
           </Link>
         </div>
 
         <button
           type="button"
           className="nav-toggle"
-          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-label={menuOpen ? t.closeMenu : t.openMenu}
           aria-expanded={menuOpen}
           aria-controls="marketing-mobile-menu"
           onClick={() => setMenuOpen((v) => !v)}
@@ -146,58 +169,24 @@ export function MarketingNav() {
       {/* Mobile menu (<=900px) — backdrop + slide-down panel. */}
       <div
         className={`nav-backdrop${menuOpen ? " open" : ""}`}
-        onClick={closeMenu}
+        onClick={() => setMenuOpen(false)}
         aria-hidden="true"
       />
       <div
         id="marketing-mobile-menu"
         className={`nav-mobile${menuOpen ? " open" : ""}`}
       >
-        <a
-          href="/#features"
-          onClick={(e) => {
-            handleProductClick(e);
-            closeMenu();
-          }}
-          className={pathname === "/" ? "is-active" : undefined}
-        >
-          Product
-        </a>
-        <a
-          href="/security"
-          onClick={closeMenu}
-          className={pathname.startsWith("/security") ? "is-active" : undefined}
-        >
-          Security
-        </a>
-        <a
-          href="/pricing"
-          onClick={closeMenu}
-          className={pathname.startsWith("/pricing") ? "is-active" : undefined}
-        >
-          Pricing
-        </a>
-        <a
-          href="/docs"
-          onClick={closeMenu}
-          className={pathname.startsWith("/docs") ? "is-active" : undefined}
-        >
-          Docs
-        </a>
+        {links()}
         <div className="nav-mobile-cta">
-          <Link href="/login" className="btn btn-ghost" onClick={closeMenu}>
-            Sign in
+          {langSwitch}
+          <Link href={SIGN_IN_HREF} className="btn btn-ghost-dark" onClick={() => setMenuOpen(false)}>
+            {t.signIn}
           </Link>
-          <Link
-            href="/signup"
-            className="btn brand-cta"
-            style={{ fontWeight: 500, color: "#ffffff" }}
-            onClick={closeMenu}
-          >
-            Get started <span className="arrow" aria-hidden="true"><ArrowRight size={16} /></span>
+          <Link href={GET_STARTED_HREF} className="btn" onClick={() => setMenuOpen(false)}>
+            {t.getStarted}
           </Link>
         </div>
       </div>
-    </nav>
+    </header>
   );
 }
