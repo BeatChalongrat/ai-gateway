@@ -68,20 +68,33 @@ _RESPONSES_PATH = "/responses"
 # depends on no data we know to be wrong.
 _COMPLETION_TOKEN_FAMILIES: tuple[str, ...] = ("gpt-5", "o1", "o3", "o4")
 
+# Families that reason BY DEFAULT server-side and whose /chat/completions
+# contract rejects function tools at any reasoning effort except an
+# explicit ``"none"`` (400 invalid_request_error, param=reasoning_effort
+# — even when the request carries no reasoning fields at all; the effort
+# defaulting happens on OpenAI's side). Verified live against the whole
+# gpt-5.6 generation (``-luna`` / ``-sol`` / ``-terra``); gpt-5.1
+# through gpt-5.4 accept tools at their default effort and MUST NOT get
+# the pin, since it would silently disable reasoning they support.
+_TOOLS_REQUIRE_EFFORT_NONE_FAMILIES: tuple[str, ...] = ("gpt-5.6",)
 
-def _uses_completion_token_contract(model: str) -> bool:
-    """True for OpenAI families that reject legacy ``max_tokens``.
 
-    Prefix match with a boundary check so ``gpt-5`` matches ``gpt-5``,
+def _model_in_family(model: str, families: tuple[str, ...]) -> bool:
+    """Prefix match with a boundary check so ``gpt-5`` matches ``gpt-5``,
     ``gpt-5.4-mini`` and ``gpt-5.6-luna`` but a hypothetical ``gpt-50``
-    or ``o1000x`` would not silently inherit the contract.
+    or ``o1000x`` would not silently inherit the family contract.
     """
-    for family in _COMPLETION_TOKEN_FAMILIES:
+    for family in families:
         if model == family:
             return True
         if model.startswith(family) and len(model) > len(family) and model[len(family)] in ".-":
             return True
     return False
+
+
+def _uses_completion_token_contract(model: str) -> bool:
+    """True for OpenAI families that reject legacy ``max_tokens``."""
+    return _model_in_family(model, _COMPLETION_TOKEN_FAMILIES)
 
 
 class OpenAIAdapter(BaseProviderAdapter):
@@ -184,6 +197,21 @@ class OpenAIAdapter(BaseProviderAdapter):
                     body["max_completion_tokens"] = body.pop("max_tokens")
                 body.pop("temperature", None)
                 body.pop("top_p", None)
+
+        # gpt-5.6 generation + function tools: the request is rejected
+        # unless reasoning is explicitly opted OUT (see the family-list
+        # comment above — this was the live "Model unavailable, please
+        # try again" failure on every app tool turn, while toolless curl
+        # requests passed). Pin only when no effort was chosen above so
+        # a future ``supports_reasoning=true`` row that asks for
+        # reasoning WITH tools still fails loudly on the (real) upstream
+        # conflict instead of having its reasoning silently dropped.
+        if (
+            "tools" in body
+            and "reasoning_effort" not in body
+            and _model_in_family(model, _TOOLS_REQUIRE_EFFORT_NONE_FAMILIES)
+        ):
+            body["reasoning_effort"] = "none"
 
         return body
 

@@ -467,4 +467,62 @@ class TestCompletionTokenContract:
         assert not _uses_completion_token_contract("gpt-4.1-mini")
         assert not _uses_completion_token_contract("gpt-50")  # boundary, not prefix-greed
         assert not _uses_completion_token_contract("o1000x")
+
+
+# ---------------------------------------------------------------------------
+# gpt-5.6 generation: function tools require an explicit reasoning_effort
+# of "none" on /chat/completions (400 invalid_request_error,
+# param=reasoning_effort otherwise — the model reasons by DEFAULT server-
+# side, so the conflict fires even when the request carries no reasoning
+# fields at all). Verified live against gpt-5.6-luna / -sol / -terra; the
+# toolless requests that already passed carry no pin and stay unchanged.
+# ---------------------------------------------------------------------------
+
+_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_time",
+            "description": "Get current time",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+]
+
+
+def _payload_with_tools(model: str) -> ChatCompletionsRequest:
+    return ChatCompletionsRequest(
+        model=model,
+        messages=[Message(role="user", content="Hi")],
+        max_tokens=64,
+        tools=_TOOLS,
+        metadata={},
+    )
+
+
+class TestGpt56ToolsEffortPin:
+    def _body(self, model: str) -> dict:
+        return OpenAIAdapter()._build_body(
+            _payload_with_tools(model), [Message(role="user", content="Hi")]
+        )
+
+    def test_gpt56_generation_with_tools_pins_effort_none(self):
+        for model in ("gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"):
+            body = self._body(model)
+            assert body["reasoning_effort"] == "none", model
+            assert body["tools"] == _TOOLS
+
+    def test_gpt56_without_tools_gets_no_pin(self):
+        body = OpenAIAdapter()._build_body(
+            _payload_with_knobs("gpt-5.6-luna"), [Message(role="user", content="Hi")]
+        )
+        assert "reasoning_effort" not in body
+
+    def test_older_gpt5_family_with_tools_is_not_pinned(self):
+        # gpt-5.1 – gpt-5.4 accept tools at their default effort (verified
+        # live) — pinning "none" would silently disable reasoning there.
+        for model in ("gpt-5", "gpt-5.1", "gpt-5.4-mini", "o3-mini", "gpt-4o"):
+            body = self._body(model)
+            assert "reasoning_effort" not in body, model
+            assert body["tools"] == _TOOLS
         assert not _uses_completion_token_contract("chat-latest")
