@@ -92,6 +92,25 @@ public class StdioMcpTransportTests
     }
 
     [Fact]
+    public async Task Unresponsive_Server_Times_Out_As_Protocol_Error()
+    {
+        // debug/hang never replies but the process stays alive — before the
+        // per-request timeout this call would park forever and hang the turn.
+        var (command, args) = StdioEchoServer.CommandLine();
+        await using var transport = new StdioMcpTransport(command, args,
+            requestTimeout: TimeSpan.FromMilliseconds(500));
+
+        var ex = await Assert.ThrowsAsync<McpProtocolException>(
+            () => transport.SendRequestAsync("debug/hang", null).WaitAsync(TestTimeout));
+        ex.Message.Should().Contain("timed out");
+
+        // The process is still alive — a later request on the same transport
+        // still round-trips (timeout is per-request, not a connection kill).
+        var response = await transport.SendRequestAsync("debug/env", null).WaitAsync(TestTimeout);
+        response.Result.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task Spawn_Failure_Is_A_Protocol_Error_Not_A_Crash()
     {
         await using var transport = new StdioMcpTransport("sran-no-such-mcp-server-xyz.exe");

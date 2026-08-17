@@ -19,6 +19,70 @@ public partial class MessageBubble : UserControl
         DataContextChanged += (_, _) => TryAnimateEntrance();
     }
 
+    /// <summary>Breathing animation for the cat status mark (was: pulsing
+    /// dots). Started on visible / stopped on collapse so no animation clock
+    /// ticks for hidden bubbles; skipped entirely under reduced motion —
+    /// the cat then sits still, mirroring the web's prefers-reduced-motion
+    /// rule for .cat-indicator.</summary>
+    private void CatIndicator_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Shapes.Path path ||
+            path.RenderTransform is not ScaleTransform scale)
+            return;
+
+        if (e.NewValue is true && Services.MotionSettings.Enabled)
+        {
+            var breathe = new System.Windows.Media.Animation.DoubleAnimation(1.0, 1.06,
+                TimeSpan.FromSeconds(1.1))
+            {
+                AutoReverse = true,
+                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
+                EasingFunction = new System.Windows.Media.Animation.SineEase
+                {
+                    EasingMode = System.Windows.Media.Animation.EasingMode.EaseInOut
+                }
+            };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, breathe);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, breathe);
+        }
+        else
+        {
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        }
+    }
+
+    /// <summary>Shimmer sweep for the cat row's status label (web parity with
+    /// .shimmer-text): translates the label's gradient Foreground so the
+    /// bright band sweeps left→right on a loop. Started on visible / stopped
+    /// on collapse; under reduced motion the label falls back to the flat
+    /// theme brush instead of showing a frozen highlight band.</summary>
+    private void CatStatusRow_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        foreach (var tb in new[] { CatStatusLabel, CatStatusFallback })
+        {
+            if (tb?.Foreground is not LinearGradientBrush brush ||
+                brush.RelativeTransform is not TranslateTransform translate)
+                continue;
+
+            if (e.NewValue is true && Services.MotionSettings.Enabled)
+            {
+                var sweep = new System.Windows.Media.Animation.DoubleAnimation(
+                    -1.0, 1.0, TimeSpan.FromSeconds(1.9))
+                {
+                    RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever
+                };
+                translate.BeginAnimation(TranslateTransform.XProperty, sweep);
+            }
+            else
+            {
+                translate.BeginAnimation(TranslateTransform.XProperty, null);
+                if (!Services.MotionSettings.Enabled)
+                    tb.SetResourceReference(ForegroundProperty, "TextSecondaryBrush");
+            }
+        }
+    }
+
     /// <summary>Phase 8 Task 3: fade + 8px slide-up (140 ms ease-out) for live
     /// appends only; everything else snaps to rest. Uses RenderTransform, so
     /// layout — and therefore the auto-scroll anchor — never moves.</summary>

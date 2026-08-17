@@ -37,6 +37,7 @@ public sealed class StdioMcpTransport : IMcpTransport
     private readonly IReadOnlyList<string> _args;
     private readonly IReadOnlyDictionary<string, string>? _env;
     private readonly ILogger? _logger;
+    private readonly TimeSpan _requestTimeout;
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonRpcResponse>> _pending = new();
@@ -52,12 +53,17 @@ public sealed class StdioMcpTransport : IMcpTransport
         string command,
         IReadOnlyList<string>? args = null,
         IReadOnlyDictionary<string, string>? env = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        TimeSpan? requestTimeout = null)
     {
         _command = command;
         _args = args ?? Array.Empty<string>();
         _env = env;
         _logger = logger;
+        // A hung-but-alive server must not park the turn forever (HTTP has
+        // HttpClient's timeout; stdio had none). Generous default — real
+        // tool calls can legitimately run long.
+        _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(120);
     }
 
     /// <summary>Fires when the server process exits for any reason other than
@@ -161,8 +167,21 @@ public sealed class StdioMcpTransport : IMcpTransport
         try
         {
             await WriteLineAsync(BuildEnvelope(method, @params, id), ct);
-            await using var registration = ct.Register(() => tcs.TrySetCanceled(ct));
-            return await tcs.Task;
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(_requestTimeout);
+            await using var registration =
+                timeoutCts.Token.Register(() => tcs.TrySetCanceled(timeoutCts.Token));
+            try
+            {
+                return await tcs.Task;
+            }
+            catch (OperationCanceledException)
+            {
+                if (ct.IsCancellationRequested)
+                    throw; // caller cancelled — preserve the original behavior
+                throw new McpProtocolException(
+                    $"MCP request '{method}' timed out after {_requestTimeout.TotalSeconds:0}s");
+            }
         }
         finally
         {
