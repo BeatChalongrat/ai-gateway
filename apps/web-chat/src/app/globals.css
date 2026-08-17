@@ -694,12 +694,15 @@ input {
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Reasoning "Thinking…" shimmer. A bright highlight sweeps across the
-   dim base text while the model is reasoning — the ChatGPT-style wave.
-   ``background-clip: text`` paints the moving gradient onto the glyphs
-   only (pure CSS, no JS / repaint cost). Colours come from the theme
-   text vars so it reads in both dark and light mode (dim tertiary base,
-   bright primary highlight). */
+/* Shimmer status text — the ChatGPT-style wave. Used by TWO distinct
+   states that must not be conflated: the ThinkingBlock header while
+   REAL reasoning streams ("Thinking…", reasoning.thinking), and the
+   CatIndicator's transient wait/progress labels ("Working…" /
+   "Searching…", gen.*), which say nothing about reasoning because they
+   fire for every model. ``background-clip: text`` paints the moving
+   gradient onto the glyphs only (pure CSS, no JS / repaint cost).
+   Colours come from the theme text vars so it reads in both dark and
+   light mode (dim tertiary base, bright primary highlight). */
 .shimmer-text {
   background: linear-gradient(
     90deg,

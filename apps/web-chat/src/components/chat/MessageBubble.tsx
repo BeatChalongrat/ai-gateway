@@ -838,7 +838,7 @@ function AssistantContentBody({
     // While searching the web, show the searching indicator in place of
     // the typing dots. It self-hides once the answer streams in.
     if (message.is_searching) return <SearchingIndicator />;
-    return <CatIndicator labelKey="reasoning.thinking" />;
+    return <CatIndicator labelKey="gen.working" />;
   }
 
   if (isStreaming) {

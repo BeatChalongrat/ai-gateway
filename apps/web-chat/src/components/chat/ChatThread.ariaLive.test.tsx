@@ -51,10 +51,10 @@ function liveRegion(container: HTMLElement): HTMLElement {
 }
 
 describe("ChatThread live region", () => {
-  it("is persistent and announces Thinking on stream start", () => {
+  it("is persistent and announces the waiting label on stream start", () => {
     const { container } = renderThread([msg({ isStreaming: true })]);
     expect(liveRegion(container).textContent).toBe(
-      dictionaries.en["reasoning.thinking"],
+      dictionaries.en["gen.working"],
     );
   });
 
@@ -102,7 +102,7 @@ describe("ChatThread live region", () => {
       />,
     );
     expect(liveRegion(container).textContent).toBe(
-      dictionaries.en["reasoning.thinking"],
+      dictionaries.en["gen.working"],
     );
   });
 });
@@ -110,7 +110,7 @@ describe("ChatThread live region", () => {
 describe("CatIndicator is visual-only", () => {
   it("has no role=status and no aria-label (thread region is the announcer)", () => {
     const { container } = render(
-      <CatIndicator labelKey="reasoning.thinking" />,
+      <CatIndicator labelKey="gen.working" />,
     );
     const wrapper = container.firstElementChild as HTMLElement;
     expect(wrapper.getAttribute("role")).toBeNull();

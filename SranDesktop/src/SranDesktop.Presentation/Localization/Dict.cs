@@ -688,6 +688,10 @@ public static class Dict
 
         // i18n sweep — message meta (MessageViewModel)
         ["msg.thinking"] = "Thinking...",
+        // First-token wait label (cat row fallback). NOT "Thinking..." —
+        // that word is reserved for real reasoning (the Expander header);
+        // this state fires for every model while no token has arrived.
+        ["msg.working"] = "Working…",
         ["msg.thoughtFor"] = "Thought for {0:F1}s",
         ["msg.tokens"] = "{0} tokens",
 
@@ -1417,6 +1421,7 @@ public static class Dict
 
         // i18n sweep — ข้อมูลกำกับข้อความ (MessageViewModel)
         ["msg.thinking"] = "กำลังคิด...",
+        ["msg.working"] = "กำลังประมวลผล…",
         ["msg.thoughtFor"] = "ใช้เวลาคิด {0:F1} วินาที",
         ["msg.tokens"] = "{0} โทเคน",
 
