@@ -66,13 +66,92 @@ def _validate_provider_base_url_setting(value: str) -> str:
     return validate_provider_base_url(v)
 
 
+def _validate_auto_model(value: str) -> str:
+    """A single model id that Auto may elect.
+
+    Must be a model the registry knows AND one that can call tools —
+    Auto turns carry the memory/search tool set, and electing a
+    tools-blind model drops those calls silently.
+    """
+    from app.services.providers.model_registry import get_candidate
+
+    v = (value or "").strip()
+    if not v:
+        raise ValidationError("Pick a model.", code="invalid_value")
+    cand = get_candidate(v)
+    if cand is None:
+        raise ValidationError(
+            f"Unknown model '{v}'.", code="invalid_value"
+        )
+    if not getattr(cand, "supports_tools", False):
+        raise ValidationError(
+            f"'{v}' does not support tool calling.", code="invalid_value"
+        )
+    return v
+
+
+def _validate_auto_fallbacks(value: str) -> str:
+    """Comma-separated fallback chain. Empty is allowed (no chain)."""
+    from app.services.routing_settings import parse_model_list
+
+    models = parse_model_list(value)
+    for model in models:
+        _validate_auto_model(model)
+    return ",".join(models)
+
+
 _VALIDATORS: dict[str, Callable[[str], str]] = {
     "free_trial_tokens": _validate_positive_int,
     "trial_model_tier": _validate_model_tier,
     "portal_signup_enabled": _validate_bool,
     "credit_low_threshold": _validate_positive_int,
     "provider_base_url:sranai": _validate_provider_base_url_setting,
+    "auto_default_model": _validate_auto_model,
+    "auto_default_fallbacks": _validate_auto_fallbacks,
 }
+
+
+# Cost tiers, cheapest first — same ordering smart_router uses.
+_TIER_RANK = {"cheap": 0, "budget": 0, "standard": 1, "premium": 2}
+
+
+def _tier_rank(tier: str | None) -> int:
+    return _TIER_RANK.get((tier or "").strip().lower(), 1)
+
+
+def _check_tier_ceiling(key: str, value: str, session: Session) -> None:
+    """Keep the Auto default at or under the max-tier ceiling.
+
+    ``trial_model_tier`` is the "Budget maximum tier" card; the Auto
+    default is the quality floor. A floor above the ceiling is
+    incoherent, so whichever side moves is rejected with a message
+    naming the other one. Only these two keys interact.
+    """
+    if key not in ("auto_default_model", "trial_model_tier"):
+        return
+
+    from app.services.providers.model_registry import get_candidate
+
+    def _current(k: str) -> str | None:
+        row = session.get(SystemSettingORM, k)
+        return row.value if row is not None else None
+
+    if key == "auto_default_model":
+        model, ceiling = value, _current("trial_model_tier")
+    else:
+        model, ceiling = _current("auto_default_model"), value
+    if not model or not ceiling:
+        return
+
+    cand = get_candidate(model)
+    if cand is None:
+        return
+    if _tier_rank(cand.cost_tier) > _tier_rank(ceiling):
+        raise ValidationError(
+            f"'{model}' is a {cand.cost_tier}-tier model but the maximum "
+            f"tier is '{ceiling}'. Raise the maximum tier first.",
+            code="invalid_value",
+        )
 
 
 @router.get("")
@@ -114,8 +193,16 @@ def update_setting(
             code="setting_not_editable",
         )
 
-    row.value = validator(body.value)
+    validated = validator(body.value)
+    _check_tier_ceiling(key, validated, session)
+    row.value = validated
     session.flush()
+    if key in ("auto_default_model", "auto_default_fallbacks"):
+        # Take effect on the next turn instead of after the read TTL —
+        # the whole point is "change it without a deploy".
+        from app.services.routing_settings import clear_cache
+
+        clear_cache()
     if key.startswith("provider_base_url:"):
         # Propagate an endpoint edit without waiting out the 30s TTL.
         # (Pool eviction of the old URL is skipped on this sync route —

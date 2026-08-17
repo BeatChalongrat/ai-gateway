@@ -72,51 +72,51 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         provider="openai", model="gpt-4o",
         cost_per_input_token=0.0000025, cost_per_output_token=0.000010,
         cost_tier=_derive_cost_tier(0.0000025), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="openai", model="gpt-4o-mini",
         cost_per_input_token=0.00000015, cost_per_output_token=0.0000006,
         cost_tier=_derive_cost_tier(0.00000015), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="openai", model="gpt-4-turbo",
         cost_per_input_token=0.00001, cost_per_output_token=0.00003,
         cost_tier=_derive_cost_tier(0.00001), latency_tier="slow",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="openai", model="gpt-3.5-turbo",
         cost_per_input_token=0.0000005, cost_per_output_token=0.0000015,
         cost_tier=_derive_cost_tier(0.0000005), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     # --- Anthropic ----------------------------------------------------
     ModelCandidate(
         provider="anthropic", model="claude-3-5-sonnet-20241022",
         cost_per_input_token=0.000003, cost_per_output_token=0.000015,
         cost_tier=_derive_cost_tier(0.000003), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="anthropic", model="claude-3-opus-20240229",
         cost_per_input_token=0.000015, cost_per_output_token=0.000075,
         cost_tier=_derive_cost_tier(0.000015), latency_tier="slow",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="anthropic", model="claude-3-haiku-20240307",
         cost_per_input_token=0.00000025, cost_per_output_token=0.00000125,
         cost_tier=_derive_cost_tier(0.00000025), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     # --- Minimax ------------------------------------------------------
     ModelCandidate(
         provider="minimax", model="abab6.5s-chat",
         cost_per_input_token=0.00000045, cost_per_output_token=0.0000045,
         cost_tier=_derive_cost_tier(0.00000045), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="minimax", model="abab5.5-chat",
@@ -129,38 +129,38 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         provider="qwen", model="qwen-turbo",
         cost_per_input_token=0.00000005, cost_per_output_token=0.0000002,
         cost_tier=_derive_cost_tier(0.00000005), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="qwen", model="qwen-plus",
         cost_per_input_token=0.00000056, cost_per_output_token=0.0000016,
         cost_tier=_derive_cost_tier(0.00000056), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="qwen", model="qwen-max",
         cost_per_input_token=0.0000024, cost_per_output_token=0.0000096,
         cost_tier=_derive_cost_tier(0.0000024), latency_tier="slow",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     # --- Kimi / Moonshot ----------------------------------------------
     ModelCandidate(
         provider="kimi", model="moonshot-v1-8k",
         cost_per_input_token=0.0000012, cost_per_output_token=0.0000012,
         cost_tier=_derive_cost_tier(0.0000012), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="kimi", model="moonshot-v1-32k",
         cost_per_input_token=0.0000024, cost_per_output_token=0.0000024,
         cost_tier=_derive_cost_tier(0.0000024), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="kimi", model="moonshot-v1-128k",
         cost_per_input_token=0.0000060, cost_per_output_token=0.0000060,
         cost_tier=_derive_cost_tier(0.0000060), latency_tier="slow",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     # --- Z.AI / Yi ----------------------------------------------------
     ModelCandidate(
@@ -186,13 +186,13 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         provider="openrouter", model="anthropic/claude-3.5-sonnet",
         cost_per_input_token=0.000003, cost_per_output_token=0.000015,
         cost_tier=_derive_cost_tier(0.000003), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="openrouter", model="openai/gpt-4o",
         cost_per_input_token=0.0000025, cost_per_output_token=0.000010,
         cost_tier=_derive_cost_tier(0.0000025), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="openrouter", model="meta-llama/llama-3.1-405b",
@@ -204,7 +204,7 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         provider="openrouter", model="google/gemini-pro-1.5",
         cost_per_input_token=0.0000035, cost_per_output_token=0.0000105,
         cost_tier=_derive_cost_tier(0.0000035), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     # --- Google -------------------------------------------------------
     ModelCandidate(
@@ -236,13 +236,13 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         provider="groq", model="llama-3.3-70b-versatile",
         cost_per_input_token=0.00000059, cost_per_output_token=0.00000079,
         cost_tier=_derive_cost_tier(0.00000059), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="groq", model="llama-3.1-8b-instant",
         cost_per_input_token=0.00000005, cost_per_output_token=0.00000008,
         cost_tier=_derive_cost_tier(0.00000005), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="groq", model="mixtral-8x7b-32768",
@@ -273,7 +273,7 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         provider="deepseek", model="deepseek-chat",
         cost_per_input_token=0.00000027, cost_per_output_token=0.0000011,
         cost_tier=_derive_cost_tier(0.00000027), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="deepseek", model="deepseek-coder",
@@ -292,13 +292,13 @@ SEED_CANDIDATES: list[ModelCandidate] = [
         provider="xai", model="grok-2-latest",
         cost_per_input_token=0.000002, cost_per_output_token=0.000010,
         cost_tier=_derive_cost_tier(0.000002), latency_tier="standard",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     ModelCandidate(
         provider="xai", model="grok-2-mini",
         cost_per_input_token=0.0000002, cost_per_output_token=0.0000004,
         cost_tier=_derive_cost_tier(0.0000002), latency_tier="fast",
-        supports_streaming=True,
+        supports_streaming=True, supports_tools=True,
     ),
     # Mistral / Cohere / Perplexity seed entries moved to
     # ``_PENDING_PROVIDERS`` below. Their adapters live under

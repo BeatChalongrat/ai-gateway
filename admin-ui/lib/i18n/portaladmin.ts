@@ -99,6 +99,14 @@ export const en = {
   "padmin.settings.lowThreshold": "Low credit warning threshold",
   "padmin.settings.lowThresholdDesc":
     "Warn user in the portal when their balance drops below this value.",
+  "padmin.settings.autoHeading": "Auto model routing",
+  "padmin.settings.autoDefaultModel": "Auto default model",
+  "padmin.settings.autoDefaultModelDesc":
+    "Model that 'auto' picks first. Only active, tool-capable models are listed — a model that cannot call tools drops memory and search calls silently.",
+  "padmin.settings.autoFallbacks": "Fallback chain",
+  "padmin.settings.autoFallbacksDesc":
+    "Tried in order when the default has no usable provider key. Comma-separated model ids.",
+  "padmin.settings.autoLoadingModels": "Loading models…",
   "padmin.settings.unsavedChanges": "Unsaved changes",
   "padmin.settings.settingsSaved": "Settings saved",
   "padmin.settings.comingSoon": "Coming soon",
@@ -232,6 +240,14 @@ export const th: Record<keyof typeof en, string> = {
   "padmin.settings.trialTierDesc": "ระดับโมเดลสูงสุดที่ผู้ทดลองใช้เข้าถึงได้",
   "padmin.settings.lowThreshold": "เกณฑ์แจ้งเตือนเครดิตใกล้หมด",
   "padmin.settings.lowThresholdDesc": "แจ้งเตือนผู้ใช้ในพอร์ทัลเมื่อยอดเครดิตคงเหลือต่ำกว่าค่านี้",
+  "padmin.settings.autoHeading": "การเลือกโมเดลอัตโนมัติ (Auto)",
+  "padmin.settings.autoDefaultModel": "โมเดลหลักของ Auto",
+  "padmin.settings.autoDefaultModelDesc":
+    "โมเดลที่ \"auto\" เลือกเป็นอันดับแรก แสดงเฉพาะโมเดลที่เปิดใช้งานและเรียก tool ได้ — โมเดลที่เรียก tool ไม่ได้จะทำให้ความจำและการค้นหาเงียบหายไป",
+  "padmin.settings.autoFallbacks": "ลำดับสำรอง",
+  "padmin.settings.autoFallbacksDesc":
+    "ใช้ตามลำดับเมื่อโมเดลหลักไม่มีคีย์ที่ใช้ได้ คั่นด้วยเครื่องหมายจุลภาค",
+  "padmin.settings.autoLoadingModels": "กำลังโหลดรายชื่อโมเดล…",
   "padmin.settings.unsavedChanges": "มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก",
   "padmin.settings.settingsSaved": "บันทึกการตั้งค่าแล้ว",
   "padmin.settings.comingSoon": "เร็ว ๆ นี้",

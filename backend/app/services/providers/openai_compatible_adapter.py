@@ -40,6 +40,27 @@ if TYPE_CHECKING:
     from app.schemas.common import Message
 
 
+def serialize_openai_wire_message(msg) -> dict:
+    """Build the OpenAI wire-format dict for a single Message.
+
+    Includes content when set. Function-calling fields are role-scoped:
+    assistant turns may carry ``tool_calls`` while tool result turns may
+    carry ``tool_call_id`` / ``name``. Other internal message metadata
+    must not leak into the wire payload.
+    """
+    out: dict = {"role": msg.role}
+    if msg.content is not None:
+        out["content"] = msg.content
+    if msg.role == "assistant" and msg.tool_calls is not None:
+        out["tool_calls"] = msg.tool_calls
+    if msg.role == "tool":
+        if msg.tool_call_id is not None:
+            out["tool_call_id"] = msg.tool_call_id
+        if msg.name is not None:
+            out["name"] = msg.name
+    return out
+
+
 class OpenAICompatibleAdapter(BaseProviderAdapter):
     """Concrete-enough base for any provider that mirrors OpenAI's
     Chat Completions API. Subclasses must set ``base_url`` and
@@ -73,7 +94,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         model = resolved_model or payload.model
         body: dict = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [serialize_openai_wire_message(m) for m in messages],
         }
         if stream:
             body["stream"] = True
@@ -82,6 +103,25 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             val = getattr(payload, param, None) or payload.metadata.get(param)
             if val is not None:
                 body[param] = val
+
+        # Function-calling passthrough, gated on the registry capability
+        # flag: silently stripping ``tools`` would leave the model unable
+        # to call tools while the caller believes they were sent, so a
+        # tools request against a non-tool model fails loudly instead.
+        tools = getattr(payload, "tools", None)
+        if tools:
+            from app.core.exceptions import ValidationError
+            from app.services.providers.model_registry import get_candidate
+
+            cand = get_candidate(model)
+            if cand is None or not cand.supports_tools:
+                raise ValidationError(
+                    f"Model '{model}' does not support tool/function calling"
+                )
+            body["tools"] = tools
+            tool_choice = getattr(payload, "tool_choice", None)
+            if tool_choice is not None:
+                body["tool_choice"] = tool_choice
 
         # T3: forward ``reasoning_effort`` for reasoning-capable models
         # served over the OpenAI-compatible wire (covers DeepSeek-R1

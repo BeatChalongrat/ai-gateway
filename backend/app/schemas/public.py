@@ -186,6 +186,11 @@ class RoutingHints(BaseModel):
 
     needs_vision: bool = False
     needs_reasoning: bool = False
+    # The turn ships tool definitions. Routing MUST then land on a model
+    # with supports_tools — a tools-blind model silently answers in prose
+    # and the tool call never happens.
+    has_tools: bool = False
+    tool_count: int = 0
     has_code: bool = False
     has_files: bool = False
     complexity: Optional[str] = None      # "low" | "medium" | "high"
