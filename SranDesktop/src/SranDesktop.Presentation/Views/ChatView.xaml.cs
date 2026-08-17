@@ -22,9 +22,20 @@ public partial class ChatView : UserControl
     private readonly SranDesktop.Application.Services.ScrollMemory _scrollMemory =
         SranDesktop.Application.Services.ScrollMemory.Instance;
 
+    // P2 — a Show more / Show less click changes the extent exactly like
+    // stream growth does, and the ScrollChanged re-pin below cannot tell the
+    // two apart on its own. The bubble raises CollapseToggled on the click;
+    // extent changes inside this grace window skip ONE re-pin so expanding a
+    // message while pinned at the bottom does not yank the viewport down.
+    private long _collapseToggleTick;
+    private const int CollapseToggleGraceMs = 300;
+
     public ChatView()
     {
         InitializeComponent();
+        MessageList.AddHandler(
+            Controls.MessageBubble.CollapseToggledEvent,
+            new RoutedEventHandler((_, _) => _collapseToggleTick = Environment.TickCount64));
         DataContextChanged += (_, e) =>
         {
             if (e.OldValue is ChatViewModel oldVm)
@@ -91,7 +102,7 @@ public partial class ChatView : UserControl
         {
             // restored — leave the offset alone this pass
         }
-        else if (_autoScroll)
+        else if (_autoScroll && !WasCollapseJustToggled())
         {
             scroll.ScrollToVerticalOffset(scroll.ExtentHeight);
         }
@@ -133,6 +144,10 @@ public partial class ChatView : UserControl
             Services.ScrollStateHelper.ShouldShowJumpToLatest(_autoScroll, hasContentBelow)
                 ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private bool WasCollapseJustToggled() =>
+        _collapseToggleTick != 0
+        && Environment.TickCount64 - _collapseToggleTick < CollapseToggleGraceMs;
 
     private void JumpToLatest_Click(object sender, RoutedEventArgs e)
     {

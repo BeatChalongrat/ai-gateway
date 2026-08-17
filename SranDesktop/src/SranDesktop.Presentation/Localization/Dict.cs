@@ -137,6 +137,9 @@ public static class Dict
         ["msg.goodResponse"] = "Good response",
         ["msg.badResponse"] = "Bad response",
         ["msg.regenerate"] = "Regenerate",
+        // P2 — long user-message collapse
+        ["msg.showMore"] = "Show more",
+        ["msg.showLess"] = "Show less",
 
         // Model selector
         ["model.auto.name"] = "Auto",
@@ -865,6 +868,9 @@ public static class Dict
         ["msg.goodResponse"] = "คำตอบดี",
         ["msg.badResponse"] = "คำตอบไม่ดี",
         ["msg.regenerate"] = "สร้างคำตอบใหม่",
+        // P2 — ย่อข้อความยาวของผู้ใช้
+        ["msg.showMore"] = "แสดงเพิ่มเติม",
+        ["msg.showLess"] = "ย่อ",
 
         // Model selector
         ["model.auto.name"] = "อัตโนมัติ",
