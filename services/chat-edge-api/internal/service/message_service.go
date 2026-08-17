@@ -904,6 +904,15 @@ type StreamUpdate struct {
 	// every other event.
 	CodeExecution *CodeExecutionUpdate
 
+	// Generic per-tool activity marker for tools that have NO dedicated
+	// progress event (save_memory, list_memories, update_conversation_state,
+	// search_past_conversations, update_canvas_artifact — previously fully
+	// invisible to the user). Emitted twice per call: "started" just before
+	// the executor runs, "finished" right after. Ephemeral like
+	// CodeExecution — never persisted; survives a mid-stream reconnect via
+	// the broker snapshot only.
+	ToolActivity *ToolActivityUpdate
+
 	// B1 — a provider error frame forwarded from the Gateway. The
 	// handler emits it as an ``error`` SSE event (distinct styling on
 	// the frontend) instead of letting the stream end blank.
@@ -911,6 +920,40 @@ type StreamUpdate struct {
 	// B2 — a fallback notice forwarded from the Gateway. The handler
 	// emits it as a ``fallback_info`` SSE event.
 	FallbackInfo map[string]any
+}
+
+// ToolActivityUpdate is one generic "the assistant is using a tool"
+// frame. ID is the gateway tool_call id so the client can pair the
+// "started" and "finished" frames into one indicator/card.
+type ToolActivityUpdate struct {
+	ID    string `json:"id"`
+	Tool  string `json:"tool"`
+	Phase string `json:"phase"` // "started" | "finished"
+}
+
+// dedicatedEventTools are the tools whose progress already has a
+// dedicated SSE event. The generic tool_activity is suppressed for
+// them — emitting both would double-render client-side (the phase
+// placeholder AND a generic activity row for the same call).
+var dedicatedEventTools = map[string]bool{
+	"generate_image": true, // image_generating
+	"generate_video": true, // video_generating
+	"web_search":     true, // search_status
+	"web_fetch":      true, // search_status (reused, see pump)
+	"run_python":     true, // code_execution
+}
+
+// silentByDesignTools are internal-bookkeeping tools that deliberately
+// get NO tool_activity either: memory/state writes are housekeeping the
+// model already acknowledges in its reply text ("จำไว้แล้วครับ…"), so a
+// "saving a memory…" badge double-reports the same fact — ChatGPT and
+// Claude both keep these silent. User-visible ACTIONS stay announced:
+// search_past_conversations (reads the user's other chats) and
+// update_canvas_artifact (mutates a document the user is looking at).
+var silentByDesignTools = map[string]bool{
+	"save_memory":               true,
+	"list_memories":             true,
+	"update_conversation_state": true,
 }
 
 // CodeExecutionUpdate is one run_python invocation as the UI sees it
@@ -2802,11 +2845,20 @@ func (s *MessageService) resolveAutoIfNeeded(
 	}
 	hasFiles := strings.TrimSpace(s.fileContext(ctx, tenantID, conv.ID)) != ""
 	hasImages := len(imageURLs) > 0
-	hints := BuildRoutingHints(message, hasFiles, hasImages, historyLen, conv.ReasoningEnabled)
+	// Same count the context budgeter reserves for (InspectContext does
+	// this too) — the gateway needs it to keep a tool-bearing turn off a
+	// model that can't call tools.
+	numTools := 0
+	if s.toolExec != nil {
+		numTools = len(s.toolExec.ToolDefs(conv))
+	}
+	hints := BuildRoutingHints(message, hasFiles, hasImages, historyLen, conv.ReasoningEnabled, numTools)
 	slog.Info("auto_routing_hints",
 		"conversation_id", conv.ID.String(),
 		"needs_vision", hints.NeedsVision,
 		"needs_reasoning", hints.NeedsReasoning,
+		"has_tools", hints.HasTools,
+		"tool_count", hints.ToolCount,
 		"has_code", hints.HasCode,
 		"has_files", hints.HasFiles,
 		"complexity", hints.Complexity,
@@ -3914,7 +3966,23 @@ func (s *MessageService) executeToolCalls(
 	}
 	results := make([]GatewayMessage, 0, len(toolCalls))
 	for _, tc := range toolCalls {
+		// Generic activity frames for tools with no dedicated event —
+		// the tool logic itself is untouched, this only brackets it.
+		// Suppressed for tools with their own event AND for
+		// silent-by-design bookkeeping tools (see the sets above).
+		generic := !dedicatedEventTools[tc.Function.Name] &&
+			!silentByDesignTools[tc.Function.Name]
+		if generic {
+			ec.emit(StreamUpdate{ToolActivity: &ToolActivityUpdate{
+				ID: tc.ID, Tool: tc.Function.Name, Phase: "started",
+			}})
+		}
 		out := s.toolExec.Execute(ctx, tc, ec)
+		if generic {
+			ec.emit(StreamUpdate{ToolActivity: &ToolActivityUpdate{
+				ID: tc.ID, Tool: tc.Function.Name, Phase: "finished",
+			}})
+		}
 		results = append(results, GatewayMessage{
 			Role:       "tool",
 			ToolCallID: tc.ID,

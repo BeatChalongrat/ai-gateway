@@ -226,6 +226,12 @@ type GatewayReasoningConfig struct {
 type RoutingHints struct {
 	NeedsVision    bool   `json:"needs_vision,omitempty"`
 	NeedsReasoning bool   `json:"needs_reasoning,omitempty"`
+	// HasTools/ToolCount tell the gateway this turn ships tool
+	// definitions, so it must not elect a tools-blind (or budget-tier)
+	// model — a model that ignores the tool set answers in prose and
+	// the memory/search calls never happen.
+	HasTools       bool   `json:"has_tools,omitempty"`
+	ToolCount      int    `json:"tool_count,omitempty"`
 	HasCode        bool   `json:"has_code,omitempty"`
 	HasFiles       bool   `json:"has_files,omitempty"`
 	Complexity     string `json:"complexity,omitempty"` // "low" | "medium" | "high"

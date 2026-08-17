@@ -43,7 +43,7 @@ func TestIsComplexQuery_ShortThaiGreetingNotComplex(t *testing.T) {
 func TestBuildRoutingHints_MidLengthThaiIsLowNotMedium(t *testing.T) {
 	// 30 Thai runes = 90 bytes. Old byte-based low-gate (<=80) failed (90 > 80)
 	// → "medium"; rune-based passes (30 <= 80) → "low".
-	h := BuildRoutingHints(thaiRunes(30), false, false, 0, false)
+	h := BuildRoutingHints(thaiRunes(30), false, false, 0, false, 0)
 	if h.Complexity != "low" {
 		t.Fatalf("30-rune Thai turn: complexity=%q, want low", h.Complexity)
 	}
@@ -51,7 +51,7 @@ func TestBuildRoutingHints_MidLengthThaiIsLowNotMedium(t *testing.T) {
 
 func TestBuildRoutingHints_LongThaiIsHigh(t *testing.T) {
 	// 600 runes → isComplexQuery true → complexity "high".
-	h := BuildRoutingHints(thaiRunes(600), false, false, 0, false)
+	h := BuildRoutingHints(thaiRunes(600), false, false, 0, false, 0)
 	if h.Complexity != "high" {
 		t.Fatalf("600-rune Thai turn: complexity=%q, want high", h.Complexity)
 	}
