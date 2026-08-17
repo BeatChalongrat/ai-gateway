@@ -232,20 +232,29 @@ class OpenAIAdapter(BaseProviderAdapter):
                 body.pop("temperature", None)
                 body.pop("top_p", None)
 
-        # gpt-5.6 generation + function tools: the request is rejected
-        # unless reasoning is explicitly opted OUT (see the family-list
-        # comment above — this was the live "Model unavailable, please
-        # try again" failure on every app tool turn, while toolless curl
-        # requests passed). Pin only when no effort was chosen above so
-        # a future ``supports_reasoning=true`` row that asks for
-        # reasoning WITH tools still fails loudly on the (real) upstream
-        # conflict instead of having its reasoning silently dropped.
-        if (
-            "tools" in body
-            and "reasoning_effort" not in body
-            and _model_in_family(model, _TOOLS_REQUIRE_EFFORT_NONE_FAMILIES)
-        ):
-            body["reasoning_effort"] = "none"
+        # PRECEDENCE — this block must stay LAST in the builder, after
+        # the reasoning block above, because on /chat/completions the
+        # whole gpt-5 generation rejects function tools at any
+        # reasoning effort except an explicit 'none' (400, live-proven
+        # against gpt-5.4-mini AND gpt-5.6, 2026-08-17). Two cases:
+        #
+        #  1. Tools + an effort chosen above (reasoning wanted but this
+        #     request is on the chat/completions path — i.e. the
+        #     Responses attempt failed and fell back here): OVERRIDE to
+        #     'none'. Answer-over-reasoning is the fallback's contract;
+        #     the earlier ordering bug (reasoning block silently beating
+        #     the pin) must not come back.
+        #  2. gpt-5.6 family + tools with NO effort chosen: pin 'none'
+        #     anyway — 5.6 reasons by server default, so even an
+        #     effort-less tools request 400s without the explicit opt-out.
+        #
+        # Reasoning-WITH-tools is served by the Responses path
+        # (_responses_eligible), never by this builder.
+        if "tools" in body and _model_in_family(model, ("gpt-5",)):
+            if "reasoning_effort" in body or _model_in_family(
+                model, _TOOLS_REQUIRE_EFFORT_NONE_FAMILIES
+            ):
+                body["reasoning_effort"] = "none"
 
         return body
 
@@ -253,31 +262,88 @@ class OpenAIAdapter(BaseProviderAdapter):
     def _responses_eligible(payload, resolved_model: str | None) -> bool:
         """True when this request should use the Responses API.
 
-        Tightly gated so the default path is untouched:
-          * the resolved model is an o-series reasoning model
-            (``reasoning_strategy == "openai_responses_reasoning"``),
-          * the caller asked for reasoning (``mode != off``) AND wants the
-            visible summary (``show_summary``) — the only reason to pay the
-            Responses API; token-count-only requests stay on
-            /chat/completions, and
-          * the request carries NO tools (the Responses API models tool
-            calls as ``function_call`` items, a different shape; tool turns
-            keep the well-tested Chat Completions path).
+        Two tiers, both requiring a catalog row with
+        ``supports_reasoning=True`` and ``reasoning_strategy ==
+        "openai_responses_reasoning"`` and a non-``off`` reasoning mode:
+
+        * **gpt-5 family** — eligible with or without tools. On
+          /chat/completions this generation rejects function tools at
+          any reasoning effort except an explicit 'none' ("To use
+          function tools, use /v1/responses" — the provider's own 400),
+          so /responses is the ONLY endpoint that serves reasoning AND
+          tools together. Live-verified 2026-08-17: tool call + summary
+          text arrive together, and a stateless follow-up leg
+          (function_call + function_call_output echoed back, no
+          reasoning item) is accepted.
+
+        * **o-series** (everything else with the strategy) — the
+          original conservative gate, byte-identical to before: summary
+          wanted AND no tools. Tool turns keep the well-tested Chat
+          Completions path, which the o-series accepts at any effort.
         """
         rc = getattr(payload, "reasoning", None)
-        if rc is None or rc.mode == "off" or not getattr(rc, "show_summary", False):
-            return False
-        if getattr(payload, "tools", None):
+        if rc is None or rc.mode == "off":
             return False
         model = resolved_model or payload.model
         from app.services.providers.model_registry import get_candidate
 
         cand = get_candidate(model)
-        return bool(
+        if not (
             cand
             and cand.supports_reasoning
             and cand.reasoning_strategy == "openai_responses_reasoning"
-        )
+        ):
+            return False
+        if _model_in_family(model, ("gpt-5",)):
+            return True
+        if getattr(payload, "tools", None):
+            return False
+        return bool(getattr(rc, "show_summary", False))
+
+    @staticmethod
+    def _messages_to_responses_input(messages) -> list[dict]:
+        """Translate Chat-Completions-shaped history into Responses input.
+
+        Plain role turns become ``{role, content}`` items. Function-calling
+        history changes shape entirely: an assistant turn's ``tool_calls``
+        become top-level ``function_call`` items (call_id / name /
+        arguments), and each ``tool`` role turn becomes a
+        ``function_call_output`` item keyed by the same call_id. Prior
+        reasoning items are NOT replayed — the client contract has no slot
+        for them, and the stateless echo (function_call + output, no
+        reasoning sibling) is accepted upstream (live-verified 2026-08-17).
+        """
+        items: list[dict] = []
+        for m in messages:
+            if m.role == "assistant" and m.tool_calls:
+                # Content (if any) stays a message item; each tool call
+                # becomes its own function_call item.
+                if m.content:
+                    items.append({"role": "assistant", "content": m.content})
+                for tc in m.tool_calls:
+                    fn = tc.get("function") or {}
+                    items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": tc.get("id", ""),
+                            "name": fn.get("name", ""),
+                            "arguments": fn.get("arguments", "") or "",
+                        }
+                    )
+                continue
+            if m.role == "tool":
+                items.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": m.tool_call_id or "",
+                        "output": m.content if m.content is not None else "",
+                    }
+                )
+                continue
+            items.append(
+                {"role": m.role, "content": (m.content if m.content is not None else "")}
+            )
+        return items
 
     def _build_responses_body(
         self, payload, messages, *, stream: bool = False, resolved_model: str | None = None
@@ -285,23 +351,48 @@ class OpenAIAdapter(BaseProviderAdapter):
         """Build a Responses API request body (``input`` + ``reasoning``).
 
         Differs from the Chat Completions body: messages become ``input``
-        role/content items, reasoning carries ``effort`` + ``summary``, and
-        the token budget is ``max_output_tokens``.
+        items (see ``_messages_to_responses_input`` for the tool-history
+        translation), tool definitions are FLAT (``{type, name,
+        description, parameters}`` — not nested under ``function``),
+        reasoning carries ``effort`` (+ ``summary`` only when the caller
+        wants it visible), and the token budget is ``max_output_tokens``.
         """
         model = resolved_model or payload.model
         rc = payload.reasoning
-        input_items = [
-            {"role": m.role, "content": (m.content if m.content is not None else "")}
-            for m in messages
-        ]
+        reasoning_block: dict = {
+            "effort": _REASONING_EFFORT_MAP.get(rc.mode, "medium"),
+        }
+        if getattr(rc, "show_summary", False):
+            reasoning_block["summary"] = _RESPONSES_SUMMARY_MAP.get(rc.mode, "auto")
         body: dict = {
             "model": model,
-            "input": input_items,
-            "reasoning": {
-                "effort": _REASONING_EFFORT_MAP.get(rc.mode, "medium"),
-                "summary": _RESPONSES_SUMMARY_MAP.get(rc.mode, "auto"),
-            },
+            "input": self._messages_to_responses_input(messages),
+            "reasoning": reasoning_block,
         }
+        tools = getattr(payload, "tools", None)
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "name": (t.get("function") or {}).get("name", ""),
+                    "description": (t.get("function") or {}).get("description", ""),
+                    "parameters": (t.get("function") or {}).get("parameters", {}),
+                }
+                if t.get("type") == "function" and "function" in t
+                else t
+                for t in tools
+            ]
+            tool_choice = getattr(payload, "tool_choice", None)
+            if tool_choice is not None:
+                # String forms ("auto"/"required"/"none") pass through;
+                # the named form flattens the same way the defs do.
+                if isinstance(tool_choice, dict) and "function" in tool_choice:
+                    body["tool_choice"] = {
+                        "type": "function",
+                        "name": (tool_choice.get("function") or {}).get("name", ""),
+                    }
+                else:
+                    body["tool_choice"] = tool_choice
         if stream:
             body["stream"] = True
         mt = getattr(payload, "max_tokens", None) or payload.metadata.get("max_tokens")
@@ -408,8 +499,11 @@ class OpenAIAdapter(BaseProviderAdapter):
                             raise map_provider_error(
                                 status_exc, self.provider_name
                             ) from status_exc
+                    # Per-stream tool-call bookkeeping (item_id → dense
+                    # downstream index) owned here, not in the parser.
+                    sse_state: dict = {}
                     async for line in resp.aiter_lines():
-                        chunk = _parse_responses_sse_line(line)
+                        chunk = _parse_responses_sse_line(line, sse_state)
                         if chunk is not None:
                             yielded = True
                             yield chunk
@@ -576,6 +670,7 @@ def _parse_responses_response(data: dict) -> ProviderResponse:
     """
     text_parts: list[str] = []
     reasoning_parts: list[str] = []
+    tool_calls: list[dict] = []
     for item in data.get("output", []) or []:
         if not isinstance(item, dict):
             continue
@@ -588,18 +683,36 @@ def _parse_responses_response(data: dict) -> ProviderResponse:
             for s in item.get("summary", []) or []:
                 if isinstance(s, dict) and s.get("type") == "summary_text":
                     reasoning_parts.append(s.get("text", "") or "")
+        elif itype == "function_call":
+            # Normalize to the Chat-Completions tool_calls shape the
+            # whole downstream (route layer, DLP arg buffering, both
+            # clients) already speaks — same pattern as the Anthropic
+            # parser's tool_use normalization (parsers.py).
+            tool_calls.append(
+                {
+                    "id": item.get("call_id", "") or item.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": item.get("name", ""),
+                        "arguments": item.get("arguments", "") or "",
+                    },
+                }
+            )
     reasoning_text = "".join(reasoning_parts) or None
     return ProviderResponse(
         content="".join(text_parts),
         model=data.get("model", ""),
-        finish_reason="stop",
+        finish_reason="tool_calls" if tool_calls else "stop",
         usage=_responses_usage(data.get("usage")),
         raw=data,
         reasoning_content=reasoning_text,
+        tool_calls=tool_calls or None,
     )
 
 
-def _parse_responses_sse_line(line: str) -> ProviderStreamChunk | None:
+def _parse_responses_sse_line(
+    line: str, state: dict | None = None
+) -> ProviderStreamChunk | None:
     """Parse one Responses API streaming SSE line.
 
     Responses streams emit ``event:`` + ``data:`` line pairs; the ``data``
@@ -607,9 +720,18 @@ def _parse_responses_sse_line(line: str) -> ProviderStreamChunk | None:
     and ignore the ``event:`` line. Handled types:
       * ``response.output_text.delta``            → content delta
       * ``response.reasoning_summary_text.delta`` → reasoning delta
+      * ``response.output_item.added`` (function_call)
+                                                  → tool_calls header delta
+      * ``response.function_call_arguments.delta``→ tool_calls args delta
       * ``response.completed``                    → final usage
     All other lifecycle events (created / in_progress / *.added / *.done)
     are ignored.
+
+    ``state`` carries the per-stream tool-call bookkeeping the caller
+    owns (Responses keys argument deltas by ``item_id``; the downstream
+    Chat-Completions delta contract keys by a dense 0-based ``index``
+    with the id+name on the first fragment). Passing ``None`` keeps the
+    text/reasoning/usage parsing stateless for tool-less callers.
     """
     if not line.startswith("data: "):
         return None
@@ -633,11 +755,40 @@ def _parse_responses_sse_line(line: str) -> ProviderStreamChunk | None:
             delta="", finish_reason=None, model="",
             reasoning_delta=rd or None,
         )
+    if t == "response.output_item.added" and state is not None:
+        item = data.get("item") or {}
+        if isinstance(item, dict) and item.get("type") == "function_call":
+            index = len(state.setdefault("tool_indexes", {}))
+            state["tool_indexes"][item.get("id", "")] = index
+            return ProviderStreamChunk(
+                delta="", finish_reason=None, model="",
+                tool_calls=[
+                    {
+                        "index": index,
+                        "id": item.get("call_id", "") or item.get("id", ""),
+                        "type": "function",
+                        "function": {"name": item.get("name", ""), "arguments": ""},
+                    }
+                ],
+            )
+        return None
+    if t == "response.function_call_arguments.delta" and state is not None:
+        indexes = state.get("tool_indexes") or {}
+        index = indexes.get(data.get("item_id", ""))
+        if index is None:
+            return None
+        return ProviderStreamChunk(
+            delta="", finish_reason=None, model="",
+            tool_calls=[
+                {"index": index, "function": {"arguments": data.get("delta", "") or ""}}
+            ],
+        )
     if t == "response.completed":
         resp_obj = data.get("response") or {}
+        saw_tools = bool(state and state.get("tool_indexes"))
         return ProviderStreamChunk(
             delta="",
-            finish_reason="stop",
+            finish_reason="tool_calls" if saw_tools else "stop",
             model=resp_obj.get("model", "") if isinstance(resp_obj, dict) else "",
             usage=_responses_usage(
                 resp_obj.get("usage") if isinstance(resp_obj, dict) else None
