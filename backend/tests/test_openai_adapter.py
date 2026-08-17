@@ -645,3 +645,181 @@ class TestResponsesFallbackLogging:
         assert kwargs["error_type"] == "UpstreamBadResponseError"
         assert kwargs["status"] == 400
         assert "must be verified" in str(kwargs["body"])
+
+
+# ---------------------------------------------------------------------------
+# Responses API with tools (gpt-5 family) — request translation, stream
+# translation, and the fallback pin precedence.
+# ---------------------------------------------------------------------------
+
+from app.services.providers.openai_adapter import (
+    _parse_responses_response,
+    _parse_responses_sse_line as _sse,
+)
+
+
+def _tool_history():
+    return [
+        Message(role="user", content="What time is it?"),
+        Message(
+            role="assistant",
+            content=None,
+            tool_calls=[{"id": "call_1", "type": "function",
+                         "function": {"name": "get_time", "arguments": "{}"}}],
+        ),
+        Message(role="tool", content="14:30", tool_call_id="call_1", name="get_time"),
+    ]
+
+
+class TestResponsesToolTranslation:
+    def test_history_translates_to_function_call_items(self):
+        items = OpenAIAdapter._messages_to_responses_input(_tool_history())
+        assert items == [
+            {"role": "user", "content": "What time is it?"},
+            {"type": "function_call", "call_id": "call_1",
+             "name": "get_time", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "14:30"},
+        ]
+
+    def test_tool_defs_flatten_and_summary_only_when_wanted(self, monkeypatch):
+        payload = ChatCompletionsRequest(
+            model="gpt-5.4-mini",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            reasoning={"mode": "medium", "show_summary": False},
+            metadata={},
+        )
+        body = OpenAIAdapter()._build_responses_body(
+            payload, [Message(role="user", content="Hi")]
+        )
+        assert body["tools"] == [{
+            "type": "function", "name": "get_time",
+            "description": "Get current time",
+            "parameters": {"type": "object", "properties": {}},
+        }]
+        assert body["reasoning"] == {"effort": "medium"}  # no summary key
+
+    def test_named_tool_choice_flattens(self):
+        payload = ChatCompletionsRequest(
+            model="gpt-5.4-mini",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            tool_choice={"type": "function", "function": {"name": "get_time"}},
+            reasoning={"mode": "auto", "show_summary": True},
+            metadata={},
+        )
+        body = OpenAIAdapter()._build_responses_body(
+            payload, [Message(role="user", content="Hi")]
+        )
+        assert body["tool_choice"] == {"type": "function", "name": "get_time"}
+
+
+class TestResponsesToolStreaming:
+    def test_function_call_events_become_chat_style_deltas(self):
+        state: dict = {}
+        header = _sse(
+            'data: {"type":"response.output_item.added","output_index":1,'
+            '"item":{"id":"fc_abc","type":"function_call","call_id":"call_9",'
+            '"name":"get_time","arguments":""}}',
+            state,
+        )
+        assert header is not None
+        assert header.tool_calls == [{
+            "index": 0, "id": "call_9", "type": "function",
+            "function": {"name": "get_time", "arguments": ""},
+        }]
+
+        frag = _sse(
+            'data: {"type":"response.function_call_arguments.delta",'
+            '"item_id":"fc_abc","delta":"{}"}',
+            state,
+        )
+        assert frag is not None
+        assert frag.tool_calls == [{"index": 0, "function": {"arguments": "{}"}}]
+
+        done = _sse(
+            'data: {"type":"response.completed","response":{"model":"gpt-5.4-mini",'
+            '"usage":{"input_tokens":3,"output_tokens":7}}}',
+            state,
+        )
+        assert done is not None and done.finish_reason == "tool_calls"
+
+    def test_toolless_stream_still_finishes_stop(self):
+        state: dict = {}
+        done = _sse(
+            'data: {"type":"response.completed","response":{"model":"gpt-5.4-mini"}}',
+            state,
+        )
+        assert done is not None and done.finish_reason == "stop"
+
+    def test_nonstream_function_call_items_become_tool_calls(self):
+        r = _parse_responses_response({
+            "model": "gpt-5.4-mini",
+            "output": [
+                {"type": "reasoning", "summary": [
+                    {"type": "summary_text", "text": "check the clock"}]},
+                {"type": "function_call", "call_id": "call_2",
+                 "name": "get_time", "arguments": "{}"},
+            ],
+        })
+        assert r.finish_reason == "tool_calls"
+        assert r.tool_calls == [{
+            "id": "call_2", "type": "function",
+            "function": {"name": "get_time", "arguments": "{}"},
+        }]
+        assert r.reasoning_content == "check the clock"
+
+
+class TestFallbackPinPrecedence:
+    def test_effort_is_overridden_to_none_on_tools_fallback(self, monkeypatch):
+        # Reasoning wanted + flag true (the post-075 world) but the body
+        # is built for /chat/completions (Responses fell back): the pin
+        # must WIN over the reasoning block for the whole gpt-5 family.
+        monkeypatch.setattr(
+            model_registry_module, "get_candidate", lambda m: _ReasoningCandidate()
+        )
+        payload = ChatCompletionsRequest(
+            model="gpt-5.4-mini",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            reasoning={"mode": "medium", "show_summary": True},
+            metadata={},
+        )
+        body = OpenAIAdapter()._build_body(
+            payload, [Message(role="user", content="Hi")]
+        )
+        assert body["reasoning_effort"] == "none"
+
+    def test_gpt56_effortless_tools_pin_survives(self):
+        body = OpenAIAdapter()._build_body(
+            _payload_with_tools("gpt-5.6-luna"), [Message(role="user", content="Hi")]
+        )
+        assert body["reasoning_effort"] == "none"
+
+
+class TestResponsesEligibilityTiers:
+    def test_gpt5_family_eligible_with_tools(self, monkeypatch):
+        monkeypatch.setattr(
+            model_registry_module, "get_candidate", lambda m: _ReasoningCandidate()
+        )
+        payload = ChatCompletionsRequest(
+            model="gpt-5.4-mini",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            reasoning={"mode": "auto", "show_summary": True},
+            metadata={},
+        )
+        assert OpenAIAdapter._responses_eligible(payload, None)
+
+    def test_o_series_with_tools_stays_on_chat_completions(self, monkeypatch):
+        monkeypatch.setattr(
+            model_registry_module, "get_candidate", lambda m: _ReasoningCandidate()
+        )
+        payload = ChatCompletionsRequest(
+            model="o4-mini",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            reasoning={"mode": "medium", "show_summary": True},
+            metadata={},
+        )
+        assert not OpenAIAdapter._responses_eligible(payload, None)
