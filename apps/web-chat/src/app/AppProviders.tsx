@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 import { ToastViewport } from "@/components/ui/Toast";
+import { UpdateBanner } from "@/components/ui/UpdateBanner";
 import { clearLegacyToken } from "@/lib/auth";
 import { startSilentRefresh, stopSilentRefresh } from "@/lib/auth-refresh";
 import { useHydrateI18n } from "@/lib/i18n";
@@ -71,6 +72,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       ) : null}
       <ToastViewport />
       <ImageLightbox />
+      <UpdateBanner />
     </QueryClientProvider>
   );
 }

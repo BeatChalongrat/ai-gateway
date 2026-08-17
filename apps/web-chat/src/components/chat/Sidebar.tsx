@@ -334,7 +334,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={onToggleCollapsed}
-            aria-label="Collapse sidebar (⌘⇧S)"
+            aria-label={t("a11y.collapseSidebar")}
             title="Collapse sidebar (⌘⇧S)"
             className="focus-ring tap-44 hidden rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary md:inline-flex"
           >
@@ -421,7 +421,7 @@ export function Sidebar({
               {search ? (
                 <button
                   type="button"
-                  aria-label="Clear search"
+                  aria-label={t("a11y.clearSearch")}
                   onClick={() => {
                     setSearch("");
                     setSearchExpanded(false);
@@ -545,13 +545,29 @@ function UserMenu({
   const toggleLocale = useI18nStore((s) => s.toggle);
   const t = useT();
 
+  // WAI-ARIA menu pattern: focus moves INTO the menu on open, ArrowUp/
+  // ArrowDown cycle through items, Home/End jump, Escape closes and
+  // returns focus to the trigger. Refs (not state) so the keyboard
+  // handlers read the live DOM order.
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuItems = () =>
+    Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+
   useEffect(() => {
     if (!open) return;
+    // Initial focus: first menu item (menu ARIA contract).
+    menuItems()[0]?.focus();
     const off = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener("mousedown", off);
     document.addEventListener("keydown", onKey);
@@ -561,12 +577,40 @@ function UserMenu({
     };
   }, [open]);
 
+  function onMenuKeyDown(e: React.KeyboardEvent) {
+    const list = menuItems();
+    if (list.length === 0) return;
+    const idx = list.indexOf(document.activeElement as HTMLElement);
+    const focusAt = (i: number) =>
+      list[(i + list.length) % list.length].focus();
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusAt(idx + 1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        focusAt(idx - 1);
+        break;
+      case "Home":
+        e.preventDefault();
+        list[0].focus();
+        break;
+      case "End":
+        e.preventDefault();
+        list[list.length - 1].focus();
+        break;
+    }
+  }
+
   return (
     <div ref={wrapRef} className="relative border-t border-border-subtle">
       {open ? (
         <div
+          ref={menuRef}
           role="menu"
-          aria-label="Account menu"
+          aria-label={t("a11y.accountMenu")}
+          onKeyDown={onMenuKeyDown}
           className="popover-appear absolute inset-x-2 bottom-full z-40 mb-1 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-2xl"
         >
           <MenuItem
@@ -632,6 +676,7 @@ function UserMenu({
       ) : null}
 
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -1248,7 +1293,7 @@ function ProjectHeader({
         </button>
         <button
           type="button"
-          aria-label="Project actions"
+          aria-label={t("a11y.projectActions")}
           onClick={() => setMenuOpen((v) => !v)}
           className={`focus-ring tap-44 rounded p-1 text-text-muted transition-opacity hover:bg-bg-secondary hover:text-text-primary md:opacity-0 md:group-hover:opacity-100 ${
             menuOpen ? "md:opacity-100" : ""

@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ChatInput, uploadFiles } from "@/components/chat/ChatInput";
@@ -95,6 +95,26 @@ export default function ConversationPage() {
       void loadMessages(convId);
     }
   }, [convId, setActive, loadMessages]);
+
+  // Conversation-gone escape hatch: handleConversationGone (404/410 —
+  // deleted elsewhere) clears activeConversationId while this route
+  // still points at the dead id, which would otherwise leave the page
+  // parked on the skeleton forever. Redirect to the new-chat page —
+  // but only after this conversation was actually observed active, so
+  // the initial null-before-setActive render can't trigger a premature
+  // redirect (and replace() unmounts the page, so no loop).
+  const activeId = useChatStore((s) => s.activeConversationId);
+  const wasActiveRef = useRef(false);
+  useEffect(() => {
+    if (!convId) return;
+    if (activeId === convId) {
+      wasActiveRef.current = true;
+      return;
+    }
+    if (wasActiveRef.current && activeId === null) {
+      router.replace("/chat");
+    }
+  }, [activeId, convId, router]);
 
   if (!convId) {
     router.replace("/chat");

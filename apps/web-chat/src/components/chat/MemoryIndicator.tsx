@@ -20,7 +20,7 @@ import { useRouter } from "next/navigation";
 import { Brain, BrainCircuit } from "lucide-react";
 
 import { toast } from "@/components/ui/Toast";
-import { tOutside } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { useChatStore } from "@/stores/chatStore";
 
@@ -29,6 +29,7 @@ interface Props {
 }
 
 export function MemoryIndicator({ conversationId }: Props) {
+  const t = useT();
   const router = useRouter();
   const conv = useChatStore((s) =>
     s.conversations.find((c) => c.id === conversationId),
@@ -125,7 +126,7 @@ export function MemoryIndicator({ conversationId }: Props) {
       {open ? (
         <div
           role="menu"
-          aria-label="Memory settings"
+          aria-label={t("a11y.memorySettings")}
           className="popover-appear absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-2xl"
         >
           <div className="border-b border-border-subtle px-3 py-2.5">

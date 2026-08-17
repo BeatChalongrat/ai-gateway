@@ -199,7 +199,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
           />
           <div
             role="listbox"
-            aria-label="Models"
+            aria-label={t("a11y.models")}
             className="
               popover-appear sheet-up z-40 flex flex-col overflow-hidden
               border border-border bg-bg-surface text-xs shadow-2xl
@@ -345,7 +345,7 @@ function ModelPicker({
           {search ? (
             <button
               type="button"
-              aria-label="Clear search"
+              aria-label={t("a11y.clearSearch")}
               onClick={() => setSearch("")}
               className="focus-ring shrink-0 rounded text-text-tertiary hover:text-text-primary"
             >

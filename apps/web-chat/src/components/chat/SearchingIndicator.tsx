@@ -1,23 +1,13 @@
 "use client";
 
 // Loading indicator shown while the backend is searching the web (the
-// `search_status: "searching"` SSE event). Sits in place of the typing
-// dots; auto-hides once the answer streams in. Reuses the global
-// .shimmer-text sweep so it matches the thinking/image indicators.
+// `search_status: "searching"` SSE event). Sits in place of the waiting
+// indicator; auto-hides once the answer streams in. Renders the shared
+// breathing-cat status mark so waiting and searching read as one visual
+// language — only the label changes.
 
-import { Search } from "lucide-react";
-import { useT } from "@/lib/i18n";
+import { CatIndicator } from "./CatIndicator";
 
 export function SearchingIndicator() {
-  const t = useT();
-  return (
-    <div
-      className="flex items-center gap-2.5 py-1"
-      role="status"
-      aria-label={t("gen.searching")}
-    >
-      <Search className="h-4 w-4 animate-pulse text-text-tertiary" aria-hidden />
-      <p className="shimmer-text text-sm font-medium">{t("gen.searching")}</p>
-    </div>
-  );
+  return <CatIndicator labelKey="gen.searching" />;
 }

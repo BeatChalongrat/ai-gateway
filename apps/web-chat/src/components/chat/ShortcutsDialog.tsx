@@ -11,7 +11,9 @@
 // Key rendering is platform-aware: ⌘ on Mac, Ctrl elsewhere, decided at
 // render time (not build time) because the same bundle serves both.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 import { useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
@@ -55,6 +57,8 @@ export function ShortcutsDialog({
   onClose: () => void;
 }) {
   const t = useT();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   useEffect(() => {
     if (!open) return;
@@ -78,6 +82,7 @@ export function ShortcutsDialog({
       data-testid="shortcuts-backdrop"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("shortcuts.title")}

@@ -34,10 +34,11 @@
 // This mirrors the Canvas C1 posture (a static frame gets NO
 // capabilities) and must not be loosened.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Download, X } from "lucide-react";
 
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { api } from "@/lib/api";
 import { isImageMime } from "@/lib/fileUtil";
 import { useT } from "@/lib/i18n";
@@ -105,6 +106,11 @@ export function FilePreviewModal({
   const [doc, setDoc] = useState<DocumentPreview | null>(null);
   const [deck, setDeck] = useState<SlidesPreview | null>(null);
   const [paging, setPaging] = useState(false);
+
+  // Mounted = open (the parent conditionally renders this modal), so the
+  // trap is always active for the component's lifetime.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, true);
 
   // Esc closes, matching every other overlay in the app.
   useEffect(() => {
@@ -259,6 +265,7 @@ export function FilePreviewModal({
       data-testid="preview-backdrop"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={file.filename}

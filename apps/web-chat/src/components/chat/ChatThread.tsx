@@ -17,6 +17,7 @@ import { useT } from "@/lib/i18n";
 import { recallScroll, rememberScroll } from "@/lib/scrollMemory";
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
+import { toolActivityLabelKey } from "./ToolActivityIndicator";
 
 interface Props {
   convId: string;
@@ -140,6 +141,52 @@ export function ChatThread({
   // After streaming completes: if user is still "near bottom" (within
   // 100px) snap to bottom to show the full response.
   const anyStreaming = messages.some((m) => m.isStreaming);
+
+  // ── Screen-reader announcements ─────────────────────────────
+  // One persistent polite live region for the whole thread. Persistent
+  // (always mounted) because a region inserted together with its content
+  // is unreliably announced by NVDA/JAWS — this is also why CatIndicator
+  // is visual-only. Announces only on STATE EDGES (phase change /
+  // completion), never per streamed token: the announcement text derives
+  // from the phase key, which is stable across content_delta renders.
+  const streamingMsg = messages.find((m) => m.isStreaming);
+  // A generic tool in flight (tool_activity "started" without its
+  // "finished") takes precedence over the thinking label — the phase
+  // token doubles as the change-detection key, so a tool switch
+  // announces once and streamed tokens never re-trigger it.
+  const runningTool = streamingMsg?.tool_activities?.find(
+    (a) => a.phase === "started",
+  );
+  const phaseKey = streamingMsg
+    ? runningTool
+      ? (`tool:${runningTool.tool}` as const)
+      : streamingMsg.is_searching
+        ? ("gen.searching" as const)
+        : ("reasoning.thinking" as const)
+    : null;
+  const [announcement, setAnnouncement] = useState("");
+  const prevPhaseRef = useRef<string | null>(null);
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (phaseKey) {
+      wasStreamingRef.current = true;
+      if (prevPhaseRef.current !== phaseKey) {
+        prevPhaseRef.current = phaseKey;
+        if (phaseKey.startsWith("tool:")) {
+          const tool = phaseKey.slice("tool:".length);
+          const key = toolActivityLabelKey(tool);
+          setAnnouncement(key ? t(key) : t("tool.generic", { tool }));
+        } else {
+          setAnnouncement(t(phaseKey as "gen.searching" | "reasoning.thinking"));
+        }
+      }
+    } else if (wasStreamingRef.current) {
+      // true → false edge: the turn finished.
+      wasStreamingRef.current = false;
+      prevPhaseRef.current = null;
+      setAnnouncement(t("a11y.responseComplete"));
+    }
+  }, [phaseKey, t]);
   useEffect(() => {
     if (anyStreaming) return;
     const el = scrollerRef.current;
@@ -195,6 +242,12 @@ export function ChatThread({
 
   return (
     <div className="relative flex-1 overflow-hidden">
+      {/* SR-only live region — the single announcement source for the
+          thread (start/phase-change/finish). Never wraps the streaming
+          markdown body: per-token announcements would flood the reader. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
       <div
         ref={scrollerRef}
         onScroll={onScroll}

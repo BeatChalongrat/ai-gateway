@@ -4,6 +4,8 @@
 // alternative branches at a fork point. The parent owns the
 // switch handler so the navigator stays pure UI.
 
+import { useT } from "@/lib/i18n";
+
 interface Props {
   branchIndex: number; // 0-based
   branchCount: number;
@@ -17,6 +19,7 @@ export function BranchNavigator({
   onSwitch,
   disabled,
 }: Props) {
+  const t = useT();
   if (branchCount <= 1) return null;
   const canPrev = !disabled && branchIndex > 0;
   const canNext = !disabled && branchIndex < branchCount - 1;
@@ -24,7 +27,7 @@ export function BranchNavigator({
     <div className="inline-flex items-center gap-1 rounded-full bg-bg-elevated/70 px-1.5 py-0.5 text-[11px] text-text-muted ring-1 ring-border">
       <button
         type="button"
-        aria-label="Previous branch"
+        aria-label={t("a11y.prevBranch")}
         onClick={() => canPrev && onSwitch(branchIndex - 1)}
         disabled={!canPrev}
         className="focus-ring rounded p-0.5 transition-colors hover:bg-bg-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
@@ -44,7 +47,7 @@ export function BranchNavigator({
       </span>
       <button
         type="button"
-        aria-label="Next branch"
+        aria-label={t("a11y.nextBranch")}
         onClick={() => canNext && onSwitch(branchIndex + 1)}
         disabled={!canNext}
         className="focus-ring rounded p-0.5 transition-colors hover:bg-bg-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"

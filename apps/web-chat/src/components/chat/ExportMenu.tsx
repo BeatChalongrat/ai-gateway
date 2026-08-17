@@ -68,7 +68,7 @@ export function ExportMenu({ conversationId, onShare }: Props) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Conversation actions"
+        aria-label={t("a11y.conversationActions")}
         title="Conversation actions"
         className="focus-ring rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >

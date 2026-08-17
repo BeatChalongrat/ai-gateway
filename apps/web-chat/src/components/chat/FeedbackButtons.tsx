@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { useT } from "@/lib/i18n";
 import { useChatStore } from "@/stores/chatStore";
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
 // data is copied straight from the icon set so the thumbs read as a
 // matched pair instead of one mirrored hand-drawn from the other.
 export function FeedbackButtons({ convId, messageId, current }: Props) {
+  const t = useT();
   const setFeedback = useChatStore((s) => s.setFeedback);
   const [busy, setBusy] = useState(false);
 
@@ -32,7 +34,7 @@ export function FeedbackButtons({ convId, messageId, current }: Props) {
     <div className="flex items-center gap-0.5">
       <button
         type="button"
-        aria-label="Helpful"
+        aria-label={t("a11y.helpful")}
         onClick={() => send("thumbs_up")}
         className={`focus-ring tap-44 rounded p-1.5 transition-colors ${
           current === "thumbs_up"
@@ -57,7 +59,7 @@ export function FeedbackButtons({ convId, messageId, current }: Props) {
       </button>
       <button
         type="button"
-        aria-label="Not helpful"
+        aria-label={t("a11y.notHelpful")}
         onClick={() => send("thumbs_down")}
         className={`focus-ring tap-44 rounded p-1.5 transition-colors ${
           current === "thumbs_down"
