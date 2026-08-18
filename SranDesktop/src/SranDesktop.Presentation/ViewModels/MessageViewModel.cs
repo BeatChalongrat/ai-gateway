@@ -225,6 +225,11 @@ public partial class MessageViewModel : ObservableObject
     /// "model · N tokens" line can't clobber it.</summary>
     public string? FallbackNotice { get; set; }
 
+    /// <summary>Reasoning downgrade notice ("answered without extended
+    /// thinking"), set mid-stream; merged into <see cref="MetaLine"/> by
+    /// Complete alongside <see cref="FallbackNotice"/>.</summary>
+    public string? ReasoningNotice { get; set; }
+
     // ── Durable tool history (Phase A PART 1) ───────────────────────────────
 
     /// <summary>
@@ -334,6 +339,7 @@ public partial class MessageViewModel : ObservableObject
         StatusText = null;
         var parts = new List<string>();
         if (FallbackNotice is not null) parts.Add(FallbackNotice);
+        if (ReasoningNotice is not null) parts.Add(ReasoningNotice);
         if (!string.IsNullOrEmpty(ModelId)) parts.Add(ModelId!);
         if (usage is not null) parts.Add(Localization.LocaleService.Instance.T("msg.tokens", usage.TotalTokens));
         if (parts.Count > 0)

@@ -36,6 +36,28 @@ func TestParseStreamChunk_FallbackInfoFrame(t *testing.T) {
 	}
 }
 
+// A reasoning_notice frame (the Gateway downgraded a reasoning request
+// because the resolved model can't reason) must parse into
+// ReasoningNotice so the pump relays it instead of dropping it — the
+// user must not silently get less than they asked for. Shape per
+// public_chat.py's downgrade emitter.
+func TestParseStreamChunk_ReasoningNoticeFrame(t *testing.T) {
+	raw := `{"id":"req-1","type":"reasoning_notice","created":1,"model":"gpt-4o-mini","reasoning_downgraded":true,"reason":"Reasoning was requested (mode='auto') but the resolved model 'gpt-4o-mini' is not reasoning-capable"}`
+	ev, err := parseStreamChunk(raw, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ev.ReasoningNotice == nil {
+		t.Fatalf("expected ReasoningNotice to be set, got %+v", ev)
+	}
+	if ev.ReasoningNotice.Model != "gpt-4o-mini" {
+		t.Errorf("model = %q, want gpt-4o-mini", ev.ReasoningNotice.Model)
+	}
+	if ev.ReasoningNotice.Reason == "" {
+		t.Error("reason must carry the gateway's explanation")
+	}
+}
+
 // Regression: a normal OpenAI content chunk must still decode to a Delta
 // and must NOT be mistaken for an error/fallback frame.
 func TestParseStreamChunk_NormalContentUnaffected(t *testing.T) {

@@ -52,6 +52,9 @@ type StreamSnapshot struct {
 	VideoStatus    string
 	SearchStatus   string
 	FallbackInfo   map[string]any
+	// ReasoningNotice: sticky like FallbackInfo — a reattaching client
+	// still learns the answer was produced without reasoning.
+	ReasoningNotice *ReasoningNotice
 	// CodeExecutions are the run_python cards seen so far, in first-seen
 	// order, each collapsed to its LATEST frame (the "running" frame is
 	// superseded by the terminal one). Replaying them restores the
@@ -81,6 +84,7 @@ type brokerEntry struct {
 	video     string
 	search    string
 	fallback  map[string]any
+	rnotice   *ReasoningNotice
 	terminal  *StreamUpdate
 	// codeRuns keeps the latest frame per run_python call, plus the
 	// order they first appeared, so the snapshot replays them the way
@@ -108,16 +112,17 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		}
 	}
 	return StreamSnapshot{
-		Content:        e.content.String(),
-		Reasoning:      e.reasoning.String(),
-		AnalysisStatus: e.analysis,
-		ImageStatus:    e.image,
-		VideoStatus:    e.video,
-		SearchStatus:   e.search,
-		FallbackInfo:   e.fallback,
-		CodeExecutions: runs,
-		ToolActivities: acts,
-		Terminal:       e.terminal,
+		Content:         e.content.String(),
+		Reasoning:       e.reasoning.String(),
+		AnalysisStatus:  e.analysis,
+		ImageStatus:     e.image,
+		VideoStatus:     e.video,
+		SearchStatus:    e.search,
+		FallbackInfo:    e.fallback,
+		ReasoningNotice: e.rnotice,
+		CodeExecutions:  runs,
+		ToolActivities:  acts,
+		Terminal:        e.terminal,
 	}
 }
 
@@ -139,7 +144,7 @@ func NewStreamBroker() *StreamBroker {
 	}
 }
 
-// Tee registers msgID and returns a channel that mirrors ``in``.
+// Tee registers msgID and returns a channel that mirrors “in“.
 // The returned channel is what the primary StreamHandle consumer
 // drains — same buffering behaviour as the raw pump channel. The
 // mirror goroutine owns the entry lifecycle.
@@ -198,6 +203,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	if ev.FallbackInfo != nil {
 		e.fallback = ev.FallbackInfo
 	}
+	if ev.ReasoningNotice != nil {
+		e.rnotice = ev.ReasoningNotice
+	}
 	if ev.CodeExecution != nil && ev.CodeExecution.ID != "" {
 		if e.codeRuns == nil {
 			e.codeRuns = make(map[string]CodeExecutionUpdate)
@@ -242,10 +250,10 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 // Subscribe attaches to an in-flight generation. ok=false ⇒ the broker
 // doesn't know the message (never teed here, or already dropped after
 // TTL) — the caller falls back to the persisted row. When the entry is
-// terminal, Snapshot.Terminal is set and events is nil. ``cancel`` is
+// terminal, Snapshot.Terminal is set and events is nil. “cancel“ is
 // always safe to call (idempotent) and MUST be called when the caller
 // stops consuming, or the subscriber slot leaks until terminal.
-// ``lagged`` reports (after events closes) whether the subscriber was
+// “lagged“ reports (after events closes) whether the subscriber was
 // dropped for falling behind.
 func (b *StreamBroker) Subscribe(msgID uuid.UUID) (
 	snap StreamSnapshot, events <-chan StreamUpdate, cancel func(), lagged func() bool, ok bool,

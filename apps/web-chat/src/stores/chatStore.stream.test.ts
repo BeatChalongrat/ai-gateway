@@ -285,6 +285,31 @@ describe("sendMessage / consumeStream", () => {
     await done;
   });
 
+  it("stashes reasoning_notice on the streaming message", async () => {
+    const s = makeStream();
+    mockApi.openMessageStream.mockResolvedValue(s.response);
+    seedConversation("c1", [userMsg("u0")]);
+
+    const done = useChatStore.getState().sendMessage("c1", "hi");
+    await tick();
+    s.push(
+      frame("reasoning_notice", {
+        model: "gpt-4o-mini",
+        reason: "resolved model is not reasoning-capable",
+      }),
+    );
+    await tick();
+    expect(messagesOf("c1").at(-1)?.reasoning_notice).toEqual({
+      model: "gpt-4o-mini",
+      reason: "resolved model is not reasoning-capable",
+    });
+    // Informational only — the message must NOT be in an error state.
+    expect(messagesOf("c1").at(-1)?.error_message).toBeUndefined();
+    s.push(frame("message_complete", { message_id: "m" }));
+    s.close();
+    await done;
+  });
+
   // Phase 13 Part B — run_python artifacts reuse the existing
   // message_files seam: a chart png / generated file the sandbox produced
   // is attached to the assistant message and the generating flags clear.

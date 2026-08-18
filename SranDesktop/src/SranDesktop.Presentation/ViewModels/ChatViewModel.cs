@@ -1312,6 +1312,10 @@ public partial class ChatViewModel : ObservableObject
                 SetFallbackNotice(bubble, fallback.ActualModel!, fallback.RequestedModel!);
                 break;
 
+            case ReasoningNoticeEvent notice:
+                SetReasoningNotice(bubble, notice.Model);
+                break;
+
             case StreamErrorEvent error:
                 // Only ordinary turn errors reach here — the reattach control
                 // codes are consumed by the runner.
@@ -2132,6 +2136,10 @@ public partial class ChatViewModel : ObservableObject
                         SetFallbackNotice(assistantMessage, fallback.ActualModel, fallback.RequestedModel);
                         break;
 
+                    case AgentReasoningNoticeEvent reasoningNotice:
+                        SetReasoningNotice(assistantMessage, reasoningNotice.Model);
+                        break;
+
                     case AgentContextTrimmedEvent trimmed:
                         _logger.LogInformation("Context trimmed ({Omitted} messages omitted)",
                             trimmed.OmittedMessages);
@@ -2426,6 +2434,10 @@ public partial class ChatViewModel : ObservableObject
                     case FallbackInfoEvent fallback when !string.IsNullOrEmpty(fallback.ActualModel)
                                                           && !string.IsNullOrEmpty(fallback.RequestedModel):
                         SetFallbackNotice(assistantMessage, fallback.ActualModel!, fallback.RequestedModel!);
+                        break;
+
+                    case ReasoningNoticeEvent notice:
+                        SetReasoningNotice(assistantMessage, notice.Model);
                         break;
 
                     case StreamErrorEvent error:
@@ -3006,6 +3018,19 @@ public partial class ChatViewModel : ObservableObject
         message.FallbackNotice = notice;
         message.MetaLine = notice;
         _logger.LogInformation("Model fallback: {Requested} → {Actual}", requestedModel, actualModel);
+    }
+
+    /// <summary>Reasoning downgrade notice for any turn path — the reply was
+    /// produced without the requested thinking. Same quiet MetaLine surface
+    /// as the fallback notice: information, never an error.</summary>
+    private void SetReasoningNotice(MessageViewModel message, string? model)
+    {
+        var notice = Localization.LocaleService.Instance.T("chat.reasoningDowngraded");
+        message.ReasoningNotice = notice;
+        message.MetaLine = message.FallbackNotice is not null
+            ? message.FallbackNotice + "  ·  " + notice
+            : notice;
+        _logger.LogInformation("Reasoning downgraded (model={Model})", model ?? "?");
     }
 
     // ── "Chat is getting long" nudge (Phase 5 Task 4, chat-edge only) ──────

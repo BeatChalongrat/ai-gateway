@@ -75,6 +75,17 @@ public class ChatServiceTests
     }
 
     [Fact]
+    public async Task Maps_Reasoning_Notice_Event()
+    {
+        var events = await RunAsync(
+            new SseFrame("reasoning_notice",
+                """{"model":"gpt-4o-mini","reason":"resolved model is not reasoning-capable"}"""));
+
+        events.Should().ContainSingle().Which.Should().Be(
+            new ReasoningNoticeEvent("gpt-4o-mini", "resolved model is not reasoning-capable"));
+    }
+
+    [Fact]
     public async Task Skips_Unknown_And_Malformed_Frames()
     {
         var events = await RunAsync(

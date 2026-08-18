@@ -84,8 +84,12 @@ public sealed class ReasoningParityTests : IDisposable
     [Fact]
     public void Parser_still_ignores_unknown_typed_frames()
     {
+        // reasoning_notice graduated to a typed event in the downgrade-
+        // notice work (GatewayChunkParserTests.Reasoning_Notice_Frame_
+        // Emits_Event pins the new shape); genuinely unknown frames
+        // keep being ignored.
         var parser = new GatewayChunkParser();
-        parser.Parse("{\"type\":\"reasoning_notice\",\"reason\":\"x\"}")
+        parser.Parse("{\"type\":\"unknown_future_frame\",\"reason\":\"x\"}")
             .Should().BeEmpty();
     }
 

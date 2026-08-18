@@ -170,12 +170,32 @@ def _estimate_reasoning_cost(model: str, reasoning_tokens: int) -> float:
 
 class UsageService:
 
-    def estimate(self, payload, response_text: str, model_name: str) -> UsageInfo:
-        """Heuristic token estimation when provider doesn't report usage."""
+    def estimate(
+        self,
+        payload,
+        response_text: str,
+        model_name: str,
+        reasoning_tokens: int = 0,
+    ) -> UsageInfo:
+        """Heuristic token estimation when provider doesn't report usage.
+
+        ``reasoning_tokens`` (parsed from provider frames or length-
+        estimated from reasoning text) is FOLDED INTO
+        ``completion_tokens`` before pricing — providers bill reasoning
+        as output, and every provider-reported usage block already
+        includes it in ``completion_tokens`` (see the invariant on
+        ``reasoning_cost``). Before this parameter existed, callers
+        stamped ``reasoning_tokens`` onto the estimate afterwards
+        without adjusting ``completion_tokens``, so reasoning-heavy
+        turns on the no-usage-chunk path billed only the visible text —
+        and violated the ``reasoning_tokens <= completion_tokens``
+        invariant the attribution helper documents.
+        """
         from app.services.currency_service import currency_service
 
         prompt_tokens = sum(max(1, len(m.content) // 4) for m in payload.messages)
-        completion_tokens = max(1, len(response_text) // 4)
+        reasoning_tokens = max(0, reasoning_tokens)
+        completion_tokens = max(1, len(response_text) // 4) + reasoning_tokens
         total_tokens = prompt_tokens + completion_tokens
         usd = _estimate_cost(model_name, prompt_tokens, completion_tokens)
         cost_info = currency_service.format_cost(usd)
@@ -186,6 +206,7 @@ class UsageService:
             estimated_cost_usd=usd,
             cost_thb=cost_info["thb"],
             cost_display=cost_info["display"],
+            reasoning_tokens=reasoning_tokens or None,
         )
 
     def build_usage_record(

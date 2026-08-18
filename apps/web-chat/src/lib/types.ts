@@ -433,6 +433,14 @@ export interface Message {
     actual_model: string;
     reason?: string;
   };
+  /** local-only — set when the gateway downgraded a reasoning request
+   *  (the resolved model can't reason). Drives a small informational
+   *  line under the reply, same quiet styling as fallback_info —
+   *  this is not an error. */
+  reasoning_notice?: {
+    model?: string;
+    reason?: string;
+  };
 }
 
 /** S7 — one source the AI drew on while producing an assistant
@@ -761,6 +769,14 @@ export interface SSEFallbackInfo {
   actual_model: string;
   reason?: string;
   attempts?: FallbackAttempt[];
+}
+
+/** Emitted before content when the gateway downgraded a reasoning
+ *  request because the resolved model can't reason. Informational —
+ *  never rendered as an error. */
+export interface SSEReasoningNotice {
+  model?: string;
+  reason?: string;
 }
 
 // ── Direct-dispatch media generation (Sprint 2A.5) ──────────────

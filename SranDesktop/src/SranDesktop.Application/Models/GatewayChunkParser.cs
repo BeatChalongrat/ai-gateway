@@ -104,6 +104,13 @@ public sealed class GatewayChunkParser
                             when GetStringProperty(root, "status") is { Length: > 0 } status:
                             events.Add(new AgentAnalysisStatusEvent(status));
                             break;
+                        // reasoning_notice: the gateway downgraded a reasoning
+                        // request (resolved model can't reason). Informational.
+                        case "reasoning_notice":
+                            events.Add(new AgentReasoningNoticeEvent(
+                                GetStringProperty(root, "model"),
+                                GetStringProperty(root, "reason")));
+                            break;
                         // Any other type keeps being ignored, exactly as before.
                     }
                 }
