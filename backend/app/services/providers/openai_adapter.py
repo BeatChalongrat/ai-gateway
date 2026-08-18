@@ -90,16 +90,19 @@ _RESPONSES_PATH = "/responses"
 # default ``temperature`` / ``top_p``. THE single place the rule lives —
 # adding the next family (e.g. "gpt-6") is a one-entry change here.
 #
-# Deliberately NAME-based, not catalog-based: the catalog's capability
-# flags for these rows are known-wrong today (every gpt-5.* row carries
-# ``supports_reasoning=false``, which is exactly why the old
-# reasoning-gated rename never fired), and correcting them shifts
-# auto-router/capability-guard behaviour — a separate change. The
+# Deliberately NAME-based, not catalog-based: this is wire-protocol
+# behaviour (which sampling params the endpoint accepts), not a
+# capability an admin should be able to flip — a wrong data row must
+# never be able to break request shaping. (Historical note: the catalog
+# flags for gpt-5 rows WERE wrong until migrations 074/075.) The
 # accepted trade-off: a family whose name doesn't start with one of
 # these prefixes needs a new entry; in exchange the rule is correct for
 # every current row (including the oddly-named ``gpt-5.6-luna`` /
 # ``-sol`` / ``-terra``, which all share the ``gpt-5`` prefix) and
 # depends on no data we know to be wrong.
+#
+# Adding the next family: append its prefix if the provider rejects
+# legacy ``max_tokens`` for it (probe: a 400 naming max_completion_tokens).
 _COMPLETION_TOKEN_FAMILIES: tuple[str, ...] = ("gpt-5", "o1", "o3", "o4")
 
 # Families that reason BY DEFAULT server-side and whose /chat/completions
@@ -111,6 +114,25 @@ _COMPLETION_TOKEN_FAMILIES: tuple[str, ...] = ("gpt-5", "o1", "o3", "o4")
 # through gpt-5.4 accept tools at their default effort and MUST NOT get
 # the pin, since it would silently disable reasoning they support.
 _TOOLS_REQUIRE_EFFORT_NONE_FAMILIES: tuple[str, ...] = ("gpt-5.6",)
+# Adding the next family: append its prefix ONLY if a live probe shows
+# the provider 400s an effort-LESS tools request (server-side default
+# reasoning); families that merely reject tools+explicit-effort are
+# already covered by the pin in _build_body.
+
+# Families whose Responses-API tier is "full": eligible WITH tools, not
+# just for summary-only turns. /chat/completions rejects tools at any
+# effort except an explicit 'none' for this generation, so /v1/responses
+# is the only endpoint serving reasoning AND tools together (the
+# o-series shares reasoning_strategy='openai_responses_reasoning' in the
+# catalog but deliberately stays on the conservative summary-only tier —
+# its chat/completions accepts tools at any effort, and its Responses
+# summaries are org-verification-gated).
+#
+# Adding the next family: if its chat/completions rejects tools+effort
+# the way gpt-5 does (probe it live), append the prefix here AND to
+# _COMPLETION_TOKEN_FAMILIES; eligibility itself needs no code change —
+# it is keyed off the catalog row's reasoning_strategy.
+_RESPONSES_WITH_TOOLS_FAMILIES: tuple[str, ...] = ("gpt-5",)
 
 
 def _model_in_family(model: str, families: tuple[str, ...]) -> bool:
@@ -250,7 +272,7 @@ class OpenAIAdapter(BaseProviderAdapter):
         #
         # Reasoning-WITH-tools is served by the Responses path
         # (_responses_eligible), never by this builder.
-        if "tools" in body and _model_in_family(model, ("gpt-5",)):
+        if "tools" in body and _model_in_family(model, _RESPONSES_WITH_TOOLS_FAMILIES):
             if "reasoning_effort" in body or _model_in_family(
                 model, _TOOLS_REQUIRE_EFFORT_NONE_FAMILIES
             ):
@@ -266,7 +288,8 @@ class OpenAIAdapter(BaseProviderAdapter):
         ``supports_reasoning=True`` and ``reasoning_strategy ==
         "openai_responses_reasoning"`` and a non-``off`` reasoning mode:
 
-        * **gpt-5 family** — eligible with or without tools. On
+        * **_RESPONSES_WITH_TOOLS_FAMILIES (gpt-5)** — eligible with or
+          without tools. On
           /chat/completions this generation rejects function tools at
           any reasoning effort except an explicit 'none' ("To use
           function tools, use /v1/responses" — the provider's own 400),
@@ -294,7 +317,7 @@ class OpenAIAdapter(BaseProviderAdapter):
             and cand.reasoning_strategy == "openai_responses_reasoning"
         ):
             return False
-        if _model_in_family(model, ("gpt-5",)):
+        if _model_in_family(model, _RESPONSES_WITH_TOOLS_FAMILIES):
             return True
         if getattr(payload, "tools", None):
             return False
