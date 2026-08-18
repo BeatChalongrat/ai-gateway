@@ -1,4 +1,9 @@
 [tool.pytest.ini_options]
+# Bare `pytest` must never collect outside tests/: the live-probe script
+# test_dlp_prompt_live.py sys.exit()s at import without a real API key,
+# which INTERNALERRORs collection (broke CI backend-test and `make
+# test-unit`). Explicit paths on the command line still work as usual.
+testpaths = ["tests"]
 addopts = """
   --ignore=tests/test_dlp_docs.py
   --ignore=tests/test_api_docs.py
