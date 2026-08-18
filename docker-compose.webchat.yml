@@ -11,8 +11,17 @@
 # stacks need to talk, run them on the same network OR set
 # ``GATEWAY_API_URL=http://host.docker.internal:8080/api/v1`` for
 # cross-stack calls during dev. Production uses a shared network.
-
-version: "3.9"
+#
+# ── DO NOT MERGE THIS FILE WITH docker-compose.yml ──────────────────
+# This is a SELF-CONTAINED SHAPE, not an overlay. The base file defines
+# its own chat-edge-api behind ``profiles: ["desktop"]``; merging the two
+# collapses both definitions into one profile-gated service, compose
+# drops it (no active profile), and validation fails with
+#   service "web-chat" depends on undefined service "chat-edge-api"
+# Run this stack via ``make webchat-up`` (or
+# ``docker compose -p ai-gateway -f docker-compose.webchat.yml …``).
+# ``make compose-check`` validates every supported combination; the full
+# list lives in README.md → "Deployment shapes".
 
 services:
   chat-edge-api:
