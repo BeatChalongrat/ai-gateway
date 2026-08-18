@@ -432,6 +432,30 @@ type streamDrainResult struct {
 // which killed the generation on every refresh/network blip.)
 func detachOnDisconnect() {}
 
+// heartbeatInterval is how often an SSE comment frame (": ping") goes
+// out while a generation is in flight with no real event to send
+// (Batch 2 T2). Three jobs: intermediate proxies stop idle-killing
+// quiet streams (long tool runs), the clients' idle watchdogs get a
+// liveness signal to reset on, and a genuinely stalled provider
+// becomes detectable (no bytes at all past the client threshold).
+// Comment frames are ignored by both clients' parsers (web
+// lib/stream.ts parseFrame yields nothing without a data: line;
+// desktop SseStreamReader skips lines starting with ':') and are
+// written at the HTTP edge ONLY — they never enter the stream broker,
+// so resume replays stay heartbeat-free by construction, and they
+// never touch the persistence/orphan-settlement clocks, which read
+// database timestamps.
+// A var (not const) purely so the stream tests can shorten it.
+var heartbeatInterval = 15 * time.Second
+
+// writeSSEHeartbeat emits the comment frame. Failures are silently
+// dropped like writeSSEEvent's — a dead connection is detected by the
+// request context, not by write errors.
+func writeSSEHeartbeat(w http.ResponseWriter, flusher http.Flusher) {
+	_, _ = fmt.Fprint(w, ": ping\n\n")
+	flusher.Flush()
+}
+
 func drainStreamEvents(
 	w http.ResponseWriter,
 	flusher http.Flusher,
@@ -444,9 +468,17 @@ func drainStreamEvents(
 		reasoning strings.Builder
 		res       streamDrainResult
 	)
+	// T2 — keepalive ticker. Fires only when neither `done` nor
+	// `events` is ready, i.e. exactly the quiet stretches (slow
+	// provider, long tool run) that need a heartbeat. Stops with the
+	// drain; writes to an already-disconnected client fail silently.
+	heartbeat := time.NewTicker(heartbeatInterval)
+	defer heartbeat.Stop()
 Loop:
 	for {
 		select {
+		case <-heartbeat.C:
+			writeSSEHeartbeat(w, flusher)
 		case <-done:
 			// Client disconnected — fire the disconnect hook once,
 			// keep draining until the pump's terminal event (see doc

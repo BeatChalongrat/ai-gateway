@@ -695,6 +695,8 @@ public static class Dict
 
         // i18n sweep — message meta (MessageViewModel)
         ["msg.thinking"] = "Thinking...",
+        // Batch 2 T2 — stalled-stream pill (mirrors web thread.stalled)
+        ["msg.stalled"] = "Still working — this is taking longer than usual.",
         // First-token wait label (cat row fallback). NOT "Thinking..." —
         // that word is reserved for real reasoning (the Expander header);
         // this state fires for every model while no token has arrived.
@@ -1436,6 +1438,8 @@ public static class Dict
 
         // i18n sweep — ข้อมูลกำกับข้อความ (MessageViewModel)
         ["msg.thinking"] = "กำลังคิด...",
+        // Batch 2 T2 — stalled-stream pill (mirrors web thread.stalled)
+        ["msg.stalled"] = "ยังทำงานอยู่ — ใช้เวลานานกว่าปกติ",
         ["msg.working"] = "กำลังประมวลผล…",
         ["msg.thoughtFor"] = "ใช้เวลาคิด {0:F1} วินาที",
         ["msg.analyzed"] = "วิเคราะห์แล้ว",

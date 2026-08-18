@@ -146,3 +146,33 @@ describe("parseSSE — CRLF (\\r\\n\\r\\n) frames (E4)", () => {
     ]);
   });
 });
+
+// ── Batch 2 T2 — heartbeat comment frames ──────────────────────────
+
+describe("parseSSE — heartbeat comments", () => {
+  it("never yields comment frames as events, but counts them as activity", async () => {
+    const activity: number[] = [];
+    const out: StreamEvent[] = [];
+    const res = chunkedResponse([
+      ": ping\n\n",
+      'event: content_delta\ndata: {"delta":"x"}\n\n',
+      ": ping\n\n",
+    ]);
+    for await (const evt of parseSSE(res, undefined, () => activity.push(1))) {
+      out.push(evt);
+    }
+    // Comments are invisible to consumers…
+    expect(out).toEqual([{ event: "content_delta", data: { delta: "x" } }]);
+    // …but their BYTES reset the idle clock (one callback per chunk).
+    expect(activity.length).toBe(3);
+  });
+
+  it("a comment interleaved inside an event frame does not corrupt it", async () => {
+    const events = await collect([
+      ": ping\n\nevent: message_complete\ndata: {\"message_id\":\"m1\"}\n\n: ping\n\n",
+    ]);
+    expect(events).toEqual([
+      { event: "message_complete", data: { message_id: "m1" } },
+    ]);
+  });
+});

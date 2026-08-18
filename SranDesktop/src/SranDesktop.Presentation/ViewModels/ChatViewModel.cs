@@ -1345,6 +1345,13 @@ public partial class ChatViewModel : ObservableObject
                 _logger.LogWarning("Reattached turn error: {Message}", error.Message);
                 bubble.SetError(LocalizeTurnError(error.Code, error.Message));
                 break;
+
+            // T2 — the idle watchdog's verdict (see ChatService). Raises /
+            // clears the "still working — retry?" pill on the bubble.
+            case StreamStalledEvent stall:
+                bubble.IsStalled = stall.Stalled;
+                MessageActivity?.Invoke(this, EventArgs.Empty);
+                break;
         }
     }
 
@@ -1369,6 +1376,36 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogDebug(ex, "Could not cache reattached reply for {Id}", conversationId);
         }
+    }
+
+    /// <summary>Batch 2 T2 — recovery from a stalled stream. The server
+    /// generation is (presumed) still running: drop whichever local consumer
+    /// owns the stream (the send turn's CTS or a previous reattach) and go
+    /// back in through the EXISTING reattach machinery into the SAME bubble,
+    /// which replays the prefix and reattaches to the live tail.</summary>
+    [RelayCommand]
+    private void RetryStalled()
+    {
+        var conversation = Conversation;
+        var bubble = Messages.LastOrDefault(m => m.IsAssistant && m.IsStreaming && m.IsStalled);
+        if (conversation is null || bubble is null || !bubble.IsServerMessage)
+            return;
+        bubble.IsStalled = false;
+        var serverConversationId = conversation.ServerId ?? conversation.Id;
+
+        try
+        {
+            _streamCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The turn finished between the stall and the click.
+        }
+        CancelReattach();
+
+        var cts = new CancellationTokenSource();
+        _reattachCts = cts;
+        ReattachTask = ReattachAsync(conversation, serverConversationId, bubble.Id, bubble, cts);
     }
 
     /// <summary>Stops the in-flight reattach (conversation switch). Client-side
@@ -2466,6 +2503,13 @@ public partial class ChatViewModel : ObservableObject
                     case StreamErrorEvent error:
                         _logger.LogWarning("chat-edge turn error: {Message}", error.Message);
                         assistantMessage.SetError(LocalizeTurnError(error.Code, error.Message));
+                        break;
+
+                    // T2 — idle-watchdog verdict, same wiring as the
+                    // reattach path (OnReattachEventAsync).
+                    case StreamStalledEvent stall:
+                        assistantMessage.IsStalled = stall.Stalled;
+                        MessageActivity?.Invoke(this, EventArgs.Empty);
                         break;
                 }
             }

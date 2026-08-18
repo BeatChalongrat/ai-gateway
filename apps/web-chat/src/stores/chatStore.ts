@@ -110,6 +110,11 @@ interface ChatState {
   streamingAssistantId: Record<string, string | undefined>;
   /** AbortController per active stream so cancel can interrupt. */
   abortControllers: Record<string, AbortController | undefined>;
+  /** T2 — true while an active stream has received NO bytes (real
+   *  events OR server heartbeats) for STREAM_IDLE.timeoutMs. Drives
+   *  the "still working — retry?" notice; cleared the moment data
+   *  flows again or the stream ends. */
+  stalledStreams: Record<string, boolean>;
   /** has_more=true for older-page-available conversations. */
   hasMoreMessages: Record<string, boolean>;
   /** True while a paginate-older request is in flight. */
@@ -262,6 +267,10 @@ interface ChatState {
    *  the already-generated prefix and continues through the normal
    *  streaming pipeline. */
   resumeStream: (convId: string, messageId: string) => Promise<void>;
+  /** T2 — user-driven recovery from a stalled stream: drops the local
+   *  connection and reattaches through the existing resume machinery
+   *  (the generation itself keeps running server-side). */
+  retryStalledStream: (convId: string) => void;
   regenerate: (convId: string, messageId: string) => Promise<void>;
   editMessage: (convId: string, messageId: string, newContent: string) => Promise<void>;
   switchBranch: (convId: string, messageId: string, branchIndex: number) => Promise<void>;
@@ -290,6 +299,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messagesLoaded: {},
   streamingAssistantId: {},
   abortControllers: {},
+  stalledStreams: {},
   hasMoreMessages: {},
   loadingOlder: {},
   pendingFiles: {},
@@ -1315,6 +1325,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (ctrl) ctrl.abort();
   },
 
+  retryStalledStream(convId) {
+    // T2 — recovery from a stalled stream. The server generation is
+    // (presumed) still running: drop the local connection and go back
+    // in through the EXISTING resume machinery, which replays the
+    // prefix and reattaches to the live tail. If the stall happened
+    // before message_start assigned a real id there is nothing to
+    // resume against — aborting alone routes the send path into its
+    // normal network-error handling (error card + regenerate).
+    const messageId = get().streamingAssistantId[convId];
+    const ctrl = get().abortControllers[convId];
+    set((s) => ({ stalledStreams: { ...s.stalledStreams, [convId]: false } }));
+    ctrl?.abort();
+    if (!messageId || messageId.startsWith("tmp-")) return;
+    // Let the aborted pump release the streaming slot (its finally
+    // runs on the microtask that rejects the read), then reattach.
+    setTimeout(() => {
+      if (!get().streamingAssistantId[convId]) {
+        void get().resumeStream(convId, messageId);
+      }
+    }, 0);
+  },
+
   async resumeStream(convId, messageId) {
     // Single-flight: an attached stream (or another resume) already
     // owns this conversation's streaming slot.
@@ -1609,6 +1641,13 @@ type Get = () => ChatState;
 // Exported ONLY so tests can zero the delays (mutate + restore).
 export const RESUME_RETRY_DELAYS = [0, 1000, 2000, 4000];
 
+// T2 — stream idle watchdog thresholds, in ONE place. The server
+// heartbeats every ~15s (chat-edge handler heartbeatInterval), so a
+// stream with no BYTES for timeoutMs (≈6 missed beats) is genuinely
+// stalled — a long tool run keeps the clock fresh via heartbeats.
+// Mutable object so tests can shorten it (RESUME_RETRY_DELAYS pattern).
+export const STREAM_IDLE = { timeoutMs: 90_000, checkMs: 5_000 };
+
 // Abortable sleep so a user Stop during the backoff window cancels the
 // resume loop immediately instead of after the timer.
 function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -1703,8 +1742,28 @@ async function consumeStream(
     });
   };
 
+  // T2 — idle watchdog. Bytes (real frames AND ": ping" heartbeats,
+  // which parseSSE never yields as events) reset the clock via
+  // onActivity; past the threshold the conversation is flagged stalled
+  // so the thread can offer "still working — retry?". The flag clears
+  // itself the moment data flows again, and always on stream end.
+  let lastActivityAt = Date.now();
+  const setStalled = (stalled: boolean) =>
+    set((s) =>
+      Boolean(s.stalledStreams[convId]) === stalled
+        ? s
+        : { stalledStreams: { ...s.stalledStreams, [convId]: stalled } },
+    );
+  const onActivity = () => {
+    lastActivityAt = Date.now();
+    if (get().stalledStreams[convId]) setStalled(false);
+  };
+  const watchdog = window.setInterval(() => {
+    if (Date.now() - lastActivityAt > STREAM_IDLE.timeoutMs) setStalled(true);
+  }, STREAM_IDLE.checkMs);
+
   try {
-    for await (const evt of parseSSE(res, signal)) {
+    for await (const evt of parseSSE(res, signal, onActivity)) {
       if (evt.event === "message_start") {
         const data = evt.data as SSEMessageStart;
         realAssistantId = data.message_id;
@@ -2062,6 +2121,10 @@ async function consumeStream(
       }
     }
   } finally {
+    // T2 — the watchdog dies with its stream; a finished/aborted turn
+    // is never "stalled".
+    window.clearInterval(watchdog);
+    setStalled(false);
     // Any deltas left in the buffer at this point belong to an
     // abort / error path. Flushing them here keeps the persisted UI
     // consistent with what the server already wrote to the DB.

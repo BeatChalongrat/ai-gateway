@@ -279,7 +279,9 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
         await EnsureSuccessAsync(response, ct);
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        await foreach (var frame in SseStreamReader.ParseAsync(stream, ct))
+        // T2: surface ": ping" keepalives as heartbeat frames so the
+        // ChatService idle watchdog sees liveness during long tool runs.
+        await foreach (var frame in SseStreamReader.ParseAsync(stream, ct, yieldComments: true))
             yield return frame;
     }
 
@@ -300,7 +302,9 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
         await EnsureSuccessAsync(response, ct);
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        await foreach (var frame in SseStreamReader.ParseAsync(stream, ct))
+        // T2: surface ": ping" keepalives as heartbeat frames so the
+        // ChatService idle watchdog sees liveness during long tool runs.
+        await foreach (var frame in SseStreamReader.ParseAsync(stream, ct, yieldComments: true))
             yield return frame;
     }
 

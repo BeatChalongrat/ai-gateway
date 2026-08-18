@@ -36,3 +36,9 @@ public sealed record MessageFileInfo(
 
 /// <summary>Server-side memory activity during a turn (memory_saved / memory_suggested).</summary>
 public sealed record MemoryActivityEvent(string Kind) : ChatStreamEvent;
+
+/// <summary>Batch 2 T2 — the stream idle watchdog's verdict. Stalled=true:
+/// no bytes (events OR server ": ping" heartbeats) for the idle threshold —
+/// the bubble surfaces "still working — retry?". Stalled=false: data flowed
+/// again, clear the notice. Never terminal; the stream keeps draining.</summary>
+public sealed record StreamStalledEvent(bool Stalled) : ChatStreamEvent;

@@ -543,6 +543,8 @@ export const en = {
 
   // ── Phase-2 i18n sweep — thread / sidebar states ────────────
   "thread.newMessages": "New messages",
+  // Batch 2 T2 — stalled-stream notice
+  "thread.stalled": "Still working — this is taking longer than usual.",
   "thread.scrollToLatest": "Scroll to latest",
   "thread.loadEarlier": "Load earlier messages",
   "sidebar.searching": "Searching…",
@@ -1399,6 +1401,8 @@ const th: Record<DictKey, string> = {
 
   // ── Phase-2 i18n sweep — thread / sidebar states ────────────
   "thread.newMessages": "ข้อความใหม่",
+  // Batch 2 T2 — stalled-stream notice
+  "thread.stalled": "ยังทำงานอยู่ — ใช้เวลานานกว่าปกติ",
   "thread.scrollToLatest": "เลื่อนไปข้อความล่าสุด",
   "thread.loadEarlier": "โหลดข้อความก่อนหน้า",
   "sidebar.searching": "กำลังค้นหา…",

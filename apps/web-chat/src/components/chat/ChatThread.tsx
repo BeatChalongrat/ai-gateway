@@ -14,6 +14,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { Message } from "@/lib/types";
 import { useT } from "@/lib/i18n";
+import { useChatStore } from "@/stores/chatStore";
 import { recallScroll, rememberScroll } from "@/lib/scrollMemory";
 import {
   ANCHOR_PREVIOUS_PEEK_PX,
@@ -57,6 +58,12 @@ export function ChatThread({
   onLoadEarlier,
 }: Props) {
   const t = useT();
+  // T2 — stalled-stream notice: the idle watchdog in chatStore flags a
+  // conversation whose active stream has received no bytes (events or
+  // server heartbeats) past the threshold; the retry rides the
+  // existing resume machinery.
+  const stalled = useChatStore((s) => Boolean(s.stalledStreams[convId]));
+  const retryStalledStream = useChatStore((s) => s.retryStalledStream);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [autoStick, setAutoStick] = useState(true);
   const [farFromBottom, setFarFromBottom] = useState(false);
@@ -452,6 +459,23 @@ export function ChatThread({
           style={{ height: 0 }}
         />
       </div>
+
+      {stalled ? (
+        <div
+          role="status"
+          data-testid="stalled-stream-notice"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface/95 px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
+        >
+          {t("thread.stalled")}
+          <button
+            type="button"
+            onClick={() => retryStalledStream(convId)}
+            className="focus-ring rounded-full bg-text-primary px-2.5 py-0.5 font-medium text-bg-base hover:opacity-90"
+          >
+            {t("common.retry")}
+          </button>
+        </div>
+      ) : null}
 
       {pendingNew && !autoStick ? (
         <button
