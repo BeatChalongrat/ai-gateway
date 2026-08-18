@@ -88,7 +88,33 @@ func (s *ShareService) Create(
 	if err != nil {
 		return nil, err
 	}
-	return s.shares.Create(ctx, tenantID, convID, token, expiresAt)
+
+	// T3 — freeze the share at creation time: pin the ids of the
+	// conversation as it stands NOW. Messages sent afterwards never
+	// reach recipients; re-sharing (this method — one link per
+	// conversation, token rotates) takes a fresh snapshot.
+	snapshotIDs, err := s.currentSnapshotIDs(ctx, tenantID, convID)
+	if err != nil {
+		return nil, err
+	}
+	return s.shares.Create(ctx, tenantID, convID, token, expiresAt, snapshotIDs)
+}
+
+// currentSnapshotIDs is the id list a snapshot taken right now pins:
+// the active branch, chronological — exactly what the old live view
+// rendered. Same generous 1000 cap as the export/read paths.
+func (s *ShareService) currentSnapshotIDs(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) ([]uuid.UUID, error) {
+	msgs, _, err := s.messages.ListByConversation(ctx, tenantID, convID, 1000, uuid.Nil)
+	if err != nil {
+		return nil, fmt.Errorf("share snapshot: %w", err)
+	}
+	ids := make([]uuid.UUID, 0, len(msgs))
+	for i := range msgs {
+		ids = append(ids, msgs[i].ID)
+	}
+	return ids, nil
 }
 
 // Revoke deletes the share row. ErrShareNotFound when nothing to do.
@@ -177,10 +203,30 @@ func (s *ShareService) Resolve(ctx context.Context, token string) (*SharedView, 
 		}
 		return nil, err
 	}
-	// Pull a generous slice (1000) — same limit as the export path.
-	msgs, _, err := s.messages.ListByConversation(ctx, row.TenantID, row.ConversationID, 1000, uuid.Nil)
-	if err != nil {
-		return nil, err
+	// T3 — snapshot semantics: render exactly the ids frozen at share
+	// time. Rows hard-deleted since then silently drop out (deletion
+	// wins); rows edited away (forked inactive) keep rendering their
+	// pre-edit content, which is what a snapshot means.
+	var msgs []model.Message
+	if row.SnapshotMessageIDs != nil {
+		msgs, err = s.messages.ListByIDs(ctx, row.TenantID, row.SnapshotMessageIDs)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Legacy pre-033 row the migration backfill missed: it was a
+		// live view — freeze it NOW (lazy self-heal, best-effort write)
+		// so it can never publish a future message again.
+		var listErr error
+		msgs, _, listErr = s.messages.ListByConversation(ctx, row.TenantID, row.ConversationID, 1000, uuid.Nil)
+		if listErr != nil {
+			return nil, listErr
+		}
+		ids := make([]uuid.UUID, 0, len(msgs))
+		for i := range msgs {
+			ids = append(ids, msgs[i].ID)
+		}
+		_ = s.shares.SetSnapshot(ctx, row.ID, ids)
 	}
 
 	// File metadata only (not download urls — the public view is

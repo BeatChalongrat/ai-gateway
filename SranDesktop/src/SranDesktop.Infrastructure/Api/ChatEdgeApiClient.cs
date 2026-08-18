@@ -759,11 +759,17 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
 
     // ── Sharing (R9 Feature K) ──────────────────────────────────────────────
 
-    public async Task<ShareResponse> ShareConversationAsync(string id, CancellationToken ct = default)
+    public async Task<ShareResponse> ShareConversationAsync(
+        string id, string expiresIn = "never", CancellationToken ct = default)
     {
+        // T3 — expiry parity with the web ShareModal: the server accepts
+        // "1h" | "24h" | "7d" | "never" and re-creating rotates the token
+        // (one link per conversation) with a FRESH snapshot.
         using var deadline = Deadline(ct);
-        using var response = await _http.PostAsync(
-            $"api/v1/conversations/{Uri.EscapeDataString(id)}/share", content: null, deadline.Token);
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/conversations/{Uri.EscapeDataString(id)}/share",
+            new Dictionary<string, string> { ["expires_in"] = expiresIn },
+            JsonOptions, deadline.Token);
         return await ReadAsync<ShareResponse>(response, deadline.Token);
     }
 
