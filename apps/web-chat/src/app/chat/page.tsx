@@ -21,6 +21,7 @@ import { ChatInput, DRAFT_CONV_KEY, uploadFiles } from "@/components/chat/ChatIn
 import { EmptyState } from "@/components/chat/EmptyState";
 import { toast } from "@/components/ui/Toast";
 import { tOutside } from "@/lib/i18n";
+import { gateImagesForVision } from "@/lib/visionGate";
 import { useChatStore } from "@/stores/chatStore";
 import { useModelStore } from "@/stores/modelStore";
 
@@ -119,7 +120,11 @@ export default function ChatLanding() {
     <AttachmentDropZone
       className="flex flex-1 flex-col overflow-hidden"
       enabled
-      onFiles={async (files) => {
+      onFiles={async (filesRaw) => {
+        // W3 — gate BEFORE ensureConv so a rejected image-only drop
+        // never eager-creates an empty conversation row.
+        const files = gateImagesForVision(filesRaw, selectedModelId);
+        if (files.length === 0) return;
         const id = await ensureConv();
         if (!id) return;
         // Chip bucket is DRAFT_CONV_KEY so the dropped-file chip

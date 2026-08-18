@@ -59,6 +59,17 @@ export function isImageMime(contentType: string): boolean {
   return contentType.startsWith("image/");
 }
 
+// Image detection for a File must match the accept-list, not just the
+// MIME — some platforms hand image files over with an empty type.
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+  "png", "jpg", "jpeg", "gif", "webp",
+]);
+
+export function isImageFile(file: File): boolean {
+  if (file.type && isImageMime(file.type)) return true;
+  return IMAGE_EXTENSIONS.has(fileExtension(file.name));
+}
+
 export function validateFile(
   file: File,
 ): { ok: true } | { ok: false; reason: string } {
@@ -120,4 +131,14 @@ export function iconEmojiFor(kind: FileIcon): string {
 export const FILE_PICKER_ACCEPT = [
   ...Array.from(ALLOWED_FILE_EXTENSIONS, (e) => `.${e}`),
   ...Array.from(ALLOWED_FILE_MIMES),
+].join(",");
+
+/** Picker accept-list for a non-vision model (W3): same set minus the
+ *  image types, so the OS file dialog itself steers away from images.
+ *  The real gate stays in gateImagesForVision — accept is advisory. */
+export const FILE_PICKER_ACCEPT_NO_IMAGES = [
+  ...Array.from(ALLOWED_FILE_EXTENSIONS, (e) => `.${e}`).filter(
+    (e) => !IMAGE_EXTENSIONS.has(e.slice(1)),
+  ),
+  ...Array.from(ALLOWED_FILE_MIMES).filter((m) => !isImageMime(m)),
 ].join(",");

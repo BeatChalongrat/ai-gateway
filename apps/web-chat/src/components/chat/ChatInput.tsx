@@ -16,9 +16,12 @@ import type { ExtractionStatus } from "@/lib/fileExtraction";
 import { isExtracting, watchExtraction } from "@/lib/fileExtraction";
 import {
   FILE_PICKER_ACCEPT,
+  FILE_PICKER_ACCEPT_NO_IMAGES,
+  isImageFile,
   MAX_FILES_PER_MESSAGE,
   validateFile,
 } from "@/lib/fileUtil";
+import { gateImagesForVision, modelAcceptsImages } from "@/lib/visionGate";
 import { tOutside, useT } from "@/lib/i18n";
 import { shouldSendOnEnter } from "@/lib/keyboard";
 import {
@@ -219,6 +222,14 @@ export function ChatInput({
   // the chat composer (modelKind defaults to "chat" when the model is the
   // Auto sentinel, unknown, or a payload without model_kind).
   const modelKind = activeModel?.model_kind ?? "chat";
+  // W3 — vision gating. The picker's accept-list and the send gate
+  // react to the model instantly; the paste/drop paths gate through
+  // gateImagesForVision (reading the CURRENT id via the ref, because
+  // the paste listener binds once at mount and would otherwise close
+  // over a stale model).
+  const acceptsImages = modelAcceptsImages(activeModelId ?? null, models);
+  const activeModelIdRef = useRef(activeModelId);
+  activeModelIdRef.current = activeModelId;
   // Phase 11 — Thinking Mode toggle. The store action + server columns have
   // existed since T4; nothing ever called them, so a reasoning-capable model
   // could never actually be told to think. Shown only when the selected model
@@ -477,7 +488,18 @@ export function ChatInput({
 
   function submit() {
     if (!canSend) return;
-    const t = text.trim();
+    // W3 — a user who attached an image and THEN switched to a
+    // non-vision model keeps the attachment; the send is blocked with
+    // the fix named instead of silently dropping their file or letting
+    // the provider fail opaquely.
+    if (
+      !acceptsImages &&
+      pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file))
+    ) {
+      toast(t("input.visionBlockedSend"));
+      return;
+    }
+    const t2 = text.trim();
     // Hand the attachment metadata to the store BEFORE onSend. The
     // clearPendingFiles calls below run synchronously, but on the
     // landing page onSend awaits ensureConv() before it reaches
@@ -497,7 +519,7 @@ export function ChatInput({
           created_at: new Date().toISOString(),
         })),
     );
-    onSend(t, readyFileIds, imageMode, videoMode);
+    onSend(t2, readyFileIds, imageMode, videoMode);
     setText("");
     // Delete the persisted draft NOW — the debounced empty-save would
     // also clear it, but a reload inside that 1s window must not
@@ -658,7 +680,16 @@ export function ChatInput({
     }
   }
 
-  async function handleFiles(filesRaw: File[]) {
+  async function handleFiles(filesInput: File[]) {
+    // W3 — vision gate first: images are filtered (with a toast naming
+    // a capable model) when the active model can't read them. Reads
+    // the CURRENT model id via the ref — this function is also reached
+    // from the mount-time paste listener whose closure is stale.
+    const filesRaw = gateImagesForVision(
+      filesInput,
+      activeModelIdRef.current ?? null,
+    );
+    if (filesRaw.length === 0) return;
     // Per-message cap. Count rows already in the render bucket; we
     // re-read the selector value because closures see the snapshot
     // captured at render time and that's exactly what the user
@@ -866,7 +897,11 @@ export function ChatInput({
           <input
             ref={fileInputRef}
             type="file"
-            accept={FILE_PICKER_ACCEPT}
+            // W3 — non-vision models get the image-free accept list so
+            // the OS dialog steers away from images; gateImagesForVision
+            // in handleFiles stays the real gate ("All files" bypasses
+            // accept).
+            accept={acceptsImages ? FILE_PICKER_ACCEPT : FILE_PICKER_ACCEPT_NO_IMAGES}
             multiple
             className="hidden"
             onChange={onPickFiles}
@@ -944,8 +979,8 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  aria-label={t("input.attach")}
-                  title={t("input.attach")}
+                  aria-label={acceptsImages ? t("input.attach") : t("input.attachNoImages")}
+                  title={acceptsImages ? t("input.attach") : t("input.attachNoImages")}
                   disabled={streaming || disabled}
                   className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >

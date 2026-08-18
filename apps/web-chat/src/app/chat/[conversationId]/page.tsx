@@ -20,6 +20,7 @@ import { toast } from "@/components/ui/Toast";
 import { tOutside } from "@/lib/i18n";
 import { useIsStreaming } from "@/hooks/useStream";
 import { ApiError } from "@/lib/api";
+import { gateImagesForVision } from "@/lib/visionGate";
 import { useChatStore } from "@/stores/chatStore";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 
@@ -228,7 +229,10 @@ export default function ConversationPage() {
       <AttachmentDropZone
         className="flex flex-1 flex-col overflow-hidden"
         enabled={!streaming}
-        onFiles={(files) => {
+        onFiles={(filesRaw) => {
+          // W3 — same vision gate as the composer's picker/paste paths.
+          const files = gateImagesForVision(filesRaw, conv?.model_id ?? null);
+          if (files.length === 0) return;
           void uploadFiles(convId, files, {
             addPendingFile,
             updateFileProgress,
