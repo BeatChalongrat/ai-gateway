@@ -823,3 +823,42 @@ class TestResponsesEligibilityTiers:
             metadata={},
         )
         assert not OpenAIAdapter._responses_eligible(payload, None)
+
+
+class TestResponsesTierIsProtocolNotData:
+    """Step 5 — the eligibility GATE is data (reasoning_strategy on the
+    catalog row); the tools TIER is protocol (_RESPONSES_WITH_TOOLS_FAMILIES).
+    A future model carrying the strategy but outside the family tuple gets
+    the conservative summary-only tier, not Responses-with-tools."""
+
+    def test_strategy_without_family_gets_conservative_tier(self, monkeypatch):
+        monkeypatch.setattr(
+            model_registry_module, "get_candidate", lambda m: _ReasoningCandidate()
+        )
+        # With tools: NOT eligible (conservative tier).
+        payload = ChatCompletionsRequest(
+            model="future-thinker-1",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            reasoning={"mode": "auto", "show_summary": True},
+            metadata={},
+        )
+        assert not OpenAIAdapter._responses_eligible(payload, None)
+        # Summary-only: eligible — the strategy row is what admits it.
+        payload_no_tools = ChatCompletionsRequest(
+            model="future-thinker-1",
+            messages=[Message(role="user", content="Hi")],
+            reasoning={"mode": "auto", "show_summary": True},
+            metadata={},
+        )
+        assert OpenAIAdapter._responses_eligible(payload_no_tools, None)
+
+    def test_no_catalog_row_means_never_eligible(self, monkeypatch):
+        monkeypatch.setattr(model_registry_module, "get_candidate", lambda m: None)
+        payload = ChatCompletionsRequest(
+            model="gpt-5.4-mini",
+            messages=[Message(role="user", content="Hi")],
+            reasoning={"mode": "auto", "show_summary": True},
+            metadata={},
+        )
+        assert not OpenAIAdapter._responses_eligible(payload, None)
