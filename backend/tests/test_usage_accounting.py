@@ -87,3 +87,45 @@ class TestHeuristicEstimate:
         assert isinstance(result, UsageInfo)
         assert result.prompt_tokens > 0
         assert result.completion_tokens > 0
+        assert result.reasoning_tokens is None
+
+    def test_estimate_folds_reasoning_into_completion(self, svc):
+        """Reasoning tokens on the estimate path must be billed like the
+        provider-usage path bills them: inside completion_tokens. The
+        old callers stamped reasoning_tokens on afterwards without
+        touching completion_tokens/cost, so reasoning-heavy turns whose
+        stream ended without a usage chunk under-billed by exactly
+        reasoning_tokens x output rate (and could violate the documented
+        reasoning_tokens <= completion_tokens invariant)."""
+        payload = ChatCompletionsRequest(
+            model="auto",
+            messages=[Message(role="user", content="Hello world")],
+        )
+        plain = svc.estimate(payload, "Hi there", "gpt-4o-mini")
+        with_reasoning = svc.estimate(
+            payload, "Hi there", "gpt-4o-mini", reasoning_tokens=320
+        )
+        assert with_reasoning.reasoning_tokens == 320
+        assert (
+            with_reasoning.completion_tokens
+            == plain.completion_tokens + 320
+        )
+        assert (
+            with_reasoning.total_tokens == plain.total_tokens + 320
+        )
+        # The all-in cost prices the reasoning tokens too.
+        assert with_reasoning.estimated_cost_usd > plain.estimated_cost_usd
+        # Invariant from the reasoning_cost attribution helper.
+        assert (
+            with_reasoning.reasoning_tokens
+            <= with_reasoning.completion_tokens
+        )
+
+    def test_estimate_negative_reasoning_treated_as_zero(self, svc):
+        payload = ChatCompletionsRequest(
+            model="auto",
+            messages=[Message(role="user", content="Hello world")],
+        )
+        result = svc.estimate(payload, "Hi", "gpt-4o-mini", reasoning_tokens=-5)
+        assert result.reasoning_tokens is None
+        assert result.completion_tokens == max(1, len("Hi") // 4)

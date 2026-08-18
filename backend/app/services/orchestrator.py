@@ -1307,20 +1307,21 @@ class GatewayOrchestrator:
                 reasoning_tokens=_reasoning_tok_for_usage,
             )
         else:
+            # Heuristic estimator doesn't know reasoning tokens, but if
+            # the adapter parsed ``reasoning_content`` we can still
+            # length-estimate; estimate() folds them into
+            # completion_tokens so this path bills the same all-in
+            # total as the provider-usage path (reasoning is output).
             usage = self.usage_service.estimate(
                 payload=payload,
                 response_text=provider_response.content,
                 model_name=route.model_name,
+                reasoning_tokens=(
+                    max(1, len(provider_response.reasoning_content) // 4)
+                    if provider_response.reasoning_content
+                    else 0
+                ),
             )
-            # Heuristic estimator doesn't know reasoning tokens, but if
-            # the adapter parsed ``reasoning_content`` we can still
-            # length-estimate. Leave ``None`` when neither is available.
-            if provider_response.reasoning_content:
-                usage = usage.model_copy(update={
-                    "reasoning_tokens": max(
-                        1, len(provider_response.reasoning_content) // 4
-                    )
-                })
 
         # 8. DLP scan response THEN restore (order matters).
         #

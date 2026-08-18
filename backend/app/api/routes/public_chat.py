@@ -1864,15 +1864,16 @@ async def chat_completions(
                     # deduct_portal_credit no-ops on zero cost+tokens.
                     usage = UsageInfo()
                 else:
+                    # Reasoning tokens parsed from the stream are folded
+                    # into completion_tokens inside estimate() so this
+                    # path bills the same all-in total as the provider-
+                    # usage path (reasoning is billed as output).
                     usage = orchestrator.usage_service.estimate(
                         payload=payload,
                         response_text=full_text,
                         model_name=route.model_name,
+                        reasoning_tokens=_stream_reasoning_tok or 0,
                     )
-                    if _stream_reasoning_tok:
-                        usage = usage.model_copy(update={
-                            "reasoning_tokens": _stream_reasoning_tok,
-                        })
 
                 latency_ms = int((time.perf_counter() - t_start) * 1000)
 
