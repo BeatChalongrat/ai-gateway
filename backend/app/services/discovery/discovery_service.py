@@ -363,12 +363,42 @@ class ModelDiscoveryService:
                     continue
 
                 row.supports_streaming = model.supports_streaming
-                row.supports_tools = model.supports_tools
-                row.supports_vision = model.supports_vision
-                row.max_context_tokens = model.max_context_tokens
-                row.cost_per_input_token = model.cost_per_input_token
-                row.cost_per_output_token = model.cost_per_output_token
-                row.cost_tier = _derive_cost_tier(model.cost_per_input_token)
+                # Tools / vision: PROMOTE-ONLY, same contract as
+                # reasoning below. These flags are keyword-inferred from
+                # the model id when the provider API doesn't surface
+                # them, and the keyword lists inevitably lag new
+                # families (gpt-5 matched neither _TOOL_KEYWORDS nor
+                # _VISION_KEYWORDS when it shipped) — an inference miss
+                # must not demote a row corrected by migration or admin.
+                # Demotion stays a manual admin action.
+                if model.supports_tools and not row.supports_tools:
+                    row.supports_tools = True
+                if model.supports_vision and not row.supports_vision:
+                    row.supports_vision = True
+                # Context: a discovered value equal to the provider-
+                # adapter sentinel means "the API didn't say and litellm
+                # had no entry" — keep the row's real value instead of
+                # stomping it with the guess. Non-sentinel values are
+                # genuine upstream/litellm data and still flow.
+                if (
+                    model.max_context_tokens != DEFAULT_MAX_CONTEXT_TOKENS
+                    or (row.max_context_tokens or 0) <= 0
+                ):
+                    row.max_context_tokens = model.max_context_tokens
+                # Prices: 0.0 means "unknown" (litellm miss), not
+                # "free". Never overwrite a known price with unknown —
+                # this is what silently reverted the migration-shipped
+                # price corrections (068/069/071) on rows that aren't
+                # flagged is_manual_override. Real prices (OpenRouter
+                # inline, litellm hits) still track upstream, and
+                # cost_tier is re-derived only when a price was written.
+                if model.cost_per_input_token > 0.0:
+                    row.cost_per_input_token = model.cost_per_input_token
+                    row.cost_tier = _derive_cost_tier(
+                        model.cost_per_input_token
+                    )
+                if model.cost_per_output_token > 0.0:
+                    row.cost_per_output_token = model.cost_per_output_token
                 row.is_active = True
                 row.last_synced_at = now
                 # Reasoning: PROMOTE-ONLY. Discovery may turn a row's

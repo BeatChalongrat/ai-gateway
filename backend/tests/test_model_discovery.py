@@ -95,14 +95,17 @@ def _make_row(
     cost_in: float = 0.0,
     cost_out: float = 0.0,
     source: str = "auto",
+    supports_tools: bool = False,
+    supports_vision: bool = False,
+    max_context_tokens: int = 128000,
 ) -> ModelConfigORM:
     return ModelConfigORM(
         provider=provider,
         model=model,
         supports_streaming=True,
-        supports_tools=False,
-        supports_vision=False,
-        max_context_tokens=128000,
+        supports_tools=supports_tools,
+        supports_vision=supports_vision,
+        max_context_tokens=max_context_tokens,
         cost_tier="standard",
         latency_tier="standard",
         cost_per_input_token=cost_in,
@@ -310,6 +313,133 @@ async def test_sync_skips_manual_override_rows(fresh_db_session, monkeypatch):
     assert row.cost_per_output_token == pytest.approx(1.99)
     assert row.is_manual_override is True
     assert row.source == "manual"
+
+
+def _patch_discovery(monkeypatch, openai_models):
+    """Point every provider adapter at an empty stub except openai."""
+    from app.services.discovery import provider_discovery
+    from app.services.discovery import discovery_service as ds_mod
+
+    async def _stub_openai(_api_key):
+        return list(openai_models)
+
+    async def _stub_empty(_api_key):
+        return []
+
+    patched = {k: _stub_empty for k in provider_discovery.PROVIDER_DISCOVERY}
+    patched["openai"] = _stub_openai
+    monkeypatch.setattr(provider_discovery, "PROVIDER_DISCOVERY", patched)
+    monkeypatch.setattr(ds_mod, "PROVIDER_DISCOVERY", patched)
+
+    async def _stub_fetch(self):
+        return {}
+    monkeypatch.setattr(PricingFetcher, "fetch", _stub_fetch)
+
+
+@pytest.mark.asyncio
+async def test_sync_does_not_clobber_corrected_rows_with_unknowns(
+    fresh_db_session, monkeypatch
+):
+    """A NON-override row corrected by migration/admin survives a sync
+    whose discovered entry carries only "unknown" markers: price 0.0
+    (litellm miss), tools/vision False (keyword-inference miss — e.g.
+    gpt-5 matches no keyword list), context == the provider-adapter
+    sentinel (API didn't say). This is the gap ``is_manual_override``
+    doesn't cover: migrations 068-075 corrected rows without setting
+    the flag."""
+    from app.services.discovery import provider_discovery
+
+    fresh_db_session.add(
+        _make_row(
+            provider="openai",
+            model="gpt-5-test",
+            is_manual_override=False,
+            cost_in=0.00000125,
+            cost_out=0.00001,
+            supports_tools=True,
+            supports_vision=True,
+            max_context_tokens=400000,
+        )
+    )
+    fresh_db_session.commit()
+
+    _patch_discovery(
+        monkeypatch,
+        [
+            provider_discovery.DiscoveredModel(
+                provider="openai",
+                model="gpt-5-test",
+                # All defaults: cost 0.0, tools/vision False, context =
+                # DEFAULT_MAX_CONTEXT_TOKENS — every field "unknown".
+            )
+        ],
+    )
+
+    svc = ModelDiscoveryService()
+    result = await svc.sync_all(fresh_db_session)
+    assert result.updated >= 1
+
+    fresh_db_session.expire_all()
+    row = (
+        fresh_db_session.query(ModelConfigORM)
+        .filter_by(provider="openai", model="gpt-5-test")
+        .one()
+    )
+    assert row.cost_per_input_token == pytest.approx(0.00000125)
+    assert row.cost_per_output_token == pytest.approx(0.00001)
+    assert row.supports_tools is True
+    assert row.supports_vision is True
+    assert row.max_context_tokens == 400000
+
+
+@pytest.mark.asyncio
+async def test_sync_still_updates_rows_with_known_values(
+    fresh_db_session, monkeypatch
+):
+    """The guard must not freeze rows: genuine upstream data (nonzero
+    prices, non-sentinel context, promoted flags) still flows."""
+    from app.services.discovery import provider_discovery
+
+    fresh_db_session.add(
+        _make_row(
+            provider="openai",
+            model="gpt-4o-test",
+            cost_in=0.001,
+            cost_out=0.002,
+            supports_tools=False,
+            max_context_tokens=16384,
+        )
+    )
+    fresh_db_session.commit()
+
+    _patch_discovery(
+        monkeypatch,
+        [
+            provider_discovery.DiscoveredModel(
+                provider="openai",
+                model="gpt-4o-test",
+                cost_per_input_token=0.0000025,
+                cost_per_output_token=0.00001,
+                supports_tools=True,
+                max_context_tokens=200000,
+            )
+        ],
+    )
+
+    svc = ModelDiscoveryService()
+    result = await svc.sync_all(fresh_db_session)
+    assert result.updated >= 1
+
+    fresh_db_session.expire_all()
+    row = (
+        fresh_db_session.query(ModelConfigORM)
+        .filter_by(provider="openai", model="gpt-4o-test")
+        .one()
+    )
+    assert row.cost_per_input_token == pytest.approx(0.0000025)
+    assert row.cost_per_output_token == pytest.approx(0.00001)
+    assert row.supports_tools is True
+    assert row.max_context_tokens == 200000
 
 
 @pytest.mark.asyncio
