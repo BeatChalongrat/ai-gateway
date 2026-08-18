@@ -89,12 +89,31 @@ async def get_models(
             cap_flags["audio_generation"] = True
         if getattr(c, "supports_tts", False):
             cap_flags["tts"] = True
+        # Display data (models-catalog step 1): context window + per-1M
+        # prices straight from the ``model_configs`` row, emitted only
+        # when the value is a real positive number — zero/unknown stays
+        # off the wire so chat-edge's curated fallback fills the gap
+        # instead of the UI showing "free" or a zero-token window.
+        ctx = c.max_context_tokens if (c.max_context_tokens or 0) > 0 else None
+        in_price = (
+            round(c.cost_per_input_token * 1_000_000, 4)
+            if (c.cost_per_input_token or 0) > 0
+            else None
+        )
+        out_price = (
+            round(c.cost_per_output_token * 1_000_000, 4)
+            if (c.cost_per_output_token or 0) > 0
+            else None
+        )
         entries.append(
             ModelInfo(
                 id=c.model,
                 provider=c.provider,
                 reasoning=reasoning_block,
                 capabilities=ModelCapabilities(**cap_flags) if cap_flags else None,
+                context_window=ctx,
+                input_price_per_1m=in_price,
+                output_price_per_1m=out_price,
             )
         )
 

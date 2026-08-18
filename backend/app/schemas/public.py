@@ -111,6 +111,14 @@ class ModelInfo(BaseModel):
     # capability block. ``response_model_exclude_none`` on the route
     # drops it from the wire when absent.
     reasoning: Optional[ReasoningCapability] = None
+    # Display data from ``model_configs`` (models-catalog step 1) so
+    # clients need no static metadata of their own. All optional and
+    # None-excluded: emitted only when the DB row carries a real value,
+    # so old clients and rows with unknown data see the wire unchanged.
+    # Prices are per 1M tokens (the shape both client pickers render).
+    context_window: Optional[int] = None
+    input_price_per_1m: Optional[float] = None
+    output_price_per_1m: Optional[float] = None
 
 
 class ModelListResponse(BaseModel):
