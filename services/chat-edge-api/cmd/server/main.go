@@ -480,6 +480,11 @@ func main() {
 	// into history as image_url content so they can SEE what was made;
 	// everything else keeps the text-annotation fallback.
 	messageSvc.SetVisionCapabilityChecker(modelHandler.SupportsVision)
+	// Models-catalog step 3 — the trivial-turn reasoning downgrade gate
+	// reads reasoning capability from the live gateway catalog
+	// (DB-authoritative) instead of the static set, so onboarding a
+	// reasoning model is a data change, not a chat-edge release.
+	messageSvc.SetReasoningCapabilityChecker(modelHandler.ReasoningCapable)
 
 	handlers := router.Handlers{
 		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),

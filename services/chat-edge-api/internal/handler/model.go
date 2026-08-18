@@ -45,6 +45,11 @@ type ModelHandler struct {
 	mu       sync.RWMutex
 	cached   []modelResponse
 	cachedAt time.Time
+	// gwTools records the Gateway's DB-authoritative tools flag per model
+	// id from the last successful catalog fetch (models-catalog step 4).
+	// KnownWithoutTools prefers it over the static metadata; nil until the
+	// first successful Gateway fetch.
+	gwTools map[string]bool
 }
 
 func NewModelHandler(cfg *config.Config, gateway *service.GatewayClient) *ModelHandler {
@@ -271,6 +276,15 @@ func (h *ModelHandler) List(w http.ResponseWriter, r *http.Request) {
 // config catalog when the Gateway is unreachable or returns nothing.
 func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
 	if h.gateway == nil {
+		// No gateway client: serve a populated cache when one exists
+		// (test fixtures inject it; production never fills it in this
+		// mode), else the static config catalog.
+		h.mu.RLock()
+		cached := h.cached
+		h.mu.RUnlock()
+		if cached != nil {
+			return cached
+		}
 		return h.configCatalog()
 	}
 
@@ -297,10 +311,11 @@ func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
 		return h.configCatalog()
 	}
 
-	out := h.buildFromGateway(gwModels)
+	out, gwTools := h.buildFromGateway(gwModels)
 	h.mu.Lock()
 	h.cached = out
 	h.cachedAt = time.Now()
+	h.gwTools = gwTools
 	h.mu.Unlock()
 	return out
 }
@@ -312,7 +327,19 @@ func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
 // metadata so the picker always renders something sensible. Reasoning
 // capability is taken from the Gateway (DB-authoritative), so a newly
 // onboarded reasoning model no longer needs a code change here.
-func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelResponse {
+//
+// Models-catalog step 2: prices and (when curated metadata has none)
+// context window now come from the Gateway too — model_configs is the
+// price authority (migrations 068-072 corrected it; the static map had
+// drifted). The static map remains the fallback for fields the Gateway
+// does not send. Context window stays curated-first for now because
+// several pre-gpt-5 model_configs rows carry a max-OUTPUT value in
+// max_context_tokens (e.g. gpt-4o-mini = 16384) — flip to gateway-first
+// once that data is cleaned.
+//
+// The second return value maps model id -> DB supports_tools, consumed
+// by KnownWithoutTools (step 4).
+func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) ([]modelResponse, map[string]bool) {
 	// Friendly names from the operator's curated catalog take priority
 	// over a humanized id for models that appear in both.
 	names := map[string]string{}
@@ -321,6 +348,7 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 	}
 
 	out := make([]modelResponse, 0, len(gw))
+	gwTools := make(map[string]bool, len(gw))
 	for _, m := range gw {
 		// The Gateway exposes an "auto" pseudo-model; the frontend
 		// renders its own Auto row, so skip it here.
@@ -357,6 +385,35 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 			continue
 		}
 		resp := h.buildModelResponse(m.ID, name, m.Provider, rb)
+		// Step 2 — Gateway-supplied display data wins over the static
+		// map for PRICES (model_configs is the corrected authority);
+		// context window fills in only where curated metadata has none
+		// (see the function comment on the dirty pre-gpt-5 rows).
+		if m.InputPricePer1M > 0 {
+			resp.InputPricePerM = m.InputPricePer1M
+		}
+		if m.OutputPricePer1M > 0 {
+			resp.OutputPricePerM = m.OutputPricePer1M
+		}
+		// "Curated" means an EXACT modelMetadata entry — the provider-
+		// default bucket (any unknown openai id gets 128000) is a guess
+		// and loses to real DB data.
+		if _, curated := modelMetadata[m.ID]; !curated && m.ContextWindow > 0 {
+			resp.ContextWindow = m.ContextWindow
+		}
+		// Step 4 groundwork — surface the DB-authoritative tools/vision
+		// flags as capability strings when the static metadata missed
+		// them (append-only; never removes a static claim), and record
+		// the tools flag for KnownWithoutTools.
+		if m.Capabilities != nil {
+			gwTools[m.ID] = m.Capabilities.Tools
+			if m.Capabilities.Tools && !containsCap(resp.Capabilities, "function_calling") {
+				resp.Capabilities = append(resp.Capabilities, "function_calling")
+			}
+			if m.Capabilities.Vision && !containsCap(resp.Capabilities, "vision") {
+				resp.Capabilities = append(resp.Capabilities, "vision")
+			}
+		}
 		// 🎨 / 🎬 composer-button gates — chat models advertise the
 		// *_via_tools flags (kept distinct from the dedicated media caps so
 		// model_kind can disambiguate).
@@ -383,7 +440,18 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) []modelRe
 		resp.ModelKind = deriveModelKind(m.Capabilities)
 		out = append(out, resp)
 	}
-	return out
+	return out, gwTools
+}
+
+// containsCap reports whether the capability-string slice already carries
+// ``want`` — buildFromGateway's append-only merge guard.
+func containsCap(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 // deriveModelKind maps a DEDICATED media model's capability flags to its
@@ -469,21 +537,35 @@ func (h *ModelHandler) SupportsVision(ctx context.Context, id string) bool {
 	return false
 }
 
-// KnownWithoutTools reports whether ``id`` has a CURATED metadata entry
-// that deliberately omits function_calling (e.g. o1, o3-mini).
+// KnownWithoutTools reports whether ``id`` is known to lack tool support.
 // MessageService uses this to skip attaching the tools block so a
 // mid-conversation switch to such a model doesn't send a ``tools``
 // request param the provider may reject.
 //
-// Deliberately consults ONLY the static modelMetadata map, NOT the live
-// catalog: gateway-discovered models carry no capability flags, so the
-// dynamic catalog under-reports tool support (gpt-5.x etc. show no
-// function_calling despite supporting it). Gating on the catalog would
-// silently strip tools from those models. Unknown ids and the Auto
-// sentinel return false (capability unknown → keep tools).
-func (h *ModelHandler) KnownWithoutTools(_ context.Context, id string) bool {
-	meta, ok := modelMetadata[id]
-	if !ok {
+// Models-catalog step 4: the Gateway's /v1/models has carried a
+// DB-authoritative ``capabilities.tools`` flag since migration 074, so
+// the last successful catalog fetch is the primary source — an explicit
+// tools=false from the DB means "strip", tools=true means "keep". The
+// static modelMetadata lookup remains only as the fallback for ids the
+// Gateway hasn't reported (and for the gateway-down window before the
+// first fetch). Unknown ids and the Auto sentinel return false
+// (capability unknown → keep tools).
+func (h *ModelHandler) KnownWithoutTools(ctx context.Context, id string) bool {
+	// Refresh the catalog if stale — this also (re)populates gwTools.
+	h.catalog(ctx)
+	h.mu.RLock()
+	known, ok := false, false
+	if h.gwTools != nil {
+		var tools bool
+		tools, ok = h.gwTools[id]
+		known = !tools
+	}
+	h.mu.RUnlock()
+	if ok {
+		return known
+	}
+	meta, metaOK := modelMetadata[id]
+	if !metaOK {
 		return false
 	}
 	for _, c := range meta.Capabilities {
@@ -492,6 +574,27 @@ func (h *ModelHandler) KnownWithoutTools(_ context.Context, id string) bool {
 		}
 	}
 	return true
+}
+
+// ReasoningCapable reports whether ``id``'s catalog entry advertises
+// reasoning support (models-catalog step 3). Backed by the same cached
+// live catalog as the list endpoint, so the answer tracks the
+// DB-authoritative ``supports_reasoning`` flag: a newly onboarded
+// reasoning model (e.g. deepseek/deepseek-r1) is recognised without a
+// chat-edge code change. When the Gateway is unreachable the catalog
+// falls back to the static config list, which carries the historical
+// static reasoning set — so this degrades to the old behaviour rather
+// than to "nothing reasons". Unknown ids return false.
+func (h *ModelHandler) ReasoningCapable(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, m := range h.catalog(ctx) {
+		if m.ID == id {
+			return m.Reasoning != nil && m.Reasoning.Supported
+		}
+	}
+	return false
 }
 
 // configCatalog is the static fallback path (Gateway unreachable). It

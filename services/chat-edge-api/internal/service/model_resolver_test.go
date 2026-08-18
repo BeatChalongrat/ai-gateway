@@ -18,6 +18,23 @@ func catalogIDs() []string {
 	return out
 }
 
+// catalogReasoningChecker is the catalog-injection fixture (models-
+// catalog step 3): reasoning capability comes from the catalog entries'
+// capability strings, exactly like the live ModelHandler.ReasoningCapable
+// checker derives it from the gateway catalog — NOT from the static
+// isReasoningCapableID set.
+func catalogReasoningChecker() func(string) bool {
+	capable := map[string]bool{}
+	for _, m := range config.DefaultModels {
+		for _, c := range m.Capabilities {
+			if c == "reasoning" {
+				capable[m.ID] = true
+			}
+		}
+	}
+	return func(id string) bool { return capable[id] }
+}
+
 func TestIsComplexQuery(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -62,7 +79,7 @@ func TestAutoThinkingPrefersWorkingReasoningModel(t *testing.T) {
 	if !prefer {
 		t.Fatal("expected complex query to be flagged complex")
 	}
-	got := ResolveAutoModelWithReasoning(complexMsg, false, false, 1, ids, prefer)
+	got := ResolveAutoModelWithReasoning(complexMsg, false, false, 1, ids, prefer, catalogReasoningChecker())
 	if got != "o3-mini" {
 		t.Fatalf("complex auto turn resolved to %q, want o3-mini", got)
 	}
@@ -82,7 +99,7 @@ func TestAutoThinkingPrefersWorkingReasoningModel(t *testing.T) {
 	// simple turn — the reasoning param is gated by the conversation's
 	// reasoning setting (preferReasoning here is false), not by the
 	// model id, so the default model being capable doesn't make it think.
-	gotSimple := ResolveAutoModelWithReasoning(simpleMsg, false, false, 1, ids, preferSimple)
+	gotSimple := ResolveAutoModelWithReasoning(simpleMsg, false, false, 1, ids, preferSimple, catalogReasoningChecker())
 	if gotSimple != "claude-sonnet-4-20250514" {
 		t.Fatalf("simple auto turn resolved to %q, want claude-sonnet-4-20250514", gotSimple)
 	}
@@ -93,11 +110,34 @@ func TestAutoThinkingPrefersWorkingReasoningModel(t *testing.T) {
 // tier so catalogs without Claude keep the legacy behaviour.
 func TestPreferredDefaultModel(t *testing.T) {
 	withClaude := []string{"gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022"}
-	if got := ResolveAutoModelWithReasoning("hi", false, false, 1, withClaude, false); got != "claude-3-5-sonnet-20241022" {
+	if got := ResolveAutoModelWithReasoning("hi", false, false, 1, withClaude, false, nil); got != "claude-3-5-sonnet-20241022" {
 		t.Fatalf("with Claude in catalog, simple turn = %q, want claude-3-5-sonnet-20241022", got)
 	}
 	noClaude := []string{"gpt-4o", "gpt-4o-mini"}
-	if got := ResolveAutoModelWithReasoning("hi", false, false, 1, noClaude, false); got != "gpt-4o-mini" {
+	if got := ResolveAutoModelWithReasoning("hi", false, false, 1, noClaude, false, nil); got != "gpt-4o-mini" {
 		t.Fatalf("without Claude, simple turn = %q, want gpt-4o-mini (legacy fast tier)", got)
+	}
+}
+
+
+// TestCatalogCheckerRecognisesDbOnboardedModel is the step-3 regression
+// proof: deepseek/deepseek-r1 is reasoning-capable in model_configs but
+// was NEVER in the static set, so the old resolver could not prefer it.
+// With a catalog-backed checker injected it wins a reasoning-enabled
+// turn; with the static fallback (nil) it does not.
+func TestCatalogCheckerRecognisesDbOnboardedModel(t *testing.T) {
+	ids := []string{"gpt-4o-mini", "deepseek/deepseek-r1"}
+	catalog := func(id string) bool { return id == "deepseek/deepseek-r1" }
+
+	got := ResolveAutoModelWithReasoning("analyze this step by step", false, false, 1, ids, true, catalog)
+	if got != "deepseek/deepseek-r1" {
+		t.Fatalf("catalog-backed resolve = %q, want deepseek/deepseek-r1", got)
+	}
+	if isReasoningCapableID("deepseek/deepseek-r1") {
+		t.Fatal("precondition broken: deepseek/deepseek-r1 unexpectedly joined the static set")
+	}
+	gotStatic := ResolveAutoModelWithReasoning("analyze this step by step", false, false, 1, ids, true, nil)
+	if gotStatic == "deepseek/deepseek-r1" {
+		t.Fatalf("static fallback resolved %q — it should not know this model", gotStatic)
 	}
 }

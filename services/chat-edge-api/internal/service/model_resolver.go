@@ -49,12 +49,13 @@ func modelTier(id string) string {
 	return "flagship"
 }
 
-// isReasoningCapableID reports whether ``id`` is in the static
-// reasoning-capable set the model handler maintains (T4 — same
-// list as ``reasoningCapableModels`` in handler/model.go, plus
-// the Gemini 2.5+ / 3 prefix rule). Kept as a free function in
-// the resolver package so the auto-routing path can prefer
-// reasoning models without dragging the handler layer in.
+// isReasoningCapableID is the STATIC FALLBACK reasoning-capable set
+// (T4 — same list as ``reasoningCapableModels`` in handler/model.go,
+// plus the Gemini 2.5+ / 3 prefix rule). Since models-catalog step 3
+// the live paths consult the gateway catalog (DB-authoritative,
+// handler.ModelHandler.ReasoningCapable); this set is only used when
+// no checker is injected — i.e. the gateway-down window. Do NOT add
+// new models here: onboard them in model_configs instead.
 func isReasoningCapableID(id string) bool {
 	switch id {
 	case "o1", "o3", "o3-mini", "o3-2025-04-16",
@@ -168,7 +169,7 @@ func ResolveAutoModel(
 ) string {
 	return ResolveAutoModelWithReasoning(
 		message, hasFiles, hasImages, conversationMessageCount,
-		availableIDs, false,
+		availableIDs, false, nil,
 	)
 }
 
@@ -212,13 +213,20 @@ func preferredDefaultModel(availableIDs []string) string {
 // Kept as a separate entry-point so the legacy ResolveAutoModel
 // signature stays a one-arg-list call site for tests + callers
 // that don't have a conversation handy.
+// reasoningCapable (models-catalog step 3) is an optional live-catalog-
+// backed capability checker (handler.ModelHandler.ReasoningCapable bound
+// to a ctx); nil falls back to the static isReasoningCapableID set.
 func ResolveAutoModelWithReasoning(
 	message string,
 	hasFiles, hasImages bool,
 	conversationMessageCount int,
 	availableIDs []string,
 	reasoningEnabled bool,
+	reasoningCapable func(string) bool,
 ) string {
+	if reasoningCapable == nil {
+		reasoningCapable = isReasoningCapableID
+	}
 	if len(availableIDs) == 0 {
 		return "gpt-4o-mini"
 	}
@@ -229,7 +237,7 @@ func ResolveAutoModelWithReasoning(
 	// deterministically.
 	if reasoningEnabled {
 		for _, id := range availableIDs {
-			if isReasoningCapableID(id) {
+			if reasoningCapable(id) {
 				return id
 			}
 		}
