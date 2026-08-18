@@ -383,6 +383,13 @@ type StreamEvent struct {
 	// before the answering model's content when a fallback rescued
 	// the request, so the client can show which model actually replied.
 	FallbackInfo map[string]any
+	// Reasoning downgrade notice. The Gateway emits
+	//   data: {"type":"reasoning_notice","model":"...","reasoning_downgraded":true,"reason":"..."}
+	// as its FIRST frame when reasoning was requested but the resolved
+	// model can't reason — the answer arrives without thinking. Pure
+	// information (not an error): forwarded so the clients can tell the
+	// user instead of silently serving less than they asked for.
+	ReasoningNotice *ReasoningNotice
 	// Phase 4A.2.2 — internal DLP canonical artifact frames, carried on
 	// named SSE events (``event: dlp.canonical_*``). These are consumed
 	// by the chat-edge canonical state machine and are NEVER forwarded to
@@ -390,6 +397,17 @@ type StreamEvent struct {
 	CanonicalCapability  *CanonicalCapabilityFrame
 	CanonicalFinal       *CanonicalArtifact
 	CanonicalUnavailable *CanonicalUnavailableFrame
+}
+
+// ReasoningNotice is the payload of a Gateway ``reasoning_notice``
+// frame: the request asked for reasoning but routing/policy resolved
+// to a model that can't reason. Model is the model that answered;
+// Reason is the Gateway's human-readable explanation (English — the
+// clients render their own localized line and may show this as
+// detail).
+type ReasoningNotice struct {
+	Model  string `json:"model,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // StreamProviderError is the payload of a Gateway “error“ SSE frame
@@ -547,6 +565,11 @@ type reasoningEnvelope struct {
 	Type   string `json:"type"`
 	Text   string `json:"text"`
 	Status string `json:"status"`
+	// reasoning_notice fields — Model/Reason are only read when Type
+	// is "reasoning_notice" (the terminal chunk also carries "model"
+	// but no top-level "type", so it never reaches that branch).
+	Model  string `json:"model"`
+	Reason string `json:"reason"`
 	// B1 / B2 — error + fallback frames carried on the same top-level
 	// envelope so we sniff them before the OpenAI-shape decoder.
 	Error        *StreamProviderError `json:"error"`
@@ -609,6 +632,11 @@ func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
 			return &StreamEvent{ReasoningDelta: env.Text}, nil
 		case "analysis_status":
 			return &StreamEvent{AnalysisStatus: env.Status}, nil
+		case "reasoning_notice":
+			return &StreamEvent{ReasoningNotice: &ReasoningNotice{
+				Model:  env.Model,
+				Reason: env.Reason,
+			}}, nil
 			// Gateway's final chat.completion.chunk frame ALSO has
 			// ``object: "chat.completion.chunk"`` but no top-level
 			// ``type`` — it falls through to the OpenAI branch below.

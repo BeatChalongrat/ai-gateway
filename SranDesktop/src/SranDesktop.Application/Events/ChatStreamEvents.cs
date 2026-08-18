@@ -16,6 +16,10 @@ public sealed record StreamStatusEvent(string Kind, string? Status) : ChatStream
 
 public sealed record FallbackInfoEvent(string? RequestedModel, string? ActualModel, string? Reason) : ChatStreamEvent;
 
+/// <summary>The reply was produced without the requested reasoning (the
+/// resolved model can't reason). Informational — never an error.</summary>
+public sealed record ReasoningNoticeEvent(string? Model, string? Reason) : ChatStreamEvent;
+
 public sealed record StreamCompletedEvent(TokenUsage? Usage) : ChatStreamEvent;
 
 public sealed record StreamErrorEvent(string? Code, string Message) : ChatStreamEvent;

@@ -509,6 +509,8 @@ export const en = {
   "update.refresh": "Refresh",
   "update.dismiss": "Dismiss update notice",
   "error.fallbackNotice": "Answered by {actual} ({requested} temporarily unavailable)",
+  "chat.reasoningDowngraded":
+    "Answered without extended thinking — this model doesn’t support it",
   "error.offline": "You're offline. Messages will send when you reconnect.",
   "error.networkStream": "Network error during streaming.",
   "error.networkRegenerate": "Network error during regenerate.",
@@ -1360,6 +1362,8 @@ const th: Record<DictKey, string> = {
   "update.refresh": "รีเฟรช",
   "update.dismiss": "ปิดการแจ้งเตือนอัปเดต",
   "error.fallbackNotice": "ตอบโดย {actual} ({requested} ไม่พร้อมใช้งานชั่วคราว)",
+  "chat.reasoningDowngraded":
+    "ตอบโดยไม่ใช้การคิดขั้นสูง — โมเดลนี้ไม่รองรับ",
   "error.offline": "คุณออฟไลน์อยู่ ข้อความจะส่งเมื่อกลับมาออนไลน์",
   "error.networkStream": "เครือข่ายขัดข้องระหว่างสตรีมคำตอบ",
   "error.networkRegenerate": "เครือข่ายขัดข้องระหว่างสร้างคำตอบใหม่",

@@ -67,3 +67,7 @@ public sealed record AgentFallbackEvent(
     string RequestedModel,
     string ActualModel,
     string? Reason) : AgentStreamEvent;
+
+/// <summary>The reply was produced without the requested reasoning (agent-path
+/// twin of the chat-edge ReasoningNoticeEvent). Informational.</summary>
+public sealed record AgentReasoningNoticeEvent(string? Model, string? Reason) : AgentStreamEvent;

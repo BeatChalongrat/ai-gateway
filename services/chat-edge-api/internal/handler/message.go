@@ -540,6 +540,11 @@ Loop:
 			if ev.FallbackInfo != nil {
 				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
 			}
+			// Reasoning downgrade notice — informational, never an
+			// error: the answer arrived without the requested thinking.
+			if ev.ReasoningNotice != nil {
+				writeSSEEvent(w, flusher, "reasoning_notice", ev.ReasoningNotice)
+			}
 			if ev.FinishReason != "" {
 				res.finishReason = ev.FinishReason
 			}
@@ -905,6 +910,9 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	if snap.FallbackInfo != nil {
 		writeSSEEvent(w, flusher, "fallback_info", snap.FallbackInfo)
+	}
+	if snap.ReasoningNotice != nil {
+		writeSSEEvent(w, flusher, "reasoning_notice", snap.ReasoningNotice)
 	}
 	// run_python cards, latest frame each — a refresh in the middle of a
 	// 60s sandbox run must not lose the code the model is running.

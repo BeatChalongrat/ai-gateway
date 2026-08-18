@@ -157,13 +157,24 @@ public class GatewayChunkParserTests
     }
 
     [Fact]
+    public void Reasoning_Notice_Frame_Emits_Event()
+    {
+        var events = _parser.Parse(
+            """{"id":"r1","type":"reasoning_notice","created":1,"model":"gpt-4o-mini","reasoning_downgraded":true,"reason":"not reasoning-capable"}""");
+
+        events.Should().ContainSingle().Which.Should().Be(
+            new AgentReasoningNoticeEvent("gpt-4o-mini", "not reasoning-capable"));
+    }
+
+    [Fact]
     public void Other_Typed_Frames_Still_Yield_Nothing()
     {
         // analysis_status graduated from "ignored" to a typed event in the
-        // reasoning-parity work (ReasoningParityTests pins the new shape);
-        // genuinely unknown frames keep being ignored.
+        // reasoning-parity work (ReasoningParityTests pins the new shape),
+        // and reasoning_notice graduated in the downgrade-notice work
+        // (Reasoning_Notice_Frame_Emits_Event pins it); genuinely unknown
+        // frames keep being ignored.
         _parser.Parse("""{"type":"unknown_future_frame","data":{}}""").Should().BeEmpty();
-        _parser.Parse("""{"type":"reasoning_notice","reason":"x"}""").Should().BeEmpty();
     }
 
     [Fact]

@@ -944,6 +944,11 @@ type StreamUpdate struct {
 	// B2 — a fallback notice forwarded from the Gateway. The handler
 	// emits it as a ``fallback_info`` SSE event.
 	FallbackInfo map[string]any
+	// Reasoning downgrade notice forwarded from the Gateway (the
+	// answer was produced without reasoning although it was
+	// requested). The handler emits it as a ``reasoning_notice`` SSE
+	// event — informational, never an error.
+	ReasoningNotice *ReasoningNotice
 }
 
 // ToolActivityUpdate is one generic "the assistant is using a tool"
@@ -3903,6 +3908,9 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			}
 			if ev.FallbackInfo != nil {
 				in.out <- StreamUpdate{FallbackInfo: ev.FallbackInfo}
+			}
+			if ev.ReasoningNotice != nil {
+				in.out <- StreamUpdate{ReasoningNotice: ev.ReasoningNotice}
 			}
 			if ev.Done {
 				// finish_reason="tool_calls" means another round.

@@ -34,6 +34,7 @@ import type {
   SSEContentDelta,
   SSEError,
   SSEFallbackInfo,
+  SSEReasoningNotice,
   SSEMessageComplete,
   SSEMessageFiles,
   SSEMessageSources,
@@ -1986,6 +1987,32 @@ async function consumeStream(
                       fallback_info: {
                         requested_model: data.requested_model,
                         actual_model: data.actual_model,
+                        reason: data.reason,
+                      },
+                    }
+                  : m,
+              ),
+            },
+          };
+        });
+      } else if (evt.event === "reasoning_notice") {
+        // The gateway answered without the requested reasoning (the
+        // resolved model can't reason). Stash on the message so
+        // MessageBubble shows a quiet informational line — same
+        // surface as fallback_info, never an error.
+        const data = evt.data as SSEReasoningNotice;
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      reasoning_notice: {
+                        model: data.model,
                         reason: data.reason,
                       },
                     }

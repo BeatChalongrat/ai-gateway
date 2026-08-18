@@ -45,3 +45,9 @@ public sealed record FallbackInfoPayload(
     [property: JsonPropertyName("requested_model")] string? RequestedModel,
     [property: JsonPropertyName("actual_model")] string? ActualModel,
     [property: JsonPropertyName("reason")] string? Reason);
+
+/// <summary>reasoning_notice — the gateway answered without the requested
+/// reasoning because the resolved model can't reason. Informational.</summary>
+public sealed record ReasoningNoticePayload(
+    [property: JsonPropertyName("model")] string? Model,
+    [property: JsonPropertyName("reason")] string? Reason);

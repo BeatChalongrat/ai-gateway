@@ -336,6 +336,12 @@ function MessageBubbleImpl({
         />
       ) : null}
 
+      {/* Reasoning downgrade notice — the reply was produced without
+          the requested thinking (resolved model can't reason). Same
+          quiet muted line as the fallback notice: information, not an
+          error. */}
+      {message.reasoning_notice ? <ReasoningDowngradeNotice /> : null}
+
       {/* Image-generation placeholder — occupies the attachment slot
           while the backend generates an image, then the real thumbnail
           (message_files) replaces it in place. */}
@@ -639,6 +645,18 @@ function FallbackNotice({
   return (
     <div className="mt-0.5 text-[11px] text-text-muted">
       {fallbackNotice(requestedModel, actualModel)}
+    </div>
+  );
+}
+
+// Reasoning downgrade notice. Same muted single-line surface as
+// FallbackNotice — informational only; the localized string carries
+// the full meaning, so the gateway's English reason is not shown.
+function ReasoningDowngradeNotice() {
+  const t = useT();
+  return (
+    <div className="mt-0.5 text-[11px] text-text-muted">
+      {t("chat.reasoningDowngraded")}
     </div>
   );
 }
@@ -986,6 +1004,7 @@ function areEqual(prev: Props, next: Props): boolean {
     a.error_message === b.error_message &&
     a.error_attempts === b.error_attempts &&
     a.fallback_info === b.fallback_info &&
+    a.reasoning_notice === b.reasoning_notice &&
     prev.showFeedback === next.showFeedback &&
     prev.showRegenerate === next.showRegenerate
   );

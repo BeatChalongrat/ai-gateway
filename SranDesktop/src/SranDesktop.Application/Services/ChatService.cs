@@ -76,6 +76,9 @@ public sealed class ChatService : IChatService
         "fallback_info" when Parse<FallbackInfoPayload>(frame) is { } p =>
             new FallbackInfoEvent(p.RequestedModel, p.ActualModel, p.Reason),
 
+        "reasoning_notice" when Parse<ReasoningNoticePayload>(frame) is { } p =>
+            new ReasoningNoticeEvent(p.Model, p.Reason),
+
         "message_complete" => new StreamCompletedEvent(
             ToTokenUsage(Parse<MessageCompletePayload>(frame)?.TokenUsage)),
 
