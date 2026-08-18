@@ -1091,6 +1091,12 @@ type GatewayModelInfo struct {
 	Provider     string                      `json:"provider"`
 	Reasoning    *GatewayReasoningCapability `json:"reasoning,omitempty"`
 	Capabilities *GatewayModelCapabilities   `json:"capabilities,omitempty"`
+	// Display data from model_configs (models-catalog step 1). Zero
+	// means "gateway didn't send it" — the Gateway omits unknown
+	// values, so chat-edge falls back to its curated metadata.
+	ContextWindow   int     `json:"context_window,omitempty"`
+	InputPricePer1M float64 `json:"input_price_per_1m,omitempty"`
+	OutputPricePer1M float64 `json:"output_price_per_1m,omitempty"`
 }
 
 // GatewayModelCapabilities mirrors the Gateway's ModelCapabilities block

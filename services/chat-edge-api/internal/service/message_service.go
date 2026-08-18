@@ -98,6 +98,12 @@ type MessageService struct {
 	// a ``tools`` param the provider would reject. nil / unknown id /
 	// the Auto sentinel => tools stay attached.
 	nonToolModel func(ctx context.Context, modelID string) bool
+	// Optional model-id -> reasoning-capable lookup backed by the live
+	// gateway catalog (handler.ModelHandler.ReasoningCapable) — models-
+	// catalog step 3. attachReasoning's trivial-turn downgrade gate uses
+	// it so a DB-onboarded reasoning model is recognised without a code
+	// change. nil => the static isReasoningCapableID fallback.
+	reasoningCapable func(ctx context.Context, modelID string) bool
 	// Optional model-id -> vision-capable lookup
 	// (handler.ModelHandler.SupportsVision). Gates Approach B: only a
 	// model the catalog says can SEE images gets generated images
@@ -595,6 +601,24 @@ func (s *MessageService) SetToolCapabilityChecker(fn func(ctx context.Context, m
 // tools are attached for every model (pre-existing behaviour).
 func (s *MessageService) SetNonToolModelChecker(fn func(ctx context.Context, modelID string) bool) {
 	s.nonToolModel = fn
+}
+
+// SetReasoningCapabilityChecker wires a model-id -> reasoning-capable
+// lookup (handler.ModelHandler.ReasoningCapable) backed by the live
+// gateway catalog. Optional — when unset, attachReasoning falls back to
+// the static isReasoningCapableID set (pre-existing behaviour).
+func (s *MessageService) SetReasoningCapabilityChecker(fn func(ctx context.Context, modelID string) bool) {
+	s.reasoningCapable = fn
+}
+
+// reasoningCheckerFor adapts the injected checker to the per-turn shape
+// attachReasoning takes; nil when no checker is wired so the callee
+// falls back to the static set.
+func (s *MessageService) reasoningCheckerFor(ctx context.Context) func(string) bool {
+	if s.reasoningCapable == nil {
+		return nil
+	}
+	return func(id string) bool { return s.reasoningCapable(ctx, id) }
 }
 
 // SetVisionCapabilityChecker wires a model-id -> vision-capable lookup
@@ -2720,7 +2744,7 @@ func (s *MessageService) compileAndBuildRequest(
 		sources.Add(srcs...)
 		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
-		attachReasoning(&req, conv, modelID, ragQuery)
+		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 		return req
 	}
 
@@ -2743,7 +2767,7 @@ func (s *MessageService) compileAndBuildRequest(
 		sources.Add(srcs...)
 		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
-		attachReasoning(&req, conv, modelID, ragQuery)
+		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 		return req
 	}
 	// S7 — flush the compiler's sources (memory + state +
@@ -2753,7 +2777,7 @@ func (s *MessageService) compileAndBuildRequest(
 	sources.Add(compiled.Sources...)
 	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imageURLs, genNotes, genVision, s.canonicalHistoryEnabled)
 	req.RoutingHints = routingHints
-	attachReasoning(&req, conv, modelID, ragQuery)
+	attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 	return req
 }
 
@@ -2782,7 +2806,13 @@ func (s *MessageService) compileAndBuildRequest(
 //
 // conv == nil (defensive) falls back to the prior unconditional
 // auto / show_summary=true default.
-func attachReasoning(req *GatewayChatRequest, conv *model.Conversation, modelID, message string) {
+func attachReasoning(req *GatewayChatRequest, conv *model.Conversation, modelID, message string, reasoningCapable func(string) bool) {
+	// Models-catalog step 3: the caller may inject a live-catalog-backed
+	// capability checker; nil keeps the static fallback set.
+	capable := reasoningCapable
+	if capable == nil {
+		capable = isReasoningCapableID
+	}
 	mode := "auto"
 	showSummary := true
 	if conv != nil {
@@ -2793,7 +2823,7 @@ func attachReasoning(req *GatewayChatRequest, conv *model.Conversation, modelID,
 			// Explicit persisted opt-out (not currently set by the
 			// composer, but honor it if a future client does).
 			mode = "off"
-		} else if !IsAutoModel(conv.ModelID) && isReasoningCapableID(modelID) && isTrivialQuery(message) {
+		} else if !IsAutoModel(conv.ModelID) && capable(modelID) && isTrivialQuery(message) {
 			// P1-4 — the user PINNED a concrete reasoning-capable model (not
 			// Auto) and this turn is trivial (e.g. "ไง"). Suppress thinking so
 			// a greeting doesn't burn a full thinking budget. The model is

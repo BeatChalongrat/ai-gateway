@@ -14,9 +14,17 @@ import (
 const reasoningModel = "claude-sonnet-4-20250514" // isReasoningCapableID == true
 const plainModel = "gpt-4o-mini"                  // not reasoning-capable
 
+// reasoningMode exercises the nil-checker path — i.e. the static
+// isReasoningCapableID fallback (gateway-down behaviour).
 func reasoningMode(conv *model.Conversation, modelID, message string) string {
+	return reasoningModeWith(conv, modelID, message, nil)
+}
+
+// reasoningModeWith is the catalog-injection fixture: the checker plays
+// the role of handler.ModelHandler.ReasoningCapable bound to a ctx.
+func reasoningModeWith(conv *model.Conversation, modelID, message string, capable func(string) bool) string {
 	req := &GatewayChatRequest{}
-	attachReasoning(req, conv, modelID, message)
+	attachReasoning(req, conv, modelID, message, capable)
 	if req.Reasoning == nil {
 		return "<nil>"
 	}
@@ -99,5 +107,32 @@ func TestConversationLevelOffRespected(t *testing.T) {
 	conv := &model.Conversation{ModelID: reasoningModel, ReasoningMode: "off"}
 	if mode := reasoningMode(conv, reasoningModel, "วิเคราะห์ code นี้"); mode != "off" {
 		t.Errorf("conversation off: mode=%q, want off", mode)
+	}
+}
+
+
+// --- catalog-backed gate (models-catalog step 3) ---------------------------
+
+// The gate follows an injected live-catalog checker: a DB-onboarded
+// reasoning model unknown to the static set gets its trivial turns
+// downgraded, and a model the catalog says does NOT reason keeps "auto"
+// even if the static set claims otherwise.
+func TestGateFollowsInjectedCatalog(t *testing.T) {
+	dbModel := "deepseek/deepseek-r1" // in model_configs, never in the static set
+	catalog := func(id string) bool { return id == dbModel }
+
+	conv := &model.Conversation{ModelID: dbModel}
+	if mode := reasoningModeWith(conv, dbModel, "ไง", catalog); mode != "off" {
+		t.Errorf("catalog-known reasoning model, trivial turn: mode=%q, want off", mode)
+	}
+	// Same model through the static fallback: unknown -> no downgrade.
+	if mode := reasoningMode(conv, dbModel, "ไง"); mode != "auto" {
+		t.Errorf("static fallback should not know %s: mode=%q, want auto", dbModel, mode)
+	}
+	// Catalog says the pinned model does NOT reason -> gate never fires.
+	convStatic := &model.Conversation{ModelID: reasoningModel}
+	no := func(string) bool { return false }
+	if mode := reasoningModeWith(convStatic, reasoningModel, "ไง", no); mode != "auto" {
+		t.Errorf("catalog-declined model: mode=%q, want auto", mode)
 	}
 }
