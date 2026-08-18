@@ -1,6 +1,6 @@
 module github.com/beatchalongrat/ai-gateway/log-worker
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
@@ -18,6 +18,6 @@ require (
 	github.com/prometheus/procfs v0.12.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sys v0.20.0 // indirect
-	golang.org/x/text v0.15.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240528184218-531527333157 // indirect
 )
