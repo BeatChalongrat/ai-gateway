@@ -169,10 +169,16 @@ export function ChatInput({
   }, [text, draftKey]);
 
   // Flush on unmount so a fast click-away (before the debounce fires)
-  // still lands the draft. Mount-only: the refs carry current values.
+  // still lands the draft — and on pagehide, because a hard reload or
+  // tab close destroys the document WITHOUT running React cleanups,
+  // which would lose anything typed inside the debounce window.
+  // Mount-only: the refs carry current values.
   useEffect(() => {
+    const flush = () => saveDraft(draftKeyRef.current, textRef.current);
+    window.addEventListener("pagehide", flush);
     return () => {
-      saveDraft(draftKeyRef.current, textRef.current);
+      window.removeEventListener("pagehide", flush);
+      flush();
     };
   }, []);
 
