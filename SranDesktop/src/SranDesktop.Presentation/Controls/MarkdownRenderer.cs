@@ -434,11 +434,26 @@ public sealed class MarkdownRenderer
         return border;
     }
 
+    /// <summary>Cap on a table column's width (Batch 1 D3). An Auto Grid
+    /// column measures its children at infinite width, so without a cap a
+    /// prose cell NEVER wraps and the whole table becomes a horizontal
+    /// scroll tunnel. ≈40% of the 768px message column: wide enough that
+    /// numeric/short tables still auto-fit, narrow enough that two prose
+    /// columns fit side by side. Genuinely wide tables still fall back to
+    /// the outer horizontal ScrollViewer.</summary>
+    internal const double MaxTableCellWidth = 300;
+
     private FrameworkElement RenderTable(Table table, bool streaming = false)
     {
         var grid = new Grid();
         var columnCount = table.ColumnDefinitions.Count;
-        for (var c = 0; c < columnCount; c++)
+        // D3 — ragged rows: a data row can carry MORE cells than the header
+        // declared. They used to be silently truncated (content loss);
+        // extend the grid to the widest row instead so every cell renders.
+        var totalColumns = columnCount;
+        foreach (var r in table.OfType<TableRow>())
+            totalColumns = Math.Max(totalColumns, r.OfType<TableCell>().Count());
+        for (var c = 0; c < totalColumns; c++)
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var rowIndex = 0;
@@ -448,6 +463,19 @@ public sealed class MarkdownRenderer
             var colIndex = 0;
             foreach (var cell in row.OfType<TableCell>())
             {
+                // D3 — honour the delimiter row's alignment markers
+                // (`:--` / `:-:` / `--:`); columns beyond the declared set
+                // default to left.
+                var align = colIndex < columnCount
+                    ? table.ColumnDefinitions[colIndex].Alignment
+                    : null;
+                var textAlignment = align switch
+                {
+                    TableColumnAlign.Center => TextAlignment.Center,
+                    TableColumnAlign.Right => TextAlignment.Right,
+                    _ => TextAlignment.Left
+                };
+
                 var cellContent = new StackPanel();
                 foreach (var child in cell)
                 {
@@ -458,6 +486,7 @@ public sealed class MarkdownRenderer
                         {
                             tb.Margin = new Thickness(0);
                             tb.FontSize = 14; // web: table font-size 0.9rem
+                            tb.TextAlignment = textAlignment;
                             if (row.IsHeader)
                                 tb.FontWeight = FontWeights.SemiBold;
                         }
@@ -469,8 +498,12 @@ public sealed class MarkdownRenderer
                 {
                     Child = cellContent,
                     Padding = new Thickness(12, 8, 12, 8),
+                    // D3 — the width cap that makes prose cells wrap (the
+                    // paragraph TextBlocks are already TextWrapping.Wrap;
+                    // they just never saw a finite constraint before).
+                    MaxWidth = MaxTableCellWidth,
                     BorderThickness = new Thickness(0, 0,
-                        colIndex < columnCount - 1 ? 1 : 0, rowIndex == 0 ? 1 : 0.5)
+                        colIndex < totalColumns - 1 ? 1 : 0, rowIndex == 0 ? 1 : 0.5)
                 };
                 cellBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
                 if (row.IsHeader)
@@ -480,7 +513,6 @@ public sealed class MarkdownRenderer
                 Grid.SetColumn(cellBorder, colIndex);
                 grid.Children.Add(cellBorder);
                 colIndex++;
-                if (colIndex >= columnCount) break;
             }
             rowIndex++;
         }
