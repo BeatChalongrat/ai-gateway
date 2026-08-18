@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
-import { tOutside } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import { api, ApiError } from "@/lib/api";
 import type { ShareExpiry, ShareLink } from "@/lib/types";
 
@@ -14,14 +15,17 @@ interface Props {
   onClose: () => void;
 }
 
-const EXPIRY_OPTIONS: { value: ShareExpiry; label: string }[] = [
-  { value: "1h", label: "1 hour" },
-  { value: "24h", label: "24 hours" },
-  { value: "7d", label: "7 days" },
-  { value: "never", label: "Never expires" },
+// Labels resolve through the dict at render time (T4) so a locale
+// switch re-labels the radios without a remount.
+const EXPIRY_OPTIONS: { value: ShareExpiry; labelKey: DictKey }[] = [
+  { value: "1h", labelKey: "share.expiry.1h" },
+  { value: "24h", labelKey: "share.expiry.24h" },
+  { value: "7d", labelKey: "share.expiry.7d" },
+  { value: "never", labelKey: "share.expiry.never" },
 ];
 
 export function ShareModal({ open, conversationId, onClose }: Props) {
+  const t = useT();
   const [link, setLink] = useState<ShareLink | null>(null);
   const [expiry, setExpiry] = useState<ShareExpiry>("7d");
   const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -113,17 +117,17 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
     <Modal
       open={open}
       onClose={onClose}
-      title="Share conversation"
-      description="Anyone with the link can view a read-only copy."
+      title={t("share.title")}
+      description={t("share.description")}
       maxWidth={500}
     >
       {loading ? (
-        <div className="py-6 text-center text-xs text-text-muted">Loading…</div>
+        <div className="py-6 text-center text-xs text-text-muted">{t("common.loading")}</div>
       ) : link ? (
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-text-secondary">
-              Share URL
+              {t("share.urlLabel")}
             </span>
             <div className="flex gap-2">
               <input
@@ -137,20 +141,18 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
                 onClick={() => void copy(absoluteUrl)}
                 className="focus-ring rounded-md bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base hover:opacity-90"
               >
-                Copy
+                {t("common.copy")}
               </button>
             </div>
           </label>
           <div className="text-[11px] text-text-muted">
-            {link.expires_at ? (
-              <>Expires {new Date(link.expires_at).toLocaleString()}</>
-            ) : (
-              <>Does not expire.</>
-            )}
+            {link.expires_at
+              ? t("share.expiresAt", { date: new Date(link.expires_at).toLocaleString() })
+              : t("share.noExpiry")}
           </div>
           {confirmRevoke ? (
             <div className="rounded-md border border-status-danger/30 bg-status-danger/10 p-3 text-[11px] text-text-secondary">
-              <p>Revoke this link? The URL will stop working immediately.</p>
+              <p>{t("share.revokeConfirm")}</p>
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
@@ -158,14 +160,14 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
                   disabled={busy}
                   className="focus-ring rounded bg-status-danger/85 px-2 py-1 text-[11px] font-medium text-white hover:bg-status-danger disabled:opacity-50"
                 >
-                  Revoke
+                  {t("share.revoke")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmRevoke(false)}
                   className="focus-ring rounded border border-border px-2 py-1 text-[11px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
               </div>
             </div>
@@ -176,7 +178,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
                 onClick={() => setConfirmRevoke(true)}
                 className="focus-ring rounded-md border border-status-danger/40 px-3 py-1.5 text-xs text-status-danger hover:bg-status-danger/10"
               >
-                Revoke link
+                {t("share.revokeLink")}
               </button>
             </div>
           )}
@@ -185,7 +187,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
         <div className="flex flex-col gap-4">
           <fieldset className="flex flex-col gap-2">
             <legend className="text-xs font-medium text-text-secondary">
-              Link expires after
+              {t("share.expiryLegend")}
             </legend>
             <div className="grid grid-cols-2 gap-2">
               {EXPIRY_OPTIONS.map((o) => (
@@ -205,7 +207,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
                     onChange={() => setExpiry(o.value)}
                     className="accent-[var(--text-primary)]"
                   />
-                  {o.label}
+                  {t(o.labelKey)}
                 </label>
               ))}
             </div>
@@ -216,7 +218,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
             disabled={busy}
             className="focus-ring self-end rounded-md bg-text-primary px-4 py-1.5 text-xs font-medium text-bg-base hover:opacity-90 disabled:opacity-50"
           >
-            {busy ? "Creating…" : "Create link"}
+            {busy ? t("share.creating") : t("share.createLink")}
           </button>
         </div>
       )}

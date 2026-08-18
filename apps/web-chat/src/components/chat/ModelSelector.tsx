@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BrainCircuit, ImagePlus, Search, Sparkles, X } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 import type { ModelEntry } from "@/lib/types";
 
@@ -52,10 +53,11 @@ const AUTO_PICK_ENTRY: ModelEntry = {
 
 // Sprint 3 — dedicated media-model kind sections (shown above provider
 // groups so video/audio/tts models are discoverable even at 0 count).
-const MEDIA_KIND_SECTIONS: { kind: "video" | "audio" | "tts"; label: string }[] = [
-  { kind: "video", label: "Video Generation" },
-  { kind: "audio", label: "Audio / Music" },
-  { kind: "tts", label: "Text-to-Speech" },
+// Section labels resolve through the dict at render (T4).
+const MEDIA_KIND_SECTIONS: { kind: "video" | "audio" | "tts"; labelKey: DictKey }[] = [
+  { kind: "video", labelKey: "model.section.video" },
+  { kind: "audio", labelKey: "model.section.audio" },
+  { kind: "tts", labelKey: "model.section.tts" },
 ];
 
 // Preview rows shown per provider group before the "…N more" expander.
@@ -373,10 +375,10 @@ function ModelPicker({
             {loading || !loaded ? (
               <span className="inline-flex items-center gap-2">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
-                Loading…
+                {t("common.loading")}
               </span>
             ) : (
-              <>No models available.</>
+              <>{t("model.empty")}</>
             )}
           </div>
         ) : null}
@@ -420,13 +422,13 @@ function ModelPicker({
         {/* Media-model kind sections (Sprint 3). Shown even at 0 count when
             not searching, so users discover the video/audio/tts verticals and
             learn a key is needed. Hidden when searching unless they match. */}
-        {MEDIA_KIND_SECTIONS.map(({ kind, label }) => {
+        {MEDIA_KIND_SECTIONS.map(({ kind, labelKey }) => {
           const items = mediaByKind[kind];
           if (searching && items.length === 0) return null;
           return (
             <Section
               key={`kind-${kind}`}
-              title={`${MEDIA_BADGE[kind]} ${label}`}
+              title={`${MEDIA_BADGE[kind]} ${t(labelKey)}`}
               count={items.length || undefined}
             >
               {items.length > 0 ? (
@@ -444,7 +446,7 @@ function ModelPicker({
                 ))
               ) : (
                 <p className="px-3 py-2 text-[11px] text-text-muted">
-                  No models available — add a provider key in the admin console.
+                  {t("model.emptyKind")}
                 </p>
               )}
             </Section>
@@ -479,7 +481,7 @@ function ModelPicker({
                   onClick={() => toggle(provider)}
                   className="focus-ring w-full rounded-md px-3 py-2 text-left text-[12px] text-text-tertiary transition-colors hover:bg-bg-elevated/60 hover:text-text-secondary"
                 >
-                  …{hiddenCount} more
+                  {t("model.showMore", { n: String(hiddenCount) })}
                 </button>
               ) : null}
             </Section>
@@ -488,7 +490,7 @@ function ModelPicker({
 
         {/* Search yielded nothing (Auto already hidden in this branch). */}
         {searching && filtered.length === 0 && !showAuto ? (
-          <div className="px-3 py-8 text-center text-text-muted">No models found</div>
+          <div className="px-3 py-8 text-center text-text-muted">{t("model.noResults")}</div>
         ) : null}
       </div>
     </div>
@@ -550,11 +552,12 @@ const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
   tts: "🔊",
 };
 
-const TIER_LABEL: Record<"free" | "low" | "medium" | "high", string> = {
-  free: "Free",
-  low: "Standard",
-  medium: "Premium",
-  high: "Premium+",
+// Dict keys, resolved with t() where rendered (T4).
+const TIER_LABEL_KEY: Record<"free" | "low" | "medium" | "high", DictKey> = {
+  free: "model.tier.free",
+  low: "model.tier.low",
+  medium: "model.tier.medium",
+  high: "model.tier.high",
 };
 
 function ModelRow({
@@ -616,10 +619,10 @@ function ModelRow({
       ) : null}
       {tier ? (
         <span
-          title={`Cost tier: ${TIER_LABEL[tier]}`}
+          title={t("model.tier.tooltip", { tier: t(TIER_LABEL_KEY[tier]) })}
           className="inline-flex shrink-0 items-center rounded-md bg-bg-elevated px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary"
         >
-          {TIER_LABEL[tier]}
+          {t(TIER_LABEL_KEY[tier])}
         </span>
       ) : null}
       {selected ? (

@@ -495,7 +495,7 @@ function ProjectDetailPanel({
                   className="focus-ring flex w-full items-center gap-3 rounded-md border border-border bg-bg-surface px-3 py-2 text-left text-xs text-text-primary hover:bg-bg-elevated"
                 >
                   <span className="min-w-0 flex-1 truncate">
-                    {c.title || "Untitled"}
+                    {c.title || t("conv.untitled")}
                   </span>
                   <span className="shrink-0 text-text-muted">
                     {timeAgo(c.updated_at)}

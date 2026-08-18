@@ -16,7 +16,7 @@ import { ChevronUp, ExternalLink } from "lucide-react";
 
 import { useUsage } from "@/hooks/useUsage";
 import { PORTAL_URL } from "@/lib/auth";
-import { useT } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import type { ModelUsage } from "@/lib/types";
 import { useModelStore } from "@/stores/modelStore";
 
@@ -181,7 +181,7 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 pb-2 pt-3">
-        <span className="text-sm font-semibold text-text-primary">Usage</span>
+        <span className="text-sm font-semibold text-text-primary">{t("usage.title")}</span>
         <a
           href={`${PORTAL_URL}/usage`}
           target="_blank"
@@ -189,7 +189,7 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
           onClick={onClose}
           className="focus-ring flex items-center gap-1 rounded text-xs text-text-secondary transition-colors hover:text-text-primary"
         >
-          View in Portal
+          {t("usage.viewInPortal")}
           <ExternalLink size={11} aria-hidden />
         </a>
       </div>
@@ -202,11 +202,11 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
             {remaining.toLocaleString()}
           </div>
           <div className="text-xs text-text-muted">
-            of {total.toLocaleString()} credits remaining
+            {t("usage.creditsRemaining", { total: total.toLocaleString() })}
           </div>
           {reset_date ? (
             <div className="mt-0.5 text-xs text-text-muted">
-              Resets: {new Date(reset_date).toLocaleDateString()}
+              {t("usage.resets", { date: new Date(reset_date).toLocaleDateString() })}
             </div>
           ) : null}
         </div>
@@ -215,10 +215,10 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
       {/* Usage by model */}
       <div className="px-4 pb-1 pt-3">
         <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-muted">
-          Usage by model
+          {t("usage.byModel")}
         </div>
         {rows.length === 0 ? (
-          <p className="pb-2 text-xs text-text-muted">No usage yet.</p>
+          <p className="pb-2 text-xs text-text-muted">{t("usage.empty")}</p>
         ) : (
           <div className="flex flex-col gap-2.5 pb-2">
             {rows.map((row) => (
@@ -234,9 +234,9 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
 
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
-        <span className="text-xs text-text-muted">Total used</span>
+        <span className="text-xs text-text-muted">{t("usage.totalUsed")}</span>
         <span className="text-xs font-medium tabular-nums text-text-primary">
-          {totalUsed.toLocaleString()} credits
+          {totalUsed.toLocaleString()} {t("usage.unit.credits")}
         </span>
       </div>
     </div>
@@ -252,7 +252,7 @@ function ModelRow({ row, name }: { row: ModelUsage; name: string }) {
           {name}
         </span>
         <span className="shrink-0 text-[11px] font-medium tabular-nums text-text-primary">
-          {row.credits_used.toLocaleString()} credits
+          {row.credits_used.toLocaleString()} {tOutside("usage.unit.credits")}
         </span>
       </div>
       <div className="flex items-center justify-between gap-2">

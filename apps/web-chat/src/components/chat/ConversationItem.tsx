@@ -117,7 +117,7 @@ export function ConversationItem({
             className="flex flex-1 items-center gap-1.5 truncate"
             title={
               conv.memory_enabled === false
-                ? `${conv.title || "Untitled"} — temporary chat (memory off)`
+                ? t("conv.tempChatTooltip", { title: conv.title || t("conv.untitled") })
                 : conv.title
             }
           >
@@ -137,7 +137,7 @@ export function ConversationItem({
                 className="shrink-0 text-text-muted opacity-70"
               />
             ) : null}
-            <span className="truncate">{conv.title || "Untitled"}</span>
+            <span className="truncate">{conv.title || t("conv.untitled")}</span>
           </span>
         )}
         <button
@@ -323,7 +323,7 @@ export function ConversationItem({
           onClick={(e) => e.stopPropagation()}
         >
           <p className="text-text-secondary">
-            Delete this conversation? This cannot be undone.
+            {t("conv.deleteConfirm")}
           </p>
           <div className="mt-1.5 flex gap-2">
             <button
@@ -334,14 +334,14 @@ export function ConversationItem({
               }}
               className="focus-ring rounded bg-status-danger/85 px-2 py-1 font-medium text-white hover:bg-status-danger"
             >
-              Delete
+              {t("common.delete")}
             </button>
             <button
               type="button"
               onClick={() => setConfirmingDelete(false)}
               className="focus-ring rounded border border-border px-2 py-1 text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
         </div>
