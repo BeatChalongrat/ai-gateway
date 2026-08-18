@@ -10,7 +10,9 @@ Verifies:
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.providers.model_registry import list_models
+import pytest
+
+from app.services.providers.model_registry import get_all_candidates, list_models
 
 client = TestClient(app)
 
@@ -60,3 +62,65 @@ class TestModelsEndpoint:
         """Registry should have more models than the old hardcoded 3."""
         body = client.get("/v1/models").json()
         assert len(body["data"]) > 3
+
+
+class TestDisplayDataFields:
+    """Models-catalog step 1: /v1/models carries context window + per-1M
+    prices from the registry row, additively (absent when unknown).
+
+    The provider-key filter is stubbed wide open so these assertions are
+    deterministic regardless of which keys the test DB happens to hold
+    (standalone runs of this file otherwise see only the ``auto`` row).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _all_providers_valid(self, monkeypatch):
+        from app.api.routes import public_models as pm
+
+        monkeypatch.setattr(
+            pm.ProviderKeyService,
+            "providers_with_valid_keys",
+            lambda self, session: {
+                c.provider for c in get_all_candidates()
+            },
+        )
+
+    def _by_id(self):
+        return {m["id"]: m for m in client.get("/v1/models").json()["data"]}
+
+    def test_priced_candidate_exposes_per_1m_prices(self):
+        by_id = self._by_id()
+        checked = 0
+        for c in get_all_candidates():
+            row = by_id.get(c.model)
+            if (
+                row is None
+                or (c.cost_per_input_token or 0) <= 0
+                or (c.cost_per_output_token or 0) <= 0
+            ):
+                continue
+            assert row["input_price_per_1m"] == round(
+                c.cost_per_input_token * 1_000_000, 4
+            )
+            assert row["output_price_per_1m"] == round(
+                c.cost_per_output_token * 1_000_000, 4
+            )
+            checked += 1
+        assert checked > 0, "no priced registry candidate reached the wire"
+
+    def test_context_window_matches_registry(self):
+        by_id = self._by_id()
+        checked = 0
+        for c in get_all_candidates():
+            row = by_id.get(c.model)
+            if row is None or (c.max_context_tokens or 0) <= 0:
+                continue
+            assert row["context_window"] == c.max_context_tokens
+            checked += 1
+        assert checked > 0
+
+    def test_auto_entry_has_no_display_fields(self):
+        auto = self._by_id()["auto"]
+        assert "context_window" not in auto
+        assert "input_price_per_1m" not in auto
+        assert "output_price_per_1m" not in auto
