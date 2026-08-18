@@ -115,7 +115,7 @@ web-unit-test:
 # ─────────────────────────────────────────────────────────────────────────
 go-test:
   stage: test
-  image: golang:1.24
+  image: golang:1.25
   variables:
     GOPATH: "$CI_PROJECT_DIR/.cache/go"
   cache:
@@ -136,7 +136,7 @@ go-test:
 # ─────────────────────────────────────────────────────────────────────────
 gateway-test:
   stage: test
-  image: golang:1.24
+  image: golang:1.25
   variables:
     GOPATH: "$CI_PROJECT_DIR/.cache/go"
   cache:
@@ -252,7 +252,7 @@ audit:npm:
 
 audit:go:
   stage: audit
-  image: golang:1.24
+  image: golang:1.25
   variables:
     GOPATH: "$CI_PROJECT_DIR/.cache/go"
   cache:
