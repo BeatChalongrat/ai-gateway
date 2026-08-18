@@ -75,6 +75,19 @@ export function validateFile(
   return { ok: true };
 }
 
+/** Trigger a browser save from an ALREADY-LOADED object URL (W2).
+ *  Unlike api.downloadFile this never fetches and never revokes —
+ *  the URL is owned by whoever loaded it (AuthedImage revokes on
+ *  unmount), so revoking here would kill the on-screen image. */
+export function downloadFromObjectUrl(url: string, filename: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 export type FileIcon = "pdf" | "doc" | "sheet" | "text" | "image" | "generic";
 
 export function iconKindFor(filename: string, contentType?: string): FileIcon {

@@ -15,7 +15,8 @@ import { useRef, useState } from "react";
 import { Download } from "lucide-react";
 
 import { api } from "@/lib/api";
-import { formatBytes, isImageMime } from "@/lib/fileUtil";
+import { downloadFromObjectUrl, formatBytes, isImageMime } from "@/lib/fileUtil";
+import { useT } from "@/lib/i18n";
 import type { FileAttachment } from "@/lib/types";
 import { openLightbox } from "@/components/ui/ImageLightbox";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
@@ -76,27 +77,48 @@ export function MessageAttachments({ files }: Props) {
 }
 
 function ImageThumb({ file }: { file: FileAttachment }) {
+  const t = useT();
   // AuthedImage hands us the loaded object URL; we reuse it for the
-  // full-size lightbox so opening it doesn't trigger a second fetch.
-  // The thumb stays mounted while the lightbox overlay is open, so the
-  // URL is still valid (AuthedImage revokes only on unmount).
+  // full-size lightbox AND the download button so neither triggers a
+  // second fetch. The thumb stays mounted while the lightbox overlay
+  // is open, so the URL is still valid (AuthedImage revokes only on
+  // unmount).
   const objectUrl = useRef<string | null>(null);
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (objectUrl.current) openLightbox(objectUrl.current, file.filename);
-      }}
-      className="focus-ring overflow-hidden rounded-md border border-border bg-bg-base"
-      title={`${file.filename} · ${formatBytes(file.file_size_bytes)}`}
-    >
-      <AuthedImage
-        fileId={file.id}
-        alt={file.filename}
-        onReady={(u) => (objectUrl.current = u)}
-        className="block max-h-[200px] max-w-[300px] object-cover"
-      />
-    </button>
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={() => {
+          if (objectUrl.current)
+            openLightbox(objectUrl.current, file.filename, file.filename);
+        }}
+        className="focus-ring overflow-hidden rounded-md border border-border bg-bg-base"
+        title={`${file.filename} · ${formatBytes(file.file_size_bytes)}`}
+      >
+        <AuthedImage
+          fileId={file.id}
+          alt={file.filename}
+          onReady={(u) => (objectUrl.current = u)}
+          className="block max-h-[200px] max-w-[300px] object-cover"
+        />
+      </button>
+      {/* Hover download — W2. Sibling of the thumb button (a nested
+          button would be invalid HTML); saves straight from the loaded
+          object URL, zero re-fetch. Focus reveals it for keyboard use. */}
+      <button
+        type="button"
+        aria-label={t("common.download")}
+        title={t("common.download")}
+        data-testid="image-thumb-download"
+        onClick={() => {
+          if (objectUrl.current)
+            downloadFromObjectUrl(objectUrl.current, file.filename);
+        }}
+        className="focus-ring absolute right-1.5 top-1.5 rounded-md bg-black/55 p-1.5 text-white opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <Download className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </div>
   );
 }
 

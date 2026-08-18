@@ -568,6 +568,9 @@ export const en = {
   "common.dismiss": "Dismiss",
   "common.loading": "Loading…",
 
+  // ── Batch 1 W2 — image lightbox ─────────────────────────────
+  "lightbox.zoomReset": "Reset zoom",
+
   // ── Phase-3 i18n cleanup — count units ──────────────────────
   "unit.file": "file",
   "unit.files": "files",
@@ -1415,6 +1418,9 @@ const th: Record<DictKey, string> = {
   "common.close": "ปิด",
   "common.dismiss": "ปิดข้อความ",
   "common.loading": "กำลังโหลด…",
+
+  // ── Batch 1 W2 — image lightbox ─────────────────────────────
+  "lightbox.zoomReset": "รีเซ็ตการซูม",
 
   // ── Phase-3 i18n cleanup — count units ──────────────────────
   "unit.file": "ไฟล์",
