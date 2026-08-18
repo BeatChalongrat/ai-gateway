@@ -43,7 +43,20 @@ public sealed record MessageDto(
     // FIX 10: the message's file attachments (uploads + generated media),
     // embedded per message by the server's list endpoint. Null/empty when
     // the message has none.
-    [property: JsonPropertyName("files")] List<FileAttachmentDto>? Files = null);
+    [property: JsonPropertyName("files")] List<FileAttachmentDto>? Files = null,
+    // Batch 1 D2: web-search citations persisted on the row (server column
+    // search_sources, migration 023), embedded per message by the list
+    // endpoint. Null/absent when the turn used no web search.
+    [property: JsonPropertyName("search_sources")] List<SearchSourceDto>? SearchSources = null);
+
+/// <summary>One persisted web-search citation (D2) — the JSONB entry shape
+/// the server stores ({title,url,snippet,domain,published_date}).</summary>
+public sealed record SearchSourceDto(
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("url")] string? Url,
+    [property: JsonPropertyName("snippet")] string? Snippet,
+    [property: JsonPropertyName("domain")] string? Domain,
+    [property: JsonPropertyName("published_date")] string? PublishedDate = null);
 
 /// <summary>GET /conversations/{id}/messages — latest N in ascending order; `before` pages older.</summary>
 public sealed record MessageListResponse(
