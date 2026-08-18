@@ -16,6 +16,7 @@ import { create } from "zustand";
 
 import { bumpUsageVersion } from "@/hooks/useUsage";
 import { api, ApiError } from "@/lib/api";
+import { clearDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
@@ -806,6 +807,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // if the conversation list is mutated during the request window.
     const beforeProjectId = get().conversations.find((c) => c.id === id)?.project_id ?? null;
     await api.deleteConversation(id);
+    // A deleted conversation must not resurrect its unsent draft (W1).
+    clearDraft(id);
     set((s) => {
       const next = { ...s.messages };
       delete next[id];

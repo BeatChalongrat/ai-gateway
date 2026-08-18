@@ -5,6 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import {
+  clearDraft,
+  loadDraft,
+  migrateDraft,
+  NEW_CHAT_DRAFT_KEY,
+  saveDraft,
+} from "@/lib/draftStore";
 import type { ExtractionStatus } from "@/lib/fileExtraction";
 import { isExtracting, watchExtraction } from "@/lib/fileExtraction";
 import {
@@ -100,6 +107,72 @@ export function ChatInput({
 }: Props) {
   const t = useT();
   const [text, setText] = useState("");
+
+  // ── Composer draft persistence (Batch 1 W1 — desktop parity) ────
+  // Typed-but-unsent text survives conversation switches and reloads:
+  // debounced (~1s) save while typing, immediate flush on switch and
+  // unmount, delete on send. Invisible beyond the text reappearing —
+  // mirrors ChatViewModel.cs "Composer draft persistence (Phase 3 C4)".
+  const draftKey = conversationId ?? NEW_CHAT_DRAFT_KEY;
+  // Render-time mirrors so the flush paths (key-change effect, unmount
+  // cleanup) read the CURRENT text/key without re-running per keystroke.
+  const textRef = useRef(text);
+  textRef.current = text;
+  const draftKeyRef = useRef(draftKey);
+
+  // Restore on mount + handle an in-place key change. The only expected
+  // in-place change is a landing page's eager-create (null → real id):
+  // the visible text belongs to the SAME logical conversation, so the
+  // entry migrates instead of loading (an empty load would clobber what
+  // the user is typing). NOTE: the current /chat landing intentionally
+  // pins conversationId=null for its instance's lifetime, so this branch
+  // is defensive — landing drafts live under NEW_CHAT_DRAFT_KEY and
+  // restore when the landing page is revisited.
+  useEffect(() => {
+    const prev = draftKeyRef.current;
+    if (prev !== draftKey) {
+      draftKeyRef.current = draftKey;
+      if (prev === NEW_CHAT_DRAFT_KEY && conversationId) {
+        migrateDraft(prev, draftKey);
+        saveDraft(draftKey, textRef.current);
+        return;
+      }
+      // Any other in-place switch: flush the outgoing conversation's
+      // text, then fall through to restore the incoming one.
+      saveDraft(prev, textRef.current);
+    }
+    const restored = loadDraft(draftKey);
+    if (restored !== null && restored !== textRef.current) {
+      setText(restored);
+      // Caret at the end of the restored text. No focus() call — the
+      // restore must never steal focus or pop the soft keyboard.
+      requestAnimationFrame(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        const end = ta.value.length;
+        ta.setSelectionRange(end, end);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, conversationId]);
+
+  // Debounced (~1s) save while typing; the effect cleanup doubles as
+  // the per-keystroke debounce reset. saveDraft with empty text deletes
+  // the entry, so clearing the composer clears the draft too.
+  useEffect(() => {
+    const key = draftKey;
+    const id = window.setTimeout(() => saveDraft(key, text), 1000);
+    return () => window.clearTimeout(id);
+  }, [text, draftKey]);
+
+  // Flush on unmount so a fast click-away (before the debounce fires)
+  // still lands the draft. Mount-only: the refs carry current values.
+  useEffect(() => {
+    return () => {
+      saveDraft(draftKeyRef.current, textRef.current);
+    };
+  }, []);
+
   // Phase 10 — slash quick actions. The menu is derived from `text`
   // (single source of truth): no separate "is open" flag to fall out of
   // sync with what the user actually typed.
@@ -426,6 +499,10 @@ export function ChatInput({
     );
     onSend(t, readyFileIds, imageMode, videoMode);
     setText("");
+    // Delete the persisted draft NOW — the debounced empty-save would
+    // also clear it, but a reload inside that 1s window must not
+    // resurrect an already-sent message.
+    clearDraft(draftKey);
     // Clear whichever bucket the visible chips were rendering from —
     // covers both the conv-page case (real id) and the landing
     // path where the chips might still be on the DRAFT key at the
