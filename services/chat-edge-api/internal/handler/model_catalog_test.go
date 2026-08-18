@@ -45,21 +45,26 @@ func TestStaticPricesRemainWhenGatewayOmitsThem(t *testing.T) {
 	}
 }
 
-func TestGatewayContextFillsUnknownModelsOnly(t *testing.T) {
+func TestGatewayContextWins(t *testing.T) {
 	h := newTestHandler()
 	out, _ := h.buildFromGateway([]service.GatewayModelInfo{
 		// Unknown to the static map -> gateway context fills in.
 		{ID: "gpt-6-preview", Provider: "openai", ContextWindow: 400000},
-		// Curated entry keeps its curated context even when the gateway
-		// sends a different number (dirty pre-gpt-5 rows carry a
-		// max-OUTPUT value in max_context_tokens).
-		{ID: "gpt-4o-mini", Provider: "openai", ContextWindow: 16384},
+		// Curated entry too: model_configs is the context authority
+		// since migration 076 corrected the rows that carried
+		// max-OUTPUT values, so gateway data wins everywhere.
+		{ID: "gpt-4o-mini", Provider: "openai", ContextWindow: 128000},
+		// Gateway silent on context -> static fallback survives.
+		{ID: "gpt-4o", Provider: "openai"},
 	})
 	if out[0].ContextWindow != 400000 {
 		t.Fatalf("discovered model context = %d, want 400000", out[0].ContextWindow)
 	}
-	if want := modelMetadata["gpt-4o-mini"].ContextWindow; out[1].ContextWindow != want {
-		t.Fatalf("curated context overridden: got %d want %d", out[1].ContextWindow, want)
+	if out[1].ContextWindow != 128000 {
+		t.Fatalf("curated model context = %d, want gateway 128000", out[1].ContextWindow)
+	}
+	if want := modelMetadata["gpt-4o"].ContextWindow; out[2].ContextWindow != want {
+		t.Fatalf("static fallback context lost: got %d want %d", out[2].ContextWindow, want)
 	}
 }
 

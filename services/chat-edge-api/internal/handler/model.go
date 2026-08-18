@@ -328,14 +328,11 @@ func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
 // capability is taken from the Gateway (DB-authoritative), so a newly
 // onboarded reasoning model no longer needs a code change here.
 //
-// Models-catalog step 2: prices and (when curated metadata has none)
-// context window now come from the Gateway too — model_configs is the
-// price authority (migrations 068-072 corrected it; the static map had
-// drifted). The static map remains the fallback for fields the Gateway
-// does not send. Context window stays curated-first for now because
-// several pre-gpt-5 model_configs rows carry a max-OUTPUT value in
-// max_context_tokens (e.g. gpt-4o-mini = 16384) — flip to gateway-first
-// once that data is cleaned.
+// Models-catalog step 2: prices and context window now come from the
+// Gateway — model_configs is the display-data authority (migrations
+// 068-072 corrected prices, 076 corrected the context windows that
+// carried max-OUTPUT values). The static map remains the fallback for
+// fields the Gateway does not send.
 //
 // The second return value maps model id -> DB supports_tools, consumed
 // by KnownWithoutTools (step 4).
@@ -386,19 +383,15 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) ([]modelR
 		}
 		resp := h.buildModelResponse(m.ID, name, m.Provider, rb)
 		// Step 2 — Gateway-supplied display data wins over the static
-		// map for PRICES (model_configs is the corrected authority);
-		// context window fills in only where curated metadata has none
-		// (see the function comment on the dirty pre-gpt-5 rows).
+		// map: model_configs is the corrected authority for prices
+		// (068-072) and context windows (076).
 		if m.InputPricePer1M > 0 {
 			resp.InputPricePerM = m.InputPricePer1M
 		}
 		if m.OutputPricePer1M > 0 {
 			resp.OutputPricePerM = m.OutputPricePer1M
 		}
-		// "Curated" means an EXACT modelMetadata entry — the provider-
-		// default bucket (any unknown openai id gets 128000) is a guess
-		// and loses to real DB data.
-		if _, curated := modelMetadata[m.ID]; !curated && m.ContextWindow > 0 {
+		if m.ContextWindow > 0 {
 			resp.ContextWindow = m.ContextWindow
 		}
 		// Step 4 groundwork — surface the DB-authoritative tools/vision

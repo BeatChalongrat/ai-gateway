@@ -102,7 +102,12 @@ def _enrich_with_pricing(
         if isinstance(cost_out, (int, float)) and cost_out >= 0:
             model.cost_per_output_token = float(cost_out)
     if model.max_context_tokens == DEFAULT_MAX_CONTEXT_TOKENS:
-        max_tokens = pricing.get("max_tokens") or pricing.get("max_input_tokens")
+        # ``max_input_tokens`` FIRST: litellm's legacy ``max_tokens``
+        # key is the max OUTPUT figure for many entries (gpt-4o: 16384,
+        # o1: 100000). Preferring it is what filled ~30 catalog rows
+        # with an output cap as their "context window" — the data
+        # migration 076 repairs those; this ordering stops the refill.
+        max_tokens = pricing.get("max_input_tokens") or pricing.get("max_tokens")
         if isinstance(max_tokens, int) and max_tokens > 0:
             model.max_context_tokens = max_tokens
 
