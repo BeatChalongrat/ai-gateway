@@ -299,6 +299,10 @@ class Settings(BaseSettings):
     provider_max_retries: int = 2
     image_generation_timeout_seconds: float = 180.0
     openai_image_timeout_seconds: float = 180.0
+    # Ceiling for /v1/voice/* (transcribe + synthesize). Audio work on a
+    # long clip routinely outruns the global 20s request timeout, which
+    # 504'd mid-transcription (Batch 1 B1).
+    voice_timeout_seconds: float = 120.0
 
     # Provider base-URL overrides (used by perf-baseline to re-target all
     # outbound calls at the local mock_provider). JSON dict keyed by
