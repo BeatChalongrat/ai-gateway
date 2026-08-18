@@ -47,9 +47,10 @@ public partial class AudioGenViewModel : ObservableObject
         ILogger logger,
         string modelId,
         string? conversationId,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        Func<MediaGenSubmitResponse, CancellationToken, Task<bool>>? confirmPremium = null)
     {
-        _service = new AudioGenerationService(api, logger, delay);
+        _service = new AudioGenerationService(api, logger, delay, confirmPremium);
         _service.ProgressChanged += (_, pct) => ProgressPct = pct;
         _modelId = modelId;
         _conversationId = conversationId;
@@ -145,6 +146,12 @@ public partial class AudioGenViewModel : ObservableObject
                 ResultContentType = result.ContentType;
                 StatusMessage = null;
                 Completed?.Invoke(this, result);
+            }
+            else if (result.UserCancelled)
+            {
+                // Declined the premium-cost confirmation (D1) — same silent
+                // reset as pressing Cancel; there is no error to report.
+                StatusMessage = null;
             }
             else
             {
