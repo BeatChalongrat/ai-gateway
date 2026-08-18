@@ -30,6 +30,8 @@
 
 import "katex/dist/katex.min.css";
 
+import { useMemo } from "react";
+
 import ReactMarkdown, { type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -37,6 +39,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 
 import { tOutside } from "@/lib/i18n";
+import { normalizeMathDelimiters } from "@/lib/mathDelimiters";
 
 import { CodeBlock } from "./CodeBlock";
 
@@ -160,13 +163,21 @@ interface MarkdownProps {
 }
 
 export function Markdown({ children, citations = false }: MarkdownProps) {
+  // T1 — GPT-family models emit \[…\]/\(…\) math delimiters, which
+  // remark-math doesn't parse; normalize them to $-forms first (fence /
+  // inline-code / streaming aware — see lib/mathDelimiters.ts). Runs
+  // BEFORE the citation rewrite so pills act on normalized text; runs
+  // here (the one shared pipeline home) so every render surface —
+  // streaming blocks, completed messages, the public shared view —
+  // behaves identically.
+  const normalized = useMemo(() => normalizeMathDelimiters(children), [children]);
   return (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       components={markdownComponents}
     >
-      {citations ? renderCitations(children) : children}
+      {citations ? renderCitations(normalized) : normalized}
     </ReactMarkdown>
   );
 }

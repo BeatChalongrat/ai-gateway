@@ -135,6 +135,32 @@ describe("LaTeX via remark-math + rehype-katex", () => {
     expect(container.querySelector(".katex-display")).not.toBeNull();
   });
 
+  // ── Batch 2 T1 — GPT-style \[…\]/\(…\) delimiters ─────────────────
+  it("renders \\[…\\] as display math (GPT-family default delimiters)", () => {
+    const { container } = render(<Markdown>{"\\[x^2 + 1\\]"}</Markdown>);
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+  });
+
+  it("renders \\(…\\) as inline math", () => {
+    const { container } = render(<Markdown>{"value \\(a+b\\) here"}</Markdown>);
+    expect(container.querySelector(".katex")).not.toBeNull();
+    expect(container.querySelector(".katex-display")).toBeNull();
+  });
+
+  it("leaves \\[ inside a code fence as literal code", () => {
+    const { container } = render(
+      <Markdown>{"```latex\n\\[x^2\\]\n```"}</Markdown>,
+    );
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toContain("\\[x^2\\]");
+  });
+
+  it("leaves an unterminated \\[ literal while streaming", () => {
+    const { container } = render(<Markdown>{"result is \\[x^2 + "}</Markdown>);
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.textContent).toContain("[x^2 +");
+  });
+
   it("keeps an unclosed single $ literal (dollar amounts survive)", () => {
     const { container } = render(
       <Markdown>{"The fee is $5 per month"}</Markdown>,

@@ -51,9 +51,13 @@ public sealed class MarkdownRenderer
         "M8.5 13.5 11 16.51 14.5 12 19 18H5l3.5-4.5Z");
 
     /// <summary>Parses with the renderer's exact pipeline — the streaming
-    /// viewer must diff the SAME block structure this class renders.</summary>
+    /// viewer must diff the SAME block structure this class renders.
+    /// T1: GPT-style \[…\]/\(…\) math delimiters normalize to $-forms
+    /// FIRST (fence/inline-code/streaming aware — see MathDelimiters),
+    /// inside this one choke point so the viewer's block diff and the
+    /// full render always see identical normalized structure.</summary>
     internal static MarkdownDocument ParseDocument(string markdown) =>
-        Markdig.Markdown.Parse(markdown, Pipeline);
+        Markdig.Markdown.Parse(MathDelimiters.Normalize(markdown), Pipeline);
 
     public FrameworkElement Render(string markdown)
     {
