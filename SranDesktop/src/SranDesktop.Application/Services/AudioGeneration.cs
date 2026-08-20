@@ -4,16 +4,13 @@ using SranDesktop.Application.Models;
 
 namespace SranDesktop.Application.Services;
 
-/// <summary>Terminal outcome of an audio-generation run. UserCancelled
-/// distinguishes "declined the premium-cost confirmation" from a real
-/// failure — the caller resets silently instead of showing an error.</summary>
+/// <summary>Terminal outcome of an audio-generation run.</summary>
 public sealed record AudioGenerationResult(
     bool Success,
     byte[]? Audio,
     string? Filename,
     string? ContentType,
-    string? ErrorMessage,
-    bool UserCancelled = false);
+    string? ErrorMessage);
 
 /// <summary>
 /// Job-status vocabulary, in one place. The gateway is the authority on the
@@ -58,18 +55,15 @@ public sealed class AudioGenerationService
     private readonly IChatEdgeApiClient _api;
     private readonly ILogger _logger;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
-    private readonly Func<MediaGenSubmitResponse, CancellationToken, Task<bool>>? _confirmPremium;
 
     public AudioGenerationService(
         IChatEdgeApiClient api,
         ILogger logger,
-        Func<TimeSpan, CancellationToken, Task>? delay = null,
-        Func<MediaGenSubmitResponse, CancellationToken, Task<bool>>? confirmPremium = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _api = api;
         _logger = logger;
         _delay = delay ?? ((d, ct) => Task.Delay(d, ct));
-        _confirmPremium = confirmPremium;
     }
 
     /// <summary>Progress callback: percent complete when the job reports it.</summary>
@@ -87,32 +81,6 @@ public sealed class AudioGenerationService
         {
             _logger.LogWarning(ex, "Audio generation submit failed");
             return Failure(ex.Message);
-        }
-
-        // Premium-cost gate (Batch 1 D1). The threshold is SERVER-owned:
-        // requires_confirmation=true means the job is reserved but must not
-        // proceed without explicit consent — the same post-submit flow as
-        // the web CostConfirmModal (cancel → POST /jobs/{id}/cancel refunds
-        // the reservation; confirm → start polling). With no confirm hook
-        // wired (headless callers), declining is the safe default.
-        if (submitted.RequiresConfirmation)
-        {
-            var confirmed = false;
-            try
-            {
-                confirmed = _confirmPremium is not null
-                    && await _confirmPremium(submitted, ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Premium confirmation failed; treating as declined");
-            }
-            if (!confirmed)
-            {
-                await CancelJobSafeAsync(submitted.JobId);
-                return new AudioGenerationResult(
-                    false, null, null, null, null, UserCancelled: true);
-            }
         }
 
         // A job can come back already finished (cache hit) — check before
@@ -157,21 +125,6 @@ public sealed class AudioGenerationService
         {
             _logger.LogWarning(ex, "Could not download the generated audio");
             return Failure(ex.Message);
-        }
-    }
-
-    /// <summary>Best-effort cancel of a declined reservation. Runs on
-    /// CancellationToken.None — the refund must not be lost to a racing
-    /// user cancel of the surrounding run.</summary>
-    private async Task CancelJobSafeAsync(string jobId)
-    {
-        try
-        {
-            await _api.CancelMediaJobAsync(jobId, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not cancel declined media job {JobId}", jobId);
         }
     }
 

@@ -532,14 +532,6 @@ public sealed class ChatEdgeApiClient : IChatEdgeApiClient
             $"api/v1/jobs/{Uri.EscapeDataString(jobId)}", ct);
     }
 
-    public async Task<MediaJobStatus> CancelMediaJobAsync(string jobId, CancellationToken ct = default)
-    {
-        using var deadline = Deadline(ct);
-        using var response = await _http.PostAsync(
-            $"api/v1/jobs/{Uri.EscapeDataString(jobId)}/cancel", content: null, deadline.Token);
-        return await ReadAsync<MediaJobStatus>(response, deadline.Token);
-    }
-
     public async Task<byte[]> DownloadMediaJobOutputAsync(string jobId, CancellationToken ct = default)
     {
         // The artifact can run to tens of MB — allow more than the default
