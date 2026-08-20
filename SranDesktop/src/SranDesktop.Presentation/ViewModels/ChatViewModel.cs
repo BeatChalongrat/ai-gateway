@@ -3851,31 +3851,7 @@ public partial class ChatViewModel : ObservableObject
         if (string.IsNullOrEmpty(modelId) || modelId == "auto")
             return;
 
-        // Premium-cost gate (Batch 1 D1): the server flags jobs above its
-        // confirmation threshold with requires_confirmation — show the cost
-        // and require explicit consent before the job runs, mirroring the
-        // web CostConfirmModal. With no dialog service wired, the service's
-        // safe default declines (job cancelled, reservation refunded).
-        Func<Application.Models.MediaGenSubmitResponse, CancellationToken, Task<bool>>? confirmPremium = null;
-        if (_dialogs is { } dialogs)
-        {
-            confirmPremium = (submitted, _) =>
-            {
-                var l = Localization.LocaleService.Instance;
-                var message = string.Format(
-                    l.T("media.confirm.message"), submitted.EstimatedCostUsd ?? "—");
-                if (!string.IsNullOrEmpty(submitted.BalanceAfterUsd))
-                    message += "\n" + string.Format(
-                        l.T("media.confirm.balanceAfter"), submitted.BalanceAfterUsd);
-                message += "\n\n" + l.T("media.confirm.body");
-                // destructive:false → the confirm button reads "Confirm".
-                return dialogs.ConfirmAsync(
-                    l.T("media.confirm.title"), message, destructive: false);
-            };
-        }
-
-        var vm = new AudioGenViewModel(
-            _api, _logger, modelId, Conversation?.Id, confirmPremium: confirmPremium);
+        var vm = new AudioGenViewModel(_api, _logger, modelId, Conversation?.Id);
         vm.Completed += (_, result) =>
         {
             if (!result.Success || result.Audio is not { Length: > 0 })

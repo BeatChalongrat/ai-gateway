@@ -127,12 +127,6 @@ public interface IChatEdgeApiClient
 
     Task<MediaJobStatus> GetMediaJobAsync(string jobId, CancellationToken ct = default);
 
-    /// <summary>POST /jobs/{id}/cancel — abort a reserved or running media job
-    /// (refunds the session reservation). Mirrors the web client's
-    /// cancelMediaJob; used when the user declines a premium-cost
-    /// confirmation (Batch 1 D1).</summary>
-    Task<MediaJobStatus> CancelMediaJobAsync(string jobId, CancellationToken ct = default);
-
     /// <summary>The finished artifact's bytes, through the authed client — the
     /// job's output_url is gateway-relative and cannot be fetched directly.</summary>
     Task<byte[]> DownloadMediaJobOutputAsync(string jobId, CancellationToken ct = default);
