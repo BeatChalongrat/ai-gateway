@@ -13,9 +13,9 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Version>1.2.3</Version>
-    <FileVersion>1.2.3.0</FileVersion>
-    <AssemblyVersion>1.2.3.0</AssemblyVersion>
+    <Version>1.2.4</Version>
+    <FileVersion>1.2.4.0</FileVersion>
+    <AssemblyVersion>1.2.4.0</AssemblyVersion>
     <Product>SRAN Desktop</Product>
     <Company>SRAN</Company>
     <Description>AI Desktop Assistant with MCP Agent capabilities</Description>

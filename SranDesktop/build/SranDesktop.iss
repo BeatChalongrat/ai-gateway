@@ -6,7 +6,7 @@
 ; Build:  ISCC.exe build\SranDesktop.iss
 
 #define MyAppName "SRAN Desktop"
-#define MyAppVersion "1.2.3"
+#define MyAppVersion "1.2.4"
 #define MyAppPublisher "SRAN"
 #define MyAppURL "https://sran.ai"
 #define MyAppExeName "SranDesktop.exe"
