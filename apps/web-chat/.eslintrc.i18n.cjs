@@ -10,7 +10,7 @@
 // the library-bound plugins (formatjs, react-intl) do not apply, and
 // react/jsx-no-literals — already available via eslint-plugin-react —
 // cannot tell a user-visible attribute from className or data-testid.
-// This rule can, via onlyAttribute.
+// This rule can, via its jsx-attributes include-list.
 module.exports = {
   root: true,
   parser: "@typescript-eslint/parser",
@@ -25,12 +25,15 @@ module.exports = {
       "error",
       {
         // JSX text nodes plus the four attributes a user actually reads.
-        // Everything else (className, data-testid, keys, technical
-        // constants, imports, object literals) is out of scope by
-        // construction rather than by suppression.
         mode: "jsx-only",
         "should-validate-template": false,
-        onlyAttribute: ["title", "placeholder", "aria-label", "alt"],
+        // Only these four attributes are read by a user. Everything else
+        // (className, variant, data-testid, href, keys, technical
+        // constants) is excluded by NOT being included — the rule
+        // validates the include-list and nothing more.
+        "jsx-attributes": {
+          include: ["title", "placeholder", "aria-label", "alt"],
+        },
         message: "User-visible string must go through t() — see src/lib/i18n/dict.ts",
       },
     ],
