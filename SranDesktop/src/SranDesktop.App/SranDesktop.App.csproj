@@ -48,6 +48,26 @@
     </None>
   </ItemGroup>
 
+  <!-- Offline WebView2 libs (KaTeX for display math, React/mermaid/babel for
+       canvas) must land beside the exe as LOOSE FILES: the app finds them via
+       Path.Combine(AppContext.BaseDirectory, "Assets", "WebLibs") and maps the
+       folder into WebView2. A single-file publish bundles Content items INTO
+       the exe, where Directory.Exists cannot see them — so the build output
+       had all five libs while the publish output had none, and the installer
+       (which copies from publish) shipped a folder that silently disappeared.
+       Copying explicitly after Publish is the same idiom PublishBrowserHost
+       already uses, and it is immune to single-file bundling semantics. -->
+  <Target Name="PublishWebLibs" AfterTargets="Publish">
+    <ItemGroup>
+      <WebLibFile Include="..\SranDesktop.Presentation\Assets\WebLibs\**\*" />
+    </ItemGroup>
+    <Error Condition="'@(WebLibFile)' == ''"
+           Text="No files under SranDesktop.Presentation\Assets\WebLibs — display math and canvas would ship broken." />
+    <Copy SourceFiles="@(WebLibFile)"
+          DestinationFiles="@(WebLibFile->'$(PublishDir)Assets\WebLibs\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="PublishBrowserHost" AfterTargets="Publish">
     <PropertyGroup>
       <BrowserHostPublishDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\publish\win-x64\'))</BrowserHostPublishDir>
