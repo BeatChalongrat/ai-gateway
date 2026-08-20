@@ -29,6 +29,36 @@ public class MathPipelineTests
         math.DelimiterCount.Should().Be(1);
     }
 
+    // ── Currency vs inline math (audit A4) ────────────────────────────────
+    // Markdig refuses a closing '$' that is immediately followed by a DIGIT,
+    // which is what keeps "$100 ถึง $200" out of math while "$x$", "$100$"
+    // and "$2x + 5$" stay math. The web client had no such rule and
+    // typeset the text between two amounts; lib/remarkCurrencyGuard.ts
+    // ports THIS behaviour, so these cases are the cross-client contract —
+    // Markdown.test.tsx asserts the same six inputs.
+
+    [Theory]
+    [InlineData("ราคาอยู่ระหว่าง $100 ถึง $200")]
+    [InlineData("between $100 and $200")]
+    [InlineData("costs $100-$200 total")]
+    [InlineData("$100 today")]
+    public void Currency_Pairs_Are_Not_Math(string src)
+    {
+        Parse(src).Descendants().OfType<MathInline>().Should().BeEmpty(
+            "a closing '$' followed by a digit starts the next amount, not a formula");
+    }
+
+    [Theory]
+    [InlineData("the value $x$ grows", "x")]
+    [InlineData("solve $2x + 5$ now", "2x + 5")]
+    [InlineData("exactly $100$ baht", "100")]
+    public void Genuine_Single_Dollar_Math_Still_Renders(string src, string expected)
+    {
+        var math = Parse(src).Descendants().OfType<MathInline>().Single();
+
+        math.Content.ToString().Should().Be(expected);
+    }
+
     [Fact]
     public void Double_Dollar_Block_Produces_Closed_MathBlock()
     {

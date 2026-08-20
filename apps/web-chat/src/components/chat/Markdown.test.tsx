@@ -278,3 +278,82 @@ describe("shared-component invariant", () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Currency vs inline math (audit A4). The rule is Markdig's, ported so the
+// two clients agree: a closing `$` immediately followed by a digit is not a
+// math delimiter, it is the start of the next amount. Everything else that
+// rendered as math before must still render as math.
+// ─────────────────────────────────────────────────────────────────────────
+describe("currency is not math", () => {
+  afterEach(cleanup);
+
+  it("does not typeset the text between two Thai baht amounts", () => {
+    const { container } = render(
+      <Markdown>{"ราคาอยู่ระหว่าง $100 ถึง $200"}</Markdown>,
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.textContent).toContain("$100");
+    expect(container.textContent).toContain("$200");
+    expect(container.textContent).toContain("ถึง");
+  });
+
+  it("does not typeset the text between two English amounts", () => {
+    const { container } = render(
+      <Markdown>{"It costs between $100 and $200 per month"}</Markdown>,
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.textContent).toContain("$100 and $200");
+  });
+
+  it("does not typeset hyphenated amount ranges", () => {
+    const { container } = render(<Markdown>{"costs $100-$200 total"}</Markdown>);
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.textContent).toContain("$100-$200");
+  });
+
+  it("still renders genuine single-dollar inline math", () => {
+    const { container } = render(<Markdown>{"let $x$ be the count"}</Markdown>);
+
+    expect(container.querySelector(".katex")).not.toBeNull();
+    expect(container.querySelector(".katex-display")).toBeNull();
+  });
+
+  it("still renders inline math that merely starts with a digit", () => {
+    const { container } = render(<Markdown>{"solve $2x + 5$ now"}</Markdown>);
+
+    expect(container.querySelector(".katex")).not.toBeNull();
+  });
+
+  it("still renders a lone amount wrapped as math", () => {
+    // "$100$" is a formula by every rule we have; only a digit AFTER the
+    // closing delimiter means "second amount".
+    const { container } = render(<Markdown>{"exactly $100$ baht"}</Markdown>);
+
+    expect(container.querySelector(".katex")).not.toBeNull();
+  });
+
+  it("leaves T1's backslash math untouched while amounts stay literal", () => {
+    const { container } = render(
+      <Markdown>{"ราคา $100 ถึง $200 แล้ว \\(a+b\\) ครับ"}</Markdown>,
+    );
+
+    // The \(…\) formula still typesets (T1 routes it through $…$)...
+    expect(container.querySelectorAll(".katex").length).toBe(1);
+    // ...while both amounts stay literal text.
+    expect(container.textContent).toContain("$100");
+    expect(container.textContent).toContain("$200");
+  });
+
+  it("leaves $$ display math alone", () => {
+    const { container } = render(
+      <Markdown>{"ราคา $100 ถึง $200\n\n$$c+d$$"}</Markdown>,
+    );
+
+    expect(container.querySelectorAll(".katex").length).toBe(1);
+    expect(container.textContent).toContain("$100");
+  });
+});

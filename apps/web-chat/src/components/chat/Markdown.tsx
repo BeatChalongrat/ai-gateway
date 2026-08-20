@@ -40,6 +40,7 @@ import rehypeKatex from "rehype-katex";
 
 import { tOutside } from "@/lib/i18n";
 import { normalizeMathDelimiters } from "@/lib/mathDelimiters";
+import { remarkCurrencyGuard } from "@/lib/remarkCurrencyGuard";
 
 import { CodeBlock } from "./CodeBlock";
 
@@ -82,7 +83,14 @@ export const KATEX_OPTIONS = {
   output: "html",
 } as const;
 
-const remarkPlugins: Options["remarkPlugins"] = [remarkGfm, remarkMath];
+// remarkCurrencyGuard runs AFTER remark-math and undoes the one span
+// remark-math gets wrong: "$100 ถึง $200" (a closing $ followed by a
+// digit). Ports the rule Markdig already applies on desktop.
+const remarkPlugins: Options["remarkPlugins"] = [
+  remarkGfm,
+  remarkMath,
+  remarkCurrencyGuard,
+];
 // NOTE: rehype-raw is deliberately absent. Raw HTML must stay inert.
 const rehypePlugins: Options["rehypePlugins"] = [
   rehypeHighlight,
