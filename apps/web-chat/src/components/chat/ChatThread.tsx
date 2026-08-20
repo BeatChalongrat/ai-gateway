@@ -62,7 +62,16 @@ export function ChatThread({
   // conversation whose active stream has received no bytes (events or
   // server heartbeats) past the threshold; the retry rides the
   // existing resume machinery.
-  const stalled = useChatStore((s) => Boolean(s.stalledStreams[convId]));
+  // Two independent signals, one notice: the byte-based watchdog catches
+  // a dead CONNECTION (nothing arrives at all), while chat-edge's
+  // provider_stall event catches a live connection whose MODEL has gone
+  // quiet — heartbeats keep the byte clock fresh, so only the server can
+  // see that one.
+  const byteStalled = useChatStore((s) => Boolean(s.stalledStreams[convId]));
+  const providerStalled = useChatStore((s) =>
+    Boolean(s.providerStalledStreams[convId]),
+  );
+  const stalled = byteStalled || providerStalled;
   const retryStalledStream = useChatStore((s) => s.retryStalledStream);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [autoStick, setAutoStick] = useState(true);

@@ -155,4 +155,66 @@ public class ChatServiceTests
         events[0].Should().Be(new StreamStatusEvent("image", "started"));
         events[1].Should().Be(new StreamStatusEvent("video", "completed"));
     }
+
+    // ── Server-declared provider stall ────────────────────────────────
+    // chat-edge holds the upstream connection, so only it can tell a
+    // silent MODEL from a busy server. These pin that its verdict drives
+    // the same pill the client's byte watchdog uses, and that heartbeats
+    // can no longer wipe it.
+
+    [Fact]
+    public async Task Provider_Stall_Frame_Raises_The_Stalled_State()
+    {
+        var events = await RunAsync(
+            new SseFrame("message_start", """{"message_id":"m1"}"""),
+            new SseFrame("provider_stall", """{"stalled":true,"waiting_seconds":75}"""),
+            new SseFrame("message_complete", """{"message_id":"m1"}"""));
+
+        events.OfType<StreamStalledEvent>().Should().ContainSingle()
+            .Which.Stalled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Heartbeat_After_A_Provider_Stall_Does_Not_Clear_It()
+    {
+        // The bug this design avoids: a stalled provider still produces
+        // heartbeats, so a byte-driven clear would erase the warning
+        // immediately.
+        var events = await RunAsync(
+            new SseFrame("message_start", """{"message_id":"m1"}"""),
+            new SseFrame("provider_stall", """{"stalled":true,"waiting_seconds":75}"""),
+            new SseFrame(":", ""),
+            new SseFrame(":", ""),
+            new SseFrame("message_complete", """{"message_id":"m1"}"""));
+
+        events.OfType<StreamStalledEvent>().Should().ContainSingle()
+            .Which.Stalled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Provider_Recovery_Frame_Clears_The_Stalled_State()
+    {
+        var events = await RunAsync(
+            new SseFrame("message_start", """{"message_id":"m1"}"""),
+            new SseFrame("provider_stall", """{"stalled":true,"waiting_seconds":75}"""),
+            new SseFrame("provider_stall", """{"stalled":false}"""),
+            new SseFrame("content_delta", """{"delta":"back"}"""),
+            new SseFrame("message_complete", """{"message_id":"m1"}"""));
+
+        var stalls = events.OfType<StreamStalledEvent>().ToList();
+        stalls.Should().HaveCount(2);
+        stalls[0].Stalled.Should().BeTrue();
+        stalls[1].Stalled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Provider_Stall_Frame_Is_Never_Rendered_As_Content()
+    {
+        var events = await RunAsync(
+            new SseFrame("message_start", """{"message_id":"m1"}"""),
+            new SseFrame("provider_stall", """{"stalled":true}"""),
+            new SseFrame("message_complete", """{"message_id":"m1"}"""));
+
+        events.OfType<ContentDeltaEvent>().Should().BeEmpty();
+    }
 }

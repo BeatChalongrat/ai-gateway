@@ -55,6 +55,13 @@ type StreamSnapshot struct {
 	// ReasoningNotice: sticky like FallbackInfo — a reattaching client
 	// still learns the answer was produced without reasoning.
 	ReasoningNotice *ReasoningNotice
+	// ProviderStall: sticky, and carrying the LATEST state rather than
+	// the first. A client reattaching mid-stall must learn the turn is
+	// stalled — showing it a normal spinner during a dead turn is the
+	// exact blindness this feature exists to remove — while a client
+	// reattaching after recovery must NOT see a stale warning, which is
+	// why the recovery frame overwrites this instead of clearing a flag.
+	ProviderStall *ProviderStallNotice
 	// CodeExecutions are the run_python cards seen so far, in first-seen
 	// order, each collapsed to its LATEST frame (the "running" frame is
 	// superseded by the terminal one). Replaying them restores the
@@ -85,6 +92,7 @@ type brokerEntry struct {
 	search    string
 	fallback  map[string]any
 	rnotice   *ReasoningNotice
+	stall     *ProviderStallNotice
 	terminal  *StreamUpdate
 	// codeRuns keeps the latest frame per run_python call, plus the
 	// order they first appeared, so the snapshot replays them the way
@@ -120,6 +128,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		SearchStatus:    e.search,
 		FallbackInfo:    e.fallback,
 		ReasoningNotice: e.rnotice,
+		ProviderStall:   e.stall,
 		CodeExecutions:  runs,
 		ToolActivities:  acts,
 		Terminal:        e.terminal,
@@ -205,6 +214,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.ReasoningNotice != nil {
 		e.rnotice = ev.ReasoningNotice
+	}
+	if ev.ProviderStall != nil {
+		e.stall = ev.ProviderStall
 	}
 	if ev.CodeExecution != nil && ev.CodeExecution.ID != "" {
 		if e.codeRuns == nil {

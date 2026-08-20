@@ -287,3 +287,50 @@ func waitSnapshot(t *testing.T, b *StreamBroker, msgID uuid.UUID, cond func(Stre
 	}
 	t.Fatal("snapshot never reached expected state")
 }
+
+// A client that reattaches DURING a stall must learn the turn is stalled
+// — otherwise it shows a normal spinner for a dead turn, which is the
+// blindness server-side detection exists to remove.
+func TestBroker_SnapshotCarriesLatestStallState(t *testing.T) {
+	b := NewStreamBroker()
+	b.afterFunc = func(time.Duration, func()) *time.Timer { return nil }
+	msgID := uuid.New()
+	in := make(chan StreamUpdate, 4)
+	in <- StreamUpdate{Delta: "partial"}
+	in <- StreamUpdate{ProviderStall: &ProviderStallNotice{Stalled: true, WaitingSeconds: 75}}
+	close(in)
+	out := b.Tee(msgID, in)
+	collectNoT(out)
+
+	snap, _, _, _, ok := b.Subscribe(msgID)
+	if !ok {
+		t.Fatal("entry should be subscribable")
+	}
+	if snap.ProviderStall == nil || !snap.ProviderStall.Stalled {
+		t.Fatalf("reattaching client must see the stall: %+v", snap.ProviderStall)
+	}
+	if snap.ProviderStall.WaitingSeconds != 75 {
+		t.Errorf("waiting_seconds lost in replay: %+v", snap.ProviderStall)
+	}
+}
+
+// ...and one that reattaches AFTER recovery must not be shown a stale
+// warning: the recovery frame overwrites the stall rather than being a
+// second sticky value.
+func TestBroker_RecoveryOverwritesStallInSnapshot(t *testing.T) {
+	b := NewStreamBroker()
+	b.afterFunc = func(time.Duration, func()) *time.Timer { return nil }
+	msgID := uuid.New()
+	in := make(chan StreamUpdate, 4)
+	in <- StreamUpdate{ProviderStall: &ProviderStallNotice{Stalled: true, WaitingSeconds: 75}}
+	in <- StreamUpdate{ProviderStall: &ProviderStallNotice{Stalled: false}}
+	in <- StreamUpdate{Delta: "back"}
+	close(in)
+	out := b.Tee(msgID, in)
+	collectNoT(out)
+
+	snap, _, _, _, _ := b.Subscribe(msgID)
+	if snap.ProviderStall == nil || snap.ProviderStall.Stalled {
+		t.Fatalf("recovery must clear the replayed stall: %+v", snap.ProviderStall)
+	}
+}

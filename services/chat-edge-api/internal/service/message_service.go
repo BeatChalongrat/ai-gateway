@@ -949,6 +949,24 @@ type StreamUpdate struct {
 	// requested). The handler emits it as a ``reasoning_notice`` SSE
 	// event — informational, never an error.
 	ReasoningNotice *ReasoningNotice
+
+	// Provider-stall state. chat-edge holds the upstream connection, so
+	// chat-edge is the only layer that can tell "the provider has gone
+	// quiet" apart from "the server is busy working" — to a client both
+	// look identical (see the heartbeat comment in handler/message.go).
+	// Emitted once when the wait crosses the threshold and once more
+	// with Stalled=false when output resumes.
+	ProviderStall *ProviderStallNotice
+}
+
+// ProviderStallNotice tells the client the turn is alive but the model
+// has produced nothing for an unusual length of time. Informational —
+// the turn is NOT cancelled and may still complete on its own.
+type ProviderStallNotice struct {
+	Stalled bool `json:"stalled"`
+	// WaitingSeconds is how long the provider had been silent when this
+	// frame was emitted (0 on the recovery frame).
+	WaitingSeconds int `json:"waiting_seconds,omitempty"`
 }
 
 // ToolActivityUpdate is one generic "the assistant is using a tool"
@@ -3824,8 +3842,150 @@ type streamPumpInput struct {
 //
 // The caller's `finish` callback handles persistence — pump only
 // feeds the events channel and closes it when no more streams.
+// providerStallAfter is how long the pump may wait on PROVIDER OUTPUT
+// before telling the client the turn looks stalled.
+//
+// Chosen against three numbers. Realistic time-to-first-token here is a
+// few seconds (measured: 2-7s on gpt-4o/4o-mini) and tens of seconds at
+// worst for a reasoning model that streams no summary frames, so 75s
+// clears every legitimate wait we have observed with room to spare. It is
+// also deliberately BELOW the clients' 90s byte-based idle watchdog, so
+// the specific, informative signal ("the model has gone quiet") arrives
+// before the generic one ("no bytes at all"). And it is well inside the
+// minute-or-two a user will stare at a spinner before deciding the
+// product is broken.
+//
+// A var, not a const, purely so tests can shorten it — same precedent as
+// heartbeatInterval.
+var providerStallAfter = 75 * time.Second
+
+// providerStallPoll is how often the watcher re-checks; small enough that
+// the reported WaitingSeconds is accurate, large enough to be free.
+var providerStallPoll = time.Second
+
+// stallWatch reports a provider that has stopped producing output.
+//
+// The critical property: it measures ONLY the windows in which the pump
+// is genuinely awaiting the provider. Silence during tool execution is
+// normal and must never raise a stall — a run_python call can hold the
+// turn for a legitimate minute. The pump therefore drives the phase
+// explicitly (BeginAwait / EndAwait) instead of the watcher inferring it
+// from byte timing, which is precisely the inference that made the
+// client-side watchdog blind to this failure.
+type stallWatch struct {
+	out       chan<- StreamUpdate
+	threshold time.Duration
+
+	mu       sync.Mutex
+	since    time.Time // zero => not awaiting the provider
+	fired    bool
+	stopped  bool
+	stopOnce sync.Once
+	done     chan struct{}
+	finished chan struct{}
+}
+
+func newStallWatch(out chan<- StreamUpdate, threshold time.Duration) *stallWatch {
+	w := &stallWatch{
+		out:       out,
+		threshold: threshold,
+		done:      make(chan struct{}),
+		finished:  make(chan struct{}),
+	}
+	go w.run()
+	return w
+}
+
+func (w *stallWatch) run() {
+	defer close(w.finished)
+	t := time.NewTicker(providerStallPoll)
+	defer t.Stop()
+	for {
+		select {
+		case <-w.done:
+			return
+		case <-t.C:
+			w.mu.Lock()
+			if w.stopped || w.fired || w.since.IsZero() {
+				w.mu.Unlock()
+				continue
+			}
+			waited := time.Since(w.since)
+			if waited < w.threshold {
+				w.mu.Unlock()
+				continue
+			}
+			w.fired = true
+			w.mu.Unlock()
+			// Sent while holding no lock; Stop() waits for this
+			// goroutine to finish before the pump closes `out`.
+			w.emit(&ProviderStallNotice{
+				Stalled:        true,
+				WaitingSeconds: int(waited.Seconds()),
+			})
+		}
+	}
+}
+
+func (w *stallWatch) emit(n *ProviderStallNotice) {
+	select {
+	case <-w.done:
+	case w.out <- StreamUpdate{ProviderStall: n}:
+	}
+}
+
+// BeginAwait starts (or restarts) the clock: the pump is now blocked on
+// provider output.
+func (w *stallWatch) BeginAwait() {
+	w.mu.Lock()
+	w.since = time.Now()
+	w.mu.Unlock()
+}
+
+// EndAwait stops the clock — the pump is doing something else (running a
+// tool). Does NOT clear a fired stall: recovery is declared by real
+// output arriving, which is Activity().
+func (w *stallWatch) EndAwait() {
+	w.mu.Lock()
+	w.since = time.Time{}
+	w.mu.Unlock()
+}
+
+// Activity records provider output. Restarts the clock and, if a stall
+// was announced, tells the client it is over so the notice clears itself
+// exactly like the byte-based path does.
+func (w *stallWatch) Activity() {
+	w.mu.Lock()
+	w.since = time.Now()
+	recovered := w.fired
+	w.fired = false
+	w.mu.Unlock()
+	if recovered {
+		w.emit(&ProviderStallNotice{Stalled: false})
+	}
+}
+
+// Stop ends the watcher and returns only once its goroutine can no longer
+// send, so the pump may safely close the channel afterwards.
+func (w *stallWatch) Stop() {
+	w.stopOnce.Do(func() {
+		w.mu.Lock()
+		w.stopped = true
+		w.mu.Unlock()
+		close(w.done)
+	})
+	<-w.finished
+}
+
 func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	defer close(in.out)
+	// Registered AFTER close(in.out): defers run LIFO, so the watcher is
+	// stopped (and proven silent) before the channel closes.
+	stall := newStallWatch(in.out, providerStallAfter)
+	defer stall.Stop()
+	// The first round is already in flight when the pump starts — we are
+	// awaiting its first frame right now.
+	stall.BeginAwait()
 
 	// Phase 8 Task 2 — let a long-running tool report progress on the
 	// SAME channel the pump owns (run_python's code+output card). Wired
@@ -3855,6 +4015,10 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				_ = current.Close()
 				return
 			}
+			// Any frame from the provider — content, reasoning, tool-call
+			// delta, even a bare usage frame — is proof it is alive, and
+			// clears a stall notice if one went out.
+			stall.Activity()
 			if ev.Usage != nil {
 				lastUsage = ev.Usage
 			}
@@ -3950,10 +4114,18 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				in.out <- StreamUpdate{SearchStatus: "searching"}
 			}
 		}
+		// Tool execution is legitimately silent — a sandboxed run_python
+		// call may hold the turn for a minute. Stop the clock so the
+		// watcher cannot mistake work for a stall; restart it once we are
+		// waiting on the model again.
+		stall.EndAwait()
 		asstToolMsg, results := s.executeToolCalls(in.streamCtx, acc, in.toolExecCtx)
 		req.Messages = append(req.Messages, asstToolMsg)
 		req.Messages = append(req.Messages, results...)
 
+		// Opening the next round IS waiting on the provider (this call
+		// blocks until the upstream response headers arrive).
+		stall.BeginAwait()
 		next, err := s.gateway.SendChatCompletionStream(in.streamCtx, in.callCtx, req)
 		if err != nil {
 			in.out <- StreamUpdate{Err: err}

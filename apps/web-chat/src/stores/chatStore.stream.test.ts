@@ -310,6 +310,35 @@ describe("sendMessage / consumeStream", () => {
     await done;
   });
 
+  it("raises the stalled notice from a provider_stall frame and clears it on recovery", async () => {
+    const st = makeStream();
+    mockApi.openMessageStream.mockResolvedValue(st.response);
+    seedConversation("c1", [userMsg("u0")]);
+
+    const done = useChatStore.getState().sendMessage("c1", "hi");
+    await tick();
+
+    expect(useChatStore.getState().providerStalledStreams["c1"]).toBeFalsy();
+
+    st.push(frame("provider_stall", { stalled: true, waiting_seconds: 75 }));
+    await tick();
+    expect(useChatStore.getState().providerStalledStreams["c1"]).toBe(true);
+
+    // A heartbeat-driven byte activity must NOT clear a server-declared
+    // stall — that is exactly the mistake the separate flag prevents.
+    st.push(frame("content_delta", { delta: "" }));
+    await tick();
+    expect(useChatStore.getState().providerStalledStreams["c1"]).toBe(true);
+
+    st.push(frame("provider_stall", { stalled: false }));
+    await tick();
+    expect(useChatStore.getState().providerStalledStreams["c1"]).toBe(false);
+
+    st.push(frame("message_complete", { message_id: "m" }));
+    st.close();
+    await done;
+  });
+
   // Phase 13 Part B — run_python artifacts reuse the existing
   // message_files seam: a chart png / generated file the sandbox produced
   // is attached to the assistant message and the generating flags clear.

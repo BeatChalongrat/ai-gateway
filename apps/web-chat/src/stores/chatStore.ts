@@ -35,6 +35,7 @@ import type {
   SSEContentDelta,
   SSEError,
   SSEFallbackInfo,
+  SSEProviderStall,
   SSEReasoningNotice,
   SSEMessageComplete,
   SSEMessageFiles,
@@ -115,6 +116,13 @@ interface ChatState {
    *  the "still working — retry?" notice; cleared the moment data
    *  flows again or the stream ends. */
   stalledStreams: Record<string, boolean>;
+  /** Server-declared provider stall: chat-edge is holding the upstream
+   *  connection and has had NO model output for its threshold. Kept
+   *  SEPARATE from stalledStreams on purpose — heartbeats keep arriving
+   *  during a provider stall, so the byte-based clock would erase this
+   *  the instant the next ": ping" landed. Cleared only by the server's
+   *  recovery frame, by retry, or by stream end. */
+  providerStalledStreams: Record<string, boolean>;
   /** has_more=true for older-page-available conversations. */
   hasMoreMessages: Record<string, boolean>;
   /** True while a paginate-older request is in flight. */
@@ -300,6 +308,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingAssistantId: {},
   abortControllers: {},
   stalledStreams: {},
+  providerStalledStreams: {},
   hasMoreMessages: {},
   loadingOlder: {},
   pendingFiles: {},
@@ -1335,7 +1344,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // normal network-error handling (error card + regenerate).
     const messageId = get().streamingAssistantId[convId];
     const ctrl = get().abortControllers[convId];
-    set((s) => ({ stalledStreams: { ...s.stalledStreams, [convId]: false } }));
+    set((s) => ({
+      stalledStreams: { ...s.stalledStreams, [convId]: false },
+      providerStalledStreams: { ...s.providerStalledStreams, [convId]: false },
+    }));
     ctrl?.abort();
     if (!messageId || messageId.startsWith("tmp-")) return;
     // Let the aborted pump release the streaming slot (its finally
@@ -1754,6 +1766,20 @@ async function consumeStream(
         ? s
         : { stalledStreams: { ...s.stalledStreams, [convId]: stalled } },
     );
+  // Server-declared stall (provider_stall event). Deliberately NOT
+  // touched by onActivity: heartbeats are bytes, and a stalled provider
+  // still produces them.
+  const setProviderStalled = (stalled: boolean) =>
+    set((s) =>
+      Boolean(s.providerStalledStreams[convId]) === stalled
+        ? s
+        : {
+            providerStalledStreams: {
+              ...s.providerStalledStreams,
+              [convId]: stalled,
+            },
+          },
+    );
   const onActivity = () => {
     lastActivityAt = Date.now();
     if (get().stalledStreams[convId]) setStalled(false);
@@ -2057,6 +2083,12 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "provider_stall") {
+        // chat-edge holds the upstream connection, so it is the only
+        // layer that can tell provider silence from server work. Trust
+        // its verdict directly instead of guessing from byte timing.
+        const data = evt.data as SSEProviderStall;
+        setProviderStalled(Boolean(data?.stalled));
       } else if (evt.event === "reasoning_notice") {
         // The gateway answered without the requested reasoning (the
         // resolved model can't reason). Stash on the message so
@@ -2125,6 +2157,7 @@ async function consumeStream(
     // is never "stalled".
     window.clearInterval(watchdog);
     setStalled(false);
+    setProviderStalled(false);
     // Any deltas left in the buffer at this point belong to an
     // abort / error path. Flushing them here keeps the persisted UI
     // consistent with what the server already wrote to the DB.

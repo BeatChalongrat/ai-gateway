@@ -779,6 +779,15 @@ export interface SSEReasoningNotice {
   reason?: string;
 }
 
+/** ``provider_stall`` SSE frame — chat-edge reporting that the upstream
+ *  model has produced nothing for its threshold (stalled=true), or that
+ *  output resumed (stalled=false). Informational: the turn is not
+ *  cancelled and may still finish on its own. */
+export interface SSEProviderStall {
+  stalled: boolean;
+  waiting_seconds?: number;
+}
+
 // ── Direct-dispatch media generation (Sprint 2A.5) ──────────────
 // Wire shapes for the BACKEND public endpoints POST /v1/videos|audio/
 // generations + GET /v1/jobs/{id}. Every credit field carries a sibling

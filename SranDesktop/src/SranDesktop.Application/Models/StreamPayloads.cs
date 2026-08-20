@@ -51,3 +51,13 @@ public sealed record FallbackInfoPayload(
 public sealed record ReasoningNoticePayload(
     [property: JsonPropertyName("model")] string? Model,
     [property: JsonPropertyName("reason")] string? Reason);
+
+/// <summary>provider_stall — chat-edge holds the upstream connection and
+/// reports that the MODEL has produced nothing for its threshold
+/// (Stalled=true), or that output resumed (Stalled=false). Distinct from
+/// the client's own idle watchdog, which only sees whether BYTES arrive:
+/// heartbeats keep flowing while a provider is stalled, so the client
+/// cannot detect this case itself.</summary>
+public sealed record ProviderStallPayload(
+    [property: JsonPropertyName("stalled")] bool Stalled,
+    [property: JsonPropertyName("waiting_seconds")] int WaitingSeconds = 0);

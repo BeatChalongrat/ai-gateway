@@ -54,6 +54,11 @@ public sealed class ChatService : IChatService
         // retry?", and the next frame clears it. WaitAsync disposes its
         // timer per cycle, so a fast delta stream doesn't leak timers.
         var stalled = false;
+        // Server-declared stall (provider_stall). Held separately because
+        // the byte clock below CANNOT clear it: chat-edge keeps sending
+        // heartbeats while the provider is silent, so the very next frame
+        // would wipe a stall the server can see and we cannot.
+        var serverStalled = false;
         var e = frames.GetAsyncEnumerator();
         try
         {
@@ -84,7 +89,25 @@ public sealed class ChatService : IChatService
                     yield break;
 
                 var frame = e.Current;
-                if (stalled)
+
+                // chat-edge's verdict wins over the byte clock in both
+                // directions — it is the layer holding the connection.
+                if (frame.Event == "provider_stall")
+                {
+                    var p = Parse<ProviderStallPayload>(frame);
+                    if (p is not null)
+                    {
+                        serverStalled = p.Stalled;
+                        if (stalled != p.Stalled)
+                        {
+                            stalled = p.Stalled;
+                            yield return new StreamStalledEvent(p.Stalled);
+                        }
+                    }
+                    continue;
+                }
+
+                if (stalled && !serverStalled)
                 {
                     stalled = false;
                     yield return new StreamStalledEvent(false);
