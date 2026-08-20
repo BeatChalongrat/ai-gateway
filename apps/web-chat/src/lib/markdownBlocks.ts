@@ -17,11 +17,38 @@ export interface MarkdownBlock {
   text: string;
 }
 
+/** Line-level fence/math-region state — the ONE home for the "is this
+ *  line inside a protected region" rules. splitMarkdownBlocks and the
+ *  math-delimiter normalizer (lib/mathDelimiters.ts) both consume it so
+ *  the two can never disagree about where a fence starts or ends. The
+ *  desktop port (Rendering/MathDelimiters.cs) mirrors these exact rules. */
+export interface FenceState {
+  inFence: boolean;
+  inMathBlock: boolean;
+}
+
+/** Applies one line to the state. Returns true when the line itself is a
+ *  region delimiter (``` / ~~~ / $$) — a delimiter line belongs to the
+ *  region it opens or closes. A $$ line inside a fence is code, and a
+ *  fence marker inside a math block is math — each state only toggles
+ *  while the other is off. */
+export function stepFenceState(state: FenceState, line: string): boolean {
+  const trimmed = line.trim();
+  if (!state.inMathBlock && (trimmed.startsWith("```") || trimmed.startsWith("~~~"))) {
+    state.inFence = !state.inFence;
+    return true;
+  }
+  if (!state.inFence && trimmed.startsWith("$$")) {
+    state.inMathBlock = !state.inMathBlock;
+    return true;
+  }
+  return false;
+}
+
 export function splitMarkdownBlocks(src: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   const current: string[] = [];
-  let inFence = false;
-  let inMathBlock = false;
+  const state: FenceState = { inFence: false, inMathBlock: false };
 
   const flush = () => {
     if (current.length === 0) return;
@@ -33,18 +60,7 @@ export function splitMarkdownBlocks(src: string): MarkdownBlock[] {
   };
 
   for (const line of src.split("\n")) {
-    const trimmed = line.trim();
-
-    // Fence open/close (``` or ~~~). A $$ line inside a fence is code,
-    // and a fence marker inside a math block is math — each state only
-    // toggles while the other is off.
-    if (!inMathBlock && (trimmed.startsWith("```") || trimmed.startsWith("~~~"))) {
-      inFence = !inFence;
-      current.push(line);
-      continue;
-    }
-    if (!inFence && trimmed.startsWith("$$")) {
-      inMathBlock = !inMathBlock;
+    if (stepFenceState(state, line)) {
       current.push(line);
       continue;
     }
@@ -52,7 +68,7 @@ export function splitMarkdownBlocks(src: string): MarkdownBlock[] {
     // Blank line = block boundary, but only at the top level. Inside a
     // fence or math block it is content. Consecutive blank lines collapse
     // into a single boundary because flush() on an empty buffer is a no-op.
-    if (trimmed === "" && !inFence && !inMathBlock) {
+    if (line.trim() === "" && !state.inFence && !state.inMathBlock) {
       flush();
       continue;
     }
