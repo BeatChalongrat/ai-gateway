@@ -138,6 +138,47 @@ public class MarkdownTableRenderTests
         TextOf(CellTextBlocks(grid, 1, 3).Single()).Should().Be("4");
     });
 
+    // ── The cap itself (Batch 2.5 item 3) ────────────────────────────────
+    // Was a hand-picked 300; now derived from the message column so the
+    // "≈40% of the available width" intent is in the code, not a comment.
+
+    [Fact]
+    public void Cell_Cap_Is_Forty_Percent_Of_The_Message_Column()
+    {
+        MarkdownRenderer.MaxTableCellWidth.Should().Be(768 * 0.4);
+    }
+
+    [Theory]
+    [InlineData(768, 307.2)]   // today's fixed column
+    [InlineData(1200, 480)]    // a wider column would widen the cap
+    [InlineData(500, 200)]     // a narrower one narrows it
+    public void Cap_Scales_With_The_Available_Width(double available, double expected)
+    {
+        MarkdownRenderer.MaxTableCellWidthFor(available).Should().BeApproximately(expected, 0.001);
+    }
+
+    [Theory]
+    [InlineData(300)]
+    [InlineData(120)]
+    [InlineData(1)]
+    public void Cap_Never_Falls_Below_The_Readability_Floor(double available)
+    {
+        MarkdownRenderer.MaxTableCellWidthFor(available)
+            .Should().Be(MarkdownRenderer.MinTableCellWidth);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void Unlaid_Out_Width_Uses_The_Full_Column_So_Rows_Do_Not_Resize(double available)
+    {
+        // A table realizing in the recycling ListBox must measure the same
+        // before and after it has a width, or its row height jumps mid-scroll.
+        MarkdownRenderer.MaxTableCellWidthFor(available)
+            .Should().Be(MarkdownRenderer.MaxTableCellWidth);
+    }
+
     [Fact]
     public void A_Compact_Numeric_Table_Still_Autosizes_Below_The_Cap() => RunSta(() =>
     {

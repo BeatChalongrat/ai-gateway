@@ -438,18 +438,68 @@ public sealed class MarkdownRenderer
         return border;
     }
 
+    /// <summary>Fraction of the available message width one table column may
+    /// occupy (Batch 1 D3's original intent). Two prose columns fit side by
+    /// side; anything wider still falls back to the horizontal ScrollViewer.
+    /// </summary>
+    internal const double TableCellWidthFraction = 0.4;
+
+    /// <summary>Width of the assistant message column (MessageBubble.xaml's
+    /// StackPanel MaxWidth). Used as the assumed width before the table has
+    /// been laid out — see <see cref="MaxTableCellWidthFor"/>.</summary>
+    internal const double MessageColumnWidth = 768;
+
+    /// <summary>Floor for a column cap. Below this a prose cell wraps every
+    /// two or three words, which is harder to read than a scroll tunnel — so
+    /// a very narrow window scrolls horizontally instead of shredding text.
+    /// </summary>
+    internal const double MinTableCellWidth = 160;
+
     /// <summary>Cap on a table column's width (Batch 1 D3). An Auto Grid
     /// column measures its children at infinite width, so without a cap a
     /// prose cell NEVER wraps and the whole table becomes a horizontal
-    /// scroll tunnel. ≈40% of the 768px message column: wide enough that
-    /// numeric/short tables still auto-fit, narrow enough that two prose
-    /// columns fit side by side. Genuinely wide tables still fall back to
-    /// the outer horizontal ScrollViewer.</summary>
-    internal const double MaxTableCellWidth = 300;
+    /// scroll tunnel.
+    ///
+    /// The cap scales with the width actually available to the table rather
+    /// than the old fixed 300px, so a narrow window stops handing every
+    /// column more room than the window has.
+    ///
+    /// Unusable widths (0 / NaN / Infinity — e.g. before layout) resolve to
+    /// the full-column value, so a table measures the same before and after
+    /// realization and cannot change height as it scrolls into view in the
+    /// recycling ListBox.
+    ///
+    /// NOTE on why this takes a width instead of reading one at runtime: the
+    /// message column is currently a FIXED 768px (ChatView.xaml sets
+    /// MessageBubble Width="768"), so there is no live width to react to.
+    /// Binding the cap to the table's own container would also be circular —
+    /// that container auto-fits its content (HorizontalAlignment.Left), so
+    /// cell caps would feed back into the width they were derived from. If
+    /// the column ever becomes responsive, pass the real width here.
+    /// </summary>
+    internal static double MaxTableCellWidthFor(double availableWidth)
+    {
+        if (double.IsNaN(availableWidth) || double.IsInfinity(availableWidth)
+            || availableWidth <= 0)
+            return MessageColumnWidth * TableCellWidthFraction;
+
+        return Math.Max(MinTableCellWidth, availableWidth * TableCellWidthFraction);
+    }
+
+    /// <summary>The cap in force for today's fixed message column: 40% of
+    /// 768px. Replaces the hand-picked 300 with the number that constant was
+    /// approximating.</summary>
+    internal static readonly double MaxTableCellWidth =
+        MaxTableCellWidthFor(MessageColumnWidth);
 
     private FrameworkElement RenderTable(Table table, bool streaming = false)
     {
         var grid = new Grid();
+        // Derived once per table, not per cell: identical for every cell and
+        // constant across layout passes, so nothing here can make a row
+        // change height while the list recycles it.
+        var cellCap = MaxTableCellWidthFor(MessageColumnWidth);
+
         var columnCount = table.ColumnDefinitions.Count;
         // D3 — ragged rows: a data row can carry MORE cells than the header
         // declared. They used to be silently truncated (content loss);
@@ -505,7 +555,7 @@ public sealed class MarkdownRenderer
                     // D3 — the width cap that makes prose cells wrap (the
                     // paragraph TextBlocks are already TextWrapping.Wrap;
                     // they just never saw a finite constraint before).
-                    MaxWidth = MaxTableCellWidth,
+                    MaxWidth = cellCap,
                     BorderThickness = new Thickness(0, 0,
                         colIndex < totalColumns - 1 ? 1 : 0, rowIndex == 0 ? 1 : 0.5)
                 };
