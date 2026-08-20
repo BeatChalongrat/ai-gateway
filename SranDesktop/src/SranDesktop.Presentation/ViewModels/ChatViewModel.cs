@@ -3700,7 +3700,7 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Failed to set model {Model}", model.Id);
-            ErrorMessage = "Could not change the model - server unreachable.";
+            ErrorMessage = Localization.LocaleService.Instance.T("model.error.offline");
         }
     }
 
@@ -3730,7 +3730,7 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Failed to set Auto model");
-            ErrorMessage = "Could not change the model - server unreachable.";
+            ErrorMessage = Localization.LocaleService.Instance.T("model.error.offline");
         }
     }
 
@@ -3774,7 +3774,7 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Failed to set knowledge base");
-            ErrorMessage = "Could not change the knowledge base - server unreachable.";
+            ErrorMessage = Localization.LocaleService.Instance.T("kb.error.offline");
         }
     }
 
@@ -3813,7 +3813,7 @@ public partial class ChatViewModel : ObservableObject
         {
             MemoryEnabled = !target; // revert on failure
             _logger.LogWarning(ex, "Failed to toggle memory");
-            ErrorMessage = "Could not update memory - server unreachable.";
+            ErrorMessage = Localization.LocaleService.Instance.T("memory.error.offline");
         }
     }
 
@@ -3835,7 +3835,7 @@ public partial class ChatViewModel : ObservableObject
         {
             IsReasoningOn = !target; // revert on failure
             _logger.LogWarning(ex, "Failed to toggle thinking mode");
-            ErrorMessage = "Could not update thinking mode - server unreachable.";
+            ErrorMessage = Localization.LocaleService.Instance.T("reasoning.error.offline");
         }
     }
 
@@ -3990,7 +3990,7 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Export ({Format}) failed", format);
-            ErrorMessage = "Could not export - server unreachable.";
+            ErrorMessage = Localization.LocaleService.Instance.T("export.error.offline");
         }
     }
 
@@ -4009,7 +4009,7 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Copy-as-markdown failed");
-            ErrorMessage = "Could not copy - server unreachable.";
+            ErrorMessage = Localization.LocaleService.Instance.T("copy.error.offline");
         }
     }
 

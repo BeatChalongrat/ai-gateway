@@ -268,7 +268,8 @@ public sealed class ConversationLoadIsolationTests
         await vm.LoadAsync();
 
         vm.Conversations.Should().HaveCount(2, "the local mirror is still readable");
-        vm.StatusMessage.Should().Be("Offline - showing local history",
+        vm.StatusMessage.Should().Be(
+            SranDesktop.Presentation.Localization.LocaleService.Instance.T("sidebar.status.offlineLocal"),
             "an unreachable server is offline, not a hard failure");
     }
 
@@ -286,7 +287,8 @@ public sealed class ConversationLoadIsolationTests
         await vm.LoadAsync();
 
         vm.Conversations.Should().BeEmpty();
-        vm.StatusMessage.Should().Be("Failed to load conversations");
+        vm.StatusMessage.Should().Be(
+            SranDesktop.Presentation.Localization.LocaleService.Instance.T("sidebar.status.loadFailed"));
     }
 
     [Fact]

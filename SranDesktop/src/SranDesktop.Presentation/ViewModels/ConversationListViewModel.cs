@@ -527,7 +527,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to create project");
-            StatusMessage = "Could not create project - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("project.error.createOffline");
         }
     }
 
@@ -582,7 +582,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to rename project {Id}", project.Id);
-            StatusMessage = "Could not rename project - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("project.error.renameOffline");
         }
     }
 
@@ -610,7 +610,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to delete project {Id}", project.Id);
-            StatusMessage = "Could not delete project - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("project.error.deleteOffline");
             return;
         }
 
@@ -642,7 +642,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to move conversation {Id} to project", conv.Id);
-            StatusMessage = "Could not move chat - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("project.error.moveOffline");
             return;
         }
 
@@ -674,7 +674,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to create project for move");
-            StatusMessage = "Could not create project - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("project.error.createOffline");
         }
     }
 
@@ -793,8 +793,8 @@ public partial class ConversationListViewModel : ObservableObject
             if (!synced)
             {
                 StatusMessage = shownFromLocal
-                    ? "Offline - showing local history"
-                    : "Failed to load conversations";
+                    ? Localization.LocaleService.Instance.T("sidebar.status.offlineLocal")
+                    : Localization.LocaleService.Instance.T("sidebar.status.loadFailed");
                 return shownFromLocal;
             }
             await RepopulateFromStoreAsync();
@@ -806,8 +806,8 @@ public partial class ConversationListViewModel : ObservableObject
             // Keep whatever the local read managed to show; only claim failure
             // when the user is actually looking at an empty sidebar.
             StatusMessage = shownFromLocal
-                ? "Offline - showing local history"
-                : "Failed to load conversations";
+                ? Localization.LocaleService.Instance.T("sidebar.status.offlineLocal")
+                : Localization.LocaleService.Instance.T("sidebar.status.loadFailed");
             return shownFromLocal;
         }
     }
@@ -871,7 +871,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to create conversation");
-            StatusMessage = "Could not create a chat - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("conv.error.createOffline");
         }
     }
 
@@ -979,7 +979,7 @@ public partial class ConversationListViewModel : ObservableObject
             removed++;
         }
 
-        StatusMessage = $"Removed {removed} empty chat(s)";
+        StatusMessage = string.Format(Localization.LocaleService.Instance.T("conv.status.removedEmpty"), removed);
     }
 
     /// <summary>Context-menu Rename: turn the row title into an inline editor (web parity).</summary>
@@ -1030,7 +1030,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to delete conversation {Id}", item.Id);
-            StatusMessage = "Could not delete - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("conv.error.deleteOffline");
             return;
         }
 
@@ -1082,8 +1082,8 @@ public partial class ConversationListViewModel : ObservableObject
         {
             _logger.LogError(ex, "Failed to archive conversation {Id}", item.Id);
             StatusMessage = newValue
-                ? "Could not archive - server unreachable"
-                : "Could not restore - server unreachable";
+                ? Localization.LocaleService.Instance.T("archive.error.archiveOffline")
+                : Localization.LocaleService.Instance.T("archive.error.restoreOffline");
             return;
         }
 
@@ -1126,7 +1126,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to toggle pin for {Id}", item.Id);
-            StatusMessage = "Could not update pin - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("conv.error.pinOffline");
         }
     }
 
@@ -1148,7 +1148,7 @@ public partial class ConversationListViewModel : ObservableObject
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogError(ex, "Failed to rename {Id}", item.Id);
-            StatusMessage = "Could not rename - server unreachable";
+            StatusMessage = Localization.LocaleService.Instance.T("conv.error.renameOffline");
         }
     }
 

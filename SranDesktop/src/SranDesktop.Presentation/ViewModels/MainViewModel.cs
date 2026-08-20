@@ -59,7 +59,8 @@ public partial class MainViewModel : ObservableObject
         Usage is null ? "—" : Usage.Credits.Remaining.ToString("N0");
 
     public string CreditsTotalText =>
-        Usage is null ? "" : $"of {Usage.Credits.Total:N0} credits remaining";
+        Usage is null ? "" : string.Format(
+            Localization.LocaleService.Instance.T("usage.creditsTotalLine"), $"{Usage.Credits.Total:N0}");
 
     public double UsagePercentRemaining =>
         Usage is null || Usage.Credits.Total <= 0
@@ -67,7 +68,7 @@ public partial class MainViewModel : ObservableObject
             : Math.Clamp(Usage.Credits.Remaining * 100.0 / Usage.Credits.Total, 0, 100);
 
     public string TotalCreditsUsedText =>
-        Usage is null ? "—" : $"{Usage.TotalCreditsUsed:N0} credits";
+        Usage is null ? "—" : $"{Usage.TotalCreditsUsed:N0} {Localization.LocaleService.Instance.T("usage.unit.credits")}";
 
     /// <summary>Fetch/refresh usage (skips the call when fetched under a minute ago).</summary>
     public async Task RefreshUsageAsync(bool force = false)

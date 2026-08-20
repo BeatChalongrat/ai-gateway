@@ -71,8 +71,8 @@ export function MemoryIndicator({ conversationId }: Props) {
       await setMemory(conversationId, !enabled);
       toast(
         !enabled
-          ? "Memory turned on for this chat."
-          : "Memory turned off for this chat.",
+          ? tOutside("memory.toast.onForChat")
+          : tOutside("memory.toast.offForChat"),
       );
     } catch {
       toast(tOutside("memory.toast.toggleFailed"));
@@ -96,9 +96,9 @@ export function MemoryIndicator({ conversationId }: Props) {
         title={
           enabled
             ? pendingCount > 0
-              ? `Memory is active — ${pendingCount} suggested preference${pendingCount === 1 ? "" : "s"} pending`
-              : "Memory is active"
-            : "Memory is off for this chat"
+              ? t("memory.indicator.onPendingTooltip", { n: String(pendingCount) })
+              : t("memory.indicator.onTooltip")
+            : t("memory.indicator.offTooltip")
         }
         className={`focus-ring relative inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors hover:bg-bg-elevated ${
           enabled ? "text-text-tertiary" : "text-text-muted"
@@ -110,7 +110,7 @@ export function MemoryIndicator({ conversationId }: Props) {
           <BrainCircuit className="h-3.5 w-3.5 opacity-60" />
         )}
         <span className="hidden sm:inline">
-          {enabled ? "Memory" : "No memory"}
+          {enabled ? t("memory.indicator.on") : t("memory.indicator.off")}
         </span>
         {/* S8 — small blue dot when pending suggestions exist.
             Tiny + absolute so it overlays the Brain icon without
@@ -131,12 +131,12 @@ export function MemoryIndicator({ conversationId }: Props) {
         >
           <div className="border-b border-border-subtle px-3 py-2.5">
             <div className="text-xs font-semibold text-text-primary">
-              {enabled ? "Memory is on" : "Memory is off"}
+              {enabled ? t("memory.popover.on") : t("memory.popover.off")}
             </div>
             <div className="mt-0.5 text-[11px] text-text-tertiary">
               {enabled
-                ? "AI can remember facts from this conversation."
-                : "Nothing said here will be saved as a memory."}
+                ? t("memory.popover.onHint")
+                : t("memory.popover.offHint")}
             </div>
           </div>
           <button
@@ -150,7 +150,7 @@ export function MemoryIndicator({ conversationId }: Props) {
             ) : (
               <Brain className="h-3.5 w-3.5 text-text-tertiary" />
             )}
-            <span>{enabled ? "Turn off for this chat" : "Turn on for this chat"}</span>
+            <span>{enabled ? t("memory.popover.toggleOff") : t("memory.popover.toggleOn")}</span>
           </button>
           <div className="border-t border-border-subtle" />
           <button
@@ -160,7 +160,7 @@ export function MemoryIndicator({ conversationId }: Props) {
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-elevated"
           >
             <SettingsIcon />
-            <span>Open Memory Settings</span>
+            <span>{t("memory.openSettings")}</span>
           </button>
         </div>
       ) : null}

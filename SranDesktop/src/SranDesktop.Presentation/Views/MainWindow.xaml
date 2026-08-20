@@ -74,20 +74,20 @@
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button Style="{StaticResource TitleBarButton}"
-                            Click="MinimizeButton_Click" ToolTip="Minimize"
-                            AutomationProperties.Name="Minimize">
+                            Click="MinimizeButton_Click" ToolTip="{loc:T window.minimize}"
+                            AutomationProperties.Name="{loc:T window.minimize}">
                         <Path Data="M0,0 H10" Stretch="None"
                               Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1" />
                     </Button>
                     <Button Style="{StaticResource TitleBarButton}"
-                            Click="MaximizeButton_Click" ToolTip="Maximize"
-                            AutomationProperties.Name="Maximize">
+                            Click="MaximizeButton_Click" ToolTip="{loc:T window.maximize}"
+                            AutomationProperties.Name="{loc:T window.maximize}">
                         <Path Data="M0,0 H10 V10 H0 Z" Stretch="None"
                               Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1" />
                     </Button>
                     <Button Style="{StaticResource CloseTitleBarButton}"
-                            Click="CloseButton_Click" ToolTip="Close"
-                            AutomationProperties.Name="Close">
+                            Click="CloseButton_Click" ToolTip="{loc:T common.close}"
+                            AutomationProperties.Name="{loc:T common.close}">
                         <Path Data="M0,0 L10,10 M10,0 L0,10" Stretch="None"
                               Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1" />
                     </Button>
@@ -848,12 +848,12 @@
                             <StackPanel>
                                 <!-- header -->
                                 <DockPanel Margin="0,0,0,10">
-                                    <TextBlock Text="Usage" FontSize="14" FontWeight="SemiBold"
+                                    <TextBlock Text="{loc:T usage.title}" FontSize="14" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextPrimaryBrush}" />
                                     <Button DockPanel.Dock="Right" HorizontalAlignment="Right"
                                             Style="{DynamicResource FlatRowButton}" Padding="6,2"
                                             Click="OpenPortalUsage_Click">
-                                        <TextBlock Text="View in Portal" FontSize="11"
+                                        <TextBlock Text="{loc:T usage.viewInPortal}" FontSize="11"
                                                    Foreground="{DynamicResource TextSecondaryBrush}" />
                                     </Button>
                                 </DockPanel>
@@ -873,7 +873,7 @@
                                     </StackPanel>
                                 </StackPanel>
 
-                                <TextBlock Text="USAGE BY MODEL" FontSize="10" FontWeight="Bold"
+                                <TextBlock Text="{loc:T usage.byModel}" FontSize="10" FontWeight="Bold"
                                            Foreground="{DynamicResource TextTertiaryBrush}"
                                            Margin="0,0,0,6" />
 
@@ -888,7 +888,7 @@
                                                     <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
                                                                FontSize="11"
                                                                Foreground="{DynamicResource TextSecondaryBrush}">
-                                                        <Run Text="{Binding CreditsUsed, Mode=OneWay, StringFormat=N0}" /><Run Text=" cred" />
+                                                        <Run Text="{Binding CreditsUsed, Mode=OneWay, StringFormat=N0}" /><Run Text="{loc:T usage.unit.credShort}" />
                                                     </TextBlock>
                                                 </DockPanel>
                                                 <DockPanel Margin="0,1,0,3">
@@ -909,7 +909,7 @@
                                 <Border Height="1" Margin="0,2,0,8"
                                         Background="{DynamicResource BorderBrush}" Opacity="0.6" />
                                 <DockPanel>
-                                    <TextBlock Text="Total used" FontSize="11"
+                                    <TextBlock Text="{loc:T usage.totalUsed}" FontSize="11"
                                                Foreground="{DynamicResource TextSecondaryBrush}" />
                                     <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
                                                Text="{Binding TotalCreditsUsedText}" FontSize="11" FontWeight="Medium"
