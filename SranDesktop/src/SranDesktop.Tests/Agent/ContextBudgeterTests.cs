@@ -47,6 +47,48 @@ public class ContextBudgeterTests
         messages.Should().Equal(snapshot);
     }
 
+    /// <summary>
+    /// Downstream effect of the Thai-aware estimator: the SAME conversation
+    /// that fits under the old flat 4-chars/token model now correctly
+    /// exceeds the window and gets trimmed. Before the port this history
+    /// estimated ~253 tokens and sailed under the budget; the provider then
+    /// rejected the request and the user paid for a wasted round-trip.
+    /// </summary>
+    [Fact]
+    public void Thai_History_Now_Trims_Where_The_Flat_Model_Thought_It_Fit()
+    {
+        // 100 Thai runes per message ≈ 67 tokens each (was 25 under flat/4).
+        var thai = new string('ก', 100);
+        var messages = new List<GatewayMessage> { System_("system") };
+        for (var i = 1; i <= 6; i++)
+        {
+            messages.Add(User($"u{i}:" + thai));
+            messages.Add(Assistant($"a{i}:" + thai));
+        }
+
+        // Window chosen to sit BETWEEN the two models' verdicts: the flat
+        // estimate (~366) fits inside the 540-token effective budget, the
+        // Thai-aware one (~857) does not. That gap IS the bug.
+        const int window = 600;
+        const int effectiveBudget = (int)(window * 0.9); // ContextBudgeter's safety margin
+
+        var oldFlatModelEstimate = messages.Sum(m =>
+            ((((string)m.Content!).Length + 3) / 4) + 4);
+        var thaiAwareEstimate = TokenEstimator.EstimateMessages(messages);
+        var result = ContextBudgeter.FitToBudget(messages, window, outputReserve: 0);
+
+        oldFlatModelEstimate.Should().BeLessThan(effectiveBudget,
+            "under the old model this history looked like it fit the budget");
+        thaiAwareEstimate.Should().BeGreaterThan(oldFlatModelEstimate * 2,
+            "Thai text costs roughly 2.7x what the flat model claimed");
+        thaiAwareEstimate.Should().BeGreaterThan(effectiveBudget,
+            "and that is what forces the trim the old model skipped");
+        result.Trimmed.Should().BeTrue("the Thai-aware estimate exceeds it");
+        result.OmittedMessages.Should().BeGreaterThan(0);
+        messages.Should().NotContain(m => Heads(m, "u1:"), "oldest group goes first");
+        messages.Should().Contain(m => Heads(m, "u6:"), "the newest turn always survives");
+    }
+
     [Fact]
     public void Over_Budget_Removes_Oldest_Groups_And_Inserts_One_Note()
     {
