@@ -305,7 +305,10 @@ public interface IChatEdgeApiClient
     // ── Sharing (R9 Feature K) ──────────────────────────────────────────────
 
     /// <summary>Create (or return the existing) public share link for a conversation.</summary>
-    Task<ShareResponse> ShareConversationAsync(string id, CancellationToken ct = default);
+    /// <summary>Create/refresh the public share link. expiresIn is the server
+    /// vocabulary ("1h" | "24h" | "7d" | "never"); re-creating rotates the
+    /// token and takes a fresh snapshot (T3).</summary>
+    Task<ShareResponse> ShareConversationAsync(string id, string expiresIn = "never", CancellationToken ct = default);
 
     Task RevokeShareAsync(string id, CancellationToken ct = default);
 }

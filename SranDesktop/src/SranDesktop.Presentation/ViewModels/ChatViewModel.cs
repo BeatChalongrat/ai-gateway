@@ -3939,9 +3939,14 @@ public partial class ChatViewModel : ObservableObject
             return;
         try
         {
-            var share = await _api.ShareConversationAsync(Conversation.Id);
+            var conversationId = Conversation.Id;
+            var share = await _api.ShareConversationAsync(conversationId);
             var dialog = new Views.Dialogs.ShareDialog(share.ShareUrl,
-                revoke: () => _api.RevokeShareAsync(Conversation.Id))
+                revoke: () => _api.RevokeShareAsync(conversationId),
+                // T3 — expiry choice re-creates the link (token rotates,
+                // snapshot refreshes), matching the web ShareModal.
+                recreate: async expiresIn =>
+                    (await _api.ShareConversationAsync(conversationId, expiresIn)).ShareUrl)
             {
                 Owner = System.Windows.Application.Current.MainWindow
             };

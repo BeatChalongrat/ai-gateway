@@ -237,6 +237,68 @@ func (r *MessageRepo) ListByConversation(
 	return out, hasMore, nil
 }
 
+// ListByIDs returns exactly the requested rows (T3 — the share
+// snapshot read), chronological. Deliberately NOT filtered on
+// is_active: the snapshot pins rows as they stood at share time, so a
+// message later edited away (forked to an inactive branch) still
+// renders on the public view, while a hard-DELETED/purged row simply
+// isn't returned — deletion wins over the snapshot.
+func (r *MessageRepo) ListByIDs(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	ids []uuid.UUID,
+) ([]model.Message, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	idStrs := make([]string, len(ids))
+	for i, id := range ids {
+		idStrs[i] = id.String()
+	}
+	extraCols := ""
+	if r.displayLifecycle {
+		extraCols = `, content_canonical, canonical_status, display_state`
+	}
+	q := `
+		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
+		       status, model_id, token_usage_input, token_usage_output,
+		       secure_trace_id, created_at, parent_id, branch_index, is_active,
+		       reasoning_content, search_sources, client_id` + extraCols + `
+		FROM chat.messages_masked
+		WHERE tenant_id = $1
+		  AND id = ANY($2::uuid[])
+		ORDER BY created_at ASC, id ASC
+	`
+	rows, err := r.db.Query(ctx, q, tenantID, idStrs)
+	if err != nil {
+		return nil, fmt.Errorf("list messages by ids: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]model.Message, 0, len(ids))
+	for rows.Next() {
+		var m model.Message
+		dest := []any{
+			&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role,
+			&m.ContentMasked, &m.Status, &m.ModelID,
+			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
+			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
+			&m.ReasoningContent, &m.SearchSources, &m.ClientID,
+		}
+		if r.displayLifecycle {
+			dest = append(dest, &m.ContentCanonical, &m.CanonicalStatus, &m.DisplayState)
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("list by ids scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ListContextByConversation is a tighter variant used by the
 // MessageService to build the conversation context that ships to
 // the Gateway. Returns the most recent “limit“ messages in

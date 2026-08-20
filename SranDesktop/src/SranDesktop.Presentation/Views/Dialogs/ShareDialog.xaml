@@ -21,6 +21,22 @@
                        VerticalAlignment="Center" />
         </StackPanel>
 
+        <!-- T3: expiry parity with the web ShareModal. Changing the choice
+             re-creates the link on the server (token rotates, snapshot
+             refreshes) and swaps the URL below in place. -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="{loc:T share.expiry}" FontSize="12.5"
+                       VerticalAlignment="Center" Margin="0,0,10,0"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <ComboBox x:Name="ExpiryBox" Width="160" FontSize="12.5"
+                      SelectionChanged="Expiry_Changed">
+                <ComboBoxItem Tag="never" Content="{loc:T share.expiry.never}" IsSelected="True" />
+                <ComboBoxItem Tag="1h" Content="{loc:T share.expiry.1h}" />
+                <ComboBoxItem Tag="24h" Content="{loc:T share.expiry.24h}" />
+                <ComboBoxItem Tag="7d" Content="{loc:T share.expiry.7d}" />
+            </ComboBox>
+        </StackPanel>
+
         <Border Background="{DynamicResource BgSecondaryBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1" CornerRadius="8" Padding="10,8"
