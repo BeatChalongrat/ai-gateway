@@ -97,6 +97,29 @@ describe("normalizeMathDelimiters — must NOT touch", () => {
     expect(n(src)).toBe(src);
   });
 
+  it("leaves escaped brackets INSIDE a link label alone", () => {
+    // Regression (VERIFY_DELIVER_REPORT item 1): the \[ \] here are markdown
+    // escapes inside the label, not display math — the label must read
+    // "ตัวอย่าง [escaped]".
+    const src = "ลิงก์ [ตัวอย่าง \\[escaped\\]](https://example.com)";
+    expect(n(src)).toBe(src);
+  });
+
+  it("leaves escaped brackets inside an image label alone", () => {
+    const src = "![alt \\[1\\]](https://example.com/a.png)";
+    expect(n(src)).toBe(src);
+  });
+
+  it("leaves escaped brackets inside a reference link label alone", () => {
+    const src = "see [note \\[1\\]][ref] below";
+    expect(n(src)).toBe(src);
+  });
+
+  it("still converts display math that FOLLOWS a link on the same line", () => {
+    const src = "see [docs](https://x) then \\[x^2\\] ok";
+    expect(n(src)).toBe("see [docs](https://x) then $$x^2$$ ok");
+  });
+
   it("leaves escaped backslashes alone (\\\\[ is a literal backslash + bracket)", () => {
     const src = "literal \\\\[x\\\\] brackets";
     expect(n(src)).toBe(src);

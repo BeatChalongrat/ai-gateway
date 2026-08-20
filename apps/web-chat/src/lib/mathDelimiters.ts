@@ -86,6 +86,21 @@ function convertRun(text: string): string {
       continue;
     }
 
+    // Markdown link / image label — copy the whole construct verbatim.
+    // Inside a label, `\[` and `\]` are markdown ESCAPES (a literal
+    // bracket), not display-math delimiters, so the label is a skip region
+    // exactly like an inline code span. An unclosed label falls through to
+    // normal scanning, which keeps the streaming behaviour: a half-typed
+    // construct converts nothing until it closes.
+    if (ch === "[") {
+      const past = linkConstructEnd(text, i);
+      if (past !== -1) {
+        out += text.slice(i, past);
+        i = past;
+        continue;
+      }
+    }
+
     if (ch === "\\") {
       const next = text[i + 1];
       // Escaped backslash — consume the pair so \\[ never reads as \[.
@@ -127,6 +142,54 @@ function convertRun(text: string): string {
     i++;
   }
   return out;
+}
+
+/**
+ * If `text[start]` opens a markdown link or image label that is actually
+ * part of a link — `[label](url)` or `[label][ref]` — returns the index just
+ * past the whole construct. Returns -1 for a bare `[…]` that is not a link
+ * (those keep converting as before) and for an unclosed label.
+ *
+ * Bracket depth ignores escaped brackets, so `[a \[b\] c](url)` closes on
+ * the real `]`, not the escaped one.
+ */
+function linkConstructEnd(text: string, start: number): number {
+  let depth = 1;
+  let j = start + 1;
+  let labelEnd = -1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === "\\") {
+      j += 2; // escaped char (incl. \[ and \]) — never affects depth
+      continue;
+    }
+    if (c === "\n") break; // a label spanning lines is not worth guessing at
+    if (c === "[") depth++;
+    else if (c === "]") {
+      depth--;
+      if (depth === 0) {
+        labelEnd = j;
+        break;
+      }
+    }
+    j++;
+  }
+  if (labelEnd === -1) return -1;
+
+  const after = text[labelEnd + 1];
+  const closer = after === "(" ? ")" : after === "[" ? "]" : null;
+  if (closer === null) return -1; // `[text]` alone — not a link
+
+  for (let k = labelEnd + 2; k < text.length; k++) {
+    const c = text[k];
+    if (c === "\\") {
+      k++;
+      continue;
+    }
+    if (c === "\n") return -1; // unterminated target
+    if (c === closer) return k + 1;
+  }
+  return -1;
 }
 
 /** Only whitespace between the previous newline (or start) and `pos`. */

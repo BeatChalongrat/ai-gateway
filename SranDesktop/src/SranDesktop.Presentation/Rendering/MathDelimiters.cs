@@ -114,6 +114,23 @@ public static class MathDelimiters
                 continue;
             }
 
+            // Markdown link / image label — copy the whole construct
+            // verbatim. Inside a label, \[ and \] are markdown ESCAPES (a
+            // literal bracket), not display-math delimiters, so the label is
+            // a skip region exactly like an inline code span. An unclosed
+            // label falls through to normal scanning, preserving the
+            // streaming behaviour.
+            if (ch == '[')
+            {
+                var past = LinkConstructEnd(text, i);
+                if (past != -1)
+                {
+                    sb.Append(text, i, past - i);
+                    i = past;
+                    continue;
+                }
+            }
+
             if (ch == '\\' && i + 1 < text.Length)
             {
                 var next = text[i + 1];
@@ -155,6 +172,61 @@ public static class MathDelimiters
             i++;
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// If <paramref name="start"/> opens a markdown link or image label that
+    /// is actually part of a link — [label](url) or [label][ref] — returns
+    /// the index just past the whole construct; -1 for a bare [text] that is
+    /// not a link, and for an unclosed label. Bracket depth ignores escaped
+    /// brackets, so [a \[b\] c](url) closes on the real ']'.
+    /// Twin of linkConstructEnd in apps/web-chat/src/lib/mathDelimiters.ts.
+    /// </summary>
+    private static int LinkConstructEnd(string text, int start)
+    {
+        var depth = 1;
+        var j = start + 1;
+        var labelEnd = -1;
+        while (j < text.Length)
+        {
+            var c = text[j];
+            if (c == '\\')
+            {
+                j += 2; // escaped char (incl. \[ and \]) — never affects depth
+                continue;
+            }
+            if (c == '\n') break; // a label spanning lines is not worth guessing at
+            if (c == '[') depth++;
+            else if (c == ']')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    labelEnd = j;
+                    break;
+                }
+            }
+            j++;
+        }
+        if (labelEnd == -1) return -1;
+
+        if (labelEnd + 1 >= text.Length) return -1;
+        var after = text[labelEnd + 1];
+        var closer = after switch { '(' => ')', '[' => ']', _ => '\0' };
+        if (closer == '\0') return -1; // [text] alone — not a link
+
+        for (var k = labelEnd + 2; k < text.Length; k++)
+        {
+            var c = text[k];
+            if (c == '\\')
+            {
+                k++;
+                continue;
+            }
+            if (c == '\n') return -1; // unterminated target
+            if (c == closer) return k + 1;
+        }
+        return -1;
     }
 
     private static int FindCloser(string text, int from, char closerChar, bool sameLine)

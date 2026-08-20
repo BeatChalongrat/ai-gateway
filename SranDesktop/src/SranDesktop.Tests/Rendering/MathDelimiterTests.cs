@@ -118,6 +118,36 @@ public class MathDelimiterTests
     }
 
     [Fact]
+    public void Escaped_Brackets_Inside_A_Link_Label_Stay_Literal()
+    {
+        // Regression (VERIFY_DELIVER_REPORT item 1) — the twin of the web
+        // corpus case; both clients must leave the label untouched.
+        const string src = "ลิงก์ [ตัวอย่าง \\[escaped\\]](https://example.com)";
+        N(src).Should().Be(src);
+    }
+
+    [Fact]
+    public void Escaped_Brackets_Inside_An_Image_Label_Stay_Literal()
+    {
+        const string src = "![alt \\[1\\]](https://example.com/a.png)";
+        N(src).Should().Be(src);
+    }
+
+    [Fact]
+    public void Escaped_Brackets_Inside_A_Reference_Link_Label_Stay_Literal()
+    {
+        const string src = "see [note \\[1\\]][ref] below";
+        N(src).Should().Be(src);
+    }
+
+    [Fact]
+    public void Display_Math_After_A_Link_On_The_Same_Line_Still_Converts()
+    {
+        const string src = "see [docs](https://x) then \\[x^2\\] ok";
+        N(src).Should().Be("see [docs](https://x) then $$x^2$$ ok");
+    }
+
+    [Fact]
     public void Escaped_Backslashes_Never_Start_A_Delimiter()
     {
         const string src = "literal \\\\[x\\\\] brackets";
