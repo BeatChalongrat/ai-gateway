@@ -1,18 +1,43 @@
 import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
-import { Outfit, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { AppProviders } from "./AppProviders";
 
-const outfit = Outfit({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+// Fonts are VENDORED, not fetched from Google at build time.
+//
+// next/font/google downloads the woff2 during `next build`, which made the
+// build require outbound access to fonts.googleapis.com — it failed in the
+// container and would fail in any air-gapped or egress-restricted network,
+// which is exactly where a DLP gateway gets deployed. Runtime was never
+// affected (Next self-hosts what it fetched); this removes the BUILD-time
+// coupling.
+//
+// The bytes are the same ones Next was downloading: Google serves each of
+// these families as a single variable woff2 covering every weight we ask
+// for (all four Outfit weights resolved to one URL, both JetBrains weights
+// to another), so the vendored file IS the file, and rendering is
+// unchanged. Weight RANGES below describe that variable axis; the weights
+// actually used by the app (Outfit 400/500/600/700, JetBrains 400/500) sit
+// inside them.
+//
+// Latin subset only, matching the previous `subsets: ["latin"]`. Thai still
+// falls back to the OS face — bundling a Thai webfont is a separate
+// decision, now possible because this directory exists.
+//
+// Licences: both families are SIL OFL 1.1 (see OFL-Outfit.txt and
+// OFL-JetBrainsMono.txt next to the files), which permits redistribution
+// and bundling; the OFL requires the notices to travel with the fonts, so
+// they are committed here rather than referenced.
+const outfit = localFont({
+  src: [{ path: "./fonts/Outfit-latin-variable.woff2", weight: "100 900", style: "normal" }],
   variable: "--font-outfit",
   display: "swap",
 });
-const jetbrains = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const jetbrains = localFont({
+  src: [
+    { path: "./fonts/JetBrainsMono-latin-variable.woff2", weight: "100 800", style: "normal" },
+  ],
   variable: "--font-jetbrains",
   display: "swap",
 });
