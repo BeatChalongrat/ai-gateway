@@ -434,10 +434,16 @@ func detachOnDisconnect() {}
 
 // heartbeatInterval is how often an SSE comment frame (": ping") goes
 // out while a generation is in flight with no real event to send
-// (Batch 2 T2). Three jobs: intermediate proxies stop idle-killing
-// quiet streams (long tool runs), the clients' idle watchdogs get a
-// liveness signal to reset on, and a genuinely stalled provider
-// becomes detectable (no bytes at all past the client threshold).
+// (Batch 2 T2). Two jobs: intermediate proxies stop idle-killing
+// quiet streams (long tool runs), and the clients' idle watchdogs get
+// a liveness signal to reset on — so the watchdog fires only on a dead
+// connection, a hung chat-edge, or a buffering proxy. A stalled
+// UPSTREAM is NOT covered: the ticker fires during any quiet stretch,
+// including one where the provider has gone silent, so the client
+// clock keeps resetting and the stall stays invisible (verified live,
+// Batch 2 A2: 130s provider pause → pings every 15s, no pill).
+// Detecting that needs upstream-activity tracking in the pump —
+// tracked as the provider-stall-detection follow-up.
 // Comment frames are ignored by both clients' parsers (web
 // lib/stream.ts parseFrame yields nothing without a data: line;
 // desktop SseStreamReader skips lines starting with ':') and are
