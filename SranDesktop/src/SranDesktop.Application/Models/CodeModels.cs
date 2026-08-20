@@ -85,6 +85,12 @@ public sealed record MediaGenSubmitResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("estimated_cost_usd")] string? EstimatedCostUsd = null,
     [property: JsonPropertyName("balance_after_usd")] string? BalanceAfterUsd = null,
+    // Set by the server when the estimate crosses its confirmation threshold;
+    // web acts on it (CostConfirmModal). Desktop deliberately does NOT — by
+    // product decision, users hold their own credit balance, so paid media is
+    // not gated per job here. L1 (session budget) and L2 (tenant daily cap) in
+    // backend spend_guard.py still apply. Intentionally read-but-unused on
+    // desktop — do not "fix" it.
     [property: JsonPropertyName("requires_confirmation")] bool RequiresConfirmation = false);
 
 /// <summary>GET /api/v1/jobs/{id} — poll until status is a terminal value.</summary>
