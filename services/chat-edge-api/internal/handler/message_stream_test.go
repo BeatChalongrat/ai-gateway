@@ -10,6 +10,7 @@
 package handler
 
 import (
+	"strings"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
@@ -112,5 +113,64 @@ func TestDrainStreamEventsNormalCompletionNeverCancels(t *testing.T) {
 	}
 	if res.finishReason != "stop" || res.usage == nil || res.usage.CompletionTokens != 7 {
 		t.Fatalf("terminal metadata not captured: %+v", res)
+	}
+}
+
+// ── Batch 2 T2 — SSE heartbeats ─────────────────────────────────────
+
+// TestDrainStreamEventsEmitsHeartbeatsOnAQuietStream: a provider or
+// tool run that goes quiet must not go silent on the wire — the drain
+// emits ": ping" comment frames on the heartbeat interval so proxies
+// keep the connection and the clients' idle watchdogs get liveness.
+func TestDrainStreamEventsEmitsHeartbeatsOnAQuietStream(t *testing.T) {
+	old := heartbeatInterval
+	heartbeatInterval = 15 * time.Millisecond
+	defer func() { heartbeatInterval = old }()
+
+	rec := httptest.NewRecorder()
+	done := make(chan struct{}) // client stays connected
+
+	events := make(chan service.StreamUpdate)
+	go func() {
+		time.Sleep(120 * time.Millisecond) // the quiet stretch
+		events <- service.StreamUpdate{Delta: "late answer"}
+		events <- service.StreamUpdate{Done: true, FinishReason: "stop"}
+		close(events)
+	}()
+
+	res := drainStreamEvents(rec, rec, done, events, func() {})
+
+	body := rec.Body.String()
+	if got := strings.Count(body, ": ping\n\n"); got < 3 {
+		t.Fatalf("want >=3 heartbeat frames during the quiet stretch, got %d in %q", got, body)
+	}
+	// Heartbeats are comments — the real frames still parse cleanly
+	// around them and the drain result is untouched.
+	if !strings.Contains(body, `"delta":"late answer"`) {
+		t.Fatalf("delta frame missing from body: %q", body)
+	}
+	if res.content != "late answer" || res.finishReason != "stop" {
+		t.Fatalf("drain result corrupted by heartbeats: %+v", res)
+	}
+}
+
+// TestResumeSnapshotReplayContainsNoHeartbeats pins the replay-purity
+// invariant: heartbeats are written at the HTTP edge only and must
+// never appear in a resume snapshot replay (the broker never stores
+// them — this asserts the replay writer emits none either).
+func TestResumeSnapshotReplayContainsNoHeartbeats(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	(&MessageHandler{}).writeResumeSnapshot(rec, rec, service.StreamSnapshot{
+		Content:        "already generated prefix",
+		Reasoning:      "prior thinking",
+		AnalysisStatus: "completed",
+	})
+
+	if strings.Contains(rec.Body.String(), ": ping") {
+		t.Fatalf("resume replay must not contain heartbeat frames: %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "already generated prefix") {
+		t.Fatalf("replay lost the snapshot content: %q", rec.Body.String())
 	}
 }

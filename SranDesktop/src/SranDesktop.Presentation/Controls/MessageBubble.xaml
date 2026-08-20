@@ -1054,6 +1054,41 @@
                 </Button>
             </StackPanel>
 
+            <!-- T2: stalled-stream pill — the idle watchdog saw no bytes
+                 (heartbeats included) past the threshold. Visible only while
+                 the turn is BOTH streaming and flagged, so turn end clears it
+                 implicitly; Retry reattaches through the existing resume
+                 machinery (RetryStalledCommand), never a new code path. -->
+            <StackPanel Orientation="Horizontal" Margin="-4,8,0,0">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsStalled}" Value="True" />
+                                    <Condition Binding="{Binding IsStreaming}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <TextBlock Text="{loc:T msg.stalled}" FontSize="12.5"
+                           VerticalAlignment="Center" Margin="0,0,8,0"
+                           Foreground="{DynamicResource TextTertiaryBrush}" />
+                <Button Style="{DynamicResource PillButton}" Padding="12,4"
+                        AutomationProperties.Name="{loc:T common.retry}"
+                        Command="{Binding DataContext.RetryStalledCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}">
+                    <StackPanel Orientation="Horizontal">
+                        <controls:IconView Geometry="{StaticResource Geo_Regenerate}"
+                                           Stroke="{DynamicResource TextSecondaryBrush}"
+                                           Width="15" Height="15" Margin="0,0,6,0" />
+                        <TextBlock Text="{loc:T common.retry}" FontSize="12.5" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
             <!-- Continue: resume a turn paused at its step/time budget (PART 1/6).
                  Standalone (not hover-gated) so the checkpoint is always actionable. -->
             <Button Margin="-4,8,0,0" HorizontalAlignment="Left"

@@ -49,6 +49,14 @@ public partial class MessageViewModel : ObservableObject
     /// them server-side; null when the turn had no uploaded attachments.</summary>
     public List<string>? AttachedFileIds { get; set; }
 
+    /// <summary>Batch 2 T2 — the stream idle watchdog flagged this turn as
+    /// stalled (no bytes, heartbeats included, past the threshold). Shows
+    /// the "still working — retry?" pill; the pill's visibility is ALSO
+    /// gated on IsStreaming, so turn end clears it implicitly, and a
+    /// resuming stream clears it via StreamStalledEvent(false).</summary>
+    [ObservableProperty]
+    private bool _isStalled;
+
     /// <summary>Shows the shimmer image placeholder while the server generates.</summary>
     [ObservableProperty]
     private bool _isGeneratingImage;

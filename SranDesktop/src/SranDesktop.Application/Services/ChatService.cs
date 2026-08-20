@@ -11,6 +11,14 @@ public sealed class ChatService : IChatService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>Batch 2 T2 — the stream idle threshold, in ONE place. The
+    /// server heartbeats every ~15s (chat-edge heartbeatInterval), and the
+    /// reader surfaces those as heartbeat frames, so a stream that is quiet
+    /// for this long (≈6 missed beats) is genuinely stalled — a long tool
+    /// run stays alive via heartbeats. Mirrors web STREAM_IDLE.timeoutMs.
+    /// Mutable field (not const) purely so tests can shorten it.</summary>
+    internal static TimeSpan StreamIdleTimeout = TimeSpan.FromSeconds(90);
+
     private readonly IChatEdgeApiClient _api;
     private readonly ILogger<ChatService> _logger;
 
@@ -39,21 +47,70 @@ public sealed class ChatService : IChatService
 
     private async IAsyncEnumerable<ChatStreamEvent> MapFramesAsync(IAsyncEnumerable<SseFrame> frames)
     {
-        await foreach (var frame in frames)
+        // T2 — idle watchdog. Any frame (heartbeat ":" comments included —
+        // the chat-edge client opts the reader into yielding them) resets
+        // the clock; a wait that outlives StreamIdleTimeout raises
+        // StreamStalledEvent(true) so the bubble can offer "still working —
+        // retry?", and the next frame clears it. WaitAsync disposes its
+        // timer per cycle, so a fast delta stream doesn't leak timers.
+        var stalled = false;
+        var e = frames.GetAsyncEnumerator();
+        try
         {
-            ChatStreamEvent? mapped;
-            try
+            while (true)
             {
-                mapped = MapFrame(frame);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Skipping malformed SSE frame (event={Event})", frame.Event);
-                continue;
-            }
+                var moveTask = e.MoveNextAsync().AsTask();
+                var has = false;
+                while (true)
+                {
+                    var timedOut = false;
+                    try
+                    {
+                        has = await moveTask.WaitAsync(StreamIdleTimeout);
+                    }
+                    catch (TimeoutException)
+                    {
+                        timedOut = true; // yield is illegal inside a catch
+                    }
+                    if (!timedOut)
+                        break;
+                    if (!stalled)
+                    {
+                        stalled = true;
+                        yield return new StreamStalledEvent(true);
+                    }
+                }
+                if (!has)
+                    yield break;
 
-            if (mapped is not null)
-                yield return mapped;
+                var frame = e.Current;
+                if (stalled)
+                {
+                    stalled = false;
+                    yield return new StreamStalledEvent(false);
+                }
+                // Heartbeat sentinel — liveness only, nothing to map.
+                if (frame.Event == ":")
+                    continue;
+
+                ChatStreamEvent? mapped;
+                try
+                {
+                    mapped = MapFrame(frame);
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Skipping malformed SSE frame (event={Event})", frame.Event);
+                    continue;
+                }
+
+                if (mapped is not null)
+                    yield return mapped;
+            }
+        }
+        finally
+        {
+            await e.DisposeAsync();
         }
     }
 

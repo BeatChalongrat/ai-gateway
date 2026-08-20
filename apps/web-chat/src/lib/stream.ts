@@ -32,6 +32,12 @@ const FRAME_BOUNDARY = /\r?\n\r?\n/;
 export async function* parseSSE<T = unknown>(
   response: Response,
   signal?: AbortSignal,
+  // T2 — liveness callback, fired on every chunk of BYTES received.
+  // Heartbeat comment frames (": ping") are deliberately never yielded
+  // as events (no data: line), so an idle watchdog that only counted
+  // yielded events would false-positive during a long quiet tool run;
+  // counting bytes makes heartbeats reset the clock.
+  onActivity?: () => void,
 ): AsyncGenerator<StreamEvent<T>> {
   if (!response.body) {
     return;
@@ -48,6 +54,7 @@ export async function* parseSSE<T = unknown>(
       }
       const { done, value } = await reader.read();
       if (done) break;
+      onActivity?.();
       buffer += decoder.decode(value, { stream: true });
 
       // Split on blank-line frames. Keep the trailing partial frame
