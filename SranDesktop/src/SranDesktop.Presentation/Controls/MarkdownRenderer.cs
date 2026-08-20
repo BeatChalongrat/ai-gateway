@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using Markdig;
+using Markdig.Extensions.CustomContainers;
 using Markdig.Extensions.Mathematics;
 using Markdig.Extensions.Tables;
 using Markdig.Extensions.TaskLists;
@@ -24,13 +25,30 @@ namespace SranDesktop.Presentation.Controls;
 /// </summary>
 public sealed class MarkdownRenderer
 {
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        // Math ($...$/$$...$$ → MathInline/MathBlock) ships inside
-        // UseAdvancedExtensions; the explicit call is idempotent and pins the
-        // dependency in case a future Markdig slims the advanced set.
-        .UseMathematics()
-        .Build();
+    private static readonly MarkdownPipeline Pipeline = BuildPipeline();
+
+    private static MarkdownPipeline BuildPipeline()
+    {
+        var builder = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            // Math ($...$/$$...$$ → MathInline/MathBlock) ships inside
+            // UseAdvancedExtensions; the explicit call is idempotent and pins
+            // the dependency in case a future Markdig slims the advanced set.
+            .UseMathematics();
+
+        // UseAdvancedExtensions bundles CustomContainers, which owns the ':::'
+        // grammar — the same marker this app uses for :::artifact and the
+        // :::*-plan cards. Those are extracted from the raw text BEFORE
+        // rendering (ChatViewModel.ExtractPlanBlocks), so by the time markdown
+        // is parsed a ':::' can only be one the app did not recognise. Leaving
+        // the extension on, Markdig consumed the marker into a CustomContainer
+        // block that RenderBlock has no case for, so it fell through `_ => null`
+        // and the user's text VANISHED — a malformed one-line directive
+        // rendered as an empty bubble. Removing it makes an unrecognised ':::'
+        // degrade to literal text, which is the only honest thing to show.
+        builder.Extensions.RemoveAll(e => e is CustomContainerExtension);
+        return builder.Build();
+    }
 
     // Match web's JetBrains Mono vibe with fonts that ship on Windows.
     private static readonly FontFamily MonoFont =
