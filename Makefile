@@ -1,4 +1,4 @@
-.PHONY: up preflight prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up sandbox-image webchat-up webchat-down health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
+.PHONY: up preflight prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up sandbox-image webchat-up webchat-down compose-check health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -187,6 +187,35 @@ webchat-up: sandbox-image ## Start the web-chat stack (chat-edge:4000 + web-chat
 
 webchat-down: ## Stop the web-chat stack (preserves volumes)
 	docker compose -p ai-gateway $(WEBCHAT_COMPOSE) down
+
+# ── Compose-shape validation (Batch 2 T0) ──────────────────────────
+# The compose files are SHAPES, not freely-stackable layers: base(+override)
+# is the core dev stack, webchat.yml is a SELF-CONTAINED stack, prod overlays
+# base. Base and webchat must never be merged — base marks chat-edge-api
+# ``profiles: ["desktop"]``, so the merged project drops the service and
+# fails with "web-chat depends on undefined service chat-edge-api".
+# This target validates every SUPPORTED shape so a compose edit that breaks
+# one fails here instead of at the next bring-up. Prod shapes validate with
+# placeholder values for their ``:?``-required vars (structure check only —
+# real deploys still need the .env values).
+PROD_CONFIG_ENV := WEB_CHAT_PUBLIC_URL=placeholder PORTAL_PUBLIC_URL=placeholder \
+	CHAT_EDGE_ADMIN_API_KEY=placeholder MCP_PUBLIC_BASE=placeholder \
+	CHAT_CORS_ORIGINS=placeholder CORS_ORIGINS=placeholder CSRF_SECRET=placeholder \
+	PORTAL_JWT_SECRET=placeholder REDIS_PASSWORD=placeholder \
+	SERVICE_JWT_SECRET=placeholder USER_JWT_SECRET=placeholder
+
+compose-check: ## Validate every supported compose shape (dev / prod / prod-desktop / webchat / webchat+sandbox / desktop+sandbox)
+	@echo "[1/6] dev: base + override" && docker compose -f docker-compose.yml -f docker-compose.override.yml config -q
+	@echo "[2/6] prod: base + prod" && $(PROD_CONFIG_ENV) docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q
+	@echo "[3/6] prod-desktop: base + prod + profile desktop" && $(PROD_CONFIG_ENV) docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile desktop config -q
+	@echo "[4/6] webchat: webchat.yml alone" && docker compose $(WEBCHAT_COMPOSE) config -q
+	@echo "[5/6] webchat + sandbox overlay" && docker compose $(SANDBOX_COMPOSE) config -q
+	@echo "[6/6] desktop + sandbox overlay" && docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.sandbox.yml --profile desktop config -q
+	@echo ""
+	@echo "All supported compose shapes validate."
+	@echo "NOT supported: merging docker-compose.yml with docker-compose.webchat.yml"
+	@echo "(chat-edge-api is profile-gated in base -> 'web-chat depends on undefined"
+	@echo "service chat-edge-api'). Use 'make webchat-up' / 'make up' instead."
 
 # ── Code-interpreter sandbox overlay (Phase 13 / 15) ───────────────
 # Kept for the BASE/desktop stack, where chat-edge-api is profile-gated and

@@ -107,6 +107,24 @@ seeds the admin and portal users. `make help` lists every target. Raw steps:
 | **prod-desktop** | `make prod-desktop` | base + prod + `--profile desktop` (chat-edge + mcp + nginx `:80/:443`), bound to 127.0.0.1 |
 | **sandbox** | `+ docker-compose.sandbox.yml` (or `make sandbox-up`) | Enables the code interpreter on the **base/desktop** stack; the webchat stack already has it inline. Read that file's header first — needs a built sandbox image + docker socket |
 
+> **The shapes are not stackable.** `docker-compose.webchat.yml` is a
+> self-contained stack, **never** an overlay for `docker-compose.yml`: the
+> base file's `chat-edge-api` sits behind `profiles: ["desktop"]`, so a merged
+> project drops the service and every combination that includes both files
+> fails validation with *“service "web-chat" depends on undefined service
+> "chat-edge-api"”*. If you see that error, you have merged the two files —
+> use `make webchat-up` (webchat shape) or `make up` / `make prod-desktop`
+> (base shapes) instead. `make compose-check` validates all supported
+> combinations in one shot.
+>
+> **Rebuilding a single webchat service** (e.g. after a web-chat code change —
+> the container runs a compiled bundle, not a mount): the stack runs under the
+> shared project name, so target it explicitly:
+> `docker compose -p ai-gateway -f docker-compose.webchat.yml build web-chat`
+> then `… up -d --no-deps web-chat`. (`docker compose ls` shows the union of
+> config files ever used under `ai-gateway` — that list is *not* a supported
+> invocation.)
+
 > **Why the webchat stack enables the sandbox by default.** chat-edge fails
 > *closed* on every python path it shells out to: PDF/DOCX/XLSX text
 > extraction, the Excel/Doc/Pptx plan executors, inspectors, validators,
