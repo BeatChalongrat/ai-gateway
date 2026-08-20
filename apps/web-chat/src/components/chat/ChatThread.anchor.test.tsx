@@ -218,6 +218,32 @@ describe("send-time turn anchoring", () => {
     expect(scroller.scrollTop).toBe(400); // nobody moves the user
   });
 
+  // ── Decision: what happens to the spacer when the turn ends ──
+  // It SHRINKS to exactly what still holds the anchored position, and no
+  // further. Removing it outright would clamp scrollTop and yank the thread
+  // upward the instant a short answer landed — the one thing the anchor
+  // exists to prevent. It reaches 0 on its own whenever the reply is long
+  // enough to fill the room below the anchor.
+
+  it("a short answer keeps only the spacer that holds the view in place", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+
+    const anchored = scroller.scrollTop;
+    expect(anchored).toBe(736);
+    expect(spacerOf(scroller)).toBeGreaterThan(0);
+
+    // The reply finishes short — one line, nowhere near filling the viewport.
+    heights[9] = 40;
+    rerender([...sent().slice(0, 9), msg("a1", "assistant", "done", false)]);
+
+    // content = 8 seeded rows + the sent message + a 40px reply = 940;
+    // holding scrollTop 736 in a 300px viewport needs exactly 96px.
+    expect(scroller.scrollTop).toBe(anchored); // not yanked
+    expect(spacerOf(scroller)).toBe(96);
+    expect(spacerOf(scroller)).toBeLessThan(164); // smaller than mid-stream
+  });
+
   // ── Rule 3: opening or switching a conversation lands at the bottom ──
 
   it("switching conversations lands at the bottom, not a remembered spot", () => {
