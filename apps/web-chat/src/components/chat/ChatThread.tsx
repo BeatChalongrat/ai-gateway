@@ -15,7 +15,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Message } from "@/lib/types";
 import { useT } from "@/lib/i18n";
 import { useChatStore } from "@/stores/chatStore";
-import { recallScroll, rememberScroll } from "@/lib/scrollMemory";
 import {
   ANCHOR_PREVIOUS_PEEK_PX,
   anchorTarget,
@@ -141,26 +140,57 @@ export function ChatThread({
     const contentH = el.scrollHeight - spacerPx();
     setSpacerPx(spacerNeeded(target, el.clientHeight, contentH));
     autoScrolling.current = true;
-    // Instant assignment — same idiom as every other effect-driven snap
-    // in this file, so prefers-reduced-motion needs no special-casing.
-    el.scrollTop = target;
+    // The anchor jump ANIMATES: it is a deliberate move the user asked for
+    // by sending, and a hard cut loses the sense that the thread scrolled.
+    // Smoothness is switched on for this one write and off again straight
+    // after, so the per-token stick-to-bottom during streaming stays
+    // instant (a smooth scroll restarted on every token fights itself).
+    animateScroll(el, target);
     requestAnimationFrame(() => {
       autoScrolling.current = false;
     });
     return true;
   }
 
-  // Phase 7 — pending scroll restore for the conversation just opened.
-  // null = no saved position (keep the default bottom-anchored view).
-  const pendingRestore = useRef<number | null>(null);
+  /** Programmatic scroll that animates unless the OS asks for reduced
+   *  motion. Driven through CSS scroll-behavior rather than
+   *  `scrollTo({behavior})` so the assignment stays a plain scrollTop
+   *  write — the same value the anchor math and the tests read back. */
+  function animateScroll(el: HTMLElement, top: number) {
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!reduced) el.style.scrollBehavior = "smooth";
+    el.scrollTop = top;
+    requestAnimationFrame(() => {
+      el.style.scrollBehavior = "auto";
+    });
+  }
+
+  // Opening or switching to a conversation ALWAYS lands at the bottom —
+  // the newest turn, the way Claude/ChatGPT/Gemini behave. This replaced a
+  // per-conversation scroll memory that restored the previous reading
+  // position: switching away and back dropped you mid-thread with no sign
+  // that newer messages existed below. "Continue the conversation" is the
+  // intent behind opening one; a stale offset is never what you meant.
   useLayoutEffect(() => {
     // P3 — a turn anchor never crosses conversations.
     anchorActive.current = false;
     lastUserMsgId.current = null;
     if (spacerRef.current) spacerRef.current.style.height = "0px";
-    pendingRestore.current = recallScroll(convId);
+    // Follow state must reset too: carrying autoStick=false over from a
+    // conversation the user had scrolled up in left the new one parked
+    // wherever it happened to render, with only a pill for company.
+    setAutoStick(true);
+    setPendingNew(false);
+    setFarFromBottom(false);
+    const scroller = scrollerRef.current;
+    if (scroller) {
+      autoScrolling.current = true;
+      scroller.scrollTop = scroller.scrollHeight;
+    }
     // Force the message effect below to treat this as a fresh render so
-    // the restore (or the default scroll-to-bottom) actually fires.
+    // the bottom-anchoring actually fires once the list has rendered.
     lastLen.current = -1;
     lastLastContent.current = "\u0000";
   }, [convId]);
@@ -220,27 +250,12 @@ export function ChatThread({
       userMsg !== null &&
       userMsg.id !== seenUserId &&
       ((lengthGrew && prevLen > 0) ||
-        (prevLen === -1 &&
-          Boolean(last?.isStreaming) &&
-          pendingRestore.current === null));
-
-    // Phase 7 — scroll memory. On the first render after switching to a
-    // conversation we've seen before, restore where the user was
-    // instead of snapping to the bottom. Runs before the auto-stick
-    // branch below so it wins exactly once per switch.
-    if (pendingRestore.current !== null && el.scrollHeight > 0) {
-      const target = pendingRestore.current;
-      pendingRestore.current = null;
-      autoScrolling.current = true;
-      el.scrollTop = target;
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setAutoStick(distance < NEAR_BOTTOM_PX);
-      setFarFromBottom(distance > SHOW_SCROLL_BUTTON_PX);
-      requestAnimationFrame(() => {
-        autoScrolling.current = false;
-      });
-      return;
-    }
+        // Second arm: the very first turn of a just-created conversation,
+        // where the thread mounts already mid-stream. Bounded to that one
+        // case (the user message plus its streaming reply) so switching
+        // INTO an existing conversation that happens to be streaming still
+        // lands at the bottom, per rule 3.
+        (prevLen === -1 && Boolean(last?.isStreaming) && messages.length <= 2));
 
     // P3 — anchor the user's own turn near the top, unconditionally:
     // it fires pinned-to-bottom, scrolled-up, or position-restored
@@ -371,8 +386,6 @@ export function ChatThread({
     // decides whether to follow, exactly as before).
     anchorActive.current = false;
     const el = e.currentTarget;
-    // Phase 7 — remember where the user is, per conversation.
-    rememberScroll(convId, el.scrollTop);
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = distance < NEAR_BOTTOM_PX;
     setAutoStick(nearBottom);
@@ -386,7 +399,7 @@ export function ChatThread({
     setAutoStick(true);
     setPendingNew(false);
     autoScrolling.current = true;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    animateScroll(el, el.scrollHeight);
     window.setTimeout(() => {
       autoScrolling.current = false;
     }, 400);

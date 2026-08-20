@@ -5,11 +5,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useI18nStore } from "@/lib/i18n";
-import {
-  clearScrollMemory,
-  recallScroll,
-  rememberScroll,
-} from "@/lib/scrollMemory";
 import { MAX_FILE_SIZE_BYTES } from "@/lib/fileUtil";
 import { shouldSendOnEnter } from "@/lib/keyboard";
 
@@ -19,7 +14,6 @@ import { formatMessageTime } from "./MessageBubble";
 afterEach(cleanup);
 beforeEach(() => {
   useI18nStore.setState({ locale: "en" });
-  clearScrollMemory();
 });
 
 // ─── Task 1: upload progress ────────────────────────────────────
@@ -102,38 +96,6 @@ describe("formatMessageTime", () => {
   it("returns null for missing/garbage timestamps instead of crashing", () => {
     expect(formatMessageTime(undefined, "en", now)).toBeNull();
     expect(formatMessageTime("not-a-date", "en", now)).toBeNull();
-  });
-});
-
-// ─── Task 3: scroll memory ──────────────────────────────────────
-
-describe("scroll memory", () => {
-  it("remembers a position per conversation and forgets nothing else", () => {
-    rememberScroll("c1", 420);
-    rememberScroll("c2", 100);
-    expect(recallScroll("c1")).toBe(420);
-    expect(recallScroll("c2")).toBe(100);
-    expect(recallScroll("never-opened")).toBeNull();
-  });
-
-  it("overwrites with the latest position and normalizes the value", () => {
-    rememberScroll("c1", 10);
-    rememberScroll("c1", 999.6);
-    expect(recallScroll("c1")).toBe(1000);
-    rememberScroll("c1", -5);
-    expect(recallScroll("c1")).toBe(0);
-  });
-
-  it("is bounded (LRU) so a long session can't grow without limit", () => {
-    for (let i = 0; i < 60; i++) rememberScroll(`c${i}`, i);
-    expect(recallScroll("c0")).toBeNull(); // evicted
-    expect(recallScroll("c59")).toBe(59); // newest kept
-  });
-
-  it("uses NO browser storage", () => {
-    rememberScroll("c1", 42);
-    expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.length).toBe(0);
   });
 });
 

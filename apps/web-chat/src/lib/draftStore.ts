@@ -5,17 +5,18 @@
 // ChatInput debounces (~1s) a save while typing, flushes immediately on
 // switch/unmount, deletes on send. Invisible beyond the text reappearing.
 //
-// Persisted in localStorage — unlike scrollMemory's in-memory rule,
-// a draft is text the user wrote themselves, so restoring it days later
-// is exactly what they expect (this matches desktop's SQLite drafts).
+// Persisted in localStorage: a draft is text the user wrote themselves, so
+// restoring it days later is exactly what they expect (this matches
+// desktop's SQLite drafts). Note the contrast with scroll position, which
+// is deliberately NOT remembered — opening a conversation always lands at
+// the newest turn.
 // All entries live under ONE key as a JSON map so the LRU cap can see
 // every draft at once; failures (quota, disabled storage, corrupt JSON)
 // are swallowed — losing a draft save must never break the composer.
 
 const STORAGE_KEY = "sran-webchat-composer-drafts";
 
-/** Bounded so a heavy user can't grow storage without limit — same cap
- *  as scrollMemory's MAX_REMEMBERED. */
+/** Bounded so a heavy user can't grow storage without limit. */
 const MAX_DRAFTS = 50;
 
 /** Bucket for text typed on the landing page before a conversation id

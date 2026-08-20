@@ -24,7 +24,6 @@ vi.mock("./MessageBubble", () => ({
 import type { Message } from "@/lib/types";
 import { useI18nStore } from "@/lib/i18n";
 import { dictionaries } from "@/lib/i18n/dict";
-import { clearScrollMemory } from "@/lib/scrollMemory";
 import { ANCHOR_PREVIOUS_PEEK_PX } from "@/lib/turnAnchor";
 
 import { ChatThread } from "./ChatThread";
@@ -60,7 +59,6 @@ const origGBCR = HTMLElement.prototype.getBoundingClientRect;
 
 beforeEach(() => {
   useI18nStore.setState({ locale: "en" });
-  clearScrollMemory();
   heights = {};
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
     cb(0);
@@ -124,15 +122,18 @@ const seed = (n: number): Message[] =>
     msg(`m${i}`, i % 2 === 0 ? "user" : "assistant", `seed ${i}`),
   );
 
-function mount(initial: Message[]) {
-  const props = { convId: "c1", onRegenerate: () => {} };
-  const view = render(<ChatThread {...props} messages={initial} />);
+function mount(initial: Message[], convId = "c1") {
+  const props = { onRegenerate: () => {} };
+  const view = render(
+    <ChatThread {...props} convId={convId} messages={initial} />,
+  );
   const scroller = view.container.querySelector(
     ".overflow-y-auto",
   ) as HTMLElement;
   return {
     scroller,
-    rerender: (m: Message[]) => view.rerender(<ChatThread {...props} messages={m} />),
+    rerender: (m: Message[], id = convId) =>
+      view.rerender(<ChatThread {...props} convId={id} messages={m} />),
   };
 }
 
@@ -215,6 +216,41 @@ describe("send-time turn anchoring", () => {
     heights[9] = 250;
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "grown", true)]);
     expect(scroller.scrollTop).toBe(400); // nobody moves the user
+  });
+
+  // ── Rule 3: opening or switching a conversation lands at the bottom ──
+
+  it("switching conversations lands at the bottom, not a remembered spot", () => {
+    const { scroller, rerender } = mount(seed(8));
+
+    // The user reads partway up conversation c1...
+    scroller.scrollTop = 200;
+    fireEvent.scroll(scroller);
+    expect(scroller.scrollTop).toBe(200);
+
+    // ...switches to c2, then back to c1. Both must land at the newest turn.
+    rerender(seed(8), "c2");
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+
+    rerender(seed(8), "c1");
+    expect(scroller.scrollTop).toBe(
+      scroller.scrollHeight,
+      );
+  });
+
+  it("switching after scrolling up restores follow, so no pill is left behind", () => {
+    const { scroller, rerender } = mount(seed(8));
+
+    scroller.scrollTop = 100; // scrolled up => autoStick false in c1
+    fireEvent.scroll(scroller);
+
+    rerender(seed(8), "c2");
+
+    // Landing at the bottom means streaming in the NEW conversation
+    // follows immediately instead of raising "new messages".
+    heights[8] = 100;
+    rerender([...seed(8), msg("a1", "assistant", "hi", true)], "c2");
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
   });
 
   it("does not anchor or move on a fresh conversation open", () => {
