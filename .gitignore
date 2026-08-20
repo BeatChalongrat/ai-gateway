@@ -119,3 +119,22 @@ PROMPT*.md
 scratchpad/
 *.patch
 !reports/**/*.patch
+
+# Build artifacts: installers and release binaries (2026-08-20 hygiene pass)
+# Nothing here is source — every one is regenerable by the desktop build.
+# The tree already carries a ~98 MB installer under releases/, which no rule
+# covered: a single `git add -A` would put it in history permanently, and
+# undoing that means rewriting history across every branch.
+# SranDesktop/publish/ and SranDesktop/installer/ were already covered by
+# SranDesktop/.gitignore:6-7; these extension rules are the repo-wide
+# backstop for artifacts produced anywhere else, including releases/.
+# Scoped by extension rather than by directory ON PURPOSE: releases/ is the
+# desktop update channel and releases/latest.json is the live manifest whose
+# history is the rollback path, so it must STAY TRACKED. A `releases/` rule
+# would have swallowed it.
+*.exe
+*.msi
+*.msix
+*.appx
+*.appxbundle
+*.nupkg
