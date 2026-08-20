@@ -62,6 +62,11 @@ export const en = {
   // sendable while this is up — extraction no longer blocks the turn.
   "file.reading": "Reading…",
   "input.attach": "Attach files",
+  // ── Batch 1 W3 — vision gating ──────────────────────────────
+  "input.attachNoImages": "Attach files (this model can't read images)",
+  "input.visionUnsupported": "This model can't read images — switch to {model} to attach them.",
+  "input.visionUnsupportedNoAlt": "This model can't read images.",
+  "input.visionBlockedSend": "This model can't read images — switch models or remove the image to send.",
   "input.voice": "Voice input",
   "input.imageMode": "Generate an image",
   "input.videoMode": "Generate a video",
@@ -568,6 +573,9 @@ export const en = {
   "common.dismiss": "Dismiss",
   "common.loading": "Loading…",
 
+  // ── Batch 1 W2 — image lightbox ─────────────────────────────
+  "lightbox.zoomReset": "Reset zoom",
+
   // ── Phase-3 i18n cleanup — count units ──────────────────────
   "unit.file": "file",
   "unit.files": "files",
@@ -919,6 +927,11 @@ const th: Record<DictKey, string> = {
   "input.placeholder.reading": "กำลังอ่านเอกสาร…",
   "file.reading": "กำลังอ่าน…",
   "input.attach": "แนบไฟล์",
+  // ── Batch 1 W3 — vision gating ──────────────────────────────
+  "input.attachNoImages": "แนบไฟล์ (โมเดลนี้อ่านรูปภาพไม่ได้)",
+  "input.visionUnsupported": "โมเดลนี้อ่านรูปภาพไม่ได้ — เปลี่ยนไปใช้ {model} เพื่อแนบรูป",
+  "input.visionUnsupportedNoAlt": "โมเดลนี้อ่านรูปภาพไม่ได้",
+  "input.visionBlockedSend": "โมเดลนี้อ่านรูปภาพไม่ได้ — เปลี่ยนโมเดลหรือลบรูปออกก่อนส่ง",
   "input.voice": "ป้อนเสียง",
   "input.imageMode": "สร้างรูปภาพ",
   "input.videoMode": "สร้างวิดีโอ",
@@ -1415,6 +1428,9 @@ const th: Record<DictKey, string> = {
   "common.close": "ปิด",
   "common.dismiss": "ปิดข้อความ",
   "common.loading": "กำลังโหลด…",
+
+  // ── Batch 1 W2 — image lightbox ─────────────────────────────
+  "lightbox.zoomReset": "รีเซ็ตการซูม",
 
   // ── Phase-3 i18n cleanup — count units ──────────────────────
   "unit.file": "ไฟล์",

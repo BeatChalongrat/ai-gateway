@@ -998,6 +998,10 @@ public partial class ChatViewModel : ObservableObject
             // under that LOCAL id so dedup, tool-chain attachment and branch
             // restore keep working.
             var entries = new List<(string Id, MessageRole Role, string Content, DateTimeOffset CreatedAt, string? ModelId, bool FromServer, List<FileAttachmentDto>? Files)>();
+            // D2 — persisted web-search citations, keyed by the RENDER id
+            // (client_id for imported rows) so the lookup below matches the
+            // vm the row renders under.
+            var sourcesByRenderId = new Dictionary<string, List<SearchSourceDto>>(StringComparer.Ordinal);
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
             var serverRead = false;
             // Legacy local-first conversations read their Phase 3 mirror.
@@ -1031,7 +1035,11 @@ public partial class ChatViewModel : ObservableObject
                     var isImported = !string.IsNullOrEmpty(dto.ClientId);
                     var id = isImported ? dto.ClientId! : dto.Id;
                     if (seenIds.Add(id))
+                    {
                         entries.Add((id, role, dto.Content ?? string.Empty, dto.CreatedAt, dto.ModelId, !isImported, dto.Files));
+                        if (role == MessageRole.Assistant && dto.SearchSources is { Count: > 0 })
+                            sourcesByRenderId[id] = dto.SearchSources;
+                    }
                 }
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -1098,6 +1106,21 @@ public partial class ChatViewModel : ObservableObject
                             vm.UpdatePlan(Application.Services.PlanParser.Parse(planArgs));
                     }
                     ExtractPlanBlocks(conversation.Id, vm);
+                    // D2 — restore the web-search citation cards the live
+                    // turn showed. Same URL dedupe as AddSearchSources so a
+                    // restored card is indistinguishable from a live one;
+                    // absent/empty stays silent (no empty card).
+                    if (sourcesByRenderId.TryGetValue(vm.Id, out var persistedSources))
+                    {
+                        foreach (var s in persistedSources)
+                        {
+                            if (string.IsNullOrEmpty(s.Url)
+                                || vm.Sources.Any(x => x.Url == s.Url))
+                                continue;
+                            vm.Sources.Add(new SourceViewModel(
+                                s.Title ?? s.Url, s.Url, s.Snippet, s.Domain));
+                        }
+                    }
                 }
                 if (entry.Files is { Count: > 0 })
                     hydration.Add((vm, entry.Files));
@@ -3784,7 +3807,31 @@ public partial class ChatViewModel : ObservableObject
         if (string.IsNullOrEmpty(modelId) || modelId == "auto")
             return;
 
-        var vm = new AudioGenViewModel(_api, _logger, modelId, Conversation?.Id);
+        // Premium-cost gate (Batch 1 D1): the server flags jobs above its
+        // confirmation threshold with requires_confirmation — show the cost
+        // and require explicit consent before the job runs, mirroring the
+        // web CostConfirmModal. With no dialog service wired, the service's
+        // safe default declines (job cancelled, reservation refunded).
+        Func<Application.Models.MediaGenSubmitResponse, CancellationToken, Task<bool>>? confirmPremium = null;
+        if (_dialogs is { } dialogs)
+        {
+            confirmPremium = (submitted, _) =>
+            {
+                var l = Localization.LocaleService.Instance;
+                var message = string.Format(
+                    l.T("media.confirm.message"), submitted.EstimatedCostUsd ?? "—");
+                if (!string.IsNullOrEmpty(submitted.BalanceAfterUsd))
+                    message += "\n" + string.Format(
+                        l.T("media.confirm.balanceAfter"), submitted.BalanceAfterUsd);
+                message += "\n\n" + l.T("media.confirm.body");
+                // destructive:false → the confirm button reads "Confirm".
+                return dialogs.ConfirmAsync(
+                    l.T("media.confirm.title"), message, destructive: false);
+            };
+        }
+
+        var vm = new AudioGenViewModel(
+            _api, _logger, modelId, Conversation?.Id, confirmPremium: confirmPremium);
         vm.Completed += (_, result) =>
         {
             if (!result.Success || result.Audio is not { Length: > 0 })

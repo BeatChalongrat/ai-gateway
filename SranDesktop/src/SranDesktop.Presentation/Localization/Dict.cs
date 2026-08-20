@@ -522,6 +522,12 @@ public static class Dict
         ["media.genFailed"] = "Audio generation failed.",
         ["media.promptTooLong"] = "That text is too long — shorten it and try again.",
         ["media.audioReady"] = "Done — the audio was added to the chat.",
+        // Batch 1 D1 — premium-cost confirmation (server-owned threshold;
+        // copy mirrors the web CostConfirmModal).
+        ["media.confirm.title"] = "⚠ Premium generation",
+        ["media.confirm.message"] = "This generation is above the confirmation threshold.\nEstimated cost: {0}",
+        ["media.confirm.balanceAfter"] = "Balance after: {0}",
+        ["media.confirm.body"] = "Generation is reserved but not yet started. Cancel to refund, or confirm to begin processing. Once processing starts, the charge is final — even if cancelled mid-generation.",
 
         // R9 — Connectors
         ["menu.connectors"] = "Connectors",
@@ -1257,6 +1263,12 @@ public static class Dict
         ["media.genFailed"] = "สร้างไฟล์เสียงไม่สำเร็จ",
         ["media.promptTooLong"] = "ข้อความยาวเกินไป กรุณาย่อให้สั้นลงแล้วลองใหม่",
         ["media.audioReady"] = "เสร็จแล้ว — เพิ่มไฟล์เสียงลงในแชทให้แล้ว",
+        // Batch 1 D1 — premium-cost confirmation (server-owned threshold;
+        // copy mirrors the web CostConfirmModal).
+        ["media.confirm.title"] = "⚠ การสร้างระดับพรีเมียม",
+        ["media.confirm.message"] = "การสร้างนี้มีค่าใช้จ่ายเกินเกณฑ์ที่ต้องยืนยัน\nค่าใช้จ่ายโดยประมาณ: {0}",
+        ["media.confirm.balanceAfter"] = "ยอดคงเหลือหลังหัก: {0}",
+        ["media.confirm.body"] = "งานถูกจองไว้แต่ยังไม่เริ่มประมวลผล กดยกเลิกเพื่อรับเงินคืน หรือยืนยันเพื่อเริ่มประมวลผล เมื่อเริ่มแล้วจะไม่สามารถขอคืนได้ แม้ยกเลิกกลางคัน",
 
         // R9 — Connectors
         ["menu.connectors"] = "เชื่อมต่อ",

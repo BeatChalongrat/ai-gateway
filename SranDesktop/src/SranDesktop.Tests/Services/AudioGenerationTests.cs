@@ -31,16 +31,20 @@ public sealed class AudioGenerationServiceTests
     /// <summary>No real waiting — the poll loop runs at full speed.</summary>
     private static Task NoDelay(TimeSpan _, CancellationToken __) => Task.CompletedTask;
 
-    private AudioGenerationService Create() =>
-        new(_api.Object, NullLogger.Instance, NoDelay);
+    private AudioGenerationService Create(
+        Func<MediaGenSubmitResponse, CancellationToken, Task<bool>>? confirmPremium = null) =>
+        new(_api.Object, NullLogger.Instance, NoDelay, confirmPremium);
 
     private static AudioGenerationRequest Request(string mode = "tts") =>
         new("hello there", "tts-1", mode);
 
-    private void Submitted(string status = "queued") =>
+    private void Submitted(string status = "queued", bool requiresConfirmation = false) =>
         _api.Setup(a => a.SubmitAudioGenerationAsync(
                 It.IsAny<AudioGenerationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new MediaGenSubmitResponse("job-1", status));
+            .ReturnsAsync(new MediaGenSubmitResponse(
+                "job-1", status,
+                EstimatedCostUsd: requiresConfirmation ? "$2.50" : null,
+                RequiresConfirmation: requiresConfirmation));
 
     private void Polls(params string[] statuses)
     {
@@ -107,6 +111,74 @@ public sealed class AudioGenerationServiceTests
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("402");
         _api.Verify(a => a.GetMediaJobAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Batch 1 D1 — premium-cost confirmation ──────────────────────────
+    // requires_confirmation=true is the server saying "reserved, but do not
+    // proceed without consent". Declining (or having no confirm hook wired)
+    // must cancel the job so the reservation refunds; confirming proceeds.
+
+    [Fact]
+    public async Task Premium_Job_Declined_Cancels_The_Job_And_Reports_UserCancelled()
+    {
+        Submitted(requiresConfirmation: true);
+
+        var result = await Create(confirmPremium: (_, _) => Task.FromResult(false))
+            .GenerateAsync(Request());
+
+        result.Success.Should().BeFalse();
+        result.UserCancelled.Should().BeTrue();
+        result.ErrorMessage.Should().BeNull();
+        _api.Verify(a => a.CancelMediaJobAsync("job-1", It.IsAny<CancellationToken>()), Times.Once);
+        _api.Verify(a => a.GetMediaJobAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Premium_Job_Confirmed_Proceeds_To_Completion()
+    {
+        Submitted(requiresConfirmation: true);
+        Polls("processing", "done");
+        Output(new byte[] { 7 });
+
+        var result = await Create(confirmPremium: (submitted, _) =>
+        {
+            submitted.EstimatedCostUsd.Should().Be("$2.50");
+            return Task.FromResult(true);
+        }).GenerateAsync(Request());
+
+        result.Success.Should().BeTrue();
+        _api.Verify(a => a.CancelMediaJobAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Premium_Job_With_No_Confirm_Hook_Is_Declined_Safely()
+    {
+        // Headless callers that never wired a dialog must not silently start
+        // a job the server said needs consent.
+        Submitted(requiresConfirmation: true);
+
+        var result = await Create().GenerateAsync(Request());
+
+        result.UserCancelled.Should().BeTrue();
+        _api.Verify(a => a.CancelMediaJobAsync("job-1", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NonPremium_Job_Never_Invokes_The_Confirm_Hook()
+    {
+        Submitted("done");
+        Output(new byte[] { 1 });
+        var hookCalls = 0;
+
+        var result = await Create(confirmPremium: (_, _) =>
+        {
+            hookCalls++;
+            return Task.FromResult(true);
+        }).GenerateAsync(Request());
+
+        result.Success.Should().BeTrue();
+        hookCalls.Should().Be(0);
+        _api.Verify(a => a.CancelMediaJobAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

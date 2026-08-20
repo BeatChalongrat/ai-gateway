@@ -418,6 +418,54 @@ public class ChatViewModelServerReadTests : IDisposable
         _vm.Messages[1].Content.Should().Be("cached answer");
     }
 
+    [Fact]
+    public async Task Persisted_Search_Sources_Hydrate_Citation_Cards_On_Open()
+    {
+        // D2: a web-search answer keeps its citation cards after the
+        // conversation is closed and reopened. The server row carries
+        // search_sources (migration 023); web already restored them,
+        // desktop silently dropped them.
+        var conversation = await SeedConversationAsync();
+        SetupServerMessages(
+            Dto("s-u1", "user", "what's new?", T0),
+            Dto("s-a1", "assistant", "here's what I found", T0.AddSeconds(5)) with
+            {
+                SearchSources = new List<SearchSourceDto>
+                {
+                    new("Result A", "https://a.example/x", "snippet a", "a.example"),
+                    new("Result B", "https://b.example/y", null, null),
+                    // Same URL again — the live AddSearchSources path
+                    // dedupes by URL; restore must match it.
+                    new("Result A (dup)", "https://a.example/x", null, "a.example"),
+                }
+            });
+
+        await _vm.OpenConversationAsync(conversation);
+
+        var assistant = _vm.Messages[1];
+        assistant.Sources.Should().HaveCount(2);
+        assistant.Sources[0].Title.Should().Be("Result A");
+        assistant.Sources[0].Url.Should().Be("https://a.example/x");
+        assistant.Sources[0].Snippet.Should().Be("snippet a");
+        assistant.Sources[0].Domain.Should().Be("a.example");
+        // Domain falls back to the URL host when the payload omits it —
+        // SourceViewModel's own rule, shared with the live path.
+        assistant.Sources[1].Domain.Should().Be("b.example");
+        _vm.Messages[0].Sources.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Messages_Without_Search_Sources_Hydrate_An_Empty_Collection()
+    {
+        // Absent/null must stay silent — no empty card.
+        var conversation = await SeedConversationAsync();
+        SetupServerMessages(Dto("s-a1", "assistant", "no search used", T0));
+
+        await _vm.OpenConversationAsync(conversation);
+
+        _vm.Messages.Single().Sources.Should().BeEmpty();
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

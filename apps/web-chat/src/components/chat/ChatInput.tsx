@@ -5,13 +5,23 @@ import { useEffect, useRef, useState } from "react";
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import {
+  clearDraft,
+  loadDraft,
+  migrateDraft,
+  NEW_CHAT_DRAFT_KEY,
+  saveDraft,
+} from "@/lib/draftStore";
 import type { ExtractionStatus } from "@/lib/fileExtraction";
 import { isExtracting, watchExtraction } from "@/lib/fileExtraction";
 import {
   FILE_PICKER_ACCEPT,
+  FILE_PICKER_ACCEPT_NO_IMAGES,
+  isImageFile,
   MAX_FILES_PER_MESSAGE,
   validateFile,
 } from "@/lib/fileUtil";
+import { gateImagesForVision, modelAcceptsImages } from "@/lib/visionGate";
 import { tOutside, useT } from "@/lib/i18n";
 import { shouldSendOnEnter } from "@/lib/keyboard";
 import {
@@ -100,6 +110,78 @@ export function ChatInput({
 }: Props) {
   const t = useT();
   const [text, setText] = useState("");
+
+  // ── Composer draft persistence (Batch 1 W1 — desktop parity) ────
+  // Typed-but-unsent text survives conversation switches and reloads:
+  // debounced (~1s) save while typing, immediate flush on switch and
+  // unmount, delete on send. Invisible beyond the text reappearing —
+  // mirrors ChatViewModel.cs "Composer draft persistence (Phase 3 C4)".
+  const draftKey = conversationId ?? NEW_CHAT_DRAFT_KEY;
+  // Render-time mirrors so the flush paths (key-change effect, unmount
+  // cleanup) read the CURRENT text/key without re-running per keystroke.
+  const textRef = useRef(text);
+  textRef.current = text;
+  const draftKeyRef = useRef(draftKey);
+
+  // Restore on mount + handle an in-place key change. The only expected
+  // in-place change is a landing page's eager-create (null → real id):
+  // the visible text belongs to the SAME logical conversation, so the
+  // entry migrates instead of loading (an empty load would clobber what
+  // the user is typing). NOTE: the current /chat landing intentionally
+  // pins conversationId=null for its instance's lifetime, so this branch
+  // is defensive — landing drafts live under NEW_CHAT_DRAFT_KEY and
+  // restore when the landing page is revisited.
+  useEffect(() => {
+    const prev = draftKeyRef.current;
+    if (prev !== draftKey) {
+      draftKeyRef.current = draftKey;
+      if (prev === NEW_CHAT_DRAFT_KEY && conversationId) {
+        migrateDraft(prev, draftKey);
+        saveDraft(draftKey, textRef.current);
+        return;
+      }
+      // Any other in-place switch: flush the outgoing conversation's
+      // text, then fall through to restore the incoming one.
+      saveDraft(prev, textRef.current);
+    }
+    const restored = loadDraft(draftKey);
+    if (restored !== null && restored !== textRef.current) {
+      setText(restored);
+      // Caret at the end of the restored text. No focus() call — the
+      // restore must never steal focus or pop the soft keyboard.
+      requestAnimationFrame(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        const end = ta.value.length;
+        ta.setSelectionRange(end, end);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, conversationId]);
+
+  // Debounced (~1s) save while typing; the effect cleanup doubles as
+  // the per-keystroke debounce reset. saveDraft with empty text deletes
+  // the entry, so clearing the composer clears the draft too.
+  useEffect(() => {
+    const key = draftKey;
+    const id = window.setTimeout(() => saveDraft(key, text), 1000);
+    return () => window.clearTimeout(id);
+  }, [text, draftKey]);
+
+  // Flush on unmount so a fast click-away (before the debounce fires)
+  // still lands the draft — and on pagehide, because a hard reload or
+  // tab close destroys the document WITHOUT running React cleanups,
+  // which would lose anything typed inside the debounce window.
+  // Mount-only: the refs carry current values.
+  useEffect(() => {
+    const flush = () => saveDraft(draftKeyRef.current, textRef.current);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
+
   // Phase 10 — slash quick actions. The menu is derived from `text`
   // (single source of truth): no separate "is open" flag to fall out of
   // sync with what the user actually typed.
@@ -146,6 +228,14 @@ export function ChatInput({
   // the chat composer (modelKind defaults to "chat" when the model is the
   // Auto sentinel, unknown, or a payload without model_kind).
   const modelKind = activeModel?.model_kind ?? "chat";
+  // W3 — vision gating. The picker's accept-list and the send gate
+  // react to the model instantly; the paste/drop paths gate through
+  // gateImagesForVision (reading the CURRENT id via the ref, because
+  // the paste listener binds once at mount and would otherwise close
+  // over a stale model).
+  const acceptsImages = modelAcceptsImages(activeModelId ?? null, models);
+  const activeModelIdRef = useRef(activeModelId);
+  activeModelIdRef.current = activeModelId;
   // Phase 11 — Thinking Mode toggle. The store action + server columns have
   // existed since T4; nothing ever called them, so a reasoning-capable model
   // could never actually be told to think. Shown only when the selected model
@@ -404,7 +494,18 @@ export function ChatInput({
 
   function submit() {
     if (!canSend) return;
-    const t = text.trim();
+    // W3 — a user who attached an image and THEN switched to a
+    // non-vision model keeps the attachment; the send is blocked with
+    // the fix named instead of silently dropping their file or letting
+    // the provider fail opaquely.
+    if (
+      !acceptsImages &&
+      pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file))
+    ) {
+      toast(t("input.visionBlockedSend"));
+      return;
+    }
+    const t2 = text.trim();
     // Hand the attachment metadata to the store BEFORE onSend. The
     // clearPendingFiles calls below run synchronously, but on the
     // landing page onSend awaits ensureConv() before it reaches
@@ -424,8 +525,12 @@ export function ChatInput({
           created_at: new Date().toISOString(),
         })),
     );
-    onSend(t, readyFileIds, imageMode, videoMode);
+    onSend(t2, readyFileIds, imageMode, videoMode);
     setText("");
+    // Delete the persisted draft NOW — the debounced empty-save would
+    // also clear it, but a reload inside that 1s window must not
+    // resurrect an already-sent message.
+    clearDraft(draftKey);
     // Clear whichever bucket the visible chips were rendering from —
     // covers both the conv-page case (real id) and the landing
     // path where the chips might still be on the DRAFT key at the
@@ -581,7 +686,16 @@ export function ChatInput({
     }
   }
 
-  async function handleFiles(filesRaw: File[]) {
+  async function handleFiles(filesInput: File[]) {
+    // W3 — vision gate first: images are filtered (with a toast naming
+    // a capable model) when the active model can't read them. Reads
+    // the CURRENT model id via the ref — this function is also reached
+    // from the mount-time paste listener whose closure is stale.
+    const filesRaw = gateImagesForVision(
+      filesInput,
+      activeModelIdRef.current ?? null,
+    );
+    if (filesRaw.length === 0) return;
     // Per-message cap. Count rows already in the render bucket; we
     // re-read the selector value because closures see the snapshot
     // captured at render time and that's exactly what the user
@@ -789,7 +903,11 @@ export function ChatInput({
           <input
             ref={fileInputRef}
             type="file"
-            accept={FILE_PICKER_ACCEPT}
+            // W3 — non-vision models get the image-free accept list so
+            // the OS dialog steers away from images; gateImagesForVision
+            // in handleFiles stays the real gate ("All files" bypasses
+            // accept).
+            accept={acceptsImages ? FILE_PICKER_ACCEPT : FILE_PICKER_ACCEPT_NO_IMAGES}
             multiple
             className="hidden"
             onChange={onPickFiles}
@@ -867,8 +985,8 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  aria-label={t("input.attach")}
-                  title={t("input.attach")}
+                  aria-label={acceptsImages ? t("input.attach") : t("input.attachNoImages")}
+                  title={acceptsImages ? t("input.attach") : t("input.attachNoImages")}
                   disabled={streaming || disabled}
                   className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >

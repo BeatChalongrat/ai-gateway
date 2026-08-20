@@ -861,6 +861,12 @@ app.add_middleware(
     timeout_seconds=20.0,
     path_timeouts={
         "/v1/images/generations": settings.image_generation_timeout_seconds,
+        # Voice work on a long clip outruns the 20s default (B1). The
+        # middleware matches exact paths, so both fixed voice routes are
+        # listed (see public_voice.py — /voice/transcribe, /voice/synthesize
+        # mounted under /v1).
+        "/v1/voice/transcribe": settings.voice_timeout_seconds,
+        "/v1/voice/synthesize": settings.voice_timeout_seconds,
     },
 )
 app.add_middleware(RequestTimingMiddleware)
