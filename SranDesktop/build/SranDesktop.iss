@@ -6,7 +6,7 @@
 ; Build:  ISCC.exe build\SranDesktop.iss
 
 #define MyAppName "SRAN Desktop"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "SRAN"
 #define MyAppURL "https://sran.ai"
 #define MyAppExeName "SranDesktop.exe"
@@ -68,6 +68,20 @@ Source: "..\publish\win-x64\*.json"; DestDir: "{app}"; Flags: ignoreversion skip
 ; unpacked extension folder Settings points users at.
 Source: "..\publish\win-x64\SranDesktop.BrowserHost.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\browser-extension\*"; DestDir: "{app}\browser-extension"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
+; Offline web assets the app maps into WebView2 through the appassets.sran
+; virtual host: KaTeX (display math) and the React bundle (canvas artifacts).
+; Read at runtime from {app}\Assets\WebLibs by MathBlockControl,
+; ArtifactControl and CanvasWindow. Publish emits them from the Content
+; items in SranDesktop.Presentation.csproj; until this line existed the
+; folder was simply absent in an installed build, the virtual-host mapping
+; was skipped by a silent `if`, and display math + canvas rendered as raw
+; source with no error anywhere.
+;
+; Deliberately NO skipifsourcedoesntexist: these files are required, so if
+; publish has not emitted them the compile must FAIL here rather than
+; produce a quietly broken installer — which is exactly how this shipped
+; broken since 14 Jul.
+Source: "..\publish\win-x64\Assets\*"; DestDir: "{app}\Assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
