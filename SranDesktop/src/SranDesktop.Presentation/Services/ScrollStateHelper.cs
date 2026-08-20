@@ -60,4 +60,27 @@ public static class AnimatedScroller
         };
         scroll.BeginAnimation(VerticalOffsetProperty, anim);
     }
+
+    /// <summary>Scroll to a specific offset — animated when motion is
+    /// enabled, else snap. Used by the send-time turn anchor: moving to the
+    /// new turn is a deliberate move the user asked for by sending, and a
+    /// hard cut loses the sense that the thread scrolled. Honours
+    /// MotionSettings, which is the desktop's reduced-motion switch.</summary>
+    public static void ScrollTo(ScrollViewer scroll, double offset)
+    {
+        offset = Math.Max(0, Math.Min(offset, scroll.ScrollableHeight));
+        if (!MotionSettings.Enabled)
+        {
+            scroll.BeginAnimation(VerticalOffsetProperty, null);
+            scroll.ScrollToVerticalOffset(offset);
+            return;
+        }
+
+        var anim = new DoubleAnimation(scroll.VerticalOffset, offset,
+            new Duration(System.TimeSpan.FromMilliseconds(250)))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        scroll.BeginAnimation(VerticalOffsetProperty, anim);
+    }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FluentAssertions;
 using SranDesktop.Application.Services;
 using Xunit;
@@ -117,40 +118,6 @@ public class TurnAnchorMathTests
     }
 
     [Fact]
-    public void Resume_OnceContentReachesTheViewportBottom()
-    {
-        TurnAnchorMath.ShouldResumeFollow(contentHeight: 2536, offset: 1936, Viewport)
-            .Should().BeTrue();
-    }
-
-    // ── IsExtentReady (offset-coercion guard — the P3-desktop bug) ──────────
-
-    [Fact]
-    public void ExtentNotReady_WhenTheSpacerHasNotEnteredLayoutYet()
-    {
-        // The original failure: extent still 2100 while the anchor needs
-        // 1936+600 — a ScrollToVerticalOffset(1936) would be coerced short.
-        TurnAnchorMath.IsExtentReady(extentHeight: 2100, target: 1936, Viewport)
-            .Should().BeFalse();
-    }
-
-    [Fact]
-    public void ExtentReady_OnceTheSpacerIsMeasuredIn()
-    {
-        TurnAnchorMath.IsExtentReady(extentHeight: 2536, target: 1936, Viewport)
-            .Should().BeTrue();
-    }
-
-    [Fact]
-    public void ExtentReady_ForATargetDeepInsideALongThread()
-    {
-        TurnAnchorMath.IsExtentReady(extentHeight: 10000, target: 5000, Viewport)
-            .Should().BeTrue();
-    }
-
-    // ── IsRecentTick (programmatic-vs-user ScrollChanged) ───────────────────
-
-    [Fact]
     public void ScrollInsideTheGraceWindow_IsOurs()
     {
         TurnAnchorMath.IsRecentTick(nowTick: 1_000_100, issuedTick: 1_000_000, graceMs: 150)
@@ -169,5 +136,61 @@ public class TurnAnchorMathTests
     {
         TurnAnchorMath.IsRecentTick(nowTick: 42, issuedTick: 0, graceMs: 150)
             .Should().BeFalse();
+    }
+    // ── F3: the spacer must not compound across recomputations ────────────
+    // The live failure was not the formula but its INPUT. ApplyAnchor passed
+    // `ExtentHeight - currentSpacer`, and a virtualizing panel does not fold
+    // a just-set spacer into ExtentHeight until the row is realized — so each
+    // retry subtracted a spacer the extent never included and asked for more
+    // (175 -> 350 -> 525 -> 700 -> 875 in the owner's log). Fed a content
+    // height measured from realized containers, the result is absolute:
+    // recompute it any number of times and it does not move.
+
+    [Fact]
+    public void SpacerIsIdempotent_RecomputingNeverGrowsIt()
+    {
+        const double target = 2226, viewport = 686, contentHeight = 2738;
+
+        var first = TurnAnchorMath.SpacerNeeded(target, viewport, contentHeight);
+        var again = TurnAnchorMath.SpacerNeeded(target, viewport, contentHeight);
+        var third = TurnAnchorMath.SpacerNeeded(target, viewport, contentHeight);
+
+        first.Should().Be(174);
+        again.Should().Be(first);
+        third.Should().Be(first);
+    }
+
+    [Fact]
+    public void SpacerShrinksAsRealContentArrives_AndNeverGoesNegative()
+    {
+        const double target = 2226, viewport = 686;
+
+        // The reply streams in: content grows, so less spacer is needed.
+        var early = TurnAnchorMath.SpacerNeeded(target, viewport, 2738);
+        var later = TurnAnchorMath.SpacerNeeded(target, viewport, 2850);
+        var full = TurnAnchorMath.SpacerNeeded(target, viewport, 3000);
+
+        later.Should().BeLessThan(early);
+        full.Should().Be(0, "content already reaches past the viewport bottom");
+    }
+
+    [Fact]
+    public void FeedingThePreviousSpacerBackIn_IsWhatUsedToCompound()
+    {
+        // Documents the old call site so the mistake is not repeated: when the
+        // measured height silently excludes the spacer just set, subtracting
+        // it again makes every pass ask for more.
+        const double target = 2226, viewport = 686, staleExtent = 2738;
+
+        double spacer = 0;
+        var asked = new List<double>();
+        for (var pass = 0; pass < 4; pass++)
+        {
+            spacer = TurnAnchorMath.SpacerNeeded(target, viewport, staleExtent - spacer);
+            asked.Add(spacer);
+        }
+
+        asked.Should().BeInAscendingOrder("this is the runaway the fix removes");
+        asked[^1].Should().BeGreaterThan(asked[0] * 3);
     }
 }

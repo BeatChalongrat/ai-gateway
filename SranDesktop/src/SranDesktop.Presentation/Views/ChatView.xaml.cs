@@ -12,15 +12,12 @@ public partial class ChatView : UserControl
     private bool _autoScroll = true;
     private ScrollViewer? _messageScroll;
 
-    // ── Per-conversation scroll memory (Phase 13 Task 3) ────────────────────
-    // The id whose position we are currently recording, and whether the newly
-    // opened chat still owes us a restore. Both live in the view because the
-    // offsets are a property of the rendered list, not of the conversation.
+    // The conversation currently displayed — tracked so a switch can be
+    // detected and the view landed at the newest turn (rule 3). Scroll
+    // POSITION is deliberately not remembered across switches; see
+    // OnConversationChanged.
     private string? _trackedConversationId;
-    private bool _restorePending;
 
-    private readonly SranDesktop.Application.Services.ScrollMemory _scrollMemory =
-        SranDesktop.Application.Services.ScrollMemory.Instance;
 
     // P2 — a Show more / Show less click changes the extent exactly like
     // stream growth does, and the ScrollChanged re-pin below cannot tell the
@@ -122,22 +119,28 @@ public partial class ChatView : UserControl
             OnConversationChanged(vm);
     }
 
-    /// <summary>A different chat is now open: stop recording against the old
-    /// id and arm a restore for the new one. The old chat's offset was already
-    /// captured on its last user scroll, so nothing is read here — by now the
-    /// list may have been cleared and its offset reset to 0.</summary>
+    /// <summary>A different chat is now open: reset the turn anchor and land
+    /// at the newest message.</summary>
     private void OnConversationChanged(ChatViewModel vm)
     {
         var next = vm.Conversation?.Id;
         if (next == _trackedConversationId)
             return;
         _trackedConversationId = next;
-        _autoScroll = true;                     // new chats start at the newest message
-        _restorePending = next is not null && _scrollMemory.Recall(next) is not null;
+        // Rule 3: opening or switching to a conversation ALWAYS lands at the
+        // newest turn. This replaced a per-conversation scroll memory that
+        // restored the previous reading position — switching away and back
+        // dropped you mid-thread with no sign that newer messages existed
+        // below. "Continue the conversation" is the intent behind opening
+        // one; a stale offset is never what you meant.
+        _autoScroll = true;
         // P3 — a turn anchor never crosses conversations.
         _anchorPending = false;
         _anchorActive = false;
         ClearSpacer();
+        // Land at the bottom as soon as the new list has laid out.
+        Dispatcher.InvokeAsync(() => MessageScroll?.ScrollToEnd(),
+            System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     /// <summary>The ListBox's internal ScrollViewer (materialized after the template applies).</summary>
@@ -244,11 +247,26 @@ public partial class ChatView : UserControl
 
         var target = SranDesktop.Application.Services.TurnAnchorMath.AnchorTarget(
             userTop, prevTop, AnchorPreviousPeekPx);
+
+        // Content height comes from the REALIZED turn, never from
+        // ExtentHeight. A VirtualizingStackPanel with recycling does not
+        // report an extent that includes a row until that row is realized —
+        // and the row is exactly what is missing when the user has scrolled
+        // away, which is when the anchor matters most. Waiting for the extent
+        // aborted 1 send in 3 (audit: 10 applied / 5 "extent never ready"),
+        // and each retry recomputed the spacer against a stale extent, so it
+        // GREW every pass (175→350→525→700→875) instead of converging.
+        //
+        // The bottom of the last realized item is always obtainable and is
+        // the same quantity web feeds its spacerNeeded (scrollHeight minus
+        // the spacer). Its own ActualHeight includes the spacer it hosts, so
+        // that is subtracted back out.
+        var contentHeight = ContentHeightOfTurn(vm, gen, scroll, container, userTop);
         var spacer = SranDesktop.Application.Services.TurnAnchorMath.SpacerNeeded(
-            target, scroll.ViewportHeight, scroll.ExtentHeight - _spacerPx);
+            target, scroll.ViewportHeight, contentHeight);
         vm.TraceAnchor("measure",
             $"userTop={userTop:F0} prevTop={prevTop?.ToString("F0") ?? "-"} target={target:F0} " +
-            $"extent={scroll.ExtentHeight:F0} viewport={scroll.ViewportHeight:F0} " +
+            $"contentH={contentHeight:F0} viewport={scroll.ViewportHeight:F0} " +
             $"offset={scroll.VerticalOffset:F0} spacer={spacer:F0}");
         SetSpacer(vm, spacer);
 
@@ -257,43 +275,63 @@ public partial class ChatView : UserControl
         // silently refuses to move (the original P3-desktop bug).
         MessageList.UpdateLayout();
 
-        if (!SranDesktop.Application.Services.TurnAnchorMath.IsExtentReady(
-                scroll.ExtentHeight, target, scroll.ViewportHeight))
-        {
-            if (retries <= 0)
-            {
-                AbortAnchor(vm, $"extent never ready (extent={scroll.ExtentHeight:F0} " +
-                    $"needed={target + scroll.ViewportHeight:F0})");
-                return;
-            }
-            vm.TraceAnchor("extent-wait",
-                $"extent={scroll.ExtentHeight:F0} < target+viewport={target + scroll.ViewportHeight:F0}, retry ({retries} left)");
-            Dispatcher.InvokeAsync(() => ApplyAnchor(retries - 1),
-                System.Windows.Threading.DispatcherPriority.Loaded);
-            return;
-        }
-
         _anchorScrollTick = Environment.TickCount64;
-        // Instant offset set — the idiom every non-button scroll in this
-        // file already uses (AnimatedScroller stays button-only).
-        scroll.ScrollToVerticalOffset(target);
+        // Animated: sending is a deliberate request to see the new turn, and
+        // AnimatedScroller falls back to a snap when MotionSettings is off.
+        SranDesktop.Presentation.Services.AnimatedScroller.ScrollTo(scroll, target);
         _anchorPending = false;
         _anchorActive = true;
         vm.TraceAnchor("applied",
             $"target={target:F0} extentAfterLayout={scroll.ExtentHeight:F0} offsetNow={scroll.VerticalOffset:F0}");
     }
 
-    /// <summary>Anchor could not be applied: log WHY (this used to be a
-    /// silent give-up) and restore the pre-send follow state so the turn
-    /// degrades to the old ScrollToEnd behaviour instead of a dead view.</summary>
+    /// <summary>
+    /// Height of the content excluding the turn spacer, measured from
+    /// realized containers. Prefers the LAST item (the streaming reply);
+    /// falls back to the user's own row, which is realized by construction
+    /// because ApplyAnchor just scrolled it into view. Any small
+    /// under-estimate self-corrects: HoldAnchor shrinks the spacer as the
+    /// reply arrives.
+    /// </summary>
+    private double ContentHeightOfTurn(
+        ChatViewModel vm,
+        System.Windows.Controls.ItemContainerGenerator gen,
+        ScrollViewer scroll,
+        FrameworkElement userContainer,
+        double userTop)
+    {
+        var last = vm.Messages.Count > 0 ? vm.Messages[vm.Messages.Count - 1] : null;
+        if (last is not null
+            && gen.ContainerFromItem(last) is FrameworkElement lastContainer
+            && lastContainer.ActualHeight > 0)
+        {
+            // ActualHeight includes the spacer this item hosts — take it back
+            // out so the value is pure content, like web's scrollHeight - spacer.
+            return ContentTopOf(lastContainer, scroll) + lastContainer.ActualHeight - _spacerPx;
+        }
+
+        return userTop + userContainer.ActualHeight;
+    }
+
+    /// <summary>
+    /// Anchor could not be applied at all (no ScrollViewer, no view model, no
+    /// user message — never a geometry wait, which no longer exists). Log WHY
+    /// and stop.
+    ///
+    /// Deliberately does NOT fall back to ScrollToEnd. The two land in the
+    /// same place only when the spacer is right, so a ScrollToEnd fallback
+    /// would silently paper over exactly the bug this path exists to reveal;
+    /// an anchor that fails visibly is worth more than a scroll that hides
+    /// the failure. It also restores follow state rather than forcing it: the
+    /// old behaviour here left a scrolled-up user's view frozen on send,
+    /// which was the original complaint.
+    /// </summary>
     private void AbortAnchor(ChatViewModel? vm, string reason)
     {
         _anchorPending = false;
         _anchorActive = false;
         _autoScroll = _autoScrollBeforeAnchor;
         vm?.TraceAnchor("ABORT", $"{reason}; restored autoScroll={_autoScroll}");
-        if (_autoScroll)
-            MessageScroll?.ScrollToEnd();
     }
 
     /// <summary>Phase 1 tick: shrink the spacer as real content replaces it
@@ -413,15 +451,6 @@ public partial class ChatView : UserControl
                 _anchorActive = false;
             }
             _autoScroll = scroll.VerticalOffset >= scroll.ScrollableHeight - Services.ScrollStateHelper.BottomThreshold;
-            // Remember where the user left this chat. Recorded on the user's
-            // own scrolls only — content growth during a stream must not
-            // overwrite the place they deliberately scrolled to.
-            _scrollMemory.Remember(_trackedConversationId, scroll.VerticalOffset);
-            _restorePending = false; // they've taken over; don't yank them later
-        }
-        else if (_restorePending && TryRestoreScroll(scroll))
-        {
-            // restored — leave the offset alone this pass
         }
         else if (_autoScroll && !WasCollapseJustToggled())
         {
@@ -431,29 +460,6 @@ public partial class ChatView : UserControl
         UpdateJumpToLatest(scroll);
     }
 
-    /// <summary>Puts the freshly rendered transcript back where the user left
-    /// it. Returns false when there is nothing to restore (or the remembered
-    /// place was the bottom), leaving the normal auto-stick in charge.</summary>
-    private bool TryRestoreScroll(ScrollViewer scroll)
-    {
-        var target = SranDesktop.Application.Services.ScrollRestore.Resolve(
-            _scrollMemory.Recall(_trackedConversationId),
-            scroll.ScrollableHeight,
-            Services.ScrollStateHelper.BottomThreshold);
-        if (target is not { } offset)
-        {
-            // Only stop trying once the list actually has scrollable content;
-            // the first pass of a long transcript can still be laying out.
-            if (scroll.ScrollableHeight > 0)
-                _restorePending = false;
-            return false;
-        }
-
-        scroll.ScrollToVerticalOffset(offset);
-        _autoScroll = false; // the user's place wins over following the stream
-        _restorePending = false;
-        return true;
-    }
 
     /// <summary>Phase C PART 2: show the jump button only when scrolled up with
     /// content below (even during a stream that keeps growing).</summary>
@@ -475,10 +481,6 @@ public partial class ChatView : UserControl
         var scroll = MessageScroll;
         if (scroll is null) return;
         _autoScroll = true; // re-pin so the stream keeps following
-        // Explicitly asking for the newest message clears the remembered
-        // place — otherwise reopening this chat would scroll back up again.
-        _scrollMemory.Forget(_trackedConversationId);
-        _restorePending = false;
         Services.AnimatedScroller.ScrollToBottom(scroll); // snaps when reduced-motion
         JumpToLatestButton.Visibility = Visibility.Collapsed;
     }
