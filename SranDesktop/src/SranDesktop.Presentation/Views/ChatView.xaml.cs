@@ -87,13 +87,27 @@ public partial class ChatView : UserControl
         // with a pressed button keeps a scrollbar-thumb drag stamped for its
         // whole duration.
         MessageList.PreviewMouseWheel += (_, _) => _userInputTick = Environment.TickCount64;
-        MessageList.PreviewMouseDown += (_, _) => _userInputTick = Environment.TickCount64;
-        MessageList.PreviewKeyDown += (_, _) => _userInputTick = Environment.TickCount64;
+        MessageList.PreviewMouseDown += (_, _) =>
+        {
+            _userInputTick = Environment.TickCount64;
+            // A thumb drag (or any click) takes the offset away from the wheel.
+            CancelWheelAnimation();
+        };
+        MessageList.PreviewKeyDown += (_, _) =>
+        {
+            _userInputTick = Environment.TickCount64;
+            // PageUp/PageDown/arrows/Home/End scroll natively; a queued wheel
+            // target left in flight would fight them.
+            CancelWheelAnimation();
+        };
         MessageList.PreviewMouseMove += (_, e) =>
         {
             if (e.LeftButton == MouseButtonState.Pressed)
                 _userInputTick = Environment.TickCount64;
         };
+        // Smooth wheel — registered AFTER the tick stamp above so that handler
+        // keeps running first for every wheel event, consumed or not.
+        MessageList.PreviewMouseWheel += OnSmoothWheel;
         MessageList.PreviewTouchMove += (_, _) => _userInputTick = Environment.TickCount64;
         DataContextChanged += (_, e) =>
         {
@@ -113,6 +127,69 @@ public partial class ChatView : UserControl
         };
     }
 
+    private void CancelWheelAnimation()
+    {
+        if (MessageScroll is { } scroll)
+            Services.AnimatedScroller.CancelWheel(scroll);
+    }
+
+    /// <summary>
+    /// Animate a wheel notch instead of applying it in one frame.
+    ///
+    /// WHY THIS IS A PREVIEW HANDLER, WHICH IS NOT WHAT IT LOOKS LIKE.
+    /// The obvious safe choice is the bubbling MouseWheel, so that an inner
+    /// ScrollViewer which consumes the wheel simply keeps it. Measured, that
+    /// cannot work at all: the ListBox's own template ScrollViewer is a
+    /// DESCENDANT of the ListBox, so it handles the event and scrolls
+    /// natively BEFORE the event ever bubbles up to us. A plain bubbling
+    /// handler here never fires, and a handledEventsToo one fires only after
+    /// the jump has already happened. Preventing the native scroll requires
+    /// seeing the event on the way DOWN.
+    ///
+    /// So the nested panels are protected explicitly instead of implicitly:
+    /// <see cref="InnerScrollerWantsWheel"/> walks from the element under the
+    /// pointer up to the message list's own ScrollViewer, and if anything on
+    /// that path is a vertically scrollable ScrollViewer, this handler does
+    /// nothing and WPF routes the wheel exactly as it does today — including
+    /// the case where that inner panel is at its limit and swallows the event,
+    /// which stays the status quo rather than being "improved".
+    /// </summary>
+    private void OnSmoothWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Handled)
+            return;
+        if (MessageScroll is not { } scroll)
+            return;
+        if (InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, scroll))
+            return;
+        if (!Services.AnimatedScroller.TryWheelScroll(scroll, e.Delta))
+            return; // reduced motion, trackpad-shaped delta, or nothing to scroll
+        e.Handled = true;
+    }
+
+    /// <summary>True when a ScrollViewer between the pointer and
+    /// <paramref name="stopAt"/> can still scroll vertically, i.e. WPF is
+    /// about to give it the wheel and we must not intercept.</summary>
+    internal static bool InnerScrollerWantsWheel(DependencyObject? source, ScrollViewer stopAt)
+    {
+        for (var node = source; node is not null && !ReferenceEquals(node, stopAt); node = VisualOrLogicalParent(node))
+        {
+            if (node is ScrollViewer inner
+                && inner.VerticalScrollBarVisibility != ScrollBarVisibility.Disabled
+                && inner.ScrollableHeight > 0)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Walk up through both trees: a wheel's OriginalSource can be a
+    /// content element (a Run inside a rendered paragraph), which has no
+    /// visual parent.</summary>
+    private static DependencyObject? VisualOrLogicalParent(DependencyObject node) =>
+        node is Visual or System.Windows.Media.Media3D.Visual3D
+            ? VisualTreeHelper.GetParent(node)
+            : LogicalTreeHelper.GetParent(node);
+
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ChatViewModel.Conversation) && sender is ChatViewModel vm)
@@ -127,6 +204,9 @@ public partial class ChatView : UserControl
         if (next == _trackedConversationId)
             return;
         _trackedConversationId = next;
+        // A wheel target from the previous conversation must never survive the
+        // switch — it would fling the new thread the moment it landed.
+        CancelWheelAnimation();
         // Rule 3: opening or switching to a conversation ALWAYS lands at the
         // newest turn. This replaced a per-conversation scroll memory that
         // restored the previous reading position — switching away and back
