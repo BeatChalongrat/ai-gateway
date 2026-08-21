@@ -79,12 +79,6 @@ public partial class ChatView : UserControl
         MessageList.AddHandler(
             Controls.MessageBubble.CollapseToggledEvent,
             new RoutedEventHandler((_, _) => _collapseToggleTick = Environment.TickCount64));
-        // TEMPORARY (open-latency study). LayoutUpdated, not
-        // MessageBubble.Loaded (a recycled container never re-raises it) and
-        // not the generator's StatusChanged (which only fired on about 60% of
-        // opens — measured). LayoutUpdated fires after every layout pass, so
-        // the first one with a realized container is a reliable trigger.
-        MessageList.LayoutUpdated += (_, _) => ArmFirstPaintProbe();
         // P3 — "the user always wins" needs to know what a USER scroll is.
         // On WPF, ScrollChanged fires for everything (our own offset writes,
         // the extent re-pin's follow-up, VSP corrections), so during a hold
@@ -132,57 +126,6 @@ public partial class ChatView : UserControl
             }
         };
     }
-
-    // ── TEMPORARY (open-latency study) ──────────────────────────────────────
-    /// <summary>
-    /// First paint, as honestly as WPF allows: a real MessageBubble has been
-    /// added to the visual tree (Loaded) AND the compositor has produced a
-    /// frame since (CompositionTarget.Rendering). Rendering fires per composed
-    /// frame, so the first tick after the first bubble loads is the closest
-    /// observable point to "the user can see a message".
-    ///
-    /// It is a PROXY, not the scan-out instant: it is the frame WPF hands to
-    /// the compositor, not the moment the pixels are on the glass. Reported as
-    /// such.
-    /// </summary>
-    private void ArmFirstPaintProbe()
-    {
-        if (DataContext is not ChatViewModel vm || !vm.OpenPaintPending || vm.Messages.Count == 0)
-            return;
-        // Wait for a container to actually exist — an empty layout pass is not
-        // a painted message.
-        //
-        // Scan from the END, not index 0. An open lands at the bottom, so with
-        // virtualization index 0 is realized only when the whole thread fits
-        // the viewport: checking it meant the probe could ONLY ever fire for
-        // tiny conversations, and every paint sample read bubbles=2 while the
-        // 22-bubble opens reported nothing at all.
-        var generator = MessageList.ItemContainerGenerator;
-        var realized = false;
-        for (var i = vm.Messages.Count - 1; i >= 0 && i >= vm.Messages.Count - 40; i--)
-        {
-            if (generator.ContainerFromIndex(i) is not null) { realized = true; break; }
-        }
-        if (!realized)
-            return;
-
-        vm.OpenPaintPending = false; // one probe per open, armed here
-        var containersAt = Environment.TickCount64 - vm.OpenStartTick;
-
-        EventHandler? onRender = null;
-        onRender = (_, _) =>
-        {
-            System.Windows.Media.CompositionTarget.Rendering -= onRender;
-            if (DataContext is not ChatViewModel current)
-                return;
-            var paintedAt = Environment.TickCount64 - current.OpenStartTick;
-            current.TraceOpen("first-paint", paintedAt,
-                $"containers={containersAt} render={paintedAt - containersAt} " +
-                $"bubbles={current.Messages.Count}");
-        };
-        System.Windows.Media.CompositionTarget.Rendering += onRender;
-    }
-    // ── end TEMPORARY ───────────────────────────────────────────────────────
 
     private void CancelWheelAnimation()
     {
