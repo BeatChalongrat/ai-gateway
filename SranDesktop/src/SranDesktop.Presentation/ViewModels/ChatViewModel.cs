@@ -773,6 +773,23 @@ public partial class ChatViewModel : ObservableObject
     internal void TraceAnchor(string stage, string detail)
         => _logger.LogDebug("[anchor] {Stage}: {Detail}", stage, detail);
 
+    // ── TEMPORARY (open-latency study) ──────────────────────────────────────
+    // Where the wait goes when a conversation is opened. Same Serilog pipeline
+    // as the anchor trace — Debug level, on in the shipped config. Removed in
+    // its own commit once the numbers are recorded.
+
+    /// <summary>Ticks at the moment OpenConversationAsync began, so the view
+    /// can time first paint against the same origin.</summary>
+    internal long OpenStartTick { get; private set; }
+
+    /// <summary>Set while an open is in flight, so the view logs first paint
+    /// once per open rather than on every layout pass.</summary>
+    internal bool OpenPaintPending { get; set; }
+
+    internal void TraceOpen(string stage, double ms, string detail = "")
+        => _logger.LogDebug("[open] {Stage}: {Ms:F1}ms {Detail}", stage, ms, detail);
+    // ── end TEMPORARY ───────────────────────────────────────────────────────
+
     /// <summary>Raised to ask the view to focus the composer (e.g. after a suggestion chip).</summary>
     public event EventHandler? ComposerFocusRequested;
 
@@ -973,7 +990,17 @@ public partial class ChatViewModel : ObservableObject
         // Fetch model / KB / memory state in the background (non-blocking).
         _ = LoadConversationStateAsync(conversation.Id);
 
+        // TEMPORARY (open-latency study) — segment timers.
+        var openSw = System.Diagnostics.Stopwatch.StartNew();
+        var segSw = new System.Diagnostics.Stopwatch();
+        OpenStartTick = Environment.TickCount64;
+        OpenPaintPending = true;
+        double msDraft = 0, msList = 0, msLocal = 0, msCache = 0, msMerge = 0, msVms = 0, msBranches = 0;
+        var listedCount = 0;
+        var localCount = 0;
+
         // Restore an unsent composer draft for this conversation (C4).
+        segSw.Restart();
         try
         {
             var draft = await _store.GetDraftAsync(conversation.Id);
@@ -984,6 +1011,7 @@ public partial class ChatViewModel : ObservableObject
         {
             _logger.LogDebug(ex, "Draft restore failed for {Id}", conversation.Id);
         }
+        msDraft = segSw.Elapsed.TotalMilliseconds;
 
         IsLoadingHistory = true;
         try
@@ -1008,9 +1036,12 @@ public partial class ChatViewModel : ObservableObject
             var serverConversationId = conversation.ServerId ?? conversation.Id;
             MessageDto? resumable = null;
 
+            segSw.Restart();
             try
             {
                 var response = await _api.ListMessagesAsync(serverConversationId, 50);
+                msList = segSw.Elapsed.TotalMilliseconds; // the round trip, on its own
+                listedCount = response.Messages.Count;
                 serverRead = true;
                 var lastDto = response.Messages.Count > 0 ? response.Messages[^1] : null;
                 foreach (var dto in response.Messages)
@@ -1044,6 +1075,7 @@ public partial class ChatViewModel : ObservableObject
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
+                msList = segSw.Elapsed.TotalMilliseconds; // a failed read still costs wall clock
                 _logger.LogWarning(ex, "Server messages unavailable for {Id}; using local history", conversation.Id);
             }
 
@@ -1052,14 +1084,21 @@ public partial class ChatViewModel : ObservableObject
             // placeholders). Those are NOT conversation bubbles — regroup them
             // per assistant turn and skip them from the visible thread; they are
             // re-attached to their bubble below so the next turn replays them.
+            segSw.Restart();
             var localRows = await _store.GetMessagesAsync(conversation.Id);
+            msLocal = segSw.Elapsed.TotalMilliseconds;
+            localCount = localRows.Count;
 
             // Cache server-origin rows locally (FIX 9 Part D) so an already-
             // opened conversation still renders offline. Best-effort, and the
             // cached rows carry the synced marker so they are never pushed
             // back to the server as new messages.
+            segSw.Restart();
             if (serverRead)
                 await CacheServerRowsAsync(conversation.Id, serverConversationId, entries, localRows);
+            msCache = segSw.Elapsed.TotalMilliseconds;
+
+            segSw.Restart();
             var chainMap = Application.Services.AgentChainCodec.GroupChains(localRows);
             foreach (var local in localRows)
             {
@@ -1072,10 +1111,16 @@ public partial class ChatViewModel : ObservableObject
                     entries.Add((local.Id, local.Role, local.Content!, local.CreatedAt, local.ModelId, false, null));
             }
 
+            msMerge = segSw.Elapsed.TotalMilliseconds;
+
             // Selection may have moved on while we awaited.
             if (Conversation?.Id != conversation.Id)
+            {
+                OpenPaintPending = false; // superseded; no paint will follow
                 return;
+            }
 
+            segSw.Restart();
             Messages.Clear();
             // Reasoning parity: local rows are the only store that carries
             // the persisted thinking text (the server DTO has no slot on
@@ -1126,7 +1171,11 @@ public partial class ChatViewModel : ObservableObject
                     hydration.Add((vm, entry.Files));
                 Messages.Add(vm);
             }
+            msVms = segSw.Elapsed.TotalMilliseconds;
+
+            segSw.Restart();
             await RestoreBranchesAsync(conversation.Id); // R10 Fix 3
+            msBranches = segSw.Elapsed.TotalMilliseconds;
             UpdateLastAssistantFlag();
             MessageActivity?.Invoke(this, EventArgs.Empty);
 
@@ -1146,6 +1195,18 @@ public partial class ChatViewModel : ObservableObject
         finally
         {
             IsLoadingHistory = false;
+
+            // TEMPORARY (open-latency study). The sum check is part of the
+            // output on purpose: if the segments do not add up to the total,
+            // the instrument is wrong and the numbers are not evidence.
+            var total = openSw.Elapsed.TotalMilliseconds;
+            var sum = msDraft + msList + msLocal + msCache + msMerge + msVms + msBranches;
+            TraceOpen("segments", total,
+                $"draft={msDraft:F1} list={msList:F1} local={msLocal:F1} cache={msCache:F1} " +
+                $"merge={msMerge:F1} vms={msVms:F1} branches={msBranches:F1} | " +
+                $"sum={sum:F1} unaccounted={total - sum:F1} | " +
+                $"serverRows={listedCount} localRows={localCount} bubbles={Messages.Count} " +
+                $"conv={conversation.Id}");
         }
     }
 

@@ -79,6 +79,15 @@ public partial class ChatView : UserControl
         MessageList.AddHandler(
             Controls.MessageBubble.CollapseToggledEvent,
             new RoutedEventHandler((_, _) => _collapseToggleTick = Environment.TickCount64));
+        // TEMPORARY (open-latency study) — containers for the new messages
+        // exist. Deliberately NOT MessageBubble.Loaded: a RECYCLED container
+        // never re-raises Loaded, so that missed every open but the first.
+        MessageList.ItemContainerGenerator.StatusChanged += (_, _) =>
+        {
+            if (MessageList.ItemContainerGenerator.Status
+                == System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated)
+                ArmFirstPaintProbe();
+        };
         // P3 — "the user always wins" needs to know what a USER scroll is.
         // On WPF, ScrollChanged fires for everything (our own offset writes,
         // the extent re-pin's follow-up, VSP corrections), so during a hold
@@ -126,6 +135,38 @@ public partial class ChatView : UserControl
             }
         };
     }
+
+    // ── TEMPORARY (open-latency study) ──────────────────────────────────────
+    /// <summary>
+    /// First paint, as honestly as WPF allows: a real MessageBubble has been
+    /// added to the visual tree (Loaded) AND the compositor has produced a
+    /// frame since (CompositionTarget.Rendering). Rendering fires per composed
+    /// frame, so the first tick after the first bubble loads is the closest
+    /// observable point to "the user can see a message".
+    ///
+    /// It is a PROXY, not the scan-out instant: it is the frame WPF hands to
+    /// the compositor, not the moment the pixels are on the glass. Reported as
+    /// such.
+    /// </summary>
+    private void ArmFirstPaintProbe()
+    {
+        if (DataContext is not ChatViewModel vm || !vm.OpenPaintPending || vm.Messages.Count == 0)
+            return;
+
+        EventHandler? onRender = null;
+        onRender = (_, _) =>
+        {
+            System.Windows.Media.CompositionTarget.Rendering -= onRender;
+            if (DataContext is not ChatViewModel current || !current.OpenPaintPending)
+                return;
+            current.OpenPaintPending = false;
+            current.TraceOpen("first-paint",
+                Environment.TickCount64 - current.OpenStartTick,
+                $"bubbles={current.Messages.Count}");
+        };
+        System.Windows.Media.CompositionTarget.Rendering += onRender;
+    }
+    // ── end TEMPORARY ───────────────────────────────────────────────────────
 
     private void CancelWheelAnimation()
     {
