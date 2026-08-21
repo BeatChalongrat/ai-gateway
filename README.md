@@ -277,7 +277,12 @@ is required in every mode**):
 | `DLP_HMAC_KEY` | Deterministic per-conversation mask-token derivation |
 | `INTERNAL_SERVICE_SECRET` | Trust anchor for chat-edge → gateway `X-User-ID` |
 | `NEXTAUTH_SECRET` | NextAuth on the portal |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, … | Provider auth (or set via admin **Providers**) |
+
+> **Provider API keys are not environment variables.** Add them in the admin console under
+> **Providers** — that is the only supported path, and it needs no restart. The same applies to
+> a self-hosted provider's endpoint. (`OPENAI_API_KEY` is still read for the *embeddings* and
+> *voice* utility surfaces — see `docs/PROVIDER_ARCHITECTURE.md` — but it is no longer used for
+> chat routing.)
 
 Selected optional flags (full list in `backend/app/core/config.py` and
 `.env.example`):

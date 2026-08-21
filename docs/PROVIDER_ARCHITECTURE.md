@@ -91,13 +91,26 @@ app/
 
 ## Configuration
 
+### Provider keys and endpoints — admin UI only
+
+Provider API keys and self-hosted endpoints are configured **exclusively** through the
+admin console at **/providers**. There is no environment-variable path for either:
+
+* **Keys** resolve `provider_keys` (the UI Add-Key flow) → `providers.api_key_encrypted`
+  (legacy single key). A provider with neither is unconfigured, and a request routed to
+  it fails with `503 No API key configured for provider '<name>'`.
+* **Endpoints** resolve `system_settings` row `provider_base_url:<name>` (the UI endpoint
+  form) → the adapter's built-in default. Self-hosted providers have no default, so an
+  unset endpoint is a clean `503`.
+
+This is deliberate: the people operating this product are IT staff, not people who should
+have to edit a file inside a container. Keys added through the UI take effect with no
+restart (30 s cache TTL at worst) and can be tested and rotated in place.
+
 Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENAI_API_KEY` | (empty) | OpenAI API key |
-| `ANTHROPIC_API_KEY` | (empty) | Anthropic API key |
-| `OPENROUTER_API_KEY` | (empty) | OpenRouter API key |
 | `PROVIDER_TIMEOUT_CONNECT` | `5.0` | TCP connect timeout (seconds) |
 | `PROVIDER_TIMEOUT_READ` | `30.0` | Read/response timeout (seconds) |
 | `PROVIDER_MAX_RETRIES` | `2` | Retries on transient failures (429, 5xx, timeout) |
