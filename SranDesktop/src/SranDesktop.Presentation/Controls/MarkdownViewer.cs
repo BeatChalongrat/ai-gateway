@@ -46,6 +46,17 @@ public sealed class MarkdownViewer : ContentControl
     private DispatcherTimer? _timer;
     private bool _renderQueued;
 
+    /// <summary>The exact string the current <see cref="ContentControl.Content"/>
+    /// was built from, so a recycled viewer can tell "already showing the right
+    /// thing" from "showing the previous message".</summary>
+    private string? _renderedSource;
+
+    /// <summary>Set by DataContextChanged, cleared by whichever runs first:
+    /// the Markdown binding delivering the new message (render synchronously)
+    /// or the Loaded-priority fallback (the texts were identical, nothing to
+    /// do). See the constructor.</summary>
+    private bool _pendingSwap;
+
     // ── incremental streaming state ──
     private DispatcherTimer? _streamTimer;
     private bool _streamDirty;
@@ -82,20 +93,57 @@ public sealed class MarkdownViewer : ContentControl
         IsTabStop = false;
         // Phase 8 Task 3 (stale-flash fix): when this viewer is RECYCLED onto
         // a different message, the previous message's rendered panel must
-        // never show — clear immediately, before any timer tick. If the new
-        // message's Markdown happens to EQUAL the old value the DP callback
-        // never fires, so re-render at Loaded priority (after bindings have
-        // delivered) when nothing else has.
+        // never show. That still holds — but it is now solved by ORDERING
+        // rather than by blanking.
+        //
+        // Measured (ScrollRenderCostTests.Step1_BindingVersusDataContextChanged_Ordering):
+        // on a recycled container DataContextChanged fires BEFORE the Markdown
+        // binding delivers. So at this point Markdown still holds the PREVIOUS
+        // message's text and cannot simply be re-rendered. The old code set
+        // Content = null here and waited; a null Content measures as a
+        // zero-height row, and when the new markdown happened to EQUAL the old
+        // one the DP callback never fired, so the row stayed empty through
+        // layout and only filled at Loaded priority — the height jump.
+        //
+        // Instead: pull the binding forward so the NEW text is in hand, then
+        // swap old → new in ONE assignment. The row's height goes from its old
+        // value straight to its new value with no zero in between, and the
+        // previous message's panel is never displayed because the swap happens
+        // before this generation pass is measured.
         DataContextChanged += (_, _) =>
         {
             _timer?.Stop();
             _renderQueued = false;
             _streamTimer?.Stop();
             ResetStreamingState();
-            Content = null;
+
+            if (IsStreaming)
+            {
+                // Streaming shows an empty panel by design — the typing
+                // indicator covers the gap. Unchanged.
+                Content = null;
+                _renderedSource = null;
+                _pendingSwap = false;
+                return;
+            }
+
+            // Do NOT blank. The binding delivers a moment from now, still
+            // inside this generation pass and still before the panel measures
+            // the container, and OnMarkdownChanged will swap old → new in one
+            // assignment. Nothing renders in between, so the previous message
+            // is never actually displayed.
+            _pendingSwap = true;
             Dispatcher.InvokeAsync(() =>
             {
-                if (Content is null && !IsStreaming)
+                if (!_pendingSwap || IsStreaming)
+                    return;
+                // The binding never fired, which means the new message's text
+                // is IDENTICAL to what is already rendered (the case the old
+                // code needed this fallback for). Re-rendering it would
+                // produce the same tree, so only re-render if the content is
+                // somehow not there.
+                _pendingSwap = false;
+                if (Content is null || !string.Equals(_renderedSource, Markdown, StringComparison.Ordinal))
                     RenderNow();
             }, DispatcherPriority.Loaded);
         };
@@ -104,6 +152,18 @@ public sealed class MarkdownViewer : ContentControl
     private static void OnMarkdownChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         var viewer = (MarkdownViewer)d;
+
+        // This is the delivery a DataContext swap was waiting for: render it
+        // NOW, synchronously, so the container carries the new content into
+        // the same measure pass. Going through the 66 ms coalescing timer here
+        // would leave the PREVIOUS message on screen until the tick.
+        if (viewer._pendingSwap && !viewer.IsStreaming)
+        {
+            viewer._pendingSwap = false;
+            viewer.RenderNow();
+            return;
+        }
+        viewer._pendingSwap = false;
 
         if (viewer.IsStreaming)
         {
@@ -136,6 +196,7 @@ public sealed class MarkdownViewer : ContentControl
             // show an EMPTY panel until the first stream tick — never the
             // previous content (the typing dots cover the visual gap).
             viewer.Content = null;
+            viewer._renderedSource = null;
             viewer._streamDirty = true;
             viewer.EnsureStreamTimer();
         }
@@ -209,6 +270,8 @@ public sealed class MarkdownViewer : ContentControl
             _streamElements.Clear();
             _fenceChip = null;
             Content = _streamPanel;
+            // Incremental content is not a full render of any one source.
+            _renderedSource = null;
         }
 
         var fingerprints = BlockDiff.Fingerprint(visible, document);
@@ -333,5 +396,6 @@ public sealed class MarkdownViewer : ContentControl
         FullRenderCount++;          // TEMPORARY (scroll-perf Step 0)
         OnFullRender?.Invoke(source); // TEMPORARY (scroll-perf Step 0)
         Content = Renderer.Render(source);
+        _renderedSource = source;
     }
 }
