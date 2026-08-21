@@ -13,8 +13,13 @@ BEHIND the DLP raw-egress gates:
     chat pipeline.
 
 Classified ``raw_whitelisted`` in ``tests/test_dlp_egress_invariant.py`` (RAW
-user content by design, gated by the whitelisted ``voice`` channel). Empty
-``settings.openai_api_key`` disables both (503).
+user content by design, gated by the whitelisted ``voice`` channel).
+
+The OpenAI credential is resolved through ``ProviderKeyService`` — the same
+pool chat dispatch draws from — so rotating the key in the admin UI is
+followed here too. This used to read ``settings.openai_api_key`` directly,
+which made it a second live source for the same value. No usable key
+disables both endpoints (503).
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import structlog
 
 from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError, ValidationError
+from app.services.provider_key_service import resolve_provider_key_async
 
 logger = structlog.get_logger(__name__)
 
@@ -36,9 +42,9 @@ ALLOWED_TTS_VOICES = frozenset(
 )
 
 
-def voice_enabled() -> bool:
-    """Whether the gateway has the OpenAI credential to run voice."""
-    return bool((settings.openai_api_key or "").strip())
+async def voice_enabled() -> bool:
+    """Whether the gateway has a usable OpenAI credential for voice."""
+    return bool(await resolve_provider_key_async("openai"))
 
 
 def _base_url() -> str:
@@ -58,9 +64,11 @@ async def transcribe(
     The caller MUST have run ``assert_stt_egress_allowed`` first (the route
     does) — audio itself is not scannable here.
     """
-    if not voice_enabled():
+    api_key = await resolve_provider_key_async("openai")
+    if not api_key:
         raise ProviderUnavailableError(
-            "voice provider not configured (set OPENAI_API_KEY)"
+            "voice provider not configured — add an OpenAI key in the "
+            "admin UI under Providers"
         )
     if not audio:
         raise ValidationError("audio is empty")
@@ -75,7 +83,7 @@ async def transcribe(
         async with httpx.AsyncClient(timeout=_STT_TIMEOUT_SECONDS) as client:
             resp = await client.post(
                 f"{_base_url()}/audio/transcriptions",
-                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                headers={"Authorization": f"Bearer {api_key}"},
                 files=files,
                 data=data,
             )
@@ -103,9 +111,11 @@ async def synthesize(
     The caller MUST have run ``scan_voice_text`` on ``text`` first (the route
     does). Voice/speed are validated here to avoid an upstream round-trip.
     """
-    if not voice_enabled():
+    api_key = await resolve_provider_key_async("openai")
+    if not api_key:
         raise ProviderUnavailableError(
-            "voice provider not configured (set OPENAI_API_KEY)"
+            "voice provider not configured — add an OpenAI key in the "
+            "admin UI under Providers"
         )
     text = (text or "").strip()
     if not text:
@@ -126,7 +136,7 @@ async def synthesize(
             resp = await client.post(
                 f"{_base_url()}/audio/speech",
                 headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={

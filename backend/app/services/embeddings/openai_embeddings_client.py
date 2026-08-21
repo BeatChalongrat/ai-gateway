@@ -9,8 +9,12 @@ per-tenant PII policy + audit). It is therefore classified ``raw_whitelisted``
 in ``tests/test_dlp_egress_invariant.py``: it carries RAW user content by
 design, gated by the whitelisted ``embeddings`` channel.
 
-Empty ``settings.openai_api_key`` disables the endpoint (503), mirroring the
-old chat-edge "configure OpenAI to enable RAG" behaviour.
+The OpenAI credential is resolved through ``ProviderKeyService`` — the same
+pool chat dispatch draws from — so rotating the key in the admin UI is
+followed here too. It used to read ``settings.openai_api_key`` directly,
+which made this a second live source: an admin could rotate the key, chat
+would follow it, and RAG would keep sending the stale environment value with
+nothing on screen saying so. No usable key disables the endpoint (503).
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import structlog
 
 from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError, ValidationError
+from app.services.provider_key_service import resolve_provider_key_async
 
 logger = structlog.get_logger(__name__)
 
@@ -32,9 +37,9 @@ EMBEDDING_DIMENSIONS = 1536
 _TIMEOUT_SECONDS = 30.0
 
 
-def embeddings_enabled() -> bool:
-    """Whether the gateway has the OpenAI credential to produce embeddings."""
-    return bool((settings.openai_api_key or "").strip())
+async def embeddings_enabled() -> bool:
+    """Whether the gateway has a usable OpenAI credential for embeddings."""
+    return bool(await resolve_provider_key_async("openai"))
 
 
 async def generate_embedding(text: str, *, model: str | None = None) -> list[float]:
@@ -45,9 +50,11 @@ async def generate_embedding(text: str, *, model: str | None = None) -> list[flo
     the upstream call fails. The caller MUST have run the DLP embeddings
     egress scan before invoking this (the route does).
     """
-    if not embeddings_enabled():
+    api_key = await resolve_provider_key_async("openai")
+    if not api_key:
         raise ProviderUnavailableError(
-            "embeddings provider not configured (set OPENAI_API_KEY)"
+            "embeddings provider not configured — add an OpenAI key in "
+            "the admin UI under Providers"
         )
     text = (text or "").strip()
     if not text:
@@ -61,7 +68,7 @@ async def generate_embedding(text: str, *, model: str | None = None) -> list[flo
             resp = await client.post(
                 f"{base}/embeddings",
                 headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={"model": mdl, "input": text},

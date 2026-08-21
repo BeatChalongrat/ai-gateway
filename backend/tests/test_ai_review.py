@@ -28,6 +28,47 @@ from sqlalchemy.orm import sessionmaker
 
 
 client = TestClient(app, raise_server_exceptions=False)
+
+# AI review resolves its fallback key through ProviderKeyService now, not from
+# ``settings.<provider>_api_key`` — see app/services/ai_review_provider.py.
+# These two helpers put the test in the state the product actually reaches:
+# a provider key row the admin UI would have created, or none at all.
+_TEST_PROVIDER_KEY = "sk-ant-api03-" + "t" * 60
+
+
+def _give_provider_a_key(provider: str = "anthropic") -> None:
+    from tests.conftest import _IntegrationSession
+    from app.services.provider_key_service import ProviderKeyService, clear_keys_cache
+
+    _take_provider_key_away(provider)
+    session = _IntegrationSession()
+    try:
+        ProviderKeyService().add_key(
+            session, provider, _TEST_PROVIDER_KEY, label="admin"
+        )
+        session.commit()
+    finally:
+        session.close()
+    clear_keys_cache()
+
+
+def _take_provider_key_away(*providers: str) -> None:
+    from tests.conftest import _IntegrationSession
+    from app.models.provider_key import ProviderKeyORM
+    from app.services.provider_key_service import clear_keys_cache
+
+    session = _IntegrationSession()
+    try:
+        for provider in providers or ("anthropic", "openai", "openrouter"):
+            session.query(ProviderKeyORM).filter(
+                ProviderKeyORM.provider_name == provider
+            ).delete()
+        session.commit()
+    finally:
+        session.close()
+    clear_keys_cache()
+
+
 _HEADERS = {"Authorization": "Bearer demo-key"}
 
 
@@ -212,9 +253,9 @@ class TestAiReviewScan:
 
     @respx.mock
     def test_scan_calls_claude_and_saves_findings(self, monkeypatch):
-        # Ensure the route sees a non-empty key regardless of env.
-        from app.core.config import settings as app_settings
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "sk-test-fake")
+        # Ensure the route sees a usable key: a provider_keys row, which is
+        # the only place AI review looks now.
+        _give_provider_a_key("anthropic")
 
         client.patch(
             "/admin/ai-review/settings",
@@ -419,8 +460,7 @@ class TestAiReviewProviderConfig:
 class TestAiReviewScanRuns:
     @respx.mock
     def test_scan_creates_scan_run_row(self, monkeypatch):
-        from app.core.config import settings as app_settings
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "sk-test-fake")
+        _give_provider_a_key("anthropic")
 
         client.patch(
             "/admin/ai-review/settings",
@@ -462,8 +502,7 @@ class TestAiReviewScanRuns:
 
     @respx.mock
     def test_scan_run_tracks_tokens_and_cost(self, monkeypatch):
-        from app.core.config import settings as app_settings
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "sk-test-fake")
+        _give_provider_a_key("anthropic")
 
         client.patch(
             "/admin/ai-review/settings",
@@ -508,11 +547,9 @@ class TestAiReviewScanRuns:
             s.close()
 
     def test_scan_returns_422_when_no_key_configured(self, monkeypatch):
-        from app.core.config import settings as app_settings
-        # Blow away both env fallbacks — OpenAI preset is selected but
-        # OPENAI_API_KEY is empty, so resolve_review_key returns None.
-        monkeypatch.setattr(app_settings, "openai_api_key", "")
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "")
+        # No key row for either provider — the OpenAI preset is selected and
+        # nothing is configured, so resolve_review_key returns None.
+        _take_provider_key_away("openai", "anthropic")
 
         client.patch(
             "/admin/ai-review/settings",
@@ -680,8 +717,7 @@ class TestAiReviewRealtimeHook:
 class TestAiReviewTestConnection:
     @respx.mock
     def test_test_connection_returns_success_when_key_valid(self, monkeypatch):
-        from app.core.config import settings as app_settings
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "sk-test-fake")
+        _give_provider_a_key("anthropic")
 
         respx.post("https://api.anthropic.com/v1/messages").mock(
             return_value=httpx.Response(
@@ -714,9 +750,7 @@ class TestAiReviewTestConnection:
             s.close()
 
     def test_test_connection_returns_error_when_no_key(self, monkeypatch):
-        from app.core.config import settings as app_settings
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "")
-        monkeypatch.setattr(app_settings, "openai_api_key", "")
+        _take_provider_key_away("anthropic", "openai")
 
         resp = client.post("/admin/ai-review/test-connection", headers=_HEADERS)
         assert resp.status_code == 200, resp.text
@@ -736,8 +770,7 @@ class TestAiReviewOutputRaw:
     def test_scan_uses_output_raw_not_input_raw(self, monkeypatch):
         """The scan endpoint must send output_raw (the AI provider's raw
         response) to Claude, NOT input_raw (the user message)."""
-        from app.core.config import settings as app_settings
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "sk-test-fake")
+        _give_provider_a_key("anthropic")
 
         client.patch(
             "/admin/ai-review/settings",
@@ -818,8 +851,7 @@ class TestAiReviewOutputRaw:
     @respx.mock
     def test_scan_skips_requests_with_no_output_raw(self, monkeypatch):
         """Rows with output_raw=NULL must be skipped entirely — no Claude call."""
-        from app.core.config import settings as app_settings
-        monkeypatch.setattr(app_settings, "anthropic_api_key", "sk-test-fake")
+        _give_provider_a_key("anthropic")
 
         client.patch(
             "/admin/ai-review/settings",

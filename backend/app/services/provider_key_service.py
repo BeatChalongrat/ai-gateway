@@ -157,6 +157,41 @@ def clear_keys_cache() -> None:
     _keys_cache.clear()
 
 
+async def resolve_provider_key_async(provider_name: str) -> str | None:
+    """Resolve a provider key for a caller that has no session of its own.
+
+    The utility clients — embeddings, voice and AI review — are not part of
+    the chat dispatch path and never had a request-scoped session to hand in,
+    so they each read ``settings.<provider>_api_key`` directly. That made them
+    a SECOND live source for the same value: an admin could rotate the OpenAI
+    key in the admin UI, chat would follow it within the cache TTL, and those
+    three would go on sending the stale environment value with nothing on
+    screen saying so. Removing that second source is the whole point of the
+    UI-owned model, so they resolve through here instead.
+
+    Opens its own short-lived session. An async session does not check a
+    connection out of the pool until a statement runs, and ``_keys_cache``
+    sits in front of the only statement — so a burst of embedding calls costs
+    at most one SELECT per 30s, not one per call.
+
+    Returns ``None`` when the provider has no usable key, and also when the
+    lookup itself fails: callers turn that into a clean "provider not
+    configured / unavailable" error, which is the right answer either way.
+    """
+    from app.core.db import get_async_session_factory
+
+    try:
+        async with get_async_session_factory()() as session:
+            return await ProviderKeyService().get_active_key_async(
+                session, provider_name
+            )
+    except Exception as exc:  # noqa: BLE001 — utility path, never 500 on this
+        logger.warning(
+            "provider key lookup failed for %s: %s", provider_name, exc
+        )
+        return None
+
+
 class ProviderKeyService:
 
     # ------------------------------------------------------------------
