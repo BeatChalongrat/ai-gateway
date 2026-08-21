@@ -113,15 +113,6 @@ async def lifespan(app: FastAPI):
     # Seed admin user (runs blocking bcrypt in thread)
     await asyncio.to_thread(_seed_admin_user)
 
-    # Import env-configured provider API keys into provider_keys.
-    # Without this, OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY
-    # are reachable to the routing path but invisible to the admin UI —
-    # the Providers page surfaces them as an opaque "via env" badge that
-    # cannot be tested or rotated. Importing them once at boot gives the
-    # operator a real row to manage and unifies key management behind a
-    # single source.
-    await asyncio.to_thread(_import_env_provider_keys)
-
     # Per-worker NER pre-load. ``ner_status`` module-level state is
     # process-local — a ``PATCH /admin/settings`` call routes to one
     # gunicorn worker, which loads the analyzer in *its* process only,
@@ -291,7 +282,8 @@ async def lifespan(app: FastAPI):
 # cross-connection unlock bookkeeping after the pool recycles the
 # connection).
 STARTUP_LOCK_SEED_ADMIN = 900005
-STARTUP_LOCK_ENV_KEY_IMPORT = 900006
+# 900006 was STARTUP_LOCK_ENV_KEY_IMPORT (env-key importer, removed). Left
+# documented, not reused, so an old worker mid-rollout cannot collide.
 
 
 def _acquire_startup_lock(session, lock_id: int) -> None:
@@ -386,107 +378,6 @@ def _seed_admin_user() -> None:
     except Exception as e:
         session.rollback()
         print(f"[startup] Admin seed skipped: {e}")
-    finally:
-        session.close()
-
-
-def _import_env_provider_keys() -> None:
-    """Import env-configured provider API keys into ``provider_keys``.
-
-    Sync function — runs in a thread via ``asyncio.to_thread``. Idempotent:
-    skips any provider whose ``provider_keys`` row set already contains a
-    key (active or soft-deleted), so a reboot never duplicates, and never
-    overrides a key the operator added manually through the admin UI. If
-    the operator soft-deletes our imported key, the soft-deleted row keeps
-    us from re-creating it on the next boot — the deletion stands.
-
-    Placeholder safety (Group A / A1): if an env var still holds a dev
-    placeholder (e.g. ``sk-ant-...``), we never insert it — a placeholder
-    in the pool would 401 silently on dispatch. We also retroactively
-    deactivate any matching placeholder row a PRIOR boot imported before
-    this guard existed, so an upgrade self-heals the pool.
-
-    Keys are inserted with no test status; the admin UI's Test button
-    populates ``last_test_status`` on demand.
-
-    Serialized across workers via advisory lock 900006 (see
-    ``_acquire_startup_lock``) so concurrent fresh-DB boots import each
-    env key exactly once instead of racing the check-then-insert.
-    """
-    from app.core.db import SessionLocal
-    from app.repositories.provider_key_repository import ProviderKeyRepository
-    from app.services.provider_key_service import (
-        ProviderKeyService,
-        _decode,
-        _looks_like_placeholder_key,
-    )
-
-    env_keys = {
-        "openai": settings.openai_api_key,
-        "anthropic": settings.anthropic_api_key,
-        "openrouter": settings.openrouter_api_key,
-    }
-
-    session = SessionLocal()
-    try:
-        # Serialize across workers (Phase 12 A1) — the whole import runs
-        # in one transaction, so the xact-scoped lock covers every
-        # provider's check-then-insert and releases at COMMIT/ROLLBACK.
-        _acquire_startup_lock(session, STARTUP_LOCK_ENV_KEY_IMPORT)
-        svc = ProviderKeyService()
-        repo = ProviderKeyRepository(session)
-        imported: list[str] = []
-        skipped: list[str] = []
-        deactivated: list[str] = []
-        for provider, raw_key in env_keys.items():
-            raw_key = (raw_key or "").strip()
-            if not raw_key:
-                continue
-            if _looks_like_placeholder_key(raw_key):
-                # Never import a placeholder. Also deactivate any active row
-                # whose decoded key equals this placeholder — i.e. one a
-                # pre-guard boot imported — so the pool self-heals.
-                for row in repo.list_active_by_provider(provider):
-                    try:
-                        if _decode(row.api_key_encrypted) == raw_key:
-                            repo.update(row, is_active=False)
-                            deactivated.append(provider)
-                    except Exception:
-                        continue
-                skipped.append(provider)
-                continue
-            if svc.list_keys(session, provider):
-                # Provider already has at least one row (active or
-                # historically soft-deleted) — leave it alone.
-                continue
-            svc.add_key(
-                session,
-                provider,
-                raw_key,
-                label="Imported from environment",
-            )
-            imported.append(provider)
-        session.commit()
-        from app.services.provider_key_service import clear_keys_cache
-        if deactivated:
-            clear_keys_cache()
-        if imported:
-            print(
-                "[startup] Imported env API keys into provider_keys: "
-                + ", ".join(imported)
-            )
-        for provider in skipped:
-            print(
-                f"[startup] Skipping placeholder key for {provider} from env"
-            )
-        if deactivated:
-            print(
-                "[startup] Deactivated previously-imported placeholder keys: "
-                + ", ".join(sorted(set(deactivated)))
-            )
-    except Exception as exc:
-        session.rollback()
-        print(f"[startup] env-key import skipped: {exc}")
     finally:
         session.close()
 

@@ -1,11 +1,14 @@
 """Phase 12 A1 — multi-worker startup seeding race.
 
-``app.main._seed_admin_user`` and ``app.main._import_env_provider_keys``
-are check-then-insert; 4 workers booting on a fresh DB used to race the
-existence check and double-insert (or crash into the unique constraint
-and abort the whole import batch with an ``[startup] ... skipped`` line).
-Phase 12 A1 wraps each in ``pg_advisory_xact_lock`` (ids 900005/900006,
-distinct from worker.py's 900001-900003 and job_loop's 900004).
+``app.main._seed_admin_user`` is check-then-insert; 4 workers booting on a
+fresh DB used to race the existence check and double-insert (or crash into
+the unique constraint and abort with an ``[startup] ... skipped`` line).
+Phase 12 A1 wraps it in ``pg_advisory_xact_lock`` (id 900005, distinct from
+worker.py's 900001-900003 and job_loop's 900004).
+
+(The sibling ``_import_env_provider_keys`` step and its lock id 900006 were
+removed when provider keys became admin-UI-only — there is no env key to
+import any more.)
 
 How these tests are made meaningful on the SQLite test DB (which has no
 advisory locks):
@@ -82,26 +85,29 @@ class TestPostgresPathTakesLock:
         assert sess.executed == []
 
     def test_lock_ids_are_distinct_and_unclaimed(self):
-        """900005/900006 must not collide with worker.py (900001-900003)
-        or the generation job loop (900004)."""
+        """900005 must not collide with worker.py (900001-900003), the
+        generation job loop (900004), or the schema guard (900007)."""
+        from app.core.schema_guard import SCHEMA_MIGRATE_LOCK_ID
         from app.services.media_gen.job_loop import LOCK_GENERATION_JOBS
 
-        claimed = {900001, 900002, 900003, LOCK_GENERATION_JOBS}
+        claimed = {
+            900001, 900002, 900003, LOCK_GENERATION_JOBS, SCHEMA_MIGRATE_LOCK_ID
+        }
         assert app_main.STARTUP_LOCK_SEED_ADMIN not in claimed
-        assert app_main.STARTUP_LOCK_ENV_KEY_IMPORT not in claimed
-        assert (
-            app_main.STARTUP_LOCK_SEED_ADMIN
-            != app_main.STARTUP_LOCK_ENV_KEY_IMPORT
-        )
 
-    def test_seed_and_import_call_the_lock_helper(self, monkeypatch, tmp_path):
+    def test_env_key_import_lock_is_gone(self):
+        """The env-key importer was removed with the env key source; its
+        lock id must not come back silently attached to something else."""
+        assert not hasattr(app_main, "STARTUP_LOCK_ENV_KEY_IMPORT")
+        assert not hasattr(app_main, "_import_env_provider_keys")
+
+    def test_seed_calls_the_lock_helper(self, monkeypatch, tmp_path):
         """Each startup step must acquire ITS OWN lock id before touching
         the table."""
         Session = _file_sessionmaker(tmp_path, "lockcall.db")
         monkeypatch.setattr("app.core.db.SessionLocal", Session)
         monkeypatch.setenv("APP_ENV", "development")
         monkeypatch.delenv("INITIAL_ADMIN_PASSWORD", raising=False)
-        _pin_env_keys(monkeypatch, openai="")
 
         acquired: list[int] = []
 
@@ -112,10 +118,6 @@ class TestPostgresPathTakesLock:
 
         app_main._seed_admin_user()
         assert acquired == [app_main.STARTUP_LOCK_SEED_ADMIN]
-
-        acquired.clear()
-        app_main._import_env_provider_keys()
-        assert acquired == [app_main.STARTUP_LOCK_ENV_KEY_IMPORT]
 
 
 # ---------------------------------------------------------------------------
@@ -133,14 +135,6 @@ def _file_sessionmaker(tmp_path, name: str):
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-
-def _pin_env_keys(monkeypatch, *, openai="", anthropic="", openrouter=""):
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "openai_api_key", openai, raising=False)
-    monkeypatch.setattr(settings, "anthropic_api_key", anthropic, raising=False)
-    monkeypatch.setattr(settings, "openrouter_api_key", openrouter, raising=False)
 
 
 class _FakeXactLock:
@@ -216,46 +210,3 @@ class TestConcurrentSeeding:
         assert "Admin seed skipped" not in out
         # All 4 workers went through the seed-admin lock id.
         assert fake_lock.acquired_ids == [app_main.STARTUP_LOCK_SEED_ADMIN] * 4
-
-    @pytest.mark.asyncio
-    async def test_concurrent_env_key_import_imports_each_key_once(
-        self, monkeypatch, tmp_path, capsys
-    ):
-        from app.repositories.provider_key_repository import (
-            ProviderKeyRepository,
-        )
-
-        Session = _file_sessionmaker(tmp_path, "envkeys.db")
-        monkeypatch.setattr("app.core.db.SessionLocal", Session)
-        _pin_env_keys(
-            monkeypatch,
-            openai="sk-proj-" + "a" * 60,
-            anthropic="sk-ant-api03-" + "b" * 60,
-        )
-
-        # Widen the race window: the placeholder heuristic + encryption
-        # run between the existence check and the insert; a sleepy
-        # encoder guarantees overlap for unserialized workers.
-        import app.services.provider_key_service as pks
-
-        real_encode = pks._encode
-        monkeypatch.setattr(
-            pks, "_encode", lambda raw: time.sleep(0.1) or real_encode(raw)
-        )
-
-        fake_lock = _FakeXactLock()
-        monkeypatch.setattr(app_main, "_acquire_startup_lock", fake_lock)
-
-        await _run_concurrently(app_main._import_env_provider_keys, n=4)
-
-        with Session() as s:
-            repo = ProviderKeyRepository(s)
-            openai_rows = repo.list_by_provider("openai")
-            anthropic_rows = repo.list_by_provider("anthropic")
-        assert len(openai_rows) == 1, "openai key must be imported exactly once"
-        assert len(anthropic_rows) == 1, "anthropic key must be imported exactly once"
-        out = capsys.readouterr().out
-        assert "env-key import skipped" not in out
-        assert fake_lock.acquired_ids == (
-            [app_main.STARTUP_LOCK_ENV_KEY_IMPORT] * 4
-        )
