@@ -782,8 +782,14 @@ public partial class ChatViewModel : ObservableObject
     /// can time first paint against the same origin.</summary>
     internal long OpenStartTick { get; private set; }
 
-    /// <summary>Set while an open is in flight, so the view logs first paint
-    /// once per open rather than on every layout pass.</summary>
+    /// <summary>
+    /// Armed only once the NEW messages are in the collection, never at the
+    /// start of the open. Set at the start was wrong and measured nonsense:
+    /// LayoutUpdated fires many times DURING an open, while the previous
+    /// conversation's containers are still on screen, so the probe armed on
+    /// the old content and reported its bubble count. Every paint sample read
+    /// bubbles=2 regardless of which conversation was opened.
+    /// </summary>
     internal bool OpenPaintPending { get; set; }
 
     internal void TraceOpen(string stage, double ms, string detail = "")
@@ -994,7 +1000,7 @@ public partial class ChatViewModel : ObservableObject
         var openSw = System.Diagnostics.Stopwatch.StartNew();
         var segSw = new System.Diagnostics.Stopwatch();
         OpenStartTick = Environment.TickCount64;
-        OpenPaintPending = true;
+        OpenPaintPending = false; // armed after the bubbles exist, see below
         double msDraft = 0, msList = 0, msLocal = 0, msCache = 0, msMerge = 0, msVms = 0, msBranches = 0;
         var listedCount = 0;
         var localCount = 0;
@@ -1172,6 +1178,9 @@ public partial class ChatViewModel : ObservableObject
                 Messages.Add(vm);
             }
             msVms = segSw.Elapsed.TotalMilliseconds;
+            // TEMPORARY — the new bubbles exist now, so a layout pass from here
+            // on is measuring THIS conversation.
+            OpenPaintPending = Messages.Count > 0;
 
             segSw.Restart();
             await RestoreBranchesAsync(conversation.Id); // R10 Fix 3
