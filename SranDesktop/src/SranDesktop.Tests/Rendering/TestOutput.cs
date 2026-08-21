@@ -14,3 +14,10 @@ internal static class TestOutput
             Path.Combine(Path.GetTempPath(), "sran-scroll-perf.txt"),
             line + Environment.NewLine);
 }
+
+/// <summary>MotionSettings.OverrideEnabled is process-wide static state, so
+/// every class that toggles it must run serially or they flip it under each
+/// other — which is exactly how ReducedMotion_LeavesNativeWheelBehaviourExactly
+/// AsItWas passed alone and failed in the full suite.</summary>
+[Xunit.CollectionDefinition("MotionSettings", DisableParallelization = true)]
+public class MotionSettingsCollection { }
