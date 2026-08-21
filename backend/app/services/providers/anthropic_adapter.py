@@ -414,7 +414,7 @@ class AnthropicAdapter(BaseProviderAdapter):
             provider_name=self.provider_name,
         )
         headers = {
-            "x-api-key": api_key or settings.anthropic_api_key,
+            "x-api-key": api_key or "",
             "anthropic-version": ANTHROPIC_VERSION,
         }
 
@@ -445,7 +445,7 @@ class AnthropicAdapter(BaseProviderAdapter):
         body = self._build_body(
             payload, messages, stream=True, resolved_model=resolved_model
         )
-        key = api_key or settings.anthropic_api_key
+        key = api_key or ""
         initial_model = resolved_model or payload.model
 
         client = await get_provider_client(

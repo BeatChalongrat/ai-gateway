@@ -125,7 +125,7 @@ class OpenRouterAdapter(BaseProviderAdapter):
 
     def _request_headers(self, api_key: str | None) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {api_key or settings.openrouter_api_key}",
+            "Authorization": f"Bearer {api_key or ''}",
             "HTTP-Referer": settings.app_name,
         }
 

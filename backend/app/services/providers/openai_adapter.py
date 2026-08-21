@@ -438,7 +438,7 @@ class OpenAIAdapter(BaseProviderAdapter):
     async def chat(
         self, payload, messages: list[Message], *, resolved_model: str | None = None, api_key: str | None = None
     ) -> ProviderResponse:
-        key = api_key or settings.openai_api_key
+        key = api_key or ""
 
         client = await get_provider_client(
             base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
@@ -485,7 +485,7 @@ class OpenAIAdapter(BaseProviderAdapter):
     async def stream_chat(
         self, payload, messages: list[Message], *, resolved_model: str | None = None, api_key: str | None = None
     ) -> AsyncIterator[ProviderStreamChunk]:
-        key = api_key or settings.openai_api_key
+        key = api_key or ""
 
         client = await get_provider_client(
             base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),

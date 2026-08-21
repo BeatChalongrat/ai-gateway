@@ -1,7 +1,12 @@
 """Provider API key management — multi-key with round-robin and validation.
 
-Keys stored in provider_keys table. Falls back to legacy providers.api_key_encrypted
-then environment variables.
+Keys are stored in the ``provider_keys`` table and are configured EXCLUSIVELY
+through the admin UI. Resolution order is ``provider_keys`` → the legacy
+``providers.api_key_encrypted`` single key. There is deliberately **no
+environment-variable tier**: the operators of this product are IT staff, and
+"edit a file inside a container to add an API key" is the wrong interface.
+A provider with no key in either table is unconfigured, and the caller raises
+``ProviderUnavailableError`` rather than sending a half-configured request.
 
 All direct ``ProviderKeyORM`` queries live in
 ``app.repositories.ProviderKeyRepository``. This service keeps the
@@ -33,30 +38,49 @@ from app.repositories.provider_key_repository import ProviderKeyRepository
 logger = logging.getLogger(__name__)
 
 
-def _filter_placeholder_candidates(
-    rows: list[ProviderKeyORM], provider_name: str
-) -> list[str]:
-    """Decode active rows, dropping any whose key is a dev placeholder.
+def _usable_rows(
+    rows: list[ProviderKeyORM], provider_name: str, *, log: bool = True
+) -> list[tuple[ProviderKeyORM, str]]:
+    """The subset of ``rows`` that dispatch will actually send.
 
-    Group A / A2: a placeholder stored in ``provider_keys`` (e.g. one a
-    pre-guard boot imported) would 401 silently on dispatch. We filter it
-    out of the resolved candidate list — not just the env fallback — so the
-    pool only ever yields keys that look real. Each drop is logged.
+    A row is usable when it is neither marked ``invalid`` by a key test nor
+    holding a dev placeholder value. Both filters exist because either kind
+    of row would 401 silently on dispatch.
+
+    This is the SINGLE definition of "usable" — both the resolver
+    (``_resolve_key_candidates``) and the admin badge (``get_key_status``)
+    call it, so the UI can never claim a key that dispatch would skip.
+    Pass ``log=False`` from read-only/status paths so polling the admin page
+    does not spam the log with one warning per poll.
+
+    Returns ``(row, decoded_key)`` pairs so callers that need the row
+    metadata and callers that need the key both avoid a second decode.
     """
-    out: list[str] = []
+    out: list[tuple[ProviderKeyORM, str]] = []
     for r in rows:
         if r.last_test_status == "invalid":
             continue
         key = _decode(r.api_key_encrypted)
         if _looks_like_placeholder_key(key):
-            logger.warning(
-                "Filtering placeholder key %s for provider %s from pool",
-                r.id,
-                provider_name,
-            )
+            if log:
+                logger.warning(
+                    "Filtering placeholder key %s for provider %s from pool",
+                    r.id,
+                    provider_name,
+                )
             continue
-        out.append(key)
+        out.append((r, key))
     return out
+
+
+def _filter_placeholder_candidates(
+    rows: list[ProviderKeyORM], provider_name: str
+) -> list[str]:
+    """Decoded keys for the rows dispatch will actually send.
+
+    Thin wrapper over :func:`_usable_rows` kept for call-site readability.
+    """
+    return [key for _row, key in _usable_rows(rows, provider_name)]
 
 
 def _encode(key: str) -> str:
@@ -109,19 +133,9 @@ def _looks_like_placeholder_key(key: str | None) -> bool:
     return any(marker in low for marker in _KEY_PLACEHOLDER_MARKERS)
 
 
-_ENV_KEYS = {
-    "openai": lambda: settings.openai_api_key,
-    "anthropic": lambda: settings.anthropic_api_key,
-    "openrouter": lambda: settings.openrouter_api_key,
-    "minimax": lambda: settings.minimax_api_key,
-    "qwen": lambda: settings.qwen_api_key,
-    "kimi": lambda: settings.kimi_api_key,
-    "zai": lambda: settings.zai_api_key,
-    # Sprint 2B.5: reuse the existing Sprint 2B field (replicate_api_token),
-    # NOT a separate replicate_api_key — one source of truth for the env key.
-    "replicate": lambda: settings.replicate_api_token,
-    "elevenlabs": lambda: settings.elevenlabs_api_key,  # Sprint 4
-}
+# NOTE: there is intentionally no ``_ENV_KEYS`` map here any more. Provider
+# keys come from the admin UI (``provider_keys``) or the legacy
+# ``providers`` table — never from the environment. See the module docstring.
 
 # In-memory round-robin counters (per worker process)
 _rr_counters: dict[str, int] = defaultdict(int)
@@ -174,8 +188,9 @@ class ProviderKeyService:
     ) -> list[str]:
         """Resolve the ordered candidate key list (uncached).
 
-        Priority: provider_keys table → legacy providers.api_key_encrypted
-        → env var. Decoded to plain strings so the cache holds no ORM.
+        Priority: provider_keys table → legacy providers.api_key_encrypted.
+        No environment tier — keys are UI-configured only. Decoded to plain
+        strings so the cache holds no ORM.
         """
         repo = ProviderKeyRepository(session)
         rows = repo.list_active_by_provider(provider_name)
@@ -190,15 +205,7 @@ class ProviderKeyService:
         if provider and provider.api_key_encrypted:
             return [_decode(provider.api_key_encrypted)]
 
-        # Fallback: env var. Skip dev placeholders (e.g. "sk-ant-...") so
-        # the dispatch/fallback chain moves to a keyed provider instead of
-        # 401-ing — makes default->Claude (Fix 4) safe when
-        # ANTHROPIC_API_KEY is still a placeholder. No-op for real keys.
-        env_fn = _ENV_KEYS.get(provider_name)
-        env_key = env_fn() if env_fn else None
-        if _looks_like_placeholder_key(env_key):
-            return []
-        return [env_key]
+        return []
 
     # Backward compat alias
     def get_api_key(self, session: Session, provider_name: str) -> str | None:
@@ -244,8 +251,9 @@ class ProviderKeyService:
         DB reads. The repository is sync-only, so the ``provider_keys``
         SELECT is issued directly here (same query as
         ``ProviderKeyRepository.list_active_by_provider``).
-        Priority: provider_keys table → legacy providers.api_key_encrypted
-        → env var. Decoded to plain strings so the cache holds no ORM.
+        Priority: provider_keys table → legacy providers.api_key_encrypted.
+        No environment tier — keys are UI-configured only. Decoded to plain
+        strings so the cache holds no ORM.
         """
         result = await session.execute(
             select(ProviderKeyORM)
@@ -269,15 +277,7 @@ class ProviderKeyService:
         if provider and provider.api_key_encrypted:
             return [_decode(provider.api_key_encrypted)]
 
-        # Fallback: env var. Skip dev placeholders (e.g. "sk-ant-...") so
-        # the dispatch/fallback chain moves to a keyed provider instead of
-        # 401-ing — makes default->Claude (Fix 4) safe when
-        # ANTHROPIC_API_KEY is still a placeholder. No-op for real keys.
-        env_fn = _ENV_KEYS.get(provider_name)
-        env_key = env_fn() if env_fn else None
-        if _looks_like_placeholder_key(env_key):
-            return []
-        return [env_key]
+        return []
 
     # Backward compat alias (async)
     async def get_api_key_async(
@@ -644,32 +644,60 @@ class ProviderKeyService:
     # ------------------------------------------------------------------
 
     def get_key_status(self, session: Session, provider_name: str) -> dict:
-        """Summary of key configuration for a provider."""
-        keys = self.list_keys(session, provider_name)
-        active_keys = [k for k in keys if k["is_active"]]
-        valid_keys = [k for k in active_keys if k["last_test_status"] == "valid"]
+        """Summary of key configuration for a provider.
 
-        # Check legacy sources too
+        The counts here mean exactly what dispatch would do. ``total_keys``
+        is the number of rows :meth:`_resolve_key_candidates` would actually
+        put in the round-robin pool, so it excludes rows a key test marked
+        ``invalid`` and rows holding a dev placeholder — both of which the
+        resolver skips. Before this, a provider whose only key was invalid
+        reported ``configured: true`` while every request to it failed with
+        "no API key configured"; the badge now says what dispatch does.
+
+        Rows that are excluded here are NOT hidden from the operator — the
+        expanded key panel still lists every row with its test status via
+        :meth:`list_keys`. Only the "is this provider callable" summary is
+        filtered.
+
+        ``source`` is ``provider_keys | database | none``. There is no
+        ``environment`` value: env is not a key source (see module docstring).
+        """
+        keys = self.list_keys(session, provider_name)
+        repo = ProviderKeyRepository(session)
+        # Same filter the resolver applies, so the badge cannot claim a key
+        # dispatch would skip. log=False: the admin page polls this.
+        usable = _usable_rows(
+            repo.list_active_by_provider(provider_name), provider_name, log=False
+        )
+        valid_keys = [
+            row for row, _key in usable if row.last_test_status == "valid"
+        ]
+
+        # Check the legacy single-key table too
         provider = session.execute(
             select(ProviderORM).where(ProviderORM.name == provider_name)
         ).scalar_one_or_none()
         legacy_db = bool(provider and provider.api_key_encrypted)
-        env_fn = _ENV_KEYS.get(provider_name)
-        env_configured = bool(env_fn and env_fn())
 
-        total = len(active_keys) + (1 if legacy_db else 0) + (1 if env_configured and not active_keys and not legacy_db else 0)
+        total = len(usable) + (1 if legacy_db else 0)
 
         result = {
             "provider_name": provider_name,
             "configured": total > 0,
-            "total_keys": len(active_keys),
+            "total_keys": len(usable),
             "valid_keys": len(valid_keys),
-            "source": "provider_keys" if active_keys else ("database" if legacy_db else ("environment" if env_configured else "none")),
+            "source": (
+                "provider_keys" if usable else ("database" if legacy_db else "none")
+            ),
+            # Rows the operator has that dispatch will NOT use (invalid or
+            # placeholder). Lets the UI explain a "no key" badge on a
+            # provider that visibly has key rows, instead of looking broken.
+            "unusable_keys": len([k for k in keys if k["is_active"]]) - len(usable),
         }
 
         # Self-hosted providers expose their operator-set endpoint so the
         # admin UI can prefill the form and show an "endpoint not set"
-        # state. Effective value (DB → env → "") — never a secret.
+        # state. Effective value (DB → "") — never a secret.
         from app.services.providers.base_urls import (
             SELF_HOSTED_PROVIDERS,
             resolve_base_url,
