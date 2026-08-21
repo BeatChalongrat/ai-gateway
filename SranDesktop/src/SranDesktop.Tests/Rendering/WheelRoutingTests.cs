@@ -342,8 +342,11 @@ public class WheelRoutingTests
         });
     }
 
+    /// <summary>Reduced motion removes the animation, not the reach: the notch
+    /// still travels the full Chromium distance, it just arrives in one
+    /// frame.</summary>
     [Fact]
-    public void ReducedMotion_LeavesNativeWheelBehaviourExactlyAsItWas()
+    public void ReducedMotion_ScrollsTheFullDistanceInOneFrame()
     {
         RunSta(() =>
         {
@@ -352,14 +355,17 @@ public class WheelRoutingTests
             {
                 using var h = Harness.Build(attachSmoothWheel: true);
                 var before = h.Outer.VerticalOffset;
+                var perNotch = AnimatedScroller.NotchDistanceForLines(
+                    SystemParameters.WheelScrollLines, h.Outer.ViewportHeight);
 
                 h.WheelOver(h.PlainRow, -120);
                 h.List.UpdateLayout();
                 Pump();
 
-                h.Outer.VerticalOffset.Should().BeGreaterThan(before,
-                    "native handling still scrolls, in one frame, as before");
-                double.IsNaN(AnimatedScroller.PendingWheelTarget(h.Outer)).Should().BeTrue();
+                (h.Outer.VerticalOffset - before).Should().BeApproximately(perNotch, 1.0,
+                    "the whole distance arrives at once");
+                double.IsNaN(AnimatedScroller.PendingWheelTarget(h.Outer)).Should().BeTrue(
+                    "with nothing left in flight");
             }
             finally { MotionSettings.OverrideEnabled = null; }
         });

@@ -4,6 +4,69 @@ using System.Windows.Media.Animation;
 
 namespace SranDesktop.Presentation.Services;
 
+/// <summary>
+/// Cubic-bezier timing evaluation, the same shape CSS and Chromium use: the
+/// curve runs from (0,0) to (1,1) through control points (x1,y1) and (x2,y2),
+/// x is the time fraction and y the progress fraction.
+///
+/// Only needed to answer one question — how fast is a running scroll animation
+/// moving right now — so that a retarget can carry that speed into the next
+/// curve instead of restarting from a standstill.
+/// </summary>
+internal static class CubicBezier
+{
+    private static double SampleX(double t, double x1, double x2) =>
+        3 * (1 - t) * (1 - t) * t * x1 + 3 * (1 - t) * t * t * x2 + t * t * t;
+
+    private static double SampleDerivativeX(double t, double x1, double x2) =>
+        3 * (1 - t) * (1 - t) * x1 + 6 * (1 - t) * t * (x2 - x1) + 3 * t * t * (1 - x2);
+
+    private static double SampleDerivativeY(double t, double y1, double y2) =>
+        3 * (1 - t) * (1 - t) * y1 + 6 * (1 - t) * t * (y2 - y1) + 3 * t * t * (1 - y2);
+
+    /// <summary>Curve parameter t at which the curve reaches time fraction
+    /// <paramref name="x"/>. Newton first, bisection as the guaranteed
+    /// fallback when the derivative is too flat to iterate on.</summary>
+    internal static double SolveForT(double x, double x1, double x2)
+    {
+        x = Math.Clamp(x, 0.0, 1.0);
+        var t = x;
+        for (var i = 0; i < 8; i++)
+        {
+            var error = SampleX(t, x1, x2) - x;
+            if (Math.Abs(error) < 1e-6)
+                return t;
+            var slope = SampleDerivativeX(t, x1, x2);
+            if (Math.Abs(slope) < 1e-6)
+                break;
+            t -= error / slope;
+        }
+
+        double low = 0, high = 1;
+        t = x;
+        for (var i = 0; i < 32; i++)
+        {
+            var sample = SampleX(t, x1, x2);
+            if (Math.Abs(sample - x) < 1e-6)
+                return t;
+            if (sample < x) low = t; else high = t;
+            t = (low + high) / 2;
+        }
+        return t;
+    }
+
+    /// <summary>dy/dx at time fraction <paramref name="x"/> — i.e. progress per
+    /// unit of time, which scaled by (distance / duration) is velocity.</summary>
+    internal static double SlopeAtX(double x1, double y1, double x2, double y2, double x)
+    {
+        var t = SolveForT(x, x1, x2);
+        var dx = SampleDerivativeX(t, x1, x2);
+        if (Math.Abs(dx) < 1e-6)
+            return 0;
+        return SampleDerivativeY(t, y1, y2) / dx;
+    }
+}
+
 /// <summary>Scroll-position logic for the chat view (Phase C PART 2).</summary>
 public static class ScrollStateHelper
 {
@@ -31,33 +94,28 @@ public static class AnimatedScroller
     /// Everything that decides how a wheel notch feels, in one place, because
     /// this is tuned by eye and nobody should have to hunt for it.
     ///
-    /// Why any of this exists: WPF applies a wheel notch in a single frame —
-    /// the view is at offset X, then at X+80, with nothing in between.
-    /// Chromium animates every notch over roughly a tenth of a second, which
-    /// is the whole reason a browser reads as smooth at the same pixel
-    /// distance. This animates the notch; it does not change how far it goes.
+    /// Why any of this exists, in two parts. WPF applies a wheel notch in a
+    /// single frame — the view is at offset X, then at X+80, with nothing in
+    /// between — and it moves only ~16 DIP per configured line where a browser
+    /// moves 40. So the same hand gesture both jumped and fell short. These
+    /// constants are Chromium's own, verified against its source; the comments
+    /// say which file each came from.
     /// </summary>
     public static class WheelFeel
     {
-        /// <summary>One notch's travel time. Deliberately much shorter than
-        /// the 250 ms used for a deliberate jump to a new turn: at 250 ms a
-        /// wheel notch feels like wading.</summary>
-        public const int DurationMs = 120;
+        /// <summary>
+        /// DIP per line of wheel travel. This is Chromium's
+        /// <c>kPixelsPerLineStep</c> (cc/input/scroll_utils.h), NOT WPF's ~16:
+        /// WPF moves 48 DIP at the Windows default of 3 lines where a browser
+        /// moves 120, so the same hand gesture reached 2.5x less far. That
+        /// difference needs no animation to fix and is very likely the largest
+        /// single part of "ไม่เลื่อนเท่าพวก chatgpt claude".
+        /// </summary>
+        public const double PixelsPerLineStep = 40.0;
 
-        /// <summary>Ease out only — a wheel notch has no run-up. Anything with
-        /// an EaseIn phase reads as lag.</summary>
-        public static IEasingFunction NewEasing() =>
-            new CubicEase { EasingMode = EasingMode.EaseOut };
-
-        /// <summary>Multiplier on the OS-derived distance. 1.0 = exactly what
-        /// Windows was already going to scroll. Raise it if the owner wants
-        /// more travel per notch; it does NOT belong above ~1.5 before the
-        /// animation starts to overshoot the eye.</summary>
+        /// <summary>Multiplier on the derived distance. 1.0 = exactly
+        /// Chromium's reach. Tune here, not in the arithmetic.</summary>
         public const double DistanceMultiplier = 1.0;
-
-        /// <summary>DIP per text line, matching what WPF's own ScrollViewer
-        /// uses (measured: WheelScrollLines=5 scrolled exactly 80 DIP).</summary>
-        public const double LineHeightDip = 16.0;
 
         /// <summary>Fallback when the OS reports a nonsense line count.</summary>
         public const int FallbackLines = 3;
@@ -65,6 +123,53 @@ public static class AnimatedScroller
         /// <summary>One physical notch. Windows reports wheel movement in
         /// units of WHEEL_DELTA = 120.</summary>
         public const int WheelDelta = 120;
+
+        // ── duration: inverse-delta ─────────────────────────────────────
+        // Chromium's DurationBehavior::kInverseDelta for wheel scrolls
+        // (cc/animation/scroll_offset_animation_curve.cc). The FARTHER it has
+        // to travel, the SHORTER the animation — which is what makes rapid
+        // wheeling accelerate instead of pile up lag. Delta is the ACCUMULATED
+        // pending distance, not the single notch.
+        //
+        //   units    = clamp(14 - |delta| / 60, 6, 12)
+        //   duration = units / 60 seconds
+        //
+        // 120 px -> 200 ms · 240 px -> 167 ms · 480 px and beyond -> 100 ms.
+        public const double InverseDeltaRampStartPx = 120.0;
+        public const double InverseDeltaRampEndPx = 480.0;
+        public const double InverseDeltaMinDuration = 6.0;
+        public const double InverseDeltaMaxDuration = 12.0;
+        public const double DurationDivisor = 60.0;
+
+        // ── easing: CSS ease-in-out, symmetric ──────────────────────────
+        // cubic-bezier(0.42, 0, 0.58, 1) — Chromium's kEaseInOutControlPoints.
+        // Symmetric, so the curve STARTS from zero velocity; that is what
+        // gives browser scrolling its sense of mass. An EaseOut curve leaves
+        // at maximum velocity, which from a standing start reads as a snap.
+        //
+        // Deliberately NOT applied to ScrollTo/ScrollToBottom: a jump the app
+        // initiates should arrive gently, not depart gently, so those keep
+        // their EaseOut.
+        public const double EaseX1 = 0.42;
+        public const double EaseY1 = 0.0;
+        public const double EaseX2 = 0.58;
+        public const double EaseY2 = 1.0;
+
+        /// <summary>Chromium clamps the retarget slope to this.</summary>
+        public const double MaxRetargetSlope = 1000.0;
+    }
+
+    /// <summary>Duration for a pending travel distance, in seconds. Pure and
+    /// internal so the ramp can be checked at its endpoints.</summary>
+    internal static double WheelDurationSeconds(double pendingDistancePx)
+    {
+        var distance = Math.Abs(pendingDistancePx);
+        var slope = (WheelFeel.InverseDeltaMinDuration - WheelFeel.InverseDeltaMaxDuration)
+                    / (WheelFeel.InverseDeltaRampEndPx - WheelFeel.InverseDeltaRampStartPx);
+        var offset = WheelFeel.InverseDeltaMaxDuration - WheelFeel.InverseDeltaRampStartPx * slope;
+        var units = Math.Clamp(offset + distance * slope,
+            WheelFeel.InverseDeltaMinDuration, WheelFeel.InverseDeltaMaxDuration);
+        return units / WheelFeel.DurationDivisor;
     }
 
     public static readonly DependencyProperty VerticalOffsetProperty =
@@ -85,10 +190,17 @@ public static class AnimatedScroller
     /// everything the view knows about (thumb drag, keyboard, conversation
     /// switch).
     /// </summary>
-    private static readonly DependencyProperty WheelTargetProperty =
+    private static readonly DependencyProperty WheelFlightProperty =
         DependencyProperty.RegisterAttached(
-            "WheelTarget", typeof(double), typeof(AnimatedScroller),
-            new PropertyMetadata(double.NaN));
+            "WheelFlight", typeof(WheelFlight), typeof(AnimatedScroller),
+            new PropertyMetadata(null));
+
+    /// <summary>Everything needed to retarget mid-flight WITHOUT losing the
+    /// speed already built up: where the current curve started, where it is
+    /// heading, when it started, how long it runs, and the initial slope it
+    /// was built with.</summary>
+    private sealed record WheelFlight(
+        double StartOffset, double Target, long StartTick, double DurationSec, double Slope);
 
     public static void SetVerticalOffset(DependencyObject o, double value) =>
         o.SetValue(VerticalOffsetProperty, value);
@@ -112,11 +224,6 @@ public static class AnimatedScroller
     /// </summary>
     public static bool TryWheelScroll(ScrollViewer scroll, int delta)
     {
-        // Reduced motion means reduced motion, not a shorter animation. Native
-        // behaviour, entirely unchanged.
-        if (!MotionSettings.Enabled)
-            return false;
-
         if (!IsMouseWheelShapedDelta(delta))
             return false;
 
@@ -129,37 +236,100 @@ public static class AnimatedScroller
         // Accumulate toward the PENDING target when one is in flight, so a
         // burst of notches adds up instead of each one restarting from
         // wherever the animation happens to have got to.
-        var basis = (double)scroll.GetValue(WheelTargetProperty);
-        if (double.IsNaN(basis))
-            basis = scroll.VerticalOffset;
+        var flight = (WheelFlight?)scroll.GetValue(WheelFlightProperty);
+        var basis = flight?.Target ?? scroll.VerticalOffset;
 
         // Clamp at ACCUMULATION time, not only when animating: otherwise
         // wheeling hard at the end of a thread builds an invisible overshoot
         // the user then has to unwind before anything moves.
         var target = Math.Max(0, Math.Min(basis + travel, scroll.ScrollableHeight));
 
-        // Already exactly where this notch would take us (top or bottom):
-        // nothing to animate, and claiming the event would swallow it.
-        if (Math.Abs(target - scroll.VerticalOffset) < 0.5 && double.IsNaN(basis))
-            return false;
+        var from = scroll.VerticalOffset;
+        if (Math.Abs(target - from) < 0.5 && flight is null)
+            return false; // already at the end this notch aims at
 
-        scroll.SetValue(WheelTargetProperty, target);
-
-        var anim = new DoubleAnimation(scroll.VerticalOffset, target,
-            new Duration(System.TimeSpan.FromMilliseconds(WheelFeel.DurationMs)))
+        // DISTANCE IS NOT MOTION. Reduced motion removes the animation, not the
+        // reach: the notch still travels the full Chromium distance, it just
+        // arrives in one frame. Gating the distance on the animation would
+        // leave reduced-motion users with WPF's short 16-px-per-line scroll.
+        if (!MotionSettings.Enabled)
         {
-            EasingFunction = WheelFeel.NewEasing(),
-        };
+            CancelWheel(scroll);
+            scroll.ScrollToVerticalOffset(target);
+            return true;
+        }
+
+        var pending = target - from;
+        var durationSec = WheelDurationSeconds(pending);
+        var slope = RetargetSlope(scroll, flight, pending, durationSec);
+
+        scroll.SetValue(WheelFlightProperty,
+            new WheelFlight(from, target, Environment.TickCount64, durationSec, slope));
+
+        scroll.BeginAnimation(VerticalOffsetProperty,
+            BuildWheelAnimation(scroll, from, target, durationSec, slope));
+        return true;
+    }
+
+    /// <summary>
+    /// The initial slope for a retargeted curve, so speed already built up
+    /// carries into the new one. Chromium:
+    /// <c>new_slope = velocity * (new_duration / |new_delta|)</c>, clamped.
+    /// Without it every notch restarts from zero velocity and rapid wheeling
+    /// stutters once per notch.
+    /// </summary>
+    private static double RetargetSlope(
+        ScrollViewer scroll, WheelFlight? flight, double pending, double durationSec)
+    {
+        if (flight is null || durationSec <= 0 || Math.Abs(pending) < 0.5)
+            return 0; // from rest: the symmetric curve starts at zero velocity
+
+        var elapsed = (Environment.TickCount64 - flight.StartTick) / 1000.0;
+        if (elapsed <= 0 || elapsed >= flight.DurationSec || flight.DurationSec <= 0)
+            return 0;
+
+        // Velocity in px/s = total travel x (dy/dx at this point) / duration.
+        var dydx = CubicBezier.SlopeAtX(
+            WheelFeel.EaseX1, WheelFeel.EaseX1 * flight.Slope,
+            WheelFeel.EaseX2, WheelFeel.EaseY2,
+            elapsed / flight.DurationSec);
+        var velocity = (flight.Target - flight.StartOffset) * dydx / flight.DurationSec;
+
+        var slope = velocity * (durationSec / Math.Abs(pending));
+        return Math.Clamp(slope, -WheelFeel.MaxRetargetSlope, WheelFeel.MaxRetargetSlope);
+    }
+
+    /// <summary>
+    /// The exact cubic-bezier(0.42, 0, 0.58, 1) curve, expressed as WPF's
+    /// KeySpline rather than approximated with a built-in easing class. A
+    /// retarget scales the first control point's y by the slope, exactly as
+    /// Chromium's EaseInOutWithInitialSlope does.
+    /// </summary>
+    private static AnimationTimeline BuildWheelAnimation(
+        ScrollViewer scroll, double from, double target, double durationSec, double slope)
+    {
+        // KeySpline requires both control-point coordinates within [0,1], so a
+        // very fast retarget cannot be expressed exactly; y1 saturates at 1,
+        // i.e. slopes above 1/0.42 = 2.38 flatten to that. Measured on
+        // realistic notch bursts this does not bind (see SmoothWheelTests).
+        var y1 = Math.Clamp(WheelFeel.EaseX1 * slope, 0.0, 1.0);
+        var spline = new KeySpline(WheelFeel.EaseX1, y1, WheelFeel.EaseX2, WheelFeel.EaseY2);
+        var duration = System.TimeSpan.FromSeconds(durationSec);
+
+        var anim = new DoubleAnimationUsingKeyFrames { Duration = new Duration(duration) };
+        // A new animation otherwise starts from the property's BASE value, not
+        // from where the previous animation had actually got to.
+        anim.KeyFrames.Add(new LinearDoubleKeyFrame(from, KeyTime.FromTimeSpan(System.TimeSpan.Zero)));
+        anim.KeyFrames.Add(new SplineDoubleKeyFrame(target, KeyTime.FromTimeSpan(duration), spline));
         anim.Completed += (_, _) =>
         {
-            // Only clear if this animation is still the one in charge; a newer
+            // Only clear if this flight is still the one in charge; a newer
             // notch or an anchor scroll may have moved the target on.
-            var current = (double)scroll.GetValue(WheelTargetProperty);
-            if (!double.IsNaN(current) && Math.Abs(current - target) < 0.5)
-                scroll.SetValue(WheelTargetProperty, double.NaN);
+            if (scroll.GetValue(WheelFlightProperty) is WheelFlight current
+                && Math.Abs(current.Target - target) < 0.5)
+                scroll.SetValue(WheelFlightProperty, null);
         };
-        scroll.BeginAnimation(VerticalOffsetProperty, anim);
-        return true;
+        return anim;
     }
 
     /// <summary>
@@ -180,10 +350,10 @@ public static class AnimatedScroller
         if (lines < 0)
             return viewportHeight > 0
                 ? viewportHeight
-                : WheelFeel.LineHeightDip * WheelFeel.FallbackLines;
+                : WheelFeel.PixelsPerLineStep * WheelFeel.FallbackLines;
         if (lines == 0)
             lines = WheelFeel.FallbackLines; // don't scroll nowhere
-        return lines * WheelFeel.LineHeightDip;
+        return lines * WheelFeel.PixelsPerLineStep;
     }
 
     /// <summary>
@@ -212,7 +382,7 @@ public static class AnimatedScroller
     /// the view somewhere nobody asked for.</summary>
     public static void CancelWheel(ScrollViewer scroll)
     {
-        scroll.SetValue(WheelTargetProperty, double.NaN);
+        scroll.SetValue(WheelFlightProperty, null);
         DetachAnimationInPlace(scroll);
     }
 
@@ -236,13 +406,22 @@ public static class AnimatedScroller
 
     /// <summary>Test seam: the pending wheel target, or NaN when idle.</summary>
     internal static double PendingWheelTarget(ScrollViewer scroll) =>
-        (double)scroll.GetValue(WheelTargetProperty);
+        scroll.GetValue(WheelFlightProperty) is WheelFlight f ? f.Target : double.NaN;
+
+    /// <summary>Test seam: the initial slope the in-flight curve was built
+    /// with. 0 means it started from rest.</summary>
+    internal static double PendingWheelSlope(ScrollViewer scroll) =>
+        scroll.GetValue(WheelFlightProperty) is WheelFlight f ? f.Slope : double.NaN;
+
+    /// <summary>Test seam: the duration the in-flight curve was built with.</summary>
+    internal static double PendingWheelDurationSec(ScrollViewer scroll) =>
+        scroll.GetValue(WheelFlightProperty) is WheelFlight f ? f.DurationSec : double.NaN;
 
     /// <summary>Scroll to the bottom — animated when motion is enabled, else snap.</summary>
     public static void ScrollToBottom(ScrollViewer scroll)
     {
         // A jump-to-latest supersedes anything the wheel had queued.
-        scroll.SetValue(WheelTargetProperty, double.NaN);
+        scroll.SetValue(WheelFlightProperty, null);
         if (!MotionSettings.Enabled)
         {
             scroll.BeginAnimation(VerticalOffsetProperty, null); // cancel any running anim
@@ -266,7 +445,7 @@ public static class AnimatedScroller
     public static void ScrollTo(ScrollViewer scroll, double offset)
     {
         // The send-time anchor supersedes anything the wheel had queued.
-        scroll.SetValue(WheelTargetProperty, double.NaN);
+        scroll.SetValue(WheelFlightProperty, null);
         offset = Math.Max(0, Math.Min(offset, scroll.ScrollableHeight));
         if (!MotionSettings.Enabled)
         {

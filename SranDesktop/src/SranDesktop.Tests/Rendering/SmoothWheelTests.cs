@@ -73,9 +73,9 @@ public class SmoothWheelTests
     // ── distance mapping ───────────────────────────────────────────────────
 
     [Theory]
-    [InlineData(1, 16)]     // one line
-    [InlineData(3, 48)]     // Windows default
-    [InlineData(5, 80)]     // this machine
+    [InlineData(1, 40)]     // one line
+    [InlineData(3, 120)]    // Windows default — what Chromium travels
+    [InlineData(5, 200)]    // this machine
     public void NotchDistance_FollowsWheelScrollLines(int lines, double expected) =>
         AnimatedScroller.NotchDistanceForLines(lines, 300).Should().Be(expected);
 
@@ -86,12 +86,182 @@ public class SmoothWheelTests
 
     [Fact]
     public void NotchDistance_MinusOneWithNoViewport_FallsBackToLines() =>
-        AnimatedScroller.NotchDistanceForLines(-1, 0).Should().Be(48);
+        AnimatedScroller.NotchDistanceForLines(-1, 0).Should().Be(120);
 
     [Fact]
     public void NotchDistance_ZeroIsNonsense_AndFallsBack() =>
-        AnimatedScroller.NotchDistanceForLines(0, 300).Should().Be(48,
+        AnimatedScroller.NotchDistanceForLines(0, 300).Should().Be(120,
             "scrolling zero pixels per notch would look like a dead wheel");
+
+    // ── duration: inverse-delta ────────────────────────────────────────────
+
+    /// <summary>Chromium's kInverseDelta ramp, verified against the source
+    /// constants in cc/animation/scroll_offset_animation_curve.cc. Note the
+    /// direction: the FARTHER it travels, the SHORTER the animation.</summary>
+    [Theory]
+    [InlineData(120, 200)]   // one notch from rest
+    [InlineData(240, 167)]
+    [InlineData(360, 133)]
+    [InlineData(480, 100)]   // rapid wheeling
+    public void Duration_FollowsTheInverseDeltaRamp(double pendingPx, double expectedMs) =>
+        (AnimatedScroller.WheelDurationSeconds(pendingPx) * 1000)
+            .Should().BeApproximately(expectedMs, 1.0);
+
+    [Fact]
+    public void Duration_IsClampedAtBothEnds()
+    {
+        (AnimatedScroller.WheelDurationSeconds(10) * 1000).Should().BeApproximately(200, 1.0,
+            "below the ramp start it holds at the maximum");
+        (AnimatedScroller.WheelDurationSeconds(5000) * 1000).Should().BeApproximately(100, 1.0,
+            "beyond the ramp end it holds at the minimum");
+    }
+
+    [Fact]
+    public void Duration_IsMonotonicallyShorterWithDistance()
+    {
+        var previous = double.MaxValue;
+        for (var d = 120.0; d <= 480; d += 30)
+        {
+            var current = AnimatedScroller.WheelDurationSeconds(d);
+            current.Should().BeLessThanOrEqualTo(previous);
+            previous = current;
+        }
+    }
+
+    // ── the curve itself ───────────────────────────────────────────────────
+
+    /// <summary>cubic-bezier(0.42, 0, 0.58, 1) is symmetric and starts from
+    /// ZERO velocity — that is what gives it a sense of mass. An ease-out curve
+    /// leaves at maximum velocity, which from a standing start reads as a
+    /// snap.</summary>
+    [Fact]
+    public void EaseInOutCurve_StartsAndEndsAtZeroVelocity()
+    {
+        var start = CubicBezier.SlopeAtX(0.42, 0.0, 0.58, 1.0, 0.0);
+        var middle = CubicBezier.SlopeAtX(0.42, 0.0, 0.58, 1.0, 0.5);
+        var end = CubicBezier.SlopeAtX(0.42, 0.0, 0.58, 1.0, 1.0);
+
+        start.Should().BeApproximately(0, 0.01);
+        end.Should().BeApproximately(0, 0.01);
+        middle.Should().BeGreaterThan(1.0, "peak speed is in the middle");
+    }
+
+    [Fact]
+    public void SlopeScaledCurve_HasThatSlopeAtTheStart()
+    {
+        foreach (var slope in new[] { 0.5, 1.0, 2.0 })
+        {
+            CubicBezier.SlopeAtX(0.42, 0.42 * slope, 0.58, 1.0, 0.0)
+                .Should().BeApproximately(slope, 0.01,
+                    "y1 = x1 x slope is exactly how Chromium injects an initial velocity");
+        }
+    }
+
+    [Fact]
+    public void SolveForT_RoundTrips()
+    {
+        for (var x = 0.0; x <= 1.0; x += 0.05)
+        {
+            var t = CubicBezier.SolveForT(x, 0.42, 0.58);
+            var back = 3 * (1 - t) * (1 - t) * t * 0.42 + 3 * (1 - t) * t * t * 0.58 + t * t * t;
+            back.Should().BeApproximately(x, 1e-4);
+        }
+    }
+
+    // ── retarget preserves velocity ────────────────────────────────────────
+
+    [Fact]
+    public void FirstNotchFromRest_StartsAtZeroVelocity()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                var scroll = StandaloneScroller();
+                AnimatedScroller.TryWheelScroll(scroll, -120);
+                AnimatedScroller.PendingWheelSlope(scroll).Should().Be(0);
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
+    /// <summary>
+    /// A notch arriving mid-flight must build its curve with the speed already
+    /// on the clock. Without it every notch restarts from a standstill and
+    /// rapid wheeling stutters once per notch — which would look exactly like
+    /// the jank 1.2.7 removed, from an unrelated cause.
+    /// </summary>
+    [Fact]
+    public void RetargetMidFlight_CarriesTheCurrentVelocity()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                var scroll = StandaloneScroller();
+                AnimatedScroller.TryWheelScroll(scroll, -120);
+
+                // Let the curve get up to speed (peak velocity is mid-flight).
+                var deadline = Environment.TickCount64 + 90;
+                while (Environment.TickCount64 < deadline)
+                {
+                    Pump(DispatcherPriority.SystemIdle);
+                    Thread.Sleep(5);
+                }
+
+                AnimatedScroller.TryWheelScroll(scroll, -120).Should().BeTrue();
+                AnimatedScroller.PendingWheelSlope(scroll).Should().BeGreaterThan(0,
+                    "the new curve must start moving, not from a standstill");
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
+    /// <summary>
+    /// WPF's KeySpline requires both control-point coordinates within [0,1], so
+    /// an initial slope above 1/0.42 = 2.38 cannot be expressed exactly and
+    /// saturates. This records the slopes a realistic notch burst actually
+    /// produces, so the report can say whether that limit ever binds.
+    /// </summary>
+    [Fact]
+    public void RetargetSlopes_InARealisticBurst_AreRecorded()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                var scroll = StandaloneScroller(viewport: 600, content: 40000);
+                var slopes = new List<double>();
+
+                for (var i = 0; i < 8; i++)
+                {
+                    AnimatedScroller.TryWheelScroll(scroll, -120);
+                    slopes.Add(AnimatedScroller.PendingWheelSlope(scroll));
+                    // ~60 ms between notches is brisk but human wheeling.
+                    var until = Environment.TickCount64 + 60;
+                    while (Environment.TickCount64 < until)
+                    {
+                        Pump(DispatcherPriority.SystemIdle);
+                        Thread.Sleep(5);
+                    }
+                }
+
+                var max = slopes.Max();
+                var clampLimit = 1.0 / 0.42;
+                TestOutput.Record(
+                    "[wheel] retarget slopes over 8 notches at ~60ms: " +
+                    string.Join(", ", slopes.Select(s => s.ToString("F2"))) +
+                    $" | max={max:F2} KeySpline limit={clampLimit:F2} " +
+                    $"clamped={(max > clampLimit ? "YES" : "no")}");
+
+                slopes.Should().NotBeEmpty();
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
 
     // ── the target accumulates ─────────────────────────────────────────────
 
@@ -272,8 +442,14 @@ public class SmoothWheelTests
 
     // ── reduced motion and trackpads pass straight through ─────────────────
 
+    /// <summary>
+    /// Distance is not motion. Reduced motion removes the ANIMATION, not the
+    /// reach: the notch must still travel the full Chromium distance, it just
+    /// arrives in one frame. Gating distance on the animation would leave
+    /// reduced-motion users on WPF's short 16-px-per-line scroll forever.
+    /// </summary>
     [Fact]
-    public void ReducedMotion_DoesNotAnimateAtAll()
+    public void ReducedMotion_StillTravelsTheFullDistance_JustInstantly()
     {
         RunSta(() =>
         {
@@ -281,9 +457,16 @@ public class SmoothWheelTests
             try
             {
                 var scroll = StandaloneScroller();
-                AnimatedScroller.TryWheelScroll(scroll, -120).Should().BeFalse(
-                    "reduced motion means native behaviour, not a shorter animation");
-                double.IsNaN(AnimatedScroller.PendingWheelTarget(scroll)).Should().BeTrue();
+                var perNotch = AnimatedScroller.NotchDistanceForLines(
+                    SystemParameters.WheelScrollLines, scroll.ViewportHeight);
+
+                AnimatedScroller.TryWheelScroll(scroll, -120).Should().BeTrue();
+                scroll.UpdateLayout();
+
+                scroll.VerticalOffset.Should().BeApproximately(perNotch, 0.5,
+                    "the whole distance arrives at once, with no animation");
+                double.IsNaN(AnimatedScroller.PendingWheelTarget(scroll)).Should().BeTrue(
+                    "and nothing is left in flight");
             }
             finally { MotionSettings.OverrideEnabled = null; }
         });
