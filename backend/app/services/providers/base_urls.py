@@ -171,8 +171,15 @@ def set_stored_base_url(session, provider_name: str, url: str) -> str | None:
     (``validate_provider_base_url``) and for evicting the old URL's
     pooled httpx client (``http_client.evict_client``) — eviction is
     async and this helper is sync by design.
+
+    Also records that this provider's endpoint is database-owned, so the
+    first-boot env seed cannot act on it again (see
+    ``app.services.provider_env_seed``). This module still does not import
+    ``settings``: the mark is a DB write, not an env read, so there is no
+    env tier at resolve time.
     """
     from app.models.system_setting import SystemSettingORM
+    from app.services.provider_env_seed import KIND_BASE_URL, mark_provider_owned
 
     key = f"{PROVIDER_BASE_URL_SETTING_PREFIX}{provider_name}"
     row = session.get(SystemSettingORM, key)
@@ -186,6 +193,9 @@ def set_stored_base_url(session, provider_name: str, url: str) -> str | None:
         session.add(row)
     else:
         row.value = url
+    # Insert-if-absent, so the seeder's own "env-seed" reason survives when
+    # this is called from the seed path.
+    mark_provider_owned(session, KIND_BASE_URL, provider_name, "admin-ui")
     session.flush()
     # PRIME the resolver cache with the new value rather than just
     # clearing it: the row above is only FLUSHED in the caller's

@@ -113,6 +113,12 @@ async def lifespan(app: FastAPI):
     # Seed admin user (runs blocking bcrypt in thread)
     await asyncio.to_thread(_seed_admin_user)
 
+    # Seed provider keys / endpoints from env — ONCE per provider, ever.
+    # See app/services/provider_env_seed.py for the rule and for why the gate
+    # is a marker rather than a row count. Editing an env var on a running
+    # system deliberately does nothing.
+    await asyncio.to_thread(_seed_provider_config_from_env)
+
     # Per-worker NER pre-load. ``ner_status`` module-level state is
     # process-local — a ``PATCH /admin/settings`` call routes to one
     # gunicorn worker, which loads the analyzer in *its* process only,
@@ -282,8 +288,11 @@ async def lifespan(app: FastAPI):
 # cross-connection unlock bookkeeping after the pool recycles the
 # connection).
 STARTUP_LOCK_SEED_ADMIN = 900005
-# 900006 was STARTUP_LOCK_ENV_KEY_IMPORT (env-key importer, removed). Left
-# documented, not reused, so an old worker mid-rollout cannot collide.
+# 900006 was STARTUP_LOCK_ENV_KEY_IMPORT (the old env-key importer, removed
+# in f19a0ac0). Left documented, not reused, so an old worker mid-rollout
+# cannot collide with a new claimant. 900007 is the schema-guard autoupgrade
+# (app/core/schema_guard.py).
+STARTUP_LOCK_PROVIDER_ENV_SEED = 900008
 
 
 def _acquire_startup_lock(session, lock_id: int) -> None:
@@ -380,6 +389,47 @@ def _seed_admin_user() -> None:
         print(f"[startup] Admin seed skipped: {e}")
     finally:
         session.close()
+
+
+def _seed_provider_config_from_env() -> None:
+    """Seed provider keys and endpoints from env on a provider's first boot.
+
+    Sync — runs in a thread via ``asyncio.to_thread``. The decision logic
+    lives in ``app.services.provider_env_seed``; this wrapper owns only the
+    session, the advisory lock and the boot log, matching ``_seed_admin_user``.
+
+    Serialized across workers via advisory lock 900008 so a multi-worker boot
+    on a fresh DB seeds each provider exactly once instead of racing the
+    check-then-insert. Never raises: a gateway that cannot seed must still
+    boot and serve, and every provider is configurable from the admin UI.
+    """
+    from app.core.db import SessionLocal
+    from app.services.provider_env_seed import (
+        report_outcomes,
+        seed_provider_base_urls_from_env,
+        seed_provider_keys_from_env,
+    )
+
+    session = SessionLocal()
+    try:
+        _acquire_startup_lock(session, STARTUP_LOCK_PROVIDER_ENV_SEED)
+        key_outcomes = seed_provider_keys_from_env(session)
+        url_outcomes = seed_provider_base_urls_from_env(session)
+        session.commit()
+    except Exception as exc:  # noqa: BLE001 - seeding must never stop the boot
+        session.rollback()
+        print(f"[startup] provider env seed skipped: {exc}", flush=True)
+        return
+    finally:
+        session.close()
+
+    # add_key busts the key cache itself; the base-URL writer primes rather
+    # than clears its own cache, so drop it here when a row was seeded.
+    if any(v == "seeded" for v in url_outcomes.values()):
+        from app.services.providers.base_urls import clear_base_url_cache
+
+        clear_base_url_cache()
+    report_outcomes(key_outcomes, url_outcomes)
 
 
 def _maybe_preload_ner() -> None:

@@ -357,7 +357,18 @@ class ProviderKeyService:
     def add_key(
         self, session: Session, provider_name: str, api_key: str, label: str | None = None
     ) -> ProviderKeyORM:
-        """Insert a new provider key."""
+        """Insert a new provider key.
+
+        Also records that this provider is now database-owned, so the
+        first-boot env seed can never act on it again — see
+        ``app.services.provider_env_seed``. Without this mark, an operator
+        who adds a key here and later deletes it could have a value from the
+        environment appear in its place on the next restart, which is exactly
+        the "silently undo the operator" failure the seed rule exists to
+        avoid.
+        """
+        from app.services.provider_env_seed import KIND_KEY, mark_provider_owned
+
         repo = ProviderKeyRepository(session)
         final_label = label or f"Key {self._next_label_num(session, provider_name)}"
         row = repo.create(
@@ -365,6 +376,9 @@ class ProviderKeyService:
             label=final_label,
             api_key_encrypted=_encode(api_key),
         )
+        # Insert-if-absent, so the seeder's own "env-seed" reason survives
+        # when this is called from the seed path.
+        mark_provider_owned(session, KIND_KEY, provider_name, "admin-ui")
         clear_keys_cache()  # B5: bust the resolved-key cache
         return row
 

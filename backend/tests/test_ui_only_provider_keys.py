@@ -2,9 +2,12 @@
 
 These tests pin the contract that the "UI only" change established:
 
-* There is no environment tier. ``_ENV_KEYS`` is gone, both resolver
-  variants stop after the legacy ``providers`` table, and no amount of
-  environment configuration can make an unkeyed provider dispatchable.
+* There is no environment tier AT RESOLVE TIME. ``_ENV_KEYS`` is gone, both
+  resolver variants stop after the legacy ``providers`` table, and no amount
+  of environment configuration on a running system can make an unkeyed
+  provider dispatchable. (Env may seed a provider's FIRST boot — that path
+  is pinned in ``test_provider_env_seed.py`` — but it writes a row and then
+  has no further say.)
 * ``get_key_status`` — which drives the admin Providers card — reports
   exactly what dispatch would do. Before this, a provider whose only key
   was marked ``invalid`` reported ``configured: true`` while every request
@@ -69,8 +72,14 @@ class TestNoKeyConfigured:
         assert ProviderKeyService().get_active_key(db_session, PROVIDER) is None
 
     def test_environment_cannot_configure_a_provider(self, db_session, monkeypatch):
-        """The whole point of the change: setting the env var that used to
-        back this provider must NOT make it configured or dispatchable."""
+        """There is no env tier AT DISPATCH TIME.
+
+        Env may SEED a provider on its first boot (see
+        ``tests/test_provider_env_seed.py``), but that writes a row and then
+        stops mattering. Setting the variable on a running system — which is
+        what this test does — must never make a provider configured or
+        dispatchable, because the resolver does not look there at all.
+        """
         from app.core.config import settings
 
         monkeypatch.setattr(settings, "openai_api_key", REAL_KEY, raising=False)

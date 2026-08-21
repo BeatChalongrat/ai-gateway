@@ -56,14 +56,43 @@ def test_no_env_tier_between_db_and_default(monkeypatch):
 
 
 def test_env_tier_is_gone_by_construction():
-    """Not a branch that could be re-enabled: base_urls no longer imports
-    the settings object, and the setting itself no longer exists."""
+    """PROVIDER_BASE_URL_OVERRIDES is a first-boot SEED, never a resolve-time
+    tier.
+
+    The distinction is the whole design: ``base_urls`` does not import the
+    settings object at all, so no amount of environment editing on a running
+    system can change where a provider is called. The env value is read once,
+    by ``provider_env_seed``, and written to the ``system_settings`` row that
+    ``resolve_base_url`` already reads.
+
+    The old back-door property is also gone — a parsed map hanging off
+    ``Settings`` is exactly the thing a future caller would reach for.
+    """
     import app.services.providers.base_urls as mod
     from app.core.config import settings as app_settings
 
     assert not hasattr(mod, "settings")
-    assert not hasattr(app_settings, "provider_base_url_overrides")
     assert not hasattr(app_settings, "provider_base_url_overrides_map")
+    # The seed input exists, and is a plain unparsed string.
+    assert isinstance(app_settings.provider_base_url_overrides, str)
+
+
+def test_the_seed_does_not_become_a_resolution_tier(monkeypatch):
+    """Setting the env var must not change resolution on its own."""
+    from app.core.config import settings as app_settings
+    from app.services.providers.base_urls import clear_base_url_cache, resolve_base_url
+
+    monkeypatch.setattr(
+        app_settings,
+        "provider_base_url_overrides",
+        '{"openai": "http://not-used:9090/v1"}',
+        raising=False,
+    )
+    clear_base_url_cache()
+
+    assert resolve_base_url("openai", "https://api.openai.com/v1") == (
+        "https://api.openai.com/v1"
+    )
 
 
 def test_default_when_no_overrides(monkeypatch):

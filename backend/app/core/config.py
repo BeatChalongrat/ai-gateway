@@ -304,10 +304,16 @@ class Settings(BaseSettings):
     # 504'd mid-transcription (Batch 1 B1).
     voice_timeout_seconds: float = 120.0
 
-    # NOTE: PROVIDER_BASE_URL_OVERRIDES was removed. Provider endpoints are
-    # configured in the admin /providers UI (system_settings row
-    # provider_base_url:<name>) and nowhere else. extra="ignore" above means
-    # a stale value left in a .env is silently ignored rather than fatal.
+    # Provider endpoint SEED, read exactly once per provider on its first
+    # boot and written to the ``system_settings`` row
+    # ``provider_base_url:<name>`` — after which the database owns it and
+    # this value is never read again. It is NOT a resolution tier:
+    # ``services/providers/base_urls.py`` does not import ``settings`` at
+    # all, so an endpoint cannot be changed by editing the environment of a
+    # running system. See app/services/provider_env_seed.py.
+    # JSON dict keyed by provider_name, e.g.
+    #   PROVIDER_BASE_URL_OVERRIDES='{"openai":"http://mock:9090"}'
+    provider_base_url_overrides: str = ""
 
     # --- Per-provider concurrency bulkhead (Batch A) ---------------------
     # JSON dict provider_name → max concurrent in-flight upstream calls
