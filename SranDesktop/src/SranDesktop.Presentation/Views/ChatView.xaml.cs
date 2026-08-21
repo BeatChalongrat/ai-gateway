@@ -109,6 +109,10 @@ public partial class ChatView : UserControl
         // keeps running first for every wheel event, consumed or not.
         MessageList.PreviewMouseWheel += OnSmoothWheel;
         MessageList.PreviewTouchMove += (_, _) => _userInputTick = Environment.TickCount64;
+        // WM_MOUSEHWHEEL is a window message, not a routed event — it can only
+        // be seen once this view is attached to an HwndSource.
+        Loaded += (_, _) => AttachHorizontalWheelHook();
+        Unloaded += (_, _) => DetachHorizontalWheelHook();
         DataContextChanged += (_, e) =>
         {
             if (e.OldValue is ChatViewModel oldVm)
@@ -194,8 +198,8 @@ public partial class ChatView : UserControl
     /// a panel scrolled to its bottom must still take an UPWARD wheel, so "at
     /// its limit" is never absolute.
     ///
-    /// <paramref name="towardEnd"/> is normalised by the caller because the
-    /// horizontal and vertical wheels disagree about sign.
+    /// <paramref name="towardEnd"/> is normalised by the caller because the two
+    /// wheel messages disagree about sign — see <see cref="OnHorizontalWheel"/>.
     /// </summary>
     internal static bool CanScrollFurther(double offset, double scrollable, bool towardEnd) =>
         towardEnd ? offset < scrollable - ScrollLimitEpsilon : offset > ScrollLimitEpsilon;
@@ -282,8 +286,8 @@ public partial class ChatView : UserControl
     /// mush. Reach comes from the same Windows setting the vertical notch uses,
     /// measured against the viewport's WIDTH.
     /// </summary>
-    /// <param name="hDelta">Positive is rightwards, the INVERSE of the
-    /// vertical wheel's convention.</param>
+    /// <param name="hDelta">Positive is rightwards — the WM_MOUSEHWHEEL
+    /// convention, which is the INVERSE of the vertical wheel's.</param>
     internal static void PanBy(ScrollViewer target, int hDelta)
     {
         var perNotch = Services.AnimatedScroller.NotchDistanceForLines(
@@ -292,6 +296,73 @@ public partial class ChatView : UserControl
         var travel = perNotch * hDelta / (double)Services.AnimatedScroller.WheelFeel.WheelDelta;
         target.ScrollToHorizontalOffset(
             Math.Clamp(target.HorizontalOffset + travel, 0, target.ScrollableWidth));
+    }
+
+    private const int WmMouseHWheel = 0x020E;
+    private System.Windows.Interop.HwndSource? _hwndSource;
+
+    /// <summary>WM_MOUSEHWHEEL has no WPF routed event at all, so the only way
+    /// to see a trackpad's horizontal swipe is off the window itself. Attached
+    /// on Loaded and removed on Unloaded — ChatView is hosted and re-hosted, so
+    /// both halves have to be idempotent.</summary>
+    private void AttachHorizontalWheelHook()
+    {
+        if (_hwndSource is not null)
+            return;
+        if (PresentationSource.FromVisual(this) is not System.Windows.Interop.HwndSource source)
+            return;
+        _hwndSource = source;
+        source.AddHook(OnHorizontalWheel);
+    }
+
+    private void DetachHorizontalWheelHook()
+    {
+        _hwndSource?.RemoveHook(OnHorizontalWheel);
+        _hwndSource = null;
+    }
+
+    /// <summary>
+    /// A precision touchpad's two-finger horizontal swipe, and a genuine
+    /// tilt-wheel mouse, both arrive here.
+    ///
+    /// TWO THINGS WPF WOULD NORMALLY DO FOR US AND DOES NOT HERE.
+    ///
+    /// 1. THE SIGN IS INVERTED relative to the vertical wheel. WM_MOUSEWHEEL
+    ///    positive means away-from-the-user, which DEcreases the offset;
+    ///    WM_MOUSEHWHEEL positive means tilt-RIGHT, which INcreases it. So
+    ///    "toward the end" is <c>delta &gt; 0</c> here and <c>delta &lt; 0</c>
+    ///    for the vertical wheel. Verified by replaying the identical
+    ///    synthesised message into Chrome: +120 moved scrollLeft 334 -> 534,
+    ///    i.e. rightwards (docs/WHEEL_DIRECTIONAL_REPORT.md).
+    ///
+    /// 2. A WINDOW MESSAGE DOES NOT ROUTE. lParam carries SCREEN coordinates,
+    ///    so the element under the pointer has to be found by hand. Anything
+    ///    outside the message list is left alone entirely, so other parts of
+    ///    the window keep whatever behaviour they have.
+    /// </summary>
+    private IntPtr OnHorizontalWheel(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WmMouseHWheel || MessageScroll is not { } scroll)
+            return IntPtr.Zero;
+        var delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+        if (delta == 0)
+            return IntPtr.Zero;
+
+        var screen = new Point((short)(lParam.ToInt64() & 0xFFFF), (short)((lParam.ToInt64() >> 16) & 0xFFFF));
+        Point local;
+        try { local = MessageList.PointFromScreen(screen); }
+        catch (InvalidOperationException) { return IntPtr.Zero; } // not connected to a source yet
+        if (local.X < 0 || local.Y < 0 || local.X > MessageList.ActualWidth || local.Y > MessageList.ActualHeight)
+            return IntPtr.Zero;
+
+        var hit = VisualTreeHelper.HitTest(MessageList, local)?.VisualHit;
+        var target = HorizontalScrollTarget(hit, scroll, towardEnd: delta > 0, out _);
+        if (target is null)
+            return IntPtr.Zero; // only claim the message when it was actually consumed
+
+        PanBy(target, delta);
+        handled = true;
+        return IntPtr.Zero;
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
