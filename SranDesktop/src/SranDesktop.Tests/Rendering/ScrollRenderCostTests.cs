@@ -124,8 +124,13 @@ public class ScrollRenderCostTests
         };
     }
 
-    private static void ConfigureVirtualization(ListBox list)
+    private static void ConfigureVirtualization(ListBox list, VirtualizationCacheLength? cache = null)
     {
+        if (cache is { } length)
+        {
+            VirtualizingPanel.SetCacheLength(list, length);
+            VirtualizingPanel.SetCacheLengthUnit(list, VirtualizationCacheLengthUnit.Page);
+        }
         VirtualizingPanel.SetIsVirtualizing(list, true);
         VirtualizingPanel.SetVirtualizationMode(list, VirtualizationMode.Recycling);
         VirtualizingPanel.SetScrollUnit(list, ScrollUnit.Pixel);
@@ -231,13 +236,23 @@ public class ScrollRenderCostTests
     }
 
     [Fact]
-    public void Step0_RendersPerRowEntry_OverOneScrollPass()
+    public void Step0_RendersPerRowEntry_OverOneScrollPass() => MeasurePass(null, "default");
+
+    /// <summary>STEP 4 — does a bigger realization window help, now that the
+    /// render cache exists? Recorded rather than assumed; kept only if the
+    /// numbers move.</summary>
+    [Fact]
+    public void Step4_RendersPerRowEntry_WithCacheLength() =>
+        MeasurePass(new VirtualizationCacheLength(1, 1), "CacheLength=1 page");
+
+    private static void MeasurePass(VirtualizationCacheLength? cacheLength, string label)
     {
         RunSta(() =>
         {
+            MarkdownViewer.ClearRenderCache();
             var messages = BuildThread(32);
             var list = BuildList(messages);
-            ConfigureVirtualization(list);
+            ConfigureVirtualization(list, cacheLength);
             // Per-message ledger: the prompt asks how many renders were for a
             // message ALREADY rendered earlier in the same pass. Container
             // realization is too coarse to answer that (the panel can realize
@@ -259,8 +274,8 @@ public class ScrollRenderCostTests
                 var reRenders = rendersByMessage.Values.Sum(n => n - 1);
 
                 TestOutput.Record(
-                    $"entries={entries} renders={renders} hits={MarkdownViewer.CacheHitCount} " +
-                    $"repeatEntries={repeats} " +
+                    $"[{label}] entries={entries} renders={renders} " +
+                    $"hits={MarkdownViewer.CacheHitCount} repeatEntries={repeats} " +
                     $"rendersPerEntry={(double)renders / entries:F2} " +
                     $"distinctMessagesRendered={distinct} reRendersOfAlreadyRendered={reRenders} " +
                     $"rendersPerMessage={(double)renders / Math.Max(1, distinct):F2}");
