@@ -213,6 +213,24 @@ public static class AnimatedScroller
     public static void CancelWheel(ScrollViewer scroll)
     {
         scroll.SetValue(WheelTargetProperty, double.NaN);
+        DetachAnimationInPlace(scroll);
+    }
+
+    /// <summary>
+    /// Stop animating without moving.
+    ///
+    /// Detaching an animation reverts the attached property to its LOCAL
+    /// value, and nothing ever assigns one — so the effective value drops from
+    /// wherever the animation had it to the default 0, the property-changed
+    /// callback runs, and the view is yanked to the top of the thread.
+    /// Measured, not theorised: cancelling at offset 980 landed at 0.
+    ///
+    /// Pinning the local value to the real offset FIRST makes the removal a
+    /// no-op — the effective value never changes, so the callback never fires.
+    /// </summary>
+    private static void DetachAnimationInPlace(ScrollViewer scroll)
+    {
+        scroll.SetValue(VerticalOffsetProperty, scroll.VerticalOffset);
         scroll.BeginAnimation(VerticalOffsetProperty, null);
     }
 

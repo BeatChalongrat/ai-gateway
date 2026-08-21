@@ -184,6 +184,48 @@ public class SmoothWheelTests
         });
     }
 
+    /// <summary>
+    /// Detaching an animation reverts the attached DP to its LOCAL value, and
+    /// nothing ever sets one — so the effective value goes from wherever the
+    /// animation had it to the default 0, the property-changed callback fires,
+    /// and the view is yanked to the top of the thread. Cancelling must be
+    /// invisible.
+    /// </summary>
+    [Fact]
+    public void CancelWheel_DoesNotMoveTheView()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                var scroll = StandaloneScroller();
+                scroll.ScrollToVerticalOffset(900);
+                scroll.UpdateLayout();
+
+                AnimatedScroller.TryWheelScroll(scroll, -120);
+                // Let the animation actually take hold of the property.
+                var deadline = Environment.TickCount64 + 300;
+                while (Environment.TickCount64 < deadline)
+                {
+                    Pump(DispatcherPriority.SystemIdle);
+                    Thread.Sleep(10);
+                }
+
+                var before = scroll.VerticalOffset;
+                before.Should().BeGreaterThan(500, "precondition: we are mid-thread");
+
+                AnimatedScroller.CancelWheel(scroll);
+                scroll.UpdateLayout();
+                Pump(DispatcherPriority.SystemIdle);
+
+                scroll.VerticalOffset.Should().BeApproximately(before, 1.0,
+                    "cancelling a wheel animation must not scroll anywhere");
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
     [Fact]
     public void CancelWheel_ClearsThePendingTarget()
     {
