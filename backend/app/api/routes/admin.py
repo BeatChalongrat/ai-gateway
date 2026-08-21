@@ -69,6 +69,39 @@ router = APIRouter(dependencies=[Depends(require_admin_session)])
 _api_key_service = ApiKeyService()
 
 
+# ── Admin-UI display filter ────────────────────────────────────────────────
+# Providers the admin UI does not show. DISPLAY ONLY.
+#
+# ``mock`` is the zero-cost video adapter (services/media_gen/adapters/
+# mock_video.py): it returns a bundled sample.mp4 on a simulated timeline so
+# the whole video vertical can be exercised end to end without calling
+# Replicate or spending money. Several integration tests submit jobs against
+# it.
+#
+# IT IS HIDDEN HERE, NOT REMOVED. If you came looking for a dev fixture that
+# seems to have disappeared: the adapter, sample.mp4, migration 057 and the
+# model_configs row are all still there and still work. Don't "clean them up".
+#
+# And do NOT move this filter into get_all_candidates(). That registry is what
+# routing and model validation consult — filtering there would make
+# mock-video-1 an unknown model and break every one of those tests.
+ADMIN_HIDDEN_PROVIDERS = frozenset({"mock"})
+
+
+def _visible_candidates():
+    """``get_all_candidates()`` minus providers the admin UI hides.
+
+    The admin catalog is display; the registry is function. Only this side
+    changes.
+    """
+    from app.services.providers.model_registry import get_all_candidates
+
+    return [
+        c for c in get_all_candidates()
+        if c.provider not in ADMIN_HIDDEN_PROVIDERS
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Phase 2B Commit 11 — P0-9 / P0-10: reject client-supplied IDs
 # ---------------------------------------------------------------------------
@@ -189,12 +222,13 @@ def dashboard_stats(
     This avoids asyncio.to_thread() which can exhaust the default thread pool
     and freeze the entire process including /health.
     """
-    from app.services.providers.model_registry import get_all_candidates
     from collections import defaultdict
 
     t0 = time.time()
 
-    candidates = get_all_candidates()
+    # Hidden providers are excluded from the counts too — a "providers: 12"
+    # tile above 11 cards is the kind of mismatch that reads as a data bug.
+    candidates = _visible_candidates()
     by_provider: dict[str, list[str]] = defaultdict(list)
     for c in candidates:
         by_provider[c.provider].append(c.model)
@@ -242,13 +276,12 @@ def dashboard_stats(
 def providers(
     session: Session = Depends(get_db_session),
 ):
-    from app.services.providers.model_registry import get_all_candidates
     from app.services.provider_key_service import ProviderKeyService
     from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
     from collections import defaultdict
 
     by_provider: dict[str, list[str]] = defaultdict(list)
-    for c in get_all_candidates():
+    for c in _visible_candidates():
         by_provider[c.provider].append(c.model)
 
     # Self-hosted providers must keep their card even with ZERO model
@@ -492,9 +525,9 @@ async def provider_health(provider_name: str):
 
 @router.get("/models", response_model=AdminListResponse[ModelDetail])
 def list_models() -> AdminListResponse[ModelDetail]:
-    from app.services.providers.model_registry import get_all_candidates
-
-    candidates = get_all_candidates()
+    # Same filter as /providers, so hiding the card cannot leave the model
+    # listed on the models page — a half-change that reads as a bug later.
+    candidates = _visible_candidates()
     return AdminListResponse(
         items=[
             ModelDetail(
