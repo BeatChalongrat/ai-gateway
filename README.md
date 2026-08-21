@@ -278,11 +278,13 @@ is required in every mode**):
 | `INTERNAL_SERVICE_SECRET` | Trust anchor for chat-edge → gateway `X-User-ID` |
 | `NEXTAUTH_SECRET` | NextAuth on the portal |
 
-> **Provider API keys are not environment variables.** Add them in the admin console under
-> **Providers** — that is the only supported path, and it needs no restart. The same applies to
-> a self-hosted provider's endpoint. (`OPENAI_API_KEY` is still read for the *embeddings* and
-> *voice* utility surfaces — see `docs/PROVIDER_ARCHITECTURE.md` — but it is no longer used for
-> chat routing.)
+> **Provider API keys: env seeds the first boot, the admin console owns them after that.**
+> Set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` before the first boot and the
+> deployment comes up configured. From then on, change keys in the admin console under
+> **Providers** — it needs no restart. **Editing the env var later has no effect**, on purpose:
+> the database is the single source of truth once a provider has a key, and a key you delete
+> stays deleted. The same rule applies to a self-hosted provider's endpoint
+> (`PROVIDER_BASE_URL_OVERRIDES`). Full detail in `docs/PROVIDER_ARCHITECTURE.md`.
 
 Selected optional flags (full list in `backend/app/core/config.py` and
 `.env.example`):
