@@ -154,6 +154,45 @@ public class MarkdownViewerRecycleTests
         });
     }
 
+    /// <summary>
+    /// The ordering the whole recycle fix rests on, kept as a live check rather
+    /// than a comment: on a RECYCLED container DataContextChanged fires BEFORE
+    /// the Markdown binding delivers — and the binding delivers synchronously,
+    /// within the same DataContext assignment.
+    ///
+    /// That is why the viewer cannot render the new message when
+    /// DataContextChanged fires (Markdown still holds the previous text) and
+    /// why it does not need to blank while waiting (the new text arrives before
+    /// the container is measured). If this ever reverses, MarkdownViewer's
+    /// _pendingSwap handshake is wrong and these tests should start failing
+    /// together.
+    /// </summary>
+    [Fact]
+    public void DataContextChanged_FiresBeforeTheMarkdownBindingDelivers()
+    {
+        RunSta(() =>
+        {
+            var order = new List<string>();
+            var viewer = new MarkdownViewer();
+            viewer.DataContextChanged += (_, _) => order.Add("DataContextChanged");
+
+            var descriptor = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(
+                MarkdownViewer.MarkdownProperty, typeof(MarkdownViewer));
+            descriptor.AddValueChanged(viewer, (_, _) => order.Add("MarkdownBinding"));
+
+            viewer.SetBinding(MarkdownViewer.MarkdownProperty,
+                new Binding(nameof(MessageViewModel.RenderContent)));
+            viewer.DataContext = Message("a", "first");
+            Pump();
+            order.Clear(); // first attach is not a recycle
+
+            viewer.DataContext = Message("b", "second");
+
+            // No Pump: both must already have happened.
+            order.Should().Equal("DataContextChanged", "MarkdownBinding");
+        });
+    }
+
     /// <summary>A viewer whose Markdown is a literal does not depend on the
     /// DataContext at all, so a DataContext change must leave it alone. The old
     /// code blanked it and then re-rendered the same literal — a wasted render

@@ -45,26 +45,6 @@ public sealed class MarkdownViewer : ContentControl
 
     internal static int CachedTreeCount => Cache.Count;
 
-    // ── TEMPORARY (scroll-perf Step 0) ──────────────────────────────────────
-    // Counts full and incremental renders so the recycle cost can be measured
-    // instead of argued about. Read by ScrollRenderCostTests; removed in its
-    // own commit once the before/after numbers are recorded.
-    internal static int FullRenderCount;
-    internal static int StreamingIncrementCount;
-    internal static int CacheHitCount;
-
-    /// <summary>Receives the markdown of every full render, so a test can tell
-    /// a first render apart from a re-render of the same message.</summary>
-    internal static Action<string>? OnFullRender;
-
-    internal static void ResetRenderCounters()
-    {
-        FullRenderCount = 0;
-        StreamingIncrementCount = 0;
-        CacheHitCount = 0;
-    }
-    // ── end TEMPORARY ───────────────────────────────────────────────────────
-
     private DispatcherTimer? _timer;
     private bool _renderQueued;
 
@@ -273,7 +253,6 @@ public sealed class MarkdownViewer : ContentControl
 
     private void RenderStreamingIncrement()
     {
-        StreamingIncrementCount++; // TEMPORARY (scroll-perf Step 0)
         var (visible, fenceKind) = StreamingFenceGuard.TruncateAtOpenFence(Markdown ?? string.Empty);
 
         MarkdownDocument document;
@@ -437,14 +416,10 @@ public sealed class MarkdownViewer : ContentControl
 
         if (key is { } hitKey && Cache.TryGet(hitKey, this, out var cached))
         {
-            CacheHitCount++;        // TEMPORARY (scroll-perf Step 0)
             Content = cached;
             _renderedSource = source;
             return;
         }
-
-        FullRenderCount++;          // TEMPORARY (scroll-perf Step 0)
-        OnFullRender?.Invoke(source); // TEMPORARY (scroll-perf Step 0)
 
         var katexBefore = MarkdownRenderer.KatexSurfacesCreated;
         var built = Renderer.Render(source);

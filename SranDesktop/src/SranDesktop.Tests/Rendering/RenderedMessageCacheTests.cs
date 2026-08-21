@@ -259,7 +259,6 @@ public class RenderedMessageCacheTests
         RunSta(() =>
         {
             MarkdownViewer.ClearRenderCache();
-            MarkdownViewer.ResetRenderCounters();
 
             var message = Message("a", "");
             message.IsStreaming = true;
@@ -273,18 +272,24 @@ public class RenderedMessageCacheTests
             Pump();
 
             message.AppendContent("partial answer text");
-            PumpUntil(() => MarkdownViewer.StreamingIncrementCount > 0);
-            MarkdownViewer.StreamingIncrementCount.Should().BeGreaterThan(0,
+            PumpUntil(() => TextOf(viewer.Content).Contains("partial answer text"));
+            TextOf(viewer.Content).Should().Contain("partial answer text",
                 "the incremental path must still run while streaming");
-            TextOf(viewer.Content).Should().Contain("partial answer text");
 
-            var fullsBefore = MarkdownViewer.FullRenderCount;
+            var cachedDuringStream = MarkdownViewer.CachedTreeCount;
+            cachedDuringStream.Should().Be(0,
+                "a streaming message's text changes every tick — caching it would " +
+                "store something stale on arrival");
+
+            var streamingTree = viewer.Content;
+            message.AppendContent(" and its conclusion");
             message.IsStreaming = false;
             Pump();
 
-            MarkdownViewer.FullRenderCount.Should().BeGreaterThan(fullsBefore,
+            viewer.Content.Should().NotBeSameAs(streamingTree,
                 "streaming end must still do one authoritative full render");
-            MarkdownViewer.CachedTreeCount.Should().BeGreaterThan(0,
+            TextOf(viewer.Content).Should().Contain("and its conclusion");
+            MarkdownViewer.CachedTreeCount.Should().Be(1,
                 "and that final tree is what gets cached");
         });
     }
