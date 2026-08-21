@@ -164,6 +164,19 @@ public partial class ChatView : UserControl
             return;
         if (MessageScroll is not { } scroll)
             return;
+        // Shift+wheel is a HORIZONTAL wheel in every browser. Claimed ONLY when
+        // there is something horizontal under the pointer: over plain prose it
+        // stays today's vertical scroll rather than becoming a new dead input.
+        // -e.Delta: the vertical wheel calls "away from the user" positive and
+        // that DEcreases the offset, while the horizontal convention calls
+        // rightwards positive and that INcreases it. Negating here is what
+        // makes shift+wheel-down pan RIGHT, as it does in a browser.
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0
+            && TryPanHorizontally(e.OriginalSource as DependencyObject, scroll, -e.Delta))
+        {
+            e.Handled = true;
+            return;
+        }
         if (InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, scroll, e.Delta))
             return;
         if (!Services.AnimatedScroller.TryWheelScroll(scroll, e.Delta))
@@ -210,6 +223,76 @@ public partial class ChatView : UserControl
         node is Visual or System.Windows.Media.Media3D.Visual3D
             ? VisualTreeHelper.GetParent(node)
             : LogicalTreeHelper.GetParent(node);
+
+    // ── horizontal wheel ────────────────────────────────────────────────────
+    // WPF maps NOTHING to horizontal scrolling: neither shift+wheel nor the
+    // WM_MOUSEHWHEEL a precision touchpad's two-finger swipe generates. Both
+    // were measured dead on 1.2.8, so a wide table could only be panned by
+    // dragging its scrollbar (docs/TABLE_SCROLL_AUDIT_REPORT.md).
+
+    /// <summary>
+    /// The innermost horizontally scrollable viewer between the pointer and
+    /// <paramref name="stopAt"/> that can still move <paramref name="towardEnd"/>.
+    /// Walking PAST one that has hit its limit is the outward chaining.
+    /// </summary>
+    /// <param name="anyOnPath">Whether any horizontally scrollable container was
+    /// on the path at all, limit or not. A gesture that lands on one stays
+    /// horizontal — it must never fall through and scroll the thread instead,
+    /// which is the axis-crossing browsers are careful never to do.</param>
+    internal static ScrollViewer? HorizontalScrollTarget(
+        DependencyObject? source, ScrollViewer stopAt, bool towardEnd, out bool anyOnPath)
+    {
+        anyOnPath = false;
+        for (var node = source; node is not null && !ReferenceEquals(node, stopAt); node = VisualOrLogicalParent(node))
+        {
+            if (node is not ScrollViewer inner || inner.ScrollableWidth <= 0)
+                continue;
+            anyOnPath = true;
+            if (CanScrollFurther(inner.HorizontalOffset, inner.ScrollableWidth, towardEnd))
+                return inner;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Pan the container under the pointer. Returns true when the gesture was
+    /// consumed — including the case where it landed on a container that is
+    /// already at its limit and nothing outside it can scroll horizontally
+    /// either, because stopping there is what a browser does.
+    /// </summary>
+    /// <param name="hDelta">Signed in the HORIZONTAL convention: positive is
+    /// rightwards. Every caller normalises to this one convention, so the
+    /// direction is derived here instead of being passed in beside the delta
+    /// where the two could drift apart.</param>
+    internal static bool TryPanHorizontally(DependencyObject? source, ScrollViewer stopAt, int hDelta)
+    {
+        var target = HorizontalScrollTarget(source, stopAt, towardEnd: hDelta > 0, out var anyOnPath);
+        if (!anyOnPath)
+            return false; // nothing horizontal here — leave the gesture alone
+        if (target is null)
+            return true; // chained outward, found nothing that can move: stop
+        PanBy(target, hDelta);
+        return true;
+    }
+
+    /// <summary>
+    /// Apply the pan directly, never animated. A precision touchpad sends many
+    /// small deltas and panning must track the finger; stacking an easing tail
+    /// on each one is how smooth-scroll implementations end up feeling like
+    /// mush. Reach comes from the same Windows setting the vertical notch uses,
+    /// measured against the viewport's WIDTH.
+    /// </summary>
+    /// <param name="hDelta">Positive is rightwards, the INVERSE of the
+    /// vertical wheel's convention.</param>
+    internal static void PanBy(ScrollViewer target, int hDelta)
+    {
+        var perNotch = Services.AnimatedScroller.NotchDistanceForLines(
+            SystemParameters.WheelScrollLines, target.ViewportWidth);
+        // Fractional notches are normal on a precision touchpad.
+        var travel = perNotch * hDelta / (double)Services.AnimatedScroller.WheelFeel.WheelDelta;
+        target.ScrollToHorizontalOffset(
+            Math.Clamp(target.HorizontalOffset + travel, 0, target.ScrollableWidth));
+    }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
