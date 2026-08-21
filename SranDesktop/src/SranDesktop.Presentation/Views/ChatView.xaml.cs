@@ -149,10 +149,14 @@ public partial class ChatView : UserControl
     /// So the nested panels are protected explicitly instead of implicitly:
     /// <see cref="InnerScrollerWantsWheel"/> walks from the element under the
     /// pointer up to the message list's own ScrollViewer, and if anything on
-    /// that path is a vertically scrollable ScrollViewer, this handler does
-    /// nothing and WPF routes the wheel exactly as it does today — including
-    /// the case where that inner panel is at its limit and swallows the event,
-    /// which stays the status quo rather than being "improved".
+    /// that path can still move in the direction this wheel is turning, this
+    /// handler does nothing and WPF routes the wheel natively.
+    ///
+    /// The "in the direction it is turning" part is the whole of the fix: a
+    /// panel that has run out of room in THAT direction no longer blocks the
+    /// thread, which is Chrome's scroll chaining. Measured before the change:
+    /// panel pinned at 319/319, thread frozen at 1200, three further notches
+    /// moved nothing (docs/TABLE_SCROLL_AUDIT_REPORT.md).
     /// </summary>
     private void OnSmoothWheel(object sender, MouseWheelEventArgs e)
     {
@@ -160,23 +164,40 @@ public partial class ChatView : UserControl
             return;
         if (MessageScroll is not { } scroll)
             return;
-        if (InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, scroll))
+        if (InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, scroll, e.Delta))
             return;
         if (!Services.AnimatedScroller.TryWheelScroll(scroll, e.Delta))
             return; // reduced motion, trackpad-shaped delta, or nothing to scroll
         e.Handled = true;
     }
 
+    /// <summary>Offsets within this many DIPs of an end count as "at the end" —
+    /// the same tolerance <see cref="Services.AnimatedScroller.TryWheelScroll"/>
+    /// uses when it decides a notch has nowhere left to go.</summary>
+    private const double ScrollLimitEpsilon = 0.5;
+
+    /// <summary>
+    /// Can a viewer at <paramref name="offset"/> still move? Direction matters:
+    /// a panel scrolled to its bottom must still take an UPWARD wheel, so "at
+    /// its limit" is never absolute.
+    ///
+    /// <paramref name="towardEnd"/> is normalised by the caller because the
+    /// horizontal and vertical wheels disagree about sign.
+    /// </summary>
+    internal static bool CanScrollFurther(double offset, double scrollable, bool towardEnd) =>
+        towardEnd ? offset < scrollable - ScrollLimitEpsilon : offset > ScrollLimitEpsilon;
+
     /// <summary>True when a ScrollViewer between the pointer and
-    /// <paramref name="stopAt"/> can still scroll vertically, i.e. WPF is
-    /// about to give it the wheel and we must not intercept.</summary>
-    internal static bool InnerScrollerWantsWheel(DependencyObject? source, ScrollViewer stopAt)
+    /// <paramref name="stopAt"/> can still scroll vertically IN THE DIRECTION
+    /// <paramref name="delta"/> is turning, i.e. WPF is about to give it the
+    /// wheel and we must not intercept. Walking past one that has hit its
+    /// limit is the outward chaining.</summary>
+    internal static bool InnerScrollerWantsWheel(DependencyObject? source, ScrollViewer stopAt, int delta)
     {
         for (var node = source; node is not null && !ReferenceEquals(node, stopAt); node = VisualOrLogicalParent(node))
         {
             if (node is ScrollViewer inner
-                && inner.VerticalScrollBarVisibility != ScrollBarVisibility.Disabled
-                && inner.ScrollableHeight > 0)
+                && CanScrollFurther(inner.VerticalOffset, inner.ScrollableHeight, towardEnd: delta < 0))
                 return true;
         }
         return false;
