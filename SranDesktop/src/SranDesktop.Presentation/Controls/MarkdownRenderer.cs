@@ -748,6 +748,18 @@ public sealed class MarkdownRenderer
     private const int InlineImageDecodeWidth = 960;
 
     /// <summary>
+    /// Box reserved for a REMOTE image, whose real size is unknowable until the
+    /// download finishes — nothing in the message model carries image
+    /// dimensions, and asking the network for them would just move the delay.
+    /// 16:9 at the column's max width. The image letterboxes inside it
+    /// (Stretch=Uniform), so the row is the same height before and after the
+    /// bytes arrive. A fixed box that never moves beats an accurate one that
+    /// arrives after layout.
+    /// </summary>
+    private const int RemoteImageReservedWidth = 480;
+    private const int RemoteImageReservedHeight = 270;
+
+    /// <summary>
     /// Builds a WPF element rendering an inline markdown image (Phase C PART 1),
     /// or null to fall back to the icon+link. Only data:/http(s) are loaded
     /// (never local files). On decode/load failure it swaps to the alt-text link
@@ -770,6 +782,7 @@ public sealed class MarkdownRenderer
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 4, 0, 4)
         };
+        ReserveInlineImageSize(element, bitmap, plan.Kind);
         System.Windows.Automation.AutomationProperties.SetName(element, alt);
         element.ToolTip = alt;
 
@@ -786,6 +799,41 @@ public sealed class MarkdownRenderer
             fallback.Visibility = Visibility.Visible;
         };
         return grid;
+    }
+
+    /// <summary>
+    /// Give the Image an explicit size BEFORE it is measured, so the row's
+    /// height never changes underneath the reader.
+    ///
+    /// Without this an image contributed nothing to the first measure and the
+    /// row grew once the bitmap was ready — which is one of the ways the thread
+    /// shifted while scrolling.
+    ///
+    /// A data: URI is already decoded here (BitmapCacheOption.OnLoad, no
+    /// DelayCreation), so its final on-screen size is known exactly and is
+    /// reserved exactly. A remote image is not: it is created with
+    /// DelayCreation precisely so a slow fetch cannot block the UI, and reading
+    /// its dimensions now would either block or lie. It gets the fixed box.
+    /// </summary>
+    internal static void ReserveInlineImageSize(
+        System.Windows.Controls.Image element,
+        System.Windows.Media.Imaging.BitmapSource bitmap,
+        Rendering.InlineImageKind kind)
+    {
+        if (kind == Rendering.InlineImageKind.DataUri && bitmap.Width > 0 && bitmap.Height > 0)
+        {
+            // Same arithmetic Stretch=Uniform + StretchDirection=DownOnly would
+            // have produced, applied up front instead of after the fact.
+            var scale = Math.Min(1.0, Math.Min(
+                InlineImageMaxDip / bitmap.Width,
+                InlineImageMaxDip / bitmap.Height));
+            element.Width = Math.Round(bitmap.Width * scale);
+            element.Height = Math.Round(bitmap.Height * scale);
+            return;
+        }
+
+        element.Width = RemoteImageReservedWidth;
+        element.Height = RemoteImageReservedHeight;
     }
 
     private static System.Windows.Media.Imaging.BitmapImage? TryCreateBitmap(
