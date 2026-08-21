@@ -174,8 +174,20 @@ public sealed class MarkdownRenderer
             : RenderMathSourceText(tex);
     }
 
-    private static FrameworkElement RenderKatexBlock(string tex) =>
-        new MathBlockControl(tex) { Margin = new Thickness(0, 8, 0, 16) };
+    /// <summary>
+    /// Counts the browser surfaces this renderer has created. MathBlockControl
+    /// owns a live WebView2, and a rendered tree containing one must NOT be
+    /// held in the render cache: sixty retained entries would be sixty retained
+    /// browser frames. MarkdownViewer reads this counter around a render to
+    /// tell whether the tree it just built is cacheable.
+    /// </summary>
+    internal static int KatexSurfacesCreated;
+
+    private static FrameworkElement RenderKatexBlock(string tex)
+    {
+        KatexSurfacesCreated++;
+        return new MathBlockControl(tex) { Margin = new Thickness(0, 8, 0, 16) };
+    }
 
     /// <summary>Streamed / unterminated math: readable styled text, never a
     /// half-typed KaTeX render.</summary>

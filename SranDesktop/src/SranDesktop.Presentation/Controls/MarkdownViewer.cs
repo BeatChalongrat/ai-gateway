@@ -25,12 +25,33 @@ public sealed class MarkdownViewer : ContentControl
     private static readonly TimeSpan RenderInterval = TimeSpan.FromMilliseconds(66);
     private static readonly TimeSpan StreamRenderInterval = TimeSpan.FromMilliseconds(150);
 
+    /// <summary>
+    /// Rendered trees, shared by every viewer — a recycled row re-attaches its
+    /// message instead of re-parsing it. Theme and locale are part of the key,
+    /// so stale entries are already unreachable after a switch; clearing on
+    /// those events just releases them promptly instead of waiting for the LRU
+    /// to age them out.
+    /// </summary>
+    private static readonly RenderedMessageCache Cache = new(capacity: 60);
+
+    static MarkdownViewer()
+    {
+        Services.ThemeManager.ThemeChanged += (_, _) => Cache.Clear();
+        Localization.LocaleService.Instance.LocaleChanged += (_, _) => Cache.Clear();
+    }
+
+    /// <summary>Test seam — drop every cached tree.</summary>
+    internal static void ClearRenderCache() => Cache.Clear();
+
+    internal static int CachedTreeCount => Cache.Count;
+
     // ── TEMPORARY (scroll-perf Step 0) ──────────────────────────────────────
     // Counts full and incremental renders so the recycle cost can be measured
     // instead of argued about. Read by ScrollRenderCostTests; removed in its
     // own commit once the before/after numbers are recorded.
     internal static int FullRenderCount;
     internal static int StreamingIncrementCount;
+    internal static int CacheHitCount;
 
     /// <summary>Receives the markdown of every full render, so a test can tell
     /// a first render apart from a re-render of the same message.</summary>
@@ -40,6 +61,7 @@ public sealed class MarkdownViewer : ContentControl
     {
         FullRenderCount = 0;
         StreamingIncrementCount = 0;
+        CacheHitCount = 0;
     }
     // ── end TEMPORARY ───────────────────────────────────────────────────────
 
@@ -73,6 +95,7 @@ public sealed class MarkdownViewer : ContentControl
     public static readonly DependencyProperty IsStreamingProperty = DependencyProperty.Register(
         nameof(IsStreaming), typeof(bool), typeof(MarkdownViewer),
         new PropertyMetadata(false, OnIsStreamingChanged));
+
 
     public string Markdown
     {
@@ -390,12 +413,49 @@ public sealed class MarkdownViewer : ContentControl
         return timer;
     }
 
+    /// <summary>
+    /// Message identity comes from the DataContext REFERENCE, not from a bound
+    /// id property. A bound id would be unreliable here: DataContextChanged
+    /// fires before any binding delivers, and the render is driven by whichever
+    /// binding lands first, so an id binding is routinely still the previous
+    /// message's when the key is built (measured: zero cache hits). The
+    /// DataContext itself is already correct at this point — it is what raised
+    /// the event.
+    /// </summary>
+    private RenderedMessageCache.Key? CacheKeyFor(string source)
+    {
+        if (DataContext is not { } owner)
+            return null;
+        return new RenderedMessageCache.Key(
+            owner, source, Localization.LocaleService.Instance.Locale, Services.ThemeManager.IsDark);
+    }
+
     private void RenderNow()
     {
         var source = Markdown ?? string.Empty;
+        var key = CacheKeyFor(source);
+
+        if (key is { } hitKey && Cache.TryGet(hitKey, this, out var cached))
+        {
+            CacheHitCount++;        // TEMPORARY (scroll-perf Step 0)
+            Content = cached;
+            _renderedSource = source;
+            return;
+        }
+
         FullRenderCount++;          // TEMPORARY (scroll-perf Step 0)
         OnFullRender?.Invoke(source); // TEMPORARY (scroll-perf Step 0)
-        Content = Renderer.Render(source);
+
+        var katexBefore = MarkdownRenderer.KatexSurfacesCreated;
+        var built = Renderer.Render(source);
+        Content = built;
         _renderedSource = source;
+
+        // A tree containing a MathBlockControl owns a live WebView2. Caching it
+        // would retain a browser frame per entry, which costs far more than the
+        // parse it saves — so display-math messages stay uncached and keep
+        // today's behaviour exactly.
+        if (key is { } putKey && MarkdownRenderer.KatexSurfacesCreated == katexBefore)
+            Cache.Put(putKey, built);
     }
 }

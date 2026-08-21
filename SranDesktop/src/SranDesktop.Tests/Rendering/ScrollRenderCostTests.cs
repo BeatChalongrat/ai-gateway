@@ -259,7 +259,8 @@ public class ScrollRenderCostTests
                 var reRenders = rendersByMessage.Values.Sum(n => n - 1);
 
                 TestOutput.Record(
-                    $"entries={entries} renders={renders} repeatEntries={repeats} " +
+                    $"entries={entries} renders={renders} hits={MarkdownViewer.CacheHitCount} " +
+                    $"repeatEntries={repeats} " +
                     $"rendersPerEntry={(double)renders / entries:F2} " +
                     $"distinctMessagesRendered={distinct} reRendersOfAlreadyRendered={reRenders} " +
                     $"rendersPerMessage={(double)renders / Math.Max(1, distinct):F2}");
