@@ -304,13 +304,10 @@ class Settings(BaseSettings):
     # 504'd mid-transcription (Batch 1 B1).
     voice_timeout_seconds: float = 120.0
 
-    # Provider base-URL overrides (used by perf-baseline to re-target all
-    # outbound calls at the local mock_provider). JSON dict keyed by
-    # provider_name; unset keys fall through to each adapter's hardcoded
-    # default. Empty string disables the feature. Example:
-    #   PROVIDER_BASE_URL_OVERRIDES='{"openai":"http://localhost:9090",
-    #                                  "anthropic":"http://localhost:9090"}'
-    provider_base_url_overrides: str = ""
+    # NOTE: PROVIDER_BASE_URL_OVERRIDES was removed. Provider endpoints are
+    # configured in the admin /providers UI (system_settings row
+    # provider_base_url:<name>) and nowhere else. extra="ignore" above means
+    # a stale value left in a .env is silently ignored rather than fatal.
 
     # --- Per-provider concurrency bulkhead (Batch A) ---------------------
     # JSON dict provider_name → max concurrent in-flight upstream calls
@@ -745,37 +742,6 @@ class Settings(BaseSettings):
         if self.auth_cookie_secure is not None:
             return self.auth_cookie_secure
         return self.app_env.lower() not in _DEV_ENVS
-
-    @property
-    def provider_base_url_overrides_map(self) -> dict[str, str]:
-        """Decode ``PROVIDER_BASE_URL_OVERRIDES`` JSON into a mapping.
-
-        Parse failures are silently treated as "no override" so a typo in
-        the env var cannot knock production off the real upstream. We
-        emit a one-time warning on malformed input via ``warnings.warn``
-        to make the misconfiguration discoverable in logs.
-        """
-        raw = (self.provider_base_url_overrides or "").strip()
-        if not raw:
-            return {}
-        try:
-            import json as _json
-
-            data = _json.loads(raw)
-        except Exception:
-            warnings.warn(
-                "PROVIDER_BASE_URL_OVERRIDES is not valid JSON — ignoring.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return {}
-        if not isinstance(data, dict):
-            return {}
-        return {
-            str(k): str(v).rstrip("/")
-            for k, v in data.items()
-            if isinstance(v, (str,)) and v
-        }
 
     def _provider_int_map(self, raw: str, env_name: str) -> dict[str, int]:
         """Decode a JSON provider→positive-int map; malformed = {} + warn."""

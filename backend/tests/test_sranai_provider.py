@@ -30,31 +30,40 @@ def _clean_base_url_cache():
 
 
 # ---------------------------------------------------------------------------
-# resolve_base_url priority: DB → env override → default
+# resolve_base_url priority: DB → default (no env tier — UI-only config)
 # ---------------------------------------------------------------------------
 
 def _seed_db_cache(provider: str, value: str | None) -> None:
     base_urls._db_cache[provider] = (time.monotonic() + 30.0, value)
 
 
-def test_db_value_wins_over_env_and_default(monkeypatch):
+def test_db_value_wins_over_default():
     _seed_db_cache("sranai", "http://box:8000/v1")
-    monkeypatch.setattr(
-        type(base_urls.settings),
-        "provider_base_url_overrides_map",
-        property(lambda self: {"sranai": "http://env:9000/v1"}),
-    )
     assert resolve_base_url("sranai", "http://default/v1") == "http://box:8000/v1"
 
 
-def test_env_override_when_no_db_value(monkeypatch):
-    _seed_db_cache("sranai", None)
-    monkeypatch.setattr(
-        type(base_urls.settings),
-        "provider_base_url_overrides_map",
-        property(lambda self: {"sranai": "http://env:9000/v1"}),
+def test_no_env_tier_between_db_and_default(monkeypatch):
+    """PROVIDER_BASE_URL_OVERRIDES is no longer consulted. Even with the
+    variable live in the process environment, an unset DB row falls straight
+    through to the adapter default — endpoints are admin-UI-only."""
+    monkeypatch.setenv(
+        "PROVIDER_BASE_URL_OVERRIDES", '{"sranai": "http://env:9000/v1"}'
     )
-    assert resolve_base_url("sranai", "") == "http://env:9000/v1"
+    _seed_db_cache("sranai", None)
+    assert resolve_base_url("sranai", "http://default/v1") == "http://default/v1"
+    # Self-hosted with no default and no DB row stays unconfigured ("").
+    assert resolve_base_url("sranai", "") == ""
+
+
+def test_env_tier_is_gone_by_construction():
+    """Not a branch that could be re-enabled: base_urls no longer imports
+    the settings object, and the setting itself no longer exists."""
+    import app.services.providers.base_urls as mod
+    from app.core.config import settings as app_settings
+
+    assert not hasattr(mod, "settings")
+    assert not hasattr(app_settings, "provider_base_url_overrides")
+    assert not hasattr(app_settings, "provider_base_url_overrides_map")
 
 
 def test_default_when_no_overrides(monkeypatch):
