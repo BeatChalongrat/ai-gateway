@@ -42,9 +42,6 @@ export const en = {
   "infra.providers.noMatch": "No providers match “{query}”",
   "infra.providers.new": "NEW",
   "infra.providers.keyCount": "{valid}/{total} keys",
-  "infra.providers.viaEnv": "via env",
-  "infra.providers.viaEnvTitle":
-    "Key set via environment variable — add a key below to override it from the UI",
   "infra.providers.keySet": "key set",
   "infra.providers.noKey": "no key",
   "infra.providers.modelCount": "{n} models",
@@ -60,9 +57,9 @@ export const en = {
   "infra.providers.statusValid": "valid",
   "infra.providers.statusInvalid": "invalid",
   "infra.providers.statusUntested": "untested",
-  "infra.providers.envNoteIntro": "A key is currently being read from this environment variable:",
-  "infra.providers.envNoteBody":
-    "Adding a key here overrides the env value and lets you rotate or test keys without redeploying.",
+  "infra.providers.unusableNote":
+    "{n} key(s) here cannot be used — a key test marked them invalid, or the value is a placeholder. Add a working key below.",
+  "infra.providers.unusableBadge": "{n} unusable",
   "infra.providers.noKeysConfigured": "No keys configured. Add one below.",
   "infra.providers.labelPlaceholder": "Primary",
   "infra.providers.apiKeyLabel": "API key *",
@@ -350,9 +347,6 @@ export const th: Record<keyof typeof en, string> = {
   "infra.providers.noMatch": "ไม่พบผู้ให้บริการที่ตรงกับ “{query}”",
   "infra.providers.new": "ใหม่",
   "infra.providers.keyCount": "คีย์ {valid}/{total}",
-  "infra.providers.viaEnv": "จาก env",
-  "infra.providers.viaEnvTitle":
-    "คีย์ถูกกำหนดผ่านตัวแปรสภาพแวดล้อม — เพิ่มคีย์ด้านล่างเพื่อแทนที่ค่านั้นจากหน้าจอนี้",
   "infra.providers.keySet": "มีคีย์แล้ว",
   "infra.providers.noKey": "ยังไม่มีคีย์",
   "infra.providers.modelCount": "{n} โมเดล",
@@ -368,9 +362,9 @@ export const th: Record<keyof typeof en, string> = {
   "infra.providers.statusValid": "ใช้งานได้",
   "infra.providers.statusInvalid": "ใช้ไม่ได้",
   "infra.providers.statusUntested": "ยังไม่ทดสอบ",
-  "infra.providers.envNoteIntro": "ขณะนี้ระบบอ่านคีย์จากตัวแปรสภาพแวดล้อมนี้:",
-  "infra.providers.envNoteBody":
-    "การเพิ่มคีย์ที่นี่จะแทนที่ค่าจาก env และทำให้หมุนเวียนหรือทดสอบคีย์ได้โดยไม่ต้องดีพลอยใหม่",
+  "infra.providers.unusableNote":
+    "มีคีย์ {n} รายการที่ใช้งานไม่ได้ — ผลทดสอบระบุว่าใช้ไม่ได้ หรือค่าที่กรอกเป็นค่าตัวอย่าง กรุณาเพิ่มคีย์ที่ใช้งานได้ด้านล่าง",
+  "infra.providers.unusableBadge": "ใช้ไม่ได้ {n} รายการ",
   "infra.providers.noKeysConfigured": "ยังไม่ได้ตั้งค่าคีย์ เพิ่มได้ที่ด้านล่าง",
   "infra.providers.labelPlaceholder": "คีย์หลัก",
   "infra.providers.apiKeyLabel": "คีย์ API *",
