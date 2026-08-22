@@ -1,7 +1,7 @@
 # SRAN Desktop — Architecture
 
 Native Windows chat client (C# / .NET 8 / WPF) for the SRAN AI Gateway.
-Build spec: `../../docs/DESKTOP_BUILD_PROMPT.md` — **with the auth corrections below**.
+The layer map, the auth flow and the sync contract below are the reference; this file supersedes the original build spec.
 
 ## Layers
 
