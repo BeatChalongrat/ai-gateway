@@ -15,6 +15,12 @@ services:
       # Read-only mount so test_*_docs.py tests that read ../docs/*.md
       # from backend/ can resolve the path inside the container.
       - ./docs:/docs:ro
+      # Same reason for examples/: test_dlp_docs.py validates the example
+      # policy profiles in examples/*.json against the PolicyProfile
+      # dataclass. Without this mount all 24 of its assertions fail on a
+      # missing path, which is why the file sat in pyproject's --ignore
+      # list rather than being fixed.
+      - ./examples:/examples:ro
     environment:
       # Schema-drift guard (FIX 3): dev hot-reloads source, so code can
       # advance past a long-lived container's schema. autoupgrade runs
