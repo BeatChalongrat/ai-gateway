@@ -113,7 +113,7 @@ Add the Replicate key through the admin UI (Sprint 2B.5) — no env var, no rest
 
 - [ ] **Total actual spend:** __________ (record from `actual_cost_usd` sum)
 - [ ] All checks above ✓ → `git tag sprint-2b-smoke-passed`
-- [ ] Document any deviations in `docs/sprint-2b-report.md`
+- [ ] Record any deviations against the rollout runbook (`sprint-2b-production-rollout.md`) before sign-off
 - [ ] Before alpha rollout: set production tenants' `max_daily_spend_usd` via SQL
 
 ---
