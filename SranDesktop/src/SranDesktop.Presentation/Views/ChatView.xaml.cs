@@ -109,6 +109,10 @@ public partial class ChatView : UserControl
         // keeps running first for every wheel event, consumed or not.
         MessageList.PreviewMouseWheel += OnSmoothWheel;
         MessageList.PreviewTouchMove += (_, _) => _userInputTick = Environment.TickCount64;
+        // WM_MOUSEHWHEEL is a window message, not a routed event — it can only
+        // be seen once this view is attached to an HwndSource.
+        Loaded += (_, _) => AttachHorizontalWheelHook();
+        Unloaded += (_, _) => DetachHorizontalWheelHook();
         DataContextChanged += (_, e) =>
         {
             if (e.OldValue is ChatViewModel oldVm)
@@ -149,10 +153,14 @@ public partial class ChatView : UserControl
     /// So the nested panels are protected explicitly instead of implicitly:
     /// <see cref="InnerScrollerWantsWheel"/> walks from the element under the
     /// pointer up to the message list's own ScrollViewer, and if anything on
-    /// that path is a vertically scrollable ScrollViewer, this handler does
-    /// nothing and WPF routes the wheel exactly as it does today — including
-    /// the case where that inner panel is at its limit and swallows the event,
-    /// which stays the status quo rather than being "improved".
+    /// that path can still move in the direction this wheel is turning, this
+    /// handler does nothing and WPF routes the wheel natively.
+    ///
+    /// The "in the direction it is turning" part is the whole of the fix: a
+    /// panel that has run out of room in THAT direction no longer blocks the
+    /// thread, which is Chrome's scroll chaining. Measured before the change:
+    /// panel pinned at 319/319, thread frozen at 1200, three further notches
+    /// moved nothing (docs/TABLE_SCROLL_AUDIT_REPORT.md).
     /// </summary>
     private void OnSmoothWheel(object sender, MouseWheelEventArgs e)
     {
@@ -160,23 +168,53 @@ public partial class ChatView : UserControl
             return;
         if (MessageScroll is not { } scroll)
             return;
-        if (InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, scroll))
+        // Shift+wheel is a HORIZONTAL wheel in every browser. Claimed ONLY when
+        // there is something horizontal under the pointer: over plain prose it
+        // stays today's vertical scroll rather than becoming a new dead input.
+        // -e.Delta: the vertical wheel calls "away from the user" positive and
+        // that DEcreases the offset, while the horizontal convention calls
+        // rightwards positive and that INcreases it. Negating here is what
+        // makes shift+wheel-down pan RIGHT, as it does in a browser.
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0
+            && TryPanHorizontally(e.OriginalSource as DependencyObject, scroll, -e.Delta))
+        {
+            e.Handled = true;
+            return;
+        }
+        if (InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, scroll, e.Delta))
             return;
         if (!Services.AnimatedScroller.TryWheelScroll(scroll, e.Delta))
             return; // reduced motion, trackpad-shaped delta, or nothing to scroll
         e.Handled = true;
     }
 
+    /// <summary>Offsets within this many DIPs of an end count as "at the end" —
+    /// the same tolerance <see cref="Services.AnimatedScroller.TryWheelScroll"/>
+    /// uses when it decides a notch has nowhere left to go.</summary>
+    private const double ScrollLimitEpsilon = 0.5;
+
+    /// <summary>
+    /// Can a viewer at <paramref name="offset"/> still move? Direction matters:
+    /// a panel scrolled to its bottom must still take an UPWARD wheel, so "at
+    /// its limit" is never absolute.
+    ///
+    /// <paramref name="towardEnd"/> is normalised by the caller because the two
+    /// wheel messages disagree about sign — see <see cref="OnHorizontalWheel"/>.
+    /// </summary>
+    internal static bool CanScrollFurther(double offset, double scrollable, bool towardEnd) =>
+        towardEnd ? offset < scrollable - ScrollLimitEpsilon : offset > ScrollLimitEpsilon;
+
     /// <summary>True when a ScrollViewer between the pointer and
-    /// <paramref name="stopAt"/> can still scroll vertically, i.e. WPF is
-    /// about to give it the wheel and we must not intercept.</summary>
-    internal static bool InnerScrollerWantsWheel(DependencyObject? source, ScrollViewer stopAt)
+    /// <paramref name="stopAt"/> can still scroll vertically IN THE DIRECTION
+    /// <paramref name="delta"/> is turning, i.e. WPF is about to give it the
+    /// wheel and we must not intercept. Walking past one that has hit its
+    /// limit is the outward chaining.</summary>
+    internal static bool InnerScrollerWantsWheel(DependencyObject? source, ScrollViewer stopAt, int delta)
     {
         for (var node = source; node is not null && !ReferenceEquals(node, stopAt); node = VisualOrLogicalParent(node))
         {
             if (node is ScrollViewer inner
-                && inner.VerticalScrollBarVisibility != ScrollBarVisibility.Disabled
-                && inner.ScrollableHeight > 0)
+                && CanScrollFurther(inner.VerticalOffset, inner.ScrollableHeight, towardEnd: delta < 0))
                 return true;
         }
         return false;
@@ -189,6 +227,143 @@ public partial class ChatView : UserControl
         node is Visual or System.Windows.Media.Media3D.Visual3D
             ? VisualTreeHelper.GetParent(node)
             : LogicalTreeHelper.GetParent(node);
+
+    // ── horizontal wheel ────────────────────────────────────────────────────
+    // WPF maps NOTHING to horizontal scrolling: neither shift+wheel nor the
+    // WM_MOUSEHWHEEL a precision touchpad's two-finger swipe generates. Both
+    // were measured dead on 1.2.8, so a wide table could only be panned by
+    // dragging its scrollbar (docs/TABLE_SCROLL_AUDIT_REPORT.md).
+
+    /// <summary>
+    /// The innermost horizontally scrollable viewer between the pointer and
+    /// <paramref name="stopAt"/> that can still move <paramref name="towardEnd"/>.
+    /// Walking PAST one that has hit its limit is the outward chaining.
+    /// </summary>
+    /// <param name="anyOnPath">Whether any horizontally scrollable container was
+    /// on the path at all, limit or not. A gesture that lands on one stays
+    /// horizontal — it must never fall through and scroll the thread instead,
+    /// which is the axis-crossing browsers are careful never to do.</param>
+    internal static ScrollViewer? HorizontalScrollTarget(
+        DependencyObject? source, ScrollViewer stopAt, bool towardEnd, out bool anyOnPath)
+    {
+        anyOnPath = false;
+        for (var node = source; node is not null && !ReferenceEquals(node, stopAt); node = VisualOrLogicalParent(node))
+        {
+            if (node is not ScrollViewer inner || inner.ScrollableWidth <= 0)
+                continue;
+            anyOnPath = true;
+            if (CanScrollFurther(inner.HorizontalOffset, inner.ScrollableWidth, towardEnd))
+                return inner;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Pan the container under the pointer. Returns true when the gesture was
+    /// consumed — including the case where it landed on a container that is
+    /// already at its limit and nothing outside it can scroll horizontally
+    /// either, because stopping there is what a browser does.
+    /// </summary>
+    /// <param name="hDelta">Signed in the HORIZONTAL convention: positive is
+    /// rightwards. Every caller normalises to this one convention, so the
+    /// direction is derived here instead of being passed in beside the delta
+    /// where the two could drift apart.</param>
+    internal static bool TryPanHorizontally(DependencyObject? source, ScrollViewer stopAt, int hDelta)
+    {
+        var target = HorizontalScrollTarget(source, stopAt, towardEnd: hDelta > 0, out var anyOnPath);
+        if (!anyOnPath)
+            return false; // nothing horizontal here — leave the gesture alone
+        if (target is null)
+            return true; // chained outward, found nothing that can move: stop
+        PanBy(target, hDelta);
+        return true;
+    }
+
+    /// <summary>
+    /// Apply the pan directly, never animated. A precision touchpad sends many
+    /// small deltas and panning must track the finger; stacking an easing tail
+    /// on each one is how smooth-scroll implementations end up feeling like
+    /// mush. Reach comes from the same Windows setting the vertical notch uses,
+    /// measured against the viewport's WIDTH.
+    /// </summary>
+    /// <param name="hDelta">Positive is rightwards — the WM_MOUSEHWHEEL
+    /// convention, which is the INVERSE of the vertical wheel's.</param>
+    internal static void PanBy(ScrollViewer target, int hDelta)
+    {
+        var perNotch = Services.AnimatedScroller.NotchDistanceForLines(
+            SystemParameters.WheelScrollLines, target.ViewportWidth);
+        // Fractional notches are normal on a precision touchpad.
+        var travel = perNotch * hDelta / (double)Services.AnimatedScroller.WheelFeel.WheelDelta;
+        target.ScrollToHorizontalOffset(
+            Math.Clamp(target.HorizontalOffset + travel, 0, target.ScrollableWidth));
+    }
+
+    private const int WmMouseHWheel = 0x020E;
+    private System.Windows.Interop.HwndSource? _hwndSource;
+
+    /// <summary>WM_MOUSEHWHEEL has no WPF routed event at all, so the only way
+    /// to see a trackpad's horizontal swipe is off the window itself. Attached
+    /// on Loaded and removed on Unloaded — ChatView is hosted and re-hosted, so
+    /// both halves have to be idempotent.</summary>
+    private void AttachHorizontalWheelHook()
+    {
+        if (_hwndSource is not null)
+            return;
+        if (PresentationSource.FromVisual(this) is not System.Windows.Interop.HwndSource source)
+            return;
+        _hwndSource = source;
+        source.AddHook(OnHorizontalWheel);
+    }
+
+    private void DetachHorizontalWheelHook()
+    {
+        _hwndSource?.RemoveHook(OnHorizontalWheel);
+        _hwndSource = null;
+    }
+
+    /// <summary>
+    /// A precision touchpad's two-finger horizontal swipe, and a genuine
+    /// tilt-wheel mouse, both arrive here.
+    ///
+    /// TWO THINGS WPF WOULD NORMALLY DO FOR US AND DOES NOT HERE.
+    ///
+    /// 1. THE SIGN IS INVERTED relative to the vertical wheel. WM_MOUSEWHEEL
+    ///    positive means away-from-the-user, which DEcreases the offset;
+    ///    WM_MOUSEHWHEEL positive means tilt-RIGHT, which INcreases it. So
+    ///    "toward the end" is <c>delta &gt; 0</c> here and <c>delta &lt; 0</c>
+    ///    for the vertical wheel. Verified by replaying the identical
+    ///    synthesised message into Chrome: +120 moved scrollLeft 334 -> 534,
+    ///    i.e. rightwards (docs/WHEEL_DIRECTIONAL_REPORT.md).
+    ///
+    /// 2. A WINDOW MESSAGE DOES NOT ROUTE. lParam carries SCREEN coordinates,
+    ///    so the element under the pointer has to be found by hand. Anything
+    ///    outside the message list is left alone entirely, so other parts of
+    ///    the window keep whatever behaviour they have.
+    /// </summary>
+    private IntPtr OnHorizontalWheel(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WmMouseHWheel || MessageScroll is not { } scroll)
+            return IntPtr.Zero;
+        var delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+        if (delta == 0)
+            return IntPtr.Zero;
+
+        var screen = new Point((short)(lParam.ToInt64() & 0xFFFF), (short)((lParam.ToInt64() >> 16) & 0xFFFF));
+        Point local;
+        try { local = MessageList.PointFromScreen(screen); }
+        catch (InvalidOperationException) { return IntPtr.Zero; } // not connected to a source yet
+        if (local.X < 0 || local.Y < 0 || local.X > MessageList.ActualWidth || local.Y > MessageList.ActualHeight)
+            return IntPtr.Zero;
+
+        var hit = VisualTreeHelper.HitTest(MessageList, local)?.VisualHit;
+        var target = HorizontalScrollTarget(hit, scroll, towardEnd: delta > 0, out _);
+        if (target is null)
+            return IntPtr.Zero; // only claim the message when it was actually consumed
+
+        PanBy(target, delta);
+        handled = true;
+        return IntPtr.Zero;
+    }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {

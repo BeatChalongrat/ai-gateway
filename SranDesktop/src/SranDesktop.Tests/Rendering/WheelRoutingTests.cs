@@ -67,7 +67,13 @@ public class WheelRoutingTests
         public ListBox List = null!;
         public ScrollViewer Outer = null!;
         public ScrollViewer Inner = null!;
+        /// <summary>A markdown table wrapper: MarkdownRenderer.cs:606-611 exactly
+        /// — horizontal Auto, vertical Disabled.</summary>
+        public ScrollViewer Table = null!;
         public FrameworkElement PlainRow = null!;
+        /// <summary>Keyboard.Modifiers cannot be forced in a unit test, so the
+        /// harness carries the modifier the real handler reads.</summary>
+        public bool ShiftHeld;
         public List<FrameworkElement> Items = null!;
         private Window _window = null!;
 
@@ -90,6 +96,16 @@ public class WheelRoutingTests
                     };
                     h.Items.Add(new Border { Child = h.Inner, Height = 160 });
                 }
+                else if (i == 8)
+                {
+                    h.Table = new ScrollViewer
+                    {
+                        HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                        Content = new Border { Width = 1400, Height = 200 },
+                    };
+                    h.Items.Add(new Border { Child = h.Table, Height = 200 });
+                }
                 else
                 {
                     h.Items.Add(new Border { Height = 200, Child = new TextBlock { Text = $"row {i}" } });
@@ -98,6 +114,10 @@ public class WheelRoutingTests
             h.PlainRow = h.Items[0];
 
             h.List = new ListBox { ItemsSource = h.Items, Width = 400, Height = 300 };
+            // ChatView.xaml:46 — without this the item panel is measured with
+            // infinite width, every row grows to its content, and a table
+            // wrapper never overflows.
+            ScrollViewer.SetHorizontalScrollBarVisibility(h.List, ScrollBarVisibility.Disabled);
             VirtualizingPanel.SetIsVirtualizing(h.List, true);
             VirtualizingPanel.SetVirtualizationMode(h.List, VirtualizationMode.Recycling);
             VirtualizingPanel.SetScrollUnit(h.List, ScrollUnit.Pixel);
@@ -119,7 +139,14 @@ public class WheelRoutingTests
                 h.List.PreviewMouseWheel += (_, e) =>
                 {
                     if (e.Handled) return;
-                    if (ChatView.InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, h.Outer)) return;
+                    if (h.ShiftHeld
+                        && ChatView.TryPanHorizontally(
+                            e.OriginalSource as DependencyObject, h.Outer, -e.Delta))
+                    {
+                        e.Handled = true;
+                        return;
+                    }
+                    if (ChatView.InnerScrollerWantsWheel(e.OriginalSource as DependencyObject, h.Outer, e.Delta)) return;
                     if (!AnimatedScroller.TryWheelScroll(h.Outer, e.Delta)) return;
                     e.Handled = true;
                 };
@@ -243,10 +270,54 @@ public class WheelRoutingTests
         });
     }
 
-    /// <summary>Status quo, deliberately unchanged: WPF swallows the wheel when
-    /// an inner viewer is at its limit. This task does not "improve" that.</summary>
+    /// <summary>
+    /// THE FIX. An inner viewer that has run out of room hands the wheel
+    /// outward instead of swallowing it, which is what a browser does.
+    /// Measured before the change: panel pinned at 319/319, thread frozen at
+    /// 1200, further notches moved nothing.
+    /// </summary>
     [Fact]
-    public void InnerScrollerAtItsLimit_StillSwallowsTheWheel_AsToday()
+    public void InnerScrollerAtItsLimit_ChainsOutwardToTheThread()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                using var h = Harness.Build(attachSmoothWheel: true);
+                h.Realize(5);
+                h.Inner.ScrollToEnd();
+                h.List.UpdateLayout();
+                Pump();
+                h.Inner.VerticalOffset.Should().BeApproximately(h.Inner.ScrollableHeight, 0.5,
+                    "the panel must actually be at its bottom for this to mean anything");
+
+                var innerBefore = h.Inner.VerticalOffset;
+                var outerBefore = h.Outer.VerticalOffset;
+                var perNotch = AnimatedScroller.NotchDistanceForLines(
+                    SystemParameters.WheelScrollLines, h.Outer.ViewportHeight);
+
+                h.WheelOver(h.Inner, -120);
+                h.List.UpdateLayout();
+                Pump();
+
+                h.Inner.VerticalOffset.Should().BeApproximately(innerBefore, 0.5,
+                    "the panel has nowhere left to go downwards");
+                AnimatedScroller.PendingWheelTarget(h.Outer)
+                    .Should().BeApproximately(outerBefore + perNotch, 0.5,
+                        "so the thread takes the notch instead of the wheel dying");
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
+    /// <summary>
+    /// "At its limit" is DIRECTIONAL. A panel scrolled to the bottom must still
+    /// take an upward wheel, or chaining would make the five capped viewers
+    /// unscrollable back up, which is a worse bug than the one being fixed.
+    /// </summary>
+    [Fact]
+    public void InnerScrollerAtItsBottom_StillTakesAnUpwardWheel()
     {
         RunSta(() =>
         {
@@ -262,15 +333,239 @@ public class WheelRoutingTests
                 var innerBefore = h.Inner.VerticalOffset;
                 var outerBefore = h.Outer.VerticalOffset;
 
-                h.WheelOver(h.Inner, -120);
+                h.WheelOver(h.Inner, +120); // upward
                 h.List.UpdateLayout();
                 Pump();
 
-                h.Inner.VerticalOffset.Should().Be(innerBefore);
-                h.Outer.VerticalOffset.Should().Be(outerBefore);
+                h.Inner.VerticalOffset.Should().BeLessThan(innerBefore,
+                    "the panel still has room in THIS direction");
+                h.Outer.VerticalOffset.Should().Be(outerBefore, "and the thread must not move with it");
                 double.IsNaN(AnimatedScroller.PendingWheelTarget(h.Outer)).Should().BeTrue();
             }
             finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
+    /// <summary>
+    /// Pins the assumption that let the old vertical-Disabled clause be deleted
+    /// rather than kept beside the directional check: a vertically disabled
+    /// viewer reports no scrollable height even when its content is far taller
+    /// than its viewport, so the directional check already covers it.
+    /// </summary>
+    [Fact]
+    public void VerticallyDisabledScroller_ReportsNoScrollableHeight_EvenWithTallerContent()
+    {
+        RunSta(() =>
+        {
+            var inner = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = new Border { Width = 900, Height = 4000 },
+            };
+            inner.Measure(new Size(200, 100));
+            inner.Arrange(new Rect(0, 0, 200, 100));
+            inner.UpdateLayout();
+
+            inner.ScrollableHeight.Should().Be(0,
+                "so the directional predicate alone is enough to let it through");
+            ChatView.InnerScrollerWantsWheel(inner, new ScrollViewer(), -120).Should().BeFalse();
+            ChatView.InnerScrollerWantsWheel(inner, new ScrollViewer(), +120).Should().BeFalse();
+        });
+    }
+
+    // -- horizontal ---------------------------------------------------------
+
+    /// <summary>shift+wheel pans a table, and leaves the thread alone.</summary>
+    [Fact]
+    public void ShiftWheelOverATable_PansIt_AndDoesNotMoveTheThread()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                using var h = Harness.Build(attachSmoothWheel: true);
+                h.Realize(8);
+                h.Table.ScrollableWidth.Should().BeGreaterThan(0, "the table must actually overflow");
+                h.ShiftHeld = true;
+
+                var outerBefore = h.Outer.VerticalOffset;
+                h.WheelOver(h.Table, -120);
+                h.List.UpdateLayout();
+                Pump();
+
+                h.Table.HorizontalOffset.Should().BeGreaterThan(0, "shift+wheel-down pans right");
+                h.Outer.VerticalOffset.Should().Be(outerBefore);
+                double.IsNaN(AnimatedScroller.PendingWheelTarget(h.Outer)).Should().BeTrue(
+                    "the thread must not have been armed at all");
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
+    /// <summary>At the table right edge the gesture STOPS. Browsers chain
+    /// outward in the same axis and never cross into the other one; nothing
+    /// above a table scrolls horizontally, so the correct answer is nothing,
+    /// not a surprise jump down the thread.</summary>
+    [Fact]
+    public void ShiftWheelAtTheTablesRightEdge_StopsInsteadOfScrollingTheThread()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                using var h = Harness.Build(attachSmoothWheel: true);
+                h.Realize(8);
+                h.Table.ScrollToRightEnd();
+                h.List.UpdateLayout();
+                Pump();
+                h.ShiftHeld = true;
+
+                var outerBefore = h.Outer.VerticalOffset;
+                var tableBefore = h.Table.HorizontalOffset;
+
+                h.WheelOver(h.Table, -120);
+                h.List.UpdateLayout();
+                Pump();
+
+                h.Table.HorizontalOffset.Should().BeApproximately(tableBefore, 0.5);
+                h.Outer.VerticalOffset.Should().Be(outerBefore, "no axis crossing");
+                double.IsNaN(AnimatedScroller.PendingWheelTarget(h.Outer)).Should().BeTrue();
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
+    /// <summary>shift+wheel over ordinary prose is left exactly as it is today.
+    /// Claiming it everywhere would trade one dead input for another.</summary>
+    [Fact]
+    public void ShiftWheelOverPlainProse_StillScrollsTheThread()
+    {
+        RunSta(() =>
+        {
+            MotionSettings.OverrideEnabled = true;
+            try
+            {
+                using var h = Harness.Build(attachSmoothWheel: true);
+                h.ShiftHeld = true;
+                var before = h.Outer.VerticalOffset;
+                var perNotch = AnimatedScroller.NotchDistanceForLines(
+                    SystemParameters.WheelScrollLines, h.Outer.ViewportHeight);
+
+                h.WheelOver(h.PlainRow, -120);
+
+                AnimatedScroller.PendingWheelTarget(h.Outer)
+                    .Should().BeApproximately(before + perNotch, 0.5);
+            }
+            finally { MotionSettings.OverrideEnabled = null; }
+        });
+    }
+
+    /// <summary>The walk skips a container that has hit its limit and keeps
+    /// looking outward, the same chaining the vertical predicate does.</summary>
+    [Fact]
+    public void HorizontalScrollTarget_ChainsPastAContainerAtItsLimit()
+    {
+        RunSta(() =>
+        {
+            var stopAt = new ScrollViewer();
+            var innerContent = new Border { Width = 900, Height = 40 };
+            var inner = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = innerContent,
+            };
+            var outerHost = new Border { Width = 400, Height = 300, Child = inner };
+            var outerPan = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = outerHost,
+            };
+            outerPan.Measure(new Size(200, 300));
+            outerPan.Arrange(new Rect(0, 0, 200, 300));
+            outerPan.UpdateLayout();
+            inner.ScrollableWidth.Should().BeGreaterThan(0);
+            outerPan.ScrollableWidth.Should().BeGreaterThan(0);
+
+            ChatView.HorizontalScrollTarget(innerContent, stopAt, true, out var any)
+                .Should().BeSameAs(inner, "the innermost one that can move wins");
+            any.Should().BeTrue();
+
+            inner.ScrollToRightEnd();
+            inner.UpdateLayout();
+            ChatView.HorizontalScrollTarget(innerContent, stopAt, true, out any)
+                .Should().BeSameAs(outerPan, "at its limit it chains outward");
+            any.Should().BeTrue();
+        });
+    }
+
+    /// <summary>
+    /// THE SIGN. WM_MOUSEHWHEEL positive means tilt-RIGHT, which INCREASES the
+    /// horizontal offset, the opposite convention to WM_MOUSEWHEEL where
+    /// positive means away-from-user and DECREASES the vertical offset.
+    /// Getting this backwards would pan tables the wrong way, which is worse
+    /// than not panning them at all.
+    /// </summary>
+    [Fact]
+    public void PanBy_PositiveDelta_MovesRight_NegativeMovesLeft()
+    {
+        RunSta(() =>
+        {
+            var pan = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = new Border { Width = 2000, Height = 40 },
+            };
+            pan.Measure(new Size(200, 40));
+            pan.Arrange(new Rect(0, 0, 200, 40));
+            pan.UpdateLayout();
+
+            ChatView.PanBy(pan, +120);
+            pan.UpdateLayout();
+            pan.HorizontalOffset.Should().BeGreaterThan(0, "tilt-right scrolls right");
+
+            var afterRight = pan.HorizontalOffset;
+            ChatView.PanBy(pan, -120);
+            pan.UpdateLayout();
+            pan.HorizontalOffset.Should().BeLessThan(afterRight, "and tilt-left comes back");
+        });
+    }
+
+    /// <summary>A precision touchpad sends fractional notches; the reach must
+    /// scale with them rather than snapping to a whole notch.</summary>
+    [Fact]
+    public void PanBy_ScalesWithAFractionalNotch()
+    {
+        RunSta(() =>
+        {
+            static ScrollViewer Fresh()
+            {
+                var sv = new ScrollViewer
+                {
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    Content = new Border { Width = 2000, Height = 40 },
+                };
+                sv.Measure(new Size(200, 40));
+                sv.Arrange(new Rect(0, 0, 200, 40));
+                sv.UpdateLayout();
+                return sv;
+            }
+
+            var full = Fresh();
+            ChatView.PanBy(full, 120);
+            full.UpdateLayout();
+
+            var third = Fresh();
+            ChatView.PanBy(third, 40);
+            third.UpdateLayout();
+
+            third.HorizontalOffset.Should().BeApproximately(full.HorizontalOffset / 3, 0.5);
         });
     }
 
@@ -293,7 +588,7 @@ public class WheelRoutingTests
             inner.UpdateLayout();
 
             inner.ScrollableHeight.Should().BeGreaterThan(0);
-            ChatView.InnerScrollerWantsWheel(inner, outer).Should().BeTrue(
+            ChatView.InnerScrollerWantsWheel(inner, outer, -120).Should().BeTrue(
                 "the five capped viewers in a message bubble must keep scrolling");
         });
     }
@@ -318,7 +613,7 @@ public class WheelRoutingTests
             inner.Arrange(new Rect(0, 0, 200, 40));
             inner.UpdateLayout();
 
-            ChatView.InnerScrollerWantsWheel(inner, outer).Should().BeFalse();
+            ChatView.InnerScrollerWantsWheel(inner, outer, -120).Should().BeFalse();
         });
     }
 
@@ -328,7 +623,7 @@ public class WheelRoutingTests
         RunSta(() =>
         {
             var outer = new ScrollViewer();
-            ChatView.InnerScrollerWantsWheel(outer, outer).Should().BeFalse(
+            ChatView.InnerScrollerWantsWheel(outer, outer, -120).Should().BeFalse(
                 "the walk stops at the message list's own viewer");
         });
     }
@@ -338,7 +633,7 @@ public class WheelRoutingTests
     {
         RunSta(() =>
         {
-            ChatView.InnerScrollerWantsWheel(null, new ScrollViewer()).Should().BeFalse();
+            ChatView.InnerScrollerWantsWheel(null, new ScrollViewer(), -120).Should().BeFalse();
         });
     }
 
