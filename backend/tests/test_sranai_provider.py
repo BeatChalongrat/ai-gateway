@@ -30,31 +30,69 @@ def _clean_base_url_cache():
 
 
 # ---------------------------------------------------------------------------
-# resolve_base_url priority: DB → env override → default
+# resolve_base_url priority: DB → default (no env tier — UI-only config)
 # ---------------------------------------------------------------------------
 
 def _seed_db_cache(provider: str, value: str | None) -> None:
     base_urls._db_cache[provider] = (time.monotonic() + 30.0, value)
 
 
-def test_db_value_wins_over_env_and_default(monkeypatch):
+def test_db_value_wins_over_default():
     _seed_db_cache("sranai", "http://box:8000/v1")
-    monkeypatch.setattr(
-        type(base_urls.settings),
-        "provider_base_url_overrides_map",
-        property(lambda self: {"sranai": "http://env:9000/v1"}),
-    )
     assert resolve_base_url("sranai", "http://default/v1") == "http://box:8000/v1"
 
 
-def test_env_override_when_no_db_value(monkeypatch):
-    _seed_db_cache("sranai", None)
-    monkeypatch.setattr(
-        type(base_urls.settings),
-        "provider_base_url_overrides_map",
-        property(lambda self: {"sranai": "http://env:9000/v1"}),
+def test_no_env_tier_between_db_and_default(monkeypatch):
+    """PROVIDER_BASE_URL_OVERRIDES is no longer consulted. Even with the
+    variable live in the process environment, an unset DB row falls straight
+    through to the adapter default — endpoints are admin-UI-only."""
+    monkeypatch.setenv(
+        "PROVIDER_BASE_URL_OVERRIDES", '{"sranai": "http://env:9000/v1"}'
     )
-    assert resolve_base_url("sranai", "") == "http://env:9000/v1"
+    _seed_db_cache("sranai", None)
+    assert resolve_base_url("sranai", "http://default/v1") == "http://default/v1"
+    # Self-hosted with no default and no DB row stays unconfigured ("").
+    assert resolve_base_url("sranai", "") == ""
+
+
+def test_env_tier_is_gone_by_construction():
+    """PROVIDER_BASE_URL_OVERRIDES is a first-boot SEED, never a resolve-time
+    tier.
+
+    The distinction is the whole design: ``base_urls`` does not import the
+    settings object at all, so no amount of environment editing on a running
+    system can change where a provider is called. The env value is read once,
+    by ``provider_env_seed``, and written to the ``system_settings`` row that
+    ``resolve_base_url`` already reads.
+
+    The old back-door property is also gone — a parsed map hanging off
+    ``Settings`` is exactly the thing a future caller would reach for.
+    """
+    import app.services.providers.base_urls as mod
+    from app.core.config import settings as app_settings
+
+    assert not hasattr(mod, "settings")
+    assert not hasattr(app_settings, "provider_base_url_overrides_map")
+    # The seed input exists, and is a plain unparsed string.
+    assert isinstance(app_settings.provider_base_url_overrides, str)
+
+
+def test_the_seed_does_not_become_a_resolution_tier(monkeypatch):
+    """Setting the env var must not change resolution on its own."""
+    from app.core.config import settings as app_settings
+    from app.services.providers.base_urls import clear_base_url_cache, resolve_base_url
+
+    monkeypatch.setattr(
+        app_settings,
+        "provider_base_url_overrides",
+        '{"openai": "http://not-used:9090/v1"}',
+        raising=False,
+    )
+    clear_base_url_cache()
+
+    assert resolve_base_url("openai", "https://api.openai.com/v1") == (
+        "https://api.openai.com/v1"
+    )
 
 
 def test_default_when_no_overrides(monkeypatch):

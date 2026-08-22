@@ -36,7 +36,7 @@ logger = structlog.get_logger(__name__)
 
 # Advisory-lock id for the in-process autoupgrade. Lives in the same 9000xx
 # block main.py documents (worker.py 900001-900003, media job loop 900004,
-# startup seeds 900005-900006) — grep "pg_advisory" before adding another.
+# startup seed 900005; 900006 retired) — grep "pg_advisory" before adding one.
 # SESSION-level (pg_advisory_lock) because the migration spans several
 # transactions on Alembic's own engine; held on a dedicated connection across
 # the whole upgrade so exactly one of N gunicorn workers migrates.

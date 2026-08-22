@@ -10,9 +10,10 @@ Four supported targets:
 - ``openrouter`` → OpenAI-compatible /v1/chat/completions
 - ``custom``     → operator-supplied endpoint, assumed OpenAI-compatible
 
-``resolve_review_key`` is the fallback chain: stored encoded key →
-env var for the selected provider → None. ``call_review_api`` is a
-single POST; callers pick up exceptions for the failure path.
+``resolve_review_key`` is the fallback chain: a key stored specifically for
+AI review → the selected provider's key pool via ``ProviderKeyService`` (the
+same one chat dispatch draws from) → None. ``call_review_api`` is a single
+POST; callers pick up exceptions for the failure path.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.config import settings
+from app.services.provider_key_service import resolve_provider_key_async
 from app.models.ai_review import AiReviewSettingsORM
 
 
@@ -90,12 +92,19 @@ def decode_key(encoded: str) -> str:
     return base64.b64decode(encoded.encode()).decode()
 
 
-def resolve_review_key(row: AiReviewSettingsORM) -> str | None:
+async def resolve_review_key(row: AiReviewSettingsORM) -> str | None:
     """Return the plaintext API key to use for AI review.
 
     Priority:
-      1. ``row.review_api_key_enc`` if set
-      2. Env var for the selected provider (or Anthropic when None)
+      1. ``row.review_api_key_enc`` — a key set specifically for AI review,
+         which stays the most specific answer and wins
+      2. the provider's key pool, resolved through ``ProviderKeyService``
+         exactly as chat dispatch resolves it
+
+    Tier 2 used to read ``settings.<provider>_api_key`` directly. That made
+    AI review a second live source: an admin rotating the Anthropic key in
+    the admin UI would move chat onto the new key while every review scan
+    kept using the old environment value, with nothing on screen saying so.
     """
     if row.review_api_key_enc:
         try:
@@ -104,12 +113,8 @@ def resolve_review_key(row: AiReviewSettingsORM) -> str | None:
             return None
 
     provider = row.review_provider or "anthropic"
-    if provider == "anthropic":
-        return settings.anthropic_api_key
-    if provider == "openai":
-        return settings.openai_api_key
-    if provider == "openrouter":
-        return getattr(settings, "openrouter_api_key", None)
+    if provider in ("anthropic", "openai", "openrouter"):
+        return await resolve_provider_key_async(provider)
     # custom provider: must have an explicit key stored.
     return None
 
@@ -292,12 +297,12 @@ async def call_review_api(
             "AI_REVIEW_ALLOWED_HOSTS or set AI_REVIEW_ALLOW_EXTERNAL=true."
         )
 
-    api_key = resolve_review_key(row)
+    api_key = await resolve_review_key(row)
     if not api_key:
         raise ValueError(
             f"No API key configured for AI review provider '{provider}'. "
-            "Set a dedicated key in AI Review settings, or ensure the "
-            "provider's environment variable is set."
+            "Set a dedicated key in AI Review settings, or add a key for "
+            "that provider in the admin UI under Providers."
         )
 
     timeout = httpx.Timeout(

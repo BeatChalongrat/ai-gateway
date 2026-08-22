@@ -113,14 +113,11 @@ async def lifespan(app: FastAPI):
     # Seed admin user (runs blocking bcrypt in thread)
     await asyncio.to_thread(_seed_admin_user)
 
-    # Import env-configured provider API keys into provider_keys.
-    # Without this, OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY
-    # are reachable to the routing path but invisible to the admin UI —
-    # the Providers page surfaces them as an opaque "via env" badge that
-    # cannot be tested or rotated. Importing them once at boot gives the
-    # operator a real row to manage and unifies key management behind a
-    # single source.
-    await asyncio.to_thread(_import_env_provider_keys)
+    # Seed provider keys / endpoints from env — ONCE per provider, ever.
+    # See app/services/provider_env_seed.py for the rule and for why the gate
+    # is a marker rather than a row count. Editing an env var on a running
+    # system deliberately does nothing.
+    await asyncio.to_thread(_seed_provider_config_from_env)
 
     # Per-worker NER pre-load. ``ner_status`` module-level state is
     # process-local — a ``PATCH /admin/settings`` call routes to one
@@ -291,7 +288,11 @@ async def lifespan(app: FastAPI):
 # cross-connection unlock bookkeeping after the pool recycles the
 # connection).
 STARTUP_LOCK_SEED_ADMIN = 900005
-STARTUP_LOCK_ENV_KEY_IMPORT = 900006
+# 900006 was STARTUP_LOCK_ENV_KEY_IMPORT (the old env-key importer, removed
+# in f19a0ac0). Left documented, not reused, so an old worker mid-rollout
+# cannot collide with a new claimant. 900007 is the schema-guard autoupgrade
+# (app/core/schema_guard.py).
+STARTUP_LOCK_PROVIDER_ENV_SEED = 900008
 
 
 def _acquire_startup_lock(session, lock_id: int) -> None:
@@ -390,105 +391,45 @@ def _seed_admin_user() -> None:
         session.close()
 
 
-def _import_env_provider_keys() -> None:
-    """Import env-configured provider API keys into ``provider_keys``.
+def _seed_provider_config_from_env() -> None:
+    """Seed provider keys and endpoints from env on a provider's first boot.
 
-    Sync function — runs in a thread via ``asyncio.to_thread``. Idempotent:
-    skips any provider whose ``provider_keys`` row set already contains a
-    key (active or soft-deleted), so a reboot never duplicates, and never
-    overrides a key the operator added manually through the admin UI. If
-    the operator soft-deletes our imported key, the soft-deleted row keeps
-    us from re-creating it on the next boot — the deletion stands.
+    Sync — runs in a thread via ``asyncio.to_thread``. The decision logic
+    lives in ``app.services.provider_env_seed``; this wrapper owns only the
+    session, the advisory lock and the boot log, matching ``_seed_admin_user``.
 
-    Placeholder safety (Group A / A1): if an env var still holds a dev
-    placeholder (e.g. ``sk-ant-...``), we never insert it — a placeholder
-    in the pool would 401 silently on dispatch. We also retroactively
-    deactivate any matching placeholder row a PRIOR boot imported before
-    this guard existed, so an upgrade self-heals the pool.
-
-    Keys are inserted with no test status; the admin UI's Test button
-    populates ``last_test_status`` on demand.
-
-    Serialized across workers via advisory lock 900006 (see
-    ``_acquire_startup_lock``) so concurrent fresh-DB boots import each
-    env key exactly once instead of racing the check-then-insert.
+    Serialized across workers via advisory lock 900008 so a multi-worker boot
+    on a fresh DB seeds each provider exactly once instead of racing the
+    check-then-insert. Never raises: a gateway that cannot seed must still
+    boot and serve, and every provider is configurable from the admin UI.
     """
     from app.core.db import SessionLocal
-    from app.repositories.provider_key_repository import ProviderKeyRepository
-    from app.services.provider_key_service import (
-        ProviderKeyService,
-        _decode,
-        _looks_like_placeholder_key,
+    from app.services.provider_env_seed import (
+        report_outcomes,
+        seed_provider_base_urls_from_env,
+        seed_provider_keys_from_env,
     )
-
-    env_keys = {
-        "openai": settings.openai_api_key,
-        "anthropic": settings.anthropic_api_key,
-        "openrouter": settings.openrouter_api_key,
-    }
 
     session = SessionLocal()
     try:
-        # Serialize across workers (Phase 12 A1) — the whole import runs
-        # in one transaction, so the xact-scoped lock covers every
-        # provider's check-then-insert and releases at COMMIT/ROLLBACK.
-        _acquire_startup_lock(session, STARTUP_LOCK_ENV_KEY_IMPORT)
-        svc = ProviderKeyService()
-        repo = ProviderKeyRepository(session)
-        imported: list[str] = []
-        skipped: list[str] = []
-        deactivated: list[str] = []
-        for provider, raw_key in env_keys.items():
-            raw_key = (raw_key or "").strip()
-            if not raw_key:
-                continue
-            if _looks_like_placeholder_key(raw_key):
-                # Never import a placeholder. Also deactivate any active row
-                # whose decoded key equals this placeholder — i.e. one a
-                # pre-guard boot imported — so the pool self-heals.
-                for row in repo.list_active_by_provider(provider):
-                    try:
-                        if _decode(row.api_key_encrypted) == raw_key:
-                            repo.update(row, is_active=False)
-                            deactivated.append(provider)
-                    except Exception:
-                        continue
-                skipped.append(provider)
-                continue
-            if svc.list_keys(session, provider):
-                # Provider already has at least one row (active or
-                # historically soft-deleted) — leave it alone.
-                continue
-            svc.add_key(
-                session,
-                provider,
-                raw_key,
-                label="Imported from environment",
-            )
-            imported.append(provider)
+        _acquire_startup_lock(session, STARTUP_LOCK_PROVIDER_ENV_SEED)
+        key_outcomes = seed_provider_keys_from_env(session)
+        url_outcomes = seed_provider_base_urls_from_env(session)
         session.commit()
-        from app.services.provider_key_service import clear_keys_cache
-        if deactivated:
-            clear_keys_cache()
-        if imported:
-            print(
-                "[startup] Imported env API keys into provider_keys: "
-                + ", ".join(imported)
-            )
-        for provider in skipped:
-            print(
-                f"[startup] Skipping placeholder key for {provider} from env"
-            )
-        if deactivated:
-            print(
-                "[startup] Deactivated previously-imported placeholder keys: "
-                + ", ".join(sorted(set(deactivated)))
-            )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - seeding must never stop the boot
         session.rollback()
-        print(f"[startup] env-key import skipped: {exc}")
+        print(f"[startup] provider env seed skipped: {exc}", flush=True)
+        return
     finally:
         session.close()
+
+    # add_key busts the key cache itself; the base-URL writer primes rather
+    # than clears its own cache, so drop it here when a row was seeded.
+    if any(v == "seeded" for v in url_outcomes.values()):
+        from app.services.providers.base_urls import clear_base_url_cache
+
+        clear_base_url_cache()
+    report_outcomes(key_outcomes, url_outcomes)
 
 
 def _maybe_preload_ner() -> None:

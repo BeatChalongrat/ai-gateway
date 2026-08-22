@@ -8,7 +8,10 @@ Resolution priority (delegated to ``ProviderKeyService.get_active_key_async``):
 
     1. ``provider_keys`` table — active + valid (UI Add-Key flow)
     2. ``providers.api_key_encrypted`` — legacy single key
-    3. ``REPLICATE_API_TOKEN`` env — fallback (via ``_ENV_KEYS``)
+
+There is no environment fallback: ``REPLICATE_API_TOKEN`` and friends are no
+longer read as provider keys. Configure the key in the admin ``/providers``
+UI; an unconfigured provider raises ``ProviderKeyMissing`` before any call.
 
 The resolved key is returned to the caller and is NEVER logged, printed, or
 cached in this module.
@@ -20,8 +23,8 @@ from typing import Optional
 
 
 async def _resolve_key_for(provider_name: str) -> Optional[str]:
-    """Resolve a provider's active key via ProviderKeyService (UI → legacy →
-    env). Fails CLOSED: any DB / lookup error returns ``None`` so the adapter
+    """Resolve a provider's active key via ProviderKeyService (UI → legacy).
+    Fails CLOSED: any DB / lookup error returns ``None`` so the adapter
     raises ``ProviderKeyMissing`` before any provider call. Errors are
     swallowed deliberately — they must never reach a log line that could carry
     a key fragment.

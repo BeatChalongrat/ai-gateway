@@ -1,29 +1,28 @@
-"""Provider base-URL resolution: DB override → env override → default.
+"""Provider base-URL resolution: DB override → adapter default.
 
-Perf-baseline work (see PERF_BASELINE_PLAN.md §7) needs every adapter
-to point its outbound HTTP at a local mock provider. Hard-coding that
-URL into the adapters would either (a) require a code change before
-each load run or (b) leak into production. Instead we add a single
-settings-backed override map that each adapter consults at call time.
-
-P1 (Sran AI) adds a DB layer on top so a self-hosted provider's
-endpoint can be configured from the admin UI without a redeploy: a
-``system_settings`` row ``provider_base_url:<name>`` wins over both the
-env map and the adapter default.
+A self-hosted provider's endpoint is configured from the admin
+``/providers`` page and stored as a ``system_settings`` row
+``provider_base_url:<name>``. That is the only supported way to set one —
+the same rule provider keys follow, for the same reason: the operators of
+this product are IT staff, not people who should have to edit a file
+inside a container.
 
 Priority order at resolve time:
     1. ``system_settings`` row ``provider_base_url:<name>`` — read via
        a 30s-TTL per-provider cache (mirrors ``_keys_cache`` in
        ``provider_key_service``). Empty value = not configured, fall
        through. DB errors fail open to the next layer.
-    2. ``settings.provider_base_url_overrides`` (JSON dict env var) —
-       if the provider_name key is present and non-empty, its value wins.
-    3. The adapter's hardcoded default (passed in as ``default``).
+    2. The adapter's hardcoded default (passed in as ``default``).
 
-Resolving at call time — not at import time — means the perf runner
-can flip overrides on / off via env var between scenarios without
-restarting the process, and an admin edit propagates within the cache
-TTL without a restart.
+Resolving at call time — not at import time — means an admin edit
+propagates within the cache TTL without a restart.
+
+REMOVED: a ``PROVIDER_BASE_URL_OVERRIDES`` JSON env map used to sit
+between the two layers. It was built for the perf baseline
+(PERF_BASELINE_PLAN.md §7) to point the cloud adapters at an in-cluster
+mock. ``tools/loadtest/docker-compose.loadtest.yml`` still sets it and is
+now a no-op — that harness must seed ``system_settings`` rows instead
+(one INSERT per provider), which the DB layer above already honours.
 
 NOTE ON SCOPE: this module ONLY changes base-URL lookup. Auth headers,
 retries, streaming semantics, timeouts, and response parsing are all
@@ -37,7 +36,6 @@ import ipaddress
 import time
 from urllib.parse import urlsplit
 
-from app.core.config import settings
 from app.core.exceptions import ValidationError
 
 # Providers whose endpoint is operator-supplied (self-hosted boxes) and
@@ -101,9 +99,6 @@ def resolve_base_url(provider_name: str, default: str) -> str:
     db_value = _read_db_override(provider_name)
     if db_value:
         return db_value
-    overrides = settings.provider_base_url_overrides_map
-    if overrides and provider_name in overrides:
-        return overrides[provider_name]
     return default.rstrip("/")
 
 
@@ -176,8 +171,15 @@ def set_stored_base_url(session, provider_name: str, url: str) -> str | None:
     (``validate_provider_base_url``) and for evicting the old URL's
     pooled httpx client (``http_client.evict_client``) — eviction is
     async and this helper is sync by design.
+
+    Also records that this provider's endpoint is database-owned, so the
+    first-boot env seed cannot act on it again (see
+    ``app.services.provider_env_seed``). This module still does not import
+    ``settings``: the mark is a DB write, not an env read, so there is no
+    env tier at resolve time.
     """
     from app.models.system_setting import SystemSettingORM
+    from app.services.provider_env_seed import KIND_BASE_URL, mark_provider_owned
 
     key = f"{PROVIDER_BASE_URL_SETTING_PREFIX}{provider_name}"
     row = session.get(SystemSettingORM, key)
@@ -191,6 +193,9 @@ def set_stored_base_url(session, provider_name: str, url: str) -> str | None:
         session.add(row)
     else:
         row.value = url
+    # Insert-if-absent, so the seeder's own "env-seed" reason survives when
+    # this is called from the seed path.
+    mark_provider_owned(session, KIND_BASE_URL, provider_name, "admin-ui")
     session.flush()
     # PRIME the resolver cache with the new value rather than just
     # clearing it: the row above is only FLUSHED in the caller's

@@ -91,13 +91,65 @@ app/
 
 ## Configuration
 
+### Provider keys and endpoints — env seeds the first boot, the admin UI owns them after
+
+**The rule, in three lines:**
+
+```
+first boot, provider has never had a key  ->  the database is seeded from env
+every boot after that                     ->  the database is authoritative; env is IGNORED
+admin edits in the UI                     ->  persisted, and survive restart
+```
+
+**Editing an env var on a running system does nothing.** That is deliberate, not a
+limitation. Two live sources for the same value is what produced every confusing bug in
+this area — a Providers badge reading `via env` while dispatch used a different key, and
+a key rotated in the UI that chat followed while the embeddings and voice clients kept
+sending the old one. The environment is an install-time convenience so a deployment can
+come up configured; it is never a second place the value lives.
+
+**To change a key or an endpoint after the first boot, use the admin console at
+/providers.** It takes effect with no restart (30 s cache TTL at worst), and the key can
+be tested and rotated in place. A seeded key is an ordinary row — editable, rotatable and
+deletable exactly like one you typed in.
+
+**If you delete a key, it stays deleted.** A restart will not bring it back from the
+environment, even if the variable is still set.
+
+At resolve time there is no environment tier at all:
+
+* **Keys** resolve `provider_keys` (the UI Add-Key flow, and where the seed writes) →
+  `providers.api_key_encrypted` (legacy single key). A provider with neither is
+  unconfigured, and a request routed to it fails with
+  `503 No API key configured for provider '<name>'`.
+* **Endpoints** resolve `system_settings` row `provider_base_url:<name>` (the UI endpoint
+  form, and where the seed writes) → the adapter's built-in default. Self-hosted providers
+  have no default, so an unset endpoint is a clean `503`.
+
+Seeding is recorded. Each provider gets a `system_settings` row
+`provider_env_seed:<kind>:<provider>` saying how it was first configured and when, and
+every boot logs one line per provider (`[startup] provider key openai: seeded`) so a
+deployment that was *not* seeded says why rather than failing silently.
+
+| Seed variable | Seeds |
+|---|---|
+| `OPENAI_API_KEY` | the `openai` key pool |
+| `ANTHROPIC_API_KEY` | the `anthropic` key pool |
+| `OPENROUTER_API_KEY` | the `openrouter` key pool |
+| `PROVIDER_BASE_URL_OVERRIDES` | `provider_base_url:<name>` rows, JSON object keyed by provider |
+
+A placeholder value (`sk-ant-...`, `changeme`, anything under 20 characters) is never
+seeded — it would 401 on dispatch — and a boot that sees one records nothing, so filling
+in the real key and restarting still works.
+
+> **No `ENABLE_PERSISTENT_CONFIG`-style escape hatch.** Open WebUI ships one, and its
+> documented cost is a UI that still *looks* editable while every edit is silently
+> discarded on restart. Nothing here can put the console in that state.
+
 Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENAI_API_KEY` | (empty) | OpenAI API key |
-| `ANTHROPIC_API_KEY` | (empty) | Anthropic API key |
-| `OPENROUTER_API_KEY` | (empty) | OpenRouter API key |
 | `PROVIDER_TIMEOUT_CONNECT` | `5.0` | TCP connect timeout (seconds) |
 | `PROVIDER_TIMEOUT_READ` | `30.0` | Read/response timeout (seconds) |
 | `PROVIDER_MAX_RETRIES` | `2` | Retries on transient failures (429, 5xx, timeout) |

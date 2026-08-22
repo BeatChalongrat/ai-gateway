@@ -486,43 +486,6 @@ async def test_provider_key(
     return result
 
 
-@router.get("/providers/{provider_name}/health")
-async def provider_health(provider_name: str):
-    """On-demand health check — pings the external API with a 10s timeout."""
-    import asyncio
-    import httpx
-    from app.core.config import settings
-
-    endpoints = {
-        "openai": ("https://api.openai.com/v1/models", settings.openai_api_key),
-        "anthropic": ("https://api.anthropic.com/v1/messages", settings.anthropic_api_key),
-        "openrouter": ("https://openrouter.ai/api/v1/models", settings.openrouter_api_key),
-    }
-
-    entry = endpoints.get(provider_name)
-    if not entry:
-        return {"provider": provider_name, "status": "unknown", "message": "No health check configured"}
-
-    url, api_key = entry
-    if not api_key:
-        return {"provider": provider_name, "status": "no_key", "message": "API key not configured"}
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            headers = {"Authorization": f"Bearer {api_key}"}
-            if provider_name == "anthropic":
-                headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-            resp = await client.get(url, headers=headers)
-            return {
-                "provider": provider_name,
-                "status": "ok" if resp.status_code < 400 else "error",
-                "http_status": resp.status_code,
-                "latency_ms": round(resp.elapsed.total_seconds() * 1000),
-            }
-    except Exception as e:
-        return {"provider": provider_name, "status": "unreachable", "message": str(e)[:200]}
-
-
 @router.get("/models", response_model=AdminListResponse[ModelDetail])
 def list_models() -> AdminListResponse[ModelDetail]:
     # Same filter as /providers, so hiding the card cannot leave the model

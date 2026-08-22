@@ -139,12 +139,10 @@ function ProviderLogo({ name, size = 28 }: { name: string; size?: number }) {
 
 function KeysPanel({
   providerName,
-  envConfigured,
   currentEndpoint,
   onClose,
 }: {
   providerName: string;
-  envConfigured: boolean;
   currentEndpoint?: string;
   onClose: () => void;
 }) {
@@ -304,21 +302,6 @@ function KeysPanel({
             </tbody>
           </table>
         </div>
-      ) : envConfigured ? (
-        <div
-          style={{
-            padding: "0.625rem 0.75rem",
-            color: "var(--color-text-secondary)",
-            fontSize: "var(--font-size-sm)",
-            marginBottom: "1rem",
-            background: "color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 25%, transparent)",
-            borderRadius: "var(--radius-md)",
-          }}
-        >
-          {t("infra.providers.envNoteIntro")} <code>{providerName.toUpperCase()}_API_KEY</code>{" "}
-          {t("infra.providers.envNoteBody")}
-        </div>
       ) : (
         <div style={{ padding: "0.75rem 0", color: "var(--color-text-muted)", fontSize: "var(--font-size-sm)", marginBottom: "1rem" }}>
           {t("infra.providers.noKeysConfigured")}
@@ -425,6 +408,8 @@ function ProviderCard({
   const b = brandFor(p.provider_name);
   const totalKeys = keyStatus?.total_keys ?? p.key_count ?? 0;
   const validKeys = keyStatus?.valid_keys ?? 0;
+  // Active rows dispatch will NOT use (invalid or placeholder).
+  const unusableKeys = keyStatus?.unusable_keys ?? 0;
   const isNew = totalKeys === 0 && (keyStatus === undefined || !keyStatus?.configured);
 
   return (
@@ -544,17 +529,21 @@ function ProviderCard({
           <Badge variant={validKeys > 0 ? "success" : "warning"}>
             {t("infra.providers.keyCount", { valid: validKeys, total: totalKeys })}
           </Badge>
-        ) : keyStatus?.source === "environment" ? (
-          <Badge
-            variant="warning"
-            title={t("infra.providers.viaEnvTitle")}
-          >
-            {t("infra.providers.viaEnv")}
-          </Badge>
         ) : keyStatus?.configured ? (
           <Badge variant="success">{t("infra.providers.keySet")}</Badge>
         ) : (
           <Badge variant="neutral">{t("infra.providers.noKey")}</Badge>
+        )}
+        {/* A provider can show "no key" while visibly holding key rows —
+            every row is invalid or a placeholder, so dispatch has nothing.
+            Say so on the card, or the badge reads as a bug. */}
+        {!keyStatus?.configured && unusableKeys > 0 && (
+          <Badge
+            variant="warning"
+            title={t("infra.providers.unusableNote", { n: unusableKeys })}
+          >
+            {t("infra.providers.unusableBadge", { n: unusableKeys })}
+          </Badge>
         )}
         {SELF_HOSTED.has(p.provider_name) && keyStatus !== undefined && !keyStatus?.base_url && (
           <Badge variant="warning">{t("infra.providers.endpointNotSet")}</Badge>
@@ -793,7 +782,6 @@ export default function ProvidersPage() {
                 {isExpanded && (
                   <KeysPanel
                     providerName={p.provider_name}
-                    envConfigured={keyStatuses[p.provider_name]?.source === "environment"}
                     currentEndpoint={keyStatuses[p.provider_name]?.base_url || undefined}
                     onClose={() => handleClosePanel(p.provider_name)}
                   />
