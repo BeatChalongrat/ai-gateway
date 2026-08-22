@@ -105,7 +105,13 @@ Thumbs.db
 !SranDesktop/build/**
 
 # Local data and dev-server artifacts (dev-server*.log already matches *.log)
-data/
+# ROOT-ANCHORED on purpose. Unanchored, ``data/`` matched at any depth and
+# silently ignored backend/app/services/dlp/data/ -- the five corpora the
+# detector engine loads at runtime (content_policy.py, thai_name_no_prefix.py,
+# public_entity_registry.py). They sat tracked-but-ignored for months. The
+# rule was only ever meant for the local ./data dir at the repo root.
+# Same failure mode as ``storage/``; see the hand-written escapes at :32-47.
+/data/
 test-results/
 .next-dev/
 .next-fresh/
@@ -114,11 +120,14 @@ test-results/
 _retired-*/
 
 # AI-workflow scratch files - keep out of the repo (2026-08-12 hygiene pass)
+# Both spellings. PROMPT*.md matches a PREFIX only, so it never caught any
+# of the 75 *_PROMPT.md task briefs it was added for -- they stayed tracked
+# until the 2026-08-22 pass. The suffix form must be listed separately.
 PROMPT*.md
+*_PROMPT.md
 *_sandbox_*
 scratchpad/
 *.patch
-!reports/**/*.patch
 
 # Build artifacts: installers and release binaries (2026-08-20 hygiene pass)
 # Nothing here is source — every one is regenerable by the desktop build.
@@ -138,3 +147,20 @@ scratchpad/
 *.appx
 *.appxbundle
 *.nupkg
+
+# Working documents: records of how the work got done, not how the system
+# works (2026-08-22 hygiene pass). ROOT-ANCHORED so that docs/audit/ --
+# which still holds a design doc awaiting a decision -- is not swept up too.
+/audit/
+/audit-functional/
+/reports/
+/sprint-reports/
+
+# Staged release manifests. releases/latest.json is the LIVE manifest and
+# stays tracked; the per-version staged files are build scratch that a
+# ``git add -A`` would otherwise sweep in.
+releases/*.staged.json
+
+# Stray desktop icon. The build uses Assets/app.ico (csproj:12, iss:31);
+# this one is referenced by nothing and has been committed by accident twice.
+SranDesktop/src/SranDesktop.App/Assets/sran-app.ico
