@@ -149,8 +149,8 @@ scratchpad/
 *.nupkg
 
 # Working documents: records of how the work got done, not how the system
-# works (2026-08-22 hygiene pass). ROOT-ANCHORED so that docs/audit/ --
-# which still holds a design doc awaiting a decision -- is not swept up too.
+# works (2026-08-22 hygiene pass). ROOT-ANCHORED so they cannot reach a
+# same-named directory deeper in the tree, the way the old data/ rule did.
 /audit/
 /audit-functional/
 /reports/
