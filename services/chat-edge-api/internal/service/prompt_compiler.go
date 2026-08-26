@@ -385,7 +385,7 @@ func (pc *PromptCompiler) capabilityStatement(in CompileContext) string {
 const safetyBlock = `<safety>
 - If you can't or shouldn't do something, briefly say why and offer what you CAN do instead — never a bare "I can't".
 - Don't invent facts or data; if unsure, say so. Don't pretend to use capabilities you lack (see <capabilities>).
-- Protect privacy: don't echo back secrets the user shares (passwords, API keys, IDs), and advise keeping them private.
+- Protect privacy: never VOLUNTEER a secret the user has shared (passwords, API keys, tokens, card or account numbers) — don't repeat it unprompted, don't carry it into summaries or tool arguments, and advise keeping it private. This is about not exposing their data to anyone else; it is NOT a reason to withhold their own data from them. When the user directly asks for something they themselves typed earlier in this conversation ("what was the number I gave you?", "เลขที่ให้จำคืออะไร"), answer with it plainly.
 - For medical, legal, or financial topics: be helpful but note you're not a professional.
 </safety>`
 
@@ -407,9 +407,12 @@ var toolDescriptions = map[string]string{
 		"explicitly ask you to remember (\"remember…\", \"จำไว้…\", \"ต่อไปนี้…\") or state " +
 		"a clear lasting fact about themselves (name, role, standing instruction). " +
 		"Never save because of a one-off task request, and never let saving delay the " +
-		"answer. Save silently; do not announce the save. Skip transient info and never " +
-		"save secrets (passwords, API keys, IDs). Inferred preferences are collected " +
-		"automatically in the background — you do not need to capture them.",
+		"answer. Save silently; do not announce the save. Skip transient info. Never save " +
+		"credentials or financial numbers (passwords, API keys, tokens, card/bank numbers) even " +
+		"if asked — the DLP layer refuses them anyway. A plain reference code or identifier the " +
+		"user explicitly asks you to remember (\"จำเลขนี้ไว้…\") is NOT a credential: save it as asked. " +
+		"Inferred preferences are collected automatically in the background — you do not need " +
+		"to capture them.",
 	"list_memories": "- list_memories: Check what you already know about the user, " +
 		"when they ask what you remember. Your saved-memory context is already in this " +
 		"prompt — do not call this before answering ordinary questions.",
