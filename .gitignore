@@ -112,6 +112,13 @@ Thumbs.db
 !SranDesktop/build/
 !SranDesktop/build/**
 
+# FIX19 — same case again: the Electron app's electron-builder NSIS include
+# (apps/desktop/build/installer.nsh) is a required build INPUT the config
+# references, swallowed by the generic ``build/`` rule. Re-include it. (The
+# electron-builder OUTPUT, apps/desktop/release/, stays ignored above.)
+!apps/desktop/build/
+!apps/desktop/build/**
+
 # Local data and dev-server artifacts (dev-server*.log already matches *.log)
 # ROOT-ANCHORED on purpose. Unanchored, ``data/`` matched at any depth and
 # silently ignored backend/app/services/dlp/data/ -- the five corpora the
@@ -155,6 +162,13 @@ scratchpad/
 *.appx
 *.appxbundle
 *.nupkg
+
+# FIX19 — electron-builder output for the Electron desktop app. The installer
+# .exe is already covered above, but the win-unpacked/ tree (app.asar, *.dll,
+# *.pak, builder config) is not — this ignores the whole output dir. Note this
+# is apps/desktop/release/ (singular, a build artefact), NOT the tracked
+# releases/ desktop update channel.
+/apps/desktop/release/
 
 # Working documents: records of how the work got done, not how the system
 # works (2026-08-22 hygiene pass). ROOT-ANCHORED so they cannot reach a

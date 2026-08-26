@@ -183,7 +183,21 @@ void app.whenReady().then(async () => {
   const assembler = new PromptAssembler(chatEdge, log);
   // E4: the sidecar (all local tools), host tools, consent + grants.
   const dataDir = app.getPath("userData");
-  const sidecarExe = path.isAbsolute(config.sidecarPath) ? config.sidecarPath : path.resolve(APP_ROOT, config.sidecarPath);
+  // FIX19 — two-mode sidecar resolution (the same dev/packaged split FIX17
+  // used for the sandbox runtime):
+  //   • PACKAGED: the installed app carries its own sidecar in
+  //     <resources>\sidecar\; there is no repo beside it, so config.sidecarPath
+  //     (a dev, repo-relative path) is IGNORED. BrowserHost.exe + the Chrome
+  //     extension bundle sit in that same folder, which is where the sidecar
+  //     looks for them (its own AppContext.BaseDirectory).
+  //   • DEV (npm start): honour config.sidecarPath exactly as before, so a
+  //     developer runs from the repo without editing anything.
+  const sidecarExe = isRelease
+    ? path.join(process.resourcesPath, "sidecar", "SranDesktop.ToolsSidecar.exe")
+    : path.isAbsolute(config.sidecarPath)
+      ? config.sidecarPath
+      : path.resolve(APP_ROOT, config.sidecarPath);
+  log.info(`SIDECAR resolved (${isRelease ? "packaged" : "dev"}): ${sidecarExe}`);
   sidecar = new SidecarClient(sidecarExe, dataDir, log);
   const permissions = new PermissionStore(path.join(dataDir, "permissions.json"));
   grants = new GrantStore(path.join(dataDir, "grants.json"), { forbiddenRoots: defaultForbiddenRoots(process.env, dataDir) });

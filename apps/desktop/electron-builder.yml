@@ -1,0 +1,73 @@
+# FIX19 — Windows installer for the SRAN Electron desktop app.
+#
+# Identity is deliberately DISTINCT from the retired WPF app ("SRAN Desktop",
+# AppId {B8A2E5F3-...}, Program Files\SRAN Desktop) so a colleague who still
+# has the WPF app installed gets no collision: different appId, product name,
+# install dir, Start-Menu entry and Add/Remove Programs entry.
+appId: co.th.gbtech.sran.aigateway
+productName: SRAN AI Gateway
+copyright: SRAN
+
+# Reproducible output location (a BUILD ARTEFACT — gitignored, never committed).
+directories:
+  output: release
+  buildResources: build
+
+# What ships INSIDE the app (asar). The sidecar is NOT here — it is an external
+# exe, carried via extraResources below. assets/** is unpacked so session.html
+# and app.ico are real files on disk (loadFile / Tray icon / file:// origin).
+files:
+  - dist/**
+  - config/**
+  - assets/**
+  - package.json
+asarUnpack:
+  - assets/**
+
+# The tools sidecar (+ BrowserHost.exe relay + Chrome extension bundle) is
+# copied verbatim into <install>\resources\sidecar\. The packaged app resolves
+# it as process.resourcesPath\sidecar\SranDesktop.ToolsSidecar.exe (index.ts).
+extraResources:
+  - from: ../../SranDesktop/publish/sidecar-fix15
+    to: sidecar
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - nsis
+  icon: assets/app.ico
+  # Unsigned this round (no certificate — see the report). electron-builder
+  # leaves the binaries unsigned when no CSC certificate is provided.
+  #
+  # signAndEditExecutable:false skips BOTH code-signing AND the rcedit step
+  # that embeds the icon/version into the app exe. rcedit + signtool live in
+  # electron-builder's winCodeSign package, whose archive carries macOS dylib
+  # SYMLINKS that 7-Zip cannot create on a Windows host without symbolic-link
+  # privilege (Developer Mode / admin) — a system setting this build must not
+  # change. Turning this off removes the winCodeSign dependency so an UNSIGNED
+  # installer builds on a locked-down machine. Cost: the installed app exe
+  # keeps Electron's default icon (the SETUP.EXE + shortcuts still use app.ico
+  # via NSIS, which needs no rcedit). On a machine with Developer Mode on (or
+  # CI), drop this line to get the embedded icon too — the config is otherwise
+  # complete. See the report.
+  signAndEditExecutable: false
+
+nsis:
+  # Per-user install (no admin prompt); the native-messaging host it registers
+  # is HKCU anyway. Installs under %LOCALAPPDATA%\Programs\SRAN AI Gateway —
+  # away from the WPF app's Program Files\SRAN Desktop.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SRAN AI Gateway
+  # Custom uninstall step: remove the native-messaging registry key so no stale
+  # key survives (the leftover that bit the owner). The user data folder is
+  # KEPT deliberately — see installer.nsh and the report.
+  include: build/installer.nsh
+
+# No auto-update channel: generate NO latest.yml / update metadata, publish
+# nowhere. The standing rule (never publish releases/latest.json) holds.
+publish: null
