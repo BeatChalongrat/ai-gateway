@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+// FIX20 — the ONE way to build the SRAN Desktop Windows installer.
+//
+//   npm run dist                                   → localhost build (repo default config)
+//   npm run dist -- --config C:\path\to\desktop.config.json
+//   SRAN_DESKTOP_BUILD_CONFIG=C:\path\to\desktop.config.json npm run dist
+//
+// A build aimed at a shared server is produced WITHOUT editing source: the
+// owner writes one config file (start from config/desktop.config.server.example.json),
+// points this script at it, and the file is (1) run through the app's own
+// validator — the same code the app runs at startup, so a bad file fails the
+// BUILD, not a colleague's first launch — then (2) staged to
+// build/desktop.config.json, which electron-builder.yml ships beside the exe
+// as <install>\resources\desktop.config.json, the file the packaged app reads.
+//
+// The finished installer's full path is printed, loudly, as the LAST line.
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const ROOT = path.resolve(__dirname, "..");
+const DEFAULT_CONFIG = path.join(ROOT, "config", "desktop.config.json");
+const STAGED_CONFIG = path.join(ROOT, "build", "desktop.config.json");
+const RELEASE_DIR = path.join(ROOT, "release");
+
+function fail(message) {
+  console.error(`\nBUILD FAILED: ${message}\n`);
+  process.exit(1);
+}
+
+// ── 1. which config ────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+let requested = process.env.SRAN_DESKTOP_BUILD_CONFIG || "";
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === "--config") requested = argv[i + 1] || "";
+}
+const source = requested ? path.resolve(requested) : DEFAULT_CONFIG;
+if (/\.example\.json$/i.test(source)) {
+  fail(`${source} is an EXAMPLE (placeholder hosts). Copy it, fill in the real server, and pass the copy.`);
+}
+if (!fs.existsSync(source)) fail(`config not found: ${source}`);
+
+// ── 2. validate with the app's own validator (dist/main/config.js, built by
+//       `npm run build`, which the `dist` npm script runs first) ────────────
+let loadConfig;
+try {
+  ({ loadConfig } = require(path.join(ROOT, "dist", "main", "config.js")));
+} catch (err) {
+  fail(`dist/main/config.js missing — run \`npm run build\` first (${err.message})`);
+}
+let cfg;
+try {
+  cfg = loadConfig(source);
+} catch (err) {
+  fail(`config rejected by the app's validator:\n  ${err.message}`);
+}
+const localhostBuild = /^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/i.test(cfg.pageUrl);
+
+console.log("── SRAN Desktop build ─────────────────────────────────────────");
+console.log(`config     : ${source}${source === DEFAULT_CONFIG ? "  (repo default)" : ""}`);
+console.log(`pageUrl    : ${cfg.pageUrl}`);
+console.log(`gatewayUrl : ${cfg.gatewayUrl}`);
+console.log(`chatEdgeUrl: ${cfg.chatEdgeUrl}`);
+console.log(`portal     : ${cfg.portalOrigin ?? "(none)"}`);
+if (localhostBuild) {
+  console.log("NOTE       : this build points at localhost — it only works on a machine running the stack.");
+  console.log("             For a colleague: npm run dist -- --config <server config>  (see config/README.md)");
+}
+
+// ── 3. stage it where electron-builder.yml picks it up ─────────────────────
+fs.mkdirSync(path.dirname(STAGED_CONFIG), { recursive: true });
+fs.copyFileSync(source, STAGED_CONFIG);
+
+// ── 4. electron-builder ────────────────────────────────────────────────────
+const result = spawnSync("npx electron-builder --win --config electron-builder.yml --publish never", {
+  cwd: ROOT,
+  stdio: "inherit",
+  shell: true,
+});
+if (result.status !== 0) fail(`electron-builder exited ${result.status}`);
+
+// ── 5. say where it is — loudly, last ──────────────────────────────────────
+const installers = fs
+  .readdirSync(RELEASE_DIR)
+  .filter((f) => /\.exe$/i.test(f))
+  .map((f) => ({ file: path.join(RELEASE_DIR, f), mtime: fs.statSync(path.join(RELEASE_DIR, f)).mtimeMs }))
+  .sort((a, b) => b.mtime - a.mtime);
+if (installers.length === 0) fail(`no installer .exe found in ${RELEASE_DIR}`);
+const installer = installers[0].file;
+const sizeMb = (fs.statSync(installer).size / 1024 / 1024).toFixed(0);
+
+console.log("");
+console.log("═══════════════════════════════════════════════════════════════");
+console.log(`  INSTALLER READY (${sizeMb} MB, points at ${cfg.pageUrl})`);
+console.log(`  ${installer}`);
+console.log("═══════════════════════════════════════════════════════════════");

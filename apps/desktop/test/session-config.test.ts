@@ -83,3 +83,35 @@ describe("session config validation", () => {
     expect(() => validateConfig({ ...base, signInTimeoutSeconds: 5 }, "t")).toThrow(/signInTimeoutSeconds/);
   });
 });
+
+// FIX20 §5 — where the config comes from, by mode. The packaged app reads
+// the file shipped beside the exe (<resources>\desktop.config.json), never a
+// copy inside the asar; dev reads the repo's config/; the env override wins
+// over both.
+describe("config resolution by mode (FIX20 §5)", () => {
+  it("packaged: the file beside the exe, under resourcesPath", () => {
+    const resources = path.join("C:", "Users", "x", "AppData", "Local", "Programs", "SRAN Desktop", "resources");
+    const p = resolveConfigPath(APP_ROOT, {}, resources);
+    expect(p).toBe(path.join(resources, "desktop.config.json"));
+    expect(p).not.toContain("app.asar");
+  });
+
+  it("dev: the repo's config/desktop.config.json", () => {
+    expect(resolveConfigPath(APP_ROOT, {}, null)).toBe(path.join(APP_ROOT, "config", "desktop.config.json"));
+  });
+
+  it("SRAN_DESKTOP_CONFIG overrides both modes (absolute only)", () => {
+    const override = path.join("C:", "sran", "desktop.config.json");
+    const env = { SRAN_DESKTOP_CONFIG: override };
+    expect(resolveConfigPath(APP_ROOT, env, path.join("C:", "anything", "resources"))).toBe(override);
+    expect(resolveConfigPath(APP_ROOT, env, null)).toBe(override);
+    expect(() => resolveConfigPath(APP_ROOT, { SRAN_DESKTOP_CONFIG: "relative.json" }, path.join("C:", "r"))).toThrow(/absolute/);
+  });
+
+  it("the server example passes the same validator a real server config must (placeholders aside)", () => {
+    const example = loadConfig(path.join(APP_ROOT, "config", "desktop.config.server.example.json"));
+    expect(example.pageUrl).toMatch(/^https:\/\//);
+    expect(example.pageUrl).not.toMatch(/localhost/);
+    expect(example.allowedOrigins).not.toContain(example.gatewayUrl);
+  });
+});

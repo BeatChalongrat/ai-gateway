@@ -1,8 +1,9 @@
 {
   "name": "sran-desktop",
   "private": true,
-  "version": "0.1.0-e1",
-  "description": "SRAN Desktop — Electron shell (E1 skeleton: opens web-chat, cannot go anywhere else)",
+  "version": "0.1.0-e2",
+  "description": "SRAN Desktop — the desktop client of SRAN AI Gateway",
+  "author": "SRAN",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -12,7 +13,7 @@
     "measure": "npm run build && electron . --measure",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dist": "npm run build && electron-builder --win --config electron-builder.yml --publish never"
+    "dist": "npm run build && node scripts/dist.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

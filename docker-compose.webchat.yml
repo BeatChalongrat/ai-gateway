@@ -284,11 +284,9 @@ services:
         # / login redirect all break. Changing them requires a REBUILD.
         NEXT_PUBLIC_GATEWAY_URL: ${WEB_CHAT_GATEWAY_URL:-http://localhost:8080}
         NEXT_PUBLIC_PORTAL_URL: ${WEB_CHAT_PORTAL_URL:-http://localhost:3001}
-        # Shell Phase 2 hosted mode: build with WEB_CHAT_HOSTED=1 to bake
-        # a shell-hosted bundle (page-side refresh disabled). Default is
-        # empty = normal browser behaviour. Baked at build time; flipping
-        # it requires a REBUILD (per-surface build matrix = Phase 6).
-        NEXT_PUBLIC_HOSTED: ${WEB_CHAT_HOSTED:-}
+        # (FIX20 §6.5: the desktop shell's hosted mode is detected at RUNTIME
+        # from window.sranHost — no NEXT_PUBLIC_HOSTED build arg; one image
+        # serves the browser and the Electron app.)
     container_name: ai-gateway-web-chat
     ports:
       - "3002:3002"

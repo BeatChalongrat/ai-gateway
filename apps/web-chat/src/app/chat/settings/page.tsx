@@ -15,16 +15,18 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { HOSTED_MODE } from "@/lib/auth";
+import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type SettingKey, type SettingsSnapshot } from "@/lib/hostApi";
 
 export default function SettingsPage() {
+  const hosted = useHostedMode();
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [restartNote, setRestartNote] = useState(false);
 
   useEffect(() => {
-    if (!HOSTED_MODE) return;
+    // Depends on `hosted`: the hydration pass commits with false first.
+    if (!hosted) return;
     void (async () => {
       try {
         setSettings(await hostApi.getSettings());
@@ -34,9 +36,9 @@ export default function SettingsPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [hosted]);
 
-  if (!HOSTED_MODE) return <DesktopOnlyNotice />;
+  if (!hosted) return <DesktopOnlyNotice />;
 
   // Persist one key, optimistic with revert. The host validates the value and
   // drops any key outside its allow-list; a refusal reverts the control.

@@ -1,7 +1,11 @@
 // Shell configuration — the page URL, the allow-list and the portal origin
 // come from a file, never from constants (E1 §2). Resolution order:
 //   1. $SRAN_DESKTOP_CONFIG  (absolute path — per-environment override)
-//   2. <app root>/config/desktop.config.json
+//   2. PACKAGED (FIX20 §5): <install>\resources\desktop.config.json — the
+//      file scripts/dist.js ships beside the exe. Where an installed build
+//      points is decided at BUILD time by the config handed to that script,
+//      never by editing source; an admin can also edit the shipped file.
+//   3. DEV (npm start): <app root>/config/desktop.config.json
 // Validation is strict and happens once, before any window exists; a bad file
 // is a startup failure, not a silently widened allow-list.
 //
@@ -47,15 +51,29 @@ export interface ShellConfig {
 }
 
 export const CONFIG_ENV_VAR = "SRAN_DESKTOP_CONFIG";
+/** FIX20 §5: the runtime config's name beside the exe (<resources>\…). */
+export const PACKAGED_CONFIG_FILENAME = "desktop.config.json";
 const SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*$/;
 
-export function resolveConfigPath(appRoot: string, env: NodeJS.ProcessEnv = process.env): string {
+/**
+ * @param packagedResourcesDir  process.resourcesPath when app.isPackaged,
+ *   null in dev. A packaged app never falls back to the repo/asar copy: a
+ *   missing shipped config is a packaging error and must fail loudly.
+ */
+export function resolveConfigPath(
+  appRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+  packagedResourcesDir: string | null = null,
+): string {
   const override = env[CONFIG_ENV_VAR];
   if (override && override.trim() !== "") {
     if (!path.isAbsolute(override)) {
       throw new Error(`${CONFIG_ENV_VAR} must be an absolute path (got '${override}').`);
     }
     return override;
+  }
+  if (packagedResourcesDir !== null) {
+    return path.join(packagedResourcesDir, PACKAGED_CONFIG_FILENAME);
   }
   return path.join(appRoot, "config", "desktop.config.json");
 }

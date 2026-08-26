@@ -18,14 +18,15 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { HOSTED_MODE } from "@/lib/auth";
+import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type CatalogConnectorDto } from "@/lib/hostApi";
 
 export default function ConnectorsPage() {
+  const hosted = useHostedMode();
   // Non-hosted guard: this screen only makes sense inside the desktop
   // shell where the host bridge is present. On the web build, show a
   // muted notice instead of attempting host.query calls that can't land.
-  if (!HOSTED_MODE) {
+  if (!hosted) {
     return (
       <div className="flex flex-1 items-center justify-center bg-bg-base px-6">
         <p className="max-w-sm text-center text-sm text-text-muted">

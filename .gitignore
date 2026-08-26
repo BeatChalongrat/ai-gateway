@@ -118,6 +118,10 @@ Thumbs.db
 # electron-builder OUTPUT, apps/desktop/release/, stays ignored above.)
 !apps/desktop/build/
 !apps/desktop/build/**
+# FIX20 — but the runtime config scripts/dist.js STAGES there for
+# electron-builder (a copy of whatever config the build was pointed at — for
+# a server build, a file that lives outside the repo) is a build artefact.
+apps/desktop/build/desktop.config.json
 
 # Local data and dev-server artifacts (dev-server*.log already matches *.log)
 # ROOT-ANCHORED on purpose. Unanchored, ``data/`` matched at any depth and

@@ -68,15 +68,25 @@ let sidecar: SidecarClient | null = null;
 let scheduler: TaskScheduler | null = null;
 let grants: GrantStore | null = null;
 
-// ── userData: NOT "%APPDATA%\SRAN Desktop" ──────────────────────────────────
-app.setName("SRAN Desktop (Electron)");
+// ── identity (FIX20 §1): the app is SRAN Desktop, one client of SRAN AI
+// Gateway. The AppUserModelId MUST equal electron-builder's appId — the
+// installer stamps that id on the shortcuts, and Windows groups/pins the
+// running window under the shortcut only when the two match.
+// userData stays "SranDesktop-Electron" (not user-visible): "%APPDATA%\SRAN
+// Desktop" still exists on machines that ran the retired WPF app and holds
+// its incompatible data; renaming would also orphan every existing grant,
+// connector and note. The installer keeps this folder on uninstall.
+app.setName("SRAN Desktop");
 app.setPath("userData", path.join(app.getPath("appData"), "SranDesktop-Electron"));
-app.setAppUserModelId("ai.sran.desktop.electron.dev");
+app.setAppUserModelId("co.th.gbtech.sran.desktop");
 
 // ── config: file, never constants ───────────────────────────────────────────
+// FIX20 §5: packaged → the file shipped beside the exe (<resources>\
+// desktop.config.json); dev → the repo's config/desktop.config.json;
+// $SRAN_DESKTOP_CONFIG overrides both.
 let config: ShellConfig;
 try {
-  const configPath = resolveConfigPath(APP_ROOT);
+  const configPath = resolveConfigPath(APP_ROOT, process.env, isRelease ? process.resourcesPath : null);
   config = loadConfig(configPath);
   log.info(`config loaded from ${configPath}`);
   log.info(
@@ -136,7 +146,7 @@ app.on("will-quit", () => {
 // ── ready ───────────────────────────────────────────────────────────────────
 void app.whenReady().then(async () => {
   log.attachFile(path.join(app.getPath("userData"), "logs", "shell.log"));
-  log.info(`SRAN Desktop (Electron) ${app.getVersion()} pid=${process.pid} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} packaged=${isRelease}`);
+  log.info(`SRAN Desktop ${app.getVersion()} pid=${process.pid} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} packaged=${isRelease}`);
   log.info(`userData=${app.getPath("userData")}`);
 
   installSessionPolicy(session.defaultSession);
@@ -403,6 +413,15 @@ function createMainWindow(): BrowserWindow {
     }),
   });
   Menu.setApplicationMenu(null);
+
+  // FIX20 §1: the OS window title is the app's identity (taskbar, Alt-Tab), so
+  // it stays "SRAN Desktop". By default Electron overwrites it with each
+  // page's <title> — the hosted page is "SRAN Chat", a different product — so
+  // refuse the page-driven update and keep the app name.
+  win.on("page-title-updated", (event) => {
+    event.preventDefault();
+    if (!win.isDestroyed() && win.getTitle() !== "SRAN Desktop") win.setTitle("SRAN Desktop");
+  });
 
   win.once("ready-to-show", () => {
     win.show();

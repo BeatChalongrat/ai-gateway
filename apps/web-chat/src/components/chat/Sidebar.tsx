@@ -20,7 +20,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
-import { HOSTED_MODE, logoutSession } from "@/lib/auth";
+import { useHostedMode } from "@/hooks/useHostedMode";
+import { logoutSession } from "@/lib/auth";
 import { useI18nStore, useT } from "@/lib/i18n";
 import type {
   Conversation,
@@ -542,6 +543,7 @@ function UserMenu({
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const hosted = useHostedMode();
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
   const isDark = theme === "dark";
@@ -669,10 +671,11 @@ function UserMenu({
             setOpen={setOpen}
           />
           {/* Desktop-only screens (Phase 5). Reachable only in the shell —
-              HOSTED_MODE is NEXT_PUBLIC_HOSTED=1, set only by the WebView2 host.
-              They read/write host-local state over the bridge; the plain web
-              build never shows them. */}
-          {HOSTED_MODE ? (
+              decided at RUNTIME (FIX20 §6.5): useHostedMode() is true exactly
+              when the Electron preload's window.sranHost is present, so ONE
+              build serves both surfaces. They read/write host-local state
+              over the bridge; a plain browser never shows them. */}
+          {hosted ? (
             <>
               <div className="border-t border-border/60" />
               <MenuItem

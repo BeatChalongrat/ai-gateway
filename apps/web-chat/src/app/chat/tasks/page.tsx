@@ -23,12 +23,13 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { HOSTED_MODE } from "@/lib/auth";
+import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type TaskDto, type TaskRunDto } from "@/lib/hostApi";
 
 import { CloudTasksSection, KindBadge } from "./CloudTasksSection";
 
 export default function ScheduledTasksPage() {
+  const hosted = useHostedMode();
   // The create flow starts with a KIND choice so the user sees the tradeoff at
   // the moment of choosing. Picking a kind bumps that section's create nonce,
   // which opens its own create form.
@@ -73,7 +74,7 @@ export default function ScheduledTasksPage() {
           onRequestCreate={() => setChooserOpen(true)}
         />
 
-        {HOSTED_MODE ? (
+        {hosted ? (
           <LocalTasksSection
             openCreateNonce={localCreateNonce}
             onRequestCreate={() => setChooserOpen(true)}
@@ -113,6 +114,7 @@ function KindChooserModal({
   onPickCloud: () => void;
   onPickLocal: () => void;
 }) {
+  const hosted = useHostedMode();
   return (
     <Modal
       open={open}
@@ -135,7 +137,7 @@ function KindChooserModal({
           </span>
         </button>
 
-        {HOSTED_MODE ? (
+        {hosted ? (
           <button
             type="button"
             onClick={onPickLocal}

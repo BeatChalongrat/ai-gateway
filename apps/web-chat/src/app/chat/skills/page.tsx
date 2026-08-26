@@ -15,11 +15,12 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { HOSTED_MODE } from "@/lib/auth";
+import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type SkillDto } from "@/lib/hostApi";
 
 export default function SkillsPage() {
-  if (!HOSTED_MODE) {
+  const hosted = useHostedMode();
+  if (!hosted) {
     return (
       <div className="flex flex-1 items-center justify-center bg-bg-base px-6 text-center">
         <p className="max-w-sm text-sm text-text-muted">

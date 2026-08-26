@@ -26,10 +26,33 @@ export const PORTAL_URL =
 // navigation to the Portal login as its re-auth signal. The page must
 // therefore never rotate the refresh token itself: a page-side refresh
 // would consume the token the host holds and log the HOST out
-// (WEBVIEW2_SPIKE_REPORT.md finding 7). Baked at build time like every
-// NEXT_PUBLIC_* value.
-export const HOSTED_MODE =
-  typeof process !== "undefined" && process.env.NEXT_PUBLIC_HOSTED === "1";
+// (WEBVIEW2_SPIKE_REPORT.md finding 7).
+//
+// FIX20 §6.5 — a RUNTIME decision, not a build flag. ONE web-chat build
+// serves both the browser and the Electron shell, so NEXT_PUBLIC_HOSTED
+// (baked at build time) could never be right for both: set, browser users
+// got desktop-only panels that cannot work; unset (the deployed default),
+// the desktop app hid five of its screens. The host is detectable instead:
+// the Electron preload exposes `window.sranHost` (contextBridge, the E3
+// surface) BEFORE any page script runs — Electron's preload contract, and
+// the preload obtains its nonce synchronously for exactly that reason — so
+// evaluating this once at module load is both correct and early enough for
+// the timing-sensitive use (refreshSession / startSilentRefresh must see it
+// before the page's first refresh attempt; they do, because this module is
+// evaluated before either can run).
+//
+// Components must NOT read HOSTED_MODE during render (server HTML has no
+// window → hydration mismatch); they use hooks/useHostedMode, which hydrates
+// with the server value and switches after.
+export function detectHostedMode(win: unknown = typeof window === "undefined" ? undefined : window): boolean {
+  if (typeof win !== "object" || win === null) return false;
+  const host = (win as { sranHost?: unknown }).sranHost;
+  if (typeof host !== "object" || host === null) return false;
+  const h = host as { postMessage?: unknown; addEventListener?: unknown };
+  return typeof h.postMessage === "function" && typeof h.addEventListener === "function";
+}
+
+export const HOSTED_MODE: boolean = detectHostedMode();
 
 /** Bounce to the Portal login with Web Chat as the post-login return target. */
 export function redirectToPortalLogin(): void {

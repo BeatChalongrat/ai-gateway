@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import { HOSTED_MODE } from "@/lib/auth";
+import { useHostedMode } from "@/hooks/useHostedMode";
 import {
   clearDraft,
   loadDraft,
@@ -110,6 +110,7 @@ export function ChatInput({
   onRequestConversation,
 }: Props) {
   const t = useT();
+  const hosted = useHostedMode();
   const [text, setText] = useState("");
 
   // ── Composer draft persistence (Batch 1 W1 — desktop parity) ────
@@ -1071,14 +1072,14 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => {
-                    if (HOSTED_MODE) return; // FIX9 Part B: video gen isn't wired in the desktop app
+                    if (hosted) return; // FIX9 Part B: video gen isn't wired in the desktop app
                     setVideoMode((v) => !v);
                     setImageMode(false);
                   }}
                   aria-label={t("input.videoMode")}
-                  title={HOSTED_MODE ? "Video generation isn't available in the desktop app yet." : t("input.videoMode")}
-                  aria-pressed={HOSTED_MODE ? false : videoMode}
-                  disabled={disabled || HOSTED_MODE}
+                  title={hosted ? "Video generation isn't available in the desktop app yet." : t("input.videoMode")}
+                  aria-pressed={hosted ? false : videoMode}
+                  disabled={disabled || hosted}
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     videoMode
                       ? "bg-rose-500/15 text-rose-400"
