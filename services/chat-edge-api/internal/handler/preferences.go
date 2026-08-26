@@ -16,15 +16,22 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 )
 
 type PreferencesHandler struct {
 	prefs *repository.PreferencesRepo
+	// FIX22 §1a — optional write-time prompt guard: custom instructions are
+	// folded into every turn's system prompt (prompt_compiler layer 10).
+	guard service.PromptGuard
 }
 
 func NewPreferencesHandler(p *repository.PreferencesRepo) *PreferencesHandler {
 	return &PreferencesHandler{prefs: p}
 }
+
+// SetPromptGuard wires the FIX22 write-time guard (nil = unchecked).
+func (h *PreferencesHandler) SetPromptGuard(g service.PromptGuard) { h.guard = g }
 
 type preferencesResponse struct {
 	CustomInstructionsAbout   string `json:"custom_instructions_about"`
@@ -86,6 +93,12 @@ func (h *PreferencesHandler) Put(w http.ResponseWriter, r *http.Request) {
 	if len([]rune(about)) > maxInstructionChars || len([]rune(respond)) > maxInstructionChars {
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
 			"each instruction field is limited to 1500 characters")
+		return
+	}
+	// FIX22 §1a — refuse instructions that would 403 every future turn.
+	if err := service.GuardPromptText(r.Context(), h.guard, caller.TenantUUID, caller.UserID,
+		about+"\n"+respond, "your custom instructions"); err != nil {
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
 		return
 	}
 

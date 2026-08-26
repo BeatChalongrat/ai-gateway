@@ -57,11 +57,19 @@ type MemoryService struct {
 	// Nil-safe — without it the cap defaults effectively to
 	// "unlimited" (tests + legacy boot paths).
 	settings *repository.TenantMemorySettingsRepo
+	// FIX22 §1a — optional write-time prompt guard (the gateway's content
+	// guardrail). Nil-safe: without it writes are unchecked, as before.
+	guard PromptGuard
 }
 
 func NewMemoryService(repo *repository.MemoryRepo) *MemoryService {
 	return &MemoryService{repo: repo}
 }
+
+// SetPromptGuard wires the FIX22 write-time guard. Every memory write
+// (public API, save_memory tool, preference extractor) goes through
+// CreateMemory/UpdateMemory, so this one hook covers all of them.
+func (s *MemoryService) SetPromptGuard(g PromptGuard) { s.guard = g }
 
 // SetTenantSettings wires the S9 per-tenant settings repo so the
 // CreateMemory path can enforce the max-memories-per-user cap.
@@ -137,6 +145,11 @@ func (s *MemoryService) CreateMemory(
 	// to silently store a leaked key.
 	if containsProhibitedData(content) {
 		return nil, ErrMemoryProhibitedContent
+	}
+	// FIX22 §1a — would this memory 403 every future turn? Ask the gateway
+	// BEFORE any repo access; a *PromptGuardrailError names the phrase.
+	if err := guardPromptText(ctx, s.guard, in.TenantID, in.UserID, content, "this memory"); err != nil {
+		return nil, err
 	}
 
 	// S9 — per-tenant max-memories cap. Skipped when the settings
@@ -271,6 +284,9 @@ func (s *MemoryService) UpdateMemory(
 		}
 		if containsProhibitedData(c) {
 			return nil, ErrMemoryProhibitedContent
+		}
+		if gerr := guardPromptText(ctx, s.guard, tenantID, userID, c, "this memory"); gerr != nil {
+			return nil, gerr
 		}
 		existing.Content = c
 		existing.NormalizedKey = normalizeKey(c)

@@ -33,7 +33,13 @@ var (
 type ProjectService struct {
 	projects      *repository.ProjectRepo
 	conversations *repository.ConversationRepo
+	// FIX22 §1a — optional write-time prompt guard for the instructions
+	// text (it is folded verbatim into every member conversation's prompt).
+	guard PromptGuard
 }
+
+// SetPromptGuard wires the FIX22 write-time guard (nil = unchecked).
+func (s *ProjectService) SetPromptGuard(g PromptGuard) { s.guard = g }
 
 func NewProjectService(
 	projects *repository.ProjectRepo, conversations *repository.ConversationRepo,
@@ -59,6 +65,9 @@ func (s *ProjectService) Create(
 	instructions = strings.TrimSpace(instructions)
 	if len(instructions) > maxProjectInstructionsLen {
 		return nil, ErrProjectInstructionsBig
+	}
+	if err := guardPromptText(ctx, s.guard, tenantID, userID, instructions, "the project instructions"); err != nil {
+		return nil, err
 	}
 	return s.projects.Create(ctx, tenantID, userID, n, instructions)
 }
@@ -98,6 +107,9 @@ func (s *ProjectService) Update(
 		trimmed := strings.TrimSpace(*instructions)
 		if len(trimmed) > maxProjectInstructionsLen {
 			return nil, ErrProjectInstructionsBig
+		}
+		if err := guardPromptText(ctx, s.guard, tenantID, userID, trimmed, "the project instructions"); err != nil {
+			return nil, err
 		}
 		instructions = &trimmed
 	}

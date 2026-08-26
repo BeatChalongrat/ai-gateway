@@ -180,6 +180,13 @@ func main() {
 	)
 	conversationSvc := service.NewConversationService(conversations, cfg)
 	projectSvc := service.NewProjectService(projects, conversations)
+	// FIX22 §1a — the write-time prompt guard: every stored text that later
+	// lands in a system prompt (memories, project instructions, custom
+	// instructions, skill instructions) is checked against the gateway's
+	// content guardrail BEFORE it is persisted. One rule set (the backend's);
+	// chat-edge keeps no copy. Fail-open when the gateway is unreachable.
+	promptGuard := service.NewGatewayPromptGuard(gateway)
+	projectSvc.SetPromptGuard(promptGuard)
 	messageSvc := service.NewMessageService(
 		conversations, messages, gateway, titles, cfg, cfg.MaxContextMessages,
 	)
@@ -247,6 +254,7 @@ func main() {
 	// S9 — wire the tenant settings repo onto the memory service
 	// so CreateMemory enforces the per-tenant max-memories cap.
 	memorySvc.SetTenantSettings(tenantSettingsRepo)
+	memorySvc.SetPromptGuard(promptGuard) // FIX22 §1a
 	// S9 — Export + Purge + Retention. Storage root reuses the
 	// existing FileStorageRoot config so exports land in the
 	// same bind-mount as uploads (./data by default).
@@ -458,6 +466,11 @@ func main() {
 	conversationHandler.SetMessageService(messageSvc)
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
+	// FIX22 §1a — custom instructions + skill instructions are prompt sources too.
+	preferencesHandler := handler.NewPreferencesHandler(prefsRepo)
+	preferencesHandler.SetPromptGuard(promptGuard)
+	skillsHandler := handler.NewSkillHandler(skillsRepo)
+	skillsHandler.SetPromptGuard(promptGuard)
 	messageHandler.SetFileRepo(filesRepo)
 	messageHandler.SetSourceRepo(sourcesRepo)
 
@@ -522,7 +535,7 @@ func main() {
 		Model:          modelHandler,
 		Feedback:       handler.NewFeedbackHandler(feedbackSvc),
 		File:           handler.NewFileHandler(fileSvc),
-		Preferences:    handler.NewPreferencesHandler(prefsRepo),
+		Preferences:    preferencesHandler,
 		Share:          shareHandler,
 		Admin:          adminHandler,
 		Knowledge:      handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
@@ -532,7 +545,7 @@ func main() {
 		Workspace:      handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
 		Memory:         handler.NewMemoryHandler(memorySvc),
 		Search:         handler.NewSearchHandler(searchSvc),
-		Skills:         handler.NewSkillHandler(skillsRepo),
+		Skills:         skillsHandler,
 		// FIX13 — cloud scheduled tasks (migration 035): authenticated CRUD +
 		// audit. FIX16 — the unattended firing loop IS now wired (above, gated
 		// on CLOUD_SCHEDULER_ENABLED): StartScheduler → CloudTaskRunner.Tick,

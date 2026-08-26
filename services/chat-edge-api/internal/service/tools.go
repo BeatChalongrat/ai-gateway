@@ -983,6 +983,10 @@ func (e *ToolExecutor) execSaveMemory(
 		switch {
 		case errors.Is(err, ErrMemoryProhibitedContent):
 			return "I can't save that — it appears to contain sensitive data (API keys, IDs, financial info, etc.)."
+		case errors.Is(err, ErrPromptGuardrailBlocked):
+			// FIX22 §1a — the tool result says REFUSED, so the model cannot
+			// truthfully report a save that did not happen (the FIX5 lie).
+			return "Error: " + err.Error()
 		case errors.Is(err, ErrMemoryDuplicate):
 			return "I already have that saved."
 		case errors.Is(err, ErrMemoryEmpty):

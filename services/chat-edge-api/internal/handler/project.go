@@ -279,7 +279,8 @@ func (h *ProjectHandler) writeProjectError(w http.ResponseWriter, err error) {
 		errors.Is(err, service.ErrProjectKBNotFound):
 		WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
 	case errors.Is(err, service.ErrProjectNameInvalid),
-		errors.Is(err, service.ErrProjectInstructionsBig):
+		errors.Is(err, service.ErrProjectInstructionsBig),
+		errors.Is(err, service.ErrPromptGuardrailBlocked): // FIX22 §1a
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
 	default:
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")

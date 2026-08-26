@@ -25,15 +25,22 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 )
 
 type SkillHandler struct {
 	skills *repository.SkillRepo
+	// FIX22 §1a — optional write-time prompt guard: a skill's Instructions
+	// is string-concatenated into the system prompt (layer 10b).
+	guard service.PromptGuard
 }
 
 func NewSkillHandler(r *repository.SkillRepo) *SkillHandler {
 	return &SkillHandler{skills: r}
 }
+
+// SetPromptGuard wires the FIX22 write-time guard (nil = unchecked).
+func (h *SkillHandler) SetPromptGuard(g service.PromptGuard) { h.guard = g }
 
 // ---------------------------------------------------------------------------
 // Wire types
@@ -100,6 +107,12 @@ func (h *SkillHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg := validateSkillInput(req.Name, req.Description, req.Instructions); msg != "" {
 		WriteError(w, http.StatusBadRequest, CodeValidationError, msg)
+		return
+	}
+	// FIX22 §1a — refuse skill instructions that would 403 every future turn.
+	if err := service.GuardPromptText(r.Context(), h.guard, caller.TenantUUID, caller.UserID,
+		req.Instructions, "the skill instructions"); err != nil {
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
 		return
 	}
 	triggers := req.Triggers
