@@ -65,6 +65,12 @@ services:
       # SOURCE (an ABSOLUTE host path the daemon can resolve).
       SANDBOX_WORKDIR: "/sandbox-runs"
       SANDBOX_HOST_WORKDIR: "${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}"
+      # FIX17 §4 — DEVELOPMENT MODE: unset = the daemon's default runtime
+      # (runc) with the standard container boundary. Production requires
+      # gVisor via SANDBOX_RUNTIME=runsc (docker-compose.prod.yml). Either
+      # way the boot log states `boundary_in_effect=<standard|gvisor>` from
+      # a real probe run. See docs/DEPLOY_SANDBOX.md.
+      SANDBOX_RUNTIME: "${SANDBOX_RUNTIME:-}"
     volumes:
       # Daemon control socket (see privilege note above).
       - /var/run/docker.sock:/var/run/docker.sock

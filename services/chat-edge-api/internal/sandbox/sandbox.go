@@ -295,13 +295,24 @@ func (r *Runner) Available(ctx context.Context) error {
 	if r.cfg.Runtime != "" {
 		actual, verr := r.VerifyBoundary(ctx)
 		if verr != nil {
-			return fmt.Errorf("%w: required runtime %q not verifiable at startup: %v", ErrUnavailable, r.cfg.Runtime, verr)
+			return fmt.Errorf("%w: required runtime %q not verifiable at startup: %v — %s", ErrUnavailable, r.cfg.Runtime, verr, runtimeFixHint(r.cfg.Runtime))
 		}
 		if berr := r.enforceRuntime(actual); berr != nil {
-			return berr
+			return fmt.Errorf("%w — %s", berr, runtimeFixHint(r.cfg.Runtime))
 		}
 	}
 	return nil
+}
+
+// runtimeFixHint (FIX17 §5) turns the startup refusal from "this is
+// misconfigured" into "here is how to fix it": it names the script that
+// installs the runtime on the Docker host, the one that checks the boundary
+// from inside a container, and the deliberate alternative (dev mode).
+func runtimeFixHint(runtime string) string {
+	if runtime == "runsc" {
+		return "to fix: install gVisor on the Docker host with `sudo bash scripts/install-runsc.sh`, confirm with `bash scripts/verify-sandbox-runtime.sh --expect gvisor`, then restart this service; or unset SANDBOX_RUNTIME to run the standard container boundary (dev mode). See docs/DEPLOY_SANDBOX.md"
+	}
+	return fmt.Sprintf("to fix: install and register runtime %q with the Docker daemon on this host (scripts/install-runsc.sh covers runsc/gVisor), confirm with `bash scripts/verify-sandbox-runtime.sh`, then restart this service; or unset SANDBOX_RUNTIME to run the standard container boundary (dev mode). See docs/DEPLOY_SANDBOX.md", runtime)
 }
 
 // VerifyBoundary runs a minimal probe container under the configured runtime

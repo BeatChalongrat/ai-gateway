@@ -117,6 +117,18 @@ services:
       # host → uid-65534 can't write __meta.json → every run 503s.
       - SANDBOX_WORKDIR=/sandbox-runs
       - SANDBOX_HOST_WORKDIR=${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}
+      # FIX17 §4 — DEVELOPMENT MODE of the sandbox (deliberate, not an
+      # exception): SANDBOX_RUNTIME is unset, so per-run containers use the
+      # daemon's default runtime (runc) with the STANDARD container boundary
+      # — still no network, non-root (65534), all capabilities dropped,
+      # seccomp, read-only rootfs, resource caps. What it is NOT is a
+      # user-space kernel: a kernel bug is a host escape. Production sets
+      # SANDBOX_RUNTIME=runsc (docker-compose.prod.yml) and chat-edge refuses
+      # to boot if gVisor is not actually in effect. The boot log says which
+      # mode you are in: `requested_runtime=runc boundary_in_effect=standard`
+      # (dev) vs `requested_runtime=runsc boundary_in_effect=gvisor` (prod).
+      # See docs/DEPLOY_SANDBOX.md.
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
     # Persist uploaded + AI-generated files across container restarts.
     # FILE_STORAGE_ROOT defaults to ./data/uploads → /app/data/uploads
     # (WORKDIR /app); generated images land under conversation-files/.

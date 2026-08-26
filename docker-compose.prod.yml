@@ -149,6 +149,18 @@ services:
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?PORTAL_JWT_SECRET must be set for prod}
       CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:?CHAT_EDGE_ADMIN_API_KEY must be set for prod}
       CORS_ALLOW_ORIGINS: ${CHAT_CORS_ORIGINS:?CHAT_CORS_ORIGINS must be set for prod}
+      # FIX17 §4 — PRODUCTION MODE of the code-interpreter sandbox: the
+      # per-run container MUST execute under gVisor (runsc, a user-space
+      # kernel), because this is a multi-tenant server — a container escape
+      # would reach other customers' data. chat-edge proves this from INSIDE
+      # a probe container at boot and REFUSES TO START if the runtime is not
+      # in effect (FIX14 §2) — it never falls back silently. Install the
+      # runtime on the Docker host with `sudo bash scripts/install-runsc.sh`
+      # and check with `bash scripts/verify-sandbox-runtime.sh --expect
+      # gvisor`. Dev mode (SANDBOX_RUNTIME unset) is the other deliberate
+      # mode — see docs/DEPLOY_SANDBOX.md. The boot log states which one is
+      # running: `requested_runtime=runsc boundary_in_effect=gvisor`.
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-runsc}
     ports: !override
       - "127.0.0.1:4000:4000"
     restart: always
