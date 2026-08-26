@@ -16,6 +16,8 @@ import { create } from "zustand";
 
 import { bumpUsageVersion } from "@/hooks/useUsage";
 import { api, ApiError } from "@/lib/api";
+import { HOSTED_MODE } from "@/lib/auth";
+import { bridge } from "@/lib/bridge";
 import { clearDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
 import { localizeErrorCode } from "@/lib/errorMessages";
@@ -28,6 +30,8 @@ import type {
   ConversationSearchHit,
   FileAttachment,
   Message,
+  PendingConsent,
+  PlanStep,
   Project,
   SSEAnalysisStatus,
   SSECodeExecution,
@@ -36,6 +40,7 @@ import type {
   SSEError,
   SSEFallbackInfo,
   SSEProviderStall,
+  SSEImageNotice,
   SSEReasoningNotice,
   SSEMessageComplete,
   SSEMessageFiles,
@@ -49,6 +54,11 @@ import type {
 // presses send, ready file ids ride along on the message request
 // and the pending list is cleared.
 const IMAGE_GENERATION_TIMEOUT_MS = 180_000;
+// Hosted-mode reload recovery: how long to wait after posting the resume
+// ui.ready for the host to replay. The host replays its whole buffer
+// synchronously on receipt, so this only needs to cover the postMessage round
+// trip; kept generous for a busy host.
+const HOSTED_RESUME_PROBE_MS = 700;
 
 // Collision-proof optimistic ids. `Date.now()` collided when two sends
 // landed in the same millisecond (rapid double-send / same-tick calls),
@@ -275,6 +285,22 @@ interface ChatState {
    *  the already-generated prefix and continues through the normal
    *  streaming pipeline. */
   resumeStream: (convId: string, messageId: string) => Promise<void>;
+  /** Hosted mode (desktop shell): after a reload the host — not chat-edge —
+   *  holds any in-flight turn, and nothing streaming is persisted to attach
+   *  to. Probe the host over the bridge; if a turn replays, materialize a
+   *  streaming row and render it. No-op in a plain browser. */
+  hostedResumeProbe: (convId: string) => void;
+  /** Desktop shell (Phase 4) — attach an in-thread consent prompt to the
+   *  conversation's streaming assistant message. */
+  addPendingConsent: (convId: string, consent: PendingConsent) => void;
+  /** Desktop shell (Phase 4) — answer a consent prompt over the bridge and
+   *  clear the card. */
+  resolveConsent: (
+    convId: string,
+    promptId: string,
+    decision: "allow" | "deny",
+    scope: "once" | "session" | "always",
+  ) => void;
   /** T2 — user-driven recovery from a stalled stream: drops the local
    *  connection and reattaches through the existing resume machinery
    *  (the generation itself keeps running server-side). */
@@ -1011,6 +1037,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const last = list[list.length - 1];
       if (last && last.role === "assistant" && last.status === "streaming") {
         void get().resumeStream(convId, last.id);
+      } else if (HOSTED_MODE) {
+        // Hosted mode: the host holds any in-flight turn and persists nothing
+        // streaming to attach to, so the "last row is streaming" test above
+        // can't fire. Probe the host directly (plan addendum, reload recovery).
+        get().hostedResumeProbe(convId);
       }
     } catch (err) {
       // 404/410 → the conversation was deleted elsewhere: drop it from
@@ -1204,6 +1235,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         fileIds,
         imageMode,
         videoMode,
+        convModelId, // FIX9 Part B: carry the selected model into the hosted turn
       );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
@@ -1326,12 +1358,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   async cancelGeneration(convId) {
     const ctrl = get().abortControllers[convId];
+    const streamingId = get().streamingAssistantId[convId];
+    // Optimistic cancel: reflect it in the UI on click, not ~1.5s later when
+    // the host confirms and the pump's finally runs. Finalize the in-flight
+    // message as cancelled (hides the "Working…" indicator) and clear the
+    // streaming slots (flips the composer's Stop back to Send via
+    // useIsStreaming). finalizeMessage is idempotent, so the pump's own
+    // finalize on abort becomes a harmless no-op.
+    if (streamingId) finalizeMessage(set, get, convId, streamingId, "cancelled");
+    set((s) => {
+      const aborts = { ...s.abortControllers };
+      delete aborts[convId];
+      const sids = { ...s.streamingAssistantId };
+      delete sids[convId];
+      return { abortControllers: aborts, streamingAssistantId: sids };
+    });
+    if (ctrl) ctrl.abort();
     try {
       await api.cancelGeneration(convId);
     } catch {
       /* idempotent; ignore */
     }
-    if (ctrl) ctrl.abort();
   },
 
   retryStalledStream(convId) {
@@ -1461,6 +1508,104 @@ export const useChatStore = create<ChatState>((set, get) => ({
         /* non-fatal */
       }
     }
+  },
+
+  addPendingConsent(convId, consent) {
+    const id = get().streamingAssistantId[convId];
+    set((s) => {
+      const list = s.messages[convId] ?? [];
+      // Attach to the streaming assistant row; if none is known yet, attach to
+      // the last assistant row (a replayed consent after reload).
+      const targetId =
+        id ?? [...list].reverse().find((m) => m.role === "assistant")?.id;
+      if (!targetId) return {};
+      return {
+        messages: {
+          ...s.messages,
+          [convId]: list.map((m) =>
+            m.id === targetId ? { ...m, pending_consent: consent } : m,
+          ),
+        },
+      };
+    });
+  },
+
+  resolveConsent(convId, promptId, decision, scope) {
+    bridge.respondConsent(promptId, decision, scope);
+    set((s) => {
+      const list = s.messages[convId] ?? [];
+      return {
+        messages: {
+          ...s.messages,
+          [convId]: list.map((m) =>
+            m.pending_consent?.promptId === promptId
+              ? { ...m, pending_consent: null }
+              : m,
+          ),
+        },
+      };
+    });
+  },
+
+  hostedResumeProbe(convId) {
+    if (!HOSTED_MODE) return;
+    // Single-flight: an attached stream already owns this slot.
+    if (get().streamingAssistantId[convId]) return;
+    void (async () => {
+      const ctrl = new AbortController();
+      const seqBefore = bridge.peekSeq(convId);
+      // Opens the sink and posts ui.ready{conversationId,lastSeq}. Replayed
+      // frames buffer in the stream until consumed, and advance the bridge's
+      // seq cursor immediately — so we can tell "a turn replayed" from
+      // "nothing did" WITHOUT first painting a speculative row.
+      let res: Response;
+      try {
+        res = await api.openResumeStream(convId, "", ctrl.signal);
+      } catch {
+        return;
+      }
+      if (!res.ok) return;
+      await new Promise((r) => setTimeout(r, HOSTED_RESUME_PROBE_MS));
+      if (bridge.peekSeq(convId) <= seqBefore) {
+        // Nothing replayed — no live turn. Close the sink, paint nothing.
+        ctrl.abort();
+        return;
+      }
+      // A turn replayed. Materialize the streaming row and consume the
+      // buffered stream from the top (the replayed message_start renames the
+      // temp id to the host's assistant id).
+      const tempAsstId = tmpId("asst");
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [convId]: [
+            ...(s.messages[convId] ?? []),
+            {
+              id: tempAsstId,
+              role: "assistant",
+              content: "",
+              status: "streaming",
+              created_at: new Date().toISOString(),
+              isStreaming: true,
+            },
+          ],
+        },
+        streamingAssistantId: { ...s.streamingAssistantId, [convId]: tempAsstId },
+        abortControllers: { ...s.abortControllers, [convId]: ctrl },
+      }));
+      try {
+        await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
+      } catch (err) {
+        const sid = get().streamingAssistantId[convId] ?? tempAsstId;
+        finalizeMessage(set, get, convId, sid, (err as Error).name === "AbortError" ? "cancelled" : "error");
+      } finally {
+        set((s) => {
+          const aborts = { ...s.abortControllers };
+          if (aborts[convId] === ctrl) delete aborts[convId];
+          return { abortControllers: aborts };
+        });
+      }
+    })();
   },
 
   async regenerate(convId, messageId) {
@@ -1993,9 +2138,76 @@ async function consumeStream(
                   tool_activities:
                     at === -1
                       ? [...acts, data]
-                      : acts.map((a, i) => (i === at ? data : a)),
+                      : // MERGE, not replace: the rich "started" frame carries
+                        // argsSummary; the "finished" frame carries the result.
+                        // Merging keeps both so the card has arg + result.
+                        acts.map((a, i) => (i === at ? { ...a, ...data } : a)),
                 };
               }),
+            },
+          };
+        });
+      } else if (evt.event === "tool_output") {
+        // Desktop shell (Phase 4) — a live stdout/stderr chunk for a running
+        // tool (run_command). Append to that activity's output buffer.
+        const data = evt.data as { id: string; chunk: string };
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) => {
+                if (m.id !== id) return m;
+                const acts = m.tool_activities ?? [];
+                const at = acts.findIndex((a) => a.id === data.id);
+                if (at === -1) return m;
+                return {
+                  ...m,
+                  tool_activities: acts.map((a, i) =>
+                    i === at ? { ...a, output: (a.output ?? "") + data.chunk } : a,
+                  ),
+                };
+              }),
+            },
+          };
+        });
+      } else if (evt.event === "plan_update") {
+        // Desktop shell (Phase 4) — the agent's live plan checklist.
+        const data = evt.data as { steps: PlanStep[] };
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) => (m.id === id ? { ...m, plan: data.steps } : m)),
+            },
+          };
+        });
+      } else if (evt.event === "paused") {
+        // Desktop shell (Phase 4) — the turn paused at a budget checkpoint.
+        const data = evt.data as { reason: string };
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) => (m.id === id ? { ...m, paused: data } : m)),
+            },
+          };
+        });
+      } else if (evt.event === "status") {
+        // Desktop shell (Phase 4) — the phase marker ("Working… (step n/max)").
+        const data = evt.data as { text: string };
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) => (m.id === id ? { ...m, agent_status: data.text } : m)),
             },
           };
         });
@@ -2041,7 +2253,11 @@ async function consumeStream(
                       is_generating_image: false,
                       is_generating_video: false,
                       is_searching: false,
-                      tool_activities: undefined,
+                      // Web clears the transient indicators at completion; the
+                      // desktop shell KEEPS the rich tool cards so their
+                      // results stay visible after the turn (like the WPF app).
+                      tool_activities: HOSTED_MODE ? m.tool_activities : undefined,
+                      agent_status: null,
                       token_usage: data.token_usage ?? null,
                       response_time_ms: Date.now() - streamStartedAt,
                     }
@@ -2115,6 +2331,30 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "image_notice") {
+        // One or more attached images couldn't be read (unreachable,
+        // resize failure, unsupported format). Stash the filenames on
+        // the message so MessageBubble shows a quiet informational line
+        // — the person learns their attachment didn't attach instead of
+        // the turn silently degrading to text. Never an error.
+        const data = evt.data as SSEImageNotice;
+        const filenames = (data?.failures ?? [])
+          .map((f) => f?.filename)
+          .filter((n): n is string => Boolean(n));
+        if (filenames.length > 0) {
+          const id = realAssistantId ?? tempAsstId;
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            return {
+              messages: {
+                ...s.messages,
+                [convId]: list.map((m) =>
+                  m.id === id ? { ...m, image_notice: { filenames } } : m,
+                ),
+              },
+            };
+          });
+        }
       } else if (evt.event === "error") {
         // B1 — terminal stream error. Attach the code + localized
         // message + per-model attempts to the message so the bubble

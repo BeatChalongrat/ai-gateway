@@ -47,7 +47,10 @@ import { MessageAttachments } from "./MessageAttachments";
 import { PptxPlanCard } from "./PptxPlanCard";
 import type { PptxPlan } from "./PptxPlanCard";
 import { ThinkingBlock } from "./ThinkingBlock";
-import { ToolActivityIndicator } from "./ToolActivityIndicator";
+import { ConsentCard } from "./ConsentCard";
+import { PlanChecklistCard } from "./PlanChecklistCard";
+import { ToolActivityList } from "./ToolCard";
+import { useChatStore } from "@/stores/chatStore";
 
 interface Props {
   message: Message;
@@ -250,6 +253,11 @@ function MessageBubbleImpl({
                   {copied ? <CheckIcon /> : <CopyIcon />}
                 </ActionButton>
               ) : null}
+              {/* FIX11 §3: editing now FORKS in the desktop app too — the host
+                  carries the edited message's id through the turn and forks via
+                  chat-edge /edit (server-authoritative branching), so the ◀ n/m ▶
+                  navigator works in the shell exactly as in the browser. (Was
+                  hidden in hosted mode in FIX9 Part B, when it only resubmitted.) */}
               {onEdit && !message.isStreaming ? (
                 <ActionButton
                   ariaLabel={t("a11y.editMessage")}
@@ -303,12 +311,28 @@ function MessageBubbleImpl({
         <CodeRunCard key={run.id} run={run} />
       ))}
 
-      {/* A2 — generic activity for tools without a dedicated indicator
-          (memory/state/past-search/canvas + unknown/MCP tools). Same
-          zone as the code cards: the tool runs first, the explanation
-          streams after. Rows exist only while a call is in flight. */}
+      {/* Phase 4 (desktop shell) — the agent's live plan checklist, above
+          the tool cards (as the WPF app orders them). */}
+      {message.plan?.length ? <PlanChecklistCard steps={message.plan} /> : null}
+
+      {/* Tool activity. In hosted mode the host emits rich payloads and this
+          renders full tool cards (with nested sub-agent cards + streaming
+          shell output); the thin web payloads degrade to the one-line
+          running/done rows inside ToolCard. */}
       {message.tool_activities?.length ? (
-        <ToolActivityIndicator activities={message.tool_activities} />
+        <ToolActivityList activities={message.tool_activities} />
+      ) : null}
+
+      {/* Phase 4 (desktop shell) — in-thread tool-consent card. */}
+      {message.pending_consent ? (
+        <ConsentCard
+          consent={message.pending_consent}
+          onDecision={(decision, scope) =>
+            useChatStore
+              .getState()
+              .resolveConsent(convId, message.pending_consent!.promptId, decision, scope)
+          }
+        />
       ) : null}
 
       {/* Body */}
@@ -341,6 +365,41 @@ function MessageBubbleImpl({
           quiet muted line as the fallback notice: information, not an
           error. */}
       {message.reasoning_notice ? <ReasoningDowngradeNotice /> : null}
+
+      {/* Image attach notice — one or more attached images couldn't be
+          read into the vision request. Same quiet muted line: the person
+          learns their picture didn't attach; not an error. */}
+      {message.image_notice && message.image_notice.filenames.length > 0 ? (
+        <ImageAttachFailedNotice filenames={message.image_notice.filenames} />
+      ) : null}
+
+      {/* Phase 4 (desktop shell) — paused-at-budget notice + Continue. The
+          host's next turn.submit for this conversation continues the run
+          (the coordinator keeps the message list). */}
+      {message.paused ? (
+        <div
+          className="my-1 flex items-center gap-2 rounded-md border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary"
+          data-testid="paused-card"
+        >
+          <span>Paused at the step limit.</span>
+          {/* Phase 5 §5.8 — Continue posts a fresh turn.submit ("continue") for
+              this conversation. KNOWN LIMITATION (proven live): the shell's
+              ShellTurnCoordinator.BuildMessages(text) sends only [system, text],
+              so this currently starts a NEW context-free turn rather than
+              resuming the paused task's tool-chain. The button is wired and
+              type-checked; genuine resume needs the coordinator to carry the
+              conversation transcript (incl. the paused partial chain), which its
+              ephemeral Phase-3 design defers. See SHELL_PHASE5_REPORT §5.8. */}
+          <button
+            type="button"
+            data-testid="continue-button"
+            onClick={() => void useChatStore.getState().sendMessage(convId, "continue")}
+            className="focus-ring ml-auto rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+          >
+            Continue
+          </button>
+        </div>
+      ) : null}
 
       {/* Image-generation placeholder — occupies the attachment slot
           while the backend generates an image, then the real thumbnail
@@ -657,6 +716,19 @@ function ReasoningDowngradeNotice() {
   return (
     <div className="mt-0.5 text-[11px] text-text-muted">
       {t("chat.reasoningDowngraded")}
+    </div>
+  );
+}
+
+// Image attach failure notice. Same muted single-line surface — tells the
+// user which attached image(s) couldn't be read so the turn's text-only
+// degradation isn't silent. The localized string carries the meaning; only
+// the (user's own) filenames are interpolated, never the server's reason.
+function ImageAttachFailedNotice({ filenames }: { filenames: string[] }) {
+  const t = useT();
+  return (
+    <div className="mt-0.5 text-[11px] text-text-muted">
+      {t("chat.imageAttachFailed", { files: filenames.join(", ") })}
     </div>
   );
 }
@@ -992,6 +1064,15 @@ function areEqual(prev: Props, next: Props): boolean {
     // replaces the array on every upsert, so identity is enough).
     a.code_runs === b.code_runs &&
     a.tool_activities === b.tool_activities &&
+    // Phase 4 (desktop shell) — re-render when a rich tool-card frame,
+    // plan update, paused checkpoint, consent prompt, or phase-status
+    // lands (each replaces its field/array identity on the store, so
+    // reference equality is enough). Without these the memo would keep the
+    // consent card / plan / streaming tool output frozen.
+    a.plan === b.plan &&
+    a.paused === b.paused &&
+    a.pending_consent === b.pending_consent &&
+    a.agent_status === b.agent_status &&
     // S7 — re-render when the per-turn context_sources array
     // arrives or changes. The first render after a stream
     // finishes carries no sources (they persist async); the next
@@ -1005,6 +1086,7 @@ function areEqual(prev: Props, next: Props): boolean {
     a.error_attempts === b.error_attempts &&
     a.fallback_info === b.fallback_info &&
     a.reasoning_notice === b.reasoning_notice &&
+    a.image_notice === b.image_notice &&
     prev.showFeedback === next.showFeedback &&
     prev.showRegenerate === next.showRegenerate
   );

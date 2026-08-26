@@ -21,6 +21,16 @@ export const PORTAL_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PORTAL_URL) ||
   "http://localhost:3001";
 
+// Hosted mode (desktop shell): the native host owns the session — it
+// injects the cookies, rotates them on its own timer, and treats any
+// navigation to the Portal login as its re-auth signal. The page must
+// therefore never rotate the refresh token itself: a page-side refresh
+// would consume the token the host holds and log the HOST out
+// (WEBVIEW2_SPIKE_REPORT.md finding 7). Baked at build time like every
+// NEXT_PUBLIC_* value.
+export const HOSTED_MODE =
+  typeof process !== "undefined" && process.env.NEXT_PUBLIC_HOSTED === "1";
+
 /** Bounce to the Portal login with Web Chat as the post-login return target. */
 export function redirectToPortalLogin(): void {
   if (typeof window === "undefined") return;
@@ -75,6 +85,11 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
  * refresh cookies. Returns true on success.
  */
 export async function refreshSession(): Promise<boolean> {
+  // Hosted mode: refusing here (rather than only in auth-refresh.ts)
+  // also covers api.ts's 401→refresh path, so EVERY page-side 401
+  // escalates straight to redirectToPortalLogin() — which the shell
+  // cancels and answers with a host-side refresh. One holder rotates.
+  if (HOSTED_MODE) return false;
   try {
     const res = await fetch(`${GATEWAY_URL}/portal/auth/refresh`, {
       method: "POST",
@@ -101,6 +116,20 @@ export function clearLegacyToken(): void {
  * regardless so the UX is immediate.
  */
 export async function logoutSession(): Promise<void> {
+  // Hosted mode (E3 §2): logout is a host operation. The host revokes the
+  // session server-side, clears its store and cookie jar, blanks the page and
+  // shows its own signed-out view — the page has nothing left to do. Only if
+  // the bridge is unavailable (or refuses) does the browser path below run,
+  // which the host still recognises by observation (the E2 fallback).
+  if (HOSTED_MODE) {
+    try {
+      const { bridge } = await import("./bridge");
+      const result = await bridge.hostQuery("session.logout", {}, 10_000);
+      if (result.ok) return;
+    } catch {
+      /* fall through to the browser path */
+    }
+  }
   try {
     await fetch(`${GATEWAY_URL}/portal/auth/logout`, {
       method: "POST",

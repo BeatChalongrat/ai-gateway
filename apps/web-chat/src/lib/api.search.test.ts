@@ -11,6 +11,7 @@ const { mockRefreshSession, mockRedirect } = vi.hoisted(() => ({
 vi.mock("./auth", () => ({
   refreshSession: mockRefreshSession,
   redirectToPortalLogin: mockRedirect,
+  HOSTED_MODE: false,
 }));
 
 import { api } from "./api";

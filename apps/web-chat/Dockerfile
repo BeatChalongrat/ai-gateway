@@ -24,6 +24,12 @@ ARG NEXT_PUBLIC_GATEWAY_URL
 ENV NEXT_PUBLIC_GATEWAY_URL=$NEXT_PUBLIC_GATEWAY_URL
 ARG NEXT_PUBLIC_PORTAL_URL
 ENV NEXT_PUBLIC_PORTAL_URL=$NEXT_PUBLIC_PORTAL_URL
+# Desktop shell hosted mode (Shell Phase 2): "1" disables every page-side
+# session refresh (lib/auth.ts + lib/auth-refresh.ts) because the native
+# host owns the session. Build-time inlined like the rest; a per-surface
+# build matrix is the Phase 6 item — one image cannot serve both modes.
+ARG NEXT_PUBLIC_HOSTED
+ENV NEXT_PUBLIC_HOSTED=$NEXT_PUBLIC_HOSTED
 # Build stamp for the update-available prompt. `next build` loads
 # next.config.js more than once, so the stamp must be computed ONCE here
 # and handed to the build via env — that guarantees the client bundle and

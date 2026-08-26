@@ -8,6 +8,7 @@ import { ToastViewport } from "@/components/ui/Toast";
 import { UpdateBanner } from "@/components/ui/UpdateBanner";
 import { clearLegacyToken } from "@/lib/auth";
 import { startSilentRefresh, stopSilentRefresh } from "@/lib/auth-refresh";
+import { bridge, startBridge } from "@/lib/bridge";
 import { useHydrateI18n } from "@/lib/i18n";
 import { registerServiceWorker } from "@/lib/registerSW";
 import { useAuthStore } from "@/stores/authStore";
@@ -46,6 +47,14 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     // Keep the access cookie fresh so an active user is never bounced
     // to login mid-session.
     startSilentRefresh();
+    // Hosted mode (desktop shell): open the page→host bridge and complete
+    // the ui.ready handshake. No-op in a plain browser.
+    startBridge();
+    // Route host consent.request prompts into the streaming message as an
+    // in-thread consent card (Phase 4). No-op in a plain browser.
+    bridge.onConsentRequest((req) => {
+      useChatStore.getState().addPendingConsent(req.conversationId, req);
+    });
     // Best-effort service-worker install for PWA support. Skipped in
     // dev to avoid breaking HMR.
     registerServiceWorker();

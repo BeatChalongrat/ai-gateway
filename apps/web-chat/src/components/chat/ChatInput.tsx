@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import { HOSTED_MODE } from "@/lib/auth";
 import {
   clearDraft,
   loadDraft,
@@ -255,6 +256,12 @@ export function ChatInput({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Explicit IME composition tracking (Phase 4, Thai IME). WebView2's native
+  // KeyboardEvent.isComposing can be unreliable in an embedded control, so we
+  // also track composition via compositionstart/end and OR it into the
+  // Enter-to-send guard. This guarantees Enter during composition commits the
+  // candidate rather than submitting a half-formed word.
+  const composingRef = useRef(false);
 
   // ── Voice input ────────────────────────────────────────────
   // Two hooks because the user can flip the input method in voice
@@ -595,7 +602,7 @@ export function ChatInput({
         const native = e.nativeEvent as KeyboardEvent;
         // Still respect the IME guard (Phase 7): during composition
         // Enter commits a candidate and must not run a command.
-        if (e.key === "Enter" && (native.isComposing || native.keyCode === 229)) return;
+        if (e.key === "Enter" && (native.isComposing || native.keyCode === 229 || composingRef.current)) return;
         e.preventDefault();
         runSlashCommand(slashCommands[Math.min(slashIndex, slashCommands.length - 1)]);
         return;
@@ -609,7 +616,8 @@ export function ChatInput({
       shouldSendOnEnter({
         key: e.key,
         shiftKey: e.shiftKey,
-        isComposing: native.isComposing,
+        // OR in the explicitly-tracked composition state (WebView2 robustness).
+        isComposing: native.isComposing || composingRef.current,
         keyCode: native.keyCode,
       })
     ) {
@@ -962,6 +970,12 @@ export function ChatInput({
               }
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKeyDown}
+              onCompositionStart={() => {
+                composingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+              }}
               className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-text-primary placeholder:text-text-placeholder focus:outline-none disabled:opacity-60"
               style={{
                 maxHeight: maxTextareaHeight,
@@ -1057,13 +1071,14 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => {
+                    if (HOSTED_MODE) return; // FIX9 Part B: video gen isn't wired in the desktop app
                     setVideoMode((v) => !v);
                     setImageMode(false);
                   }}
                   aria-label={t("input.videoMode")}
-                  title={t("input.videoMode")}
-                  aria-pressed={videoMode}
-                  disabled={disabled}
+                  title={HOSTED_MODE ? "Video generation isn't available in the desktop app yet." : t("input.videoMode")}
+                  aria-pressed={HOSTED_MODE ? false : videoMode}
+                  disabled={disabled || HOSTED_MODE}
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     videoMode
                       ? "bg-rose-500/15 text-rose-400"

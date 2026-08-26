@@ -417,6 +417,19 @@ export interface Message {
    *  keyed by tool-call id. Ephemeral like code_runs and additionally
    *  cleared at message_complete. */
   tool_activities?: ToolActivity[];
+  /** local-only (desktop shell, Phase 4) — the agent's live plan
+   *  checklist from ``plan_update`` frames. Ephemeral. */
+  plan?: PlanStep[];
+  /** local-only (desktop shell, Phase 4) — the turn paused at a budget
+   *  checkpoint (``paused`` frame); drives the Continue affordance. */
+  paused?: { reason: string } | null;
+  /** local-only (desktop shell, Phase 4) — an in-thread tool-consent
+   *  prompt awaiting the user. Set from the bridge's consent.request;
+   *  cleared when answered. */
+  pending_consent?: PendingConsent | null;
+  /** local-only (desktop shell, Phase 4) — the phase marker text
+   *  ("Working… (step n/max)"); shown while content is still empty. */
+  agent_status?: string | null;
   /** local-only — wall-clock duration of the streaming turn (send →
    *  message_complete). Shown in the per-message metadata line; absent
    *  after a page reload (not persisted). */
@@ -440,6 +453,15 @@ export interface Message {
   reasoning_notice?: {
     model?: string;
     reason?: string;
+  };
+  /** local-only — set when one or more attached images couldn't be
+   *  read into the vision request (unreachable, resize failure, or an
+   *  unsupported format). Drives a small informational line under the
+   *  reply naming the files, same quiet styling as reasoning_notice —
+   *  this is not an error; the turn still proceeds for any images that
+   *  did resolve. */
+  image_notice?: {
+    filenames: string[];
   };
 }
 
@@ -735,11 +757,51 @@ export type SSECodeExecution = CodeRun;
 
 /** One generic tool-activity frame (the ``tool_activity`` SSE event).
  *  Two frames per call share an id: "started" then "finished" — the
- *  client upserts by id so they collapse into one indicator row. */
+ *  client upserts by id so they collapse into one card.
+ *
+ *  Phase 4 (desktop shell): the host emits RICH payloads — arg summary on
+ *  ``started``; success/result/code/screenshot on ``finished`` — so the
+ *  shell renders full tool cards. The web path still emits only
+ *  {id,tool,phase}; every extra field is optional so ToolCard degrades to
+ *  the thin running/done line for web. ``parentId`` nests a sub-agent's
+ *  child cards under the parent run_subagent card. ``output`` accumulates
+ *  live ``tool_output`` chunks (run_command mini-terminal). */
 export interface ToolActivity {
   id: string;
   tool: string;
   phase: "started" | "finished";
+  argsSummary?: string;
+  parentId?: string | null;
+  success?: boolean;
+  durationMs?: number;
+  input?: string;
+  resultPreview?: string;
+  isCodeRun?: boolean;
+  codeText?: string | null;
+  imageDataUri?: string | null;
+  /** Accumulated live stdout/stderr from ``tool_output`` frames. */
+  output?: string;
+}
+
+/** One step of the agent's live plan checklist (``plan_update`` SSE). */
+export interface PlanStep {
+  text: string;
+  status: "pending" | "in_progress" | "done";
+}
+
+/** An in-thread tool-consent request (desktop shell only), rendered as a
+ *  card in the streaming assistant message until answered. */
+export interface PendingConsent {
+  promptId: string;
+  tool: string;
+  description?: string;
+  category?: string;
+  argumentSummary: string;
+  argumentDetail?: string;
+  dangerClass: string;
+  site?: string;
+  grantOptions?: ("once" | "session" | "always")[];
+  alwaysPromptReason?: "download" | "sensitive-info" | "authorization" | null;
 }
 
 /** SSE payload — the backend serialises ToolActivityUpdate directly. */
@@ -786,6 +848,14 @@ export interface SSEReasoningNotice {
 export interface SSEProviderStall {
   stalled: boolean;
   waiting_seconds?: number;
+}
+
+/** ``image_notice`` SSE frame — one or more attached images couldn't be
+ *  turned into vision content this turn (unreachable, resize failure, or
+ *  unsupported format). Informational: the turn still runs, minus those
+ *  images. Emitted once, before content. */
+export interface SSEImageNotice {
+  failures: { filename: string; reason: string }[];
 }
 
 // ── Direct-dispatch media generation (Sprint 2A.5) ──────────────

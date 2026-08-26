@@ -14,7 +14,7 @@
 // A refresh that fails (refresh token expired/revoked/version-bumped)
 // means the session is genuinely over → bounce to the Portal login.
 
-import { redirectToPortalLogin, refreshSession } from "./auth";
+import { HOSTED_MODE, redirectToPortalLogin, refreshSession } from "./auth";
 
 const REFRESH_INTERVAL_MS = 50 * 60 * 1000; // 50 minutes
 const CHANNEL_NAME = "webchat-auth";
@@ -56,6 +56,15 @@ function onVisible(): void {
 
 /** Begin proactive refresh. Idempotent. */
 export function startSilentRefresh(): void {
+  // Hosted mode (desktop shell): the host owns rotation. No timer, no
+  // focus refresh, no BroadcastChannel — this module does nothing at
+  // all, so the page can never race the host for the refresh token.
+  // The console line is deliberate: the shell captures page console via
+  // CDP, so hosted mode being active is visible in the host log.
+  if (HOSTED_MODE) {
+    console.info("[auth] hosted mode: page-side silent refresh disabled (host owns the session)");
+    return;
+  }
   if (started || typeof window === "undefined") return;
   started = true;
   lastRefresh = Date.now();

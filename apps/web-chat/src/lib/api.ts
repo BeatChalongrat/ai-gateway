@@ -39,6 +39,7 @@ import type {
 } from "./types";
 import type { PreviewData } from "./previewData";
 import { redirectToPortalLogin, refreshSession } from "./auth";
+import { bridge, usingBridgeTransport } from "./bridge";
 
 const API_BASE =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
@@ -314,6 +315,13 @@ class ApiClient {
     return this.raw(`/conversations/${id}`, { method: "DELETE" });
   }
   cancelGeneration(convId: string) {
+    // Hosted mode: the host owns the turn — tell it to cancel over the bridge
+    // and do NOT POST /cancel (which would 404 the bridge-only turn and,
+    // worse, could cancel an unrelated server row). Returns the same shape.
+    if (usingBridgeTransport) {
+      bridge.cancelTurn(convId);
+      return Promise.resolve({ cancelled: true });
+    }
     return this.json<{ cancelled: boolean }>(
       `/conversations/${convId}/cancel`,
       { method: "POST" },
@@ -368,7 +376,19 @@ class ApiClient {
     fileIds?: string[],
     imageMode?: boolean,
     videoMode?: boolean,
+    modelId?: string | null,
   ): Promise<Response> {
+    // Hosted mode: submit the turn to the native host over the bridge and
+    // render the events it streams back. The page never POSTs /messages here
+    // (the host, not the page, drives the turn), so there is no double-persist.
+    // fileIds become opaque attachment handles. FIX9 Part B: modelId and imageMode
+    // are now CARRIED (fields on the existing turn), not dropped — the host
+    // validates the model and offers generate_image on imageMode. videoMode is NOT
+    // carried: the 🎬 button is disabled in hosted mode (video is an async job).
+    if (usingBridgeTransport) {
+      void videoMode; // deliberately unused in hosted mode
+      return bridge.submitTurn(convId, content, signal, fileIds ?? [], modelId ?? null, imageMode ?? false);
+    }
     const body: Record<string, unknown> = { content, stream: true };
     if (fileIds && fileIds.length > 0) body.file_ids = fileIds;
     // Phase C — 🎨 image mode: biases a tool-capable model to call
@@ -388,6 +408,13 @@ class ApiClient {
     messageId: string,
     signal: AbortSignal,
   ): Promise<Response> {
+    // Hosted mode: regenerate is a fresh host turn for the conversation. The
+    // richer semantics (fork from a specific message) are Phase 4+; Phase 3
+    // keeps the transport swap minimal and routes it through the bridge so no
+    // /regenerate POST forks a server row behind the host's back.
+    if (usingBridgeTransport) {
+      return bridge.submitTurn(convId, "", signal, [], null);
+    }
     return this.raw(
       `/conversations/${convId}/messages/${messageId}/regenerate`,
       { method: "POST", signal },
@@ -402,6 +429,11 @@ class ApiClient {
     messageId: string,
     signal: AbortSignal,
   ): Promise<Response> {
+    // Hosted mode: re-open the host's event sink for this conversation's
+    // in-flight turn (the host is the authority on whether one exists).
+    if (usingBridgeTransport) {
+      return bridge.resumeTurn(convId, signal);
+    }
     return this.raw(`/conversations/${convId}/messages/${messageId}/stream`, {
       method: "GET",
       signal,
@@ -782,6 +814,14 @@ class ApiClient {
     content: string,
     signal: AbortSignal,
   ): Promise<Response> {
+    // Hosted mode (FIX11 §3): carry the edited message's id through the turn so
+    // the HOST forks the conversation at it (chat-edge /edit, server-authoritative
+    // branching) instead of appending a linear turn — the ◀ n/m ▶ navigator then
+    // works exactly as in the browser. A field on the existing turn, not a new
+    // message type.
+    if (usingBridgeTransport) {
+      return bridge.submitTurn(convId, content, signal, [], null, false, messageId);
+    }
     return this.raw(`/conversations/${convId}/messages/${messageId}/edit`, {
       method: "POST",
       body: JSON.stringify({ content }),

@@ -20,7 +20,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
-import { logoutSession } from "@/lib/auth";
+import { HOSTED_MODE, logoutSession } from "@/lib/auth";
 import { useI18nStore, useT } from "@/lib/i18n";
 import type {
   Conversation,
@@ -30,7 +30,10 @@ import type {
 import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
-import { Archive, Brain, ChevronRight, FolderKanban, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Archive, Brain, ChevronRight, Clock, FolderKanban, Pencil, PenLine, Plug, Plus,
+  Settings as SettingsIcon, Trash2, Wrench,
+} from "lucide-react";
 
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 
@@ -538,6 +541,7 @@ function UserMenu({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
   const isDark = theme === "dark";
@@ -664,6 +668,50 @@ function UserMenu({
             trailing={<MemoryTrailing />}
             setOpen={setOpen}
           />
+          {/* Desktop-only screens (Phase 5). Reachable only in the shell —
+              HOSTED_MODE is NEXT_PUBLIC_HOSTED=1, set only by the WebView2 host.
+              They read/write host-local state over the bridge; the plain web
+              build never shows them. */}
+          {HOSTED_MODE ? (
+            <>
+              <div className="border-t border-border/60" />
+              <MenuItem
+                onClick={() => router.push("/chat/skills")}
+                icon={<Wrench width={14} height={14} aria-hidden />}
+                label="Skills"
+                trailing={<ArrowIcon />}
+                setOpen={setOpen}
+              />
+              <MenuItem
+                onClick={() => router.push("/chat/tasks")}
+                icon={<Clock width={14} height={14} aria-hidden />}
+                label="Scheduled tasks"
+                trailing={<ArrowIcon />}
+                setOpen={setOpen}
+              />
+              <MenuItem
+                onClick={() => router.push("/chat/connectors")}
+                icon={<Plug width={14} height={14} aria-hidden />}
+                label="Connectors"
+                trailing={<ArrowIcon />}
+                setOpen={setOpen}
+              />
+              <MenuItem
+                onClick={() => router.push("/chat/writing-style")}
+                icon={<PenLine width={14} height={14} aria-hidden />}
+                label="Writing style"
+                trailing={<ArrowIcon />}
+                setOpen={setOpen}
+              />
+              <MenuItem
+                onClick={() => router.push("/chat/settings")}
+                icon={<SettingsIcon width={14} height={14} aria-hidden />}
+                label="Settings"
+                trailing={<ArrowIcon />}
+                setOpen={setOpen}
+              />
+            </>
+          ) : null}
           <div className="border-t border-border/60" />
           <MenuItem
             onClick={onLogout}

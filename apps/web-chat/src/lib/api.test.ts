@@ -13,6 +13,9 @@ const { mockRefreshSession, mockRedirect } = vi.hoisted(() => ({
 vi.mock("./auth", () => ({
   refreshSession: mockRefreshSession,
   redirectToPortalLogin: mockRedirect,
+  // bridge.ts (imported transitively via api.ts) reads this; keep the plain
+  // browser transport in these tests.
+  HOSTED_MODE: false,
 }));
 
 import { api, ApiError, sharedRefresh } from "./api";
