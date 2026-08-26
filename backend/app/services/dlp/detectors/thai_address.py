@@ -8,6 +8,17 @@ forward up to 200 characters or a newline — whichever comes first.
 This is deliberately low-precision, low-severity (LOW). Addresses
 rarely warrant BLOCK action, and over-matching is preferable to
 leaking an address into a provider request.
+
+FIX23 — the body must (a) carry a digit within 30 characters of the
+keyword (a house number) AND (b) contain an address component on the
+same line (ถนน/ซอย/หมู่/ตำบล/อำเภอ/จังหวัด/แขวง/เขต/กรุงเทพ/กทม or a
+5-digit postcode). Without those anchors, ordinary Thai prose
+containing ``เลขที่`` ("the number that…") / ``อยู่ที่`` ("is at") /
+``ที่อยู่`` was swept to end-of-line as an "address": the question
+``เลขที่ให้จำเมื่อกี้คืออะไร`` became ``<<ADDRESS_1>>`` on input (the
+model echoed the token and restore turned it back into the user's own
+question), and the answer ``เลขที่ให้จำคือ 74-…`` was masked on output. The Rust port (``dlp-sidecar/src/detectors/
+thai_address.rs``) carries the identical regex — change both.
 """
 
 from __future__ import annotations
@@ -21,6 +32,9 @@ from app.services.dlp.detectors.base import BaseDetector
 _ADDRESS_RE = re.compile(
     r"(อยู่บ้านเลขที่|บ้านเลขที่|เลขที่|ที่อยู่|อยู่ที่|ส่งที่)"
     r"[\s:：]*"
+    r"(?=[^\n\d]{0,30}\d)"
+    r"(?=[^\n]{0,200}?(?:ถนน|ถ\.|ซอย|ซ\.|หมู่|ม\.|ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\."
+    r"|แขวง|เขต|กรุงเทพ|กทม|\d{5}(?=[\s,]|$)))"
     r"([^\n]{3,200}?\d{5}(?=[\s,]|$)"
     r"|[^\n]{3,200}?(?=\n|$|\s{3,}))"
 )
