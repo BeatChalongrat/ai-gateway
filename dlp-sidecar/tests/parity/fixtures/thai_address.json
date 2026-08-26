@@ -41,6 +41,46 @@
       ]
     },
     {
+      "id": "fix23_recall_question_prose",
+      "input": "เลขที่ให้จำเมื่อกี้คืออะไร",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23_where_is_it",
+      "input": "ตอนนี้อยู่ที่ไหน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23_answer_quoting_number",
+      "input": "เลขที่ให้จำคือ **74-กระต่าย-2951**",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23_company_address_question",
+      "input": "ที่อยู่ของบริษัทคืออะไร",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23_registered_address_prose_then_number",
+      "input": "ที่อยู่ตามทะเบียนบ้าน 99/88 หมู่ 3 ต.บางรัก กรุงเทพ 10500",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 57
+        }
+      ]
+    },
+    {
       "id": "plain_thai_prose",
       "input": "วันนี้อากาศดีครับ",
       "should_match": false,

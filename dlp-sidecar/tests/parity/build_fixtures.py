@@ -434,6 +434,18 @@ SPECS = [
                 "ส่งที่ 100 ถนน B จังหวัด นนทบุรี 11000 ขอบคุณ",
                 True,
             ),
+            # FIX23 — keyword words used as ordinary prose (no house
+            # number / digit within 30 chars) must NOT be an address.
+            # The first case is the exact recall turn that echoed.
+            Case("fix23_recall_question_prose", "เลขที่ให้จำเมื่อกี้คืออะไร", False),
+            Case("fix23_where_is_it", "ตอนนี้อยู่ที่ไหน", False),
+            Case("fix23_answer_quoting_number", "เลขที่ให้จำคือ **74-กระต่าย-2951**", False),
+            Case("fix23_company_address_question", "ที่อยู่ของบริษัทคืออะไร", False),
+            Case(
+                "fix23_registered_address_prose_then_number",
+                "ที่อยู่ตามทะเบียนบ้าน 99/88 หมู่ 3 ต.บางรัก กรุงเทพ 10500",
+                True,
+            ),
             Case("plain_thai_prose", "วันนี้อากาศดีครับ", False),
             Case("english_prose_no_keyword", "today is a good day", False),
         ],
