@@ -183,11 +183,44 @@ func (s *TitleService) Generate(
 		}
 	}
 	raw := extractContent(resp)
-	cleaned := cleanTitle(parseTitleCompletion(raw))
-	if cleaned == "" {
+	title := resolveTitle(raw, firstUser.ContentMasked)
+	if title == "" {
 		return "", errors.New("title: gateway returned empty completion")
 	}
-	return cleaned, nil
+	return title, nil
+}
+
+// resolveTitle turns a title-model completion into the final sidebar title.
+// It parses the strict {"title": string} envelope; when the completion is
+// unusable — empty, an empty title field, or a broken/truncated envelope like
+// `{"title":` that a reasoning model can emit when its structured output is cut
+// off — it falls back to the user's own first message rather than leaking JSON
+// braces into the sidebar (FIX21 §3). Returns "" only when there is nothing at
+// all to title with, which the caller maps to the "empty completion" error.
+func resolveTitle(rawCompletion, firstUserMessage string) string {
+	if t := cleanTitle(parseTitleCompletion(rawCompletion)); t != "" {
+		return t
+	}
+	return cleanTitle(fallbackTitleFromMessage(firstUserMessage))
+}
+
+// fallbackTitleFromMessage derives a plain-text title from the user's first
+// message: its first line, trimmed to a sidebar-sized prefix. cleanTitle runs
+// on the result at the call site.
+func fallbackTitleFromMessage(userMessage string) string {
+	s := strings.TrimSpace(userMessage)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	runes := []rune(strings.TrimSpace(s))
+	const fallbackRunes = 48
+	if len(runes) > fallbackRunes {
+		return string(runes[:fallbackRunes])
+	}
+	return string(runes)
 }
 
 // parseTitleCompletion pulls the title out of the model's completion.
@@ -212,9 +245,27 @@ func parseTitleCompletion(raw string) string {
 		// leaking the raw "{...}" braces into the sidebar).
 		return strings.TrimSpace(parsed.Title)
 	}
-	// Malformed / non-JSON completion (provider ignored the schema):
-	// fall back to treating the raw text as the title.
+	// Not valid JSON. Two very different cases hide here:
+	//   1. The provider ignored the schema and returned genuine FREE TEXT
+	//      ("Debugging API rate limits") — use it as the title.
+	//   2. The structured-output envelope was BROKEN or TRUNCATED
+	//      (`{"title":`, `{"title": "half`) — a reasoning model whose JSON
+	//      got cut off. Returning THAT raw leaks `{"title":` into the
+	//      sidebar (FIX21 §3, seen live). Signal "no usable title" so the
+	//      caller falls back to the user's own message.
+	if looksLikeTitleEnvelope(s) {
+		return ""
+	}
 	return s
+}
+
+// looksLikeTitleEnvelope reports whether a non-JSON-parseable string is a
+// broken attempt at the {"title": ...} envelope (so it must NOT be used as a
+// title verbatim), rather than genuine free text. Free-text titles never begin
+// with "{" nor contain the quoted key `"title"`.
+func looksLikeTitleEnvelope(s string) bool {
+	t := strings.TrimSpace(s)
+	return strings.HasPrefix(t, "{") || strings.Contains(t, `"title"`)
 }
 
 // firstUserAndAssistant returns the earliest user message and the
