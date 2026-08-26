@@ -94,17 +94,17 @@ public sealed class SlashCommandsTests
     }
 
     [Fact]
-    public void Every_Command_Has_Localized_Text_In_Both_Languages()
+    public void Every_Command_Carries_A_Label_And_Hint_Key()
     {
+        // Each command must name a localization key for its label and hint.
+        // The keys' actual translations live in the web/Electron i18n dictionary
+        // (apps/web-chat/src/lib/i18n) — with the WPF Presentation.Localization.Dict
+        // retired, that existence check moved there; here we only pin that the
+        // command definitions never ship a blank key.
         foreach (var cmd in SlashCommands.All)
         {
-            foreach (var key in new[] { cmd.LabelKey, cmd.HintKey })
-            {
-                SranDesktop.Presentation.Localization.Dict.En.Should().ContainKey(key);
-                SranDesktop.Presentation.Localization.Dict.Th.Should().ContainKey(key);
-                SranDesktop.Presentation.Localization.Dict.En[key].Should().NotBeNullOrWhiteSpace();
-                SranDesktop.Presentation.Localization.Dict.Th[key].Should().NotBeNullOrWhiteSpace();
-            }
+            cmd.LabelKey.Should().NotBeNullOrWhiteSpace();
+            cmd.HintKey.Should().NotBeNullOrWhiteSpace();
         }
     }
 }
