@@ -169,3 +169,8 @@ SranDesktop/src/SranDesktop.App/Assets/sran-app.ico
 # the desktop app (contains a secret) — never commit it.
 pairing.json
 **/browser-extension/pairing.json
+
+# Owner hand-test session notes (working docs; kept on disk, never committed).
+docs/OWNER_*.md
+# Landing-redesign scratch/mock dir (design reference; the portal holds the shipped code).
+_landing-redesign/
