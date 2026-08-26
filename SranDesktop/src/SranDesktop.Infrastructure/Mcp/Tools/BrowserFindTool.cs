@@ -8,7 +8,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// <summary>browser_find (browser tools) — targeted lookup when the full
 /// element list would be noise: matches element text/labels (or a CSS
 /// selector) and returns just those refs.</summary>
-public sealed class BrowserFindTool : IMcpTool
+public sealed class BrowserFindTool : IMcpTool, IBrowserTabAction
 {
     private readonly IBrowserBridgeService _bridge;
 
@@ -33,13 +33,16 @@ public sealed class BrowserFindTool : IMcpTool
         }
         """);
 
-    public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
         var query = ToolHelpers.GetString(arguments, "query");
         if (string.IsNullOrWhiteSpace(query))
-            return Task.FromResult(ToolResult.Fail("query is required."));
+            return ToolResult.Fail("query is required.");
 
-        return BrowserToolHelpers.RequestAsync(_bridge, "page.find",
+        var siteGuard = await BrowserToolHelpers.EnforceAuthorizedSiteAsync(_bridge, BrowserToolHelpers.GetTabId(arguments), ct);
+        if (siteGuard is not null) return siteGuard;
+
+        return await BrowserToolHelpers.RequestAsync(_bridge, "page.find",
             new { query, tab_id = BrowserToolHelpers.GetTabId(arguments) },
             r => ToolResult.Ok(BrowserToolHelpers.GetString(r, "text")), ct);
     }

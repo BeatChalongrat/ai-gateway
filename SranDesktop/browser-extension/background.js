@@ -14,7 +14,23 @@ let tokenRejected = false; // this connection died on a pairing-token mismatch
 
 async function getToken() {
   const stored = await chrome.storage.local.get('token');
-  return stored.token || '';
+  // A token pasted on the options page wins; otherwise fall back to the one
+  // the desktop app dropped into the bundle (pairing.json). That file is how a
+  // shell with no Settings→Browser pane hands us the token — no paste needed.
+  return stored.token || (await getProvisionedToken());
+}
+
+// Reads pairing.json from our own bundle (written by the desktop app). Absent
+// on a store-published build with no provisioning — returns '' then.
+async function getProvisionedToken() {
+  try {
+    const res = await fetch(chrome.runtime.getURL('pairing.json'));
+    if (!res.ok) return '';
+    const data = await res.json();
+    return data && typeof data.token === 'string' ? data.token : '';
+  } catch (e) {
+    return '';
+  }
 }
 
 async function setStatus(connected, reason) {
@@ -69,8 +85,17 @@ async function onMessage(msg) {
   }
   if (msg.hello_reject) {
     tokenRejected = true;
+    // Self-heal a regenerated token: if a stale pasted token no longer matches
+    // but the app-provisioned pairing.json carries a different one, drop the
+    // stale paste so the next connect uses the fresh provisioned token. Only
+    // then fall back to asking the user to paste (no provisioned file).
+    const stored = await chrome.storage.local.get('token');
+    const provisioned = await getProvisionedToken();
+    if (provisioned && stored.token && stored.token !== provisioned) {
+      await chrome.storage.local.remove('token');
+    }
     await setStatus(false, 'token_mismatch');
-    return; // the app drops the connection right after this
+    return; // the app drops the connection right after this; reconnect follows
   }
   if (typeof msg.id === 'undefined') return;
   const token = await getToken();

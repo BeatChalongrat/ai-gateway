@@ -49,6 +49,11 @@ public sealed class ListDirectoryTool : IMcpTool
                 // must not surface the app's own state subtree (Phase 10 D1).
                 if (PathGuard.IsProtectedStatePath(entry))
                     continue;
+                // Internal undo snapshots (BackupBeforeOverwrite) are not user
+                // content — keep them off the listing so an edited folder looks
+                // clean; the edit/move result still names the backup for undo.
+                if (entry.EndsWith(ToolHelpers.BackupSuffix, StringComparison.OrdinalIgnoreCase))
+                    continue;
                 if (++count > MaxEntries)
                 {
                     sb.AppendLine($"[...truncated at {MaxEntries} entries]");

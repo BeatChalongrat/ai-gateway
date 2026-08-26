@@ -25,23 +25,8 @@ internal static class ToolHelpers
             ? el.GetBoolean()
             : fallback;
 
-    /// <summary>Brings a window to the foreground before keyboard injection and
-    /// VERIFIES it — typing into the wrong window is the worst computer-use
-    /// failure mode. Returns an error message, or null when focused.</summary>
-    public static async Task<string?> FocusWindowForInputAsync(string windowTitle, CancellationToken ct)
-    {
-        var hWnd = Native.Win32Input.FindWindowByTitle(windowTitle);
-        if (hWnd == IntPtr.Zero)
-            return $"No visible window with a title containing '{windowTitle}'.";
-
-        var focused = await Task.Run(() => Native.Win32Input.ForceForegroundWindow(hWnd), ct);
-        await Task.Delay(150, ct); // let the activation settle before keystrokes
-        if (!focused || Native.Win32Input.GetForegroundWindow() != hWnd)
-            return $"Could not bring '{windowTitle}' to the foreground — it may belong to an " +
-                   "elevated (administrator) process, which cannot receive our input. " +
-                   "Input was NOT sent.";
-        return null;
-    }
+    // FocusWindowForInputAsync moved verbatim to SranDesktop.Infrastructure.Windows
+    // (Mcp/Tools/WindowFocus.cs) — the one Win32-bound method this class had.
 
     /// <summary>FIX-G: before a tool overwrites an EXISTING file, snapshot the
     /// previous content next to it as "&lt;file&gt;.sran.bak" (latest one only —
@@ -49,12 +34,20 @@ internal static class ToolHelpers
     /// backup path, or null when nothing existed (new file = nothing to lose).
     /// The backup lands in the same directory, so it can never escape the
     /// PathGuard root that already admitted the write itself.</summary>
+    /// <summary>Suffix of the internal undo snapshot — shared so list_directory
+    /// can filter it out (it is not user content).</summary>
+    public const string BackupSuffix = ".sran.bak";
+
     public static string? BackupBeforeOverwrite(string fullPath)
     {
         if (!File.Exists(fullPath))
             return null;
-        var backup = fullPath + ".sran.bak";
+        var backup = fullPath + BackupSuffix;
         File.Copy(fullPath, backup, overwrite: true);
+        // Hide it so it doesn't clutter Explorer / the user's folder view. It
+        // stays on disk for one-step undo, and the tool result names the path.
+        try { File.SetAttributes(backup, File.GetAttributes(backup) | FileAttributes.Hidden); }
+        catch (Exception) { /* attribute set is best-effort — non-fatal */ }
         return backup;
     }
 
@@ -122,7 +115,28 @@ public static class PathGuard
             if (IsWithin(fullPath, root))
                 return true;
         }
+        foreach (var root in _extraDeniedRoots)
+        {
+            if (IsWithin(fullPath, root))
+                return true;
+        }
         return false;
+    }
+
+    // E4: a host that keeps its state somewhere other than the WPF app's
+    // folders (the Electron sidecar's data dir) adds it here. ADDITIVE only —
+    // nothing can ever remove the built-in denied roots.
+    private static volatile string[] _extraDeniedRoots = Array.Empty<string>();
+
+    public static void ConfigureDeniedRoots(IEnumerable<string> roots)
+    {
+        var applied = new List<string>();
+        foreach (var root in roots)
+        {
+            if (!string.IsNullOrWhiteSpace(root) && Path.IsPathFullyQualified(root))
+                applied.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)));
+        }
+        _extraDeniedRoots = applied.ToArray();
     }
 
     // Replaced wholesale by ConfigureGrantedRoots; the reference swap is atomic

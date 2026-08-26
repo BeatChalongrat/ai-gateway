@@ -29,8 +29,15 @@
   <ItemGroup>
     <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
     <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
+    <ProjectReference Include="..\SranDesktop.Infrastructure.Windows\SranDesktop.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\SranDesktop.Infrastructure.Windows.Desktop\SranDesktop.Infrastructure.Windows.Desktop.csproj" />
     <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
     <ProjectReference Include="..\SranDesktop.Presentation\SranDesktop.Presentation.csproj" />
+    <ProjectReference Include="..\SranDesktop.Shell\SranDesktop.Shell.csproj" />
+    <!-- FIX1: the sidecar's host-only control surface + Electron identity are
+         tested here (§4.7). RID/self-contained props are publish-time only; a
+         plain reference-for-test does not drag them in. -->
+    <ProjectReference Include="..\SranDesktop.ToolsSidecar\SranDesktop.ToolsSidecar.csproj" />
   </ItemGroup>
 
 </Project>

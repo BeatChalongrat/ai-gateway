@@ -41,6 +41,16 @@ public sealed class ReadDocumentTool : IMcpTool
     private readonly IScannedDocumentOcr? _ocr;
     private readonly ISettingsService? _settings;
     private readonly IToastService? _toasts;
+    private readonly bool _canRelayOcr;
+
+    /// <summary>FIX3 §4: the sidecar cannot hold the JWT, so it cannot OCR — but
+    /// a host that owns the session can. When true AND no local OCR client is
+    /// set, a scanned PDF (already cleared by PathGuard + SensitiveReadGuard)
+    /// returns a sentinel carrying the bytes we read, for the HOST to OCR. Off by
+    /// default: tests and the offline host keep the strictly-offline "no OCR"
+    /// answer, byte-for-byte.</summary>
+    private const long OcrRelayByteCap = 10L * 1024 * 1024;
+    internal const string OcrRelayMarker = "__SRAN_OCR_NEEDED__";
 
     /// <param name="ocr">Server-side OCR for scanned PDFs. Null (the default,
     /// used by tests and any headless host) keeps the tool strictly offline:
@@ -54,11 +64,13 @@ public sealed class ReadDocumentTool : IMcpTool
     public ReadDocumentTool(
         IScannedDocumentOcr? ocr = null,
         ISettingsService? settings = null,
-        IToastService? toasts = null)
+        IToastService? toasts = null,
+        bool canRelayOcr = false)
     {
         _ocr = ocr;
         _settings = settings;
         _toasts = toasts;
+        _canRelayOcr = canRelayOcr;
     }
 
     public string Name => "read_document";
@@ -165,7 +177,32 @@ public sealed class ReadDocumentTool : IMcpTool
         string path, FileInfo info, DocumentExtraction scan, int maxChars, CancellationToken ct)
     {
         if (_ocr is null)
+        {
+            // FIX3 §4: no local OCR. If this host can relay to a session-holding
+            // host, hand it the bytes we ALREADY read (path + consent cleared
+            // above) — never a path, so the host can only ever OCR a file the
+            // sidecar admitted. Oversize scans fall back to the offline answer.
+            if (_canRelayOcr && info.Length <= OcrRelayByteCap)
+            {
+                try
+                {
+                    var bytes = await File.ReadAllBytesAsync(path, ct);
+                    var envelope = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        mime = "application/pdf",
+                        name = info.Name,
+                        pages = scan.TotalUnits,
+                        b64 = Convert.ToBase64String(bytes),
+                    });
+                    return ToolResult.Ok(OcrRelayMarker + "\n" + envelope);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return ToolResult.Fail(scan.Error!);
+                }
+            }
             return ToolResult.Fail(scan.Error!); // strictly-offline host: unchanged behaviour
+        }
 
         ShowUploadNoticeOnce();
 

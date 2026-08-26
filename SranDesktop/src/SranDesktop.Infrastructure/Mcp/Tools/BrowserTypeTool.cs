@@ -9,7 +9,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// content script (React-safe native setter + input events). Shares the
 /// desktop credential guard; the content script ADDITIONALLY refuses fields
 /// whose name/id/type look like credential fields regardless of the text.</summary>
-public sealed class BrowserTypeTool : IMcpTool
+public sealed class BrowserTypeTool : IMcpTool, IBrowserTabAction
 {
     private readonly IBrowserBridgeService _bridge;
 
@@ -37,20 +37,26 @@ public sealed class BrowserTypeTool : IMcpTool
         }
         """);
 
-    public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
         if (!arguments.TryGetProperty("ref", out var refEl) || !refEl.TryGetInt32(out var elementRef))
-            return Task.FromResult(ToolResult.Fail("ref integer is required."));
+            return ToolResult.Fail("ref integer is required.");
         var text = ToolHelpers.GetString(arguments, "text");
         if (text is null)
-            return Task.FromResult(ToolResult.Fail("text is required."));
+            return ToolResult.Fail("text is required.");
 
+        // The credential refusal is a CONTENT decision — it needs no site, so it
+        // runs BEFORE the per-site guard (FIX6-addendum): never even resolve the
+        // tab for text we will refuse to type.
         if (Application.Services.CredentialTextGuard.LooksLikeCredential(text, out var kind))
-            return Task.FromResult(ToolResult.Fail(
+            return ToolResult.Fail(
                 $"Refused: the text looks like a {kind}. Typing credentials, keys, or card " +
-                "numbers is prohibited — ask the user to enter it themselves."));
+                "numbers is prohibited — ask the user to enter it themselves.");
 
-        return BrowserToolHelpers.RequestAsync(_bridge, "page.type",
+        var siteGuard = await BrowserToolHelpers.EnforceAuthorizedSiteAsync(_bridge, BrowserToolHelpers.GetTabId(arguments), ct);
+        if (siteGuard is not null) return siteGuard;
+
+        return await BrowserToolHelpers.RequestAsync(_bridge, "page.type",
             new
             {
                 @ref = elementRef,

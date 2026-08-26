@@ -2,11 +2,12 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 
-namespace SranDesktop.App;
+namespace SranDesktop.Infrastructure.Platform;
 
 /// <summary>
 /// Registers a system-wide hotkey (Ctrl+Shift+Space) via Win32 RegisterHotKey.
 /// The window's HWND receives WM_HOTKEY even while hidden.
+/// Shell Phase 1: moved here from SranDesktop.App so both hosts can use it.
 /// </summary>
 public sealed class GlobalHotkey : IDisposable
 {

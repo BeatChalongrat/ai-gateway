@@ -32,6 +32,8 @@
   <ItemGroup>
     <ProjectReference Include="..\SranDesktop.Presentation\SranDesktop.Presentation.csproj" />
     <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
+    <ProjectReference Include="..\SranDesktop.Infrastructure.Windows\SranDesktop.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\SranDesktop.Infrastructure.Windows.Desktop\SranDesktop.Infrastructure.Windows.Desktop.csproj" />
   </ItemGroup>
 
   <!-- Unpacked Chrome extension ships beside the app: Settings → Browser shows

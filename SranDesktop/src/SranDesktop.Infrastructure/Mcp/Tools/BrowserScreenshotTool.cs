@@ -8,7 +8,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// <summary>browser_screenshot (browser tools) — captureVisibleTab through the
 /// extension (JPEG, to stay under the 1 MB native-messaging frame cap).
 /// Complements browser_read_page for visual verification.</summary>
-public sealed class BrowserScreenshotTool : IMcpTool
+public sealed class BrowserScreenshotTool : IMcpTool, IBrowserTabAction
 {
     private readonly IBrowserBridgeService _bridge;
 
@@ -31,8 +31,12 @@ public sealed class BrowserScreenshotTool : IMcpTool
         }
         """);
 
-    public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct) =>
-        BrowserToolHelpers.RequestAsync(_bridge, "page.screenshot",
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+    {
+        var siteGuard = await BrowserToolHelpers.EnforceAuthorizedSiteAsync(_bridge, BrowserToolHelpers.GetTabId(arguments), ct);
+        if (siteGuard is not null) return siteGuard;
+
+        return await BrowserToolHelpers.RequestAsync(_bridge, "page.screenshot",
             new { tab_id = BrowserToolHelpers.GetTabId(arguments) },
             r =>
             {
@@ -43,4 +47,5 @@ public sealed class BrowserScreenshotTool : IMcpTool
                     $"Screenshot of tab: {BrowserToolHelpers.GetString(r, "title")}. " +
                     "The image follows in the next message.", image);
             }, ct);
+    }
 }

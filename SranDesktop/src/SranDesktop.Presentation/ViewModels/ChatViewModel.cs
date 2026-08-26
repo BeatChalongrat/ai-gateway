@@ -22,6 +22,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IConversationActivityTracker? _activity;
     private readonly IFileService _fileService;
     private readonly IChatOrchestrator _orchestrator;
+    private readonly Application.Services.AgentTurnAssembler _assembler;
     private readonly IChatService _chatService;
     private readonly ISkillManager _skills;
     private readonly ISpeechService _speech;
@@ -825,7 +826,11 @@ public partial class ChatViewModel : ObservableObject
         IConversationActivityTracker? activity = null,
         // Optional for the same reason; null = no OS-level completion balloon.
         ICompletionNotifier? completionNotifier = null,
-        IWindowStateProvider? windowState = null)
+        IWindowStateProvider? windowState = null,
+        // Shared turn-prompt assembler (SHELL_TURN_PARITY_REPORT.md §2). Optional
+        // so the many test constructions keep compiling; a null one is built from
+        // the same services this VM already holds, so behaviour is identical.
+        Application.Services.AgentTurnAssembler? assembler = null)
     {
         // The skeleton hides the moment the first bubble lands, so it has to
         // track the collection, not just the loading flag.
@@ -846,6 +851,9 @@ public partial class ChatViewModel : ObservableObject
         _dialogs = dialogs;
         _completionNotifier = completionNotifier;
         _windowState = windowState;
+        _assembler = assembler ?? new Application.Services.AgentTurnAssembler(
+            skills, settings, store, api,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Application.Services.AgentTurnAssembler>.Instance);
         // Phase 12 E: on-device excel/doc/pptx plan executors; anything they
         // can't reproduce falls back to chat-edge.
         _localPlanExecutors = localPlanExecutors?.ToList() ?? new List<ILocalPlanExecutor>();
@@ -1992,18 +2000,25 @@ public partial class ChatViewModel : ObservableObject
         var gatewayMessages = BuildGatewayMessages(assistantMessage);
         RecordRecentModel(Conversation?.ModelId);
 
-        // R9: project instructions (B6), matched skills (H3), writing style (L2)
-        // and artifact guidance are appended to the system prompt per turn.
-        var extras = await BuildSystemExtrasAsync();
-        if (extras.Length > 0 && gatewayMessages.Count > 0
-            && gatewayMessages[0] is { Role: "system", Content: string basePrompt })
-        {
+        // The full system prompt — base + account instructions + working folder +
+        // image/video hints + extras (artifacts, project, file manifest, agent
+        // memory, skills, writing style) — is built by the shared
+        // AgentTurnAssembler (SHELL_TURN_PARITY_REPORT.md §2), the single source
+        // of truth the shell also uses. BuildGatewayMessages leaves [0]'s content
+        // as its base prompt; this overwrites it with the full assembled prompt.
+        // Mode flags are read BEFORE their reset below.
+        var promptInputs = new Application.Services.TurnPromptInputs(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Conversation?.Id, _activeProject, IsImageModeOn, IsVideoModeOn, MemoryEnabled,
+            Messages.LastOrDefault(m => m.IsUser)?.Content ?? "",
+            // The WPF renderer reads the :::artifact fence (closing round §1).
+            Application.Services.ArtifactDialect.WpfFence);
+        if (gatewayMessages.Count > 0 && gatewayMessages[0].Role == "system")
             gatewayMessages[0] = new GatewayMessage
             {
                 Role = "system",
-                Content = basePrompt + extras
+                Content = await _assembler.BuildSystemPromptAsync(promptInputs)
             };
-        }
 
         // Reset image/video mode toggles after building messages (per-message, not persistent)
         IsImageModeOn = false;

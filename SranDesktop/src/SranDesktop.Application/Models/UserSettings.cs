@@ -45,6 +45,14 @@ public sealed class UserSettings
     [JsonPropertyName("browser_extension_id")]
     public string BrowserExtensionId { get; set; } = "";
 
+    /// <summary>Absolute path of the unpacked Chrome extension folder actually
+    /// loaded in the browser. The shell drops the current pairing token here
+    /// (pairing.json) so the extension self-provisions — it has no
+    /// Settings→Browser pane. Empty = the copy shipped beside the app
+    /// (BaseDirectory\browser-extension).</summary>
+    [JsonPropertyName("browser_extension_path")]
+    public string BrowserExtensionPath { get; set; } = "";
+
     /// <summary>Voice settings (R9 J): TTS voice name, rate (-10..10), auto-read.</summary>
     [JsonPropertyName("voice_name")]
     public string VoiceName { get; set; } = "";

@@ -22,12 +22,23 @@ public class BrowserToolTests
                 It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
             .ReturnsAsync(JsonSerializer.SerializeToElement(result));
 
+    // FIX6-addendum: a tab-acting browser tool now REFUSES without an authorized
+    // site (fail-closed). These direct-call tests open the gate — set the ambient
+    // origin and have tabs.list report the active tab on that SAME origin — so the
+    // per-site guard passes and the tool's own bridge behaviour is what's tested.
+    private void GateOpen(string origin = "https://example.com")
+    {
+        new ShellSession().CurrentAuthorizedSite = origin;
+        SetupResult("tabs.list", new { tabs = new[] { new { id = 1, title = "t", url = origin + "/", active = true } } });
+    }
+
     [Fact]
     public async Task Disconnected_Bridge_Yields_The_Install_Guidance()
     {
         _bridge.Setup(b => b.RequestAsync(It.IsAny<string>(), It.IsAny<object?>(),
                 It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
             .ThrowsAsync(new BrowserNotConnectedException());
+        new ShellSession().CurrentAuthorizedSite = "https://example.com"; // gate on; the guard's tabs.list also throws → not-connected
 
         var result = await new BrowserReadPageTool(_bridge.Object)
             .ExecuteAsync(Args(new { }), CancellationToken.None);
@@ -59,6 +70,7 @@ public class BrowserToolTests
     [Fact]
     public async Task ReadPage_Passes_The_Element_Listing_Through()
     {
+        GateOpen();
         SetupResult("page.read", new { text = "[0] <a> \"More information\" (enabled)" });
 
         var result = await new BrowserReadPageTool(_bridge.Object)
@@ -71,6 +83,7 @@ public class BrowserToolTests
     [Fact]
     public async Task Click_Passes_A_Stale_Ref_Error_Through()
     {
+        GateOpen();
         _bridge.Setup(b => b.RequestAsync("page.click", It.IsAny<object?>(),
                 It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
             .ThrowsAsync(new BrowserBridgeException("refs are stale — call browser_read_page again"));
@@ -85,6 +98,7 @@ public class BrowserToolTests
     [Fact]
     public async Task Click_Reports_Navigation_With_The_New_Page()
     {
+        GateOpen();
         SetupResult("page.click", new { clicked = true, navigated = true, url = "https://www.iana.org/help/example-domains", title = "Example Domains" });
 
         var result = await new BrowserClickTool(_bridge.Object)
@@ -151,6 +165,7 @@ public class BrowserToolTests
     [Fact]
     public async Task Screenshot_Returns_The_Image_Data_Uri()
     {
+        GateOpen();
         SetupResult("page.screenshot", new { image = "data:image/jpeg;base64,abc123", title = "Example" });
 
         var result = await new BrowserScreenshotTool(_bridge.Object)

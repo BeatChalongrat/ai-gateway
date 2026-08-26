@@ -411,8 +411,14 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
     internal Func<string?> ResolveTokenProvider(string connectorId)
     {
         var installed = LoadState().FirstOrDefault(c => c.Id == connectorId);
+        if (installed?.AuthMode == InstalledConnector.AuthModeOAuthDcr)
+            // FIX7: client-native OAuth — the per-connector access token from the
+            // DPAPI store, resolved per request so a refresh is picked up. NEVER the
+            // portal JWT (_tokenSession): this token is scoped to one third-party
+            // service, and the sidecar holds no portal JWT at all.
+            return () => Oauth.StoredConnectorToken.FromJson(_credentials.Load($"connector-oauth:{connectorId}"))?.AccessToken;
         if (installed?.AuthMode == InstalledConnector.AuthModeOAuth2)
-            return () => _tokenSession?.AccessToken;
+            return () => _tokenSession?.AccessToken; // legacy broker mode (portal JWT; WPF only — sidecar _tokenSession is null)
 
         var token = _credentials.Load($"connector:{connectorId}");
         return () => token;

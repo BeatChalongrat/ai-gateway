@@ -121,8 +121,15 @@ public sealed class BrowserBridgeService : IBrowserBridgeService, IAsyncDisposab
         }
     }
 
+    /// <summary>Pause between attempts to CREATE the pipe when another process
+    /// already owns it (maxNumberOfServerInstances: 1). Shell Phase 1 found the
+    /// loop retrying immediately, forever, when the WPF app and the shell ran
+    /// side by side — 160 MB of "All pipe instances are busy" in ten seconds.</summary>
+    private static readonly TimeSpan PipeBusyRetryDelay = TimeSpan.FromSeconds(10);
+
     private async Task AcceptLoopAsync()
     {
+        var pipeBusyLogged = false;
         while (!_lifetime.IsCancellationRequested)
         {
             NamedPipeServerStream? server = null;
@@ -131,14 +138,31 @@ public sealed class BrowserBridgeService : IBrowserBridgeService, IAsyncDisposab
                 // Non-zero buffer quotas: the parameterless-buffer overload
                 // creates 0-byte buffers, making every write rendezvous with a
                 // read — one stalled reader would freeze writers.
-                server = new NamedPipeServerStream(
-                    _pipeName, PipeDirection.InOut, maxNumberOfServerInstances: 1,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
-                    inBufferSize: 256 * 1024, outBufferSize: 256 * 1024);
-                await server.WaitForConnectionAsync(_lifetime.Token);
+                try
+                {
+                    server = new NamedPipeServerStream(
+                        _pipeName, PipeDirection.InOut, maxNumberOfServerInstances: 1,
+                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
+                        inBufferSize: 256 * 1024, outBufferSize: 256 * 1024);
+                }
+                catch (IOException ex)
+                {
+                    // Another host owns the pipe. Warn once, then wait — never spin.
+                    if (!pipeBusyLogged)
+                    {
+                        pipeBusyLogged = true;
+                        _logger.LogWarning(ex,
+                            "Browser bridge pipe {Pipe} is owned by another process (another SRAN Desktop host?) — retrying every {Delay}s; browser tools stay unavailable here until it is released",
+                            _pipeName, PipeBusyRetryDelay.TotalSeconds);
+                    }
+                    await Task.Delay(PipeBusyRetryDelay, _lifetime.Token).ConfigureAwait(false);
+                    continue;
+                }
+                pipeBusyLogged = false;
+                await server.WaitForConnectionAsync(_lifetime.Token).ConfigureAwait(false);
                 _client = server;
                 _logger.LogInformation("Browser relay connected to pipe {Pipe}", _pipeName);
-                await ReadLoopAsync(server);
+                await ReadLoopAsync(server).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -249,7 +273,7 @@ public sealed class BrowserBridgeService : IBrowserBridgeService, IAsyncDisposab
         _lifetime.Cancel();
         _client?.Dispose();
         if (_acceptLoop is { } loop)
-            await Task.WhenAny(loop, Task.Delay(TimeSpan.FromSeconds(2)));
+            await Task.WhenAny(loop, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
         _lifetime.Dispose();
         _writeLock.Dispose();
     }

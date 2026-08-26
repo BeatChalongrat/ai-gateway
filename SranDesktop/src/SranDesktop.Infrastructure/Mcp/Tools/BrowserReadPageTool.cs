@@ -9,7 +9,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// page: the content script returns an indexed interactive-element list
 /// ([12] &lt;button&gt; "Send reply" (enabled)) whose refs feed browser_click /
 /// browser_type. DOM-level, so it beats screenshots for accuracy.</summary>
-public sealed class BrowserReadPageTool : IMcpTool
+public sealed class BrowserReadPageTool : IMcpTool, IBrowserTabAction
 {
     private readonly IBrowserBridgeService _bridge;
 
@@ -34,12 +34,17 @@ public sealed class BrowserReadPageTool : IMcpTool
         }
         """);
 
-    public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct) =>
-        BrowserToolHelpers.RequestAsync(_bridge, "page.read",
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+    {
+        var siteGuard = await BrowserToolHelpers.EnforceAuthorizedSiteAsync(_bridge, BrowserToolHelpers.GetTabId(arguments), ct);
+        if (siteGuard is not null) return siteGuard;
+
+        return await BrowserToolHelpers.RequestAsync(_bridge, "page.read",
             new
             {
                 tab_id = BrowserToolHelpers.GetTabId(arguments),
                 filter = ToolHelpers.GetString(arguments, "filter") ?? "interactive"
             },
             r => ToolResult.Ok(BrowserToolHelpers.GetString(r, "text")), ct);
+    }
 }

@@ -1,0 +1,37 @@
+<Window x:Class="SranDesktop.Shell.ShellWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="SRAN Desktop (shell preview)" Width="1200" Height="800"
+        MinWidth="640" MinHeight="480"
+        Icon="pack://application:,,,/SranDesktop.Shell;component/Assets/app.ico">
+    <Grid>
+        <!-- The one and only browser surface. Created in XAML so the control's
+             lifetime is the window's; CoreWebView2 is initialised in code-behind
+             against the shell's OWN environment (never the app's shared jar). -->
+        <wv2:WebView2 x:Name="Browser" />
+
+        <!-- Phase 2 §2.1: the shell-owned view. Shown while the host acquires
+             the session (boot, re-auth) and when signed out — never a spinner
+             over a blank WebView; a cancelled login lands on a visible
+             "Sign in" control. Opaque on purpose: nothing behind it leaks. -->
+        <Border x:Name="SessionOverlay" Visibility="Visible" Background="#FFF7F7F7">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
+                <TextBlock FontSize="22" FontWeight="SemiBold" Text="SRAN Desktop" />
+                <TextBlock x:Name="SessionStatusText" Margin="0,10,0,18" TextWrapping="Wrap"
+                           Foreground="#666" Text="Signing in…" />
+                <Button x:Name="SignInButton" Content="Sign in" Padding="20,8" HorizontalAlignment="Left"
+                        Visibility="Collapsed" Click="SignInButton_Click" />
+            </StackPanel>
+        </Border>
+
+        <!-- ProcessFailed recovery: shown only after a browser-process crash. -->
+        <Border x:Name="CrashOverlay" Visibility="Collapsed" Background="#F2FFFFFF">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
+                <TextBlock FontSize="18" FontWeight="SemiBold" Text="The page stopped responding." />
+                <TextBlock x:Name="CrashDetail" Margin="0,8,0,16" TextWrapping="Wrap" Foreground="#666" />
+                <Button x:Name="ReloadButton" Content="Reload" Padding="16,6" HorizontalAlignment="Left" Click="ReloadButton_Click" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

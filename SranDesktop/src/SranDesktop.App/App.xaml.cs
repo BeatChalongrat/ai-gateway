@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SranDesktop.App.Hosting;
 using SranDesktop.Application.Interfaces;
+using SranDesktop.Infrastructure.Platform;
 using SranDesktop.Presentation.Localization;
 using SranDesktop.Presentation.ViewModels;
 using SranDesktop.Presentation.Views;

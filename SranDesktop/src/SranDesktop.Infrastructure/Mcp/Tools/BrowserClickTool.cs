@@ -9,7 +9,7 @@ namespace SranDesktop.Infrastructure.Mcp.Tools;
 /// browser_read_page. The content script re-verifies the node is alive and
 /// visible (stale refs error cleanly) and the extension waits out any
 /// navigation the click starts, returning the final URL + title.</summary>
-public sealed class BrowserClickTool : IMcpTool
+public sealed class BrowserClickTool : IMcpTool, IBrowserTabAction
 {
     private readonly IBrowserBridgeService _bridge;
 
@@ -34,12 +34,15 @@ public sealed class BrowserClickTool : IMcpTool
         }
         """);
 
-    public Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, CancellationToken ct)
     {
         if (!arguments.TryGetProperty("ref", out var refEl) || !refEl.TryGetInt32(out var elementRef))
-            return Task.FromResult(ToolResult.Fail("ref integer is required."));
+            return ToolResult.Fail("ref integer is required.");
 
-        return BrowserToolHelpers.RequestAsync(_bridge, "page.click",
+        var siteGuard = await BrowserToolHelpers.EnforceAuthorizedSiteAsync(_bridge, BrowserToolHelpers.GetTabId(arguments), ct);
+        if (siteGuard is not null) return siteGuard;
+
+        return await BrowserToolHelpers.RequestAsync(_bridge, "page.click",
             new { @ref = elementRef, tab_id = BrowserToolHelpers.GetTabId(arguments) },
             r =>
             {

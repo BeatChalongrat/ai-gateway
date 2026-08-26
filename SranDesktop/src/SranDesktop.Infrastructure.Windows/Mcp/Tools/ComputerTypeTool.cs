@@ -40,7 +40,7 @@ public sealed class ComputerTypeTool : IMcpTool
                 "numbers is prohibited — ask the user to enter it themselves.");
 
         if (ToolHelpers.GetString(arguments, "window_title") is { Length: > 0 } windowTitle
-            && await ToolHelpers.FocusWindowForInputAsync(windowTitle, ct) is { } focusError)
+            && await WindowFocus.FocusWindowForInputAsync(windowTitle, ct) is { } focusError)
             return ToolResult.Fail(focusError);
 
         await Task.Run(() => Win32Input.TypeText(text), ct);

@@ -3,7 +3,7 @@ using System.IO.Pipes;
 using System.Threading;
 using SranDesktop.Application.Services;
 
-namespace SranDesktop.App;
+namespace SranDesktop.Infrastructure.Platform;
 
 /// <summary>
 /// Ensures only one instance runs. A second launch forwards its args over a
@@ -11,26 +11,35 @@ namespace SranDesktop.App;
 /// the args carry a ``sran://`` deep link (Phase 7 C2), hands the URI to the
 /// deep-link callback. Wire format lives in <see cref="SingleInstanceProtocol"/>
 /// and stays backward-compatible: an old sender's bare "activate" still works.
+///
+/// Shell Phase 1: moved here from SranDesktop.App so the WebView2 shell can
+/// reuse it. The instance name is a parameter because the two hosts must NOT
+/// share a mutex — otherwise launching the shell would forward its args to a
+/// running WPF app and exit. The WPF app keeps the historical default name.
 /// </summary>
 public static class SingleInstance
 {
-    private const string MutexName = "SranDesktop_SingleInstance_Mutex";
-    private const string PipeName = "SranDesktop_SingleInstance_Pipe";
+    public const string DefaultInstanceName = "SranDesktop";
+
+    private static string _mutexName = $"{DefaultInstanceName}_SingleInstance_Mutex";
+    private static string _pipeName = $"{DefaultInstanceName}_SingleInstance_Pipe";
 
     private static Mutex? _mutex;
     private static CancellationTokenSource? _listenerCts;
 
     /// <summary>True if this is the first instance. Otherwise the args were
     /// forwarded to the running instance.</summary>
-    public static bool Claim(string[]? args = null)
+    public static bool Claim(string[]? args = null, string instanceName = DefaultInstanceName)
     {
-        _mutex = new Mutex(initiallyOwned: true, MutexName, out var isNew);
+        _mutexName = $"{instanceName}_SingleInstance_Mutex";
+        _pipeName = $"{instanceName}_SingleInstance_Pipe";
+        _mutex = new Mutex(initiallyOwned: true, _mutexName, out var isNew);
         if (isNew)
             return true;
 
         try
         {
-            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+            using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out);
             client.Connect(2000);
             using var writer = new StreamWriter(client) { AutoFlush = true };
             writer.Write(SingleInstanceProtocol.Encode(args));
@@ -60,7 +69,7 @@ public static class SingleInstance
                 try
                 {
                     using var server = new NamedPipeServerStream(
-                        PipeName, PipeDirection.In, 1,
+                        _pipeName, PipeDirection.In, 1,
                         PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
                     await server.WaitForConnectionAsync(ct);
 

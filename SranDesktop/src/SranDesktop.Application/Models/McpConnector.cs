@@ -90,6 +90,14 @@ public sealed class InstalledConnector
     /// under ``connector:{id}``.</summary>
     public const string AuthModeApiKey = "api_key";
 
+    /// <summary>FIX7 — client-native OAuth (Claude Code model): the client ran the
+    /// OAuth flow against the connector's OWN authorization server, and the
+    /// per-connector access+refresh token lives in the DPAPI store under
+    /// ``connector-oauth:{id}``. Its tool calls send THAT token — never the portal
+    /// JWT, which the sidecar does not hold. Distinct from the legacy broker
+    /// ``oauth2`` mode, which authenticated with the live portal JWT (WPF only).</summary>
+    public const string AuthModeOAuthDcr = "oauth_dcr";
+
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 

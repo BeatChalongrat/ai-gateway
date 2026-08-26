@@ -10,8 +10,28 @@ using SranDesktop.Infrastructure.Native.Browser;
 using var stdin = Console.OpenStandardInput();
 using var stdout = Console.OpenStandardOutput();
 
+// FIX1 (collision #1/#4): which app's pipe do we relay to? A relay copy that
+// ships beside the Electron sidecar carries a `browser-host.pipe` file naming
+// its pipe; a relay with no such file (the WPF app's copy) uses the shared
+// default — so the WPF relay is byte-for-byte unchanged. The file holds only a
+// pipe name (no secret); it is written by the sidecar at deploy time.
+static string ResolvePipeName()
+{
+    try
+    {
+        var cfg = Path.Combine(AppContext.BaseDirectory, "browser-host.pipe");
+        if (File.Exists(cfg))
+        {
+            var name = File.ReadAllText(cfg).Trim();
+            if (name.Length is > 0 and <= 128) return name;
+        }
+    }
+    catch { /* unreadable — fall back to the default below */ }
+    return BrowserWire.PipeName();
+}
+
 using var pipe = new NamedPipeClientStream(
-    ".", BrowserWire.PipeName(), PipeDirection.InOut, PipeOptions.Asynchronous);
+    ".", ResolvePipeName(), PipeDirection.InOut, PipeOptions.Asynchronous);
 try
 {
     await pipe.ConnectAsync(5000);

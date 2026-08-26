@@ -17,6 +17,7 @@ namespace SranDesktop.Application.Services;
 public sealed class ShellSession
 {
     private static readonly AsyncLocal<string?> _current = new();
+    private static readonly AsyncLocal<string?> _authorizedSite = new();
     private readonly ConcurrentDictionary<string, string> _workingDirectories = new(StringComparer.Ordinal);
 
     /// <summary>The conversation whose turn is executing a tool right now.
@@ -26,6 +27,23 @@ public sealed class ShellSession
         get => _current.Value;
         set => _current.Value = value;
     }
+
+    /// <summary>FIX6: the ORIGIN the host authorized for the browser action
+    /// currently executing (from <c>_meta.authorizedSite</c>). A tab-acting
+    /// browser tool re-checks the target tab's LIVE origin against this and
+    /// refuses on a mismatch — so a page that navigated away after the grant, or a
+    /// tab swapped underneath the action, cannot be acted on. Null = not a gated
+    /// browser action (no check).</summary>
+    public string? CurrentAuthorizedSite
+    {
+        get => _authorizedSite.Value;
+        set => _authorizedSite.Value = value;
+    }
+
+    /// <summary>The ambient authorized site for the tool call executing on THIS
+    /// async chain — so a browser tool can read it without an injected session
+    /// instance (it is set on the same AsyncLocal the request task owns).</summary>
+    public static string? AmbientAuthorizedSite => _authorizedSite.Value;
 
     public string? GetWorkingDirectory(string conversationId) =>
         _workingDirectories.TryGetValue(conversationId, out var dir) ? dir : null;
