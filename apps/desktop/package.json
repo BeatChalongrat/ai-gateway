@@ -1,0 +1,22 @@
+{
+  "name": "sran-desktop",
+  "private": true,
+  "version": "0.1.0-e1",
+  "description": "SRAN Desktop — Electron shell (E1 skeleton: opens web-chat, cannot go anywhere else)",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --devtools",
+    "probe": "npm run build && electron . --e1-probe",
+    "measure": "npm run build && electron . --measure",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "44.0.0",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11"
+  }
+}

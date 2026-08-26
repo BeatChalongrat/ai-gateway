@@ -1,0 +1,1496 @@
+// The turn (E3 chat-only → E4 the tool loop). Ported from
+// SranDesktop.Application/Services/ChatOrchestrator.cs and the WebView2
+// shell's ShellTurnCoordinator, with the host/sidecar boundary of
+// docs/E4_REPORT.md §1:
+//
+//   turn.submit → [system, …history (with tool chains)…, user] → gateway SSE
+//   → content deltas | tool_calls → per call: DLP marker → permission
+//   (PermissionStore + ApprovalMode + SensitiveReadGuard) → consent via the
+//   bridge when needed → execute in the sidecar (with _meta grants +
+//   conversation id, live output via notifications/progress) or in the host
+//   (run_subagent, web_search, run_python, clipboard) → tool result message
+//   → loop, until the model answers without tools, the 100-step cap, the
+//   20-minute limit, an error, or turn.cancel.
+//
+// turn.event vocabulary to the page (the Phase 3/4 payloads web-chat renders):
+//   message_start, content_delta, reasoning_delta, analysis_status, status,
+//   tool_activity {id, tool, phase, argsSummary, parentId?, success?, durationMs?,
+//   resultPreview?, imageDataUri?, isCodeRun?, codeText?}, tool_output {id, chunk},
+//   plan_update {steps}, fallback_info, reasoning_notice, error, message_complete.
+//
+// History: userData/history/<conversation>.json keeps the FULL gateway
+// message list including assistant tool_calls and tool results (chat-edge's
+// transcript import carries only visible text — §3.1 needs the raw results
+// on the next turn). Visible user/assistant text is still imported to
+// chat-edge so a reload renders it.
+
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import type { BridgeChannel } from "./bridge";
+import type { ChatEdgeClient, ConversationDto } from "./chat-edge-client";
+import type { GatewayClient, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
+import type { GrantStore } from "./grants";
+import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, type NestedRunRequest, type NestedRunResult } from "./host-tools";
+import type { Logger } from "./logger";
+import {
+  applyApprovalMode,
+  BROWSER_SITE_PERM,
+  BROWSER_SITE_TOOLS,
+  classifyDanger,
+  dlpBlocked,
+  evaluateBrowserSite,
+  listApprovedSites,
+  parseApprovalMode,
+  readRequiresConsent,
+  resolveScope,
+  siteScope,
+  summarizeArgs,
+  toolMeta,
+  type PermissionDecision,
+  type PermissionStore,
+} from "./permissions";
+import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
+import type { SidecarClient } from "./sidecar-client";
+import { BROWSER_BRIDGE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
+
+interface BufferedEvent {
+  seq: number;
+  event: string;
+  data: unknown;
+}
+interface ConversationLog {
+  seq: number;
+  events: BufferedEvent[];
+}
+interface RunningTurn {
+  controller: AbortController;
+  done: Promise<void>;
+  messageId: string;
+  assistantText: string;
+}
+interface PendingConsent {
+  conversationId: string;
+  payload: Record<string, unknown>;
+  resolve: (r: ConsentRespondPayload) => void;
+}
+
+export interface TurnCoordinatorOptions {
+  homeDirectory: string;
+  dataDir: string;
+  defaultModel: string;
+  /** dev only: pin every turn to one model (index.ts gates it on !isRelease) */
+  forceModel?: string;
+  approvalMode: string;
+  maxIterations?: number;
+  maxTurnMinutes?: number;
+  signOut: () => Promise<void>;
+  /** host.query folders.* — the native picker lives in index.ts */
+  pickFolder: () => Promise<string | null>;
+  /** FIX2 host-side native dialogs (a headless sidecar cannot show a window). */
+  pickSkillFile?: () => Promise<string | null>;
+  /** Native file picker for a custom stdio MCP server's program (the user
+   * chooses it — the page names no process). */
+  pickExecutableFile?: () => Promise<string | null>;
+  /** Native yes/no confirmation (spawn consent). Returns true only on an
+   * explicit approval — never driven without the user. */
+  confirmSpawn?: (message: string) => Promise<boolean>;
+  /** FIX2 §1.2: apply the OS/Electron side-effect of a host-owned setting
+   * (startWithWindows → login item). The persisted VALUE lives only in the
+   * sidecar; this derives the effect from it, so there is no second copy. */
+  applyHostSetting?: (key: string, value: unknown) => void;
+}
+
+// FIX3 §4: the sentinel the sidecar's read_document returns for a scanned PDF it
+// could not OCR (it holds no JWT). The bytes ride with it; the host OCRs them.
+const OCR_RELAY_MARKER = "__SRAN_OCR_NEEDED__";
+
+// FIX8 A1.6: the self-reschedule tool, offered only while a scheduled task is
+// firing. It changes THAT task's own cron and/or prompt for future runs.
+const UPDATE_TASK_SCHEDULE_TOOL: GatewayToolDefinition = {
+  type: "function",
+  function: {
+    name: "update_task_schedule",
+    description:
+      "Change THIS scheduled task's own cron schedule and/or prompt for future runs, from inside its run. " +
+      "Use it when the task should next run at a different time, or with a revised instruction. Only available while a scheduled task is running.",
+    parameters: {
+      type: "object",
+      properties: {
+        cron: { type: "string", description: "New 5-field cron (e.g. '0 8 * * *'). Omit to keep the current schedule." },
+        prompt: { type: "string", description: "New prompt for future runs. Omit to keep the current prompt." },
+      },
+    },
+  },
+};
+
+const MAX_OUTPUT_TOKENS = 8192;
+const KEEP_SCREENSHOTS = 3;
+const SCREENSHOT_MARKER = "[Screenshot from";
+
+export class TurnCoordinator {
+  private readonly logs = new Map<string, ConversationLog>();
+  private readonly turns = new Map<string, RunningTurn>();
+  private readonly pendingConsents = new Map<string, PendingConsent>();
+  private readonly cwdByConversation = new Map<string, string>();
+  readonly lastReply = new Map<string, string>();
+  /** Probe seams. */
+  lastConversationId: string | null = null;
+  readonly toolCallsSeen: { conversationId: string; tool: string; args: Record<string, unknown>; decision: string; ok: boolean; where: "host" | "sidecar"; rpcError?: string }[] = [];
+  private turnCounter = 0;
+  // FIX1 §3.3: snapshot the browser-bridge connection ONCE per top-level turn so
+  // the tool list can drop the 8 bridge tools when it is down — and cannot flap
+  // mid-turn (a sub-agent in the same turn reads the same snapshot). Default
+  // false: a tool the model cannot use is not offered until the bridge is proven up.
+  private browserConnected = false;
+  // FIX5 §3: the tenant's web-search capability, cached so we do not ask the
+  // gateway on every turn. Learned from GET /v1/search/config (cheap, unbilled).
+  // Invalidation is purely the TTL — an admin flipping the tenant flag is picked
+  // up within SEARCH_CAP_TTL_MS (≤5 min, well under the "wrong for an hour" bar)
+  // — plus process restart (cold cache). null = never learned yet.
+  // FIX8 A1.3: while a scheduled task is firing, its own permission mode overrides
+  // the app-wide approvalMode for that run. Null outside a task run. Safe as a
+  // single field because the scheduler fires tasks one at a time.
+  private activeTaskApprovalMode: ReturnType<typeof parseApprovalMode> | null = null;
+  /** FIX8 A1.6: the scheduled task currently firing — lets update_task_schedule
+   * reschedule THIS task from inside its own run. Null outside a task run. */
+  private activeTaskId: string | null = null;
+  private searchTenantEnabled: boolean | null = null;
+  private searchTenantEnabledAt = 0;
+  private static readonly SEARCH_CAP_TTL_MS = 5 * 60_000;
+  // FIX9 §1.1: the models the gateway accepts, cached, for validating the
+  // page-supplied model. A page can name any model string; an unknown one is
+  // refused rather than passed to the gateway.
+  private acceptedModels: Set<string> | null = null;
+  private acceptedModelsAt = 0;
+  private static readonly MODELS_TTL_MS = 5 * 60_000;
+
+  constructor(
+    private readonly bridge: BridgeChannel,
+    private readonly gateway: GatewayClient,
+    private readonly chatEdge: ChatEdgeClient,
+    private readonly assembler: PromptAssembler,
+    private readonly sidecar: SidecarClient,
+    private readonly hostTools: HostTools,
+    private readonly permissions: PermissionStore,
+    private readonly grants: GrantStore,
+    private readonly opts: TurnCoordinatorOptions,
+    private readonly log: Logger,
+  ) {}
+
+  waitForTurn(conversationId: string): Promise<void> {
+    return this.turns.get(conversationId)?.done ?? Promise.resolve();
+  }
+  isRunning(conversationId: string): boolean {
+    return this.turns.has(conversationId);
+  }
+  currentAssistantText(conversationId: string): string | null {
+    return this.turns.get(conversationId)?.assistantText ?? null;
+  }
+  get activeTurns(): number {
+    return this.turns.size;
+  }
+  get pendingConsentCount(): number {
+    return this.pendingConsents.size;
+  }
+
+  // ── inbound ────────────────────────────────────────────────────────────────
+  onTurnSubmit(payload: TurnSubmitPayload): void {
+    this.lastConversationId = payload.conversationId;
+    const existing = this.turns.get(payload.conversationId);
+    if (existing) {
+      this.log.info(`TURN SUBMIT while a turn is running for conv=${payload.conversationId}: cancelling the old one`);
+      existing.controller.abort();
+    }
+    const controller = new AbortController();
+    const messageId = "asst_" + randomUUID().replace(/-/g, "");
+    const turn: RunningTurn = { controller, messageId, assistantText: "", done: Promise.resolve() };
+    turn.done = this.runTurn(payload, turn).finally(() => {
+      if (this.turns.get(payload.conversationId) === turn) this.turns.delete(payload.conversationId);
+    });
+    this.turns.set(payload.conversationId, turn);
+  }
+
+  onTurnCancel(payload: TurnCancelPayload): void {
+    const turn = this.turns.get(payload.conversationId);
+    if (!turn) return;
+    this.log.info(`TURN CANCEL requested conv=${payload.conversationId}`);
+    turn.controller.abort();
+    // A consent prompt still open for this turn is answered "deny" by the cancel.
+    for (const [id, p] of this.pendingConsents) {
+      if (p.conversationId === payload.conversationId) {
+        this.pendingConsents.delete(id);
+        p.resolve({ promptId: id, decision: "deny", scope: "once" });
+      }
+    }
+  }
+
+  onConsentRespond(payload: ConsentRespondPayload): void {
+    const pending = this.pendingConsents.get(payload.promptId);
+    if (!pending) {
+      this.log.info(`consent.respond for unknown/expired prompt ${payload.promptId} — ignored`);
+      return;
+    }
+    this.pendingConsents.delete(payload.promptId);
+    this.log.info(`CONSENT ${payload.decision}/${payload.scope} for prompt ${payload.promptId}`);
+    pending.resolve(payload);
+  }
+
+  onUiReady(payload: UiReadyPayload): void {
+    if (!payload.conversationId) return;
+    const log = this.logs.get(payload.conversationId);
+    if (log) {
+      const replay = log.events.filter((e) => e.seq > payload.lastSeq);
+      if (replay.length === 0) this.log.info(`RESUME conv=${payload.conversationId}: page at seq ${payload.lastSeq}, nothing to replay`);
+      else {
+        this.log.info(`RESUME conv=${payload.conversationId}: replaying ${replay.length} event(s) from seq ${payload.lastSeq + 1} (page was at ${payload.lastSeq})`);
+        for (const e of replay) this.bridge.postTurnEvent(payload.conversationId, e.seq, e.event, e.data);
+      }
+    }
+    for (const [id, p] of this.pendingConsents) {
+      if (p.conversationId === payload.conversationId) {
+        this.log.info(`RESUME conv=${payload.conversationId}: re-posting pending consent ${id}`);
+        this.bridge.post("consent.request", p.payload);
+      }
+    }
+  }
+
+  async onHostQuery(payload: HostQueryPayload): Promise<void> {
+    switch (payload.op) {
+      case "session.logout":
+        this.log.info("HOST QUERY session.logout: the page asked to sign out — host revokes, clears, blanks");
+        this.bridge.postHostResult(payload.requestId, true, { signedOut: true });
+        await this.opts.signOut();
+        return;
+      case "diag.reportRendererError":
+        this.log.warn(`RENDERER ERROR (${String(payload.args["kind"] ?? "error")}): ${String(payload.args["message"] ?? "").slice(0, 300)}`);
+        this.bridge.postHostResult(payload.requestId, true);
+        return;
+      case "folders.list":
+        this.bridge.postHostResult(payload.requestId, true, { folders: this.grants.list() });
+        return;
+      case "folders.pickAndGrant": {
+        // The page never names a path: the folder comes from a native dialog.
+        const picked = await this.opts.pickFolder();
+        if (!picked) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "cancelled");
+          return;
+        }
+        const v = this.grants.add(picked);
+        this.log.info(`GRANT ${v.verdict}: ${picked}`);
+        if (v.verdict === "Ok") this.bridge.postHostResult(payload.requestId, true, { folder: v.canonical, folders: this.grants.list() });
+        else this.bridge.postHostResult(payload.requestId, false, undefined, `rejected:${v.verdict}`);
+        return;
+      }
+      case "folders.revoke": {
+        const folder = payload.args["folder"] ?? payload.args["path"];
+        const removed = typeof folder === "string" ? this.grants.remove(folder) : false;
+        this.log.info(`GRANT revoke ${removed ? "ok" : "no-op"}: ${String(folder)}`);
+        this.bridge.postHostResult(payload.requestId, removed, { folders: this.grants.list() }, removed ? undefined : "not-found");
+        return;
+      }
+      // ── FIX6: approved sites (control-plane). The page may LIST and REVOKE;
+      //    there is NO "sites.add" — a site is approved ONLY via the consent
+      //    prompt, so neither the page nor the model can name a site to approve. ──
+      case "sites.list": {
+        this.bridge.postHostResult(payload.requestId, true, { sites: listApprovedSites(this.permissions) });
+        return;
+      }
+      case "sites.revoke": {
+        const origin = payload.args?.["origin"];
+        const removed = typeof origin === "string" ? this.permissions.revoke(BROWSER_SITE_PERM, origin) : false;
+        this.log.info(`SITE revoke ${removed ? "ok" : "no-op"}: ${String(origin)}`);
+        this.bridge.postHostResult(payload.requestId, removed, { sites: listApprovedSites(this.permissions) }, removed ? undefined : "not-found");
+        return;
+      }
+      // ── settings.get — forward straight to the sidecar (single source) ──
+      case "settings.get": {
+        const r = await this.sidecar.hostQuery("settings.get", payload.args ?? {});
+        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        return;
+      }
+      // ── settings.set — sidecar persists the value; host applies OS effects ──
+      case "settings.set": {
+        const r = await this.sidecar.hostQuery("settings.set", payload.args ?? {});
+        // §1.2: for host-owned keys, derive the OS effect from the SAME stored
+        // value (no second copy). Only after the sidecar accepted+persisted it.
+        if (r.ok) {
+          const key = payload.args?.["key"];
+          if ((key === "startWithWindows" || key === "minimizeToTray") && this.opts.applyHostSetting) {
+            this.opts.applyHostSetting(String(key), payload.args?.["value"]);
+          }
+        }
+        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        return;
+      }
+      // ── skills.installPicker — native file dialog → sidecar install ──
+      case "skills.installPicker": {
+        const path = this.opts.pickSkillFile ? await this.opts.pickSkillFile() : null;
+        if (!path) {
+          this.bridge.postHostResult(payload.requestId, true, { installed: false, cancelled: true });
+          return;
+        }
+        const r = await this.sidecar.hostQuery("skills._install", { path });
+        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        return;
+      }
+      // ── connectors.install — none installs; api_key/oauth2 stated (no secure
+      //    text input this round; those secrets must not route through the page) ──
+      case "connectors.install": {
+        const r = await this.sidecar.hostQuery("connectors.install", payload.args ?? {});
+        if (r.error === "needs-api-key") {
+          this.log.info("HOST QUERY connectors.install: api_key connector needs a secure key input (stated limitation)");
+          this.bridge.postHostResult(payload.requestId, false, undefined, "api-key-unsupported");
+          return;
+        }
+        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        return;
+      }
+      // ── OAuth connectors — §1.3: closed with a legible reason, not silence ──
+      case "connectors.oauthConnect":
+      case "connectors.oauthDisconnect":
+        this.log.info(`HOST QUERY ${payload.op}: oauth unsupported (JWT must not live in the sidecar; a later round wires it host-side)`);
+        this.bridge.postHostResult(payload.requestId, false, undefined, "oauth-unsupported");
+        return;
+      // ── addCustomDialog — a custom stdio MCP server, added NATIVELY: the user
+      //    picks the program (no page-named process), approves the spawn in a
+      //    native dialog, and only then is it test-spawned + installed. ──
+      case "connectors.addCustomDialog": {
+        const result = await this.addCustomConnector();
+        if (result.error) this.bridge.postHostResult(payload.requestId, false, undefined, result.error);
+        else this.bridge.postHostResult(payload.requestId, true, { added: result.added });
+        return;
+      }
+      // ── tasks.runNow — a task's run is a HOST turn (§1.1) ──
+      case "tasks.runNow": {
+        const id = payload.args?.["taskId"];
+        if (typeof id !== "string") {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "invalid");
+          return;
+        }
+        // Answer the page immediately; the turn runs in the background.
+        this.bridge.postHostResult(payload.requestId, true, { taskId: id, started: true });
+        void this.fireTaskById(id);
+        return;
+      }
+      // ── FIX1 §1.2: the one new page op — the browser-folder escape hatch. The
+      //    page names NO path; the host opens a native dialog and forwards the
+      //    folder the USER chose to the sidecar (browser.applyExtensionFolder). ──
+      case "browser.pickExtensionFolder": {
+        const picked = await this.opts.pickFolder();
+        if (!picked) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "cancelled");
+          return;
+        }
+        this.log.info(`BROWSER pick extension folder: ${picked}`);
+        const r = await this.sidecar.hostQuery("browser.applyExtensionFolder", { path: picked });
+        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        return;
+      }
+      // ── everything else: forward to the sidecar's host-only surface ──
+      // (skills.list/setEnabled/delete, tasks.list/create/update/setEnabled/delete,
+      //  connectors.listCatalog/listInstalled/uninstall, globalNotes.list/delete).
+      default: {
+        const r = await this.sidecar.hostQuery(payload.op, payload.args ?? {});
+        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        return;
+      }
+    }
+  }
+
+  /** FIX2: add a custom stdio MCP connector, entirely through NATIVE host
+   * dialogs. The user picks the server's program (the page names no process),
+   * the command is derived (node/python script → the interpreter; else the file
+   * itself), the SPAWN is consented in a native dialog, and only then is the
+   * server test-spawned + installed via the sidecar. Nothing runs without that
+   * explicit native approval — the §6 stop-condition gate. */
+  private async addCustomConnector(): Promise<{ added: boolean; error?: string }> {
+    if (!this.opts.pickExecutableFile || !this.opts.confirmSpawn) return { added: false, error: "addcustom-unsupported" };
+    const file = await this.opts.pickExecutableFile();
+    if (!file) return { added: false }; // cancelled
+    const lower = file.toLowerCase();
+    const base = file.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "");
+    let command = file;
+    let args: string[] = [];
+    if (/\.(mjs|cjs|js)$/.test(lower)) { command = "node"; args = [file]; }
+    else if (/\.py$/.test(lower)) { command = "python"; args = [file]; }
+    const id = `custom-${base.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
+    const name = base || "Custom connector";
+    const approved = await this.opts.confirmSpawn(
+      `Add MCP connector "${name}"?\n\nIt will spawn this local process:\n${command} ${args.join(" ")}\n\nOnly do this for a program you trust.`,
+    );
+    if (!approved) return { added: false }; // spawn consent declined
+    const connector = { id, name, command, args };
+    const test = await this.sidecar.hostQuery("connectors._testCustom", { connector });
+    const t = test.data as { ok?: boolean; toolCount?: number; error?: string } | undefined;
+    if (!test.ok || !t?.ok) return { added: false, error: `test-failed:${t?.error ?? "no tools"}` };
+    const install = await this.sidecar.hostQuery("connectors._installCustom", { connector });
+    if (!install.ok) return { added: false, error: install.error ?? "install-failed" };
+    this.log.info(`CONNECTOR added (custom stdio): ${id} (${t.toolCount} tool(s))`);
+    return { added: true };
+  }
+
+  /** FIX2 §1.1: fire a scheduled task NOW as a host turn. Only the host has the
+   * turn engine + session; the sidecar holds the store. Used by tasks.runNow and
+   * the 60 s scheduler. Creates/reuses a conversation, runs the prompt, records
+   * the result back to the sidecar's store. */
+  async fireTaskById(taskId: string): Promise<void> {
+    try {
+      const listed = await this.sidecar.hostQuery("tasks.list", {});
+      const tasks = (listed.data as { tasks?: Array<{ id: string; name: string; prompt: string; conversationId?: string | null }> } | undefined)?.tasks ?? [];
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) {
+        this.log.warn(`TASK fire: ${taskId} not found`);
+        return;
+      }
+      await this.fireTask(task);
+    } catch (err) {
+      this.log.warn(`TASK fire ${taskId} failed: ${(err as Error).message}`);
+    }
+  }
+
+  async fireTask(task: { id: string; name?: string; prompt: string; conversationId?: string | null; permissionMode?: string }, opts?: { outcome?: "ok" | "catchup"; scheduledFor?: string | null }): Promise<void> {
+    let conversationId = task.conversationId ?? null;
+    if (!conversationId) {
+      conversationId = await this.chatEdge.createConversation(this.opts.forceModel ?? this.opts.defaultModel);
+      if (!conversationId) {
+        this.log.warn(`TASK ${task.id}: could not create a conversation; recording an error`);
+        await this.sidecar.hostQuery("tasks._recordRun", { taskId: task.id, result: "Error: could not create a conversation.", outcome: "error" });
+        return;
+      }
+      try {
+        await this.chatEdge.renameConversation(conversationId, `⏰ ${task.name ?? "Task"}`);
+      } catch {
+        /* cosmetic */
+      }
+    }
+    this.log.info(`TASK FIRE ${task.id} (${task.name ?? "?"}) → conv=${conversationId} mode=${task.permissionMode ?? "(default)"}${opts?.outcome === "catchup" ? " [catch-up]" : ""}`);
+    const controller = new AbortController();
+    let text = "";
+    let errored = false;
+    // FIX8 A1.3: the task's own permission mode governs its run's approvals (a
+    // manual-mode task stalls on a tool it lacks permission for). Sequential runs
+    // (the scheduler fires one at a time), so a single active-mode field is safe.
+    this.activeTaskApprovalMode = parseApprovalMode(task.permissionMode);
+    this.activeTaskId = task.id;
+    try {
+      await this.refreshBrowserConnected();
+      const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
+      const built = await this.buildMessages(conversationId, conversation, task.prompt);
+      const model = this.opts.forceModel ?? this.opts.defaultModel;
+      await this.runLoop({
+        conversationId,
+        model,
+        messages: built.messages,
+        signal: controller.signal,
+        maxIterations: this.opts.maxIterations ?? 100,
+        maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
+        tools: await this.toolDefinitions(null, false, false),
+        parentToolCallId: null,
+        onText: (t) => {
+          text += t;
+        },
+      });
+    } catch (err) {
+      text = `Error: ${(err as Error).message}`;
+      errored = true;
+    } finally {
+      this.activeTaskApprovalMode = null;
+      this.activeTaskId = null;
+    }
+    await this.sidecar.hostQuery("tasks._recordRun", {
+      taskId: task.id,
+      result: text.slice(0, 500),
+      conversationId,
+      outcome: errored ? "error" : (opts?.outcome ?? "ok"),
+      scheduledFor: opts?.scheduledFor ?? null,
+    });
+  }
+
+  /** FIX8 A1.6: apply an update_task_schedule call to the task currently firing. */
+  private async rescheduleActiveTask(args: Record<string, unknown>): Promise<string> {
+    if (!this.activeTaskId) return "Error: update_task_schedule is only available while a scheduled task is running.";
+    const cron = typeof args["cron"] === "string" && (args["cron"] as string).trim() ? (args["cron"] as string).trim() : undefined;
+    const prompt = typeof args["prompt"] === "string" && (args["prompt"] as string).trim() ? (args["prompt"] as string).trim() : undefined;
+    if (!cron && !prompt) return "Nothing to change — provide a new cron and/or prompt.";
+    const r = await this.sidecar.hostQuery("tasks._reschedule", { taskId: this.activeTaskId, cron, prompt });
+    if (!r.ok) return `Error: could not reschedule this task (${r.error === "invalid" ? "invalid cron" : r.error ?? "unknown"}).`;
+    const next = (r.data as { nextRunAt?: string } | undefined)?.nextRunAt;
+    return `Rescheduled this task${cron ? ` to '${cron}'` : ""}${prompt ? (cron ? " and updated its prompt" : " with a new prompt") : ""}.${next ? ` Next run: ${next}.` : ""}`;
+  }
+
+  // ── events ─────────────────────────────────────────────────────────────────
+  private emit(conversationId: string, event: string, data: unknown): number {
+    let log = this.logs.get(conversationId);
+    if (!log) {
+      log = { seq: 0, events: [] };
+      this.logs.set(conversationId, log);
+    }
+    const seq = ++log.seq;
+    log.events.push({ seq, event, data });
+    this.bridge.postTurnEvent(conversationId, seq, event, data);
+    return seq;
+  }
+
+  // ── the turn ───────────────────────────────────────────────────────────────
+  private async runTurn(payload: TurnSubmitPayload, turn: RunningTurn): Promise<void> {
+    const { conversationId } = payload;
+    const signal = turn.controller.signal;
+    // FIX11 §3: an EDIT forks the conversation server-authoritatively via chat-edge
+    // (not a host gateway turn). Relay its stream; the page re-fetches and the
+    // ◀ n/m ▶ navigator reflects the new branch.
+    if (payload.editMessageId) {
+      await this.runEditFork(payload, turn);
+      return;
+    }
+    const turnNo = ++this.turnCounter;
+    this.logs.set(conversationId, { seq: this.logs.get(conversationId)?.seq ?? 0, events: [] });
+    this.emit(conversationId, "message_start", { message_id: turn.messageId, conversation_id: conversationId });
+
+    let conversation: ConversationDto | null = null;
+    try {
+      conversation = await this.chatEdge.getConversation(conversationId);
+    } catch {
+      /* logged */
+    }
+    const model = this.opts.forceModel ?? payload.modelId ?? conversation?.model_id ?? this.opts.defaultModel;
+    // FIX9 §1.1: the model here can be page-supplied (payload.modelId or the
+    // conversation's model, both set by the renderer). Validate it against the
+    // models the gateway actually accepts; an unknown/unexpected value is REFUSED,
+    // not passed through — a page that could name any model string could steer a
+    // turn somewhere nobody reviewed.
+    if (!(await this.isModelAccepted(model, signal))) {
+      this.log.warn(`TURN #${turnNo} conv=${conversationId}: REFUSED unknown model "${model}"`);
+      this.emit(conversationId, "error", { code: "model_not_accepted", message: `The selected model “${model}” is not available. Pick a model from the list and try again.` });
+      return;
+    }
+
+    let messages: GatewayMessage[];
+    let userText = payload.text;
+    try {
+      const built = await this.buildMessages(conversationId, conversation, payload.text);
+      messages = built.messages;
+      userText = built.userText;
+    } catch (err) {
+      this.log.error(`TURN #${turnNo} conv=${conversationId}: could not build messages: ${(err as Error).message}`);
+      this.emit(conversationId, "error", { code: "host_exception", message: "The turn could not be prepared." });
+      return;
+    }
+    // FIX3 §3: if the sidecar is still starting (first launch pays ~6 s of native
+    // extraction + connector refresh + browser provisioning), show its REAL phase
+    // instead of a silent hang — and end legibly if it never comes up.
+    await this.awaitSidecarReady(conversationId);
+
+    // Snapshot the browser bridge once for the whole turn (§3.3): the tool list
+    // is fixed for the turn, so it cannot flap if the bridge drops mid-turn.
+    await this.refreshBrowserConnected();
+
+    const isFirstTurn = messages.length === 2;
+    const historyStart = 1; // everything after the system message is persisted
+    const chainStart = messages.length; // where this turn's chain begins
+    this.log.info(`TURN START #${turnNo} conv=${conversationId} model=${model} msgId=${turn.messageId} textLen=${payload.text.length} attachments=${payload.attachmentHandles.length}${payload.attachmentHandles.length ? " (ignored: no attachment tools yet)" : ""}`);
+    this.log.info(`TURN OUTBOUND conv=${conversationId}: ${messages.length} msg → [${describe(messages)}]`);
+
+    // FIX9 Part B: image mode (the 🎨 button) — bias the model to call generate_image
+    // and offer it this turn. A system hint on the existing message, not a new type.
+    if (payload.imageMode) {
+      messages.splice(1, 0, { role: "system", content: "The user has turned on image mode. If they are asking for a picture, drawing, logo, or any visual, call the generate_image tool with a detailed prompt rather than describing the image in words." });
+    }
+    const startedAt = Date.now();
+    const outcome = await this.runLoop({
+      conversationId,
+      model,
+      messages,
+      signal,
+      maxIterations: this.opts.maxIterations ?? 100,
+      maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
+      tools: await this.toolDefinitions(null, false, false, payload.imageMode),
+      parentToolCallId: null,
+      onText: (t) => {
+        turn.assistantText += t;
+      },
+    });
+    const elapsed = Date.now() - startedAt;
+    this.lastReply.set(conversationId, turn.assistantText);
+
+    // Persist EVERYTHING after the system message locally (tool chains
+    // included), and the visible text to chat-edge. On cancel too (Phase 6a
+    // P1: a cancelled turn must be resumable).
+    this.saveLocalHistory(conversationId, messages.slice(historyStart));
+    await this.importVisible(conversationId, userText, turn, model, messages.slice(chainStart));
+
+    if (outcome === "error") return;
+    if (outcome === "cancelled") {
+      this.emit(conversationId, "message_complete", { message_id: turn.messageId });
+      this.log.info(`TURN CANCELLED conv=${conversationId} after ${elapsed} ms, ${turn.assistantText.length} chars kept`);
+      return;
+    }
+    if (outcome === "paused") {
+      this.emit(conversationId, "message_complete", { message_id: turn.messageId });
+      this.log.info(`TURN PAUSED conv=${conversationId} after ${elapsed} ms`);
+      return;
+    }
+    if (isFirstTurn && turn.assistantText.length > 0) void this.generateTitle(conversationId, userText, turn.assistantText);
+    this.emit(conversationId, "message_complete", { message_id: turn.messageId });
+    this.log.info(`TURN DONE conv=${conversationId} in ${elapsed} ms, ${turn.assistantText.length} chars`);
+  }
+
+  /** FIX11 §3: a hosted EDIT is a server-authoritative fork. Rather than run the
+   * host's own gateway turn, call chat-edge's /edit — which forks the branch,
+   * streams the assistant reply, AND persists it (parent_id/branch_index/
+   * is_active) — and relay the SSE to the page through the same turn.event
+   * vocabulary a normal turn uses. No local persist: chat-edge is authoritative
+   * for the fork, and the page re-fetches to update the ◀ n/m ▶ navigator. */
+  private async runEditFork(payload: TurnSubmitPayload, turn: RunningTurn): Promise<void> {
+    const { conversationId } = payload;
+    const signal = turn.controller.signal;
+    const editId = payload.editMessageId as string;
+    this.logs.set(conversationId, { seq: this.logs.get(conversationId)?.seq ?? 0, events: [] });
+    this.emit(conversationId, "message_start", { message_id: turn.messageId, conversation_id: conversationId });
+    this.log.info(`TURN EDIT-FORK conv=${conversationId} editOf=${editId} textLen=${payload.text.length}`);
+    const res = await this.chatEdge.editStream(conversationId, editId, payload.text, signal);
+    if (!res || !res.body) {
+      this.emit(conversationId, "error", { code: "edit_failed", message: "The message could not be edited (chat-edge unreachable or refused)." });
+      return;
+    }
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf("\n\n")) >= 0) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          this.relayEditFrame(conversationId, frame, turn);
+        }
+      }
+    } catch (err) {
+      if (!signal.aborted) this.emit(conversationId, "error", { code: "edit_stream_error", message: (err as Error).message });
+    }
+    this.lastReply.set(conversationId, turn.assistantText);
+    this.emit(conversationId, "message_complete", { message_id: turn.messageId });
+    this.log.info(`TURN EDIT-FORK DONE conv=${conversationId}, ${turn.assistantText.length} chars`);
+  }
+
+  /** Translate one chat-edge SSE frame (event:/data:) into the host's turn.event
+   * vocabulary. message_start/complete are host-driven (see runEditFork); only the
+   * content/reasoning/error deltas are relayed. */
+  private relayEditFrame(conversationId: string, frame: string, turn: RunningTurn): void {
+    let event = "";
+    const dataLines: string[] = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    if (!event || event === "message_start" || event === "message_complete") return;
+    const dataStr = dataLines.join("\n");
+    let data: Record<string, unknown> = {};
+    try {
+      data = dataStr ? (JSON.parse(dataStr) as Record<string, unknown>) : {};
+    } catch {
+      return;
+    }
+    switch (event) {
+      case "content_delta":
+        if (typeof data["delta"] === "string") {
+          turn.assistantText += data["delta"];
+          this.emit(conversationId, "content_delta", { delta: data["delta"] });
+        }
+        break;
+      case "reasoning_delta":
+        if (typeof data["delta"] === "string") this.emit(conversationId, "reasoning_delta", { delta: data["delta"] });
+        break;
+      case "error":
+        this.emit(conversationId, "error", { code: String(data["code"] ?? "edit_error"), message: String(data["message"] ?? "The edit failed.") });
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** ChatOrchestrator.RunAsync — shared by the top-level turn and nested runs. */
+  private async runLoop(run: {
+    conversationId: string;
+    model: string;
+    messages: GatewayMessage[];
+    signal: AbortSignal;
+    maxIterations: number;
+    maxMs: number;
+    tools: GatewayToolDefinition[];
+    parentToolCallId: string | null;
+    onText: (t: string) => void;
+    onTrace?: (entry: string) => void;
+    /** nested: consent prompts are attributed to this conversation on the page */
+    consentConversationId?: string;
+  }): Promise<"done" | "cancelled" | "error" | "paused"> {
+    const { conversationId, signal } = run;
+    const eventConv = run.consentConversationId ?? conversationId;
+    const deadline = Date.now() + run.maxMs;
+    let iteration = 0;
+    while (iteration < run.maxIterations && Date.now() < deadline) {
+      if (signal.aborted) return "cancelled";
+      iteration++;
+      if (!run.parentToolCallId) this.emit(eventConv, "status", { status: iteration === 1 ? "thinking" : `continuing (step ${iteration})`, iteration, max: run.maxIterations });
+      pruneScreenshots(run.messages, KEEP_SCREENSHOTS);
+
+      const calls = new Map<number, { id: string; name: string; args: string }>();
+      let errored = false;
+      let sawDone = false;
+      for await (const ev of this.gateway.streamCompletion(
+        { model: run.model, messages: run.messages, max_tokens: MAX_OUTPUT_TOKENS, tools: run.tools.length ? run.tools : undefined, tool_choice: run.tools.length ? "auto" : undefined, reasoning: { mode: "auto", show_summary: true } },
+        signal,
+      )) {
+        if (signal.aborted) return "cancelled";
+        switch (ev.kind) {
+          case "content_delta":
+            run.onText(ev.delta);
+            if (!run.parentToolCallId) this.emit(eventConv, "content_delta", { delta: ev.delta });
+            break;
+          case "tool_call_delta": {
+            const cur = calls.get(ev.index) ?? { id: "", name: "", args: "" };
+            if (ev.id) cur.id = ev.id;
+            if (ev.name) cur.name += ev.name;
+            cur.args += ev.argumentsDelta;
+            calls.set(ev.index, cur);
+            break;
+          }
+          case "reasoning_delta":
+            if (!run.parentToolCallId) this.emit(eventConv, "reasoning_delta", { delta: ev.delta });
+            break;
+          case "analysis_status":
+            if (!run.parentToolCallId) this.emit(eventConv, "analysis_status", { status: ev.status });
+            break;
+          case "fallback_info":
+            if (!run.parentToolCallId) this.emit(eventConv, "fallback_info", { requested_model: ev.requested_model, actual_model: ev.actual_model, reason: ev.reason });
+            break;
+          case "reasoning_notice":
+            if (!run.parentToolCallId) this.emit(eventConv, "reasoning_notice", { model: ev.model, reason: ev.reason });
+            break;
+          case "error":
+            errored = true;
+            this.log.error(`TURN ERROR conv=${conversationId}: ${ev.code} ${ev.message}`);
+            if (!run.parentToolCallId) this.emit(eventConv, "error", { code: ev.code, message: ev.message });
+            else run.onText(`\n[error: ${ev.message}]`);
+            break;
+          case "done":
+            sawDone = true;
+            break;
+        }
+        if (errored) break;
+      }
+      if (errored) return "error";
+      if (signal.aborted) return "cancelled";
+      void sawDone;
+
+      const pending: GatewayToolCall[] = [...calls.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([i, c]) => ({ id: c.id || `call_${i}_${randomUUID().slice(0, 8)}`, type: "function" as const, function: { name: c.name, arguments: c.args || "{}" } }));
+      if (pending.length === 0) return "done";
+
+      // The assistant message WITH tool_calls goes into history first.
+      const assistantText = lastAssistantDelta(run.messages);
+      run.messages.push({ role: "assistant", content: assistantText, tool_calls: pending });
+      for (const call of pending) {
+        if (signal.aborted) {
+          run.messages.push(toolResult(call, "Not executed: the turn was cancelled."));
+          continue;
+        }
+        if (Date.now() >= deadline) {
+          run.messages.push(toolResult(call, "Not executed: the turn was paused at its time limit. It can be resumed to continue."));
+          continue;
+        }
+        await this.executeToolCall(call, run);
+      }
+      if (Date.now() >= deadline) {
+        run.onText("\n\nPaused: reached the 20-minute limit. The task can be continued.");
+        if (!run.parentToolCallId) this.emit(eventConv, "content_delta", { delta: "\n\nPaused: reached the time limit. The task can be continued." });
+        return "paused";
+      }
+    }
+    if (iteration >= run.maxIterations) {
+      const note = `\n\nPaused: reached the ${run.maxIterations}-step limit. The task can be continued.`;
+      run.onText(note);
+      if (!run.parentToolCallId) this.emit(eventConv, "content_delta", { delta: note });
+    }
+    return "paused";
+  }
+
+  /** ChatOrchestrator.ExecuteToolCallAsync — DLP marker → permission → consent → run → result. */
+  private async executeToolCall(
+    call: GatewayToolCall,
+    run: { conversationId: string; messages: GatewayMessage[]; signal: AbortSignal; parentToolCallId: string | null; onTrace?: (entry: string) => void; consentConversationId?: string; tools: GatewayToolDefinition[] },
+  ): Promise<void> {
+    const name = call.function.name;
+    const eventConv = run.consentConversationId ?? run.conversationId;
+    let args: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(call.function.arguments || "{}") as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+    } catch (err) {
+      run.messages.push(toolResult(call, `Error: invalid tool arguments JSON: ${(err as Error).message}`));
+      this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Invalid arguments JSON", parentId: run.parentToolCallId });
+      return;
+    }
+    const meta = toolMeta(name);
+    this.activity(eventConv, call.id, name, "started", { argsSummary: summarizeArgs(args), parentId: run.parentToolCallId, ...(name === "run_python" ? { isCodeRun: true, codeText: String(args["code"] ?? "") } : {}) });
+
+    const dlp = dlpBlocked(args);
+    if (dlp !== null) {
+      run.messages.push(toolResult(call, "Error: the gateway's DLP policy blocked this tool call's arguments (sensitive content was masked). Explain this to the user and try a different approach if possible."));
+      this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: `Blocked by DLP (${dlp})`, parentId: run.parentToolCallId, durationMs: 0 });
+      this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "dlp-blocked", ok: false, where: "host" });
+      return;
+    }
+    const known = run.tools.some((t) => t.function.name === name);
+    if (!known) {
+      run.messages.push(toolResult(call, `Error: unknown tool '${name}'.`));
+      this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Unknown tool", parentId: run.parentToolCallId, durationMs: 0 });
+      return;
+    }
+
+    // FIX8 A1.6: a task reschedules ITSELF. Host-managed, no consent (it edits only
+    // this task's own cron/prompt) and only valid while THIS task is firing.
+    if (name === "update_task_schedule") {
+      const outcome = await this.rescheduleActiveTask(args);
+      run.messages.push(toolResult(call, outcome));
+      this.activity(eventConv, call.id, name, "finished", { success: !outcome.startsWith("Error"), resultPreview: outcome.slice(0, 80), parentId: run.parentToolCallId, durationMs: 0 });
+      this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "auto", ok: !outcome.startsWith("Error"), where: "host" });
+      return;
+    }
+
+    // Permission (PermissionService + ApprovalMode + SensitiveReadGuard).
+    const grants = this.grants.list();
+    const mode = this.activeTaskApprovalMode ?? parseApprovalMode(this.opts.approvalMode); // FIX8 A1.3: task's own mode wins during a task run
+    let scope: string;
+    let decision: PermissionDecision;
+    let decisionLabel: string;
+    let authorizedSite: string | null = null;
+
+    if (meta.category === "Browser" && BROWSER_SITE_TOOLS.has(name)) {
+      // ── FIX6: the per-SITE gate (Claude-in-Chrome model). ──────────────────
+      // The site is resolved from the TAB / destination, never from a model-named
+      // site (§1.2): a tab-acting tool reads its target tab's LIVE origin from the
+      // bridge; navigate/open_url use their destination url (which can only PROMPT
+      // for an unapproved origin — naming it cannot self-approve it).
+      const resolved = await this.resolveBrowserSite(name, args, grants, run.conversationId, run.signal);
+      if (!resolved.ok) {
+        run.messages.push(toolResult(call, `Error: could not determine which website this action targets (${resolved.error}); it cannot be authorized. Ask the user to open or name the page first.`));
+        this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Site unresolved", parentId: run.parentToolCallId, durationMs: 0 });
+        this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "site-unresolved", ok: false, where: "host" });
+        this.log.warn(`TOOL ${name} REFUSED — site unresolved (${resolved.error})`);
+        return;
+      }
+      scope = resolved.site;
+      authorizedSite = resolved.site;
+      const ev = evaluateBrowserSite(name, args, resolved.site, this.permissions, mode, resolved.url, resolved.elementLabel);
+      if (ev.refused) {
+        run.messages.push(toolResult(call, `Error: not allowed — ${ev.refused.reason} is refused in every mode (including Skip). Tell the user you cannot do this and why; do not try another route.`));
+        this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: `Refused: ${ev.refused.reason}`, parentId: run.parentToolCallId, durationMs: 0 });
+        this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: `refused:${ev.refused.reason}`, ok: false, where: "host" });
+        this.log.warn(`TOOL ${name} REFUSED (always-refused: ${ev.refused.reason}) site=${resolved.site}`);
+        return;
+      }
+      decision = ev.decision;
+      decisionLabel = decision === "Auto" ? "auto" : "allowed";
+      if (decision === "NeedsConsent") {
+        const danger = classifyDanger(name, meta.category);
+        const response = await this.requestConsent(eventConv, run.conversationId, call.id, name, meta, args, resolved.site, danger.reasonKey || "danger.browser", run.signal, { site: resolved.site, alwaysPromptReason: ev.alwaysPrompt });
+        if (response.decision === "deny") {
+          run.messages.push(toolResult(call, "Error: the user declined permission for this action on this site."));
+          this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Declined by user", parentId: run.parentToolCallId, durationMs: 0 });
+          this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "denied", ok: false, where: "host" });
+          this.log.info(`TOOL ${name} DECLINED by the user (site=${resolved.site})`);
+          return;
+        }
+        // "always" → persist the SITE grant (covers every browser tool on it);
+        // "once" → nothing recorded, so the next action on this site asks again.
+        if (response.scope === "always") this.permissions.persist(BROWSER_SITE_PERM, resolved.site, "allow_always");
+        decisionLabel = `allowed-${response.scope}`;
+      }
+    } else {
+      scope = resolveScope(meta, args, grants, this.opts.homeDirectory, this.cwdByConversation.get(run.conversationId) ?? null);
+      decision = applyApprovalMode(this.permissions.check(meta, scope), meta, mode);
+      if (decision === "Auto" && mode !== "skip" && readRequiresConsent(meta, args, grants, this.opts.homeDirectory) && !this.permissions.hasStoredDecision(name, scope)) {
+        decision = "NeedsConsent";
+      }
+      decisionLabel = decision === "Auto" ? "auto" : "allowed";
+      if (decision === "NeedsConsent") {
+        const danger = classifyDanger(name, meta.category);
+        const response = await this.requestConsent(eventConv, run.conversationId, call.id, name, meta, args, scope, danger.reasonKey || "danger.generic", run.signal);
+        if (response.decision === "deny") {
+          run.messages.push(toolResult(call, "Error: the user denied permission for this tool call."));
+          this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Permission denied by user", parentId: run.parentToolCallId, durationMs: 0 });
+          this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "denied", ok: false, where: "host" });
+          this.log.info(`TOOL ${name} DENIED by the user (scope=${scope})`);
+          return;
+        }
+        // once → run, ask again next time; session → no re-prompt this session.
+        if (response.scope === "session") this.permissions.recordSession(name, scope, "AllowAlways");
+        decisionLabel = `allowed-${response.scope}`;
+      } else if (decision === "Denied") {
+        run.messages.push(toolResult(call, "Error: this tool is blocked by user policy."));
+        this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Blocked by policy", parentId: run.parentToolCallId, durationMs: 0 });
+        this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "policy-denied", ok: false, where: "host" });
+        return;
+      }
+    }
+
+    if (name === "run_command" && typeof args["working_directory"] === "string" && args["working_directory"]) {
+      this.cwdByConversation.set(run.conversationId, args["working_directory"] as string);
+    }
+
+    // Execute — host or sidecar.
+    const t0 = Date.now();
+    let ok = false;
+    let text = "";
+    let image: string | null = null;
+    let where: "host" | "sidecar" = "sidecar";
+    let rpcError: string | undefined;
+    this.log.info(`TOOL ${name} conv=${run.conversationId} decision=${decisionLabel} scope=${scope} → ${this.hostTools.has(name) ? "host" : "sidecar"}`);
+    if (this.hostTools.has(name)) {
+      where = "host";
+      try {
+        const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal });
+        ok = r.ok;
+        text = r.text;
+        image = r.imageDataUri;
+      } catch (err) {
+        ok = false;
+        text = `${name} threw: ${(err as Error).message}`;
+      }
+    } else {
+      const r = await this.sidecar.callTool(name, args, {
+        conversationId: run.conversationId,
+        grants,
+        signal: run.signal,
+        authorizedSite: authorizedSite ?? undefined,
+        onProgress: (chunk) => this.emit(eventConv, "tool_output", { id: call.id, chunk: chunk + "\n" }),
+      });
+      ok = r.ok;
+      text = r.text;
+      image = r.imageDataUri;
+      if (r.rpcError) {
+        rpcError = `${r.rpcError.code} ${r.rpcError.message}`;
+        text = `Error: ${r.rpcError.message}`;
+        this.log.warn(`TOOL ${name} REFUSED by the sidecar: ${rpcError}`);
+      } else if (name === "read_document" && ok && text.startsWith(OCR_RELAY_MARKER)) {
+        // FIX3 §4: a scanned PDF the sidecar could not OCR. It handed us the bytes
+        // (PathGuard + SensitiveReadGuard already cleared them sidecar-side); OCR
+        // them HOST-side, which holds the session JWT. The host has NO path — only
+        // these bytes — so it can never read a file the sidecar refused.
+        text = await this.ocrScannedPdf(run.conversationId, text.slice(OCR_RELAY_MARKER.length).trim(), run.signal);
+      }
+    }
+    const durationMs = Date.now() - t0;
+    if (run.signal.aborted) {
+      run.messages.push(toolResult(call, "Not executed to completion: the turn was cancelled."));
+      this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Cancelled", parentId: run.parentToolCallId, durationMs });
+      return;
+    }
+    const content = ok ? truncate(text, 50_000) : `Error: ${text}`;
+    run.messages.push(toolResult(call, content));
+    if (ok && image) run.messages.push(screenshotMessage(name, image));
+    if (name === "update_plan" && ok) {
+      const steps = parsePlan(args);
+      if (steps) this.emit(eventConv, "plan_update", { steps });
+    }
+    this.activity(eventConv, call.id, name, "finished", {
+      success: ok,
+      durationMs,
+      resultPreview: content.length > 200 ? content.slice(0, 200) + "..." : content,
+      parentId: run.parentToolCallId,
+      ...(image ? { imageDataUri: image } : {}),
+    });
+    this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: decisionLabel, ok, where, ...(rpcError ? { rpcError } : {}) });
+    run.onTrace?.(`${name}${ok ? "" : " (failed)"}`);
+    this.log.info(`TOOL ${name} ${ok ? "ok" : "FAILED"} in ${durationMs} ms (${where}) — ${content.slice(0, 120).replace(/\n/g, " ")}`);
+  }
+
+  private activity(conversationId: string, id: string, tool: string, phase: "started" | "finished", extra: Record<string, unknown>): void {
+    this.emit(conversationId, "tool_activity", { id, tool, phase, ...extra });
+  }
+
+  /** FIX3 §4: OCR a scanned PDF host-side. Input is the sidecar's envelope
+   * (bytes it already read, path + consent cleared); the host uploads those
+   * bytes to chat-edge and polls for the recovered text. No filesystem path is
+   * involved — the host cannot reach a file the sidecar did not hand it. */
+  private async ocrScannedPdf(conversationId: string, envelopeJson: string, signal: AbortSignal): Promise<string> {
+    let env: { mime?: string; name?: string; pages?: number; b64?: string };
+    try {
+      env = JSON.parse(envelopeJson);
+    } catch {
+      return "This scanned document could not be prepared for reading.";
+    }
+    const name = env.name ?? "document.pdf";
+    if (!env.b64) return `The scanned document "${name}" could not be read.`;
+    const bytes = Buffer.from(env.b64, "base64");
+    const fileId = await this.chatEdge.uploadFileBytes(conversationId, bytes, name, env.mime ?? "application/pdf");
+    if (!fileId) {
+      return `The scanned document "${name}" could not be sent for reading. Reading a scan needs a chat synced with the SRAN server — start the request in a normal chat and try again.`;
+    }
+    // Chat-edge OCRs on ingest; poll the extracted text until it completes.
+    for (let i = 0; i < 40 && !signal.aborted; i++) {
+      const t = await this.chatEdge.getFileText(fileId);
+      if (t && t.status === "completed") {
+        if (!t.text.trim()) return `The scanned document "${name}" was read but no text could be recovered from it.`;
+        let head = `[Scanned PDF: ${name} — ${env.pages ?? "?"} page(s) — text recovered by OCR on the SRAN server]`;
+        if (t.truncated) head += "\n[TRUNCATED: this is the beginning of the document, not all of it. Say so if you summarize it.]";
+        head += "\n[OCR text may contain recognition errors — quote it with care.]";
+        return `${head}\n\n${t.text}`;
+      }
+      if (t && t.status && !["pending", "processing", "running", "queued", ""].includes(t.status)) {
+        return `The scanned document "${name}" could not be read (extraction ${t.status}).`;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return `The scanned document "${name}" is taking longer than expected to read; please try again.`;
+  }
+
+  /** FIX6: resolve the ORIGIN a browser action targets — from the TAB or the
+   * destination, NEVER from a model-named site. navigate/open_url gate on their
+   * destination url; every tab-acting tool asks the sidecar for the target tab's
+   * LIVE origin (browser._siteForAction, a control-plane read over tabs.list). */
+  private async resolveBrowserSite(
+    name: string,
+    args: Record<string, unknown>,
+    grants: readonly string[],
+    conversationId: string,
+    signal: AbortSignal,
+  ): Promise<{ ok: true; site: string; url: string | null; elementLabel: string | null } | { ok: false; error: string }> {
+    if (name === "browser_navigate" || name === "open_url") {
+      const url = typeof args["url"] === "string" ? (args["url"] as string) : "";
+      const site = siteScope(url);
+      return site ? { ok: true, site, url, elementLabel: null } : { ok: false, error: "the url is not a valid http(s) address" };
+    }
+    void grants;
+    void signal;
+    void conversationId;
+    const tabId = typeof args["tab_id"] === "number" ? (args["tab_id"] as number) : null;
+    try {
+      const r = await this.sidecar.hostQuery("browser._siteForAction", tabId === null ? {} : { tabId });
+      const d = r.data as { url?: string; site?: string } | undefined;
+      if (!r.ok || !d?.site) return { ok: false, error: r.error ?? "no active tab, or the browser bridge is not connected" };
+      return { ok: true, site: d.site, url: d.url ?? null, elementLabel: null };
+    } catch (err) {
+      return { ok: false, error: `bridge read failed: ${(err as Error).message}` };
+    }
+  }
+
+  private requestConsent(
+    eventConv: string,
+    conversationId: string,
+    toolCallId: string,
+    tool: string,
+    meta: ReturnType<typeof toolMeta>,
+    args: Record<string, unknown>,
+    scope: string,
+    dangerClass: string,
+    signal: AbortSignal,
+    siteInfo?: { site: string; alwaysPromptReason: "download" | "sensitive-info" | "authorization" | null },
+  ): Promise<ConsentRespondPayload> {
+    const promptId = `consent-${randomUUID().slice(0, 12)}`;
+    const payload = {
+      promptId,
+      conversationId: eventConv,
+      tool,
+      description: `${tool} (${meta.category})`,
+      category: meta.category,
+      argumentSummary: summarizeArgs(args, 200),
+      argumentDetail: JSON.stringify(args, null, 2).slice(0, 4000),
+      dangerClass,
+      toolCallId,
+      scope,
+      // FIX6: a browser-site prompt carries the origin and offers Anthropic's two
+      // grants (once + always). alwaysPromptReason explains a forced prompt on an
+      // already-approved site (download / sensitive-info / authorization).
+      ...(siteInfo ? { site: siteInfo.site, grantOptions: ["once", "always"] as const, alwaysPromptReason: siteInfo.alwaysPromptReason } : {}),
+    };
+    this.log.info(`CONSENT REQUEST ${promptId}: ${tool} scope=${scope} danger=${dangerClass}${siteInfo ? ` site=${siteInfo.site}${siteInfo.alwaysPromptReason ? ` always-prompt=${siteInfo.alwaysPromptReason}` : ""}` : ""}`);
+    return new Promise<ConsentRespondPayload>((resolve) => {
+      this.pendingConsents.set(promptId, { conversationId, payload, resolve });
+      const onAbort = () => {
+        if (this.pendingConsents.delete(promptId)) resolve({ promptId, decision: "deny", scope: "once" });
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      this.bridge.post("consent.request", payload);
+    });
+  }
+
+  // ── nested sub-agent runs (host capability, E4 §1 #1) ──────────────────────
+  async runNested(req: NestedRunRequest, parentSignal: AbortSignal): Promise<NestedRunResult> {
+    const conversationId = `subagent-${randomUUID().replace(/-/g, "")}`;
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    parentSignal.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), (NESTED_MAX_MINUTES + 0.5) * 60_000);
+    const tools = await this.toolDefinitions(req.tools, req.autoApprovableOnly, true);
+    const messages: GatewayMessage[] = [
+      { role: "system", content: subAgentSystemPrompt(this.opts.homeDirectory) },
+      { role: "user", content: req.task },
+    ];
+    let answer = "";
+    const trace: string[] = [];
+    this.log.info(`SUBAGENT START ${conversationId} parent=${req.parentToolCallId} tools=${tools.length}${req.autoApprovableOnly ? " (auto-approvable only)" : ""}`);
+    let outcome: "done" | "cancelled" | "error" | "paused";
+    try {
+      outcome = await this.runLoop({
+        conversationId,
+        consentConversationId: req.conversationId,
+        model: this.opts.forceModel ?? this.opts.defaultModel,
+        messages,
+        signal: controller.signal,
+        maxIterations: NESTED_MAX_ITERATIONS,
+        maxMs: NESTED_MAX_MINUTES * 60_000,
+        tools,
+        parentToolCallId: req.parentToolCallId,
+        onText: (t) => {
+          answer += t;
+        },
+        onTrace: (e) => trace.push(e),
+      });
+    } finally {
+      clearTimeout(timer);
+      parentSignal.removeEventListener("abort", onAbort);
+    }
+    this.log.info(`SUBAGENT ${outcome.toUpperCase()} ${conversationId}: ${answer.length} chars, ${trace.length} tool call(s)`);
+    return { answer: answer.trim(), completed: outcome === "done", stopReason: outcome === "done" ? null : outcome, trace };
+  }
+
+  /** Sidecar tools + host tools; nested runs never see run_subagent. */
+  private async toolDefinitions(allow: string[] | null, autoApprovableOnly: boolean, nested: boolean, imageMode = false): Promise<GatewayToolDefinition[]> {
+    let defs: GatewayToolDefinition[] = [];
+    try {
+      const sidecarTools = await this.sidecar.listTools();
+      defs = sidecarTools.map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+    } catch (err) {
+      this.log.error(`sidecar tools unavailable: ${(err as Error).message}`);
+    }
+    // Host tools at their WPF positions: clipboard after the filesystem tools,
+    // web_search after remember, run_python + run_subagent last.
+    const host = this.hostTools.definitions().map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+    const at = (name: string) => defs.findIndex((d) => d.function.name === name);
+    const insertAfter = (after: string, names: string[]) => {
+      const i = at(after);
+      const items = host.filter((h) => names.includes(h.function.name));
+      if (i >= 0) defs.splice(i + 1, 0, ...items);
+      else defs.push(...items);
+    };
+    insertAfter("search_files", ["read_clipboard", "write_clipboard"]);
+    insertAfter("remember", ["web_search"]);
+    defs.push(...host.filter((h) => h.function.name === "run_python"));
+    if (!nested) defs.push(...host.filter((h) => h.function.name === "run_subagent"));
+    let out = defs.filter((d) => d.function.name !== "run_subagent" || !nested);
+    if (allow) {
+      const set = new Set(allow.map((a) => a.toLowerCase()));
+      out = out.filter((d) => set.has(d.function.name.toLowerCase()));
+    }
+    if (autoApprovableOnly) out = out.filter((d) => toolMeta(d.function.name).defaultPermission === "AllowAlways");
+    // §3.3: when the browser bridge is down, do not offer the 8 bridge tools —
+    // the model should have no vocabulary for a tool it cannot use this turn.
+    if (!this.browserConnected) {
+      const before = out.length;
+      out = out.filter((d) => !BROWSER_BRIDGE_TOOLS.has(d.function.name));
+      if (before !== out.length) this.log.info(`TOOLS: browser bridge down — withholding ${before - out.length} browser tool(s) this turn`);
+    }
+    // FIX5 §3: web_search may be enabled locally (the app setting) yet DISABLED
+    // for the tenant on the gateway — offering it then means the model calls a
+    // tool that 400s (search_not_enabled). Same rule as the browser bridge: a
+    // tool that cannot work is not offered this turn. The honest "your org has
+    // not enabled it" line is added to the system prompt (see buildMessages), so
+    // the model explains the truth instead of silently lacking the tool.
+    if (out.some((d) => d.function.name === "web_search") && !(await this.webSearchTenantEnabled())) {
+      out = out.filter((d) => d.function.name !== "web_search");
+      this.log.info("TOOLS: web_search is on locally but the tenant has it disabled — withholding this turn");
+    }
+    // FIX8 A1.6: a task can reschedule ITSELF from inside its run — the tool exists
+    // only while a scheduled task is firing (activeTaskId set), and acts on that task.
+    if (this.activeTaskId !== null && !nested) out.push(UPDATE_TASK_SCHEDULE_TOOL);
+    // FIX9 Part B: generate_image is offered ONLY when the user turned on image mode
+    // (the 🎨 button). Off → the model has no image tool, so it cannot pretend to.
+    if (!imageMode) out = out.filter((d) => d.function.name !== "generate_image");
+    return out;
+  }
+
+  /** FIX5 §3: the tenant's web-search capability, cached (TTL). GET
+   * /v1/search/config is the cheap authority (tenant flag AND a provider). On a
+   * probe failure keep the last-known answer; if none was ever learned, fail OPEN
+   * (assume enabled) — a single search that then 400s is a smaller harm than
+   * falsely telling a user with search ON that their org disabled it. */
+  private async webSearchTenantEnabled(): Promise<boolean> {
+    const now = Date.now();
+    if (this.searchTenantEnabled !== null && now - this.searchTenantEnabledAt < TurnCoordinator.SEARCH_CAP_TTL_MS) {
+      return this.searchTenantEnabled;
+    }
+    const cfg = await this.gateway.searchConfig(AbortSignal.timeout(8_000)).catch(() => null);
+    if (cfg) {
+      this.searchTenantEnabled = cfg.enabled;
+      this.searchTenantEnabledAt = now;
+      return cfg.enabled;
+    }
+    return this.searchTenantEnabled ?? true; // probe failed and never learned → fail open
+  }
+
+  /** FIX9 §1.1: is `model` one the gateway accepts? Cached (TTL). When the model
+   * list cannot be fetched AND none was ever learned, allow (the gateway is the
+   * backstop — a bad model still errors there); once a list is known, an unknown
+   * model is refused. Trusted config models (default/force) are always in the list. */
+  private async isModelAccepted(model: string, signal: AbortSignal): Promise<boolean> {
+    const now = Date.now();
+    if (this.acceptedModels === null || now - this.acceptedModelsAt >= TurnCoordinator.MODELS_TTL_MS) {
+      const set = await this.gateway.listModels(signal).catch(() => null);
+      if (set) {
+        this.acceptedModels = set;
+        this.acceptedModelsAt = now;
+      }
+    }
+    if (this.acceptedModels === null) return true; // never learned + fetch failed → gateway is the backstop
+    return this.acceptedModels.has(model);
+  }
+
+  /** FIX3 §3: the honest first-launch indicator. While the sidecar is not ready,
+   * emit its REAL phase (from stderr, not a timer) as a `status` event the page
+   * already renders; on a sidecar that never comes up, end in a legible failure
+   * status rather than a permanent "starting". Returns once ready or failed — the
+   * turn then proceeds (degraded to host-only tools if the sidecar failed). */
+  private async awaitSidecarReady(conversationId: string): Promise<void> {
+    if (this.sidecar.ready) return;
+    void this.sidecar.ensureStarted().catch(() => {
+      /* failure is observed below via `ready` staying false / the child dying */
+    });
+    let last = this.sidecar.phase;
+    this.emit(conversationId, "status", { status: last, startup: true });
+    const start = Date.now();
+    const HARD_MS = 60_000; // the sidecar's own init timeout is 30 s/spawn, ×≤3
+    while (!this.sidecar.ready) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (this.sidecar.ready) break;
+      const died = !this.sidecar.isRunning; // child exited / never spawned
+      if (died || Date.now() - start > HARD_MS) {
+        this.log.error(`SIDECAR not ready after ${Math.round((Date.now() - start) / 1000)}s (${died ? "exited" : "timeout"})`);
+        this.emit(conversationId, "status", {
+          status: "The tools service did not start. You can keep chatting; restart the app to enable tools.",
+          startup: true,
+          failed: true,
+        });
+        return;
+      }
+      if (this.sidecar.phase !== last) {
+        last = this.sidecar.phase;
+        this.emit(conversationId, "status", { status: last, startup: true });
+      }
+    }
+  }
+
+  /** Snapshot whether the browser bridge is connected (sran/status). Errors →
+   * treated as down: a failed probe must not accidentally offer dead tools. */
+  private async refreshBrowserConnected(): Promise<void> {
+    try {
+      const s = await this.sidecar.status();
+      this.browserConnected = s["browserConnected"] === true;
+    } catch {
+      this.browserConnected = false;
+    }
+  }
+
+  // ── history ────────────────────────────────────────────────────────────────
+  private historyPath(conversationId: string): string {
+    return path.join(this.opts.dataDir, "history", `${conversationId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
+  }
+  private loadLocalHistory(conversationId: string): GatewayMessage[] | null {
+    try {
+      const p = this.historyPath(conversationId);
+      if (!fs.existsSync(p)) return null;
+      const parsed = JSON.parse(fs.readFileSync(p, "utf8")) as GatewayMessage[];
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  private saveLocalHistory(conversationId: string, messages: GatewayMessage[]): void {
+    try {
+      const p = this.historyPath(conversationId);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(messages));
+    } catch (err) {
+      this.log.warn(`history save failed for ${conversationId}: ${(err as Error).message}`);
+    }
+  }
+
+  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string): Promise<{ messages: GatewayMessage[]; userText: string }> {
+    let project = null;
+    if (conversation?.project_id) {
+      const projects = await this.chatEdge.listProjects();
+      project = projects.find((p) => p.id === conversation.project_id) ?? null;
+    }
+    // FIX2: the saved writing-style profile (a sidecar setting) reaches the
+    // system prompt. Read per turn; the sidecar is the single source.
+    let writingStyleProfile: string | undefined;
+    try {
+      const s = await this.sidecar.hostQuery("settings.get", {});
+      const v = (s.data as { writingStyleProfile?: string } | undefined)?.writingStyleProfile;
+      if (typeof v === "string" && v.trim()) writingStyleProfile = v;
+    } catch {
+      /* best-effort — a prompt without the style is still valid */
+    }
+    // FIX5 §1: the LOCAL durable notes the `remember` tool wrote (sidecar store).
+    // Before FIX5 the prompt never read these, so `remember` never recalled. The
+    // sidecar keys conversation notes by the SAME _meta.conversationId the host
+    // sends on every tools/call, so this id matches what `remember` stored under.
+    let localGlobalNotes: { content: string; createdAt: string }[] | undefined;
+    let localConversationNotes: { content: string; createdAt: string }[] | undefined;
+    try {
+      const n = await this.sidecar.hostQuery("notes._forPrompt", { conversationId });
+      const d = n.data as
+        | { conversationNotes?: { content: string; createdAt: string }[]; globalNotes?: { content: string; createdAt: string }[] }
+        | undefined;
+      if (d) {
+        localGlobalNotes = d.globalNotes;
+        localConversationNotes = d.conversationNotes;
+      }
+    } catch {
+      /* best-effort — server memories still render; a note just won't recall this turn */
+    }
+    // FIX5 §3: if web_search is on in the app but the tenant has it disabled, the
+    // tool is withheld this turn (toolDefinitions). Tell the model WHY so it gives
+    // the true reason ("your org has not enabled it") rather than implying it just
+    // lacks the ability. Only when locally on — if the user turned it off, that is
+    // their own choice, not an org restriction, so no note.
+    let webSearchUnavailableReason: "tenant-disabled" | undefined;
+    if (this.hostTools.has("web_search") && !(await this.webSearchTenantEnabled())) {
+      webSearchUnavailableReason = "tenant-disabled";
+    }
+    const system = await this.assembler.buildSystemPrompt({
+      homeDirectory: this.opts.homeDirectory,
+      conversationId,
+      activeProject: project,
+      memoryEnabled: conversation?.memory_enabled !== false,
+      toolsAvailable: true,
+      writingStyleProfile,
+      localGlobalNotes,
+      localConversationNotes,
+      webSearchUnavailableReason,
+    });
+    const messages: GatewayMessage[] = [{ role: "system", content: system }];
+    let history = this.loadLocalHistory(conversationId);
+    if (history === null) {
+      // No local chain history (a conversation started on the web or before
+      // E4): the visible transcript from chat-edge.
+      try {
+        const rows = await this.chatEdge.listMessages(conversationId);
+        history = rows
+          .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
+          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
+      } catch (err) {
+        this.log.warn(`Could not load history for ${conversationId}: ${(err as Error).message}`);
+        history = [];
+      }
+    }
+    let userText = text;
+    if (text.length === 0) {
+      const lastUser = [...history].reverse().findIndex((m) => m.role === "user" && typeof m.content === "string");
+      if (lastUser < 0) throw new Error("regenerate with no prior user message");
+      const cut = history.length - 1 - lastUser;
+      userText = history[cut]!.content as string;
+      history = history.slice(0, cut);
+    }
+    for (const m of history) messages.push(m);
+    messages.push({ role: "user", content: userText });
+    return { messages, userText };
+  }
+
+  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[]): Promise<void> {
+    if (userText.length === 0 && turn.assistantText.length === 0) return;
+    const now = new Date().toISOString();
+    const items = [];
+    if (userText.length > 0) items.push({ client_id: "u_" + turn.messageId.slice(5), role: "user" as const, content: userText, model_id: null, created_at: now });
+    if (turn.assistantText.length > 0) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: model, created_at: new Date(Date.now() + 1).toISOString() });
+    void chain;
+    const result = await this.chatEdge.importMessages(conversationId, items);
+    if (result) this.log.info(`TURN PERSISTED conv=${conversationId}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);
+    else this.log.warn(`TURN PERSIST FAILED conv=${conversationId} (chat-edge import) — local chain history saved`);
+  }
+
+  private async generateTitle(conversationId: string, firstUser: string, firstReply: string): Promise<void> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20_000);
+      let title = "";
+      for await (const ev of this.gateway.streamCompletion(
+        {
+          model: this.opts.defaultModel,
+          messages: [
+            { role: "system", content: "Generate a very short title (3-6 words, no quotes, no trailing period, same language as the conversation) for this chat. Reply with the title only." },
+            { role: "user", content: `User: ${truncate(firstUser, 500)}\n\nAssistant: ${truncate(firstReply, 500)}` },
+          ],
+          max_tokens: 30,
+        },
+        controller.signal,
+      )) {
+        if (ev.kind === "content_delta") title += ev.delta;
+        else if (ev.kind === "error") {
+          clearTimeout(timer);
+          return;
+        }
+      }
+      clearTimeout(timer);
+      const cleaned = title.trim().replace(/^["“”']+|["“”'.]+$/g, "").trim();
+      if (cleaned.length === 0 || cleaned.length > 80) return;
+      if (await this.chatEdge.renameConversation(conversationId, cleaned)) this.log.info(`TURN TITLE conv=${conversationId}: ${cleaned}`);
+    } catch (err) {
+      this.log.info(`Title generation skipped for ${conversationId}: ${(err as Error).message}`);
+    }
+  }
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+function toolResult(call: GatewayToolCall, content: string): GatewayMessage {
+  return { role: "tool", tool_call_id: call.id, name: call.function.name, content };
+}
+function screenshotMessage(toolName: string, dataUri: string): GatewayMessage {
+  return {
+    role: "user",
+    content: [
+      { type: "text", text: `${SCREENSHOT_MARKER} ${toolName} — analyze it to decide your next action]` },
+      { type: "image_url", image_url: { url: dataUri } },
+    ],
+  };
+}
+/** ScreenshotPruner: keep the last N screenshot images; older ones become a placeholder. */
+function pruneScreenshots(messages: GatewayMessage[], keep: number): void {
+  const idx: number[] = [];
+  messages.forEach((m, i) => {
+    if (m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "image_url")) idx.push(i);
+  });
+  for (const i of idx.slice(0, Math.max(0, idx.length - keep))) {
+    const m = messages[i]!;
+    const text = Array.isArray(m.content) ? m.content.find((b) => b.type === "text") : null;
+    messages[i] = { role: "user", content: `${text && text.type === "text" ? text.text : SCREENSHOT_MARKER + " earlier]"} (image removed to save context)` };
+  }
+}
+function lastAssistantDelta(messages: GatewayMessage[]): string | null {
+  void messages;
+  return null; // the streamed text of THIS iteration is not part of the chain message (WPF: assistantContent, kept only when non-empty)
+}
+function parsePlan(args: Record<string, unknown>): { text: string; status: "pending" | "in_progress" | "done" }[] | null {
+  const steps = args["steps"];
+  if (!Array.isArray(steps)) return null;
+  return steps
+    .map((s) => (s && typeof s === "object" ? (s as Record<string, unknown>) : null))
+    .filter((s): s is Record<string, unknown> => s !== null)
+    .map((s) => ({ text: String(s["text"] ?? s["step"] ?? s["title"] ?? ""), status: (["pending", "in_progress", "done"].includes(String(s["status"])) ? String(s["status"]) : "pending") as "pending" | "in_progress" | "done" }));
+}
+function describe(messages: GatewayMessage[]): string {
+  return messages
+    .map((m) => {
+      const len = typeof m.content === "string" ? `${m.content.length}ch` : m.content === null ? "null" : "blocks";
+      return `${m.role}${m.tool_calls ? "(tool_calls)" : ""}:${len}`;
+    })
+    .join(" , ");
+}
+function truncate(value: string, max: number): string {
+  return value.length <= max ? value : value.slice(0, max) + `\n\n[...truncated to ${max} chars]`;
+}
