@@ -293,6 +293,17 @@ type ToolExecContext struct {
 	// MUST NOT block: the streaming caller owns a buffered channel and
 	// a slow send would stall the whole turn.
 	Emit func(StreamUpdate)
+
+	// CloudToolAllow (FIX16 §1.4) — when non-nil, this run is a cloud
+	// scheduled run and MAY use only the tools whose name maps to true.
+	// executeToolCalls REFUSES any call outside the set with a synthetic
+	// tool result (never executing it) and sets *WithheldHit — so an
+	// unattended run cannot silently reach a spend/write tool, and the
+	// wall is visible in the run's audit. nil = interactive, unrestricted.
+	CloudToolAllow map[string]bool
+	// WithheldHit is set to true by executeToolCalls when a call was refused
+	// by CloudToolAllow. The runner records a tool_withheld skip note.
+	WithheldHit *bool
 }
 
 // emit is the nil-safe form. Tools call this, never ec.Emit directly.

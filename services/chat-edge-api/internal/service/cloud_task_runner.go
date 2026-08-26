@@ -21,7 +21,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,11 +55,23 @@ type TurnRunner interface {
 // CloudTaskStore is the subset of CloudTaskRepo the runner needs. Narrowed
 // to an interface so the invariant test can supply a fake with no DB.
 type CloudTaskStore interface {
-	ListDue(ctx context.Context, now time.Time, limit int) ([]model.CloudTask, error)
+	// ClaimDue (FIX16) atomically selects AND leases due tasks — the
+	// single-flight claim. staleBefore = now - leaseTTL; a task locked more
+	// recently than that is skipped (its run is still in flight or its
+	// holder has not yet timed out).
+	ClaimDue(ctx context.Context, now, staleBefore time.Time, instanceID string, limit int) ([]model.CloudTask, error)
 	RecordRun(ctx context.Context, run *model.CloudTaskRun) error
 	SetPaused(ctx context.Context, tenantID, userID, id uuid.UUID, reason string) error
 	AdvanceAfterRun(ctx context.Context, tenantID, userID, taskID uuid.UUID, nextRunAt time.Time, incRun bool) error
 }
+
+// Lease + per-run bounds (FIX16). leaseTTL must exceed runDeadline so a
+// legitimately slow run is never stolen; a crashed holder is reclaimed
+// leaseTTL after it died.
+const (
+	defaultRunDeadline = 5 * time.Minute
+	defaultLeaseTTL    = 15 * time.Minute
+)
 
 // CloudTaskRunner ties the three collaborators together. It owns NO state
 // beyond them plus a clock (injectable for tests).
@@ -70,20 +84,48 @@ type CloudTaskRunner struct {
 	now func() time.Time
 	// dueLimit caps how many tasks one Tick drains.
 	dueLimit int
+	// instanceID stamps the lease (locked_by) so a run's holder is
+	// identifiable; leaseTTL bounds a crashed holder's lease; runDeadline
+	// caps a single run's wall-clock.
+	instanceID  string
+	leaseTTL    time.Duration
+	runDeadline time.Duration
 }
 
 func NewCloudTaskRunner(store CloudTaskStore, authorizer RunAuthorizer, turnRunner TurnRunner) *CloudTaskRunner {
 	return &CloudTaskRunner{
-		store:      store,
-		authorizer: authorizer,
-		turnRunner: turnRunner,
-		now:        func() time.Time { return time.Now().UTC() },
-		dueLimit:   100,
+		store:       store,
+		authorizer:  authorizer,
+		turnRunner:  turnRunner,
+		now:         func() time.Time { return time.Now().UTC() },
+		dueLimit:    100,
+		instanceID:  defaultInstanceID(),
+		leaseTTL:    defaultLeaseTTL,
+		runDeadline: defaultRunDeadline,
 	}
+}
+
+// defaultInstanceID identifies this scheduler process in the lease's
+// locked_by column (hostname#pid, falling back to a random id). Diagnostic
+// only — the claim's correctness rests on the atomic UPDATE, not this value.
+func defaultInstanceID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return "chat-edge-" + uuid.NewString()[:8]
+	}
+	return fmt.Sprintf("%s#%d", host, os.Getpid())
 }
 
 // SetClock overrides the runner's clock (tests only).
 func (rr *CloudTaskRunner) SetClock(now func() time.Time) { rr.now = now }
+
+// SetLeaseParams overrides the lease TTL + per-run deadline (tests only).
+func (rr *CloudTaskRunner) SetLeaseParams(leaseTTL, runDeadline time.Duration) {
+	rr.leaseTTL, rr.runDeadline = leaseTTL, runDeadline
+}
+
+// SetInstanceID overrides the lease holder id (tests only).
+func (rr *CloudTaskRunner) SetInstanceID(id string) { rr.instanceID = id }
 
 // clamp300 bounds error text so an unexpected error string can't blow the
 // error_detail column (VARCHAR(300)) or smuggle a large payload into audit.
@@ -133,15 +175,18 @@ func (rr *CloudTaskRunner) RunDueTask(ctx context.Context, task model.CloudTask)
 			Outcome:    outcome,
 			SkipReason: strptr(authz.Reason),
 		})
-		// A revoked/departed user's task is paused so it stops being
-		// scanned; a no-balance task stays enabled to retry after top-up,
-		// but we still advance next_run_at so it doesn't fire every scan.
+		// Both refusals AUTO-PAUSE the task with a visible reason, so the
+		// user learns WHY it stopped (FIX16 §3) rather than the task
+		// silently retrying at 3 a.m. forever. revoked -> terminal; a
+		// no_balance task is paused too and resumes on the user's manual
+		// re-enable after a top-up (SetEnabled clears paused_reason). No
+		// balance is edited — this is a pre-run refusal, per the standing rule.
+		pauseReason := model.CloudPausedNoBalance
 		if authz.Reason == model.CloudPausedRevoked {
-			if e := rr.store.SetPaused(ctx, task.TenantID, task.UserID, task.ID, model.CloudPausedRevoked); e != nil {
-				slog.Warn("cloud task pause-on-revoke failed", "task_id", task.ID.String())
-			}
-		} else {
-			rr.advance(ctx, task, now)
+			pauseReason = model.CloudPausedRevoked
+		}
+		if e := rr.store.SetPaused(ctx, task.TenantID, task.UserID, task.ID, pauseReason); e != nil {
+			slog.Warn("cloud task pause-on-refuse failed", "task_id", task.ID.String(), "reason", pauseReason)
 		}
 		slog.Info("cloud task run refused", "task_id", task.ID.String(), "reason", authz.Reason)
 		return
@@ -149,18 +194,20 @@ func (rr *CloudTaskRunner) RunDueTask(ctx context.Context, task model.CloudTask)
 
 	// -------- STEP 2: RUN THE TURN (reached ONLY on Allow) --------
 	//
-	// TODO(FIX13 cloud-tool subset): SendInput has no tool-subset selector
-	// today. An unattended run should run with the CLOUD tool subset only
-	// (no desktop/local tools, no image mode). ImageMode is pinned false
-	// here; wiring an explicit tool allowlist into SendNonStream is invasive
-	// and deferred — see the report. Not destabilizing SendNonStream this
-	// round.
-	res, err := rr.turnRunner.SendNonStream(ctx, SendInput{
-		TenantID:       task.TenantID,
-		UserID:         task.UserID,
-		ConversationID: task.ConversationID,
-		Content:        task.Prompt,
-		ImageMode:      false,
+	// FIX16 §1.4 — the run is handed the explicit CLOUD tool allowlist, so
+	// SendNonStream offers only the read-only/self-contained tools and its
+	// executor refuses (and flags) any call outside it. ImageMode stays off.
+	// A per-run wall-clock deadline (§3) caps a hung run so one task cannot
+	// hold its lease — or spend — indefinitely.
+	runCtx, cancel := context.WithTimeout(ctx, rr.runDeadline)
+	defer cancel()
+	res, err := rr.turnRunner.SendNonStream(runCtx, SendInput{
+		TenantID:           task.TenantID,
+		UserID:             task.UserID,
+		ConversationID:     task.ConversationID,
+		Content:            task.Prompt,
+		ImageMode:          false,
+		CloudToolAllowlist: model.CloudAllowedToolNames(),
 	})
 	if err != nil {
 		rr.recordRun(ctx, task, &model.CloudTaskRun{
@@ -168,22 +215,27 @@ func (rr *CloudTaskRunner) RunDueTask(ctx context.Context, task model.CloudTask)
 			ErrorDetail: strptr(clamp300("turn: " + err.Error())),
 		})
 		// Still advance so a persistently-failing turn doesn't fire every
-		// scan; the audit row records the error.
+		// scan; the audit row records the error. advance also clears the lease.
 		rr.advance(ctx, task, now)
 		slog.Warn("cloud task turn failed", "task_id", task.ID.String())
 		return
 	}
 
-	// Success — audit with the assistant message id + token total.
-	run := &model.CloudTaskRun{
-		Outcome:      model.CloudRunOK,
-		PolicyAction: strptr(""), // SendResult exposes no policy action today.
-	}
-	if res != nil && res.AssistantMessage != nil {
-		id := res.AssistantMessage.ID
-		run.AssistantMessageID = &id
-		if t := tokenTotal(res.AssistantMessage); t != nil {
-			run.Tokens = t
+	// Success — audit with the assistant message id, token total, the DLP
+	// verdict the gateway reported (FIX16 §1.5), and a tool_withheld note if
+	// the model reached for a tool the cloud subset does not grant (§2).
+	run := &model.CloudTaskRun{Outcome: model.CloudRunOK}
+	if res != nil {
+		run.PolicyAction = strptr(res.PolicyAction)
+		if res.WithheldToolRequested {
+			run.SkipReason = strptr(model.SkipToolWithheld)
+		}
+		if res.AssistantMessage != nil {
+			id := res.AssistantMessage.ID
+			run.AssistantMessageID = &id
+			if t := tokenTotal(res.AssistantMessage); t != nil {
+				run.Tokens = t
+			}
 		}
 	}
 	rr.recordRun(ctx, task, run)
@@ -198,15 +250,14 @@ func (rr *CloudTaskRunner) RunDueTask(ctx context.Context, task model.CloudTask)
 	slog.Info("cloud task run ok", "task_id", task.ID.String())
 }
 
-// Tick drains all currently-due tasks. This is the unit-testable scheduler
-// entry point.
-//
-// DEPLOYMENT NOTE: the safe core does NOT start an always-on goroutine. A
-// scheduler goroutine that calls Tick(ctx, time.Now()) every N seconds (with
-// a single-flight guard so two ticks never overlap) is the deployment step —
-// wire it in main.go when the feature is turned on.
+// Tick claims and drains all currently-due tasks. FIX16: the claim is a
+// single atomic ClaimDue (lease), so two ticks — in this process or another
+// instance — never fire the same task twice. This is the scheduler entry
+// point; StartScheduler (main.go) calls it on a timer with a non-overlap
+// guard, but the lease is what makes it safe across instances/restarts.
 func (rr *CloudTaskRunner) Tick(ctx context.Context, now time.Time) error {
-	due, err := rr.store.ListDue(ctx, now, rr.dueLimit)
+	staleBefore := now.Add(-rr.leaseTTL)
+	due, err := rr.store.ClaimDue(ctx, now, staleBefore, rr.instanceID, rr.dueLimit)
 	if err != nil {
 		return err
 	}

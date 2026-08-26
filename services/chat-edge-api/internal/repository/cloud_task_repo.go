@@ -188,7 +188,8 @@ func (r *CloudTaskRepo) SetPaused(
 ) error {
 	const q = `
 		UPDATE chat.cloud_scheduled_tasks
-		SET enabled = false, paused_reason = $4
+		SET enabled = false, paused_reason = $4,
+		    locked_at = NULL, locked_by = NULL
 		WHERE id = $1 AND tenant_id = $2 AND user_id = $3`
 	tag, err := r.db.Exec(ctx, q, id, tenantID, userID, reason)
 	if err != nil {
@@ -249,8 +250,57 @@ func (r *CloudTaskRepo) ListDue(
 	return out, rows.Err()
 }
 
+// ClaimDue is the FIX16 single-flight claim — the ONE method that both
+// selects due tasks AND leases them, atomically. It replaces ListDue in the
+// scheduler's Tick path.
+//
+// A task is claimable iff it is enabled, due (next_run_at <= now), and either
+// unlocked or its lease has gone stale (locked_at < staleBefore, i.e. a prior
+// holder crashed). The inner SELECT ... FOR UPDATE SKIP LOCKED stops two
+// concurrent claim statements from grabbing the same rows in the same instant;
+// the durable locked_at stamp stops a second tick/instance from claiming a task
+// whose run is still in flight (the run happens OUTSIDE this statement's
+// transaction). The lease is cleared by AdvanceAfterRun / SetPaused on
+// completion; a crash leaves it set and the TTL (staleBefore) reclaims it.
+//
+// Cross-user by design — scheduler-internal only, NEVER an HTTP handler.
+func (r *CloudTaskRepo) ClaimDue(
+	ctx context.Context, now, staleBefore time.Time, instanceID string, limit int,
+) ([]model.CloudTask, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	q := `
+		UPDATE chat.cloud_scheduled_tasks
+		SET locked_at = $1, locked_by = $2
+		WHERE id IN (
+			SELECT id FROM chat.cloud_scheduled_tasks
+			WHERE enabled = true AND next_run_at <= $1
+			  AND (locked_at IS NULL OR locked_at < $3)
+			ORDER BY next_run_at ASC
+			LIMIT $4
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING ` + cloudTaskColumns
+	rows, err := r.db.Query(ctx, q, now, instanceID, staleBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim due cloud tasks: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.CloudTask, 0, limit)
+	for rows.Next() {
+		var t model.CloudTask
+		if err := scanCloudTask(rows, &t); err != nil {
+			return nil, fmt.Errorf("claim due scan: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // AdvanceAfterRun moves next_run_at forward and (optionally) bumps
-// run_count + last_run_at after a successful fire. Hard-scoped by the
+// run_count + last_run_at after a successful fire, AND clears the FIX16
+// lease so the task is free for its next occurrence. Hard-scoped by the
 // task's own (tenant, user).
 func (r *CloudTaskRepo) AdvanceAfterRun(
 	ctx context.Context, tenantID, userID, taskID uuid.UUID, nextRunAt time.Time, incRun bool,
@@ -259,7 +309,9 @@ func (r *CloudTaskRepo) AdvanceAfterRun(
 		UPDATE chat.cloud_scheduled_tasks
 		SET next_run_at = $4,
 		    run_count   = run_count + CASE WHEN $5 THEN 1 ELSE 0 END,
-		    last_run_at = CASE WHEN $5 THEN now() ELSE last_run_at END
+		    last_run_at = CASE WHEN $5 THEN now() ELSE last_run_at END,
+		    locked_at   = NULL,
+		    locked_by   = NULL
 		WHERE id = $1 AND tenant_id = $2 AND user_id = $3`
 	tag, err := r.db.Exec(ctx, q, taskID, tenantID, userID, nextRunAt, incRun)
 	if err != nil {

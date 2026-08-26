@@ -98,9 +98,12 @@ func cloudTaskPool(t *testing.T) *pgxpool.Pool {
 		pool.Close()
 		t.Skipf("skip: DB unreachable (%v)", err)
 	}
-	// Migration 035 is idempotent — apply so a fresh test DB has the tables.
-	if b, err := os.ReadFile("../../migrations/035_create_cloud_tasks.sql"); err == nil {
-		_, _ = pool.Exec(ctx, string(b))
+	// Migrations 035 + 036 are idempotent — apply so a fresh test DB has the
+	// tables AND the FIX16 lease columns (locked_at/locked_by).
+	for _, m := range []string{"035_create_cloud_tasks.sql", "036_cloud_task_lease.sql"} {
+		if b, err := os.ReadFile("../../migrations/" + m); err == nil {
+			_, _ = pool.Exec(ctx, string(b))
+		}
 	}
 	var reg *string
 	if err := pool.QueryRow(ctx, "SELECT to_regclass('chat.cloud_scheduled_tasks')::text").Scan(&reg); err != nil || reg == nil {
@@ -212,5 +215,73 @@ func TestCloudTaskRepo_ScopingAndDueScan(t *testing.T) {
 	}
 	if paused.Enabled || paused.PausedReason == nil || *paused.PausedReason != model.CloudPausedRevoked {
 		t.Fatalf("SetPaused must disable + set reason=revoked, got enabled=%v reason=%+v", paused.Enabled, paused.PausedReason)
+	}
+}
+
+// TestCloudTaskRepo_ClaimDue_SingleFlight proves the FIX16 lease: a claimed
+// task is invisible to a second claim (no double-fire) until its lease goes
+// stale (crash recovery) or it is released (AdvanceAfterRun).
+func TestCloudTaskRepo_ClaimDue_SingleFlight(t *testing.T) {
+	pool := cloudTaskPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	r := repository.NewCloudTaskRepo(pool)
+
+	tenantID := uuid.New()
+	userA := uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM chat.cloud_task_runs WHERE tenant_id = $1", tenantID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM chat.cloud_scheduled_tasks WHERE tenant_id = $1", tenantID)
+	})
+
+	task, err := r.Create(ctx, &model.CloudTask{
+		TenantID: tenantID, UserID: userA, ConversationID: uuid.New(),
+		Name: "lease me", Prompt: "run", IntervalSeconds: 3600,
+		NextRunAt: time.Now().Add(-time.Hour), Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	now := time.Now()
+	leaseTTL := 15 * time.Minute
+	claimedBy := func(instance string, staleBefore time.Time) bool {
+		got, err := r.ClaimDue(ctx, now, staleBefore, instance, 100)
+		if err != nil {
+			t.Fatalf("claim(%s): %v", instance, err)
+		}
+		for _, g := range got {
+			if g.ID == task.ID {
+				return true
+			}
+		}
+		return false
+	}
+
+	// First claim (instA) wins.
+	if !claimedBy("instA", now.Add(-leaseTTL)) {
+		t.Fatal("first ClaimDue must return the due task")
+	}
+	// Second claim (instB) IMMEDIATELY must NOT see it — lease is fresh.
+	// This is the single-flight guarantee: no double-fire.
+	if claimedBy("instB", now.Add(-leaseTTL)) {
+		t.Fatal("SINGLE-FLIGHT VIOLATED: a freshly-leased task was claimed by a second caller")
+	}
+	// Crash recovery: with a staleBefore AFTER the lock time (i.e. the lease
+	// TTL has elapsed), the task is reclaimable — a crashed holder does not
+	// wedge the task forever.
+	if !claimedBy("instB", now.Add(time.Minute)) {
+		t.Fatal("stale lease must be RECLAIMABLE (crash recovery)")
+	}
+	// Release via AdvanceAfterRun clears the lease.
+	if err := r.AdvanceAfterRun(ctx, tenantID, userA, task.ID, now.Add(time.Hour), true); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	var lockedAt *time.Time
+	if err := pool.QueryRow(ctx, "SELECT locked_at FROM chat.cloud_scheduled_tasks WHERE id = $1", task.ID).Scan(&lockedAt); err != nil {
+		t.Fatalf("read locked_at: %v", err)
+	}
+	if lockedAt != nil {
+		t.Fatal("AdvanceAfterRun must clear the lease (locked_at = NULL)")
 	}
 }

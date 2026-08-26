@@ -41,9 +41,69 @@ const (
 
 // Paused reasons written when a task is auto-paused (enabled=false).
 const (
-	CloudPausedRevoked = "revoked"
-	CloudPausedMaxRuns = "max_runs"
+	CloudPausedRevoked   = "revoked"
+	CloudPausedMaxRuns   = "max_runs"
+	CloudPausedNoBalance = "no_balance"
 )
+
+// SkipToolWithheld is recorded on an otherwise-ok run when the model asked
+// for a tool the cloud subset does not grant (FIX16 §1.4 / §2). The run still
+// produces an answer; the note makes the wall visible in run history instead
+// of the task silently producing a worse answer.
+const SkipToolWithheld = "tool_withheld"
+
+// ---------------------------------------------------------------------------
+// FIX16 §1.4 — the CLOUD TOOL BOUNDARY, stated once and enforced.
+//
+// A cloud task runs with NO human present, so it may use only the read-only /
+// self-contained tools: nothing that spends unpredictably, writes durable
+// user data, installs, grants, or reaches a connector. "Happening to be safe
+// is not the same as being kept safe" — so this is an explicit allowlist, and
+// CloudToolClassification() below lists EVERY current tool as allowed or
+// withheld. The exhaustiveness test (cloud_tool_boundary_test.go) fails if a
+// tool exists that is in neither list, forcing the next tool added to make a
+// decision here rather than silently inheriting cloud access.
+// ---------------------------------------------------------------------------
+
+// CloudAllowedTools is the set of tools an unattended cloud run may use.
+var CloudAllowedTools = map[string]bool{
+	"search_past_conversations": true, // read-only: the user's own history
+	"web_search":                true, // already EXTERNAL_EGRESS-scanned
+	"web_fetch":                 true, // already EXTERNAL_EGRESS-scanned
+	"run_python":                true, // network-isolated sandbox
+	"list_memories":             true, // memory READ
+	"use_skill":                 true, // loads instructions; no side effect
+}
+
+// cloudWithheldTools lists every non-allowed tool WITH the reason, so the
+// boundary is legible and the exhaustiveness test can prove the union covers
+// the live registry.
+var cloudWithheldTools = map[string]string{
+	"generate_image":           "spends credits on a paid image generation",
+	"generate_video":           "spends heavily; capability gated off besides",
+	"save_memory":              "WRITES durable user memory with nobody watching",
+	"update_canvas_artifact":   "WRITES a durable conversation artifact",
+	"update_conversation_state": "WRITES conversation state",
+}
+
+// IsCloudToolAllowed reports whether an unattended cloud run may use the tool.
+func IsCloudToolAllowed(name string) bool { return CloudAllowedTools[name] }
+
+// CloudAllowedToolNames returns the allowlist as a slice (for SendInput).
+func CloudAllowedToolNames() []string {
+	out := make([]string, 0, len(CloudAllowedTools))
+	for n := range CloudAllowedTools {
+		out = append(out, n)
+	}
+	return out
+}
+
+// CloudToolClassification returns the allowed set and the withheld set (with
+// reasons). The exhaustiveness test asserts every registered tool appears in
+// exactly one — the mechanism that keeps the boundary honest as tools change.
+func CloudToolClassification() (allowed map[string]bool, withheld map[string]string) {
+	return CloudAllowedTools, cloudWithheldTools
+}
 
 // CloudTask is one row from chat.cloud_scheduled_tasks.
 type CloudTask struct {

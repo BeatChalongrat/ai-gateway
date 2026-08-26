@@ -23,11 +23,13 @@ import (
 // ---- fakes ----------------------------------------------------------------
 
 type fakeStore struct {
-	runs      []*model.CloudTaskRun
-	paused    []pausedCall
-	advances  []advanceCall
-	dueTasks  []model.CloudTask
-	recordErr error
+	runs           []*model.CloudTaskRun
+	paused         []pausedCall
+	advances       []advanceCall
+	dueTasks       []model.CloudTask
+	recordErr      error
+	claims         int
+	lastInstanceID string
 }
 
 type pausedCall struct {
@@ -43,6 +45,13 @@ type advanceCall struct {
 }
 
 func (f *fakeStore) ListDue(_ context.Context, _ time.Time, _ int) ([]model.CloudTask, error) {
+	return f.dueTasks, nil
+}
+
+// claimCalls records each ClaimDue invocation so the lease path is testable.
+func (f *fakeStore) ClaimDue(_ context.Context, _ , _ time.Time, instanceID string, _ int) ([]model.CloudTask, error) {
+	f.claims++
+	f.lastInstanceID = instanceID
 	return f.dueTasks, nil
 }
 func (f *fakeStore) RecordRun(_ context.Context, run *model.CloudTaskRun) error {
@@ -154,13 +163,13 @@ func TestRunDueTask_RefusedNoBalance_NeverCallsTurnRunner(t *testing.T) {
 	if len(store.runs) != 1 || store.runs[0].Outcome != model.CloudRunRefusedNoBalance {
 		t.Fatalf("expected one refused_no_balance audit row, got %+v", store.runs)
 	}
-	// A no-balance task stays enabled (not paused) but is advanced so it
-	// doesn't fire every scan.
-	if len(store.paused) != 0 {
-		t.Fatalf("no_balance task must NOT be paused, got %+v", store.paused)
+	// FIX16 §3 — a no_balance task is auto-PAUSED with a visible reason so the
+	// user learns why it stopped (not silently retried forever). Not advanced.
+	if len(store.paused) != 1 || store.paused[0].reason != model.CloudPausedNoBalance {
+		t.Fatalf("no_balance task must be paused with reason=no_balance, got %+v", store.paused)
 	}
-	if len(store.advances) != 1 {
-		t.Fatalf("no_balance task must be advanced once, got %+v", store.advances)
+	if len(store.advances) != 0 {
+		t.Fatalf("paused no_balance task must NOT be advanced, got %+v", store.advances)
 	}
 }
 
@@ -245,6 +254,67 @@ func TestRunDueTask_Allow_MaxRunsReached_Pauses(t *testing.T) {
 	}
 	if len(store.paused) != 1 || store.paused[0].reason != model.CloudPausedMaxRuns {
 		t.Fatalf("reaching max_runs must pause with reason=max_runs, got %+v", store.paused)
+	}
+}
+
+// ---- FIX16: cloud tool subset + DLP verdict in the audit ------------------
+
+func TestRunDueTask_Allow_RunsWithCloudToolSubset(t *testing.T) {
+	store := &fakeStore{}
+	authz := &stubAuthorizer{result: AuthzResult{Allow: true, Reason: "ok"}}
+	spy := &spyTurnRunner{result: &SendResult{AssistantMessage: &model.Message{ID: uuid.New()}}}
+	runner := NewCloudTaskRunner(store, authz, spy)
+
+	runner.RunDueTask(context.Background(), sampleTask())
+
+	// §1.4 — the unattended turn is handed the explicit cloud allowlist, NOT
+	// the full tool set. It must be non-nil (restricted) and contain only
+	// read-only tools; it must NOT contain a spend/write tool.
+	if len(spy.Inputs) != 1 {
+		t.Fatalf("expected one turn, got %d", len(spy.Inputs))
+	}
+	allow := spy.Inputs[0].CloudToolAllowlist
+	if allow == nil {
+		t.Fatal("cloud run MUST pass a non-nil CloudToolAllowlist (restricted)")
+	}
+	set := map[string]bool{}
+	for _, n := range allow {
+		set[n] = true
+	}
+	if !set["web_search"] || !set["run_python"] {
+		t.Fatalf("allowlist must contain the read-only tools, got %v", allow)
+	}
+	for _, banned := range []string{"generate_image", "generate_video", "save_memory", "update_canvas_artifact"} {
+		if set[banned] {
+			t.Fatalf("allowlist must NOT contain the withheld tool %q", banned)
+		}
+	}
+}
+
+func TestRunDueTask_Allow_RecordsPolicyActionAndWithheldNote(t *testing.T) {
+	store := &fakeStore{}
+	authz := &stubAuthorizer{result: AuthzResult{Allow: true, Reason: "ok"}}
+	// The turn reports a DLP verdict AND that the model reached for a withheld tool.
+	spy := &spyTurnRunner{result: &SendResult{
+		AssistantMessage:      &model.Message{ID: uuid.New()},
+		PolicyAction:          "mask",
+		WithheldToolRequested: true,
+	}}
+	runner := NewCloudTaskRunner(store, authz, spy)
+
+	runner.RunDueTask(context.Background(), sampleTask())
+
+	if len(store.runs) != 1 {
+		t.Fatalf("expected one audit row, got %d", len(store.runs))
+	}
+	run := store.runs[0]
+	// §1.5 — the DLP verdict is recorded (was always "" before FIX16).
+	if run.PolicyAction == nil || *run.PolicyAction != "mask" {
+		t.Fatalf("run must record policy_action=mask, got %+v", run.PolicyAction)
+	}
+	// §2 — the wall is visible: a tool_withheld note on the run.
+	if run.SkipReason == nil || *run.SkipReason != model.SkipToolWithheld {
+		t.Fatalf("run must note tool_withheld when the model asked for a withheld tool, got %+v", run.SkipReason)
 	}
 }
 

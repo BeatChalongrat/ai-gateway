@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/auth"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/config"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/handler"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
@@ -532,14 +533,10 @@ func main() {
 		Memory:         handler.NewMemoryHandler(memorySvc),
 		Search:         handler.NewSearchHandler(searchSvc),
 		Skills:         handler.NewSkillHandler(skillsRepo),
-		// FIX13 — cloud scheduled tasks (migration 035). Authenticated CRUD
-		// + audit. The unattended firing loop is NOT started here: the
-		// service.CloudTaskRunner (authorize-before-run + audit) is unit-
-		// proven, and a goroutine calling runner.Tick(ctx, time.Now()) every
-		// N seconds — with a service.NewHTTPRunAuthorizer pointed at the
-		// backend's /internal/scheduled-run/authorize and messageSvc as the
-		// TurnRunner — is the deployment step (see FIX13 report / runner
-		// deployment note).
+		// FIX13 — cloud scheduled tasks (migration 035): authenticated CRUD +
+		// audit. FIX16 — the unattended firing loop IS now wired (above, gated
+		// on CLOUD_SCHEDULER_ENABLED): StartScheduler → CloudTaskRunner.Tick,
+		// authorize-before-run, DB lease (migration 036), cloud tool subset.
 		CloudTasks: handler.NewCloudTaskHandler(cloudTasksRepo),
 		Account:        handler.NewAccountHandler(exportSvc, purgeSvc),
 		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
@@ -581,6 +578,31 @@ func main() {
 	// background goroutine drains alongside the HTTP server.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	go retentionEnforcer.StartBackground(bgCtx)
+
+	// FIX16 — cloud scheduled tasks: the always-on firing goroutine. OFF
+	// unless CLOUD_SCHEDULER_ENABLED=true. The runner authorizes EVERY fire
+	// against the backend's revocation+balance gate BEFORE any turn (FIX13's
+	// invariant), fires with the read-only cloud tool subset only, holds a DB
+	// lease so no task double-fires, and audits every run. messageSvc is the
+	// TurnRunner (the same headless SendNonStream FIX13 proved).
+	if cfg.CloudSchedulerEnabled {
+		if cfg.CloudTaskAuthorizeURL == "" {
+			// Fail closed: never run unattended tasks without the revocation
+			// gate. Refuse to START the scheduler (the rest of the server is
+			// unaffected) rather than fire tasks that can't be authorized.
+			logger.Error("cloud scheduler NOT started: CLOUD_SCHEDULER_ENABLED=true but CLOUD_TASK_AUTHORIZE_URL is empty (no revocation gate)")
+		} else {
+			bearer := func() (string, error) {
+				return auth.IssueServiceJWT(cfg.ServiceJWTSecret, cfg.ServiceJWTTTL)
+			}
+			cloudAuthorizer := service.NewHTTPRunAuthorizer(cfg.CloudTaskAuthorizeURL, cfg.InternalServiceSecret, bearer)
+			cloudRunner := service.NewCloudTaskRunner(cloudTasksRepo, cloudAuthorizer, messageSvc)
+			service.StartScheduler(bgCtx, cloudRunner, cfg.CloudSchedulerInterval, logger)
+			logger.Info("cloud scheduled tasks ENABLED", "interval", cfg.CloudSchedulerInterval.String(), "authorize_url_configured", true)
+		}
+	} else {
+		logger.Info("cloud scheduled tasks disabled (CLOUD_SCHEDULER_ENABLED not set)")
+	}
 
 	// Run + graceful shutdown.
 	go func() {

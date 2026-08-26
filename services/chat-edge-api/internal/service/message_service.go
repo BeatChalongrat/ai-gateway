@@ -834,12 +834,28 @@ type SendInput struct {
 	// generate_image directive is appended to the system prompt so a
 	// tool-capable model produces an image rather than a text reply.
 	ImageMode bool
+	// CloudToolAllowlist (FIX16 §1.4) restricts the tools offered on this
+	// turn to the named set. nil = unrestricted (every interactive turn).
+	// A cloud scheduled run passes model.CloudAllowedToolNames() so an
+	// unattended turn can never reach a spend/write/connector tool. When
+	// set, executeToolCalls also REFUSES any call outside the set and marks
+	// ToolExecContext.WithheldToolRequested so the run's audit shows the wall.
+	CloudToolAllowlist []string
 }
 
 // SendResult is what the non-stream handler returns to the client.
 type SendResult struct {
 	UserMessage      *model.Message
 	AssistantMessage *model.Message
+	// PolicyAction (FIX16 §1.5) is the DLP verdict the gateway reported for
+	// this turn ("allow"|"mask"|"block"|…), surfaced from the x_sran_dlp
+	// envelope so an unattended run's audit row can record what the policy
+	// did. Empty when the gateway returned no verdict (public/Direct paths).
+	PolicyAction string
+	// WithheldToolRequested (FIX16 §1.4/§2) is true when a cloud run's model
+	// asked for a tool outside the allowlist; the runner records a
+	// tool_withheld skip note so the wall is visible in run history.
+	WithheldToolRequested bool
 }
 
 func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*SendResult, error) {
@@ -851,7 +867,17 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist)
+	// FIX16 §1.4 — on a cloud run, build the allow-map the executor guard
+	// uses to refuse (and flag) any out-of-allowlist call.
+	var cloudAllow map[string]bool
+	var withheldToolRequested bool
+	if in.CloudToolAllowlist != nil {
+		cloudAllow = make(map[string]bool, len(in.CloudToolAllowlist))
+		for _, n := range in.CloudToolAllowlist {
+			cloudAllow[n] = true
+		}
+	}
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -879,6 +905,8 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 				UserID:         in.UserID,
 				ConversationID: conv.ID,
 				Sources:        sourcesAcc,
+				CloudToolAllow: cloudAllow,             // FIX16 §1.4 — nil on interactive turns
+				WithheldHit:    &withheldToolRequested, // set if a withheld tool is asked for
 			})
 			gwReq.Messages = append(gwReq.Messages, tcMsg)
 			gwReq.Messages = append(gwReq.Messages, results...)
@@ -931,7 +959,12 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	// nil-safe when the source repo isn't wired.
 	s.persistSources(ctx, asstMsg.ID, in.UserID, in.TenantID, conv.ID, sourcesAcc)
 
-	return &SendResult{UserMessage: userMsg, AssistantMessage: asstMsg}, nil
+	return &SendResult{
+		UserMessage:           userMsg,
+		AssistantMessage:      asstMsg,
+		PolicyAction:          gwResp.PolicyAction, // FIX16 §1.5 — audit the DLP verdict
+		WithheldToolRequested: withheldToolRequested,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,7 +1209,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
 		imageModel := ""
@@ -1504,7 +1537,7 @@ func (s *MessageService) openAssistantStream(
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
 		UserID:         userID,
@@ -1767,7 +1800,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
 		UserID:         userID,
@@ -3512,7 +3545,7 @@ const maxToolIterations = 5
 // providers 400 on an unexpected “tools“ param, which would break a
 // conversation after the user switches to such a model. Unknown ids and
 // the Auto sentinel keep tools (capability unknown → don't degrade).
-func (s *MessageService) attachTools(ctx context.Context, req *GatewayChatRequest, conv *model.Conversation) bool {
+func (s *MessageService) attachTools(ctx context.Context, req *GatewayChatRequest, conv *model.Conversation, cloudAllow []string) bool {
 	if s.toolExec == nil {
 		return false
 	}
@@ -3530,6 +3563,12 @@ func (s *MessageService) attachTools(ctx context.Context, req *GatewayChatReques
 	if s.toolExec.HasWebSearch() && !s.webSearchEnabled(ctx) {
 		defs = dropToolByName(defs, "web_search")
 	}
+	// FIX16 §1.4 — cloud tool boundary. When cloudAllow is set (a cloud
+	// scheduled run), offer ONLY those tools; spend/write/connector tools
+	// are never even presented to an unattended model.
+	if cloudAllow != nil {
+		defs = keepOnlyTools(defs, cloudAllow)
+	}
 	if len(defs) == 0 {
 		return false
 	}
@@ -3546,6 +3585,22 @@ func dropToolByName(defs []GatewayTool, name string) []GatewayTool {
 	out := defs[:0]
 	for _, d := range defs {
 		if d.Function.Name != name {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// keepOnlyTools returns defs restricted to the named allowlist (FIX16 §1.4 —
+// the cloud tool boundary). A nil/empty allow means "keep none".
+func keepOnlyTools(defs []GatewayTool, allow []string) []GatewayTool {
+	allowed := make(map[string]bool, len(allow))
+	for _, n := range allow {
+		allowed[n] = true
+	}
+	out := defs[:0]
+	for _, d := range defs {
+		if allowed[d.Function.Name] {
 			out = append(out, d)
 		}
 	}
@@ -4372,6 +4427,27 @@ func (s *MessageService) executeToolCalls(
 	}
 	results := make([]GatewayMessage, 0, len(toolCalls))
 	for _, tc := range toolCalls {
+		// FIX16 §1.4 — cloud tool boundary. On a cloud run (CloudToolAllow
+		// non-nil) a call to a tool outside the allowlist is REFUSED here:
+		// the tool never executes, the model gets a plain result saying so,
+		// and the run is flagged tool_withheld. Withheld tools aren't even
+		// offered (attachTools filters them), so this is belt-and-braces for
+		// a fabricated/leaked call — but it is the hard guarantee that an
+		// unattended turn cannot reach a spend/write tool.
+		if ec.CloudToolAllow != nil && !ec.CloudToolAllow[tc.Function.Name] {
+			if ec.WithheldHit != nil {
+				*ec.WithheldHit = true
+			}
+			slog.Warn("cloud run refused out-of-allowlist tool",
+				"tool", tc.Function.Name, "conversation_id", ec.ConversationID.String())
+			results = append(results, GatewayMessage{
+				Role:       "tool",
+				ToolCallID: tc.ID,
+				Name:       tc.Function.Name,
+				Content:    "This tool is not available in an unattended scheduled run. Answer without it, and note that it was unavailable.",
+			})
+			continue
+		}
 		// Generic activity frames for tools with no dedicated event —
 		// the tool logic itself is untouched, this only brackets it.
 		// Suppressed for tools with their own event AND for

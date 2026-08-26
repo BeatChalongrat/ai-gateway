@@ -313,6 +313,11 @@ type GatewayChatResponse struct {
 	// non-stream responses (off-schema; public callers never send it).
 	// Parsed into a CanonicalArtifact by the consumer; never the display.
 	XSranDLP *CanonicalArtifact `json:"x_sran_dlp,omitempty"`
+	// PolicyAction (FIX16 §1.5) — the DLP verdict the gateway attaches to a
+	// managed completion ("allow"|"mask"|"block"|…). Empty on public/Direct
+	// paths. Surfaced so an unattended cloud run's audit row can record what
+	// the policy did (DLP runs regardless; this only reports it).
+	PolicyAction string `json:"policy_action,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

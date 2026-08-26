@@ -74,6 +74,15 @@ func (a *HTTPRunAuthorizer) Authorize(ctx context.Context, tenantID, userID uuid
 	if a.internalSecret != "" {
 		req.Header.Set("X-Internal-Service-Secret", a.internalSecret)
 	}
+	// The backend's internal endpoints resolve identity through the SAME
+	// get_resolved_api_key path every internal caller uses: a service JWT
+	// that names an end user via X-User-ID (a bare service JWT with no user
+	// is rejected 401, fail-closed). The scheduled-run query is ABOUT this
+	// (user, tenant) — naming them here satisfies that resolver. The endpoint
+	// still reads the body for its decision; these headers only prove the
+	// internal caller, exactly like the gateway → media/DLP internal calls.
+	req.Header.Set("X-User-ID", userID.String())
+	req.Header.Set("X-Tenant-ID", tenantID.String())
 	if a.bearerProvider != nil {
 		bearer, err := a.bearerProvider()
 		if err != nil {

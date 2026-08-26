@@ -99,6 +99,21 @@ type Config struct {
 	// safe, backward-compatible rollout: set it on BOTH sides to enable.
 	InternalServiceSecret string `env:"INTERNAL_SERVICE_SECRET" envDefault:""`
 
+	// FIX16 — cloud scheduled tasks. The unattended firing loop is OFF by
+	// default (backward-compatible with every deployment that predates it);
+	// turning it on is a deliberate config act.
+	//   CloudSchedulerEnabled   — master switch for the firing goroutine.
+	//   CloudTaskAuthorizeURL   — base URL of the backend that answers
+	//                             /internal/scheduled-run/authorize (the
+	//                             revocation + balance gate). REQUIRED when
+	//                             enabled; empty + enabled = refuse to start.
+	//   CloudSchedulerInterval  — how often Tick scans for due tasks. The
+	//                             1-hour per-task floor is enforced separately;
+	//                             this only bounds scan latency.
+	CloudSchedulerEnabled  bool          `env:"CLOUD_SCHEDULER_ENABLED" envDefault:"false"`
+	CloudTaskAuthorizeURL  string        `env:"CLOUD_TASK_AUTHORIZE_URL" envDefault:""`
+	CloudSchedulerInterval time.Duration `env:"CLOUD_SCHEDULER_INTERVAL" envDefault:"60s"`
+
 	// Max conversation messages threaded into a Gateway call. The
 	// model has its own context window. The S4 ContextCompiler trims
 	// history by TOKEN budget (per-model, see context_budget.go), so
