@@ -70,6 +70,12 @@ type MessageService struct {
 	// projectReader — Phase 4. Optional; nil keeps every conversation on
 	// the pre-Phase-4 prompt path.
 	projectReader ProjectReader
+	// skillReader — FIX12 Item 3. Optional; when wired, buildSystemPrefix
+	// loads the user's enabled skills, matches their triggers against the
+	// latest user message, and preloads ActiveSkills + SkillCatalog into
+	// the CompileContext. nil keeps the prompt byte-identical to the
+	// pre-skills behaviour.
+	skillReader SkillReader
 	// Optional. Reads conversation files (with their cached
 	// inspection_json) so the Phase 4 Excel context block can
 	// inject the workbook structure + action catalog into the
@@ -197,6 +203,10 @@ type FileLinker interface {
 	AttachToMessage(ctx context.Context, tenantID, convID, messageID uuid.UUID, fileIDs []uuid.UUID) (int64, error)
 	BuildContextBlock(ctx context.Context, tenantID, convID uuid.UUID) (string, error)
 	ImageDataURLsForMessage(ctx context.Context, tenantID, messageID uuid.UUID) []string
+	// ImageDataURLsForMessageChecked is ImageDataURLsForMessage plus the
+	// per-image failure list, so the streaming send paths can tell the
+	// user an attachment couldn't be read instead of silently dropping it.
+	ImageDataURLsForMessageChecked(ctx context.Context, tenantID, messageID uuid.UUID) ([]string, []ImageAttachFailure)
 	// GeneratedImageNotes returns a per-message annotation describing
 	// the AI-generated image attachments on each given message (one
 	// batched query). The request builder appends it to the assistant
@@ -487,6 +497,65 @@ func (s *MessageService) SetProjectReader(r ProjectReader) {
 	s.projectReader = r
 }
 
+// SkillReader supplies the user's enabled skills for turn-time trigger
+// matching + the use_skill catalog (FIX12 Item 3). Satisfied by
+// *repository.SkillRepo. The compiler stays repo-free — the message
+// service preloads via this reader and hands the result in as strings.
+type SkillReader interface {
+	ListEnabledByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]model.Skill, error)
+}
+
+// SetSkillReader wires the FIX12 skills lookup. Optional — nil keeps the
+// prompt byte-identical to the pre-skills behaviour.
+func (s *MessageService) SetSkillReader(r SkillReader) {
+	s.skillReader = r
+}
+
+// resolveSkillsForTurn loads the user's enabled skills and splits them
+// into (active, catalog): active = skills whose triggers case-
+// insensitively substring-match the latest user message; catalog = ALL
+// enabled skills (for the use_skill list). A load failure degrades to
+// (nil, nil) — skills never block a reply. The compiler treats empty
+// slices as a no-op, so the prompt stays byte-identical.
+func (s *MessageService) resolveSkillsForTurn(
+	ctx context.Context, tenantID, userID uuid.UUID, userText string,
+) (active, catalog []model.Skill) {
+	if s.skillReader == nil {
+		return nil, nil
+	}
+	all, err := s.skillReader.ListEnabledByUser(ctx, tenantID, userID)
+	if err != nil || len(all) == 0 {
+		return nil, nil
+	}
+	lowText := strings.ToLower(userText)
+	for i := range all {
+		sk := all[i]
+		if skillTriggersMatch(sk.Triggers, lowText) {
+			active = append(active, sk)
+		}
+	}
+	return active, all
+}
+
+// skillTriggersMatch reports whether any trigger is a case-insensitive
+// substring of the (already-lowercased) message text. Empty/blank
+// triggers never match, and empty text can't match anything.
+func skillTriggersMatch(triggers []string, lowText string) bool {
+	if lowText == "" {
+		return false
+	}
+	for _, t := range triggers {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" {
+			continue
+		}
+		if strings.Contains(lowText, t) {
+			return true
+		}
+	}
+	return false
+}
+
 // SetRAGReader wires the knowledge-base retrieval service. Same
 // lazy-wire pattern — kept out of the constructor so the service
 // boots fine when RAG isn't configured.
@@ -585,6 +654,15 @@ func (s *MessageService) SetCodeInterpreter(ci *CodeInterpreter, files codeFileR
 func (s *MessageService) SetCanvasArtifactTool(c canvasArtifactUpdater) {
 	if s.toolExec != nil {
 		s.toolExec.SetCanvasArtifacts(c)
+	}
+}
+
+// SetSkillTool exposes the FIX12 use_skill tool to the model. Optional —
+// without it the tool is hidden. Forwards to the ToolExecutor (created
+// inside SetMemoryService), so call this AFTER SetMemoryService.
+func (s *MessageService) SetSkillTool(r *repository.SkillRepo) {
+	if s.toolExec != nil {
+		s.toolExec.SetSkillRepo(r)
 	}
 }
 
@@ -770,9 +848,9 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		return nil, err
 	}
 
-	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
+	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs, sourcesAcc)
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv)
 	gwResp, err := s.gateway.SendChatCompletion(
 		ctx, gatewayCallContext(in, conv), gwReq,
@@ -957,6 +1035,20 @@ type StreamUpdate struct {
 	// Emitted once when the wait crosses the threshold and once more
 	// with Stalled=false when output resumes.
 	ProviderStall *ProviderStallNotice
+
+	// One or more attached images could not be turned into vision
+	// content (unreachable source, resize failure, unsupported format).
+	// Emitted ONCE at the very start of the turn — before content — so
+	// the person who attached them learns they didn't attach rather than
+	// the turn silently degrading to text-only. Informational, never an
+	// error: the turn still proceeds with whatever images did resolve.
+	ImageNotice *ImageAttachNotice
+}
+
+// ImageAttachNotice is the payload of the ``image_notice`` client event:
+// the list of attachments that fell out of the vision request this turn.
+type ImageAttachNotice struct {
+	Failures []ImageAttachFailure `json:"failures"`
 }
 
 // ProviderStallNotice tells the client the turn is alive but the model
@@ -1081,9 +1173,9 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// StreamHandle.Cancel() when the client disconnects, and the
 	// external POST /cancel endpoint invokes CancelStream(convID).
 	streamCtx, cancel := context.WithCancel(context.Background())
-	imageURLs := s.lastUserImageURLs(ctx, in.TenantID, history)
+	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imageURLs, sourcesAcc)
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv)
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
@@ -1155,6 +1247,10 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// and therefore persisted the restored display raw + canonical_status=legacy).
 	canonState := &CanonicalStreamState{}
 	ch := make(chan StreamUpdate, 16)
+	// Surface any image that couldn't be read BEFORE content streams, so
+	// the user learns their attachment didn't attach. Buffered channel +
+	// pre-pump enqueue guarantees it's the first frame the client sees.
+	emitImageNotice(ch, imgs.failures)
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -1405,9 +1501,9 @@ func (s *MessageService) openAssistantStream(
 	// Regenerate: the query for RAG is the last user message in the
 	// history (the prompt the original assistant turn was answering).
 	ragQuery := lastUserContent(history)
-	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
+	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs, sourcesAcc)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -1431,6 +1527,7 @@ func (s *MessageService) openAssistantStream(
 
 	canonState := &CanonicalStreamState{}
 	ch := make(chan StreamUpdate, 16)
+	emitImageNotice(ch, imgs.failures)
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -1667,9 +1764,9 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	if ragQuery == "" {
 		ragQuery = lastUserContent(history)
 	}
-	imageURLs := s.lastUserImageURLs(ctx, conv.TenantID, history)
+	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imageURLs, sourcesAcc)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -1693,6 +1790,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 
 	canonState := &CanonicalStreamState{}
 	ch := make(chan StreamUpdate, 16)
+	emitImageNotice(ch, imgs.failures)
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -1915,6 +2013,11 @@ func (s *MessageService) buildSystemPrefixWithSources(
 			projectKB = p.KnowledgeBaseID
 		}
 	}
+	// FIX12 Item 3 — user skills. Load enabled skills, match triggers
+	// against this turn's user message (ragQuery IS the latest user
+	// content), and preload the compiler's ActiveSkills + SkillCatalog.
+	// nil reader / no skills ⇒ both empty ⇒ prompt byte-identical.
+	in.ActiveSkills, in.SkillCatalog = s.resolveSkillsForTurn(ctx, tenantID, userID, ragQuery)
 	// Layer 13 inputs — built with the file/KB repos and gated exactly
 	// as before (each returns "" when its precondition isn't met).
 	if conv != nil {
@@ -2706,9 +2809,12 @@ func (s *MessageService) compileAndBuildRequest(
 	tenantID uuid.UUID,
 	ragQuery string,
 	history []model.Message,
-	imageURLs []string,
+	imgs userImageSet,
 	sources *SourcesAccumulator,
 ) GatewayChatRequest {
+	// current-turn images drive routing + the compiler budget; the
+	// per-message map drives inline placement in the built request.
+	imageURLs := imgs.current
 	numTools := 0
 	if s.toolExec != nil {
 		numTools = len(s.toolExec.ToolDefs(conv))
@@ -2765,7 +2871,7 @@ func (s *MessageService) compileAndBuildRequest(
 		// works in test setups.
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs, genNotes, genVision, s.canonicalHistoryEnabled)
+		req := buildGatewayRequestWithImages(modelID, history, prefix, imgs.byMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
 		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 		return req
@@ -2788,7 +2894,7 @@ func (s *MessageService) compileAndBuildRequest(
 			"conv", conv.ID.String(), "err", err)
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		req := buildGatewayRequestWithImages(modelID, history, prefix, imageURLs, genNotes, genVision, s.canonicalHistoryEnabled)
+		req := buildGatewayRequestWithImages(modelID, history, prefix, imgs.byMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
 		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 		return req
@@ -2798,7 +2904,7 @@ func (s *MessageService) compileAndBuildRequest(
 	// finish() callback can persist them alongside any search-
 	// tool hits the model adds during the turn.
 	sources.Add(compiled.Sources...)
-	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imageURLs, genNotes, genVision, s.canonicalHistoryEnabled)
+	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imgs.byMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 	req.RoutingHints = routingHints
 	attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 	return req
@@ -2986,17 +3092,17 @@ func buildGatewayRequest(model string, history []model.Message, systemPrefix str
 }
 
 // buildGatewayRequestWithImages is the vision-aware variant.
-// When `lastUserImageURLs` is non-empty, the LAST user-role
-// message in the history is rendered as a multimodal content
-// array: one image_url block per data URL followed by a single
-// text block carrying the user's prompt. All other messages
-// (system, prior turns, assistant replies) ship as plain strings.
+// `imagesByMsg` maps a user message id to its image data URLs; EACH
+// such user message is rendered as a multimodal content array — image
+// blocks FIRST (Anthropic guidance) then one text block carrying that
+// message's prompt. All other messages (system, assistant replies, and
+// user turns without images) ship as plain strings.
 //
-// Only the last user turn gets vision blocks because:
-//  1. Vision tokens cost per image. Re-sending every historical
-//     image on every turn would balloon the bill.
-//  2. The user is asking about the CURRENT turn's images. The
-//     model only needs to "see" what's in front of it.
+// Every image-bearing user turn keeps its OWN images inline — not just
+// the latest — so a picture attached three turns ago is still visible to
+// the model when a later text turn asks about it. The caller (resolveUserImages)
+// bounds the replayed history with the existing vision caps so re-sending
+// old images doesn't balloon the bill; the current turn stays uncapped.
 //
 // generatedNotes (optional, keyed by message id) carries the per-
 // message annotation for assistant turns that produced an AI image.
@@ -3015,7 +3121,7 @@ func buildGatewayRequest(model string, history []model.Message, systemPrefix str
 // Outbound-only, same as the notes: nothing is stored or shown in the
 // chat UI.
 func buildGatewayRequestWithImages(
-	model string, history []model.Message, systemPrefix string, lastUserImageURLs []string,
+	model string, history []model.Message, systemPrefix string, imagesByMsg map[uuid.UUID][]string,
 	generatedNotes map[uuid.UUID]string,
 	generatedVision map[uuid.UUID][]string,
 	canonicalHistoryEnabled bool,
@@ -3067,15 +3173,18 @@ func buildGatewayRequestWithImages(
 				content = strings.TrimSpace(m.ContentMasked + "\n\n" + note)
 			}
 		}
-		if i == lastUserIdx {
+		if m.Role == "user" {
 			text := m.ContentMasked
 			emptyText := strings.TrimSpace(text) == ""
-			if len(lastUserImageURLs) > 0 {
+			imgs := imagesByMsg[m.ID]
+			if len(imgs) > 0 {
 				// Image-attach path: build multimodal blocks (image
-				// URLs followed by one text block). Empty text gets
-				// an image-specific prompt.
-				blocks := make([]GatewayContentBlock, 0, len(lastUserImageURLs)+1)
-				for _, url := range lastUserImageURLs {
+				// URLs FIRST — Anthropic guidance — then one text block).
+				// Applied to EVERY user message that carries images so an
+				// earlier turn's picture stays inline in history, not just
+				// the latest turn. Empty text gets an image-specific prompt.
+				blocks := make([]GatewayContentBlock, 0, len(imgs)+1)
+				for _, url := range imgs {
 					blocks = append(blocks, GatewayContentBlock{
 						Type: "image_url",
 						ImageURL: &GatewayImageURL{
@@ -3092,13 +3201,14 @@ func buildGatewayRequestWithImages(
 					Text: text,
 				})
 				content = blocks
-			} else if emptyText {
+			} else if emptyText && i == lastUserIdx {
 				// Non-image attach path: text-only schema, but the
 				// stored content is empty. Substitute a generic
 				// "analyze the files" prompt. The system prefix
 				// already carries the file context (extracted text,
 				// excel inspection, doc structure, etc.) so the
-				// model has everything it needs to engage.
+				// model has everything it needs to engage. Only the
+				// CURRENT turn — an empty earlier user row is left as-is.
 				content = "Please analyze the attached files."
 			}
 		}
@@ -3211,6 +3321,92 @@ func (s *MessageService) lastUserImageURLs(
 		return urls
 	}
 	return nil
+}
+
+// userImageSet is the resolved vision content for a whole turn:
+//   - byMsg   : per user-message-id image data URLs, so EACH user message
+//     that carries images gets its own inline image blocks (fixes images
+//     attaching to the wrong message — earlier-turn images stay in history).
+//   - current : the latest user message's images, used for auto-routing and
+//     the compiler's token budget (the active turn's signals).
+//   - failures: attachments on the CURRENT turn that could not be encoded,
+//     surfaced to the user as an image_notice.
+type userImageSet struct {
+	byMsg    map[uuid.UUID][]string
+	current  []string
+	failures []ImageAttachFailure
+}
+
+// resolveUserImages walks every user message in history and resolves its
+// image attachments, so the request builder can attach each message's
+// images inline (image-before-text) rather than piling them all onto the
+// last user turn. Existing vision caps bound the REPLAYED history so the
+// payload stays in budget; the current (latest) user turn is exempt from
+// the caps — it's the active request and keeps full fidelity. Only the
+// current turn's encode failures are surfaced: older-turn failures were
+// already reported when first sent, so re-notifying every later turn
+// would just be noise.
+func (s *MessageService) resolveUserImages(
+	ctx context.Context, tenantID uuid.UUID, history []model.Message,
+) userImageSet {
+	var set userImageSet
+	if s.fileSvc == nil {
+		return set
+	}
+	lastUserIdx := -1
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			lastUserIdx = i
+			break
+		}
+	}
+	byMsg := make(map[uuid.UUID][]string)
+	total := 0 // replayed (non-current) images admitted so far
+	// Newest-first so the caps keep the most recent history images.
+	for i := len(history) - 1; i >= 0; i-- {
+		m := &history[i]
+		if m.Role != "user" {
+			continue
+		}
+		urls, fails := s.fileSvc.ImageDataURLsForMessageChecked(ctx, tenantID, m.ID)
+		if i == lastUserIdx {
+			set.failures = fails // surface current-turn failures only
+			if len(urls) > 0 {
+				set.current = urls
+				byMsg[m.ID] = urls // current turn: uncapped
+			}
+			continue
+		}
+		if len(urls) == 0 {
+			continue
+		}
+		if total >= visionHistoryMaxImages {
+			continue // budget spent on newer images
+		}
+		if len(urls) > visionHistoryMaxPerMsg {
+			urls = urls[:visionHistoryMaxPerMsg]
+		}
+		if total+len(urls) > visionHistoryMaxImages {
+			urls = urls[:visionHistoryMaxImages-total]
+		}
+		byMsg[m.ID] = urls
+		total += len(urls)
+	}
+	if len(byMsg) > 0 {
+		set.byMsg = byMsg
+	}
+	return set
+}
+
+// emitImageNotice pushes a one-shot image_notice frame onto a stream's
+// buffered event channel when the current turn had any unreadable
+// attachments. No-op when there were none. The channel buffer (16)
+// guarantees the send never blocks.
+func emitImageNotice(ch chan<- StreamUpdate, failures []ImageAttachFailure) {
+	if len(failures) == 0 {
+		return
+	}
+	ch <- StreamUpdate{ImageNotice: &ImageAttachNotice{Failures: failures}}
 }
 
 // SaveSearchSources persists the web_search citations on an assistant

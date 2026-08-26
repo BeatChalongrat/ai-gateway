@@ -43,6 +43,31 @@ class TestToolArgPolicy:
         assert _is_blocked_marker(out)
         assert "<r0>" not in out  # placeholder not forwarded
 
+    def test_connector_tool_with_detected_content_blocked(self):
+        # FIX12 §2.3 — a remote MCP connector tool (mcp__ namespace) that the
+        # scanner DETECTED PII in (so its arg carries a mask token) must be
+        # blocked as external egress, EXPLICITLY (not via the unknown default).
+        out, blocked, reason = enforce_tool_arg_safety(
+            "mcp__slack__post_message", '{"text": "ping <r0> about the invoice"}'
+        )
+        assert blocked is True
+        assert reason == "external_egress_blocked_masked_args"
+        assert _is_blocked_marker(out)
+        assert "<r0>" not in out  # nothing masked reaches the third party
+
+    def test_connector_tool_with_clean_content_allowed(self):
+        # The comparison that makes the above mean something: the SAME connector
+        # tool with content the scanner did NOT detect (no mask token) passes
+        # through unchanged — the connector works for clean content.
+        args = '{"text": "ping the team about lunch"}'
+        out, blocked, reason = enforce_tool_arg_safety(
+            "mcp__slack__post_message", args
+        )
+        assert blocked is False and reason is None
+        assert out == args
+        # And it is never treated as client-local execution.
+        assert is_local_execution_tool("mcp__slack__post_message") is False
+
     def test_save_memory_with_placeholder_allowed_with_warning(self):
         out, blocked, reason = enforce_tool_arg_safety(
             "save_memory", '{"text": "user is <r0>"}'

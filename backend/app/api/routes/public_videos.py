@@ -18,10 +18,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import func, select
+
 from app.api.deps import ResolvedApiKey, get_resolved_api_key
 from app.core.config import settings
 from app.core.db import get_async_db
 from app.models.generation_job import GenerationJobORM
+from app.models.model_config import ModelConfigORM
 from app.models.portal_user import PortalUserORM
 from app.schemas.media_gen_public import (
     JobStatusPublicResponse,
@@ -50,6 +53,85 @@ def _max_video_seconds() -> int:
     return int(getattr(settings, "replicate_max_video_duration_sec", _DEFAULT_MAX_VIDEO_SEC))
 
 
+async def _resolve_video_capability(session: AsyncSession) -> dict:
+    """Whether video generation should be OFFERED — the capability answer, the
+    same shape as GET /v1/search/config for web_search. Three independent signals,
+    ANDed, because none alone is sufficient:
+
+      * gate    — the operator kill-switch (``video_gen_enabled``), already wired
+                  into the model catalog / audio surfaces;
+      * key     — a Replicate token IS configured (the value is never revealed —
+                  "configured / not configured" is the whole answer);
+      * model   — the configured video model has been VERIFIED current by the
+                  owner (``video_model_verified``). Our own seed (059) labels the
+                  models UNVERIFIED and code cannot confirm a provider model is
+                  still alive, so this stays an explicit owner acknowledgement
+                  rather than enabling on faith.
+
+    A key being present is not a key being usable; a model being seeded is not a
+    model being current — hence all three, plus at least one active video model.
+    """
+    gate = bool(settings.video_gen_enabled)
+    key_configured = bool((settings.replicate_api_token or "").strip())
+    model_verified = bool(settings.video_model_verified)
+    model_count = 0
+    if gate:
+        model_count = int(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(ModelConfigORM)
+                    .where(
+                        ModelConfigORM.supports_video_gen.is_(True),
+                        ModelConfigORM.is_active.is_(True),
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+    enabled = gate and key_configured and model_verified and model_count > 0
+    if enabled:
+        reason = ""
+    elif not gate:
+        reason = "Video generation is turned off for this deployment."
+    elif not key_configured:
+        reason = "No video provider key is configured."
+    elif model_count == 0:
+        reason = "No video model is available on this deployment."
+    else:  # key + gate + models present, but the model has not been verified
+        reason = (
+            "The video model has not been verified as current — an owner must "
+            "confirm the configured model is still available before video is enabled."
+        )
+    return {
+        "enabled": enabled,
+        "video_gen_enabled": gate,
+        "key_configured": key_configured,
+        "model_verified": model_verified,
+        "model_count": model_count,
+        "reason": reason,
+    }
+
+
+@router.get(
+    "/video/config",
+    summary="Whether the video-generation button should be offered",
+    description=(
+        "Capability answer for the 🎬 button, parallel to GET /v1/search/config "
+        "for web_search. `enabled` is true only when the gate, a configured key, "
+        "and an owner-verified model all agree. Both clients gate the button on "
+        "`enabled` and show `reason` when false, so the control is visibly "
+        "unavailable — never a dead button that does nothing (FIX9 §B3.5)."
+    ),
+)
+async def video_config(
+    auth: ResolvedApiKey = Depends(get_resolved_api_key),
+    session: AsyncSession = Depends(get_async_db),
+) -> dict:
+    """Report whether video generation is available for this caller."""
+    return await _resolve_video_capability(session)
+
+
 async def _resolve_user(auth: ResolvedApiKey, session: AsyncSession) -> tuple[str, int]:
     user_id = getattr(auth, "portal_user_id", None)
     if not user_id:
@@ -76,8 +158,15 @@ async def generate_video(
     session: AsyncSession = Depends(get_async_db),
 ) -> VideoGenPublicResponse:
     """Submit a video generation job and return its queued status + cost."""
-    if not settings.video_gen_enabled:
-        raise HTTPException(status_code=403, detail="video generation is disabled")
+    # FIX11 §1: gate the submit on the SAME deployment-level signals the button
+    # reads (gate AND a configured key AND an owner-verified model), so a live
+    # button and its submit can never disagree. The SPECIFIC requested model is
+    # validated just below (404 unknown / 400 non-video) — model_count is a
+    # button-offer concern (GET /v1/video/config), not the per-request gate, so
+    # those precise errors survive.
+    _cap = await _resolve_video_capability(session)
+    if not (_cap["video_gen_enabled"] and _cap["key_configured"] and _cap["model_verified"]):
+        raise HTTPException(status_code=403, detail=_cap["reason"] or "video generation is unavailable")
     await enforce_media_rate_limit(
         auth, bucket="video", limit=settings.media_rate_limit_video_per_hour,
         window_seconds=3600,

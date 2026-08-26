@@ -242,6 +242,12 @@ class ChatCompletionsRequest(BaseModel):
     tools: Optional[List[dict]] = None
     tool_choice: Optional[Any] = None
 
+    # Structured-Outputs passthrough (OpenAI ``response_format``, e.g. a
+    # json_schema). Forwarded verbatim by the openai_adapter on the
+    # standard chat-completions path when present. None (or omitted) is
+    # the existing behaviour, so every existing caller stays byte-identical.
+    response_format: Optional[dict] = None
+
     # Reasoning / thinking config — provider-neutral. None (or omitted)
     # is the existing no-reasoning behaviour, so every existing caller
     # stays byte-identical. T1 only accepts + threads this through; T2

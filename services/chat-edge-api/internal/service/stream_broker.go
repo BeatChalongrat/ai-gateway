@@ -62,6 +62,9 @@ type StreamSnapshot struct {
 	// reattaching after recovery must NOT see a stale warning, which is
 	// why the recovery frame overwrites this instead of clearing a flag.
 	ProviderStall *ProviderStallNotice
+	// ImageNotice: sticky like FallbackInfo — a client reattaching after
+	// the one-shot image_notice frame still learns an attachment failed.
+	ImageNotice *ImageAttachNotice
 	// CodeExecutions are the run_python cards seen so far, in first-seen
 	// order, each collapsed to its LATEST frame (the "running" frame is
 	// superseded by the terminal one). Replaying them restores the
@@ -93,6 +96,7 @@ type brokerEntry struct {
 	fallback  map[string]any
 	rnotice   *ReasoningNotice
 	stall     *ProviderStallNotice
+	inotice   *ImageAttachNotice
 	terminal  *StreamUpdate
 	// codeRuns keeps the latest frame per run_python call, plus the
 	// order they first appeared, so the snapshot replays them the way
@@ -129,6 +133,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		FallbackInfo:    e.fallback,
 		ReasoningNotice: e.rnotice,
 		ProviderStall:   e.stall,
+		ImageNotice:     e.inotice,
 		CodeExecutions:  runs,
 		ToolActivities:  acts,
 		Terminal:        e.terminal,
@@ -217,6 +222,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.ProviderStall != nil {
 		e.stall = ev.ProviderStall
+	}
+	if ev.ImageNotice != nil {
+		e.inotice = ev.ImageNotice
 	}
 	if ev.CodeExecution != nil && ev.CodeExecution.ID != "" {
 		if e.codeRuns == nil {

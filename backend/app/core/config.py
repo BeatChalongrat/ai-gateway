@@ -252,6 +252,13 @@ class Settings(BaseSettings):
     # sets ``requires_confirmation`` when the estimated USD cost meets this
     # threshold so the frontend can show a confirm modal.
     video_gen_enabled: bool = False
+    # FIX11 §1: the owner's one-time acknowledgement that the CONFIGURED video
+    # model is current on the provider. Our own seed (migration 059) labels the
+    # Replicate video models UNVERIFIED, and code cannot confirm a provider model
+    # is still alive without a live call, so video stays unavailable until this is
+    # set — rather than auto-enabling a possibly-retired model on faith (ChatGPT
+    # retired Sora in April 2026). Env: VIDEO_MODEL_VERIFIED. See GET /v1/video/config.
+    video_model_verified: bool = False
     video_gen_default_threshold_usd: float = 1.00
 
     # --- Replicate video provider (Sprint 2B) --------------------------

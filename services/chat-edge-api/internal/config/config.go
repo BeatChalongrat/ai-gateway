@@ -153,6 +153,11 @@ type Config struct {
 	// shares the daemon's mount namespace; otherwise set to the host path
 	// the shared volume is bound from.
 	SandboxHostWorkDir string `env:"SANDBOX_HOST_WORKDIR" envDefault:""`
+	// SandboxRuntime (FIX14 §2) is the REQUIRED OCI runtime for the sandbox —
+	// e.g. "runsc" (gVisor) for a VM-grade boundary. Empty = default runc
+	// (standard container). When set, jobs run under it AND refuse rather than
+	// fall back if it is not actually in effect (proven from inside the run).
+	SandboxRuntime string `env:"SANDBOX_RUNTIME" envDefault:""`
 
 	// Phase B — the gateway image model the generate_image tool calls.
 	// gpt-image-1 is OpenAI's current image model (DALL-E is retiring).

@@ -86,6 +86,16 @@ services:
     container_name: ai-gateway-mock-provider
     ports:
       - "9090:9090"
+    environment:
+      # DLP instrument (docs/DLP_INSTRUMENT_REPORT.md): when set, the mock
+      # appends every completion request (full raw body + redacted headers)
+      # to this file. Empty (default) = capture off. Point it inside the
+      # /capture mount below, e.g. MOCK_CAPTURE_PATH=/capture/requests.jsonl
+      # — the host side (./data/mock-capture) is gitignored (/data/) and
+      # WILL contain whatever test PII is sent. Delete it after each run.
+      MOCK_CAPTURE_PATH: ${MOCK_CAPTURE_PATH:-}
+    volumes:
+      - ./data/mock-capture:/capture
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/health', timeout=3)"]
       interval: 5s

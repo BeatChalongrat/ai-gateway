@@ -72,6 +72,15 @@ type Handlers struct {
 	// S6 — Past-conversation search. Backs both the AI tool and
 	// the frontend's "search my chats" surface (future).
 	Search *handler.SearchHandler
+	// FIX12 Item 3 — user SKILLS. CRUD for chat.user_skills; the
+	// stored instruction text feeds the prompt compiler + use_skill
+	// tool. Optional (nil → routes not registered).
+	Skills *handler.SkillHandler
+	// FIX13 — CLOUD SCHEDULED TASKS. Authenticated CRUD + audit for
+	// chat.cloud_scheduled_tasks; the unattended firing (authorize-
+	// before-run) lives in the runner, not here. Optional (nil → routes
+	// not registered).
+	CloudTasks *handler.CloudTaskHandler
 	// S9 — GDPR-style data export + right-to-erasure for memory.
 	Account *handler.AccountHandler
 	// Usage — credit badge + per-model breakdown for web-chat.
@@ -344,6 +353,26 @@ func New(
 			// user scoping happens inside SearchService.
 			if h.Search != nil {
 				r.Get("/search", h.Search.Search)
+			}
+
+			// FIX12 Item 3 — user skills. Auth-gated; every op is
+			// scoped to the caller's (tenant, user) inside the repo.
+			if h.Skills != nil {
+				r.Get("/skills", h.Skills.List)
+				r.Post("/skills", h.Skills.Create)
+				r.Patch("/skills/{id}", h.Skills.SetEnabled)
+				r.Delete("/skills/{id}", h.Skills.Delete)
+			}
+
+			// FIX13 — cloud scheduled tasks. Auth-gated; every op is
+			// scoped to the caller's (tenant, user) inside the repo. The
+			// owning identity is taken from the caller, never the body.
+			if h.CloudTasks != nil {
+				r.Get("/cloud-tasks", h.CloudTasks.List)
+				r.Post("/cloud-tasks", h.CloudTasks.Create)
+				r.Patch("/cloud-tasks/{id}", h.CloudTasks.SetEnabled)
+				r.Delete("/cloud-tasks/{id}", h.CloudTasks.Delete)
+				r.Get("/cloud-tasks/{id}/runs", h.CloudTasks.ListRuns)
 			}
 
 			// Phase 13 Part B — run_python code interpreter for the

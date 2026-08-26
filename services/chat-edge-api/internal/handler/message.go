@@ -590,6 +590,11 @@ Loop:
 			if ev.ProviderStall != nil {
 				writeSSEEvent(w, flusher, "provider_stall", ev.ProviderStall)
 			}
+			// One or more attached images couldn't be read — informational,
+			// never an error: the turn proceeds text-only for those images.
+			if ev.ImageNotice != nil {
+				writeSSEEvent(w, flusher, "image_notice", ev.ImageNotice)
+			}
 			if ev.FinishReason != "" {
 				res.finishReason = ev.FinishReason
 			}
@@ -963,6 +968,9 @@ func (h *MessageHandler) writeResumeSnapshot(
 	// turn is stuck; one reattaching after recovery gets Stalled=false.
 	if snap.ProviderStall != nil {
 		writeSSEEvent(w, flusher, "provider_stall", snap.ProviderStall)
+	}
+	if snap.ImageNotice != nil {
+		writeSSEEvent(w, flusher, "image_notice", snap.ImageNotice)
 	}
 	// run_python cards, latest frame each — a refresh in the middle of a
 	// 60s sandbox run must not lose the code the model is running.

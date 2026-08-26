@@ -177,7 +177,11 @@ type Result struct {
 	Artifacts []Artifact
 	Truncated bool
 	TimedOut  bool
-	cleanup   func()
+	// Runtime (FIX14 §2) is the isolation boundary this job ACTUALLY ran
+	// under, as the job reported from inside itself ("gvisor" | "standard").
+	// The system states this from the run, not from configuration.
+	Runtime string
+	cleanup func()
 }
 
 // Cleanup removes the per-run directory. Always call it (defer).
@@ -212,6 +216,29 @@ type Config struct {
 	// namespace (dev / standalone). When chat-edge is itself a container,
 	// set this to the host path the shared volume is bind-mounted from.
 	HostWorkDir string
+	// Runtime (FIX14 §2) is the REQUIRED OCI runtime — e.g. "runsc" (gVisor)
+	// for a VM-grade boundary. Empty = the default runc (standard container,
+	// backward-compatible). When set, every run passes `--runtime=<Runtime>`
+	// AND the result is refused unless the job self-reports (from inside) that
+	// it actually executed under that runtime — so a silent fall-back to the
+	// weaker runtime is impossible, never merely assumed from config. Env:
+	// SANDBOX_RUNTIME.
+	Runtime string
+}
+
+// expectedInsideRuntime maps the requested OCI runtime to the from-inside
+// signature `sandbox_runner.py._detect_runtime` reports. "" (runc) → "standard";
+// "runsc" → "gvisor". Any other non-empty runtime must at least NOT be
+// "standard" (some hardened boundary), which the caller enforces.
+func expectedInsideRuntime(runtime string) string {
+	switch runtime {
+	case "":
+		return "standard"
+	case "runsc":
+		return "gvisor"
+	default:
+		return "" // unknown: enforce only "must not be standard"
+	}
 }
 
 // Runner executes sandbox jobs. Safe for concurrent use — each Execute
@@ -259,7 +286,54 @@ func (r *Runner) Available(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: image %q not present: %s", ErrUnavailable, r.cfg.Image, strings.TrimSpace(string(out)))
 	}
+	// FIX14 §2 — the startup boundary check. When a hardened runtime is
+	// REQUIRED, prove at boot (not from config) that it is the one actually in
+	// effect by running a probe under it and reading the runtime from inside.
+	// If it is unavailable or fell back, the sandbox is UNAVAILABLE — the
+	// service logs the boundary loudly and every job refuses, rather than
+	// running under a weaker boundary the operator believes is stronger.
+	if r.cfg.Runtime != "" {
+		actual, verr := r.VerifyBoundary(ctx)
+		if verr != nil {
+			return fmt.Errorf("%w: required runtime %q not verifiable at startup: %v", ErrUnavailable, r.cfg.Runtime, verr)
+		}
+		if berr := r.enforceRuntime(actual); berr != nil {
+			return berr
+		}
+	}
 	return nil
+}
+
+// VerifyBoundary runs a minimal probe container under the configured runtime
+// and returns the isolation boundary as measured FROM INSIDE it ("gvisor" |
+// "standard"). This is how the system states which runtime is in effect from a
+// real run rather than from configuration. An error means the runtime could
+// not be exercised at all (e.g. an unknown/uninstalled runtime name — docker
+// rejects `--runtime`), which the callers treat as "refuse", never "fall back".
+func (r *Runner) VerifyBoundary(ctx context.Context) (string, error) {
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	args := []string{"run", "--rm"}
+	if r.cfg.Runtime != "" {
+		args = append(args, "--runtime", r.cfg.Runtime)
+	}
+	args = append(args,
+		"--network", "none",
+		"--user", "65534:65534",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--read-only",
+		"--entrypoint", "cat",
+		r.cfg.Image, "/proc/version",
+	)
+	out, err := exec.CommandContext(cctx, r.cfg.DockerBin, args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("boundary probe failed: %s", strings.TrimSpace(string(out)))
+	}
+	if strings.Contains(strings.ToLower(string(out)), "gvisor") {
+		return "gvisor", nil
+	}
+	return "standard", nil
 }
 
 // runnerMeta mirrors sandbox_runner.py's __meta.json sidecar.
@@ -268,6 +342,8 @@ type runnerMeta struct {
 	Truncated bool   `json:"truncated"`
 	TimedOut  bool   `json:"timed_out"`
 	Error     string `json:"error"`
+	// Runtime (FIX14 §2) — the boundary the job measured from inside itself.
+	Runtime string `json:"runtime"`
 }
 
 // jobSpec is the JSON the runner reads from /job/in/job.json.
@@ -384,9 +460,19 @@ func (r *Runner) Execute(ctx context.Context, spec Spec) (*Result, error) {
 		return nil, fmt.Errorf("%w: no result sidecar (docker stderr: %s)",
 			ErrUnavailable, strings.TrimSpace(dockerErr.String()))
 	}
+	// FIX14 §2 — no silent fall-back. When a hardened runtime is REQUIRED,
+	// the job must have executed under it, proven from INSIDE the run (the
+	// meta.Runtime the job measured), not from the --runtime flag we passed or
+	// any deployment assumption. A mismatch means we would believe the boundary
+	// is stronger than it is — refuse the result rather than return it.
+	if boundaryErr := r.enforceRuntime(meta.Runtime); boundaryErr != nil {
+		cleanup()
+		return nil, boundaryErr
+	}
+
 	if meta.Error != "" {
 		res := &Result{Stdout: stdout, Stderr: stderrb, Exit: meta.Exit,
-			Truncated: meta.Truncated, TimedOut: meta.TimedOut, cleanup: cleanup}
+			Truncated: meta.Truncated, TimedOut: meta.TimedOut, Runtime: meta.Runtime, cleanup: cleanup}
 		return res, fmt.Errorf("%w: %s", ErrJobFailed, meta.Error)
 	}
 
@@ -398,8 +484,37 @@ func (r *Runner) Execute(ctx context.Context, spec Spec) (*Result, error) {
 		Artifacts: arts,
 		Truncated: meta.Truncated,
 		TimedOut:  meta.TimedOut,
+		Runtime:   meta.Runtime,
 		cleanup:   cleanup,
 	}, nil
+}
+
+// enforceRuntime is the no-silent-fall-back gate (FIX14 §2). Given the runtime
+// the job reported from inside itself, it returns an error (refusing the run)
+// when a REQUIRED hardened runtime was not the one that actually executed.
+// runc/default (Runtime=="") never refuses — it is the standard boundary.
+func (r *Runner) enforceRuntime(insideActual string) error {
+	if r.cfg.Runtime == "" {
+		return nil // standard container: nothing to enforce
+	}
+	if insideActual == "" {
+		insideActual = "standard" // a job that couldn't self-report is treated as the weak case
+	}
+	expected := expectedInsideRuntime(r.cfg.Runtime)
+	if expected != "" {
+		if insideActual != expected {
+			return fmt.Errorf("%w: required runtime %q (expected in-job %q) but the job executed under %q — refusing rather than run under a weaker boundary",
+				ErrUnavailable, r.cfg.Runtime, expected, insideActual)
+		}
+		return nil
+	}
+	// Unknown hardened runtime: we can't name its signature, but it must not be
+	// the plain standard container — that would be a fall-back to runc.
+	if insideActual == "standard" {
+		return fmt.Errorf("%w: required runtime %q but the job executed under a standard container — refusing (silent fall-back)",
+			ErrUnavailable, r.cfg.Runtime)
+	}
+	return nil
 }
 
 // dockerArgs builds the immutable lockdown flag set + mounts. Every value
@@ -409,11 +524,19 @@ func (r *Runner) dockerArgs(l Limits, hostIn, hostOut, name string) []string {
 	args := []string{
 		"run", "--rm",
 		"--name", name,
+	}
+	// FIX14 §2 — the hardened OCI runtime, when configured. docker itself
+	// errors on an unknown runtime name (it does NOT silently fall back), and
+	// the from-inside meta check below catches any other divergence.
+	if r.cfg.Runtime != "" {
+		args = append(args, "--runtime", r.cfg.Runtime)
+	}
+	args = append(args,
 		"--network", "none",
 		"--user", "65534:65534",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
-	}
+	)
 	if r.cfg.SeccompPath != "" {
 		args = append(args, "--security-opt", "seccomp="+r.cfg.SeccompPath)
 	}

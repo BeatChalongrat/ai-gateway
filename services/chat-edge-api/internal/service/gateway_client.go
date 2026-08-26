@@ -267,6 +267,11 @@ type GatewayChatRequest struct {
 	// picked "Auto" (Model is then the "auto" sentinel). The gateway
 	// reads these to select a concrete model from key-valid providers.
 	RoutingHints *RoutingHints `json:"routing_hints,omitempty"`
+	// OpenAI Structured-Outputs passthrough (e.g. title generation asks
+	// for a json_schema so a small model has nowhere to preamble).
+	// Omitted for the main chat flow so existing calls stay identical;
+	// forwarded verbatim by the backend openai_adapter when present.
+	ResponseFormat any `json:"response_format,omitempty"`
 }
 
 // GatewayCallContext carries the per-request identity headers we

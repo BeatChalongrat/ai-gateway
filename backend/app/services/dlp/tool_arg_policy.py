@@ -78,6 +78,12 @@ TOOL_ARG_POLICY: dict[str, str] = {
     "list_memories": PLACEHOLDER_SAFE,
     "search_past_conversations": PLACEHOLDER_SAFE,
     "update_conversation_state": PLACEHOLDER_SAFE,
+    # User skills (chat-edge FIX12 Item 3) — the single ``name`` argument
+    # selects a user-authored skill to load; the tool only READS the
+    # skill's app-authored instruction text and hands it back to the
+    # model. Nothing egresses and the content is never executed, so a
+    # masked placeholder in the name is safe (never a leak).
+    "use_skill": PLACEHOLDER_SAFE,
     # Canvas artifact update (chat-edge Phase 8) — writes the new source
     # of an artifact that already lives in chat.canvas_artifacts, i.e.
     # the same DLP-governed conversation store the message content uses.
@@ -170,10 +176,24 @@ TOOL_ARG_POLICY: dict[str, str] = {
 _FIDELITY_WARNING_TOOLS = frozenset({"save_memory"})
 
 
+# FIX12 §2.3 — remote MCP connector tools are registered under a reserved
+# namespace prefix (``mcp__<connector>__<tool>``). They call a THIRD-PARTY
+# server, so they are an external-egress boundary and are classified EXPLICITLY
+# here rather than leaning on the unknown-tool conservative block: this keeps
+# masked content blocked even if someone later makes the default branch
+# non-conservative, and the namespace additionally prevents cross-connector
+# tool-name collisions (a bug the desktop has — McpConnectorService is
+# last-writer-wins). A connector tool reaching a third party with content the
+# policy would have masked is a containment failure; this is what prevents it.
+CONNECTOR_NAMESPACE_PREFIX = "mcp__"
+
+
 def tool_arg_policy(tool_name: str | None) -> str | None:
     """Return the policy category for a tool, or None if unknown."""
     if not tool_name:
         return None
+    if tool_name.startswith(CONNECTOR_NAMESPACE_PREFIX):
+        return EXTERNAL_EGRESS
     return TOOL_ARG_POLICY.get(tool_name)
 
 

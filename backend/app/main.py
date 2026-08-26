@@ -863,6 +863,11 @@ from app.api.routes.internal_dlp import router as internal_dlp_router  # noqa: E
 app.include_router(internal_dlp_router, tags=["internal-dlp"])
 from app.api.routes.internal_media_jobs import router as internal_media_jobs_router  # noqa: E402
 app.include_router(internal_media_jobs_router)  # prefix declared on the router
+# FIX13 — internal scheduled-run authorizer. chat-edge's cloud-task scheduler
+# calls this BEFORE firing any unattended turn; internal-secret gated, reads
+# portal_users.status + credit balance, returns only {allow, reason}.
+from app.api.routes.internal_scheduled_run import router as internal_scheduled_run_router  # noqa: E402
+app.include_router(internal_scheduled_run_router)  # prefix declared on the router
 from app.api.routes.webhooks_replicate import router as webhooks_replicate_router  # noqa: E402
 app.include_router(webhooks_replicate_router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(public_chat_router, prefix="/v1")

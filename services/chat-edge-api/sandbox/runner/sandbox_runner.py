@@ -75,6 +75,26 @@ def _resolve_arg(a: str) -> str:
     return os.path.join(JOB_IN, os.path.basename(a))
 
 
+def _detect_runtime():
+    """FIX14 §2 — report the isolation boundary FROM INSIDE this running job.
+
+    Ground truth, not configuration: gVisor (runsc) intercepts syscalls with
+    its own user-space kernel and stamps "gVisor" into /proc/version and
+    /proc/sys/kernel/*; a plain runc container shows the real host kernel.
+    The Go caller compares this against the runtime it REQUESTED and refuses
+    the result on a mismatch — so a silent fall-back to the weaker runtime
+    cannot pass as hardened. Returns "gvisor" or "standard" (never raises).
+    """
+    for path in ("/proc/version", "/proc/sys/kernel/osrelease", "/proc/sys/kernel/version"):
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                if "gvisor" in fh.read().lower():
+                    return "gvisor"
+        except OSError:
+            continue
+    return "standard"
+
+
 def _write_meta(exit_code, truncated, timed_out, error=""):
     with open(os.path.join(JOB_OUT, "__meta.json"), "w", encoding="utf-8") as f:
         json.dump(
@@ -83,6 +103,9 @@ def _write_meta(exit_code, truncated, timed_out, error=""):
                 "truncated": truncated,
                 "timed_out": timed_out,
                 "error": error,
+                # FIX14 §2 — the runtime this job ACTUALLY executed under,
+                # measured from inside the run.
+                "runtime": _detect_runtime(),
             },
             f,
         )

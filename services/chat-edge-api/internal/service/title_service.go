@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,6 +42,32 @@ const titleModelID = "gpt-4o-mini"
 // even when the user prompt is Thai/Japanese/etc., which produces
 // sidebar titles in the wrong script.
 const titleSystemPrompt = "Generate a short conversation title (3-6 words) based on this exchange. The title MUST be in the same language as the user's message. If the user writes in Thai, the title must be in Thai. If in English, title in English. Reply with just the title, no quotes, no punctuation at the end."
+
+// titleResponseFormat pins the completion to a strict OpenAI
+// Structured-Outputs json_schema: a single object {"title": string}
+// with no additional properties. Small models (gpt-4o-mini) tend to
+// preamble in English on short prompts ("Sure, here's a title: …");
+// with the schema there is nowhere to preamble, so the wrong-language
+// leading text can't leak into the sidebar. Forwarded verbatim to
+// OpenAI's chat-completions API via the backend openai_adapter.
+var titleResponseFormat = map[string]any{
+	"type": "json_schema",
+	"json_schema": map[string]any{
+		"name":   "conversation_title",
+		"strict": true,
+		"schema": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"title"},
+			"properties": map[string]any{
+				"title": map[string]any{
+					"type":        "string",
+					"description": "Short 3-6 word conversation title in the user's language.",
+				},
+			},
+		},
+	},
+}
 
 // assistantSnippetMaxRunes caps the assistant text we feed the title
 // model. The full reply is irrelevant for naming — the first sentence
@@ -133,6 +160,7 @@ func (s *TitleService) Generate(
 			{Role: "system", Content: titleSystemPrompt},
 			{Role: "user", Content: prompt},
 		},
+		ResponseFormat: titleResponseFormat,
 	}
 	resp, err := s.gateway.SendChatCompletion(ctx, GatewayCallContext{
 		TenantID:       tenantID,
@@ -155,11 +183,38 @@ func (s *TitleService) Generate(
 		}
 	}
 	raw := extractContent(resp)
-	cleaned := cleanTitle(raw)
+	cleaned := cleanTitle(parseTitleCompletion(raw))
 	if cleaned == "" {
 		return "", errors.New("title: gateway returned empty completion")
 	}
 	return cleaned, nil
+}
+
+// parseTitleCompletion pulls the title out of the model's completion.
+// With the json_schema response_format the completion is a JSON object
+// {"title": "..."}; we decode it and return the field verbatim (still
+// pre-clean — cleanTitle runs afterwards). If the provider ignored the
+// schema and returned free text (or malformed JSON), we gracefully
+// fall back to treating the raw completion as the title so a title
+// still lands. Non-ASCII (Thai/CJK) is preserved either way.
+func parseTitleCompletion(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	var parsed struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+		// Valid JSON: trust the structured path. Return the title
+		// field (possibly empty — the caller maps empty to a
+		// "gateway returned empty completion" error rather than
+		// leaking the raw "{...}" braces into the sidebar).
+		return strings.TrimSpace(parsed.Title)
+	}
+	// Malformed / non-JSON completion (provider ignored the schema):
+	// fall back to treating the raw text as the title.
+	return s
 }
 
 // firstUserAndAssistant returns the earliest user message and the

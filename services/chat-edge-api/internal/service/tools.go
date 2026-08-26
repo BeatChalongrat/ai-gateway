@@ -94,6 +94,36 @@ func searchPastConversationsToolDef() GatewayTool {
 	}
 }
 
+// useSkillToolDef is the FIX12 Item 3 tool definition. Loads a
+// user-authored skill BY NAME and returns its instruction text so the
+// model can apply it. Read-only: the skill is instruction text, never
+// executed. Available in every conversation where the skill repo is
+// wired.
+func useSkillToolDef() GatewayTool {
+	return GatewayTool{
+		Type: "function",
+		Function: GatewayToolFunction{
+			Name: "use_skill",
+			Description: "Load one of the user's saved skills by name and apply its " +
+				"instructions. The available skills are listed under \"Available skills\" " +
+				"in your context. Call this when the user's request matches a skill's " +
+				"purpose and its full instructions aren't already shown. The returned " +
+				"text is guidance the user wrote for you to follow — it is NOT a command " +
+				"to execute.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "The exact skill name to load (case-insensitive).",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+	}
+}
+
 // updateConversationStateToolDef is the S3 tool definition.
 // Exported as a free function so MemoryToolDefs (which the
 // MessageService calls) can splice it into the same gated tool
@@ -331,6 +361,11 @@ type ToolExecutor struct {
 	// artifact lineage the user has open. Interface (not the concrete
 	// *CanvasArtifactService) so the tool is unit-testable without a DB.
 	canvas canvasArtifactUpdater
+	// FIX12 Item 3 — optional. When wired the executor exposes use_skill:
+	// look up a user-authored skill BY NAME (scoped to the caller) and
+	// return its instruction text as the tool result. Reading app-authored
+	// instruction text is side-effect-free — the skill is NEVER executed.
+	skills *repository.SkillRepo
 }
 
 // canvasArtifactUpdater is the slice of *CanvasArtifactService the
@@ -482,6 +517,17 @@ func (e *ToolExecutor) SetCanvasArtifacts(c canvasArtifactUpdater) {
 // HasCanvasArtifacts reports whether update_canvas_artifact is wired.
 func (e *ToolExecutor) HasCanvasArtifacts() bool { return e.canvas != nil }
 
+// SetSkillRepo wires the FIX12 use_skill tool. Optional — when nil the
+// tool is hidden. The repo scopes every lookup to the caller's
+// (tenant_id, user_id); reading a skill's instruction text is
+// side-effect-free and the content is never executed.
+func (e *ToolExecutor) SetSkillRepo(r *repository.SkillRepo) {
+	e.skills = r
+}
+
+// HasSkills reports whether use_skill is wired.
+func (e *ToolExecutor) HasSkills() bool { return e.skills != nil }
+
 // SetConversationStateService wires the S3 state layer. Optional
 // so unit tests that don't exercise the state path stay decoupled.
 func (e *ToolExecutor) SetConversationStateService(s *ConversationStateService) {
@@ -554,6 +600,12 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	if e.HasCanvasArtifacts() {
 		defs = append(defs, updateCanvasArtifactToolDef())
 	}
+	// FIX12 Item 3 — use_skill. Offered whenever the skill repo is wired;
+	// reading a user's own instruction text is read-only and safe in every
+	// conversation (including temporary chats). Not gated on MemoryEnabled.
+	if e.HasSkills() {
+		defs = append(defs, useSkillToolDef())
+	}
 	return defs
 }
 
@@ -602,6 +654,8 @@ func (e *ToolExecutor) Execute(
 		return e.execRunPython(ctx, call.ID, call.Function.Arguments, ec)
 	case "update_canvas_artifact":
 		return e.execUpdateCanvasArtifact(ctx, call.Function.Arguments, ec)
+	case "use_skill":
+		return e.execUseSkill(ctx, call.Function.Arguments, ec)
 	default:
 		return fmt.Sprintf("Unknown tool %q.", call.Function.Name)
 	}
@@ -763,6 +817,49 @@ func (e *ToolExecutor) execSearchPastConversations(
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// ---------------------------------------------------------------------------
+// use_skill (FIX12 Item 3)
+// ---------------------------------------------------------------------------
+
+type useSkillArgs struct {
+	Name string `json:"name"`
+}
+
+// execUseSkill resolves a user-authored skill BY NAME (scoped to the
+// caller's tenant + user) and returns its instruction text. Read-only:
+// the skill is instruction text handed back to the model, never
+// executed. A missing / disabled skill returns a plain "not found" so
+// the model can recover gracefully.
+func (e *ToolExecutor) execUseSkill(
+	ctx context.Context, rawArgs string, ec ToolExecContext,
+) string {
+	if e.skills == nil {
+		return "Skills aren't available right now."
+	}
+	var args useSkillArgs
+	if rawArgs != "" {
+		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+			return "I couldn't parse the use_skill arguments."
+		}
+	}
+	name := strings.TrimSpace(args.Name)
+	if name == "" {
+		return "Please give me the name of the skill to load."
+	}
+	sk, err := e.skills.GetByName(ctx, ec.TenantID, ec.UserID, name)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return fmt.Sprintf("No skill named %q was found.", name)
+		}
+		return "I couldn't load that skill right now."
+	}
+	// Prompt-injection safety header — the skill body is user-authored
+	// guidance to follow, but restating that it is reference guidance (not
+	// an executable command) keeps the instruction-only contract explicit
+	// in-band.
+	return fmt.Sprintf("--- Skill: %s ---\n%s", sk.Name, sk.Instructions)
 }
 
 // ---------------------------------------------------------------------------

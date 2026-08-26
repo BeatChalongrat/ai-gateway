@@ -154,6 +154,8 @@ func main() {
 	shareRepo := repository.NewShareRepo(pool)
 	knowledgeRepo := repository.NewKnowledgeRepo(pool)
 	memoriesRepo := repository.NewMemoryRepo(pool)
+	skillsRepo := repository.NewSkillRepo(pool)
+	cloudTasksRepo := repository.NewCloudTaskRepo(pool)
 	statesRepo := repository.NewConversationStateRepo(pool)
 	sourcesRepo := repository.NewResponseContextSourceRepo(pool)
 	tenantSettingsRepo := repository.NewTenantMemorySettingsRepo(pool)
@@ -283,6 +285,7 @@ func main() {
 			SeccompPath: cfg.SandboxSeccompPath,
 			WorkDir:     cfg.SandboxWorkDir,
 			HostWorkDir: cfg.SandboxHostWorkDir,
+			Runtime:     cfg.SandboxRuntime,
 		})
 		if err := sbx.Available(context.Background()); err != nil {
 			slog.Error("sandbox enabled but unavailable — refusing to run plan-exec in-process", "err", err)
@@ -292,7 +295,20 @@ func main() {
 		docSvc.SetSandbox(sbx)
 		fileSvc.SetSandbox(sbx)
 		workspaceSvc.SetSandbox(sbx)
-		slog.Info("plan-exec sandbox active", "image", cfg.SandboxImage)
+		// FIX14 §2 — state the isolation boundary in effect at boot, measured
+		// from a probe run (not from config), so an operator learns it here
+		// rather than from an incident.
+		requestedRuntime := cfg.SandboxRuntime
+		if requestedRuntime == "" {
+			requestedRuntime = "runc"
+		}
+		if boundary, berr := sbx.VerifyBoundary(context.Background()); berr == nil {
+			slog.Info("plan-exec sandbox active", "image", cfg.SandboxImage,
+				"requested_runtime", requestedRuntime, "boundary_in_effect", boundary)
+		} else {
+			slog.Info("plan-exec sandbox active", "image", cfg.SandboxImage,
+				"requested_runtime", requestedRuntime, "boundary_probe_err", berr.Error())
+		}
 	} else {
 		slog.Warn("SANDBOX_ENABLED=0: document, extraction, compare, and code execution fail closed")
 	}
@@ -384,6 +400,15 @@ func main() {
 	// conversations.
 	prefExtractor := service.NewPreferenceExtractor(memorySvc, memoriesRepo, messages, conversations, gateway)
 	messageSvc.SetPreferenceExtractor(prefExtractor)
+
+	// FIX12 Item 3 — user skills. The reader preloads enabled skills into
+	// the prompt compiler (trigger match + use_skill catalog); the tool
+	// wiring exposes use_skill so the model can pull an unmatched skill on
+	// demand. SetSkillTool forwards to the ToolExecutor, so it must follow
+	// SetMemoryService (which creates the executor). A skill is instruction
+	// text only — nothing here executes it.
+	messageSvc.SetSkillReader(skillsRepo)
+	messageSvc.SetSkillTool(skillsRepo)
 
 	// Knowledge base (RAG) pipeline.
 	//
@@ -506,6 +531,16 @@ func main() {
 		Workspace:      handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
 		Memory:         handler.NewMemoryHandler(memorySvc),
 		Search:         handler.NewSearchHandler(searchSvc),
+		Skills:         handler.NewSkillHandler(skillsRepo),
+		// FIX13 — cloud scheduled tasks (migration 035). Authenticated CRUD
+		// + audit. The unattended firing loop is NOT started here: the
+		// service.CloudTaskRunner (authorize-before-run + audit) is unit-
+		// proven, and a goroutine calling runner.Tick(ctx, time.Now()) every
+		// N seconds — with a service.NewHTTPRunAuthorizer pointed at the
+		// backend's /internal/scheduled-run/authorize and messageSvc as the
+		// TurnRunner — is the deployment step (see FIX13 report / runner
+		// deployment note).
+		CloudTasks: handler.NewCloudTaskHandler(cloudTasksRepo),
 		Account:        handler.NewAccountHandler(exportSvc, purgeSvc),
 		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
 		// GatewayClient (and its internal-trust headers) as the video tool.

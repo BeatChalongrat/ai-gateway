@@ -164,3 +164,8 @@ releases/*.staged.json
 # Stray desktop icon. The build uses Assets/app.ico (csproj:12, iss:31);
 # this one is referenced by nothing and has been committed by accident twice.
 SranDesktop/src/SranDesktop.App/Assets/sran-app.ico
+
+# Browser-bridge pairing token dropped into the unpacked extension folder by
+# the desktop app (contains a secret) — never commit it.
+pairing.json
+**/browser-extension/pairing.json

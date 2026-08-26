@@ -75,11 +75,19 @@ async def get_models(
             cap_flags["reasoning"] = True
         if c.supports_tools:
             cap_flags["image_generation_via_tools"] = True
-        # Video generation via the generate_video tool — same gate as
-        # image_generation_via_tools (any tool-capable chat model can call
-        # it), additionally behind the video_gen feature flag so the 🎬
-        # affordance only lights up where the feature is enabled.
-        if c.supports_tools and settings.video_gen_enabled:
+        # Video generation via the generate_video tool. FIX11 §1: the 🎬
+        # affordance must light up ONLY when video is genuinely usable, not on
+        # the bare feature flag — a key being present is not a key being usable,
+        # and our seeded model labels itself UNVERIFIED. So this mirrors the
+        # capability answer in GET /v1/video/config: the gate AND a configured
+        # key AND an owner-verified model. Both clients read this flag, so the
+        # button stays visibly unavailable everywhere until all three agree.
+        if (
+            c.supports_tools
+            and settings.video_gen_enabled
+            and bool((settings.replicate_api_token or "").strip())
+            and settings.video_model_verified
+        ):
             cap_flags["video_generation_via_tools"] = True
         # Dedicated media-model capabilities (Sprint 2A.5). Chat candidates
         # don't carry these attributes, so getattr → False (no-op here). They

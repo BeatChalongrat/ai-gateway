@@ -66,6 +66,11 @@ def _limited(*_a, **_k):
 @pytest.mark.asyncio
 async def test_no_auth_401(async_db, monkeypatch):
     monkeypatch.setattr(settings, "video_gen_enabled", True)
+    # FIX11 §1: video submit now gates on the full capability; set the other two
+    # deployment signals so tests reach the behaviour under test (audio is
+    # unaffected — it still gates on video_gen_enabled alone).
+    monkeypatch.setattr(settings, "replicate_api_token", "test-token")
+    monkeypatch.setattr(settings, "video_model_verified", True)
     r = TestClient(main_app).post(
         "/v1/videos/generations", json={"prompt": "x", "model": "m"}
     )
@@ -75,6 +80,11 @@ async def test_no_auth_401(async_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_video_rate_limit_429(async_db, monkeypatch):
     monkeypatch.setattr(settings, "video_gen_enabled", True)
+    # FIX11 §1: video submit now gates on the full capability; set the other two
+    # deployment signals so tests reach the behaviour under test (audio is
+    # unaffected — it still gates on video_gen_enabled alone).
+    monkeypatch.setattr(settings, "replicate_api_token", "test-token")
+    monkeypatch.setattr(settings, "video_model_verified", True)
     monkeypatch.setattr(RateLimitService, "check_window_async", _limited())
     uid = await _seed_user(async_db)
     await async_db.commit()
@@ -88,6 +98,11 @@ async def test_video_rate_limit_429(async_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_audio_rate_limit_429(async_db, monkeypatch):
     monkeypatch.setattr(settings, "video_gen_enabled", True)
+    # FIX11 §1: video submit now gates on the full capability; set the other two
+    # deployment signals so tests reach the behaviour under test (audio is
+    # unaffected — it still gates on video_gen_enabled alone).
+    monkeypatch.setattr(settings, "replicate_api_token", "test-token")
+    monkeypatch.setattr(settings, "video_model_verified", True)
     monkeypatch.setattr(RateLimitService, "check_window_async", _limited())
     uid = await _seed_user(async_db)
     await async_db.commit()

@@ -74,11 +74,20 @@ def parse_model_list(value: str | None) -> list[str]:
     return out
 
 
-def _read(session: "Session", key: str) -> str | None:
+def _read(key: str) -> str | None:
+    # FIX7 §3: read via a fresh SYNC session, not the request's session. The chat
+    # hot path passes an AsyncSession here (annotated Session, but AsyncSession in
+    # practice — orchestrator Track A), whose .get() returns an un-awaited
+    # coroutine, so ``row.value`` raised ``'coroutine' object has no attribute
+    # 'value'`` — swallowed as ``auto_routing_settings_read_failed`` and silently
+    # falling back to the hardcoded preference. These are global, committed admin
+    # settings, so a short sync PK read is correct from either path.
+    from app.core.db import SessionLocal
     from app.models.system_setting import SystemSettingORM
 
-    row = session.get(SystemSettingORM, key)
-    return row.value if row is not None else None
+    with SessionLocal() as s:
+        row = s.get(SystemSettingORM, key)
+        return row.value if row is not None else None
 
 
 def get_auto_preference(session: "Session | None") -> tuple[str, ...]:
@@ -100,8 +109,8 @@ def get_auto_preference(session: "Session | None") -> tuple[str, ...]:
         return _HARDCODED_PREFERENCE
 
     try:
-        default = (_read(session, KEY_DEFAULT_MODEL) or "").strip()
-        fallbacks = parse_model_list(_read(session, KEY_DEFAULT_FALLBACKS))
+        default = (_read(KEY_DEFAULT_MODEL) or "").strip()
+        fallbacks = parse_model_list(_read(KEY_DEFAULT_FALLBACKS))
     except Exception as exc:  # never let a settings read break routing
         log.warning("auto_routing_settings_read_failed", error=str(exc))
         return _HARDCODED_PREFERENCE

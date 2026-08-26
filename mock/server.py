@@ -157,12 +157,107 @@ def _maybe_inject_error() -> tuple[int | None, str | None]:
     return 500, "500"
 
 
+# ---------------------------------------------------------------------------
+# Request capture (DLP instrument). Opt-in via MOCK_CAPTURE_PATH; when set,
+# EVERY request to the two completion endpoints is appended to that file as
+# one JSON object per line:
+#   {"ts", "endpoint", "method", "path", "headers", "body_raw", "body_json"}
+# * body_raw is the ENTIRE raw request body (utf-8, errors replaced) — not
+#   just ``messages`` — so top-level fields such as Anthropic's ``system``
+#   are captured verbatim. body_json is a best-effort parse of the same
+#   bytes (null when not JSON).
+# * headers are captured with credential-bearing values REDACTED BY NAME
+#   (authorization, x-api-key, api-key, cookie, …); the value is replaced
+#   whole, never truncated, so no key fragment can reach the file.
+# * Capture is append-only and must never change the response; a capture
+#   failure is swallowed (logged to stderr) so the mock keeps serving.
+# The file will contain whatever PII the test sends — keep it out of git.
+# ---------------------------------------------------------------------------
+_CAPTURE_PATH = os.environ.get("MOCK_CAPTURE_PATH", "").strip()
+_REDACT_HEADERS = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "x-api-key",
+        "api-key",
+        "x-goog-api-key",
+        "cookie",
+        "set-cookie",
+        "x-internal-service-secret",
+    }
+)
+_capture_lock = asyncio.Lock()
+
+
+def _redact_headers(raw_headers) -> dict:
+    out: dict[str, str] = {}
+    for k, v in raw_headers:
+        key = k.decode("latin-1") if isinstance(k, bytes) else str(k)
+        val = v.decode("latin-1", "replace") if isinstance(v, bytes) else str(v)
+        if key.lower() in _REDACT_HEADERS:
+            out[key] = "<redacted>"
+        else:
+            out[key] = val
+    return out
+
+
+async def _capture_request(endpoint: str, req: Request, body_bytes: bytes) -> None:
+    if not _CAPTURE_PATH:
+        return
+    try:
+        body_raw = body_bytes.decode("utf-8", "replace")
+        try:
+            body_json = json.loads(body_bytes)
+        except Exception:  # noqa: BLE001 — non-JSON bodies are still captured raw
+            body_json = None
+        record = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+            + f".{int((time.time() % 1) * 1000):03d}Z",
+            "endpoint": endpoint,
+            "method": req.method,
+            "path": req.url.path,
+            "client": req.client.host if req.client else None,
+            "headers": _redact_headers(req.headers.raw),
+            "body_len": len(body_bytes),
+            "body_raw": body_raw,
+            "body_json": body_json,
+        }
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        data = line.encode("utf-8")
+        # One os.write per record on an O_APPEND fd: each record lands as a
+        # single atomic append even with several uvicorn workers.
+        async with _capture_lock:
+            fd = os.open(_CAPTURE_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(fd, data)
+            finally:
+                os.close(fd)
+    except Exception as exc:  # noqa: BLE001 — never let capture break the mock
+        print(f"[mock-capture] failed: {exc!r}", flush=True)
+
+
 app = FastAPI(title="mock-llm-provider", version="0.1.0")
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "profile": _PROFILE_NAME}
+    return {"status": "ok", "profile": _PROFILE_NAME, "capture": bool(_CAPTURE_PATH)}
+
+
+@app.get("/v1/models")
+async def list_models() -> dict:
+    """Minimal OpenAI-compatible model list.
+
+    Exists so the gateway's self-hosted provider flow can point at this
+    mock the supported way (admin UI → ``GET {base}/models`` probe +
+    discovery). It does not affect completions.
+    """
+    return {
+        "object": "list",
+        "data": [
+            {"id": "mock-chat-1", "object": "model", "owned_by": "mock"},
+        ],
+    }
 
 
 @app.get("/_calibration_samples")
@@ -188,7 +283,9 @@ async def calibration_samples(n: int = 1000) -> dict:
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: Request) -> object:
-    body = await req.json()
+    body_bytes = await req.body()
+    await _capture_request("/v1/chat/completions", req, body_bytes)
+    body = json.loads(body_bytes)
     messages = body.get("messages", [])
     stream = bool(body.get("stream", False))
     model = body.get("model", "mock-model")
@@ -310,7 +407,9 @@ async def chat_completions(req: Request) -> object:
 # minimal echo shim keeps both providers covered in the same process.
 @app.post("/v1/messages")
 async def anthropic_messages(req: Request) -> object:
-    body = await req.json()
+    body_bytes = await req.body()
+    await _capture_request("/v1/messages", req, body_bytes)
+    body = json.loads(body_bytes)
     messages = body.get("messages", [])
     stream = bool(body.get("stream", False))
     model = body.get("model", "mock-claude")

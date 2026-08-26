@@ -69,6 +69,10 @@ def _body(model="mock-video-1", **kw):
 @pytest.mark.asyncio
 async def test_unauthenticated_401(async_db, monkeypatch):
     monkeypatch.setattr(settings, "video_gen_enabled", True)
+    # FIX11 §1: video submit now gates on the full capability (gate AND a
+    # configured key AND an owner-verified model), so set the other two signals.
+    monkeypatch.setattr(settings, "replicate_api_token", "test-token")
+    monkeypatch.setattr(settings, "video_model_verified", True)
     r = TestClient(main_app).post("/v1/videos/generations", json=_body())
     assert r.status_code == 401
 
@@ -76,6 +80,10 @@ async def test_unauthenticated_401(async_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_model_missing_404(async_db, monkeypatch):
     monkeypatch.setattr(settings, "video_gen_enabled", True)
+    # FIX11 §1: video submit now gates on the full capability (gate AND a
+    # configured key AND an owner-verified model), so set the other two signals.
+    monkeypatch.setattr(settings, "replicate_api_token", "test-token")
+    monkeypatch.setattr(settings, "video_model_verified", True)
     uid = await _seed_user(async_db)
     await async_db.commit()
     with _auth(uid):
@@ -88,6 +96,10 @@ async def test_model_missing_404(async_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_chat_only_model_400(async_db, monkeypatch):
     monkeypatch.setattr(settings, "video_gen_enabled", True)
+    # FIX11 §1: video submit now gates on the full capability (gate AND a
+    # configured key AND an owner-verified model), so set the other two signals.
+    monkeypatch.setattr(settings, "replicate_api_token", "test-token")
+    monkeypatch.setattr(settings, "video_model_verified", True)
     uid = await _seed_user(async_db)
     await _ensure_model(async_db, "mock-chat-novideo", supports_video_gen=False)
     await async_db.commit()
@@ -101,6 +113,10 @@ async def test_chat_only_model_400(async_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_valid_submit_200(async_db, monkeypatch):
     monkeypatch.setattr(settings, "video_gen_enabled", True)
+    # FIX11 §1: video submit now gates on the full capability (gate AND a
+    # configured key AND an owner-verified model), so set the other two signals.
+    monkeypatch.setattr(settings, "replicate_api_token", "test-token")
+    monkeypatch.setattr(settings, "video_model_verified", True)
     uid = await _seed_user(async_db)
     await _ensure_model(
         async_db, "mock-video-1", supports_video_gen=True, cost_per_second=Decimal("0.07")

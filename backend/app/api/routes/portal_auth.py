@@ -667,7 +667,7 @@ def oauth_start(
     request: Request,
     provider: str = Query(..., pattern="^(google|github)$"),
     return_to: str = Query(default="/"),
-    client: str = Query(default="web", pattern="^(web|desktop)$"),
+    client: str = Query(default="web", pattern="^(web|desktop|desktop-dev)$"),
     nonce: str | None = Query(default=None, max_length=128),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
 ):
@@ -703,7 +703,7 @@ def oauth_start(
     # ignores one entirely (its result never rides a deep link).
     import re as _re
 
-    if client == "desktop":
+    if client in _DESKTOP_CLIENT_SCHEMES:
         if not nonce or not _re.fullmatch(r"[A-Za-z0-9_-]{22,128}", nonce):
             raise ValidationError(
                 "Desktop OAuth requires a nonce of 22-128 URL-safe "
@@ -779,8 +779,20 @@ _DESKTOP_PAGE_SHELL = """<!doctype html>
 </style></head><body><div class="card">{body}</div>{script}</body></html>"""
 
 
-def _desktop_success_page(ticket: str) -> HTMLResponse:
-    deep_link = f"sran://oauth/callback?ticket={ticket}"
+# Desktop clients and the custom scheme each one's deep link uses. An
+# ALLOW-LIST, not a parameter: the scheme never comes from the request.
+# ``desktop`` is the shipped WPF/WebView2 client on ``sran://``;
+# ``desktop-dev`` is the Electron shell under development (E1/E2), which
+# uses ``sran-dev://`` so the two never fight over one registration.
+# Production scheme ownership is a cut-over decision (Electron E6).
+_DESKTOP_CLIENT_SCHEMES: dict[str, str] = {
+    "desktop": "sran",
+    "desktop-dev": "sran-dev",
+}
+
+
+def _desktop_success_page(ticket: str, scheme: str = "sran") -> HTMLResponse:
+    deep_link = f"{scheme}://oauth/callback?ticket={ticket}"
     body = (
         '<div class="mark ok">&#10003;</div>'
         "<h1>ลงชื่อเข้าใช้สำเร็จ</h1>"
@@ -830,7 +842,8 @@ def oauth_callback(
     if not code:
         raise ValidationError("Missing auth code.", code="missing_code")
 
-    is_desktop = row.get("client") == "desktop"
+    desktop_scheme = _DESKTOP_CLIENT_SCHEMES.get(row.get("client") or "")
+    is_desktop = desktop_scheme is not None
 
     callback_url = str(request.url_for("portal_oauth_callback"))
     try:
@@ -885,7 +898,7 @@ def oauth_callback(
         # B0: bind the ticket to the nonce the desktop app minted at
         # /oauth/start — redemption requires presenting it again.
         ticket = ticket_store.put(result, nonce=row.get("nonce") or "")
-        return _desktop_success_page(ticket)
+        return _desktop_success_page(ticket, scheme=desktop_scheme)
 
     return result
 

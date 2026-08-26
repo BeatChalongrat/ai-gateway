@@ -93,6 +93,20 @@ type CompileContext struct {
 	// byte-identical to pre-Phase-4.
 	ProjectInstructions string
 
+	// ActiveSkills / SkillCatalog — FIX12 Item 3. Pre-loaded by the
+	// caller (the compiler is repo-free by design). ActiveSkills are the
+	// user's enabled skills whose triggers matched this turn's message;
+	// their instruction text is injected right after Layer 10.
+	// SkillCatalog is ALL of the user's enabled skills — rendered as a
+	// compact "call use_skill to load one" list so the model can pull an
+	// unmatched skill on demand. Both empty ⇒ Build output is
+	// byte-identical to a no-skills prompt.
+	//
+	// Instruction-only invariant: a Skill's Instructions is plain text
+	// concatenated into the prompt — never executed.
+	ActiveSkills []model.Skill
+	SkillCatalog []model.Skill
+
 	// Layer 13 — pre-rendered by the caller (needs file/KB repos).
 	RAGContext   string
 	FileContext  string
@@ -155,6 +169,11 @@ func (pc *PromptCompiler) Build(ctx context.Context, in CompileContext) (string,
 
 	// Layer 10: user custom instructions.
 	add(pc.userCustomInstructions(ctx, in))
+
+	// Layer 10b: user skills (FIX12 Item 3). Rendered right after the
+	// user's custom instructions — a skill is a more specific, on-demand
+	// instruction block. Empty slices ⇒ nothing added (byte-identical).
+	add(pc.skillsBlock(in))
 
 	// Layer 11: memory policy + saved memory (emits sources).
 	memBlock, memSrcs := pc.memoryBlock(ctx, in)
@@ -504,6 +523,56 @@ func (pc *PromptCompiler) userCustomInstructions(ctx context.Context, in Compile
 		parts = append(parts, "## Project instructions\n"+p+"\n")
 	}
 	return strings.Join(parts, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// Layer 10b — User Skills (FIX12 Item 3)
+// ---------------------------------------------------------------------------
+
+// skillsBlock renders the user's skills. Two independent sub-blocks:
+//
+//   - ActiveSkills — skills whose triggers matched this turn's message.
+//     Their full instruction text is inlined so the model applies them
+//     immediately, one "--- Skill: {Name} ---" section each.
+//
+//   - SkillCatalog — every enabled skill, as a one-line-per-skill list
+//     the model can pull on demand via the use_skill tool.
+//
+// A skill's Instructions is INSTRUCTION TEXT ONLY — string-concatenated
+// here, never executed. When both slices are empty this returns "" so
+// Build stays byte-identical to a no-skills prompt.
+func (pc *PromptCompiler) skillsBlock(in CompileContext) string {
+	var parts []string
+
+	for i := range in.ActiveSkills {
+		s := &in.ActiveSkills[i]
+		instr := strings.TrimSpace(s.Instructions)
+		if instr == "" {
+			continue
+		}
+		parts = append(parts, "--- Skill: "+strings.TrimSpace(s.Name)+" ---\n"+instr)
+	}
+
+	if len(in.SkillCatalog) > 0 {
+		var b strings.Builder
+		b.WriteString("Available skills (call use_skill to load one):")
+		for i := range in.SkillCatalog {
+			s := &in.SkillCatalog[i]
+			name := strings.TrimSpace(s.Name)
+			if name == "" {
+				continue
+			}
+			b.WriteString("\n- ")
+			b.WriteString(name)
+			if desc := strings.TrimSpace(s.Description); desc != "" {
+				b.WriteString(": ")
+				b.WriteString(truncateRunes(desc, 120))
+			}
+		}
+		parts = append(parts, b.String())
+	}
+
+	return strings.Join(parts, "\n\n")
 }
 
 // ---------------------------------------------------------------------------

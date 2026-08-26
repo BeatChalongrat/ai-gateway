@@ -226,6 +226,14 @@ class OpenAIAdapter(BaseProviderAdapter):
         if tool_choice is not None:
             body["tool_choice"] = tool_choice
 
+        # Structured-Outputs passthrough (OpenAI ``response_format``,
+        # e.g. a json_schema). Standard chat-completions path only —
+        # gpt-4o-mini (title generation) lives here, not the Responses
+        # API. Forwarded only when set so plain requests stay identical.
+        response_format = getattr(payload, "response_format", None)
+        if response_format:
+            body["response_format"] = response_format
+
         # Reasoning (T2) — o-series. Gated on both ``payload.reasoning``
         # being non-off AND the resolved model being flagged
         # ``supports_reasoning=True`` (migration 045). When both are

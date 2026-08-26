@@ -1379,28 +1379,78 @@ func isImageContentType(ct string) bool {
 //
 // Returns nil on any failure — the caller treats nil as
 // "ship text only" and the AI still gets the turn, minus vision.
+//
+// This is the back-compat wrapper that DROPS the per-image failure
+// list (used by paths that can't surface a notice, e.g. the compiler
+// budget preview). Streaming send paths use ImageDataURLsForMessageChecked
+// so the user learns when an attachment fell out of the request.
 func (s *FileService) ImageDataURLsForMessage(
 	ctx context.Context, tenantID, messageID uuid.UUID,
 ) []string {
+	urls, _ := s.ImageDataURLsForMessageChecked(ctx, tenantID, messageID)
+	return urls
+}
+
+// ImageAttachFailure names one attached image that could NOT be turned
+// into vision content, so the caller can tell the user it didn't attach
+// instead of silently degrading the turn to text-only. Reason is a short
+// machine tag for logs/telemetry; the client renders its own localized,
+// filename-bearing line (it does not echo Reason), so no internal detail
+// or secret ever reaches the wire.
+type ImageAttachFailure struct {
+	Filename string `json:"filename"`
+	Reason   string `json:"reason"`
+}
+
+// ImageDataURLsForMessageChecked resolves the image attachments on a
+// single message to base64 data URLs AND reports, per image, any that
+// failed to encode or arrived in an unsupported format. A failed image
+// is NOT swallowed: it becomes an ImageAttachFailure the send path
+// surfaces to the user. Non-image attachments (PDFs, docs) are skipped
+// silently — they ride the text-extraction path, not vision.
+func (s *FileService) ImageDataURLsForMessageChecked(
+	ctx context.Context, tenantID, messageID uuid.UUID,
+) ([]string, []ImageAttachFailure) {
 	files, err := s.files.ListByMessage(ctx, tenantID, messageID)
 	if err != nil || len(files) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]string, 0, len(files))
+	var fails []ImageAttachFailure
 	for i := range files {
 		f := &files[i]
-		if !isImageContentType(f.ContentType) {
+		ct := strings.ToLower(strings.TrimSpace(f.ContentType))
+		if !isImageContentType(ct) {
+			// An image-typed attachment in a format we can't ship is a
+			// loud failure (the user attached a picture expecting vision);
+			// a non-image attachment is not — it goes to the text path.
+			if strings.HasPrefix(ct, "image/") {
+				slog.Warn("vision: unsupported image format",
+					"file_id", f.ID.String(), "content_type", ct)
+				fails = append(fails, ImageAttachFailure{
+					Filename: f.OriginalFilename,
+					Reason:   "unsupported_format",
+				})
+			}
 			continue
 		}
-		url := s.imageDataURL(ctx, f)
+		url, err := s.imageDataURL(ctx, f)
+		if err != nil {
+			// Already logged inside imageDataURLSized. Surface it.
+			fails = append(fails, ImageAttachFailure{
+				Filename: f.OriginalFilename,
+				Reason:   "unreadable",
+			})
+			continue
+		}
 		if url != "" {
 			out = append(out, url)
 		}
 	}
 	if len(out) == 0 {
-		return nil
+		out = nil
 	}
-	return out
+	return out, fails
 }
 
 // GeneratedImageNotes returns, per message id, a short API-side note
@@ -1511,10 +1561,12 @@ func (s *FileService) GeneratedImageVisionURLs(
 			skipped++
 			continue
 		}
-		url := s.imageDataURLSized(ctx, c.f, visionHistoryMaxDim, ".vision512")
-		if url == "" {
+		url, err := s.imageDataURLSized(ctx, c.f, visionHistoryMaxDim, ".vision512")
+		if err != nil || url == "" {
 			// Read / resize failure (already logged inside) — this
-			// image keeps its text annotation only.
+			// image keeps its text annotation only. Generated-image
+			// history is best-effort context, not a user attachment,
+			// so a miss is not surfaced as a notice.
 			skipped++
 			continue
 		}
@@ -1548,23 +1600,30 @@ func generatedImageNote(names []string) string {
 
 // imageDataURL is the per-file path: ensure a local copy of the
 // source blob, run image_resize.py (with caching), read the .b64
-// sidecar, return the data URL.
-func (s *FileService) imageDataURL(ctx context.Context, f *model.ConversationFile) string {
-	return s.imageDataURLSized(ctx, f, 2048, ".vision")
+// sidecar, return the data URL. maxDim is 1568 — Anthropic downscales
+// anything past 1568px on its side, so shipping larger just wastes
+// upload bytes and tokens for no added fidelity.
+func (s *FileService) imageDataURL(ctx context.Context, f *model.ConversationFile) (string, error) {
+	return s.imageDataURLSized(ctx, f, 1568, ".vision")
 }
 
 // imageDataURLSized is the parameterised core: maxDim bounds the longest
 // side and sidecarTag namespaces the cache file so different sizes of
-// the same source don't clobber each other (".vision" = the 2048px
+// the same source don't clobber each other (".vision" = the 1568px
 // current-turn uploads cache, ".vision512" = history-replay images).
+//
+// Returns a non-nil error on any failure (unreachable source, resize
+// unavailable/failed, unreadable artifact) so callers can tell the user
+// the image didn't attach instead of silently degrading to text. An
+// oversize-but-legal image is NOT an error — the resize downscales it.
 func (s *FileService) imageDataURLSized(
 	ctx context.Context, f *model.ConversationFile, maxDim int, sidecarTag string,
-) string {
+) (string, error) {
 	srcPath, cleanup, err := s.storage.OpenLocalCopy(ctx, f.StoragePath)
 	if err != nil {
 		slog.Warn("vision: storage local-copy failed",
 			"file_id", f.ID.String(), "err", err)
-		return ""
+		return "", fmt.Errorf("vision: storage local-copy: %w", err)
 	}
 	defer cleanup()
 
@@ -1583,12 +1642,12 @@ func (s *FileService) imageDataURLSized(
 	b64Path := visionPath + ".b64"
 
 	if data, err := os.ReadFile(b64Path); err == nil && len(data) > 0 {
-		return string(data)
+		return string(data), nil
 	}
 
 	if s.sandbox == nil {
 		slog.Warn("vision resize blocked: sandbox unavailable", "file_id", f.ID.String())
-		return ""
+		return "", fmt.Errorf("vision: resize sandbox unavailable")
 	}
 	inputName := "source" + outExt
 	outputName := "vision" + outExt
@@ -1604,19 +1663,19 @@ func (s *FileService) imageDataURLSized(
 	}
 	if err != nil || res == nil || res.Exit != 0 {
 		slog.Warn("vision resize sandbox failed", "file_id", f.ID.String(), "err", err)
-		return ""
+		return "", fmt.Errorf("vision: resize failed (exit/err)")
 	}
 	b64Artifact := res.Artifact(outputName + ".b64")
 	if b64Artifact == nil {
 		slog.Warn("vision: b64 artifact missing", "file_id", f.ID.String())
-		return ""
+		return "", fmt.Errorf("vision: resize produced no output")
 	}
 	data, err := os.ReadFile(b64Artifact.Path)
 	if err != nil {
 		slog.Warn("vision: b64 artifact unreadable", "file_id", f.ID.String(), "err", err)
-		return ""
+		return "", fmt.Errorf("vision: resize output unreadable: %w", err)
 	}
-	return string(data)
+	return string(data), nil
 }
 
 // imageMetadataFromStorage reads the image header from storage to
