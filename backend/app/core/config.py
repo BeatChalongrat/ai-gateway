@@ -261,6 +261,14 @@ class Settings(BaseSettings):
     video_model_verified: bool = False
     video_gen_default_threshold_usd: float = 1.00
 
+    # FIX22 §2 — update NOTIFICATION, stage 1. The SRAN Desktop version the
+    # operator wants installed, served by GET /v1/desktop/version as a bare
+    # string. No file, no URL, no feed: the app compares it with its own
+    # version and shows a dismissible banner; the user installs by hand.
+    # Unset (the default) → the endpoint 404s and the app shows nothing.
+    # Env: DESKTOP_LATEST_VERSION, e.g. "0.1.0-e4".
+    desktop_latest_version: str = ""
+
     # --- Replicate video provider (Sprint 2B) --------------------------
     # ALL THREE cost guards (L1 session budget, L2 tenant daily cap, L3
     # per-job confirmation) are mandatory — there is NO bypass flag. To

@@ -12,6 +12,7 @@ from app.api.routes.public_chat import router as public_chat_router
 from app.api.routes.public_models import router as public_models_router
 from app.api.routes.public_images import router as public_images_router
 from app.api.routes.public_search import router as public_search_router
+from app.api.routes.public_guardrails import router as public_guardrails_router
 from app.api.routes.admin import router as admin_router
 from app.api.routes.portal_auth import router as portal_auth_router
 from app.api.routes.portal_me import router as portal_me_router
@@ -878,6 +879,7 @@ from app.api.routes.public_audio import router as public_audio_router  # noqa: E
 app.include_router(public_videos_router, prefix="/v1")  # /v1/videos/generations + /v1/jobs/{id}
 app.include_router(public_audio_router, prefix="/v1")  # /v1/audio/generations
 app.include_router(public_search_router, prefix="/v1")  # /v1/search + /v1/search/config
+app.include_router(public_guardrails_router, prefix="/v1")  # FIX22: /v1/guardrails/check + /v1/desktop/version
 # FIX 2 — gateway-fronted embeddings + voice so chat-edge stops calling OpenAI
 # directly (both run behind the DLP raw-egress gate).
 from app.api.routes.public_embeddings import router as public_embeddings_router  # noqa: E402
