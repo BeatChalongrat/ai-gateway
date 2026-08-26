@@ -92,6 +92,26 @@ export function classify429(
   };
 }
 
+/** FIX21 §2: best-effort backend reason from an error response body. Prefers
+ * the `{error:{message}}` envelope the gateway and Python backend both emit
+ * (httpx/json.go, ErrorResponse); falls back to the trimmed raw body. Never
+ * throws, and only ever reads the RESPONSE — it cannot surface the key. */
+export async function readErrorReason(res: Response): Promise<string> {
+  try {
+    const text = (await res.text()).slice(0, 600);
+    try {
+      const parsed = JSON.parse(text) as { error?: { message?: unknown } };
+      const msg = parsed?.error?.message;
+      if (typeof msg === "string" && msg.trim()) return msg.trim();
+    } catch {
+      /* body was not JSON — fall through to the raw text */
+    }
+    return text.trim();
+  } catch {
+    return "";
+  }
+}
+
 export type StreamEvent =
   | { kind: "content_delta"; delta: string }
   /** A streamed tool-call fragment; the caller accumulates by index. */
@@ -352,9 +372,28 @@ export class GatewayClient {
         body: JSON.stringify(body),
         signal: watchdog.signal,
       });
-      if (res.status === 401 || res.status === 403) {
+      // FIX21 §2: 401 and 403 are DIFFERENT failures and must not share a
+      // story. 401 = the agent key really is invalid / the session expired →
+      // drop the key and re-provision. 403 = a policy or guardrail REFUSAL of
+      // this request, whose reason rides the response body — the key is fine, so
+      // do NOT invalidate it (invalidating hides the real cause and forces a
+      // needless re-provision every refused turn). Never log or echo the key.
+      if (res.status === 401) {
         this.invalidateKey();
-        yield { kind: "error", code: "gateway_unauthorized", message: `The gateway refused the agent key (HTTP ${res.status}).` };
+        yield {
+          kind: "error",
+          code: "gateway_unauthorized",
+          message: "The gateway rejected the agent key (HTTP 401) — your session may have expired. Signing in again should fix it.",
+        };
+        return;
+      }
+      if (res.status === 403) {
+        const reason = await readErrorReason(res);
+        yield {
+          kind: "error",
+          code: "gateway_forbidden",
+          message: `The gateway refused this request (HTTP 403)${reason ? `: ${reason}` : "."}`,
+        };
         return;
       }
       if (!res.ok) {
