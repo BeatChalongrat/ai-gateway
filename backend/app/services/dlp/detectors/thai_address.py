@@ -5,9 +5,19 @@ keywords (``บ้านเลขที่``, ``ที่อยู่``, …). R
 every address component, we anchor on the leading keyword and span
 forward up to 200 characters or a newline — whichever comes first.
 
-This is deliberately low-precision, low-severity (LOW). Addresses
-rarely warrant BLOCK action, and over-matching is preferable to
-leaking an address into a provider request.
+Severity is MEDIUM; addresses rarely warrant BLOCK action.
+
+Precision/recall stance (current, FIX23/FIX23b): the detector fires only
+when the text after the keyword looks like a postal address — a house
+number close to the keyword AND an address component (road, soi, moo,
+tambon/amphoe/province words or abbreviations, khwaeng/khet, Bangkok, or
+a 5-digit postcode). It no longer prefers over-matching: the earlier
+"anything to end-of-line" body masked ordinary Thai sentences whole and
+broke the product (see below). KNOWN GAPS accepted pending owner review
+(FIX23b §2): addresses written with only a building / condo / village /
+estate name or a bare province name and no postcode, addresses with no
+house number, and a prose gap of more than 30 characters between the
+keyword and the house number are not matched by this detector.
 
 FIX23 — the body must (a) carry a digit within 30 characters of the
 keyword (a house number) AND (b) contain an address component on the
