@@ -28,6 +28,10 @@ export const TURN_OUTBOUND_TYPES = Object.freeze([
   "consent.request",
   "session.changed",
   "host.error",
+  // FIX22 §2: a host → page NOTICE (today: "a newer desktop version exists").
+  // Informational, dismissible, never modal; the page decides whether to show
+  // it. The closed outbound set grows by exactly one, deliberately.
+  "host.notice",
 ] as const);
 export type OutboundType = (typeof TURN_OUTBOUND_TYPES)[number] | (typeof CONTROL_OUTBOUND_TYPES)[number];
 

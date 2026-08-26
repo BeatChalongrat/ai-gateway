@@ -51,7 +51,9 @@ import {
   type PermissionStore,
 } from "./permissions";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
+import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import type { SidecarClient } from "./sidecar-client";
+import type { PromptPart } from "../shared/guardrail-mirror";
 import { BROWSER_BRIDGE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
 
 interface BufferedEvent {
@@ -99,6 +101,12 @@ export interface TurnCoordinatorOptions {
    * (startWithWindows → login item). The persisted VALUE lives only in the
    * sidecar; this derives the effect from it, so there is no second copy. */
   applyHostSetting?: (key: string, value: unknown) => void;
+  /** FIX22 §1a: the write-time prompt guard (gateway check, mirror fallback).
+   * Optional so the pure tests can build a coordinator without it. */
+  promptGuard?: PromptGuard;
+  /** FIX22 §2: the update notifier's page-ready hook (repost a pending notice
+   * after a reload; first check once the page is up). */
+  onPageReady?: () => void;
 }
 
 // FIX3 §4: the sentinel the sidecar's read_document returns for a scanned PDF it
@@ -134,6 +142,9 @@ export class TurnCoordinator {
   private readonly pendingConsents = new Map<string, PendingConsent>();
   private readonly cwdByConversation = new Map<string, string>();
   readonly lastReply = new Map<string, string>();
+  /** FIX22 §1b: the labelled user-data parts of the last assembled prompt per
+   * conversation, kept ONLY to explain a guardrail 403 after the fact. */
+  private readonly promptPartsByConversation = new Map<string, PromptPart[]>();
   /** Probe seams. */
   lastConversationId: string | null = null;
   readonly toolCallsSeen: { conversationId: string; tool: string; args: Record<string, unknown>; decision: string; ok: boolean; where: "host" | "sidecar"; rpcError?: string }[] = [];
@@ -237,6 +248,13 @@ export class TurnCoordinator {
   }
 
   onUiReady(payload: UiReadyPayload): void {
+    // FIX22 §2: the page is up (again) — let the update notifier re-post a
+    // pending notice / run its first check. Independent of any conversation.
+    try {
+      this.opts.onPageReady?.();
+    } catch (err) {
+      this.log.warn(`onPageReady hook failed: ${(err as Error).message}`);
+    }
     if (!payload.conversationId) return;
     const log = this.logs.get(payload.conversationId);
     if (log) {
@@ -311,6 +329,18 @@ export class TurnCoordinator {
       }
       // ── settings.set — sidecar persists the value; host applies OS effects ──
       case "settings.set": {
+        // FIX22 §1a: the writing-style profile lands verbatim in every turn's
+        // system prompt. Check it against the gateway's guardrail BEFORE the
+        // sidecar persists it; a refusal names the phrase. The sidecar never
+        // sees a refused value.
+        if (payload.args?.["key"] === "writingStyleProfile" && this.opts.promptGuard) {
+          const value = payload.args?.["value"];
+          const verdict = typeof value === "string" ? await this.opts.promptGuard.checkForWrite(value, "the writing-style profile") : { blocked: false as const };
+          if (verdict.blocked) {
+            this.bridge.postHostResult(payload.requestId, false, undefined, PromptGuard.refusalMessage(verdict, "the writing-style profile"));
+            return;
+          }
+        }
         const r = await this.sidecar.hostQuery("settings.set", payload.args ?? {});
         // §1.2: for host-owned keys, derive the OS effect from the SAME stored
         // value (no second copy). Only after the sidecar accepted+persisted it.
@@ -770,12 +800,21 @@ export class TurnCoordinator {
           case "reasoning_notice":
             if (!run.parentToolCallId) this.emit(eventConv, "reasoning_notice", { model: ev.model, reason: ev.reason });
             break;
-          case "error":
+          case "error": {
             errored = true;
             this.log.error(`TURN ERROR conv=${conversationId}: ${ev.code} ${ev.message}`);
-            if (!run.parentToolCallId) this.emit(eventConv, "error", { code: ev.code, message: ev.message });
+            // FIX22 §1b: a guardrail 403 names no cause. Explain it AFTER the
+            // fact from the labelled parts of the prompt we sent — diagnostic
+            // only (the turn is already refused), appended to the error the
+            // page shows, never stored in a message that gets re-sent.
+            let message = ev.message;
+            if (ev.code === "gateway_forbidden" && /guardrail/i.test(ev.message)) {
+              message += PromptGuard.explain403(this.promptPartsByConversation.get(run.conversationId) ?? []);
+            }
+            if (!run.parentToolCallId) this.emit(eventConv, "error", { code: ev.code, message });
             else run.onText(`\n[error: ${ev.message}]`);
             break;
+          }
           case "done":
             sawDone = true;
             break;
@@ -941,6 +980,26 @@ export class TurnCoordinator {
 
     if (name === "run_command" && typeof args["working_directory"] === "string" && args["working_directory"]) {
       this.cwdByConversation.set(run.conversationId, args["working_directory"] as string);
+    }
+
+    // FIX22 §1a: `remember` writes the sidecar's durable note store, and that
+    // note is folded into every later prompt. A note that matches a guardrail
+    // rule would 403 every future turn — and `remember` is a tool the model can
+    // call on its own, so a poisoned page can plant one. Ask the gateway FIRST
+    // (the sidecar holds no key; the host is the choke point). The tool result
+    // is an Error, so the model cannot truthfully report a save that did not
+    // happen. The refused note is never dispatched to the sidecar.
+    if (name === "remember" && this.opts.promptGuard) {
+      const note = typeof args["note"] === "string" ? (args["note"] as string) : "";
+      const verdict = await this.opts.promptGuard.checkForWrite(note, "this note");
+      if (verdict.blocked) {
+        const msg = PromptGuard.refusalMessage(verdict, "this note");
+        run.messages.push(toolResult(call, msg));
+        this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: `Refused: would trip guardrail ${verdict.rule}`, parentId: run.parentToolCallId, durationMs: 0 });
+        this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: `guardrail-refused:${verdict.decidedBy}`, ok: false, where: "host" });
+        this.log.warn(`TOOL remember REFUSED (would poison the prompt; rule ${verdict.rule}, decided by ${verdict.decidedBy})`);
+        return;
+      }
     }
 
     // Execute — host or sidecar.
@@ -1363,7 +1422,7 @@ export class TurnCoordinator {
     if (this.hostTools.has("web_search") && !(await this.webSearchTenantEnabled())) {
       webSearchUnavailableReason = "tenant-disabled";
     }
-    const system = await this.assembler.buildSystemPrompt({
+    const assembled = await this.assembler.buildSystemPromptParts({
       homeDirectory: this.opts.homeDirectory,
       conversationId,
       activeProject: project,
@@ -1374,6 +1433,7 @@ export class TurnCoordinator {
       localConversationNotes,
       webSearchUnavailableReason,
     });
+    const system = assembled.text;
     const messages: GatewayMessage[] = [{ role: "system", content: system }];
     let history = this.loadLocalHistory(conversationId);
     if (history === null) {
@@ -1399,6 +1459,15 @@ export class TurnCoordinator {
     }
     for (const m of history) messages.push(m);
     messages.push({ role: "user", content: userText });
+    // FIX22 §1b: remember what user-data went into this prompt, labelled, so a
+    // guardrail 403 can be explained. The gateway scans EVERY user+system
+    // message, so earlier user turns are parts too. Order = most actionable
+    // first (this message, then stored sources, then history).
+    const parts: PromptPart[] = [{ ...PROMPT_PART.userMessage, text: userText }, ...assembled.parts];
+    for (const m of history) {
+      if (m.role === "user" && typeof m.content === "string") parts.push({ ...PROMPT_PART.earlierMessage, text: m.content });
+    }
+    this.promptPartsByConversation.set(conversationId, parts);
     return { messages, userText };
   }
 

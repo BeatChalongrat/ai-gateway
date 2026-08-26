@@ -17,6 +17,8 @@
 
 import type { ChatEdgeClient, ProjectDto } from "./chat-edge-client";
 import type { Logger } from "./logger";
+import { PROMPT_PART } from "./prompt-guard";
+import type { PromptPart } from "../shared/guardrail-mirror";
 
 export interface PromptInputs {
   homeDirectory: string;
@@ -162,19 +164,33 @@ export class PromptAssembler {
   ) {}
 
   async buildSystemPrompt(inputs: PromptInputs): Promise<string> {
+    return (await this.buildSystemPromptParts(inputs)).text;
+  }
+
+  /** FIX22 §1b: the same prompt, plus the USER-DATA parts it was built from,
+   * labelled with where each can be fixed — so a guardrail 403 can be explained
+   * ("a saved memory contains …") instead of naming no cause. The first-party
+   * text (base prompt, artifact dialect) is not a part: it is covered by the
+   * CI tripwire and the user cannot edit it. */
+  async buildSystemPromptParts(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[] }> {
+    const parts: PromptPart[] = [];
     let prompt = baseSystemPrompt(inputs.homeDirectory, inputs.toolsAvailable);
     prompt += ARTIFACT_INSTRUCTION_WEBCHAT;
 
     if (inputs.activeProject) {
       const p = inputs.activeProject;
       prompt += `\n\n## Project: ${p.name ?? ""}\n`;
-      if (p.instructions && p.instructions.trim()) prompt += `${p.instructions}\n`;
+      if (p.instructions && p.instructions.trim()) {
+        prompt += `${p.instructions}\n`;
+        parts.push({ ...PROMPT_PART.projectInstructions(p.name ?? ""), text: p.instructions });
+      }
       // Project FILES: chat-edge's ProjectDto carries no files list (turn-parity
       // round 2 finding) — the block is instructions-only, as in the shell.
     }
 
     if (inputs.writingStyleProfile && inputs.writingStyleProfile.trim()) {
       prompt += `\n\n## Writing style\nApply this writing style to your responses:\n${inputs.writingStyleProfile.trim()}\n`;
+      parts.push({ ...PROMPT_PART.writingStyle, text: inputs.writingStyleProfile });
     }
 
     if (inputs.toolsAvailable && inputs.webSearchUnavailableReason === "tenant-disabled") {
@@ -182,8 +198,10 @@ export class PromptAssembler {
 Web search is turned on in this app but your organisation has NOT enabled it for this account, so you have no web-search tool this turn. If the user asks you to search the web or look something up online, tell them plainly that web search is not enabled for their account and that an administrator can enable it — do not imply you simply lack the ability, and do not pretend to have searched.`;
     }
 
-    prompt += await this.notesBlock(inputs);
-    return prompt;
+    const notes = await this.notesBlock(inputs);
+    prompt += notes.text;
+    parts.push(...notes.parts);
+    return { text: prompt, parts };
   }
 
   /** The durable-memory prologue — a faithful port of
@@ -202,7 +220,7 @@ Web search is turned on in this app but your organisation has NOT enabled it for
    * Parity note (matches WPF): the LOCAL notes are always rendered; only the
    * SERVER memories respect `memoryEnabled` (AppendNotesAsync gates only
    * GetServerMemoriesAsync on it). */
-  private async notesBlock(inputs: PromptInputs): Promise<string> {
+  private async notesBlock(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[] }> {
     const server = await this.serverMemoriesFor(inputs.memoryEnabled);
     const localGlobal = inputs.localGlobalNotes ?? [];
     const localConversation = inputs.localConversationNotes ?? [];
@@ -212,7 +230,13 @@ Web search is turned on in this app but your organisation has NOT enabled it for
     let out = "";
     out += renderGlobalBlock(merged);
     out += renderConversationBlock(localConversation);
-    return out;
+    // FIX22 §1b: each note is its own labelled part (its fix location differs
+    // by store: server memory vs local note vs conversation note).
+    const parts: PromptPart[] = [];
+    for (const n of localGlobal) parts.push({ ...PROMPT_PART.localGlobalNote, text: n.content });
+    for (const n of server) parts.push({ ...PROMPT_PART.serverMemory, text: n.content });
+    for (const n of localConversation) parts.push({ ...PROMPT_PART.localConversationNote, text: n.content });
+    return { text: out, parts };
   }
 
   /** chat-edge's global_user memories (60 s cache, best-effort). Gated on

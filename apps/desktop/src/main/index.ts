@@ -46,9 +46,11 @@ import { TaskScheduler } from "./task-scheduler";
 import { classifyFrame, classifyTopLevel, isExternalHttpUrl } from "./navigation-policy";
 import { PortalAuthClient, fingerprint } from "./portal-auth";
 import { PromptAssembler } from "./prompt-assembler";
+import { PromptGuard } from "./prompt-guard";
 import { SessionController, type ViewState } from "./session-controller";
 import { SessionStore } from "./session-store";
 import { TurnCoordinator } from "./turn-coordinator";
+import { UpdateNotifier } from "./update-check";
 import { buildWebPreferences } from "./web-preferences";
 import { BRIDGE_SURFACE_MEMBERS } from "../shared/bridge-surface";
 
@@ -140,8 +142,10 @@ app.on("before-quit", () => {
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   scheduler?.stop();
+  updateNotifierRef?.stop();
   void sidecar?.stop();
 });
+let updateNotifierRef: UpdateNotifier | null = null;
 
 // ── ready ───────────────────────────────────────────────────────────────────
 void app.whenReady().then(async () => {
@@ -217,6 +221,14 @@ void app.whenReady().then(async () => {
   }
   log.info(`grants: [${grants.list().join(", ")}] approvalMode=${config.approvalMode} webSearch=${config.webSearchEnabled}`);
   const hostTools = new HostTools(gateway, chatEdge, (req, sig) => coordinator!.runNested(req, sig), log, () => config.webSearchEnabled);
+  // FIX22 §1a: the write-time prompt guard — `remember` notes and the
+  // writing-style profile are checked against the gateway's guardrail before
+  // the sidecar stores them (the host holds the key; the sidecar does not).
+  const promptGuard = new PromptGuard(gateway, log);
+  // FIX22 §2: update NOTIFICATION only (no electron-updater, no download, no
+  // URL): compare the gateway's published version with ours; the page shows a
+  // dismissible banner. Unconfigured gateway → nothing at all.
+  const updateNotifier = new UpdateNotifier(gateway, bridge, app.getVersion(), log);
   coordinator = new TurnCoordinator(
     bridge,
     gateway,
@@ -232,6 +244,8 @@ void app.whenReady().then(async () => {
       defaultModel: config.defaultModel,
       ...(flags.model && !isRelease ? { forceModel: flags.model } : {}),
       approvalMode: config.approvalMode,
+      promptGuard,
+      onPageReady: () => updateNotifier.onPageReady(),
       signOut: () => ctl.signOut("bridge", true),
       pickFolder: async () => {
         const r = await dialog.showOpenDialog(win, { title: "Grant SRAN access to a folder", properties: ["openDirectory", "dontAddToRecent"] });
@@ -343,8 +357,10 @@ void app.whenReady().then(async () => {
 
   const initialLink = findDeepLink(process.argv, config.protocolScheme);
   const ready = await ctl.ensureSessionAtBoot();
+  updateNotifierRef = updateNotifier;
   if (ready) {
     ctl.startRotation();
+    if (!flags.e1Probe && !flags.e3Probe && !flags.e4Probe && !flags.measure) updateNotifier.start();
     if (flags.measure) runMeasure(win);
     await win.loadURL(config.pageUrl).catch((err: Error) => log.warn(`initial load rejected: ${err.message}`));
   } else if (flags.measure || flags.e3Probe) {

@@ -273,6 +273,54 @@ export class GatewayClient {
     }
   }
 
+  /** FIX22 §1a: would storing `text` trip the gateway's content guardrail?
+   * POST /v1/guardrails/check — the chat path's OWN checker, so the host keeps
+   * no rules of its own. Returns null when the gateway gives no answer (route
+   * missing on an older gateway, network, timeout) so the caller can decide
+   * how to fall back. Never throws, never logs the text. */
+  async guardrailCheck(text: string, signal: AbortSignal): Promise<{ passed: boolean; ruleName: string | null; matched: string | null } | null> {
+    const key = await this.getOrProvisionKey();
+    if (!key) return null;
+    try {
+      const res = await fetch(`${this.gatewayUrl}/v1/guardrails/check`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ text }),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { passed?: unknown; rule_name?: unknown; matched?: unknown };
+      if (typeof body.passed !== "boolean") return null;
+      return {
+        passed: body.passed,
+        ruleName: typeof body.rule_name === "string" ? body.rule_name : null,
+        matched: typeof body.matched === "string" ? body.matched : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** FIX22 §2: the desktop version the gateway says is current (GET
+   * /v1/desktop/version → a bare string). null on ANY non-200 / error /
+   * empty — the caller shows nothing. No URL, no file: notification only. */
+  async latestDesktopVersion(signal: AbortSignal): Promise<string | null> {
+    const key = await this.getOrProvisionKey();
+    if (!key) return null;
+    try {
+      const res = await fetch(`${this.gatewayUrl}/v1/desktop/version`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { version?: unknown };
+      return typeof body.version === "string" && body.version.trim() ? body.version.trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** POST /v1/search with the agent key (web_search, host-side in E4). */
   /** FIX9 §1.1: the model ids the gateway accepts (GET /v1/models), for host-side
    * validation of the page-supplied model. Returns null on failure (caller keeps

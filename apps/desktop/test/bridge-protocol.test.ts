@@ -38,8 +38,8 @@ describe("closed vocabulary — by name", () => {
   it("exactly four turn-inbound members", () => {
     expect([...TURN_INBOUND_TYPES]).toEqual(["turn.submit", "turn.cancel", "consent.respond", "ui.ready"]);
   });
-  it("exactly four turn-outbound members", () => {
-    expect([...TURN_OUTBOUND_TYPES]).toEqual(["turn.event", "consent.request", "session.changed", "host.error"]);
+  it("exactly five turn-outbound members (FIX22 added host.notice)", () => {
+    expect([...TURN_OUTBOUND_TYPES]).toEqual(["turn.event", "consent.request", "session.changed", "host.error", "host.notice"]);
   });
   it("one control pair, no more", () => {
     expect([...CONTROL_INBOUND_TYPES]).toEqual(["host.query"]);
