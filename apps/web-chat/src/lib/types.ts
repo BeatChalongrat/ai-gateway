@@ -917,3 +917,38 @@ export interface MediaJobStatus {
   created_at: string;
   completed_at?: string | null;
 }
+
+// ─── Cloud scheduled tasks ───────────────────────────────────
+// SERVER-SIDE scheduled prompts (chat-edge /cloud-tasks). Unlike the
+// desktop-only LOCAL tasks (host in-process timer, hostApi), these fire
+// even with the computer off, but cannot touch local files and run with
+// a read-only tool set only. Managed over plain authenticated HTTP and
+// available in BOTH the browser and the desktop shell.
+export interface CloudTask {
+  id: string;
+  conversation_id: string;
+  name: string;
+  prompt: string;
+  schedule_kind: string;
+  interval_seconds: number;
+  next_run_at: string;
+  enabled: boolean;
+  max_runs?: number | null;
+  run_count: number;
+  last_run_at?: string | null;
+  paused_reason?: string | null; // "revoked" | "max_runs" | "no_balance"
+  created_at: string;
+  updated_at: string;
+}
+export interface CloudTaskRun {
+  id: string;
+  task_id: string;
+  conversation_id?: string | null;
+  fired_at: string;
+  outcome: string; // "ok" | "refused_revoked" | "refused_no_balance" | "error"
+  skip_reason?: string | null; // "revoked" | "no_balance" | "tool_withheld" | ...
+  assistant_message_id?: string | null;
+  policy_action?: string | null; // DLP verdict: "allow" | "mask" | "block" | ...
+  tokens?: number | null;
+  error_detail?: string | null;
+}

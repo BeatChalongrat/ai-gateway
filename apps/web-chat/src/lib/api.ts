@@ -29,6 +29,8 @@ import type {
   MessageListResponse,
   ModelListResponse,
   CanvasArtifactRow,
+  CloudTask,
+  CloudTaskRun,
   Project,
   SearchResponse,
   UsageResponse,
@@ -173,6 +175,55 @@ class ApiClient {
   // ----- Usage & credits ------------------------------------
   getUsage() {
     return this.json<UsageResponse>("/usage/me");
+  }
+
+  // ----- Cloud scheduled tasks ------------------------------
+  // Server-side scheduled prompts (chat-edge /cloud-tasks). They fire
+  // even with the computer off, so — unlike the desktop-only LOCAL
+  // tasks over the host bridge — they are managed over plain
+  // cookie-authenticated HTTP and available in the browser too. Read-
+  // only tool set server-side (no local files). raw()/json() carry the
+  // HttpOnly session cookie + the 401→refresh→retry contract as usual.
+  listCloudTasks() {
+    return this.json<{ tasks: CloudTask[]; total: number }>("/cloud-tasks");
+  }
+  createCloudTask(input: {
+    conversationId: string;
+    name: string;
+    prompt: string;
+    intervalSeconds: number;
+    maxRuns?: number | null;
+  }) {
+    return this.json<CloudTask>("/cloud-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        conversation_id: input.conversationId,
+        name: input.name,
+        prompt: input.prompt,
+        interval_seconds: input.intervalSeconds,
+        max_runs: input.maxRuns ?? null,
+      }),
+    });
+  }
+  async setCloudTaskEnabled(id: string, enabled: boolean): Promise<void> {
+    const res = await this.raw(`/cloud-tasks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) {
+      throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+    }
+  }
+  async deleteCloudTask(id: string): Promise<void> {
+    const res = await this.raw(`/cloud-tasks/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+    }
+  }
+  listCloudTaskRuns(id: string) {
+    return this.json<{ runs: CloudTaskRun[]; total: number }>(
+      `/cloud-tasks/${id}/runs`,
+    );
   }
 
   // ----- Conversations --------------------------------------

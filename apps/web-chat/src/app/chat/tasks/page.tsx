@@ -1,14 +1,19 @@
 "use client";
 
-// Scheduled Tasks — desktop-only screen, a React port of the WPF
-// ScheduledTasksViewModel. Talks ONLY to the host over the typed
-// hostApi bridge; there is no HTTP surface for these ops.
+// Scheduled Tasks — two KINDS of task, kept clearly distinguishable:
 //
-// IMPORTANT: scheduled tasks run via an in-process timer inside the
-// host, so they only ever fire while the SRAN Desktop app is open.
-// A task with a nightly cron will not run if the app was closed at
-// that time — this is faithful to the current host behavior and is
-// surfaced to the user in the header note below.
+//   • CLOUD (CloudTasksSection): run SERVER-SIDE on a schedule, so they fire
+//     EVEN WITH THE COMPUTER OFF — but cannot touch local files and run with a
+//     read-only tool set. Managed over plain authenticated HTTP; available in
+//     BOTH the browser and the desktop shell.
+//
+//   • ON THIS DEVICE (LocalTasksSection, below): a React port of the WPF
+//     ScheduledTasksViewModel. Run via an in-process timer INSIDE the host, so
+//     they only ever fire while the SRAN Desktop app is open — but they CAN use
+//     local files. Desktop-only (HOSTED_MODE), talks only to the host bridge.
+//
+// The user chooses the kind (and sees the tradeoff) at create time, via the
+// KindChooser below.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -21,20 +26,157 @@ import { toast } from "@/components/ui/Toast";
 import { HOSTED_MODE } from "@/lib/auth";
 import { hostApi, type TaskDto, type TaskRunDto } from "@/lib/hostApi";
 
+import { CloudTasksSection, KindBadge } from "./CloudTasksSection";
+
 export default function ScheduledTasksPage() {
-  if (!HOSTED_MODE) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-bg-base px-6">
-        <p className="max-w-sm text-center text-sm text-text-muted">
-          This screen is available in the SRAN Desktop app.
-        </p>
-      </div>
-    );
-  }
-  return <ScheduledTasksScreen />;
+  // The create flow starts with a KIND choice so the user sees the tradeoff at
+  // the moment of choosing. Picking a kind bumps that section's create nonce,
+  // which opens its own create form.
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [cloudCreateNonce, setCloudCreateNonce] = useState(0);
+  const [localCreateNonce, setLocalCreateNonce] = useState(0);
+
+  return (
+    <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pt-8 pb-12 md:px-6">
+        <Link
+          href="/chat"
+          className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
+        >
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+          Back to chat
+        </Link>
+
+        <div className="mt-6">
+          <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
+            Scheduled tasks
+          </h1>
+          <p className="mt-1 text-sm text-text-secondary">
+            Have a prompt run automatically on a schedule.
+          </p>
+        </div>
+
+        <CloudTasksSection
+          openCreateNonce={cloudCreateNonce}
+          onRequestCreate={() => setChooserOpen(true)}
+        />
+
+        {HOSTED_MODE ? (
+          <LocalTasksSection
+            openCreateNonce={localCreateNonce}
+            onRequestCreate={() => setChooserOpen(true)}
+          />
+        ) : null}
+      </main>
+
+      <KindChooserModal
+        open={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        onPickCloud={() => {
+          setChooserOpen(false);
+          setCloudCreateNonce((n) => n + 1);
+        }}
+        onPickLocal={() => {
+          setChooserOpen(false);
+          setLocalCreateNonce((n) => n + 1);
+        }}
+      />
+    </div>
+  );
 }
 
-function ScheduledTasksScreen() {
+// ---------------------------------------------------------------------------
+// Kind chooser — the tradeoff is shown right where the user decides. On a
+// plain browser only Cloud is available; the on-device card says why.
+// ---------------------------------------------------------------------------
+
+function KindChooserModal({
+  open,
+  onClose,
+  onPickCloud,
+  onPickLocal,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPickCloud: () => void;
+  onPickLocal: () => void;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="New task"
+      description="Where should this task run?"
+    >
+      <div className="flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={onPickCloud}
+          className="focus-ring flex flex-col items-start gap-1 rounded-lg border border-border bg-bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated"
+        >
+          <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <KindBadge kind="cloud" />
+          </span>
+          <span className="text-xs text-text-secondary">
+            Runs on our servers on schedule, even when your computer is off.
+            Cannot use local files; runs with a read-only tool set.
+          </span>
+        </button>
+
+        {HOSTED_MODE ? (
+          <button
+            type="button"
+            onClick={onPickLocal}
+            className="focus-ring flex flex-col items-start gap-1 rounded-lg border border-border bg-bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated"
+          >
+            <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+              <KindBadge kind="local" />
+            </span>
+            <span className="text-xs text-text-secondary">
+              Runs only while the SRAN Desktop app is open. Can use local files.
+            </span>
+          </button>
+        ) : (
+          <div className="flex flex-col items-start gap-1 rounded-lg border border-dashed border-border bg-transparent px-4 py-3 text-left opacity-70">
+            <span className="flex items-center gap-2 text-sm font-medium text-text-muted">
+              <KindBadge kind="local" />
+            </span>
+            <span className="text-xs text-text-muted">
+              Runs only while the SRAN Desktop app is open, and can use local
+              files. Available in the SRAN Desktop app — not in the browser.
+            </span>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// LOCAL (on-this-device) tasks — the desktop-only host-timer flow. Unchanged
+// behavior from the original page; only lifted into a section that the page
+// renders below the cloud section (and only in HOSTED_MODE).
+// ---------------------------------------------------------------------------
+
+function LocalTasksSection({
+  openCreateNonce,
+  onRequestCreate,
+}: {
+  openCreateNonce: number;
+  onRequestCreate: () => void;
+}) {
   const [tasks, setTasks] = useState<TaskDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -59,10 +201,13 @@ function ScheduledTasksScreen() {
     };
   }, []);
 
-  function openCreate() {
-    setEditing(null);
-    setFormOpen(true);
-  }
+  // Open the create form when the page's chooser routes here.
+  useEffect(() => {
+    if (openCreateNonce > 0) {
+      setEditing(null);
+      setFormOpen(true);
+    }
+  }, [openCreateNonce]);
 
   function openEdit(task: TaskDto) {
     setEditing(task);
@@ -142,82 +287,62 @@ function ScheduledTasksScreen() {
   }
 
   return (
-    <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pt-8 pb-12 md:px-6">
-        <Link
-          href="/chat"
-          className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
-        >
-          <svg
-            width={14}
-            height={14}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
+    <section className="mt-12 border-t border-border/60 pt-10">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-text-primary">
+            On this device
+            <KindBadge kind="local" />
+          </h2>
+          <p className="mt-1 text-sm text-text-secondary">
+            Prompts that run on a schedule inside the desktop app.
+          </p>
+          <p className="mt-2 text-xs text-text-muted">
+            These run only while SRAN Desktop is open (including minimized to
+            the tray). If the app is closed at the scheduled time, the task runs
+            at the next check after you reopen it — it is not run in your
+            absence. A run missed while the app was closed is caught up{" "}
+            <span className="font-medium text-text-secondary">once</span>, for
+            the most recent missed time (within the last 7 days); older missed
+            runs are skipped, not stacked up.
+          </p>
+        </div>
+        {loaded && tasks.length > 0 ? (
+          <button
+            type="button"
+            onClick={onRequestCreate}
+            className="focus-ring inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
           >
-            <path d="M15 6l-6 6 6 6" />
-          </svg>
-          Back to chat
-        </Link>
+            <PlusIcon />
+            New task
+          </button>
+        ) : null}
+      </div>
 
-        <div className="mt-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
-              Scheduled tasks
-            </h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              Prompts that run on a schedule inside the desktop app.
-            </p>
-            <p className="mt-2 text-xs text-text-muted">
-              Scheduled tasks run only while SRAN Desktop is open (including
-              minimized to the tray). If the app is closed at the scheduled
-              time, the task runs at the next check after you reopen it — it is
-              not run in your absence. A run missed while the app was closed is
-              caught up <span className="font-medium text-text-secondary">once</span>, for the
-              most recent missed time (within the last 7 days); older missed runs are skipped, not stacked up.
-            </p>
+      <div className="mt-6">
+        {!loaded ? (
+          <div className="flex items-center justify-center py-10 text-text-secondary">
+            <Spinner size={20} />
           </div>
-          {loaded && tasks.length > 0 ? (
-            <button
-              type="button"
-              onClick={openCreate}
-              className="focus-ring inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
-            >
-              <PlusIcon />
-              New task
-            </button>
-          ) : null}
-        </div>
-
-        <div className="mt-8">
-          {!loaded ? (
-            <div className="flex items-center justify-center py-10 text-text-secondary">
-              <Spinner size={20} />
-            </div>
-          ) : tasks.length === 0 ? (
-            <EmptyState onCreate={openCreate} />
-          ) : (
-            <div className="flex flex-col gap-3">
-              {tasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  running={running[task.id] ?? false}
-                  onRun={() => void handleRun(task)}
-                  onEdit={() => openEdit(task)}
-                  onDelete={() => void handleDelete(task)}
-                  onToggle={(enabled) => void handleToggle(task, enabled)}
-                  onHistory={() => setHistoryTask(task)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
+        ) : tasks.length === 0 ? (
+          <EmptyState onCreate={onRequestCreate} />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {tasks.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                running={running[task.id] ?? false}
+                onRun={() => void handleRun(task)}
+                onEdit={() => openEdit(task)}
+                onDelete={() => void handleDelete(task)}
+                onToggle={(enabled) => void handleToggle(task, enabled)}
+                onHistory={() => setHistoryTask(task)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       <TaskFormModal
         open={formOpen}
@@ -230,7 +355,7 @@ function ScheduledTasksScreen() {
       />
 
       <HistoryModal task={historyTask} onClose={() => setHistoryTask(null)} />
-    </div>
+    </section>
   );
 }
 
@@ -312,11 +437,12 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         <circle cx="12" cy="12" r="9" />
         <path d="M12 7v5l3 2" />
       </svg>
-      <h2 className="text-base font-semibold tracking-tight text-text-primary">
-        No scheduled tasks
-      </h2>
+      <h3 className="text-base font-semibold tracking-tight text-text-primary">
+        No on-device tasks
+      </h3>
       <p className="mx-auto mt-2 max-w-sm text-sm text-text-secondary">
-        Create a task to have a prompt run automatically on a cron schedule.
+        Create a task to have a prompt run automatically on a cron schedule
+        while the desktop app is open.
       </p>
       <button
         type="button"
@@ -356,9 +482,12 @@ function TaskRow({
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-base font-medium text-text-primary">
-            {task.name}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-base font-medium text-text-primary">
+              {task.name}
+            </h3>
+            <KindBadge kind="local" />
+          </div>
           <p className="mt-1 font-mono text-xs text-text-secondary">
             {task.cron}
           </p>
@@ -505,8 +634,8 @@ function TaskFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={task ? "Edit task" : "New task"}
-      description="Runs the prompt on the schedule below"
+      title={task ? "Edit on-device task" : "New on-device task"}
+      description="Runs the prompt on the schedule below, while the app is open"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
