@@ -45,6 +45,14 @@ storage/
 # must never be left to match source by accident.
 !SranDesktop/src/SranDesktop.Tests/Storage/
 !SranDesktop/src/SranDesktop.Tests/Storage/**
+# ...and the fourth occurrence: the platform split moved the C# Storage source
+# into a NEW SranDesktop.Infrastructure.Windows project, and the same broad
+# `storage/` rule swallowed it too — DpapiCredentialStore.cs sat untracked, so
+# a fresh clone of the kept sidecar path would not build. Re-include it, same
+# as the three above. (The broad rule itself should be narrowed to data dirs;
+# that is a separate, reviewable change — not made mid-commit-of-untracked-work.)
+!SranDesktop/src/SranDesktop.Infrastructure.Windows/Storage/
+!SranDesktop/src/SranDesktop.Infrastructure.Windows/Storage/**
 uploads/
 *.sqlite3
 admin-ui/tsconfig.tsbuildinfo
