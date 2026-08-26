@@ -27,8 +27,19 @@ type HostToPage =
   | { type: "consent.request"; payload: ConsentRequest }
   | { type: "session.changed"; payload: unknown }
   | { type: "host.error"; payload: { code: string; message: string } }
+  // FIX22 §2: an informational host → page notice (today: a newer desktop
+  // version exists). Dismissible, never modal; the page decides to show it.
+  | { type: "host.notice"; payload: HostNotice }
   // Phase 5 control reply — correlated to a host.query by requestId.
   | { type: "host.result"; payload: { requestId: string; ok: boolean; data?: unknown; error?: string } };
+
+/** FIX22 §2 — the one notice kind so far. No URL and no file ride with it:
+ *  notification only; the user installs by hand. */
+export interface HostNotice {
+  kind: "update-available";
+  latest: string;
+  current: string;
+}
 
 /** The closed set of host.query operations (Phase 5 §2.2). Mirrors the host's
  *  HostQueryOp enum; the host drops anything outside it. */
@@ -114,6 +125,7 @@ class BridgeClient {
   private sinks = new Map<string, TurnSink>();
   private consentHandlers = new Set<(r: ConsentRequest) => void>();
   private errorHandlers = new Set<(code: string, message: string) => void>();
+  private noticeHandlers = new Set<(n: HostNotice) => void>();
   // In-flight host.query calls, keyed by the requestId the host echoes back.
   private pendingQueries = new Map<string, { resolve: (r: HostResult) => void; timer: ReturnType<typeof setTimeout> }>();
   private queryCounter = 0;
@@ -129,6 +141,7 @@ class BridgeClient {
     this.sinks.clear();
     this.consentHandlers.clear();
     this.errorHandlers.clear();
+    this.noticeHandlers.clear();
     this.pendingQueries.forEach((p) => clearTimeout(p.timer));
     this.pendingQueries.clear();
   }
@@ -184,6 +197,14 @@ class BridgeClient {
       case "host.error":
         this.errorHandlers.forEach((h) => h(msg.payload.code, msg.payload.message));
         return;
+      case "host.notice": {
+        // Shape-check before fan-out: the host is trusted, but a notice with
+        // no version must not render an empty banner.
+        const p = msg.payload;
+        if (!p || p.kind !== "update-available" || typeof p.latest !== "string" || !p.latest || typeof p.current !== "string") return;
+        this.noticeHandlers.forEach((h) => h(p));
+        return;
+      }
       case "host.result": {
         const { requestId, ok, data, error } = msg.payload;
         const pending = this.pendingQueries.get(requestId);
@@ -305,6 +326,12 @@ class BridgeClient {
   onHostError(handler: (code: string, message: string) => void): () => void {
     this.errorHandlers.add(handler);
     return () => this.errorHandlers.delete(handler);
+  }
+
+  /** FIX22 §2: subscribe to host notices (update available). */
+  onHostNotice(handler: (n: HostNotice) => void): () => void {
+    this.noticeHandlers.add(handler);
+    return () => this.noticeHandlers.delete(handler);
   }
 
   private openSink(

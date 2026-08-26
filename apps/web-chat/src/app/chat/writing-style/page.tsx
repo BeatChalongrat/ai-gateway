@@ -84,7 +84,9 @@ function WritingStyleScreen() {
         setProfile(value);
         toast(successMsg);
       } else {
-        toast("Couldn't save.");
+        // FIX22 §1a: the host refuses a profile that would trip the gateway's
+        // content guardrail on every turn, and says WHICH phrase — show it.
+        toast(res.error && res.error.startsWith("Error:") ? res.error : "Couldn't save.");
       }
     } catch {
       toast("Couldn't save.");

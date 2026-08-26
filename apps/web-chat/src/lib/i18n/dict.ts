@@ -225,6 +225,18 @@ export const en = {
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
+  // FIX22 §1c — local (this-computer) agent notes on the Memory page
+  "memory.local.title": "Notes on this computer",
+  "memory.local.description": "Saved by the desktop assistant's remember tool and stored only on this computer. They are added to every desktop conversation like the memories above.",
+  "memory.local.empty": "No notes saved on this computer.",
+  "memory.local.delete": "Delete",
+  "memory.local.toastDeleted": "Note deleted.",
+  "memory.local.toastDeleteError": "Couldn't delete that note.",
+  "memory.local.loadError": "Couldn't load the notes on this computer.",
+  // FIX22 §2 — desktop update notice
+  "update.available": "SRAN Desktop {latest} is available (you have {current}).",
+  "update.howTo": "Ask your administrator for the installer; this app does not download updates.",
+  "update.desktopDismiss": "Dismiss this update notice",
   "memory.title": "Memory",
   "memory.description":
     "SRAN Chat remembers facts from your conversations to personalize future responses.",
@@ -1156,6 +1168,16 @@ const th: Record<DictKey, string> = {
 
   // Memory page
   "memory.back": "กลับไปแชท",
+  "memory.local.title": "บันทึกบนเครื่องนี้",
+  "memory.local.description": "บันทึกโดยเครื่องมือ remember ของผู้ช่วยบนเดสก์ท็อป และเก็บไว้บนเครื่องนี้เท่านั้น ถูกใส่ในทุกบทสนทนาบนเดสก์ท็อปเหมือนความจำด้านบน",
+  "memory.local.empty": "ยังไม่มีบันทึกบนเครื่องนี้",
+  "memory.local.delete": "ลบ",
+  "memory.local.toastDeleted": "ลบบันทึกแล้ว",
+  "memory.local.toastDeleteError": "ลบบันทึกไม่สำเร็จ",
+  "memory.local.loadError": "โหลดบันทึกบนเครื่องนี้ไม่สำเร็จ",
+  "update.available": "SRAN Desktop {latest} พร้อมใช้งานแล้ว (เวอร์ชันของคุณ {current})",
+  "update.howTo": "ขอตัวติดตั้งจากผู้ดูแลระบบ แอปนี้ไม่ดาวน์โหลดอัปเดตเอง",
+  "update.desktopDismiss": "ปิดการแจ้งเตือนอัปเดตนี้",
   "memory.title": "ความจำ",
   "memory.description":
     "SRAN Chat จดจำข้อมูลจากการสนทนาเพื่อปรับคำตอบให้เหมาะกับคุณ",

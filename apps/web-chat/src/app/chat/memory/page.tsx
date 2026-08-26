@@ -29,6 +29,7 @@ import {
 
 import { MemoryCard } from "@/components/chat/MemoryCard";
 import { MemoryFormDialog } from "@/components/chat/MemoryFormDialog";
+import { LocalNotesSection } from "@/components/chat/LocalNotesSection";
 import { PendingPreferenceCard } from "@/components/chat/PendingPreferenceCard";
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { Modal } from "@/components/ui/Modal";
@@ -420,6 +421,13 @@ export default function MemorySettingsPage() {
             )}
           </div>
         </section>
+
+        {/* FIX22 §1c — the notes the desktop agent's `remember` tool saves on
+            THIS computer (the sidecar's local store). They are folded into
+            every desktop turn's prompt exactly like the memories above, but
+            before FIX22 no screen listed them — a poisoned note could not be
+            found or deleted. Hosted mode only (a browser has no local store). */}
+        <LocalNotesSection />
 
         <Divider />
 

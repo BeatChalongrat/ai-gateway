@@ -11,6 +11,7 @@ import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 import { CreditBadge } from "@/components/chat/CreditBadge";
 import { ShortcutsDialog } from "@/components/chat/ShortcutsDialog";
 import { Sidebar } from "@/components/chat/Sidebar";
+import { UpdateBanner } from "@/components/chat/UpdateBanner";
 import { Spinner } from "@/components/ui/Spinner";
 import {
   useKeyboardShortcuts,
@@ -191,6 +192,10 @@ export default function ChatLayout({
             }}
           />
         </div>
+
+        {/* FIX22 §2 — desktop update notice (hosted mode only; renders
+            nothing in a plain browser or when nothing is published). */}
+        <UpdateBanner />
 
         {children}
 
