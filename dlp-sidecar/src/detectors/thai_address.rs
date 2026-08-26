@@ -4,6 +4,12 @@
 //! through end of group 2 of the regex match (Python: m.start(1),
 //! m.end(2)).
 //!
+//! Precision/recall stance (FIX23/FIX23b): fires only when the body
+//! looks like a postal address (house number near the keyword AND an
+//! address component or postcode). Known gaps accepted pending owner
+//! review: building/condo/village/estate-only addresses, bare province
+//! names, no house number, >30-char prose gap before the number.
+//!
 //! FIX23 — the body must (a) carry a digit within 30 chars of the
 //! keyword (house number) AND (b) contain an address component on the
 //! same line (ถนน/ซอย/หมู่/ตำบล/อำเภอ/จังหวัด/แขวง/เขต/กรุงเทพ/กทม or a

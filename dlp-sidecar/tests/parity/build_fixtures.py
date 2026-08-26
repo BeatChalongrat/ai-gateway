@@ -440,6 +440,30 @@ SPECS = [
             Case("fix23_recall_question_prose", "เลขที่ให้จำเมื่อกี้คืออะไร", False),
             Case("fix23_where_is_it", "ตอนนี้อยู่ที่ไหน", False),
             Case("fix23_answer_quoting_number", "เลขที่ให้จำคือ **74-กระต่าย-2951**", False),
+            # FIX23b §2 — recall probes. expected_count is whatever the
+            # Python detector does TODAY (parity contract), NOT the intent;
+            # intent lives in backend/tests/test_dlp_detectors/
+            # test_thai_address_recall.py (xfail = accepted gap).
+            Case("fix23b_road_only", "บ้านเลขที่ 12 ถนนพระราม 4", True),
+            Case("fix23b_condo_only", "ที่อยู่ 199/22 คอนโดลุมพินี", False),
+            Case("fix23b_building_floor", "ส่งที่ 12 อาคารเอ ชั้น 5", False),
+            Case("fix23b_village", "บ้านเลขที่ 45/6 หมู่บ้านสัมมากร", True),
+            Case("fix23b_province_bare", "อยู่ที่ 77/1 บางใหญ่ นนทบุรี", False),
+            Case("fix23b_soi_abbrev", "ที่อยู่ 5 ซ.ลาดพร้าว 101", True),
+            Case("fix23b_thai_digits", "บ้านเลขที่ ๙๙/๘๘ ถนนสีลม", True),
+            Case("fix23b_postcode_only", "ส่งที่ 88 มัณฑนา 10540", True),
+            Case("fix23b_abbrev_m_t", "ที่อยู่ 45 ม.7 ต.บางพลี", True),
+            Case("fix23b_english_building", "ที่อยู่ 199/22 Lumpini Condo", False),
+            Case("fix23b_long_prose_gap", "ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", False),
+            Case("fix23b_amphoe_word", "อยู่ที่ 10 อำเภอเมือง เชียงใหม่", True),
+            Case("fix23b_building_room", "ส่งที่ 23 ตึกบี ห้อง 402", False),
+            Case("fix23b_condo_postcode", "ที่อยู่ 199/22 คอนโดลุมพินี 10120", True),
+            Case("fix23b_industrial_estate", "อยู่ที่ 55 นิคมอุตสาหกรรมอมตะ ชลบุรี", False),
+            Case("fix23b_district_only", "บ้านเลขที่ 12/3 แขวงบางนา", True),
+            Case("fix23b_no_house_number", "ที่อยู่ ถนนสุขุมวิท กรุงเทพ", False),
+            Case("fix23b_room_tower", "ส่งที่ คอนโดไอดีโอ ตึก A ห้อง 1205", False),
+            Case("fix23b_apartment", "อยู่ที่ 9/1 อพาร์ทเม้นท์สุขใจ", False),
+            Case("fix23b_moo_number", "บ้านเลขที่ 3 หมู่ 5 ตำบลบางรัก", True),
             Case("fix23_company_address_question", "ที่อยู่ของบริษัทคืออะไร", False),
             Case(
                 "fix23_registered_address_prose_then_number",

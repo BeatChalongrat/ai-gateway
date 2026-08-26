@@ -62,6 +62,196 @@
       "expected_spans": []
     },
     {
+      "id": "fix23b_road_only",
+      "input": "บ้านเลขที่ 12 ถนนพระราม 4",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "fix23b_condo_only",
+      "input": "ที่อยู่ 199/22 คอนโดลุมพินี",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_building_floor",
+      "input": "ส่งที่ 12 อาคารเอ ชั้น 5",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_village",
+      "input": "บ้านเลขที่ 45/6 หมู่บ้านสัมมากร",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 31
+        }
+      ]
+    },
+    {
+      "id": "fix23b_province_bare",
+      "input": "อยู่ที่ 77/1 บางใหญ่ นนทบุรี",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_soi_abbrev",
+      "input": "ที่อยู่ 5 ซ.ลาดพร้าว 101",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "fix23b_thai_digits",
+      "input": "บ้านเลขที่ ๙๙/๘๘ ถนนสีลม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "fix23b_postcode_only",
+      "input": "ส่งที่ 88 มัณฑนา 10540",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 22
+        }
+      ]
+    },
+    {
+      "id": "fix23b_abbrev_m_t",
+      "input": "ที่อยู่ 45 ม.7 ต.บางพลี",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 23
+        }
+      ]
+    },
+    {
+      "id": "fix23b_english_building",
+      "input": "ที่อยู่ 199/22 Lumpini Condo",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_long_prose_gap",
+      "input": "ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_amphoe_word",
+      "input": "อยู่ที่ 10 อำเภอเมือง เชียงใหม่",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 31
+        }
+      ]
+    },
+    {
+      "id": "fix23b_building_room",
+      "input": "ส่งที่ 23 ตึกบี ห้อง 402",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_condo_postcode",
+      "input": "ที่อยู่ 199/22 คอนโดลุมพินี 10120",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 33
+        }
+      ]
+    },
+    {
+      "id": "fix23b_industrial_estate",
+      "input": "อยู่ที่ 55 นิคมอุตสาหกรรมอมตะ ชลบุรี",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_district_only",
+      "input": "บ้านเลขที่ 12/3 แขวงบางนา",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "fix23b_no_house_number",
+      "input": "ที่อยู่ ถนนสุขุมวิท กรุงเทพ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_room_tower",
+      "input": "ส่งที่ คอนโดไอดีโอ ตึก A ห้อง 1205",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_apartment",
+      "input": "อยู่ที่ 9/1 อพาร์ทเม้นท์สุขใจ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix23b_moo_number",
+      "input": "บ้านเลขที่ 3 หมู่ 5 ตำบลบางรัก",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 30
+        }
+      ]
+    },
+    {
       "id": "fix23_company_address_question",
       "input": "ที่อยู่ของบริษัทคืออะไร",
       "should_match": false,
