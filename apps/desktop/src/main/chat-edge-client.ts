@@ -33,6 +33,15 @@ export interface MemoryDto {
   content: string;
   created_at?: string;
 }
+/** FIX27: one row of GET /conversations/{id}/files (handler.fileResponse). */
+export interface FileRowDto {
+  id: string;
+  filename: string;
+  content_type: string;
+  file_size_bytes: number;
+  extraction_status: string;
+  message_id?: string;
+}
 export interface ImportMessageItem {
   client_id: string;
   role: "user" | "assistant";
@@ -173,6 +182,42 @@ export class ChatEdgeClient {
       return j.id ?? null;
     } catch (err) {
       this.log.warn(`chat-edge OCR upload failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /** FIX27: the files of a conversation — the ONLY way an attachment handle is
+   * resolved (a handle is a chat-edge file id, never a path). */
+  async listFiles(conversationId: string): Promise<FileRowDto[] | null> {
+    const r = await this.get<{ files?: FileRowDto[] }>(`/api/v1/conversations/${encodeURIComponent(conversationId)}/files`);
+    return r && Array.isArray(r.files) ? r.files : null;
+  }
+
+  /** FIX27: the bytes of an uploaded image, for the vision block. Bounded
+   * (25 MB, 60 s); the presigned-S3 307 is followed by fetch, which drops the
+   * Authorization header on the cross-origin hop. */
+  async downloadFileBytes(fileId: string): Promise<{ bytes: Buffer; mime: string } | null> {
+    const token = this.accessToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/files/${encodeURIComponent(fileId)}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) {
+        this.log.warn(`chat-edge file download ${fileId} → HTTP ${res.status}`);
+        return null;
+      }
+      const len = Number(res.headers.get("content-length") ?? "0");
+      if (len > 25 * 1024 * 1024) {
+        this.log.warn(`chat-edge file download ${fileId}: ${len} bytes exceeds the 25 MB attachment bound`);
+        return null;
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > 25 * 1024 * 1024) return null;
+      return { bytes: buf, mime: (res.headers.get("content-type") ?? "").split(";")[0]!.trim() };
+    } catch (err) {
+      this.log.warn(`chat-edge file download ${fileId} failed: ${(err as Error).message}`);
       return null;
     }
   }

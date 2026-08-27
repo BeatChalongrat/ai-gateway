@@ -29,11 +29,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { BridgeChannel } from "./bridge";
 import type { ChatEdgeClient, ConversationDto } from "./chat-edge-client";
-import type { GatewayClient, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
+import type { GatewayClient, GatewayContentBlock, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
 import type { GrantStore } from "./grants";
 import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, type NestedRunRequest, type NestedRunResult } from "./host-tools";
 import type { Logger } from "./logger";
 import { LiveApprovalMode, parseStoredApprovalMode } from "./approval-mode";
+import { composeUserContent, pruneAttachedImages, resolveAttachments, type ImageEncoder, type ResolvedAttachments } from "./attachments";
 import {
   applyApprovalMode,
   BROWSER_SITE_PERM,
@@ -108,6 +109,10 @@ export interface TurnCoordinatorOptions {
   /** FIX22 §2: the update notifier's page-ready hook (repost a pending notice
    * after a reload; first check once the page is up). */
   onPageReady?: () => void;
+  /** FIX27 Part 1: bytes → data URI for an attached image (Electron nativeImage
+   * in index.ts; the pure tests pass a stub). Absent → images are reported as
+   * unreadable, never silently dropped. */
+  encodeImage?: ImageEncoder;
 }
 
 // FIX3 §4: the sentinel the sidecar's read_document returns for a scanned PDF it
@@ -135,6 +140,8 @@ const UPDATE_TASK_SCHEDULE_TOOL: GatewayToolDefinition = {
 
 const MAX_OUTPUT_TOKENS = 8192;
 const KEEP_SCREENSHOTS = 3;
+// FIX27: attached images kept in the chain (chat-edge replays at most 5 history images).
+const KEEP_ATTACHED_IMAGES = 5;
 const SCREENSHOT_MARKER = "[Screenshot from";
 
 export class TurnCoordinator {
@@ -621,8 +628,13 @@ export class TurnCoordinator {
 
     let messages: GatewayMessage[];
     let userText = payload.text;
+    let attached: ResolvedAttachments | null = null;
     try {
-      const built = await this.buildMessages(conversationId, conversation, payload.text);
+      // FIX27 Part 1: attachments are content on THIS user message — resolved by
+      // opaque chat-edge id (never a path), images as image_url blocks,
+      // documents as the untrusted-observation envelope chat-edge uses.
+      attached = await this.resolveTurnAttachments(conversationId, payload.attachmentHandles, signal);
+      const built = await this.buildMessages(conversationId, conversation, payload.text, attached);
       messages = built.messages;
       userText = built.userText;
     } catch (err) {
@@ -642,7 +654,11 @@ export class TurnCoordinator {
     const isFirstTurn = messages.length === 2;
     const historyStart = 1; // everything after the system message is persisted
     const chainStart = messages.length; // where this turn's chain begins
-    this.log.info(`TURN START #${turnNo} conv=${conversationId} model=${model} msgId=${turn.messageId} textLen=${payload.text.length} attachments=${payload.attachmentHandles.length}${payload.attachmentHandles.length ? " (ignored: no attachment tools yet)" : ""}`);
+    this.log.info(`TURN START #${turnNo} conv=${conversationId} model=${model} msgId=${turn.messageId} textLen=${payload.text.length} attachments=${payload.attachmentHandles.length}${attached && payload.attachmentHandles.length ? ` (${attached.imageBlocks.length} image, ${attached.attached.length - attached.imageBlocks.length} document, ${attached.failures.length} failed → on the user message)` : ""}`);
+    if (attached && attached.failures.length > 0) {
+      // Never drop a file silently: the page shows the names (same event web-chat uses).
+      this.emit(conversationId, "image_notice", { filenames: attached.failures.map((f) => f.filename) });
+    }
     this.log.info(`TURN OUTBOUND conv=${conversationId}: ${messages.length} msg → [${describe(messages)}]`);
 
     // FIX9 Part B: image mode (the 🎨 button) — bias the model to call generate_image
@@ -671,7 +687,7 @@ export class TurnCoordinator {
     // included), and the visible text to chat-edge. On cancel too (Phase 6a
     // P1: a cancelled turn must be resumable).
     this.saveLocalHistory(conversationId, messages.slice(historyStart));
-    await this.importVisible(conversationId, userText, turn, model, messages.slice(chainStart));
+    await this.importVisible(conversationId, userText, turn, model, messages.slice(chainStart), attached?.fileIds ?? []);
 
     if (outcome === "error") return;
     if (outcome === "cancelled") {
@@ -790,6 +806,7 @@ export class TurnCoordinator {
       iteration++;
       if (!run.parentToolCallId) this.emit(eventConv, "status", { status: iteration === 1 ? "thinking" : `continuing (step ${iteration})`, iteration, max: run.maxIterations });
       pruneScreenshots(run.messages, KEEP_SCREENSHOTS);
+      pruneAttachedImages(run.messages, KEEP_ATTACHED_IMAGES, isScreenshotMessage);
 
       const calls = new Map<number, { id: string; name: string; args: string }>();
       let errored = false;
@@ -1406,7 +1423,21 @@ export class TurnCoordinator {
     }
   }
 
-  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string): Promise<{ messages: GatewayMessage[]; userText: string }> {
+  /** FIX27 Part 1: resolve this turn's attachment handles against chat-edge. A
+   * failure to resolve is reported (log + image_notice), never a path lookup. */
+  private async resolveTurnAttachments(conversationId: string, handles: readonly string[], signal: AbortSignal): Promise<ResolvedAttachments | null> {
+    if (handles.length === 0) return null;
+    const encode: ImageEncoder = this.opts.encodeImage ?? (async () => null);
+    const resolved = await resolveAttachments(this.chatEdge, encode, conversationId, handles, {
+      log: this.log,
+      signal,
+      onStatus: (text) => this.emit(conversationId, "status", { status: text }),
+    });
+    for (const a of resolved.attached) this.log.info(`ATTACH conv=${conversationId}: ${a.kind} ${a.filename} (${a.id}) → user message`);
+    return resolved;
+  }
+
+  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string, attached: ResolvedAttachments | null = null): Promise<{ messages: GatewayMessage[]; userText: string }> {
     let project = null;
     if (conversation?.project_id) {
       const projects = await this.chatEdge.listProjects();
@@ -1486,12 +1517,17 @@ export class TurnCoordinator {
       history = history.slice(0, cut);
     }
     for (const m of history) messages.push(m);
-    messages.push({ role: "user", content: userText });
+    messages.push({ role: "user", content: attached ? composeUserContent(userText, attached) : userText });
     // FIX22 §1b: remember what user-data went into this prompt, labelled, so a
     // guardrail 403 can be explained. The gateway scans EVERY user+system
     // message, so earlier user turns are parts too. Order = most actionable
     // first (this message, then stored sources, then history).
     const parts: PromptPart[] = [{ ...PROMPT_PART.userMessage, text: userText }, ...assembled.parts];
+    // FIX27: a poisoned document is a prompt part too — a guardrail 403 names it.
+    if (attached?.observations) {
+      const names = attached.attached.filter((a) => a.kind === "document").map((a) => a.filename);
+      parts.splice(1, 0, { ...PROMPT_PART.attachedFile(names.join(", ")), text: attached.observations });
+    }
     for (const m of history) {
       if (m.role === "user" && typeof m.content === "string") parts.push({ ...PROMPT_PART.earlierMessage, text: m.content });
     }
@@ -1499,11 +1535,13 @@ export class TurnCoordinator {
     return { messages, userText };
   }
 
-  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[]): Promise<void> {
-    if (userText.length === 0 && turn.assistantText.length === 0) return;
+  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = []): Promise<void> {
+    if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0) return;
     const now = new Date().toISOString();
     const items = [];
-    if (userText.length > 0) items.push({ client_id: "u_" + turn.messageId.slice(5), role: "user" as const, content: userText, model_id: null, created_at: now });
+    // FIX27: file_ids link the uploaded rows to this user message on chat-edge
+    // (the web view shows the chips; a web continuation replays the images).
+    if (userText.length > 0 || fileIds.length > 0) items.push({ client_id: "u_" + turn.messageId.slice(5), role: "user" as const, content: userText, model_id: null, created_at: now, ...(fileIds.length ? { file_ids: fileIds } : {}) });
     if (turn.assistantText.length > 0) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: model, created_at: new Date(Date.now() + 1).toISOString() });
     void chain;
     const result = await this.chatEdge.importMessages(conversationId, items);
@@ -1556,11 +1594,18 @@ function screenshotMessage(toolName: string, dataUri: string): GatewayMessage {
     ],
   };
 }
+/** A computer-use screenshot message (screenshotMessage above) — as opposed to
+ * a user attachment, which FIX27 prunes separately (pruneAttachedImages). */
+function isScreenshotMessage(m: { role: string; content: unknown }): boolean {
+  if (m.role !== "user" || !Array.isArray(m.content)) return false;
+  const text = (m.content as GatewayContentBlock[]).find((b) => b.type === "text");
+  return !!text && text.type === "text" && text.text.startsWith(SCREENSHOT_MARKER);
+}
 /** ScreenshotPruner: keep the last N screenshot images; older ones become a placeholder. */
 function pruneScreenshots(messages: GatewayMessage[], keep: number): void {
   const idx: number[] = [];
   messages.forEach((m, i) => {
-    if (m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "image_url")) idx.push(i);
+    if (isScreenshotMessage(m) && Array.isArray(m.content) && m.content.some((b) => b.type === "image_url")) idx.push(i);
   });
   for (const i of idx.slice(0, Math.max(0, idx.length - keep))) {
     const m = messages[i]!;

@@ -51,6 +51,7 @@ import { SessionController, type ViewState } from "./session-controller";
 import { SessionStore } from "./session-store";
 import { TurnCoordinator } from "./turn-coordinator";
 import { UpdateNotifier } from "./update-check";
+import { encodeImageForVision } from "./image-encoder";
 import { ApprovalModeResetter } from "./approval-mode";
 import { buildWebPreferences } from "./web-preferences";
 import { BRIDGE_SURFACE_MEMBERS } from "../shared/bridge-surface";
@@ -249,6 +250,7 @@ void app.whenReady().then(async () => {
       ...(flags.model && !isRelease ? { forceModel: flags.model } : {}),
       approvalMode: config.approvalMode,
       promptGuard,
+      encodeImage: encodeImageForVision, // FIX27: attached images → vision blocks (nativeImage)
       onPageReady: () => {
         updateNotifier.onPageReady();
         modeResetter.onPageReady();
