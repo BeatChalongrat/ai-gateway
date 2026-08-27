@@ -100,10 +100,14 @@ class ProviderDispatcher:
         # can't be acquired in time.
         from app.services.providers.concurrency import provider_slot
 
+        # FIX27 Part 2: the gateway states the model's identity on the prompt
+        # for THIS attempt (fallback hops re-enter here with their own route).
+        from app.services.model_identity import inject_model_identity
+
         async with provider_slot(route.provider_name):
             return await adapter.chat(
                 payload=payload,
-                messages=messages,
+                messages=inject_model_identity(messages, route.model_name, route.provider_name),
                 resolved_model=route.model_name,
                 api_key=api_key,
             )

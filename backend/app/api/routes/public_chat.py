@@ -2128,10 +2128,17 @@ async def _chat_completions_impl(
                         guarded_stream as _guarded_stream,
                     )
 
+                    # FIX27 Part 2: state the model's identity on the prompt for
+                    # THIS attempt (re-done on a fallback swap, so a different
+                    # model never inherits the failed one's name).
+                    from app.services.model_identity import inject_model_identity
+                    _attempt_messages = inject_model_identity(
+                        messages_to_send, route.model_name, route.provider_name
+                    )
                     async for chunk in _guarded_stream(
                         route.provider_name,
                         lambda: stream_adapter.stream_chat(
-                            payload, messages_to_send,
+                            payload, _attempt_messages,
                             resolved_model=route.model_name,
                             api_key=stream_api_key,
                         ),
