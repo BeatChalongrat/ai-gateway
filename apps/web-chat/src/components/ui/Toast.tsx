@@ -98,13 +98,26 @@ export function ToastViewport({ duration = 2500 }: { duration?: number }) {
   const sidebarOffset = isDesktop && !collapsed ? SIDEBAR_DESKTOP_WIDTH / 2 : 0;
   return (
     <div
-      className="toast-appear pointer-events-none fixed bottom-6 z-50 -translate-x-1/2 rounded-full border border-border bg-bg-surface/95 px-4 py-2 text-xs text-text-primary shadow-2xl backdrop-blur-sm"
+      className={`toast-appear fixed bottom-6 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-bg-surface/95 px-4 py-2 text-xs text-text-primary shadow-2xl backdrop-blur-sm ${action ? "pointer-events-auto" : "pointer-events-none"}`}
       style={{ left: `calc(50% + ${sidebarOffset}px)` }}
       role="status"
       aria-live="polite"
       key={nonce}
     >
-      {message}
+      <span>{message}</span>
+      {action ? (
+        // FIX27 §2.2 — the way out, one click (e.g. "Switch to GPT 5.6 Terra").
+        <button
+          type="button"
+          onClick={() => {
+            action.onClick();
+            clear();
+          }}
+          className="shrink-0 rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500"
+        >
+          {action.label}
+        </button>
+      ) : null}
     </div>
   );
 }
