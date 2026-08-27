@@ -17,7 +17,7 @@
 // (§1c.3 — the host enforces that; this only tells the user).
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { AlertTriangle, FastForward, Hand } from "lucide-react";
 
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { bridge } from "@/lib/bridge";
@@ -27,6 +27,11 @@ import type { DictKey } from "@/lib/i18n/dict";
 import { toast } from "@/components/ui/Toast";
 
 export type PermissionMode = "manual" | "auto" | "skip";
+
+// FIX26 Part 4 — one distinct mark per mode (the benchmark's): a hand for
+// manual ("stop and ask"), a fast-forward for auto, the amber triangle for
+// skip. The same icon on the pill and in the menu.
+const MODE_ICONS: Record<PermissionMode, typeof Hand> = { manual: Hand, auto: FastForward, skip: AlertTriangle };
 
 export const PERMISSION_MODES: { id: PermissionMode; labelKey: DictKey; hintKey: DictKey }[] = [
   { id: "manual", labelKey: "perm.mode.manual", hintKey: "perm.mode.manual.hint" },
@@ -130,11 +135,10 @@ export function PermissionModeSelector({ disabled }: { disabled?: boolean }) {
         data-testid="permission-mode-trigger"
         data-mode={mode ?? ""}
       >
-        {isSkip ? (
-          <AlertTriangle width={12} height={12} aria-hidden />
-        ) : (
-          <ShieldCheck width={12} height={12} className="text-text-tertiary" aria-hidden />
-        )}
+        {(() => {
+          const Icon = mode ? MODE_ICONS[mode] : Hand;
+          return <Icon width={12} height={12} className={isSkip ? undefined : "text-text-tertiary"} aria-hidden />;
+        })()}
         <span className={`font-medium ${isSkip ? "" : "text-text-primary"}`}>
           {current ? t(current.labelKey) : t("perm.mode.label")}
         </span>
@@ -180,11 +184,10 @@ export function PermissionModeSelector({ disabled }: { disabled?: boolean }) {
                     }`}
                   >
                     <span className="mt-0.5 shrink-0">
-                      {warn ? (
-                        <AlertTriangle width={14} height={14} className="text-amber-500" aria-hidden />
-                      ) : (
-                        <ShieldCheck width={14} height={14} className={active ? "text-text-primary" : "text-text-tertiary"} aria-hidden />
-                      )}
+                      {(() => {
+                        const Icon = MODE_ICONS[m.id];
+                        return <Icon width={14} height={14} className={warn ? "text-amber-500" : active ? "text-text-primary" : "text-text-tertiary"} aria-hidden />;
+                      })()}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className={`block font-medium ${warn ? "text-amber-500" : "text-text-primary"}`}>{t(m.labelKey)}</span>
