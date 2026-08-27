@@ -823,6 +823,10 @@ SPECS = [
             Case("nayok_compound_no_match", "นายกรัฐมนตรี กล่าวต่อ", False),
             Case("nay_pol_compound_no_match", "นายพล ผู้บัญชาการ", False),
             Case("plain_prose_no_match", "วันนี้ฝนตก", False),
+            # FIX28 — live FP: "คุณ" + a verb is address, never a name
+            Case("fix28_khun_verb_no_mask", "คำตอบแรกที่คุณตอบผมคืออะไร ตอบสั้นๆ", False),
+            Case("fix28_khun_think_no_mask", "คุณคิดว่าอันไหนดีกว่ากัน", False),
+            Case("fix28_khun_real_name_still_masks", "ลูกค้าชื่อคุณสมชาย ใจดี โทรมา", True),
         ],
     ),
     DetectorSpec(

@@ -155,6 +155,32 @@
       "should_match": false,
       "expected_count": 0,
       "expected_spans": []
+    },
+    {
+      "id": "fix28_khun_verb_no_mask",
+      "input": "คำตอบแรกที่คุณตอบผมคืออะไร ตอบสั้นๆ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix28_khun_think_no_mask",
+      "input": "คุณคิดว่าอันไหนดีกว่ากัน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix28_khun_real_name_still_masks",
+      "input": "ลูกค้าชื่อคุณสมชาย ใจดี โทรมา",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 23
+        }
+      ]
     }
   ]
 }
