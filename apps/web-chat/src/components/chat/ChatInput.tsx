@@ -987,7 +987,11 @@ export function ChatInput({
             />
           </div>
 
-          {/* Row 2: attach (left) · model + send (right) */}
+          {/* Row 2: attach · folders · permission mode (left) · model + send (right).
+              Left is what you bring INTO the turn and under what rules (content,
+              folders, permission mode); right is how it goes OUT (image/video
+              mode, model, voice, send). FIX25b moved the two desktop controls
+              left for that reason — keep constraints-on-the-turn here. */}
           <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
             {/* Left — attach button. The plus mark replaces the
                 paperclip per the Claude reference; same behaviour.
@@ -997,7 +1001,7 @@ export function ChatInput({
                 onRequestConversation before kicking off the upload.
                 Hidden only when no upload path is wired (no
                 conversation in props AND no provider callback). */}
-            <div className="flex items-center">
+            <div className="flex min-w-0 items-center gap-1.5">
               {conversationId || onRequestConversation ? (
                 <button
                   type="button"
@@ -1016,6 +1020,15 @@ export function ChatInput({
                     />
                   </svg>
                 </button>
+              ) : null}
+              {/* FIX25/25b — desktop only: the granted folders and the permission
+                  mode (both render nothing in a plain browser). Control-plane
+                  ops only; the model never sees them. */}
+              {hosted ? (
+                <>
+                  <FolderChip disabled={disabled} />
+                  <PermissionModeSelector disabled={disabled} />
+                </>
               ) : null}
             </div>
 
@@ -1090,15 +1103,6 @@ export function ChatInput({
                 >
                   <Clapperboard className="h-[18px] w-[18px]" aria-hidden />
                 </button>
-              ) : null}
-              {/* FIX25 — desktop only: the granted folders and the permission
-                  mode, beside the model picker (both render nothing in a plain
-                  browser). Control-plane ops only; the model never sees them. */}
-              {hosted ? (
-                <>
-                  <FolderChip disabled={disabled} />
-                  <PermissionModeSelector disabled={disabled} />
-                </>
               ) : null}
               <ModelSelector
                 activeModelId={activeModelId}
