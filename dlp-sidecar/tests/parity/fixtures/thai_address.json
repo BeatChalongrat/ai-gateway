@@ -5,6 +5,108 @@
   "severity": 2,
   "cases": [
     {
+      "id": "fix26_high_thi_yu_condo_masks",
+      "input": "ที่อยู่ 199/22 คอนโดลุมพินี",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 27
+        }
+      ]
+    },
+    {
+      "id": "fix26_high_thi_yu_english_building_masks",
+      "input": "ที่อยู่ 199/22 Lumpini Condo",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "id": "fix26_high_ban_lek_thi_village_masks",
+      "input": "บ้านเลขที่ 45/6 หมู่บ้านสัมมากร",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 31
+        }
+      ]
+    },
+    {
+      "id": "fix26_high_thi_yu_colon_masks",
+      "input": "ที่อยู่: 88/1 เดอะทรัสต์",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "fix26_glued_thi_yu_with_component_masks",
+      "input": "จำที่อยู่ 99/88 ถนนสุขุมวิท 10110 ไว้",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 2,
+          "end": 33
+        }
+      ]
+    },
+    {
+      "id": "fix26_ambig_song_thi_building_no_component",
+      "input": "ส่งที่ 12 อาคารเอ ชั้น 5",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_ambig_yu_thi_bare_province",
+      "input": "อยู่ที่ 77/1 บางใหญ่ นนทบุรี",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_ambig_lek_thi_prose",
+      "input": "เลขที่ให้จำเมื่อกี้คืออะไร",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_thi_yu_relative_clause_no_mask",
+      "input": "สินค้าที่อยู่ในคลังมี 120 ชิ้น",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_thi_yu_locative_prep_no_mask",
+      "input": "ที่อยู่ใน 3 อันดับแรก",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_thi_yu_no_digit_no_mask",
+      "input": "ที่อยู่ของบริษัทคืออะไร ต้องไปเอาจากหน้าไหน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
       "id": "thai_address_full",
       "input": "ที่อยู่ 123/45 ซอย 7 ถนนสุขุมวิท กรุงเทพ 10110 ครับ",
       "should_match": true,
@@ -76,9 +178,14 @@
     {
       "id": "fix23b_condo_only",
       "input": "ที่อยู่ 199/22 คอนโดลุมพินี",
-      "should_match": false,
-      "expected_count": 0,
-      "expected_spans": []
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 27
+        }
+      ]
     },
     {
       "id": "fix23b_building_floor",
@@ -157,9 +264,14 @@
     {
       "id": "fix23b_english_building",
       "input": "ที่อยู่ 199/22 Lumpini Condo",
-      "should_match": false,
-      "expected_count": 0,
-      "expected_spans": []
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 28
+        }
+      ]
     },
     {
       "id": "fix23b_long_prose_gap",

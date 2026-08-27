@@ -5,6 +5,89 @@
   "severity": 3,
   "cases": [
     {
+      "id": "fix26_khun_no_surname_masks",
+      "input": "ฝากบอกคุณสมชายด้วย",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "fix26_khun_surname_masks",
+      "input": "คุณสมหญิง รักดี โทรมา",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "id": "fix26_compound_title_masks",
+      "input": "ผศ.ดร. สมศักดิ์ มากมี",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "fix26_trailing_label_trimmed",
+      "input": "คุณสมหญิง จำนวน 10,000 บาท",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 9
+        }
+      ]
+    },
+    {
+      "id": "fix26_khob_khun_mak_no_mask",
+      "input": "ขอบคุณมากครับ ช่วยได้เยอะเลย",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khob_khun_na_no_mask",
+      "input": "เยี่ยมมาก 👍 ขอบคุณนะ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khun_keu_krai_no_mask",
+      "input": "คุณคือใคร ชื่ออะไร",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khun_tham_no_mask",
+      "input": "คุณทำอะไรได้บ้าง",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khun_thi_rak_no_mask",
+      "input": "คุณที่รักทั้งหลาย",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
       "id": "thai_prefix_full",
       "input": "ลูกค้าชื่อ นาย สมชาย ใจดี",
       "should_match": true,

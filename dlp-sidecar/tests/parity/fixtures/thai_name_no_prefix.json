@@ -48,6 +48,84 @@
       "should_match": false,
       "expected_count": 0,
       "expected_spans": []
+    },
+    {
+      "id": "fix26_kind_answer_briefly_no_mask",
+      "input": "บอกชื่อสัตว์มา 1 ชนิด ตอบสั้นๆ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_label_pair_no_mask",
+      "input": "ลูกค้าชื่อ เบอร์ เลขบัตร ต้องเก็บ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_phrase_pairs_no_mask",
+      "input": "พนักงาน ทุกคน ต้องส่ง รายงาน ก่อนศุกร์",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_question_pair_no_mask",
+      "input": "ชื่อไฟล์ ควรตั้ง ยังไง ให้หาง่าย",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_asked_pair_no_mask",
+      "input": "ลูกค้า ถามมา ว่าสินค้า จะเข้าเมื่อไหร่",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_label_trim_keeps_name",
+      "input": "ชื่อ สมชาย เบอร์ ติดต่อกลับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 10
+        }
+      ]
+    },
+    {
+      "id": "fix26_label_trim_no_label_before_no_mask",
+      "input": "ลูกค้า ปิยะพงศ์ เบอร์ ติดต่อกลับ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_real_pair_still_masks",
+      "input": "ลูกค้าชื่อ ปิยะพงศ์ วงศ์สุวรรณ ลงทะเบียน",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 30
+        }
+      ]
+    },
+    {
+      "id": "fix26_real_pair_after_name_label",
+      "input": "name: อรอนงค์ ศรีสุข",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 20
+        }
+      ]
     }
   ]
 }

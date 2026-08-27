@@ -419,6 +419,18 @@ SPECS = [
         severity=2,
         detector=ThaiAddressDetector(),
         cases=[
+            # FIX26 §1.2 — keyword-precision split, both directions.
+            Case("fix26_high_thi_yu_condo_masks", "ที่อยู่ 199/22 คอนโดลุมพินี", True),
+            Case("fix26_high_thi_yu_english_building_masks", "ที่อยู่ 199/22 Lumpini Condo", True),
+            Case("fix26_high_ban_lek_thi_village_masks", "บ้านเลขที่ 45/6 หมู่บ้านสัมมากร", True),
+            Case("fix26_high_thi_yu_colon_masks", "ที่อยู่: 88/1 เดอะทรัสต์", True),
+            Case("fix26_glued_thi_yu_with_component_masks", "จำที่อยู่ 99/88 ถนนสุขุมวิท 10110 ไว้", True),
+            Case("fix26_ambig_song_thi_building_no_component", "ส่งที่ 12 อาคารเอ ชั้น 5", False),
+            Case("fix26_ambig_yu_thi_bare_province", "อยู่ที่ 77/1 บางใหญ่ นนทบุรี", False),
+            Case("fix26_ambig_lek_thi_prose", "เลขที่ให้จำเมื่อกี้คืออะไร", False),
+            Case("fix26_thi_yu_relative_clause_no_mask", "สินค้าที่อยู่ในคลังมี 120 ชิ้น", False),
+            Case("fix26_thi_yu_locative_prep_no_mask", "ที่อยู่ใน 3 อันดับแรก", False),
+            Case("fix26_thi_yu_no_digit_no_mask", "ที่อยู่ของบริษัทคืออะไร ต้องไปเอาจากหน้าไหน", False),
             Case(
                 "thai_address_full",
                 "ที่อยู่ 123/45 ซอย 7 ถนนสุขุมวิท กรุงเทพ 10110 ครับ",
@@ -445,7 +457,7 @@ SPECS = [
             # intent lives in backend/tests/test_dlp_detectors/
             # test_thai_address_recall.py (xfail = accepted gap).
             Case("fix23b_road_only", "บ้านเลขที่ 12 ถนนพระราม 4", True),
-            Case("fix23b_condo_only", "ที่อยู่ 199/22 คอนโดลุมพินี", False),
+            Case("fix23b_condo_only", "ที่อยู่ 199/22 คอนโดลุมพินี", True),  # FIX26: HIGH keyword recovers it
             Case("fix23b_building_floor", "ส่งที่ 12 อาคารเอ ชั้น 5", False),
             Case("fix23b_village", "บ้านเลขที่ 45/6 หมู่บ้านสัมมากร", True),
             Case("fix23b_province_bare", "อยู่ที่ 77/1 บางใหญ่ นนทบุรี", False),
@@ -453,7 +465,7 @@ SPECS = [
             Case("fix23b_thai_digits", "บ้านเลขที่ ๙๙/๘๘ ถนนสีลม", True),
             Case("fix23b_postcode_only", "ส่งที่ 88 มัณฑนา 10540", True),
             Case("fix23b_abbrev_m_t", "ที่อยู่ 45 ม.7 ต.บางพลี", True),
-            Case("fix23b_english_building", "ที่อยู่ 199/22 Lumpini Condo", False),
+            Case("fix23b_english_building", "ที่อยู่ 199/22 Lumpini Condo", True),  # FIX26: HIGH keyword recovers it
             Case("fix23b_long_prose_gap", "ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", False),
             Case("fix23b_amphoe_word", "อยู่ที่ 10 อำเภอเมือง เชียงใหม่", True),
             Case("fix23b_building_room", "ส่งที่ 23 ตึกบี ห้อง 402", False),
@@ -791,6 +803,16 @@ SPECS = [
         severity=3,
         detector=ThaiNameDetector(),
         cases=[
+            # FIX26 §1.2 — full parity + the คุณ-particle guard, both directions.
+            Case("fix26_khun_no_surname_masks", "ฝากบอกคุณสมชายด้วย", True),
+            Case("fix26_khun_surname_masks", "คุณสมหญิง รักดี โทรมา", True),
+            Case("fix26_compound_title_masks", "ผศ.ดร. สมศักดิ์ มากมี", True),
+            Case("fix26_trailing_label_trimmed", "คุณสมหญิง จำนวน 10,000 บาท", True),
+            Case("fix26_khob_khun_mak_no_mask", "ขอบคุณมากครับ ช่วยได้เยอะเลย", False),
+            Case("fix26_khob_khun_na_no_mask", "เยี่ยมมาก 👍 ขอบคุณนะ", False),
+            Case("fix26_khun_keu_krai_no_mask", "คุณคือใคร ชื่ออะไร", False),
+            Case("fix26_khun_tham_no_mask", "คุณทำอะไรได้บ้าง", False),
+            Case("fix26_khun_thi_rak_no_mask", "คุณที่รักทั้งหลาย", False),
             Case("thai_prefix_full", "ลูกค้าชื่อ นาย สมชาย ใจดี", True),
             Case("nang_sao", "ผู้รับ นางสาว สมหญิง สมบูรณ์", True),
             Case("doctor", "ดร. สมศักดิ์ มากมี เข้าร่วม", True),
@@ -824,6 +846,16 @@ SPECS = [
             ),
             Case("plain_thai_prose", "วันนี้ฝนตกหนัก", False),
             Case("english_prose", "no thai content here", False),
+            # FIX26 §1.2 — stop rules + label trim, both directions.
+            Case("fix26_kind_answer_briefly_no_mask", "บอกชื่อสัตว์มา 1 ชนิด ตอบสั้นๆ", False),
+            Case("fix26_label_pair_no_mask", "ลูกค้าชื่อ เบอร์ เลขบัตร ต้องเก็บ", False),
+            Case("fix26_phrase_pairs_no_mask", "พนักงาน ทุกคน ต้องส่ง รายงาน ก่อนศุกร์", False),
+            Case("fix26_question_pair_no_mask", "ชื่อไฟล์ ควรตั้ง ยังไง ให้หาง่าย", False),
+            Case("fix26_asked_pair_no_mask", "ลูกค้า ถามมา ว่าสินค้า จะเข้าเมื่อไหร่", False),
+            Case("fix26_label_trim_keeps_name", "ชื่อ สมชาย เบอร์ ติดต่อกลับ", True),
+            Case("fix26_label_trim_no_label_before_no_mask", "ลูกค้า ปิยะพงศ์ เบอร์ ติดต่อกลับ", False),
+            Case("fix26_real_pair_still_masks", "ลูกค้าชื่อ ปิยะพงศ์ วงศ์สุวรรณ ลงทะเบียน", True),
+            Case("fix26_real_pair_after_name_label", "name: อรอนงค์ ศรีสุข", True),
         ],
     ),
     DetectorSpec(
