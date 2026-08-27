@@ -76,12 +76,12 @@ describe("scope + sensitive read", () => {
   it("filesystem scope is the granted root containing the path, else the path", () => {
     expect(resolveScope(toolMeta("write_file"), { path: "C:\\Users\\tester\\Desktop\\project\\a\\b.txt" }, GRANTS, HOME, null)).toBe("C:\\Users\\tester\\Desktop\\project");
     expect(resolveScope(toolMeta("write_file"), { path: "C:\\elsewhere\\x.txt" }, GRANTS, HOME, null)).toBe("C:\\elsewhere\\x.txt");
-    expect(resolveScope(toolMeta("write_file"), { path: "notes.txt" }, GRANTS, HOME, null)).toBe("C:\\Users\\tester\\notes.txt");
+    expect(resolveScope(toolMeta("write_file"), { path: "notes.txt" }, GRANTS, HOME, null)).toBe("C:\\Users\\tester\\Desktop\\project"); // FIX26: relative -> INTO the first grant -> scoped to it
   });
   it("shell scope is the working directory (arg, remembered cwd, home)", () => {
     expect(resolveScope(toolMeta("run_command"), { command: "dir", working_directory: "D:\\data\\sub" }, GRANTS, HOME, null)).toBe("D:\\data");
     expect(resolveScope(toolMeta("run_command"), { command: "dir" }, GRANTS, HOME, "C:\\Users\\tester\\Desktop\\project")).toBe("C:\\Users\\tester\\Desktop\\project");
-    expect(resolveScope(toolMeta("run_command"), { command: "dir" }, GRANTS, HOME, null)).toBe(HOME);
+    expect(resolveScope(toolMeta("run_command"), { command: "dir" }, GRANTS, HOME, null)).toBe("C:\\Users\\tester\\Desktop\\project"); // FIX26: default cwd = first grant
     expect(resolveScope(toolMeta("web_fetch"), { url: "x" }, GRANTS, HOME, null)).toBe("*");
   });
   it("a silent read outside every granted folder asks; inside does not; writes are not its business", () => {

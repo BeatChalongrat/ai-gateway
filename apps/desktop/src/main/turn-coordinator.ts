@@ -1215,7 +1215,7 @@ export class TurnCoordinator {
     const timer = setTimeout(() => controller.abort(), (NESTED_MAX_MINUTES + 0.5) * 60_000);
     const tools = await this.toolDefinitions(req.tools, req.autoApprovableOnly, true);
     const messages: GatewayMessage[] = [
-      { role: "system", content: subAgentSystemPrompt(this.opts.homeDirectory) },
+      { role: "system", content: subAgentSystemPrompt(this.opts.homeDirectory, this.grants.list()) },
       { role: "user", content: req.task },
     ];
     let answer = "";
@@ -1451,6 +1451,7 @@ export class TurnCoordinator {
     }
     const assembled = await this.assembler.buildSystemPromptParts({
       homeDirectory: this.opts.homeDirectory,
+      grantedFolders: this.grants.list(), // FIX26 Part 3: name the fence in the prompt
       conversationId,
       activeProject: project,
       memoryEnabled: conversation?.memory_enabled !== false,

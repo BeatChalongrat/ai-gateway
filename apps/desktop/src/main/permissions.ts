@@ -188,20 +188,27 @@ function readPathArg(args: Record<string, unknown>, names: string[]): string | n
   }
   return null;
 }
-function resolveFull(raw: string, home: string): string {
-  return path.win32.isAbsolute(raw) ? path.win32.normalize(raw) : path.win32.join(home, raw);
+/** FIX26 Part 3: a relative path resolves INTO the first granted folder —
+ * the same rule the sidecar's PathGuard applies — so the consent scope and the
+ * tool agree. Only when nothing is granted does the profile remain the base
+ * (the sidecar will refuse such a path anyway). */
+function resolveFull(raw: string, home: string, grants: readonly string[] = []): string {
+  const base = grants[0] ?? home;
+  return path.win32.isAbsolute(raw) ? path.win32.normalize(raw) : path.win32.join(base, raw);
 }
 /** FolderScopeResolver.Resolve — the consent SCOPE key. */
 export function resolveScope(tool: ToolMeta, args: Record<string, unknown>, grants: readonly string[], home: string, cwd: string | null): string {
   if (tool.category === "FileSystem") {
     const raw = readPathArg(args, ["path", "destination", "directory"]);
     if (!raw) return "*";
-    const full = resolveFull(raw, home);
+    const full = resolveFull(raw, home, grants);
     return containingRoot(full, grants) ?? full;
   }
   if (tool.category === "Shell") {
-    const wd = readPathArg(args, ["working_directory"]) ?? cwd ?? home;
-    const full = resolveFull(wd, home);
+    // FIX26 Part 3: no working_directory and no retained cwd → the first
+    // granted folder (the sidecar's default), not the profile.
+    const wd = readPathArg(args, ["working_directory"]) ?? cwd ?? grants[0] ?? home;
+    const full = resolveFull(wd, home, grants);
     return containingRoot(full, grants) ?? full;
   }
   return "*";
@@ -214,7 +221,7 @@ export function readRequiresConsent(tool: ToolMeta, args: Record<string, unknown
   if (!argName) return false;
   const raw = args[argName];
   if (typeof raw !== "string" || !raw) return false;
-  const full = resolveFull(raw, home);
+  const full = resolveFull(raw, home, grants);
   return containingRoot(full, grants) === null;
 }
 
