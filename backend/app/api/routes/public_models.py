@@ -44,8 +44,21 @@ async def get_models(
     """
     valid_providers = ProviderKeyService().providers_with_valid_keys(session)
     entries: list[ModelInfo] = [ModelInfo(id="auto", provider="gateway")]
+    # FIX28 §5.2: a video model (supports_video_gen) is listed ONCE, by the
+    # media loop below with video_generation set — never as a chat entry.
+    # Before this, sora-2 rode the chat listing with only "streaming" and the
+    # clients put it in the chat picker.
+    from app.models.model_config import ModelConfigORM as _VideoRowORM
+    from sqlalchemy import select as _vsel
+    video_model_ids = {
+        row.model for row in session.execute(
+            _vsel(_VideoRowORM).where(_VideoRowORM.supports_video_gen.is_(True))
+        ).scalars().all()
+    }
     for c in get_all_candidates():
         if c.provider not in valid_providers:
+            continue
+        if c.model in video_model_ids:
             continue
         reasoning_block: ReasoningCapability | None = None
         if c.supports_reasoning:
@@ -93,6 +106,13 @@ async def get_models(
         # don't carry these attributes, so getattr → False (no-op here). They
         # only matter once dedicated media models are surfaced to /v1/models
         # (see Sprint 2A.5 report: that listing is a follow-up gap).
+        # FIX28 §5.2: a model's KIND is a catalog fact, not a deployment
+        # setting. Advertise video_generation from the flag alone so the
+        # clients classify sora-2 as a video model (hidden from the chat
+        # picker) whether or not video is enabled — the gate lives in
+        # /v1/video/config and the submit path, not in the model kind.
+        if getattr(c, "supports_video_gen", False):
+            cap_flags["video_generation"] = True
         if getattr(c, "supports_audio_gen", False):
             cap_flags["audio_generation"] = True
         if getattr(c, "supports_tts", False):
@@ -159,7 +179,7 @@ async def get_models(
     ).scalars().all()
     for mc in media_rows:
         mcaps: dict[str, bool] = {}
-        if mc.supports_video_gen and settings.video_gen_enabled:
+        if mc.supports_video_gen:  # FIX28 §5.2: kind is a fact; the gate is elsewhere
             mcaps["video_generation"] = True
         if mc.supports_audio_gen:
             mcaps["audio_generation"] = True
