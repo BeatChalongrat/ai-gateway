@@ -48,7 +48,7 @@ export type HostQueryOp =
   // store and jar, and shows its signed-out view). Replaces the E2 fallback of
   // the host inferring logout from a POST it observed.
   | "session.logout"
-  | "skills.list" | "skills.setEnabled" | "skills.installPicker" | "skills.delete"
+  | "skills.list" | "skills.setEnabled" | "skills.installPicker" | "skills.create" | "skills.delete"
   | "tasks.list" | "tasks.create" | "tasks.update" | "tasks.setEnabled" | "tasks.delete" | "tasks.runNow" | "tasks.runs"
   | "connectors.listCatalog" | "connectors.listInstalled" | "connectors.install" | "connectors.uninstall"
   | "connectors.oauthConnect" | "connectors.oauthDisconnect" | "connectors.addCustomDialog"

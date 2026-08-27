@@ -118,6 +118,9 @@ export const hostApi = {
   setSkillEnabled: (skillId: string, enabled: boolean) =>
     bridge.hostQuery("skills.setEnabled", { skillId, enabled }),
   installSkill: () => bridge.hostQuery<{ installed: boolean; name?: string; cancelled?: boolean }>("skills.installPicker"),
+  /** FIX28 §3 (G3): write a skill from a form — no .zip/.skill archive. */
+  createSkill: (input: { name: string; displayName?: string; description?: string; triggers?: string[]; instructions: string }) =>
+    bridge.hostQuery<{ created: boolean; skillId: string }>("skills.create", input),
   deleteSkill: (skillId: string) => bridge.hostQuery("skills.delete", { skillId }),
 
   // scheduled tasks

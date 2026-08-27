@@ -36,6 +36,37 @@ function SkillsScreen() {
   const [skills, setSkills] = useState<SkillDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [installing, setInstalling] = useState(false);
+  // FIX28 §3 (G3): write a skill from a form — no .zip/.skill archive needed.
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState({ name: "", displayName: "", triggers: "", instructions: "" });
+  const [saving, setSaving] = useState(false);
+
+  async function handleCreate() {
+    const name = draft.name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!name || !draft.instructions.trim()) {
+      toast("A skill needs an id and its instructions.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await hostApi.createSkill({
+        name,
+        displayName: draft.displayName.trim() || undefined,
+        triggers: draft.triggers.split(",").map((t) => t.trim()).filter(Boolean),
+        instructions: draft.instructions.trim(),
+      });
+      if (!res.ok) {
+        toast("Couldn't create the skill.");
+        return;
+      }
+      toast(`Skill “${draft.displayName.trim() || name}” created.`);
+      setDraft({ name: "", displayName: "", triggers: "", instructions: "" });
+      setCreating(false);
+      await reload();
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function reload() {
     try {
@@ -136,17 +167,57 @@ function SkillsScreen() {
               install your own.
             </p>
           </div>
-          <Button
-            onClick={() => void handleInstall()}
-            loading={installing}
-            className="shrink-0"
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <PlusIcon />
-              Install skill
-            </span>
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="secondary" onClick={() => setCreating((v) => !v)} aria-expanded={creating}>
+              <span className="inline-flex items-center gap-1.5">
+                <PlusIcon />
+                Create skill
+              </span>
+            </Button>
+            <Button
+              onClick={() => void handleInstall()}
+              loading={installing}
+              className="shrink-0"
+            >
+              Install package
+            </Button>
+          </div>
         </div>
+
+        {creating ? (
+          <form
+            className="mt-6 flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreate();
+            }}
+            aria-label="Create skill"
+          >
+            <p className="text-sm text-text-secondary">
+              Write the instructions the assistant must follow when this skill applies. Leave triggers empty to apply it to every message; otherwise it applies when the message contains one of the trigger words.
+            </p>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Skill id (letters, digits, dashes)</span>
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="summarize-short" required />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Display name (optional)</span>
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.displayName} onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} placeholder="สรุปแบบสั้น" />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Trigger words, comma-separated (optional)</span>
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder="สรุปแบบสั้น, สรุปสั้นๆ" />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Instructions</span>
+              <textarea className="min-h-[120px] rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} placeholder="ตอบเป็นข้อๆ ไม่เกิน 3 ข้อเสมอ ห้ามเกิน" required />
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" type="button" onClick={() => setCreating(false)}>Cancel</Button>
+              <Button type="submit" loading={saving}>Save skill</Button>
+            </div>
+          </form>
+        ) : null}
 
         <div className="mt-8">
           {!loaded ? (

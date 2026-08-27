@@ -1484,6 +1484,20 @@ export class TurnCoordinator {
     } catch {
       /* best-effort — server memories still render; a note just won't recall this turn */
     }
+    // FIX28 §3 (G3): the enabled skills that apply to this message (trigger match,
+    // or no triggers = always). The sidecar has stored skills since FIX2; the
+    // Electron host never read them, so an installed skill constrained nothing.
+    let skills: { name: string; instructions: string }[] | undefined;
+    try {
+      const r = await this.sidecar.hostQuery("skills._forPrompt", { message: text });
+      const list = (r.data as { skills?: { name: string; instructions: string }[] } | undefined)?.skills;
+      if (Array.isArray(list) && list.length > 0) {
+        skills = list.filter((s) => s && typeof s.instructions === "string" && s.instructions.trim());
+        if (skills.length) this.log.info(`SKILLS conv=${conversationId}: ${skills.map((s) => s.name).join(", ")} → system prompt`);
+      }
+    } catch {
+      /* best-effort — no skill this turn */
+    }
     // FIX5 §3: if web_search is on in the app but the tenant has it disabled, the
     // tool is withheld this turn (toolDefinitions). Tell the model WHY so it gives
     // the true reason ("your org has not enabled it") rather than implying it just
@@ -1504,6 +1518,7 @@ export class TurnCoordinator {
       localGlobalNotes,
       localConversationNotes,
       webSearchUnavailableReason,
+      skills,
     });
     const system = assembled.text;
     const messages: GatewayMessage[] = [{ role: "system", content: system }];

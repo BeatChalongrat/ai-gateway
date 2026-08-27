@@ -84,6 +84,7 @@ public class Fix1BrowserSeparationTests
         {
             "skills._install", "tasks._due", "tasks._recordRun",
             "connectors._installApiKey", "connectors._testCustom", "connectors._installCustom",
+            "skills._forPrompt", // FIX28 §3
         };
         var toolNames = registry.All.Select(t => t.Name).ToHashSet();
 

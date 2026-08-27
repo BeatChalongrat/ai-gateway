@@ -244,6 +244,10 @@ function ConnectorCard({
   onAction: () => void;
 }) {
   const isOAuth = connector.authType === "oauth2";
+  // FIX28 §3 (G5): OAuth sign-in is not wired in the desktop app (the host must
+  // own the provider sign-in; a later round). A button with no working path
+  // behind it must not look clickable — disabled, with the reason on the card.
+  const oauthUnavailable = isOAuth && !connector.installed;
   const actionLabel = isOAuth
     ? connector.installed
       ? "Disconnect"
@@ -277,14 +281,23 @@ function ConnectorCard({
           ) : null}
         </div>
 
-        <Button
-          variant={connector.installed ? "ghost" : "secondary"}
-          className="shrink-0"
-          onClick={onAction}
-          loading={busy}
-        >
-          {actionLabel}
-        </Button>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Button
+            variant={connector.installed ? "ghost" : "secondary"}
+            className="shrink-0"
+            onClick={onAction}
+            loading={busy}
+            disabled={oauthUnavailable}
+            title={oauthUnavailable ? "Sign-in for this connector isn't available in the desktop app yet." : undefined}
+          >
+            {actionLabel}
+          </Button>
+          {oauthUnavailable ? (
+            <span className="max-w-[220px] text-right text-[11px] leading-snug text-text-muted">
+              Sign-in isn’t available in the desktop app yet. API-key and no-auth connectors work.
+            </span>
+          ) : null}
+        </div>
       </div>
     </section>
   );

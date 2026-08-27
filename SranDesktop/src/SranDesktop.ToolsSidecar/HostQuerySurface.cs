@@ -75,6 +75,8 @@ public sealed class HostQuerySurface
                 "skills.setEnabled" => await SkillsSetEnabledAsync(args),
                 "skills.delete" => await SkillsDeleteAsync(args),
                 "skills._install" => await SkillsInstallAsync(args), // host→sidecar only (path from native picker)
+                "skills.create" => await SkillsCreateAsync(args),      // FIX28 §3 (G3): write a skill without a package
+                "skills._forPrompt" => Ok(await SkillsForPromptAsync(args)), // host→sidecar only (enabled skills for this turn)
 
                 // ── scheduled tasks (store + cron; firing is host-side) ──────
                 "tasks.list" => Ok(new { tasks = (await _taskStore.GetAllAsync()).Select(TaskDto).ToArray() }),
@@ -221,6 +223,59 @@ public sealed class HostQuerySurface
         {
             return (false, null, "invalid");
         }
+    }
+
+    /// <summary>FIX28 §3 (G3): create a user skill from raw fields — no .zip/.skill
+    /// archive. name = folder id (lower-case, dashes); displayName/description/
+    /// triggers optional; instructions = SKILL.md.</summary>
+    private async Task<(bool, object?, string?)> SkillsCreateAsync(JsonObject? args)
+    {
+        var name = Str(args, "name")?.Trim();
+        var instructions = Str(args, "instructions");
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(instructions)) return Invalid();
+        if (name.Length > 64 || instructions.Length > 20_000) return Invalid();
+        var triggers = new List<string>();
+        if (args?["triggers"] is JsonArray arr)
+            foreach (var t in arr) { var v = t?.ToString()?.Trim(); if (!string.IsNullOrEmpty(v) && v.Length <= 64) triggers.Add(v); }
+        var manifest = new SkillManifest
+        {
+            Name = name,
+            DisplayName = Str(args, "displayName")?.Trim() ?? "",
+            Description = Str(args, "description")?.Trim() ?? "",
+            Triggers = triggers.Take(10).ToList(),
+            Author = "user",
+        };
+        try
+        {
+            var skill = await _skills.CreateAsync(manifest, instructions);
+            return (true, new { created = true, skillId = skill.Manifest.Name }, null);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or ArgumentException)
+        {
+            return (false, null, "invalid");
+        }
+    }
+
+    /// <summary>FIX28 §3 (G3): the enabled skills that apply to THIS turn — a skill
+    /// with triggers applies when the message contains one; a skill with no
+    /// triggers always applies. Instructions included: the host puts them in the
+    /// system prompt (before FIX28 the store was never read by the Electron host).</summary>
+    private async Task<object> SkillsForPromptAsync(JsonObject? args)
+    {
+        var message = Str(args, "message") ?? "";
+        var all = await _skills.GetSkillsAsync();
+        var applicable = all.Where(s => s.IsEnabled && (s.Manifest.Triggers.Count == 0
+            || s.Manifest.Triggers.Any(t => t.Length > 0 && message.Contains(t, StringComparison.OrdinalIgnoreCase))));
+        return new
+        {
+            skills = applicable.Select(s => new
+            {
+                id = s.Manifest.Name,
+                name = string.IsNullOrEmpty(s.Manifest.DisplayName) ? s.Manifest.Name : s.Manifest.DisplayName,
+                triggers = s.Manifest.Triggers.ToArray(),
+                instructions = s.Instructions.Length > 8000 ? s.Instructions[..8000] : s.Instructions,
+            }).ToArray(),
+        };
     }
 
     // ── scheduled tasks ────────────────────────────────────────────────────

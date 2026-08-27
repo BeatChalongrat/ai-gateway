@@ -43,6 +43,7 @@ export const HOST_QUERY_OPS = Object.freeze([
   "session.logout",
   "diag.reportRendererError",
   "skills.list", "skills.setEnabled", "skills.installPicker", "skills.delete",
+  "skills.create", // FIX28 §3 (G3): write a skill from a form, no archive
   "tasks.list", "tasks.create", "tasks.update", "tasks.setEnabled", "tasks.delete", "tasks.runNow",
   "tasks.runs", // FIX8 A1.4: a task's run history (reads only; control-plane like the rest)
   "connectors.listCatalog", "connectors.listInstalled", "connectors.install", "connectors.uninstall",

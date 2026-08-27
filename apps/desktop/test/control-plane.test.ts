@@ -18,6 +18,7 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     "session.logout",
     "diag.reportRendererError",
     "skills.list", "skills.setEnabled", "skills.installPicker", "skills.delete",
+    "skills.create", // FIX28 §3 (G3)
     "tasks.list", "tasks.create", "tasks.update", "tasks.setEnabled", "tasks.delete", "tasks.runNow", "tasks.runs",
     "connectors.listCatalog", "connectors.listInstalled", "connectors.install", "connectors.uninstall",
     "connectors.oauthConnect", "connectors.oauthDisconnect", "connectors.addCustomDialog",
@@ -36,6 +37,7 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     "connectors._installApiKey", "connectors._testCustom", "connectors._installCustom",
     "browser.applyExtensionFolder",
     "notes._forPrompt", // FIX5 §1 — host reads the sidecar's local notes for the system prompt
+    "skills._forPrompt", // FIX28 §3 — host reads the enabled skills that apply to this turn
     "browser._siteForAction", // FIX6 — host resolves a browser action's target origin from the live tab
     "tasks._catchUp", "tasks._recordSkip", "tasks._reschedule", // FIX8 A1 — missed-run catch-up, skip recording, self-reschedule
   ];

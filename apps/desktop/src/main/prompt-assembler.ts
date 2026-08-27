@@ -45,6 +45,11 @@ export interface PromptInputs {
    * (not because the user disabled it). Tells the model to explain the true
    * reason instead of implying it merely lacks the capability. */
   webSearchUnavailableReason?: "tenant-disabled";
+  /** FIX28 §3 (G3): enabled skills that apply to this turn (sidecar
+   * skills._forPrompt). Their instructions go into the prompt with the
+   * highest salience of any user-authored text: a skill is an explicit
+   * standing instruction, not a preference. */
+  skills?: { name: string; instructions: string }[];
 }
 
 const SERVER_MEMORY_TTL_MS = 60_000;
@@ -224,6 +229,13 @@ export class PromptAssembler {
       // round 2 finding) — the block is instructions-only, as in the shell.
     }
 
+    if (inputs.skills && inputs.skills.length > 0) {
+      prompt += `\n\n## Active skills (MUST follow)\nThe user installed these skills and they apply to this message. Treat each skill's instructions as a hard requirement for the shape and content of your reply — they override the Response Style section and any general habit. If two skills conflict, follow the one listed first.`;
+      for (const s of inputs.skills) {
+        prompt += `\n\n### Skill: ${s.name}\n${s.instructions.trim()}`;
+        parts.push({ ...PROMPT_PART.skill(s.name), text: s.instructions });
+      }
+    }
     if (inputs.writingStyleProfile && inputs.writingStyleProfile.trim()) {
       prompt += `\n\n## Writing style\nApply this writing style to your responses:\n${inputs.writingStyleProfile.trim()}\n`;
       parts.push({ ...PROMPT_PART.writingStyle, text: inputs.writingStyleProfile });

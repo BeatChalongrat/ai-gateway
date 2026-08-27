@@ -118,6 +118,8 @@ export const PROMPT_PART = Object.freeze({
   serverMemory: { label: "A saved memory", fixAt: "in Memory (delete or edit that memory)" },
   localGlobalNote: { label: "A note saved on this computer (remember, global)", fixAt: "in Memory → Notes on this computer" },
   localConversationNote: { label: "A note saved for this conversation (remember)", fixAt: "by starting a new conversation" },
+  // FIX28: an installed skill's instructions.
+  skill: (name: string) => ({ label: `The skill “${name}”`, fixAt: "in Skills (disable or delete that skill)" }),
   // FIX27: the extracted text of an attached document (untrusted observation envelope).
   attachedFile: (names: string) => ({ label: `The attached file ${names}`, fixAt: "by removing that attachment and sending the message again" }),
 } as const);
