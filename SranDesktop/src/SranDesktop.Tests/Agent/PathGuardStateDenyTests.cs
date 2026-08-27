@@ -76,23 +76,42 @@ public sealed class PathGuardStateDenyTests : IDisposable
     [Fact]
     public void Resolve_Denies_Relative_Path_Into_State_Dir()
     {
-        // Bare relative paths resolve against the user profile; the standard
-        // layout puts %APPDATA% under it — skip if this machine differs.
+        // FIX26 Part 3: bare relative paths resolve into the FIRST GRANTED
+        // folder. Grant the profile for this test so ``AppData\\Roaming\\…``
+        // lands on the state dir — which must still be hard-denied, grant or
+        // not. Skip if this machine's layout differs.
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var relative = Path.GetRelativePath(profile, RoamingState);
         if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathFullyQualified(relative))
             return;
 
-        Resolve(Path.Combine(relative, "settings.json"), out var error).Should().BeNull();
-        error.Should().Contain("application data");
+        PathGuard.ConfigureGrantedRoots(new[] { profile });
+        try
+        {
+            Resolve(Path.Combine(relative, "settings.json"), out var error).Should().BeNull();
+            error.Should().Contain("application data");
+        }
+        finally
+        {
+            PathGuard.ConfigureGrantedRoots(Array.Empty<string>());
+        }
     }
 
     [Fact]
     public void Resolve_Still_Allows_Normal_Profile_Temp_And_Granted_Paths()
     {
-        var profileDoc = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "doc.txt");
-        Resolve(profileDoc, out _).Should().NotBeNull();
+        // FIX26 Part 3: a profile document is allowed only when its folder is
+        // granted — the profile itself is no longer an implicit root.
+        var documents = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
+        var profileDoc = Path.Combine(documents, "doc.txt");
+        Resolve(profileDoc, out _).Should().BeNull();
+        if (Directory.Exists(documents))
+        {
+            PathGuard.ConfigureGrantedRoots(new[] { documents });
+            try { Resolve(profileDoc, out _).Should().NotBeNull(); }
+            finally { PathGuard.ConfigureGrantedRoots(Array.Empty<string>()); }
+        }
 
         var tempFile = Path.Combine(Path.GetTempPath(), "sran-allowed.txt");
         Resolve(tempFile, out _).Should().NotBeNull();
@@ -100,7 +119,9 @@ public sealed class PathGuardStateDenyTests : IDisposable
         // Sibling of the state dir (e.g. %APPDATA%\OtherApp) stays reachable —
         // the deny is scoped to the SRAN Desktop subtrees, nothing wider.
         var sibling = Path.Combine(Path.GetDirectoryName(RoamingState)!, "OtherApp", "file.txt");
-        Resolve(sibling, out _).Should().NotBeNull();
+        PathGuard.ConfigureGrantedRoots(new[] { Path.GetDirectoryName(RoamingState)! }); // FIX26: needs a grant now
+        try { Resolve(sibling, out _).Should().NotBeNull(); }
+        finally { PathGuard.ConfigureGrantedRoots(Array.Empty<string>()); }
 
         // A granted folder still works, and a grant can never re-open the
         // state dir (deny is checked before ALL allow-roots).
@@ -161,6 +182,7 @@ public sealed class PathGuardStateDenyTests : IDisposable
 
         // Listing the allowed PARENT (%APPDATA%) must not surface the subtree.
         var parent = Path.GetDirectoryName(RoamingState)!;
+        PathGuard.ConfigureGrantedRoots(new[] { parent }); // FIX26: the parent must be granted now (Dispose resets)
         var listing = await new ListDirectoryTool().ExecuteAsync(
             Args($"{{\"path\":{J(parent)}}}"), CancellationToken.None);
         listing.Success.Should().BeTrue();
@@ -184,6 +206,7 @@ public sealed class PathGuardStateDenyTests : IDisposable
         _createdFiles.Add(markerPath);
 
         var parent = Path.GetDirectoryName(RoamingState)!;
+        PathGuard.ConfigureGrantedRoots(new[] { parent }); // FIX26: the parent must be granted now (Dispose resets)
         var search = await new SearchFilesTool().ExecuteAsync(
             Args($"{{\"directory\":{J(parent)},\"pattern\":{J(marker)}}}"), CancellationToken.None);
 

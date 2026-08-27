@@ -100,7 +100,7 @@ public class EditToolTests : IDisposable
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("outside the allowed directories");
+        result.Error.Should().Contain("Access denied"); // FIX26: the refusal now names the folder to grant / the system folder
     }
 
     [Fact]

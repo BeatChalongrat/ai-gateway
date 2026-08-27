@@ -147,14 +147,16 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
     private string ResolveWorkingDirectory(JsonElement arguments, out string? error)
     {
         error = null;
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var conversationId = _session?.CurrentConversationId;
+        // FIX26 Part 3: the fallback is the FIRST granted folder, never the user
+        // profile. With nothing granted a command has nowhere to run: refuse.
+        var fallback = PathGuard.DefaultRoot() ?? Path.GetTempPath();
 
         if (ToolHelpers.GetString(arguments, "working_directory") is { Length: > 0 } wd)
         {
             var resolved = PathGuard.Resolve(wd, out var resolveError);
-            if (resolved is null) { error = resolveError; return userProfile; }
-            if (!Directory.Exists(resolved)) { error = $"Working directory not found: {resolved}"; return userProfile; }
+            if (resolved is null) { error = resolveError; return fallback; }
+            if (!Directory.Exists(resolved)) { error = $"Working directory not found: {resolved}"; return fallback; }
             if (conversationId is not null)
                 _session!.SetWorkingDirectory(conversationId, resolved);
             return resolved;
@@ -162,10 +164,13 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
 
         if (conversationId is not null
             && _session!.GetWorkingDirectory(conversationId) is { } saved
-            && Directory.Exists(saved))
+            && Directory.Exists(saved)
+            && PathGuard.Resolve(saved, out _) is not null)
             return saved;
 
-        return userProfile;
+        // No grant at all → the temp staging root (inside the fence, never the
+        // profile). The system prompt already tells the model nothing is granted.
+        return fallback;
     }
 
     private TimeSpan ResolveTimeout(JsonElement arguments)

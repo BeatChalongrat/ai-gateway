@@ -43,6 +43,15 @@ internal static class ToolHelpers
         if (!File.Exists(fullPath))
             return null;
         var backup = fullPath + BackupSuffix;
+        // FIX26 (found by the Part 3 test run): File.Copy(overwrite: true) onto
+        // a HIDDEN file throws UnauthorizedAccessException on Windows, so the
+        // SECOND overwrite of the same file failed once the first backup had
+        // been hidden below. Drop the previous snapshot first.
+        if (File.Exists(backup))
+        {
+            try { File.SetAttributes(backup, FileAttributes.Normal); } catch (Exception) { /* best-effort */ }
+            File.Delete(backup);
+        }
         File.Copy(fullPath, backup, overwrite: true);
         // Hide it so it doesn't clutter Explorer / the user's folder view. It
         // stays on disk for one-step undo, and the tool result names the path.
@@ -72,11 +81,34 @@ internal static class ToolHelpers
 /// </summary>
 public static class PathGuard
 {
+    // FIX26 Part 3 — the fence is the GRANTED folders. The user profile is no
+    // longer an implicit root: with it, every file tool treated
+    // C:\Users\<user> as "the granted folder" (FIX24 B2/B3/B5 wrote there,
+    // G2 wrote into Documents\MuMuSharedFolder) and list_directory printed
+    // .ssh/.gnupg/.docker into the chat. The ONE built-in root that remains
+    // is the temp folder, which the app itself uses to stage files (uploads,
+    // generated documents) — a deliberate, named exception, not a grant.
     private static readonly string[] BuiltInRoots =
     {
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         Path.GetTempPath()
     };
+
+    private static readonly string UserProfileRoot =
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    /// <summary>The folder an unqualified / relative path resolves into and the
+    /// default working directory for shell commands: the FIRST granted folder
+    /// (grants are applied in the order the user granted them). Null when
+    /// nothing is granted — callers must refuse, never fall back to the
+    /// profile.</summary>
+    public static string? DefaultRoot()
+    {
+        var roots = _grantedRoots;
+        return roots.Length > 0 ? roots[0] : null;
+    }
+
+    /// <summary>The current granted roots (canonical), for messages and prompts.</summary>
+    public static IReadOnlyList<string> GrantedRoots() => _grantedRoots;
 
     // Phase 10 D1: the app's own state subtrees are HARD-DENIED. They live
     // UNDER the user-profile built-in root, and read_file is consent-free —
@@ -174,10 +206,22 @@ public static class PathGuard
         string fullPath;
         try
         {
-            // Bare relative paths resolve against the user profile, not the app's cwd.
-            fullPath = Path.IsPathFullyQualified(path)
-                ? Path.GetFullPath(path)
-                : Path.GetFullPath(Path.Combine(BuiltInRoots[0], path));
+            if (Path.IsPathFullyQualified(path))
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            else
+            {
+                // FIX26 Part 3: a bare relative path resolves INTO a granted
+                // folder (the first one), never the profile or the app's cwd.
+                var root = DefaultRoot();
+                if (root is null)
+                {
+                    error = NoGrantMessage(path);
+                    return null;
+                }
+                fullPath = Path.GetFullPath(Path.Combine(root, path));
+            }
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -205,9 +249,67 @@ public static class PathGuard
                 return fullPath;
         }
 
-        error = $"Access denied: '{fullPath}' is outside the allowed directories " +
-                "(your user profile, the temp folder, and folders you've granted in Settings).";
+        error = OutsideFenceMessage(fullPath);
         return null;
+    }
+
+    // ── FIX26 Part 3: refusals that say what WOULD allow the action ─────
+
+    private static string GrantedList()
+    {
+        var roots = _grantedRoots;
+        return roots.Length == 0
+            ? "(no folder is granted yet)"
+            : string.Join("; ", roots);
+    }
+
+    private static string NoGrantMessage(string requested)
+    {
+        return $"Access denied: '{requested}' is a relative path and no folder has been granted yet, " +
+               "so there is nowhere to resolve it into. Ask the user to add a folder from the folder " +
+               "chip in the composer (or Settings → Folder access), then use a path inside it.";
+    }
+
+    /// <summary>The message for a path outside every granted root. Names the
+    /// folder the user would need to grant — the nearest existing directory of
+    /// the path — and NEVER suggests granting a system folder (Windows, Program
+    /// Files, ProgramData, the app's own data): those say so and stop.</summary>
+    public static string OutsideFenceMessage(string fullPath)
+    {
+        var candidate = Directory.Exists(fullPath) ? fullPath : Path.GetDirectoryName(fullPath);
+        while (!string.IsNullOrEmpty(candidate) && !Directory.Exists(candidate))
+            candidate = Path.GetDirectoryName(candidate);
+
+        var grantedList = GrantedList();
+        if (string.IsNullOrEmpty(candidate))
+        {
+            return $"Access denied: '{fullPath}' is outside every granted folder. Granted: {grantedList}. " +
+                   "Use a path inside a granted folder, or ask the user to grant one from the composer's folder chip.";
+        }
+
+        var verdict = Application.Services.FolderGrantValidator.Validate(candidate, out var canonical);
+        switch (verdict)
+        {
+            case Application.Services.FolderGrantRejection.SystemFolder:
+                return $"Access denied: '{fullPath}' is inside a system folder ({candidate}), which can never be granted. " +
+                       $"Do not ask the user to grant it. Granted: {grantedList}. Use a path inside a granted folder instead.";
+            case Application.Services.FolderGrantRejection.DriveRoot:
+                return $"Access denied: '{fullPath}' sits directly under a drive root, which cannot be granted. " +
+                       $"Granted: {grantedList}. Use a path inside a granted folder, or ask the user to grant a specific folder.";
+            case Application.Services.FolderGrantRejection.Ok:
+                if (IsWithin(canonical!, UserProfileRoot) && canonical!.Equals(Path.TrimEndingDirectorySeparator(UserProfileRoot), StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"Access denied: '{fullPath}' is in the user's home folder, which is not granted as a whole. " +
+                           $"Granted: {grantedList}. Use a path inside a granted folder, or ask the user to grant a specific " +
+                           "sub-folder (for example a project folder) from the composer's folder chip — not the whole home folder.";
+                }
+                return $"Access denied: '{fullPath}' is outside every granted folder. Granted: {grantedList}. " +
+                       $"To allow this, the user would need to grant '{canonical}' from the folder chip in the composer " +
+                       "(or Settings → Folder access); otherwise use a path inside a granted folder.";
+            default:
+                return $"Access denied: '{fullPath}' is outside every granted folder. Granted: {grantedList}. " +
+                       "Use a path inside a granted folder, or ask the user to grant one from the composer's folder chip.";
+        }
     }
 
     /// <summary>True when the path lies inside a folder the user EXPLICITLY

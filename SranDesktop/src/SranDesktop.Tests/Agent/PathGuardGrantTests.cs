@@ -73,14 +73,72 @@ public sealed class PathGuardGrantTests : IDisposable
     }
 
     [Fact]
-    public void Built_In_Roots_Work_With_No_Grants()
+    public void Temp_Is_The_Only_Built_In_Root_The_Profile_Is_Not_Implicitly_Granted()
     {
+        // FIX26 Part 3: the fence is the granted folders. Temp stays as the
+        // app's staging area; the user profile is NOT an implicit grant.
         var tempFile = Path.Combine(Path.GetTempPath(), "sran-builtin.txt");
         Resolve(tempFile).Should().NotBeNull();
 
         var profileFile = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "doc.txt");
-        Resolve(profileFile).Should().NotBeNull();
+        PathGuard.Resolve(profileFile, out var error).Should().BeNull();
+        error.Should().Contain("not granted as a whole");
+    }
+
+    [Fact]
+    public void Relative_Path_Resolves_Into_The_First_Granted_Folder_Not_The_Profile()
+    {
+        PathGuard.ConfigureGrantedRoots(new[] { _grantDir });
+        var resolved = PathGuard.Resolve("notes.txt", out var error);
+        error.Should().BeNull();
+        resolved.Should().Be(Path.Combine(Path.TrimEndingDirectorySeparator(_grantDir), "notes.txt"));
+        PathGuard.DefaultRoot().Should().Be(Path.TrimEndingDirectorySeparator(_grantDir));
+    }
+
+    [Fact]
+    public void Relative_Path_With_No_Grant_Is_Refused_With_Guidance()
+    {
+        PathGuard.ConfigureGrantedRoots(Array.Empty<string>());
+        PathGuard.Resolve("notes.txt", out var error).Should().BeNull();
+        error.Should().Contain("no folder has been granted");
+        error.Should().Contain("folder chip");
+        PathGuard.DefaultRoot().Should().BeNull();
+    }
+
+    [Fact]
+    public void Refusal_Names_The_Folder_To_Grant_And_Lists_Current_Grants()
+    {
+        if (!_outsideBuiltins) return;
+        PathGuard.ConfigureGrantedRoots(new[] { _grantDir });
+        var sibling = Path.Combine(_grantParent!, "elsewhere");
+        Directory.CreateDirectory(sibling);
+        PathGuard.Resolve(Path.Combine(sibling, "x.txt"), out var error).Should().BeNull();
+        error.Should().Contain(Path.TrimEndingDirectorySeparator(_grantDir));   // what IS granted
+        error.Should().Contain($"grant '{sibling}'");                            // what WOULD allow it
+        error.Should().Contain("folder chip");
+    }
+
+    [Fact]
+    public void Refusal_Never_Suggests_Granting_A_System_Folder()
+    {
+        PathGuard.ConfigureGrantedRoots(new[] { _grantDir });
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        PathGuard.Resolve(Path.Combine(windows, "test.txt"), out var error).Should().BeNull();
+        error.Should().Contain("system folder");
+        error.Should().Contain("can never be granted");
+        error.Should().NotContain($"grant '{windows}'");
+        error.Should().NotContain("grant 'C:\\Windows'");
+    }
+
+    [Fact]
+    public void Refusal_For_The_Home_Folder_Suggests_A_Sub_Folder_Not_The_Whole_Profile()
+    {
+        PathGuard.ConfigureGrantedRoots(new[] { _grantDir });
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        PathGuard.Resolve(Path.Combine(profile, "doc.txt"), out var error).Should().BeNull();
+        error.Should().Contain("not granted as a whole");
+        error.Should().NotContain($"grant '{Path.TrimEndingDirectorySeparator(profile)}'");
     }
 
     [Fact]

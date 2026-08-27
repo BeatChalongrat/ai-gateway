@@ -57,20 +57,23 @@ public sealed class SensitiveReadGuardTests : IDisposable
     [Fact]
     public void Read_Outside_The_Chosen_Scope_Requires_Consent()
     {
-        var ssh = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "id_rsa");
-        _guard.RequiresConsent(new StubTool("read_file"), Args("path", ssh))
+        // FIX26 Part 3: the profile is no longer an allowed root at all (PathGuard
+        // denies it outright, which this guard leaves to PathGuard). The read
+        // that is ALLOWED but outside the user's chosen scope is one in the temp
+        // staging root — that is the case that must ask first.
+        var staged = Path.Combine(Path.GetTempPath(), "sran-staged", "id_rsa");
+        _guard.RequiresConsent(new StubTool("read_file"), Args("path", staged))
             .Should().BeTrue();
     }
 
     [Fact]
     public void List_And_Search_Follow_The_Same_Rule()
     {
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var temp = Path.TrimEndingDirectorySeparator(Path.GetTempPath()); // allowed root, not user scope (FIX26)
 
-        _guard.RequiresConsent(new StubTool("list_directory"), Args("path", profile))
+        _guard.RequiresConsent(new StubTool("list_directory"), Args("path", temp))
             .Should().BeTrue();
-        _guard.RequiresConsent(new StubTool("search_files"), Args("directory", profile))
+        _guard.RequiresConsent(new StubTool("search_files"), Args("directory", temp))
             .Should().BeTrue();
         _guard.RequiresConsent(new StubTool("list_directory"), Args("path", _grantedDir))
             .Should().BeFalse();
