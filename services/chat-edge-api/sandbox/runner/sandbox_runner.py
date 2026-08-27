@@ -71,6 +71,12 @@ def _resolve_arg(a: str) -> str:
     if a.startswith("in/"):
         base = os.path.basename(a[len("in/"):])
         return os.path.join(JOB_IN, base)
+    # FIX27: a purely numeric bare token is a literal (image_resize.py's
+    # max-dim "1568"), not a file — mapping it to /job/in/1568 broke every
+    # vision attachment on web-chat ("invalid literal for int()"). Digits
+    # cannot name a path outside /job, so the fence is unchanged.
+    if a.isdigit():
+        return a
     # bare token — treat as an input file name (plan.json, source.xlsx)
     return os.path.join(JOB_IN, os.path.basename(a))
 
