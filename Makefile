@@ -57,6 +57,12 @@ logs: ## Tail logs from all services
 seed: ## Seed tenants + projects + API keys + admin user + portal users
 	docker compose exec backend python -m scripts.seed_audit_data
 
+dlp-eval: ## FIX28: DLP detection-quality eval — both engines (Python + live Rust sidecar), must-catch recall per category + must-not-fire corpus, checked against backend/evals/dlp/baseline.json
+	docker exec ai-gateway-backend-1 sh -c 'cd /app && python -m evals.dlp.run --require-rust --check-baseline'
+
+dlp-eval-baseline: ## FIX28: re-record the DLP eval baseline (deliberate; review the diff before committing)
+	docker exec ai-gateway-backend-1 sh -c 'cd /app && python -m evals.dlp.run --require-rust --write-baseline'
+
 migrate: ## Apply pending BACKEND (gateway) Alembic migrations to the running postgres. Run this when a long-lived container outlived a new migration (schema-drift guard names the gap).
 	docker compose exec backend python -m alembic upgrade head
 

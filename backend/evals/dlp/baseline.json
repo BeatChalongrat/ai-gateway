@@ -1,0 +1,135 @@
+{
+ "python": {
+  "categories": {
+   "api_key_secret": {
+    "total": 25,
+    "caught": 22,
+    "by_expected": 22,
+    "swallow": 0,
+    "recall": 0.88
+   },
+   "credit_card": {
+    "total": 20,
+    "caught": 20,
+    "by_expected": 20,
+    "swallow": 0,
+    "recall": 1.0
+   },
+   "email": {
+    "total": 21,
+    "caught": 21,
+    "by_expected": 21,
+    "swallow": 0,
+    "recall": 1.0
+   },
+   "phone": {
+    "total": 25,
+    "caught": 22,
+    "by_expected": 22,
+    "swallow": 0,
+    "recall": 0.88
+   },
+   "thai_address": {
+    "total": 25,
+    "caught": 13,
+    "by_expected": 13,
+    "swallow": 0,
+    "recall": 0.52
+   },
+   "thai_bank_account": {
+    "total": 22,
+    "caught": 20,
+    "by_expected": 20,
+    "swallow": 0,
+    "recall": 0.9091
+   },
+   "thai_name": {
+    "total": 40,
+    "caught": 12,
+    "by_expected": 12,
+    "swallow": 1,
+    "recall": 0.3
+   },
+   "thai_national_id": {
+    "total": 23,
+    "caught": 23,
+    "by_expected": 23,
+    "swallow": 0,
+    "recall": 1.0
+   }
+  },
+  "corpus_fires": []
+ },
+ "rust": {
+  "categories": {
+   "api_key_secret": {
+    "total": 25,
+    "caught": 22,
+    "by_expected": 22,
+    "swallow": 0,
+    "recall": 0.88
+   },
+   "credit_card": {
+    "total": 20,
+    "caught": 20,
+    "by_expected": 20,
+    "swallow": 0,
+    "recall": 1.0
+   },
+   "email": {
+    "total": 21,
+    "caught": 21,
+    "by_expected": 21,
+    "swallow": 0,
+    "recall": 1.0
+   },
+   "phone": {
+    "total": 25,
+    "caught": 22,
+    "by_expected": 22,
+    "swallow": 0,
+    "recall": 0.88
+   },
+   "thai_address": {
+    "total": 25,
+    "caught": 13,
+    "by_expected": 13,
+    "swallow": 0,
+    "recall": 0.52
+   },
+   "thai_bank_account": {
+    "total": 22,
+    "caught": 20,
+    "by_expected": 20,
+    "swallow": 0,
+    "recall": 0.9091
+   },
+   "thai_name": {
+    "total": 40,
+    "caught": 12,
+    "by_expected": 12,
+    "swallow": 1,
+    "recall": 0.3
+   },
+   "thai_national_id": {
+    "total": 23,
+    "caught": 23,
+    "by_expected": 23,
+    "swallow": 0,
+    "recall": 1.0
+   }
+  },
+  "corpus_fires": []
+ },
+ "data": {
+  "api_key_secret": 25,
+  "credit_card": 20,
+  "email": 21,
+  "phone": 25,
+  "thai_address": 25,
+  "thai_bank_account": 22,
+  "thai_name": 40,
+  "thai_national_id": 23
+ },
+ "corpus": 104
+}
