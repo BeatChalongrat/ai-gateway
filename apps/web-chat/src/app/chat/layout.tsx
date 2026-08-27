@@ -11,6 +11,7 @@ import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 import { CreditBadge } from "@/components/chat/CreditBadge";
 import { ShortcutsDialog } from "@/components/chat/ShortcutsDialog";
 import { Sidebar } from "@/components/chat/Sidebar";
+import { ModeResetBanner } from "@/components/chat/ModeResetBanner";
 import { UpdateBanner } from "@/components/chat/UpdateBanner";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -196,6 +197,8 @@ export default function ChatLayout({
         {/* FIX22 §2 — desktop update notice (hosted mode only; renders
             nothing in a plain browser or when nothing is published). */}
         <UpdateBanner />
+        {/* FIX25 §1c.3 — "permissions were reset from Never-asks" (desktop, once per launch). */}
+        <ModeResetBanner />
 
         {children}
 

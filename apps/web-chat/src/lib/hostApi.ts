@@ -82,14 +82,16 @@ export interface SettingsSnapshot {
   browserExtensionId: string;
   writingStyleProfile: string;
   locale: string;
-  grantedFolders: string[];
+  grantedFolders: string[];       // FIX25 §3: the host overlays its GrantStore list (the sidecar's field was stale)
+  approvalMode?: string;          // FIX25 §1: "manual" | "auto" | "skip" — absent on a pre-FIX25 sidecar
   browser?: BrowserStatus; // FIX1: present on the desktop host; absent pre-FIX1
 }
 
 export type SettingKey =
   | "theme" | "minimizeToTray" | "startWithWindows" | "crashReportingEnabled"
   | "syncAgentConversations" | "preferLocalOfficeGeneration" | "defaultModel"
-  | "chatEdgeBaseUrl" | "gatewayBaseUrl" | "browserExtensionId" | "writingStyleProfile" | "locale";
+  | "chatEdgeBaseUrl" | "gatewayBaseUrl" | "browserExtensionId" | "writingStyleProfile" | "locale"
+  | "approvalMode"; // FIX25 §1 — the composer's permission-mode selector (same closed op; page-only, never a tool)
 
 export interface GlobalNoteDto {
   id: string;

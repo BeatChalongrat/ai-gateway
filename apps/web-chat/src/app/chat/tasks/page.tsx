@@ -25,6 +25,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type TaskDto, type TaskRunDto } from "@/lib/hostApi";
+import { useT } from "@/lib/i18n";
 
 import { CloudTasksSection, KindBadge } from "./CloudTasksSection";
 
@@ -479,7 +480,9 @@ function TaskRow({
   onToggle: (enabled: boolean) => void;
   onHistory: () => void;
 }) {
-  const modeLabel = task.permissionMode === "skip" ? "Never asks" : task.permissionMode === "auto" ? "Auto-approves safe" : "Asks each action";
+  // FIX25: the same three strings as the composer's permission-mode selector.
+  const t = useT();
+  const modeLabel = t(task.permissionMode === "skip" ? "perm.mode.skip" : task.permissionMode === "auto" ? "perm.mode.auto" : "perm.mode.manual");
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">

@@ -29,7 +29,15 @@ export default function SettingsPage() {
     if (!hosted) return;
     void (async () => {
       try {
-        setSettings(await hostApi.getSettings());
+        // FIX25 §3: the grant list comes from `folders.list` (the host's
+        // GrantStore — the list the file tools and the consent gate use), not
+        // from the settings snapshot's `grantedFolders`, which was the
+        // sidecar's never-written WPF-era field: it read as empty on a cold
+        // start beside two live grants, until an add replaced it with the
+        // real list. (The host now overlays the snapshot too; this is the
+        // belt to that brace.)
+        const [snapshot, folders] = await Promise.all([hostApi.getSettings(), hostApi.listFolders().catch(() => null)]);
+        setSettings(folders ? { ...snapshot, grantedFolders: folders } : snapshot);
       } catch {
         toast("Couldn't load settings.");
       } finally {

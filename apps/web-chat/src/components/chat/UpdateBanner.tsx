@@ -38,7 +38,7 @@ function writeDismissed(version: string): void {
 export function UpdateBanner() {
   const hosted = useHostedMode();
   const t = useT();
-  const [notice, setNotice] = useState<HostNotice | null>(null);
+  const [notice, setNotice] = useState<Extract<HostNotice, { kind: "update-available" }> | null>(null);
   const [dismissedVersion, setDismissedVersion] = useState<string>("");
 
   useEffect(() => {

@@ -38,8 +38,10 @@ import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
 import { FilePreviewCard } from "./FilePreviewCard";
+import { FolderChip } from "./FolderChip";
 import { KBSelector } from "./KBSelector";
 import { ModelSelector } from "./ModelSelector";
+import { PermissionModeSelector } from "./PermissionModeSelector";
 import { RecordingBar } from "./RecordingBar";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { SlashMenu } from "./SlashMenu";
@@ -1088,6 +1090,15 @@ export function ChatInput({
                 >
                   <Clapperboard className="h-[18px] w-[18px]" aria-hidden />
                 </button>
+              ) : null}
+              {/* FIX25 — desktop only: the granted folders and the permission
+                  mode, beside the model picker (both render nothing in a plain
+                  browser). Control-plane ops only; the model never sees them. */}
+              {hosted ? (
+                <>
+                  <FolderChip disabled={disabled} />
+                  <PermissionModeSelector disabled={disabled} />
+                </>
               ) : null}
               <ModelSelector
                 activeModelId={activeModelId}

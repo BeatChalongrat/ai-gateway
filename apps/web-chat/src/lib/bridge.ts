@@ -33,13 +33,13 @@ type HostToPage =
   // Phase 5 control reply — correlated to a host.query by requestId.
   | { type: "host.result"; payload: { requestId: string; ok: boolean; data?: unknown; error?: string } };
 
-/** FIX22 §2 — the one notice kind so far. No URL and no file ride with it:
- *  notification only; the user installs by hand. */
-export interface HostNotice {
-  kind: "update-available";
-  latest: string;
-  current: string;
-}
+/** FIX22 §2 — update notice. No URL and no file ride with it: notification
+ *  only; the user installs by hand.
+ *  FIX25 §1c.3 — approval-mode reset: the host wrote a stored `skip` back as
+ *  `manual` at start and says so once. Informational; nothing to click. */
+export type HostNotice =
+  | { kind: "update-available"; latest: string; current: string }
+  | { kind: "approval-mode-reset"; from: string; to: string };
 
 /** The closed set of host.query operations (Phase 5 §2.2). Mirrors the host's
  *  HostQueryOp enum; the host drops anything outside it. */
@@ -200,8 +200,13 @@ class BridgeClient {
       case "host.notice": {
         // Shape-check before fan-out: the host is trusted, but a notice with
         // no version must not render an empty banner.
-        const p = msg.payload;
-        if (!p || p.kind !== "update-available" || typeof p.latest !== "string" || !p.latest || typeof p.current !== "string") return;
+        const p = msg.payload as HostNotice | undefined;
+        if (!p) return;
+        if (p.kind === "update-available") {
+          if (typeof p.latest !== "string" || !p.latest || typeof p.current !== "string") return;
+        } else if (p.kind === "approval-mode-reset") {
+          if (typeof p.from !== "string" || !p.from || typeof p.to !== "string" || !p.to) return;
+        } else return;
         this.noticeHandlers.forEach((h) => h(p));
         return;
       }
