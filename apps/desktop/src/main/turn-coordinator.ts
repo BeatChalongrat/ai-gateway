@@ -35,6 +35,7 @@ import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, type NestedRunReq
 import type { Logger } from "./logger";
 import { LiveApprovalMode, parseStoredApprovalMode } from "./approval-mode";
 import { composeUserContent, pruneAttachedImages, resolveAttachments, type ImageEncoder, type ResolvedAttachments } from "./attachments";
+import { appendAssistantReply, roleSequence } from "./chain";
 import {
   applyApprovalMode,
   BROWSER_SITE_PERM,
@@ -529,6 +530,8 @@ export class TurnCoordinator {
     const controller = new AbortController();
     let text = "";
     let errored = false;
+    let taskMessages: GatewayMessage[] = [];
+    const model = this.opts.forceModel ?? this.opts.defaultModel;
     // FIX8 A1.3: the task's own permission mode governs its run's approvals (a
     // manual-mode task stalls on a tool it lacks permission for). Sequential runs
     // (the scheduler fires one at a time), so a single active-mode field is safe.
@@ -538,7 +541,7 @@ export class TurnCoordinator {
       await this.refreshBrowserConnected();
       const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
       const built = await this.buildMessages(conversationId, conversation, task.prompt);
-      const model = this.opts.forceModel ?? this.opts.defaultModel;
+      taskMessages = built.messages;
       await this.runLoop({
         conversationId,
         model,
@@ -558,6 +561,20 @@ export class TurnCoordinator {
     } finally {
       this.activeTaskApprovalMode = null;
       this.activeTaskId = null;
+    }
+    // FIX28 §3 (G4): a task run is a turn like any other — persist its chain
+    // locally and its visible transcript to chat-edge, so the alarm-clock
+    // conversation shows the prompt and the answer instead of staying empty.
+    try {
+      if (taskMessages.length > 0) {
+        appendAssistantReply(taskMessages, text);
+        this.saveLocalHistory(conversationId, taskMessages.slice(1));
+      }
+      const taskTurn = { messageId: "asst_" + randomUUID().replace(/-/g, ""), assistantText: text } as RunningTurn;
+      await this.importVisible(conversationId, task.prompt, taskTurn, model, []);
+      this.log.info(`TASK TRANSCRIPT ${task.id} conv=${conversationId}: roles=[${roleSequence(taskMessages).join(",")}]`);
+    } catch (err) {
+      this.log.warn(`TASK ${task.id}: transcript persist failed: ${(err as Error).message}`);
     }
     await this.sidecar.hostQuery("tasks._recordRun", {
       taskId: task.id,
@@ -683,6 +700,11 @@ export class TurnCoordinator {
     const elapsed = Date.now() - startedAt;
     this.lastReply.set(conversationId, turn.assistantText);
 
+    // FIX28 §5.1: the assistant's final answer joins the chain — this chain is
+    // exactly what the next turn sends to the provider, and until now it held
+    // only the user's side. Logged so the sent role sequence is visible.
+    appendAssistantReply(messages, turn.assistantText);
+    this.log.info(`TURN CHAIN conv=${conversationId}: roles=[${roleSequence(messages).join(",")}]`);
     // Persist EVERYTHING after the system message locally (tool chains
     // included), and the visible text to chat-edge. On cancel too (Phase 6a
     // P1: a cancelled turn must be resumable).
